@@ -12,9 +12,19 @@ use gpui::{
 };
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(crate) struct PaintedGeometry {
+    pub row: Bounds<Pixels>,
+    pub backdrop: Option<Bounds<Pixels>>,
+    pub text_origin: Option<Point<Pixels>>,
+}
+
 pub struct RowState {
     pub row: Row,
     pub layouts: usize,
+    #[cfg(test)]
+    pub(crate) painted_geometry: RefCell<PaintedGeometry>,
     expanded: Option<bool>,
     cache: Option<Layout>,
     pub(crate) images: crate::ui::images::Cache,
@@ -41,6 +51,8 @@ impl RowState {
         Self {
             row,
             layouts: 0,
+            #[cfg(test)]
+            painted_geometry: RefCell::new(PaintedGeometry::default()),
             expanded,
             cache: None,
             images: Default::default(),
@@ -591,10 +603,13 @@ impl Element for RetainedRow {
     ) -> Vec<gpui::AnyElement> {
         use gpui::{prelude::*, *};
         let state = self.state.borrow();
-        state
-            .cache
-            .as_ref()
-            .unwrap()
+        let cache = state.cache.as_ref().expect("measured row");
+        let origin = row_bounds.origin
+            + point(
+                ((row_bounds.size.width - cache.size.width) / 2.).max(px(0.)),
+                px(0.),
+            );
+        cache
             .images
             .iter()
             .map(|image| {
@@ -609,7 +624,12 @@ impl Element for RetainedRow {
                     let name = image.name.clone();
                     child = child
                         .cursor_pointer()
-                        .child(img(data.clone()).size_full().object_fit(ObjectFit::Contain))
+                        .child(
+                            img(data.clone())
+                                .size_full()
+                                .rounded(px(10.))
+                                .object_fit(ObjectFit::Contain),
+                        )
                         .on_click(move |_, _, cx| {
                             crate::ui::images::open(data.clone(), name.clone(), cx)
                         });
@@ -625,7 +645,7 @@ impl Element for RetainedRow {
                 }
                 let mut child = child.into_any_element();
                 child.layout_as_root(image.bounds.size.map(AvailableSpace::Definite), window, cx);
-                child.prepaint_at(row_bounds.origin + image.bounds.origin, window, cx);
+                child.prepaint_at(origin + image.bounds.origin, window, cx);
                 child
             })
             .collect()
@@ -642,35 +662,37 @@ impl Element for RetainedRow {
     ) {
         let state = self.state.borrow();
         let cache = state.cache.as_ref().expect("measured row");
+        #[cfg(test)]
+        state.painted_geometry.replace(PaintedGeometry {
+            row: bounds,
+            ..Default::default()
+        });
         for background in &cache.backgrounds {
-            window.paint_quad(gpui::fill(
-                Bounds::new(
-                    bounds.origin + background.bounds.origin,
-                    background.bounds.size,
-                ),
-                background.color,
-            ));
+            let painted_bounds = Bounds::new(
+                bounds.origin + background.bounds.origin,
+                background.bounds.size,
+            );
+            #[cfg(test)]
+            state
+                .painted_geometry
+                .borrow_mut()
+                .backdrop
+                .get_or_insert(painted_bounds);
+            window.paint_quad(gpui::fill(painted_bounds, background.color));
         }
         for line in &cache.lines {
+            let painted_origin = bounds.origin + line.origin;
+            #[cfg(test)]
+            state
+                .painted_geometry
+                .borrow_mut()
+                .text_origin
+                .get_or_insert(painted_origin);
             line.line
-                .paint_background(
-                    bounds.origin + line.origin,
-                    line.height,
-                    line.align,
-                    None,
-                    window,
-                    cx,
-                )
+                .paint_background(painted_origin, line.height, line.align, None, window, cx)
                 .unwrap();
             line.line
-                .paint(
-                    bounds.origin + line.origin,
-                    line.height,
-                    line.align,
-                    None,
-                    window,
-                    cx,
-                )
+                .paint(painted_origin, line.height, line.align, None, window, cx)
                 .unwrap();
         }
         for image in images {

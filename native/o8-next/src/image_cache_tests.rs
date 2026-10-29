@@ -294,3 +294,51 @@ fn transcript_image_cache_bounds_working_set_and_reloads_after_scroll(cx: &mut T
     cx.run_until_parked();
     assert!(surface.read_with(cx, |s, _| s.images.borrow().is_empty()));
 }
+
+#[gpui::test]
+fn transcript_image_wide_user_picture_stays_inside_bubble_and_aligns_with_text(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::new();
+    let (surface, cx) = cx.add_window_view(|w, cx| Surface::new(fixture.1.clone(), w, cx));
+    cx.simulate_resize(size(px(1680.), px(1050.)));
+    surface.update(cx, |s, cx| {
+        s.sessions = fixture.1.sessions().unwrap();
+        s.select("thoughts-image-fixture".into(), cx);
+    });
+    cx.run_until_parked();
+    draw(cx);
+    cx.run_until_parked();
+    draw(cx);
+    let image = cx
+        .debug_bounds("transcript-image-user-image-0")
+        .expect("the real history image must reach retained prepaint");
+    assert_eq!(image.size, size(px(80.), px(48.)), "use the decoded image");
+    let row = surface.read_with(cx, |s, _| {
+        s.rows
+            .iter()
+            .find(|row| row.borrow().row.id() == "user-image")
+            .unwrap()
+            .clone()
+    });
+    let geometry = row.borrow().painted_geometry.borrow().clone();
+    assert!(geometry.row.size.width > px(1200.), "exercise a wide row");
+    let bubble = geometry.backdrop.expect("painted user backdrop");
+    let text = geometry.text_origin.expect("painted user text");
+    println!(
+        "WIDE_IMAGE_GEOMETRY row={:?} bubble={bubble:?} image={image:?} text={text:?}",
+        geometry.row
+    );
+    assert!(
+        image.left() >= bubble.left()
+            && image.right() <= bubble.right()
+            && image.top() >= bubble.top()
+            && image.bottom() <= bubble.bottom(),
+        "wide transcript image must stay inside its user bubble: image={image:?}, bubble={bubble:?}"
+    );
+    assert_eq!(
+        image.left(),
+        text.x,
+        "image and bubble text must share a left edge"
+    );
+}
