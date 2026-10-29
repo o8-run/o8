@@ -271,10 +271,70 @@ process.stderr.write(${JSON.stringify(diagnostic)});
 process.exit(1);
 `);
     const { threadId, events } = await failTurn();
-    expect.soft(events.filter(event => event.event === 'error').map(event => event.data?.error)).toEqual([expected]);
+    const summary = expected.replace(/\s+/g, ' ');
+    expect.soft(events.filter(event => event.event === 'error').map(event => event.data?.error)).toEqual([summary]);
+    const saved = JSON.parse(readFileSync(join(dataDir, 'chat-history', `${threadId}.json`), 'utf8'));
+    expect.soft(saved.orchestratorTerminalError).toBe(summary);
+    expect(saved.messages.filter((message: { role: string }) => message.role === 'assistant')).toHaveLength(0);
+  }, 90_000);
+
+  it('saves a one-line chat error from an Error carrying a bridge source excerpt (#5078)', async () => {
+    const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+    const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+    const { POST: saveHistory } = await import('@/app/api/v2/chat-history/route');
+    const { NextRequest } = await import('next/server');
+    const { createOrchestratorMessageHandler } = await import('@/components/desktop/thoughts/use-orchestrator-stream/socket');
+    const { serializeTranscriptForStorage } = await import('@/lib/transcripts/history-serde');
+    const failure = new SyntaxError('file:///bundle/codex-app-bridge-impl.mjs:2\n'
+      + 'var bundleSource = 1;'.repeat(100) + '\n  ^\n\nSyntaxError [ERR_INVALID_MODULE_SYNTAX]: invalid fixture import');
+    await stopServer();
+    await updateOperatorDefaults({ codexAppThreads: true });
+    // The real app bridge turns this RPC refusal into an Error and catches it.
+    writeFileSync(fakeCli, `#!/usr/bin/env node
+if (process.argv.includes('--version')) { console.log('codex-cli 0.161.0'); process.exit(0); }
+let buffer = '';
+process.stdin.on('data', chunk => {
+  buffer += chunk;
+  let end;
+  while ((end = buffer.indexOf('\\n')) >= 0) {
+    const request = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
+    process.stdout.write(JSON.stringify({ id: request.id, error: { message: ${JSON.stringify(failure.message)} } }) + '\\n');
+  }
+});
+`);
+    await startServer();
+    const { threadId, events } = await failTurn();
+    const expected = 'SyntaxError [ERR_INVALID_MODULE_SYNTAX]: initialize: invalid fixture import';
     const saved = JSON.parse(readFileSync(join(dataDir, 'chat-history', `${threadId}.json`), 'utf8'));
     expect.soft(saved.orchestratorTerminalError).toBe(expected);
-    expect(saved.messages.filter((message: { role: string }) => message.role === 'assistant')).toHaveLength(0);
+    expect.soft(events.filter(event => event.event === 'error').map(event => event.data?.error))
+      .toEqual([expected, expected]);
+
+    // Apply the real desktop error handler, then its normal transcript serializer
+    // and canonical history writer, rather than asserting only a formatter result.
+    const ws = {} as globalThis.WebSocket;
+    const messagesRef = { current: [] as import('@/lib/mobile/types').MobileTranscriptEntry[] };
+    const handler = createOrchestratorMessageHandler({
+      captureFirstTurnPlanRef: { current: false }, currentWs: ws,
+      currentAssistantRef: { current: null }, eventCountRef: { current: 0 }, lastSeqRef: { current: 0 },
+      finalizeFirstTurnPlanCapture: vi.fn(), firstTurnPlanChunksRef: { current: [] },
+      firstTurnPlanStartedRef: { current: false }, flushCurrentAssistant: vi.fn(),
+      scheduleFlushCurrentAssistant: vi.fn(), lastEventAtRef: { current: Date.now() }, messagesRef,
+      resetEpochRef: { current: 0 }, setStatus: vi.fn(), statusRef: { current: 'busy' },
+      wsRef: { current: ws },
+      setMessages: update => {
+        messagesRef.current = typeof update === 'function' ? update(messagesRef.current) : update;
+      },
+    });
+    const event = events.find(event => event.event === 'error')!;
+    handler({ data: JSON.stringify({ channel: 'orchestrator', ...event }) } as MessageEvent);
+    expect((await saveHistory(new NextRequest('http://localhost/api/v2/chat-history', {
+      method: 'POST', body: JSON.stringify({ tabId: threadId, messages: serializeTranscriptForStorage(messagesRef.current) }),
+    }))).status).toBe(200);
+    expect(readPersistedLlmChat(threadId)!.history.messages.filter(message => message.role === 'system'))
+      .toMatchObject([{ content: `Orchestrator error: ${expected}` }]);
+    expect(serverOutput).toContain(failure.message);
+    expect(serverOutput).toContain('at onMessage');
   }, 90_000);
 
 });
