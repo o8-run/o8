@@ -94,11 +94,14 @@ fn sidebar_selection_leaves_projects_and_settings(cx: &mut TestAppContext) {
             .clone()
             .unwrap()
     });
-    for (button, panel) in [
-        ("shell-settings", "settings-page"),
-        ("shell-projects", "project-new"),
+    // Settings lives in the rail's profile menu, as in the desktop rail.
+    for (buttons, panel) in [
+        (&["shell-profile", "profile-settings"][..], "settings-page"),
+        (&["shell-projects"][..], "project-new"),
     ] {
-        click(cx, button);
+        for button in buttons.iter().copied() {
+            click(cx, button);
+        }
         settle(&shell, cx);
         assert!(cx.debug_bounds(panel).is_some());
         click(cx, "thread-row-2");
