@@ -112,7 +112,16 @@ fn placement_waits_for_missing_older_turns_instead_of_crossing_a_user_prompt() {
         message("ask", "user", Some(time + 2.)),
         message("answer", "assistant", Some(time + 3.)),
     ];
-    let (buckets, anchors) = place(&[r], &messages, &Anchors::new());
+    let (buckets, anchors) = place(&[r.clone()], &messages, &Anchors::new());
     assert!(buckets.is_empty());
     assert!(anchors.is_empty());
+    let mut backfilled = vec![message("producing", "assistant", Some(time))];
+    backfilled.extend(messages);
+    let (buckets, anchors) = place(&[r.clone()], &backfilled, &anchors);
+    assert_eq!(buckets["producing"], vec![r.clone()]);
+    assert_eq!(anchors[r.state_id()], "producing");
+    let mut rows = crate::model::render_tree(&backfilled);
+    attach(&mut rows, &buckets);
+    assert!(matches!(&rows[0], Row::Message { nodes, .. }
+        if nodes.last().unwrap().kind == "visualization"));
 }

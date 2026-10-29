@@ -93,6 +93,7 @@ pub(crate) struct Surface {
     reconcile_revision: u64,
     list_generation: u64,
     history_loading: bool,
+    history_error: Option<String>,
     key_revision: u64,
     painted: Rc<Cell<u64>>,
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
@@ -132,6 +133,7 @@ impl Surface {
             reconcile_revision: 0,
             list_generation: 0,
             history_loading: false,
+            history_error: None,
             key_revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
@@ -179,6 +181,7 @@ impl Surface {
         let generation = self.generation;
         self.subscription = None;
         self.history_loading = false;
+        self.history_error = None;
         self.transcript = None;
         self.selected = Some(id.clone());
         self.rows = Rc::new(vec![]);
@@ -472,6 +475,7 @@ impl Surface {
                 item_ix: if end { self.rows.len() - 1 } else { 0 },
                 offset_in_item: px(0.),
             });
+            self.on_transcript_scroll(cx);
         }
         self.key_revision += 1;
         cx.notify();
