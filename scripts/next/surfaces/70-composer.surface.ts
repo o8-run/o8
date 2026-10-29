@@ -18,6 +18,7 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
     }));
   }
   const queue = await import('../../../src/app/api/orchestrator/composer-queue/route');
+  const history = await import('../../../src/app/api/v2/chat-history/route');
   // Same injectable native admission boundary as the existing composer tests.
   if (composer) {
     const { getOrchestratorBackend } = await import('../../../src/lib/lane/orchestrator-backends/registry');
@@ -31,17 +32,31 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
     routes: {
       'GET /api/orchestrator/composer-queue': queue.GET,
       ...(composer ? { 'POST /api/orchestrator/composer-queue': queue.POST,
-        'PATCH /api/orchestrator/composer-queue': queue.PATCH, 'DELETE /api/orchestrator/composer-queue': queue.DELETE } : {}),
+        'PATCH /api/orchestrator/composer-queue': queue.PATCH, 'DELETE /api/orchestrator/composer-queue': queue.DELETE,
+        'POST /api/v2/chat-history': history.POST } : {}),
     },
     // The repository is supplied by the owned host, never by an external account.
-    admit: ({ body }) => {
+    admit: ({ route, body }) => {
       if (!body) return 200;
       try {
         const target = JSON.parse(body);
+        if (route === history.POST) {
+          const owned = seeds.some(seed => seed.id === target.tabId && seed.id.startsWith('thoughts-composer-'))
+            || /^thoughts-next-\d+$/.test(target.tabId);
+          return owned && realpathSync(target.repoPath) === realpathSync(repo) ? 200 : 400;
+        }
         return target.threadId?.startsWith('thoughts-composer-') && realpathSync(target.repoPath) === realpathSync(repo) ? 200 : 400;
       } catch { return 400; }
     },
     after: async (input, response) => {
+      if (input.route === history.POST && response.ok) {
+        const target = JSON.parse(input.body);
+        // The session reader admits only owned records, including conversations
+        // just created by the real composer picker through the production POST.
+        if (!seeds.some(seed => seed.id === target.tabId)) {
+          seeds.push({ id: target.tabId, title: target.title, messages: target.messages });
+        }
+      }
       if (composer && response.ok && (input.route === queue.PATCH || (input.route === queue.POST && JSON.parse(input.body).intent === 'steer-now'))) {
         const { claimComposerSteer } = await import('../../../src/lib/orchestrator/composer-queue');
         const { runQueuedComposerSteer } = await import('../../../src/lib/ws-server/composer-queue-heartbeat');

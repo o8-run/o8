@@ -543,5 +543,8 @@ fn settled_tool_runs_collapse_to_a_counted_line_and_expand_on_click(cx: &mut Tes
     let (expanded, lines) = row.borrow().rendered();
     assert!(expanded > height, "expansion must remeasure the row");
     assert!(lines[0].starts_with("⌄ "), "{lines:?}");
-    assert!(lines.iter().any(|line| line.contains("cat src/a.rs")), "{lines:?}");
+    assert!(
+        lines.iter().any(|line| line.contains("cat src/a.rs")),
+        "{lines:?}"
+    );
 }

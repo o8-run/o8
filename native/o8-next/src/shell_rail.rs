@@ -4,9 +4,7 @@
 use super::*;
 use crate::icon::Tip;
 use crate::theme::current as theme;
-use gpui::{
-    AnyElement, Div, Image, ImageFormat, ObjectFit, Rgba, SharedString, Stateful, img,
-};
+use gpui::{AnyElement, Div, Image, ImageFormat, ObjectFit, Rgba, SharedString, Stateful, img};
 use serde_json::Value;
 use std::sync::{Arc, Mutex, Once, OnceLock};
 
