@@ -59,7 +59,7 @@ impl Saved {
             // overlap requests or increase the poll rate. Its scope fences results.
         }
     }
-    pub(super) fn attach(&mut self, rows: &mut [Row], messages: &[crate::model::Entry]) {
+    pub(super) fn attach(&mut self, rows: &mut Vec<Row>, messages: &[crate::model::Entry]) {
         let (buckets, anchors) = transcript::place(&self.refs, messages, &self.anchors);
         self.anchors = anchors;
         transcript::attach(rows, &buckets);

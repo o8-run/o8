@@ -8,12 +8,15 @@ use std::collections::HashMap;
 
 pub type Anchors = HashMap<String, String>;
 
+#[derive(Default)]
+pub struct Buckets {
+    // Separate from message keys, including messages with arbitrary server IDs.
+    pub leading: Vec<Reference>,
+    pub messages: HashMap<String, Vec<Reference>>,
+}
+
 /// Pure placement: return updated conversation-local anchors alongside buckets.
-pub fn place(
-    refs: &[Reference],
-    messages: &[Entry],
-    previous: &Anchors,
-) -> (HashMap<String, Vec<Reference>>, Anchors) {
+pub fn place(refs: &[Reference], messages: &[Entry], previous: &Anchors) -> (Buckets, Anchors) {
     let mut anchors = previous.clone();
     let mut embedded = HashMap::new();
     for message in messages {
@@ -25,7 +28,7 @@ pub fn place(
             });
         }
     }
-    let mut buckets: HashMap<String, Vec<Reference>> = HashMap::new();
+    let mut buckets = Buckets::default();
     for reference in refs {
         let root = reference.state_id();
         let target = if let Some((id, embedded)) = embedded.get(root) {
@@ -63,6 +66,11 @@ pub fn place(
                     }
                 }
             }
+            // A leading placement is provisional. Do not remember an anchor:
+            // an older page may supply the producing turn on the next attach.
+            if index.is_none() {
+                buckets.leading.push(reference.clone());
+            }
             index.map(|i| {
                 let id = messages[i].id.clone();
                 anchors.insert(root.to_owned(), id.clone());
@@ -70,7 +78,11 @@ pub fn place(
             })
         };
         if let Some(id) = target {
-            buckets.entry(id).or_default().push(reference.clone());
+            buckets
+                .messages
+                .entry(id)
+                .or_default()
+                .push(reference.clone());
         }
     }
     (buckets, anchors)
@@ -119,8 +131,8 @@ pub fn merge(embedded: Vec<Reference>, listed: &[Reference]) -> Vec<Reference> {
     merged
 }
 
-pub fn attach(rows: &mut [Row], buckets: &HashMap<String, Vec<Reference>>) {
-    for row in rows {
+pub fn attach(rows: &mut Vec<Row>, buckets: &Buckets) {
+    for row in rows.iter_mut() {
         if let Row::Message { id, nodes, .. } = row {
             let embedded = nodes
                 .iter()
@@ -129,7 +141,11 @@ pub fn attach(rows: &mut [Row], buckets: &HashMap<String, Vec<Reference>>) {
                 .collect();
             let refs = merge(
                 embedded,
-                buckets.get(id).map(Vec::as_slice).unwrap_or_default(),
+                buckets
+                    .messages
+                    .get(id)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
             );
             nodes.retain(|n| n.kind != "visualization");
             nodes.extend(refs.into_iter().map(|reference| Node {
@@ -139,6 +155,28 @@ pub fn attach(rows: &mut [Row], buckets: &HashMap<String, Vec<Reference>>) {
                 data: serde_json::to_value(reference).ok(),
             }));
         }
+    }
+    for (index, reference) in merge(vec![], &buckets.leading).into_iter().enumerate() {
+        // Presentation rows never enter saved history. Keep each card in its
+        // own row so its height updates and visibility lease stay independent.
+        // Check server IDs too, since they may use any string namespace.
+        let mut id = format!("\0o8:leading-visualization:{}", reference.state_id());
+        while rows.iter().any(|row| row.id() == id) {
+            id.push('\0');
+        }
+        rows.insert(
+            index,
+            Row::Message {
+                id,
+                role: "assistant".into(),
+                nodes: vec![Node {
+                    kind: "visualization".into(),
+                    runs: vec![],
+                    language: None,
+                    data: serde_json::to_value(reference).ok(),
+                }],
+            },
+        );
     }
 }
 
