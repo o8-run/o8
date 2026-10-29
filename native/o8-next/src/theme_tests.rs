@@ -242,14 +242,26 @@ fn glass_tokens_match_the_desktop_overrides_and_window_veil() {
         .unwrap();
     let pattern = Regex::new(r"(rgba\([^)]+\)) (\d+)%").unwrap();
     let stops: Vec<_> = pattern.captures_iter(veil).collect();
-    assert_eq!(stops.len(), crate::theme::GLASS_VEIL.len());
-    for (capture, (offset, alpha)) in stops.iter().zip(crate::theme::GLASS_VEIL) {
-        assert_eq!(capture[2].parse::<f32>().unwrap() / 100., offset);
+    // The native veil is deliberately darker at the top than classic's three
+    // stops: four stops since 78fb95459, kept by Q on 2026-10-29. It keeps
+    // classic's tint and its transparent foot.
+    assert_eq!(
+        crate::theme::GLASS_VEIL,
+        [(0., 0.9), (0.3, 0.7), (0.65, 0.32), (1., 0.06)]
+    );
+    let tint = |color: gpui::Rgba| (color.r, color.g, color.b);
+    for capture in &stops {
         assert_eq!(
-            css_color(&format!("color:{};", &capture[1]), "color"),
-            crate::theme::veil_color(alpha)
+            tint(css_color(&format!("color:{};", &capture[1]), "color")),
+            tint(crate::theme::veil_color(1.))
         );
     }
+    let foot = stops.last().unwrap();
+    assert_eq!(foot[2].parse::<f32>().unwrap() / 100., 1.);
+    assert_eq!(
+        css_color(&format!("color:{};", &foot[1]), "color"),
+        crate::theme::veil_color(crate::theme::GLASS_VEIL[3].1)
+    );
 }
 
 #[test]
