@@ -295,6 +295,7 @@ impl Shell {
     }
     fn capture(&mut self, window: &Window, cx: &App) {
         if self.palette
+            || self.panel_focused(window, cx)
             || registrations().iter().any(|r| (r.overlay_open)(self))
             || registry::extensions().any(|extension| extension.capture_blocked(self))
         {

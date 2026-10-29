@@ -148,6 +148,9 @@ pub(super) const REGISTRATION: Registration = Registration {
             .flex()
             .flex_1()
             .min_h_0()
+            // This column now sits inside the panel/resize row. Its automatic
+            // minimum width must not expand the workspace beyond the window.
+            .min_w_0()
             .child(
                 gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
                     gpui::StyleRefinement::default()
@@ -157,7 +160,11 @@ pub(super) const REGISTRATION: Registration = Registration {
                 ),
             )
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
-            .child(edge(width, shell.surfaces.sidebar.resizing, shell.system_glass))
+            .child(edge(
+                width,
+                shell.surfaces.sidebar.resizing,
+                shell.system_glass,
+            ))
             .into_any_element()
     },
     key_down: |shell, event, window, cx| {
@@ -236,6 +243,12 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                         shell.state.selected = None;
                         shell.persist();
                     }
+                }
+                ThreadEvent::WorkspacePicker(previous) => {
+                    if let Some(focus) = previous {
+                        focus.focus(window);
+                    }
+                    super::palette::open_workspaces(shell, window, cx);
                 }
                 ThreadEvent::Selected(id) => shell.open_thread(id.clone(), window, cx),
                 ThreadEvent::Error(error) => {

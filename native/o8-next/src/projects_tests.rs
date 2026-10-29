@@ -523,7 +523,7 @@ fn projects_preserve_session_focus_and_allow_inbox_navigation(cx: &mut TestAppCo
         !shell.read_with(cx, |s, _| s.surfaces.projects.open),
         "opening Inbox must leave Projects"
     );
-    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Inbox));
+    inbox_panel_open(&shell, cx);
     assert!(cx.debug_bounds("inbox-view-replies").is_some());
     cx.simulate_keystrokes("ctrl-shift-p p r o j e c t s enter");
     settle(cx);

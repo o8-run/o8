@@ -445,7 +445,12 @@ fn phrase(
             };
             let links = atoms.iter().flat_map(|a| a.step.links.iter());
             let chips = links
-                .map(|(title, url)| (page(url, Some(title)), Badge::Glyph(GLOBE, crate::theme::FILE_MARKS.neutral)))
+                .map(|(title, url)| {
+                    (
+                        page(url, Some(title)),
+                        Badge::Glyph(GLOBE, crate::theme::FILE_MARKS.neutral),
+                    )
+                })
                 .collect();
             (Icon::Globe, label, chip_list(chips))
         }
@@ -954,7 +959,12 @@ fn icon(line: &Line, clock: f32) -> AnyElement {
             .flex()
             .items_center()
             .justify_center()
-            .child(crate::icon::stroke(CHECK, crate::theme::on_accent(), 11., 2.6))
+            .child(crate::icon::stroke(
+                CHECK,
+                crate::theme::on_accent(),
+                11.,
+                2.6,
+            ))
             .into_any_element(),
         Icon::Ring => div()
             .size(px(8.))

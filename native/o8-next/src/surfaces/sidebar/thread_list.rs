@@ -28,6 +28,7 @@ pub enum Event {
     Selected(String),
     Error(String),
     Workspace(Option<String>, Ledger),
+    WorkspacePicker(Option<FocusHandle>),
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Row {
@@ -55,6 +56,7 @@ pub struct ThreadList {
     workspace: Option<String>,
     header_busy: bool,
     header_menu: Option<bool>,
+    header_focus: Option<FocusHandle>,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
@@ -124,6 +126,7 @@ impl ThreadList {
             workspace: None,
             header_busy: false,
             header_menu: None,
+            header_focus: None,
             sessions: vec![],
             rows: Rc::new(vec![]),
             selected: None,

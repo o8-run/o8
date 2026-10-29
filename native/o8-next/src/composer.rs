@@ -736,12 +736,12 @@ impl Render for Composer {
                                     // The viewport excludes the input's padding and border.
                                     let visible = (input.scroll.bounds().size.height
                                         - px(if input.inline {
-                                        0.
-                                    } else if input.framed {
-                                        18.
-                                    } else {
-                                        15.
-                                    }))
+                                            0.
+                                        } else if input.framed {
+                                            18.
+                                        } else {
+                                            15.
+                                        }))
                                     .max(px(20.));
                                     let bottom = top + visible;
                                     let next = if cursor_y < top {

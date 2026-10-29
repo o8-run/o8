@@ -27,7 +27,10 @@ enum Directory {
 enum File {
     None,
     Loading,
-    Loaded { lines: Vec<SharedString>, truncated: bool },
+    Loaded {
+        lines: Vec<SharedString>,
+        truncated: bool,
+    },
     Failed(String),
 }
 
@@ -74,14 +77,18 @@ impl FilesPanel {
     }
 
     fn load_directory(&mut self, directory: String, cx: &mut Context<Self>) {
-        self.directories.insert(directory.clone(), Directory::Loading);
+        self.directories
+            .insert(directory.clone(), Directory::Loading);
         let client = self.client.clone();
         let workspace = self.workspace.clone();
         let path = directory.clone();
         let task = cx.background_executor().spawn(async move {
             client.get::<Value>(
                 "/api/panel/files",
-                &[("workspace", workspace.as_str()), ("directory", path.as_str())],
+                &[
+                    ("workspace", workspace.as_str()),
+                    ("directory", path.as_str()),
+                ],
             )
         });
         cx.spawn(async move |this, cx| {
@@ -98,7 +105,8 @@ impl FilesPanel {
                                         Some(Entry {
                                             name: entry["name"].as_str()?.to_string().into(),
                                             path: entry["path"].as_str()?.to_string(),
-                                            dir: entry["kind"] == "directory" || entry["type"] == "dir",
+                                            dir: entry["kind"] == "directory"
+                                                || entry["type"] == "dir",
                                             ignored: entry["ignored"] == true,
                                         })
                                     })
@@ -107,7 +115,10 @@ impl FilesPanel {
                             .unwrap_or_default(),
                     ),
                     Ok(body) => Directory::Failed(
-                        body["error"].as_str().unwrap_or("Directory listing failed").into(),
+                        body["error"]
+                            .as_str()
+                            .unwrap_or("Directory listing failed")
+                            .into(),
                     ),
                     Err(error) => Directory::Failed(error),
                 };
@@ -126,7 +137,11 @@ impl FilesPanel {
         let task = cx.background_executor().spawn(async move {
             client.get::<Value>(
                 "/api/v2/files",
-                &[("path", path.as_str()), ("preview", "1"), ("workspace", workspace.as_str())],
+                &[
+                    ("path", path.as_str()),
+                    ("preview", "1"),
+                    ("workspace", workspace.as_str()),
+                ],
             )
         });
         self.finish_file(task, cx);
@@ -144,11 +159,7 @@ impl FilesPanel {
         self.finish_file(task, cx);
     }
 
-    fn finish_file(
-        &mut self,
-        task: gpui::Task<Result<Value, String>>,
-        cx: &mut Context<Self>,
-    ) {
+    fn finish_file(&mut self, task: gpui::Task<Result<Value, String>>, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -163,7 +174,9 @@ impl FilesPanel {
                             .collect(),
                         truncated: body["truncated"] == true,
                     },
-                    Ok(body) => File::Failed(body["error"].as_str().unwrap_or("File unavailable").into()),
+                    Ok(body) => {
+                        File::Failed(body["error"].as_str().unwrap_or("File unavailable").into())
+                    }
                     Err(error) => File::Failed(error),
                 };
                 cx.notify();
@@ -179,7 +192,10 @@ impl FilesPanel {
         }
         if !self.expanded.remove(&entry.path) {
             self.expanded.insert(entry.path.clone());
-            if !matches!(self.directories.get(&entry.path), Some(Directory::Loaded(_))) {
+            if !matches!(
+                self.directories.get(&entry.path),
+                Some(Directory::Loaded(_))
+            ) {
                 self.load_directory(entry.path.clone(), cx);
             }
         }
@@ -193,7 +209,12 @@ impl FilesPanel {
         rows
     }
 
-    fn push_rows(&self, directory: &str, depth: usize, rows: &mut Vec<(usize, Result<Entry, SharedString>)>) {
+    fn push_rows(
+        &self,
+        directory: &str,
+        depth: usize,
+        rows: &mut Vec<(usize, Result<Entry, SharedString>)>,
+    ) {
         match self.directories.get(directory) {
             Some(Directory::Loaded(entries)) => {
                 if entries.is_empty() && depth == 0 {
@@ -251,16 +272,17 @@ impl FilesPanel {
                                     } else {
                                         theme().text_secondary
                                     })
-                                    .child(
-                                        div().w(px(12.)).flex_shrink_0().when(entry.dir, |slot| {
+                                    .child(div().w(px(12.)).flex_shrink_0().when(
+                                        entry.dir,
+                                        |slot| {
                                             slot.child(crate::icon::stroke(
                                                 if open { CHEVRON_DOWN } else { CHEVRON_RIGHT },
                                                 theme().text_muted,
                                                 12.,
                                                 1.8,
                                             ))
-                                        }),
-                                    )
+                                        },
+                                    ))
                                     .child(crate::icon::stroke(
                                         if entry.dir { FOLDER } else { FILE },
                                         theme().text_muted,
@@ -268,9 +290,15 @@ impl FilesPanel {
                                         1.6,
                                     ))
                                     .child(
-                                        div().min_w_0().overflow_hidden().text_ellipsis().child(entry.name.clone()),
+                                        div()
+                                            .min_w_0()
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .child(entry.name.clone()),
                                     )
-                                    .on_click(cx.listener(move |this, _, _, cx| this.toggle(&entry, cx)))
+                                    .on_click(
+                                        cx.listener(move |this, _, _, cx| this.toggle(&entry, cx)),
+                                    )
                             }
                         }
                     })
@@ -298,9 +326,11 @@ impl FilesPanel {
                 .text_size(px(13.))
                 .line_height(px(20.))
                 .text_color(theme().text)
-                .children(lines.iter().map(|line| {
-                    div().min_h(px(20.)).child(line.clone())
-                }))
+                .children(
+                    lines
+                        .iter()
+                        .map(|line| div().min_h(px(20.)).child(line.clone())),
+                )
                 .into_any_element(),
             File::Loaded { lines, truncated } => {
                 let lines = lines.clone();
@@ -331,7 +361,9 @@ impl FilesPanel {
                                                 .text_color(theme().text_faint)
                                                 .child((i + 1).to_string()),
                                         )
-                                        .child(div().text_color(theme().text).child(lines[i].clone()))
+                                        .child(
+                                            div().text_color(theme().text).child(lines[i].clone()),
+                                        )
                                 })
                                 .collect::<Vec<_>>()
                         })
@@ -383,7 +415,11 @@ impl FilesPanel {
                             .child(title),
                     )
                     .when(self.mode == Mode::Files, |bar| {
-                        let label = if self.tree_visible { "Hide file tree" } else { "Show file tree" };
+                        let label = if self.tree_visible {
+                            "Hide file tree"
+                        } else {
+                            "Show file tree"
+                        };
                         bar.child(
                             div()
                                 .id("files-tree-toggle")
@@ -395,10 +431,20 @@ impl FilesPanel {
                                 .rounded(px(7.))
                                 .cursor_pointer()
                                 .hover(|button| button.bg(theme().hover))
-                                .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(label.into())).into())
+                                .tooltip(move |_, cx| {
+                                    cx.new(|_| crate::icon::Tip(label.into())).into()
+                                })
                                 .child(crate::icon::stroke(
-                                    if self.tree_visible { TREE_SHOWN } else { TREE_HIDDEN },
-                                    if self.tree_visible { theme().text_secondary } else { theme().accent },
+                                    if self.tree_visible {
+                                        TREE_SHOWN
+                                    } else {
+                                        TREE_HIDDEN
+                                    },
+                                    if self.tree_visible {
+                                        theme().text_secondary
+                                    } else {
+                                        theme().accent
+                                    },
                                     16.,
                                     1.6,
                                 ))
@@ -414,7 +460,11 @@ impl FilesPanel {
 }
 
 fn status(text: String) -> impl IntoElement {
-    div().p(px(16.)).text_size(px(12.)).text_color(theme().text_muted).child(text)
+    div()
+        .p(px(16.))
+        .text_size(px(12.))
+        .text_color(theme().text_muted)
+        .child(text)
 }
 
 impl Render for FilesPanel {
@@ -430,23 +480,26 @@ impl Render for FilesPanel {
             .flex()
             .min_h_0()
             .when(viewing, |pane| pane.child(self.viewer(cx)))
-            .when(self.mode == Mode::Files && (self.tree_visible || !viewing), |pane| {
-                pane.child(
-                    div()
-                        .when(viewing, |tree| {
-                            tree.w(px(tree_width))
-                                .flex_shrink_0()
-                                .border_l_1()
-                                .border_color(theme().border)
-                        })
-                        .when(!viewing, |tree| tree.flex_1())
-                        .h_full()
-                        .min_h_0()
-                        .flex()
-                        .flex_col()
-                        .child(self.tree(cx)),
-                )
-            })
+            .when(
+                self.mode == Mode::Files && (self.tree_visible || !viewing),
+                |pane| {
+                    pane.child(
+                        div()
+                            .when(viewing, |tree| {
+                                tree.w(px(tree_width))
+                                    .flex_shrink_0()
+                                    .border_l_1()
+                                    .border_color(theme().border)
+                            })
+                            .when(!viewing, |tree| tree.flex_1())
+                            .h_full()
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .child(self.tree(cx)),
+                    )
+                },
+            )
     }
 }
 

@@ -19,7 +19,12 @@ pub fn normalize(raw: &str) -> String {
     if lower.starts_with("http://") || lower.starts_with("https://") {
         return value.into();
     }
-    let dotted = value.split('.').take(4).filter(|part| !part.is_empty()).count() == 4
+    let dotted = value
+        .split('.')
+        .take(4)
+        .filter(|part| !part.is_empty())
+        .count()
+        == 4
         && value.chars().next().is_some_and(|c| c.is_ascii_digit());
     if value.starts_with("localhost") || dotted {
         format!("http://{value}")
@@ -61,7 +66,9 @@ impl BrowserPanel {
         // The page navigates on its own; keep the address field following it.
         cx.spawn(async move |this, cx| {
             loop {
-                cx.background_executor().timer(Duration::from_millis(500)).await;
+                cx.background_executor()
+                    .timer(Duration::from_millis(500))
+                    .await;
                 if this.update(cx, |this, cx| this.follow(cx)).is_err() {
                     break;
                 }
@@ -120,7 +127,8 @@ impl BrowserPanel {
                 && field.text != current
                 && !field.composing()
             {
-                self.address.update(cx, |field, cx| field.set_text(&current, cx));
+                self.address
+                    .update(cx, |field, cx| field.set_text(&current, cx));
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -174,9 +182,18 @@ impl Render for BrowserPanel {
                     .px(px(8.))
                     .border_b_1()
                     .border_color(theme().border)
-                    .child(button("browser-back", BACK, "Back").on_click(cx.listener(|this, _, _, _| this.act(web::Web::back))))
-                    .child(button("browser-forward", FORWARD, "Forward").on_click(cx.listener(|this, _, _, _| this.act(web::Web::forward))))
-                    .child(button("browser-reload", RELOAD, "Reload").on_click(cx.listener(|this, _, _, _| this.act(web::Web::reload))))
+                    .child(
+                        button("browser-back", BACK, "Back")
+                            .on_click(cx.listener(|this, _, _, _| this.act(web::Web::back))),
+                    )
+                    .child(
+                        button("browser-forward", FORWARD, "Forward")
+                            .on_click(cx.listener(|this, _, _, _| this.act(web::Web::forward))),
+                    )
+                    .child(
+                        button("browser-reload", RELOAD, "Reload")
+                            .on_click(cx.listener(|this, _, _, _| this.act(web::Web::reload))),
+                    )
                     .child(
                         // A column so the framed field stretches across the bar.
                         div()
@@ -214,7 +231,9 @@ impl Render for BrowserPanel {
                                     let mut slot = web.borrow_mut();
                                     if slot.is_none() {
                                         *slot = web::Web::new(window);
-                                        if let (Some(page), Some(url)) = (slot.as_ref(), pending.borrow_mut().take()) {
+                                        if let (Some(page), Some(url)) =
+                                            (slot.as_ref(), pending.borrow_mut().take())
+                                        {
                                             page.load(&url);
                                         }
                                     }
@@ -262,7 +281,13 @@ mod web {
         base::{BOOL, NO, YES, id, nil},
         foundation::{NSPoint, NSRect, NSSize, NSString},
     };
-    use objc::{class, declare::ClassDecl, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl};
+    use objc::{
+        class,
+        declare::ClassDecl,
+        msg_send,
+        runtime::{Class, Object, Sel},
+        sel, sel_impl,
+    };
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use std::{ffi::CStr, sync::OnceLock};
 

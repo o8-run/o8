@@ -27,9 +27,6 @@ fn inbox_is_reachable_from_the_real_shell_palette(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     draw(cx);
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.active().unwrap().label()),
-        "Inbox"
-    );
+    inbox_panel_open(&shell, cx);
     assert!(cx.debug_bounds("inbox-view-replies").is_some());
 }

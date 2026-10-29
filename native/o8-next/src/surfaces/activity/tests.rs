@@ -343,7 +343,7 @@ fn activity_empty_local_auth_and_scoped_retention(cx: &mut TestAppContext) {
     );
     // An unregistered local-only workspace never acquires the previous remote feed.
     view.update(cx, |v, _| v.client = fixture.client.clone());
-    activity_click(cx, "workspace-switcher");
+    open_workspace_picker(&shell, cx);
     activity_click(cx, "command-1");
     ready(&shell, cx);
     cx.simulate_keystrokes("ctrl-k");

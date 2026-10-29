@@ -45,19 +45,17 @@ impl ShellFeature for RightPanel {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum Tool {
-    Launcher,
-    Files,
-    Browser,
-    Terminal,
-    Review,
-    Inbox,
-    Spec,
-}
+use crate::shell_state::PanelTool as Tool;
 
 impl Tool {
-    const PICKER: [Tool; 6] = [Tool::Files, Tool::Browser, Tool::Terminal, Tool::Review, Tool::Inbox, Tool::Spec];
+    const PICKER: [Tool; 6] = [
+        Tool::Files,
+        Tool::Browser,
+        Tool::Terminal,
+        Tool::Review,
+        Tool::Inbox,
+        Tool::Spec,
+    ];
     fn tab(self) -> Option<Tab> {
         match self {
             Tool::Launcher | Tool::Files | Tool::Browser | Tool::Spec => None,
@@ -107,6 +105,9 @@ struct Panel {
     /// The tool's own fade and 12px slide: 200ms.
     content: Transition,
     tool: Tool,
+    restored: bool,
+    focus: Option<FocusHandle>,
+    opened_focus: Option<FocusHandle>,
     /// Files and o8.md views, keyed like panel content.
     files: std::collections::HashMap<String, gpui::Entity<crate::files_panel::FilesPanel>>,
     browsers: std::collections::HashMap<String, gpui::Entity<crate::browser_panel::BrowserPanel>>,
@@ -118,6 +119,9 @@ impl Default for Panel {
             motion: Transition::new(260),
             content: Transition::new(200),
             tool: Tool::Launcher,
+            restored: false,
+            focus: None,
+            opened_focus: None,
             files: Default::default(),
             browsers: Default::default(),
         }
@@ -125,11 +129,16 @@ impl Default for Panel {
 }
 
 fn key(s: &Shell, tool: Tool) -> String {
-    format!("panel|{}|{tool:?}", s.state.selected.as_deref().unwrap_or(""))
+    format!(
+        "panel|{}|{tool:?}",
+        s.state.selected.as_deref().unwrap_or("")
+    )
 }
 
 pub(super) fn is_open(s: &Shell) -> bool {
-    s.features.read::<Panel>().is_some_and(|panel| panel.motion.is_open())
+    s.features
+        .read::<Panel>()
+        .is_some_and(|panel| panel.motion.is_open())
 }
 
 /// The column's full width (theme::right_panel_width) and the width it
@@ -178,27 +187,53 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
             crate::files_panel::Mode::Spec
         };
         let client = s.client.in_workspace(&workspace);
-        let view = cx.new(|cx| crate::files_panel::FilesPanel::new(client, workspace.clone(), mode, cx));
+        let view =
+            cx.new(|cx| crate::files_panel::FilesPanel::new(client, workspace.clone(), mode, cx));
         s.features.get::<Panel>().files.insert(key.clone(), view);
     }
     if tool == Tool::Browser && !s.features.get::<Panel>().browsers.contains_key(&key) {
         let view = cx.new(crate::browser_panel::BrowserPanel::new);
         s.features.get::<Panel>().browsers.insert(key.clone(), view);
     }
+    // A panel surface replaces management overlays, as a surface command did.
+    for registration in registrations() {
+        (registration.before_tab)(s);
+        (registration.after_tab)(s);
+    }
     let panel = s.features.get::<Panel>();
+    panel.restored = true;
+    panel.focus.get_or_insert_with(|| cx.focus_handle());
     if panel.tool != tool || !panel.motion.is_open() {
         panel.content = Transition::new(200);
         panel.content.set(true);
     }
     panel.tool = tool;
     panel.motion.set(true);
+    s.state.right_panel = Some(tool);
+    s.persist();
     if let Some(content) = s.content.get(&key) {
         content.focus(false, window, cx);
-    } else if let Some(view) = s.features.read::<Panel>().and_then(|panel| panel.files.get(&key)) {
+    } else if let Some(view) = s
+        .features
+        .read::<Panel>()
+        .and_then(|panel| panel.files.get(&key))
+    {
         view.read(cx).focus(window);
-    } else if let Some(view) = s.features.read::<Panel>().and_then(|panel| panel.browsers.get(&key)).cloned() {
+    } else if let Some(view) = s
+        .features
+        .read::<Panel>()
+        .and_then(|panel| panel.browsers.get(&key))
+        .cloned()
+    {
         view.read(cx).focus(window);
+    } else if let Some(focus) = s
+        .features
+        .read::<Panel>()
+        .and_then(|panel| panel.focus.as_ref())
+    {
+        focus.focus(window);
     }
+    s.features.get::<Panel>().opened_focus = window.focused(cx);
     cx.notify();
 }
 
@@ -233,10 +268,20 @@ pub(super) fn open_files(
 }
 
 /// The Browser, at a page.
-pub(super) fn open_browser(s: &mut Shell, url: String, window: &mut Window, cx: &mut Context<Shell>) {
+pub(super) fn open_browser(
+    s: &mut Shell,
+    url: String,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
     show(s, Tool::Browser, window, cx);
     let key = key(s, Tool::Browser);
-    if let Some(view) = s.features.read::<Panel>().and_then(|panel| panel.browsers.get(&key)).cloned() {
+    if let Some(view) = s
+        .features
+        .read::<Panel>()
+        .and_then(|panel| panel.browsers.get(&key))
+        .cloned()
+    {
         view.update(cx, |browser, cx| browser.navigate(&url, cx));
     }
 }
@@ -244,10 +289,15 @@ pub(super) fn open_browser(s: &mut Shell, url: String, window: &mut Window, cx: 
 pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     if is_open(s) {
         s.features.get::<Panel>().motion.set(false);
+        s.state.right_panel = None;
+        s.persist();
         s.restore_focus(window, cx);
         cx.notify();
     } else {
-        let tool = s.features.read::<Panel>().map_or(Tool::Launcher, |panel| panel.tool);
+        let tool = s
+            .features
+            .read::<Panel>()
+            .map_or(Tool::Launcher, |panel| panel.tool);
         show(s, tool, window, cx);
     }
 }
@@ -269,14 +319,28 @@ pub(super) fn element(
             .content
             .get(&key(s, tool))
             .map(Content::element)
-            .or_else(|| panel.files.get(&key(s, tool)).map(|view| view.clone().into_any_element()))
-            .or_else(|| panel.browsers.get(&key(s, tool)).map(|view| view.clone().into_any_element()))
+            .or_else(|| {
+                panel
+                    .files
+                    .get(&key(s, tool))
+                    .map(|view| view.clone().into_any_element())
+            })
+            .or_else(|| {
+                panel
+                    .browsers
+                    .get(&key(s, tool))
+                    .map(|view| view.clone().into_any_element())
+            })
             .unwrap_or_else(|| launcher(cx).into_any_element()),
     };
     // A fixed-width inner column, clipped by the travelling outer width, so the
     // tool never reflows while the panel opens or closes.
     let element = div()
-        .w(px(full))
+        .when_some(panel.focus.as_ref(), |element, focus| {
+            element.track_focus(focus)
+        })
+        // The enclosing column's 1px left border is inside its width.
+        .w(px((full - 1.).max(0.)))
         .h_full()
         .flex()
         .flex_col()
@@ -340,7 +404,12 @@ fn launcher(cx: &mut Context<Shell>) -> impl IntoElement {
                         .border_1()
                         .border_color(theme().border)
                         .bg(theme().hover)
-                        .child(crate::icon::stroke(tool.icon(), theme().text_secondary, 15., 1.6)),
+                        .child(crate::icon::stroke(
+                            tool.icon(),
+                            theme().text_secondary,
+                            15.,
+                            1.6,
+                        )),
                 )
                 .child(
                     div()
@@ -348,7 +417,12 @@ fn launcher(cx: &mut Context<Shell>) -> impl IntoElement {
                         .flex_col()
                         .flex_1()
                         .min_w_0()
-                        .child(div().text_size(px(13.)).text_color(theme().text).child(tool.label()))
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .text_color(theme().text)
+                                .child(tool.label()),
+                        )
                         .child(
                             div()
                                 .text_size(px(11.))
@@ -368,6 +442,7 @@ fn launcher(cx: &mut Context<Shell>) -> impl IntoElement {
 
 /// Inbox tabs saved before the panel existed move into the panel.
 fn move_inbox_tabs(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    let legacy_inbox = s.active() == Some(Tab::Inbox);
     let mut moved = false;
     for saved in s.state.workspaces.values_mut() {
         while let Some(index) = saved.tabs.iter().position(|tab| tab == &Tab::Inbox) {
@@ -380,10 +455,20 @@ fn move_inbox_tabs(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         }
     }
     if moved {
-        s.content.retain(|key, _| key.starts_with("panel|") || !key.ends_with("|Inbox"));
+        if legacy_inbox && !s.features.get::<Panel>().restored {
+            s.state.right_panel = Some(Tool::Inbox);
+        }
+        s.content
+            .retain(|key, _| key.starts_with("panel|") || !key.ends_with("|Inbox"));
         s.ensure(window, cx);
         s.persist();
         cx.notify();
+    }
+    if s.connected && !s.features.get::<Panel>().restored {
+        s.features.get::<Panel>().restored = true;
+        if let Some(tool) = s.state.right_panel {
+            show(s, tool, window, cx);
+        }
     }
 }
 
@@ -391,7 +476,11 @@ fn move_inbox_tabs(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
 pub(super) fn toggle_button(open: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
     super::header::pill(
         "header-right-panel",
-        if open { "Close panel  ⌘⌥B" } else { "Open O8 panel  ⌘⌥B" },
+        if open {
+            "Close panel  ⌘⌥B"
+        } else {
+            "Open O8 panel  ⌘⌥B"
+        },
         true,
     )
     .w(px(30.))
@@ -409,7 +498,12 @@ pub(super) fn toggle_button(open: bool, cx: &mut Context<Shell>) -> gpui::Statef
 
 /// The panel column's own header strip: its tab and the New tab opener, then
 /// the close toggle at the far right. Clipped to the column's travelling width.
-pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) -> impl IntoElement {
+pub(super) fn header(
+    s: &Shell,
+    full: f32,
+    shown: f32,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement {
     let panel = s.features.read::<Panel>();
     let tool = panel.map_or(Tool::Launcher, |panel| panel.tool);
     let travel = panel.map_or(0., |panel| panel.motion.value().0);
@@ -445,7 +539,11 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
                         .when(tool != Tool::Launcher, |pill| {
                             pill.child(crate::icon::stroke(tool.icon(), theme().text, 12., 1.8))
                         })
-                        .child(tool.label()),
+                        .child(
+                            div()
+                                .debug_selector(move || format!("panel-tab:{}", tool.label()))
+                                .child(tool.label()),
+                        ),
                 )
                 .child(
                     div().mt(px(1.3)).child(
@@ -466,8 +564,45 @@ const COLUMNS: &str = "M5 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2
 const PLUS: &str = "M12 5v14M5 12h14";
 // PanelToolIcon in o8-panel/panel-tools.tsx.
 const INBOX: &str = "M5 4h14l3 9v7H2v-7l3-9Z M2 13h6l2 3h4l2-3h6";
-const TERMINAL: &str = "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z M7 9l3 3-3 3 M12 16h5";
+const TERMINAL: &str =
+    "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z M7 9l3 3-3 3 M12 16h5";
 const REVIEW: &str = "M3 12l4 4L17 6 M12 15l3 3 7-8";
 const FILES: &str = "M3 7V4h7l2 3h9v13H3V7h7";
-const BROWSER: &str = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z M2 12h20 M12 2c5 5 5 15 0 20-5-5-5-15 0-20Z";
+const BROWSER: &str =
+    "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z M2 12h20 M12 2c5 5 5 15 0 20-5-5-5-15 0-20Z";
 const SPEC: &str = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5 M14 3l5 5v3 M8 9h6 M8 13h4 M18.4 13.6a1.4 1.4 0 0 1 2 2L16 20l-3 1 1-3Z";
+
+#[cfg(test)]
+impl Shell {
+    pub(in crate::shell) fn inbox_key(&self) -> String {
+        key(self, Tool::Inbox)
+    }
+    pub(in crate::shell) fn inbox_panel_ready(&self, cx: &App) -> bool {
+        self.features.read::<Panel>().is_some_and(|panel| {
+            panel.tool == Tool::Inbox
+                && panel.motion.is_open()
+                && !panel.motion.value().1
+                && !panel.content.value().1
+        }) && self
+            .content
+            .get(&self.inbox_key())
+            .is_some_and(|content| content.ready(cx))
+    }
+}
+
+impl Shell {
+    /// Panel focus must not overwrite the main surface's saved reading/editor focus.
+    pub(in crate::shell) fn panel_focused(&self, window: &Window, cx: &App) -> bool {
+        self.features.read::<Panel>().is_some_and(|panel| {
+            panel.motion.is_open()
+                && (panel
+                    .focus
+                    .as_ref()
+                    .is_some_and(|focus| focus.contains_focused(window, cx))
+                    || panel
+                        .opened_focus
+                        .as_ref()
+                        .is_some_and(|focus| focus.is_focused(window)))
+        })
+    }
+}

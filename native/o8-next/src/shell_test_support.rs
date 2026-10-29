@@ -177,3 +177,41 @@ pub(super) fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
         ))
     );
 }
+
+pub(super) fn open_workspace_picker(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
+    for selector in ["sidebar-project-switcher", "sidebar-workspace-picker"] {
+        draw(cx);
+        let bounds = cx
+            .debug_bounds(selector)
+            .expect("sidebar workspace navigation");
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    }
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.palette && s.workspace_picker));
+}
+
+pub(super) fn inbox_panel_open(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
+    for _ in 0..80 {
+        shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+        cx.run_until_parked();
+        draw(cx);
+        if shell.read_with(cx, |s, app| s.inbox_panel_ready(app)) {
+            assert!(cx.debug_bounds("panel-tab").is_some());
+            assert!(
+                cx.debug_bounds("panel-tab:Inbox").is_some(),
+                "panel header reads Inbox"
+            );
+            assert!(
+                shell.read_with(cx, |s, _| s
+                    .state
+                    .workspaces
+                    .values()
+                    .all(|w| !w.tabs.contains(&Tab::Inbox))),
+                "Inbox occupies the panel, never a workspace tab"
+            );
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the open Inbox panel must reach its loaded, settled frame");
+}

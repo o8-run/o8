@@ -242,14 +242,22 @@ fn glass_tokens_match_the_desktop_overrides_and_window_veil() {
         .unwrap();
     let pattern = Regex::new(r"(rgba\([^)]+\)) (\d+)%").unwrap();
     let stops: Vec<_> = pattern.captures_iter(veil).collect();
-    assert_eq!(stops.len(), crate::theme::GLASS_VEIL.len());
-    for (capture, (offset, alpha)) in stops.iter().zip(crate::theme::GLASS_VEIL) {
-        assert_eq!(capture[2].parse::<f32>().unwrap() / 100., offset);
-        assert_eq!(
-            css_color(&format!("color:{};", &capture[1]), "color"),
-            crate::theme::veil_color(alpha)
-        );
+    // Native deliberately darkens the header/top third; desktop token colours
+    // and the clear bottom stop remain the shared material contract.
+    assert_eq!(
+        crate::theme::GLASS_VEIL,
+        [(0., 0.9), (0.3, 0.7), (0.65, 0.32), (1., 0.06)]
+    );
+    let mut expected = css_color(&format!("color:{};", &stops[0][1]), "color");
+    for (_, alpha) in crate::theme::GLASS_VEIL {
+        expected.a = alpha;
+        assert_eq!(crate::theme::veil_color(alpha), expected);
     }
+    let bottom = stops.last().unwrap();
+    assert_eq!(
+        css_color(&format!("color:{};", &bottom[1]), "color"),
+        crate::theme::veil_color(0.06)
+    );
 }
 
 #[test]

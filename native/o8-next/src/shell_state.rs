@@ -29,12 +29,26 @@ impl std::ops::DerefMut for Workspace {
         &mut self.surfaces.session
     }
 }
+/// The right-panel tool retained across ordinary window restarts.
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelTool {
+    Launcher,
+    Files,
+    Browser,
+    Terminal,
+    Review,
+    Inbox,
+    Spec,
+}
 #[derive(Clone, Serialize, Deserialize)]
 pub struct State {
     pub version: u32,
     pub bounds: [f32; 4],
     pub selected: Option<String>,
     pub workspaces: BTreeMap<String, Workspace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right_panel: Option<PanelTool>,
     /// The chat list width the person dragged; absent keeps the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidebar_width: Option<f32>,
@@ -53,6 +67,7 @@ impl Default for State {
             bounds: [100., 100., 1200., 816.],
             selected: None,
             workspaces: BTreeMap::new(),
+            right_panel: None,
             sidebar_width: None,
             tab_labels: BTreeMap::new(),
             retain_file: false,
@@ -77,7 +92,10 @@ impl State {
             || !(400. ..=16_384.).contains(&h)
             || self.workspaces.len() > 500
             || self.tab_labels.len() > 16_000
-            || self.tab_labels.values().any(|label| label.chars().count() > 80)
+            || self
+                .tab_labels
+                .values()
+                .any(|label| label.chars().count() > 80)
             || self
                 .workspaces
                 .values()

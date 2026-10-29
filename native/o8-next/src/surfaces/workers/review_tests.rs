@@ -29,6 +29,22 @@ fn control(fixture: &Fixture, key: &str) -> Value {
 fn receipt(fixture: &Fixture) -> Value {
     fixture.client.get("/api/workers-fixture", &[]).unwrap()
 }
+fn receipt_after_responses(fixture: &Fixture, count: usize) -> Value {
+    // Restarting the owned route can outlast the client's request timeout.
+    // An idle card alone does not mean the fixture recorded the route response.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let value = receipt(fixture);
+        if value["responses"].as_array().unwrap().len() >= count {
+            return value;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "restarted route did not record {count} responses: {value}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 fn settle(
     visual: &mut VisualTestContext,
     fixture: &Fixture,
@@ -198,7 +214,7 @@ fn workers_restart_outcome_unknown_retry_keeps_one_steer(cx: &mut TestAppContext
     settle(&mut visual, &fixture, |v| {
         card.read_with(v, |c, _| !c.action_busy())
     });
-    let first = receipt(&fixture);
+    let first = receipt_after_responses(&fixture, 1);
     assert_eq!(
         first["restarts"], 1,
         "the route owner must actually exit mid-steer"
@@ -214,7 +230,7 @@ fn workers_restart_outcome_unknown_retry_keeps_one_steer(cx: &mut TestAppContext
     settle(&mut visual, &fixture, |v| {
         card.read_with(v, |c, _| !c.action_busy())
     });
-    let retried = receipt(&fixture);
+    let retried = receipt_after_responses(&fixture, 2);
     assert_eq!(
         retried["deliveries"].as_array().unwrap().len(),
         1,

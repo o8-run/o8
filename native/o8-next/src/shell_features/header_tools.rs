@@ -606,7 +606,7 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
                     )
                     .child(
                         action("workspace-pull-request", cx, |this, window, cx| {
-                            this.execute(Command::PullRequests, window, cx)
+                            this.execute_registered("Open pull requests", window, cx)
                         })
                         .w_full()
                         .child(crate::icon::stroke(PULL_REQUEST, theme().text_secondary, 14., 1.6))

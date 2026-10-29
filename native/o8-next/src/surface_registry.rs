@@ -240,3 +240,21 @@ macro_rules! register_surfaces {
     };
 }
 pub(super) use register_surfaces;
+
+impl Shell {
+    /// Resolve an optional surface through its registration, including its adapter.
+    pub(in crate::shell) fn execute_registered(
+        &mut self,
+        label: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some((_, command)) = registrations()
+            .iter()
+            .find(|registration| registration.command_label == label)
+            .and_then(|registration| registration.command)
+        {
+            self.execute(command(), window, cx);
+        }
+    }
+}

@@ -14,7 +14,12 @@ thread_local! {
 
 /// How far an element's hover fill has faded in: 0 at rest, 1 hovered.
 pub fn hover(key: &SharedString) -> f32 {
-    HOVERS.with(|hovers| hovers.borrow().get(key).map_or(0., |motion| motion.value().0))
+    HOVERS.with(|hovers| {
+        hovers
+            .borrow()
+            .get(key)
+            .map_or(0., |motion| motion.value().0)
+    })
 }
 
 /// Fades the element's hover fill over `milliseconds` instead of switching it;
@@ -113,7 +118,9 @@ impl Transition {
         let travelled = self.linear();
         self.open = open;
         let remaining = self.duration.mul_f32(1. - travelled);
-        self.changed = Instant::now().checked_sub(remaining).or(Some(Instant::now()));
+        self.changed = Instant::now()
+            .checked_sub(remaining)
+            .or(Some(Instant::now()));
     }
 
     /// Linear progress toward the current state, 0 to 1.

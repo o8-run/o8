@@ -562,3 +562,24 @@ fn settings_fixture_toml_save_reload_conflict_and_cancel(cx: &mut TestAppContext
 
 #[path = "settings_review_tests.rs"]
 mod review;
+
+#[gpui::test]
+fn settings_fixture_controls_and_toml_editor_fit_the_workspace(cx: &mut TestAppContext) {
+    let (_fixture, _shell, mut visual, _) = start(cx);
+    for (width, height) in [(900., 700.), (1200., 816.), (1680., 1050.)] {
+        visual.simulate_resize(gpui::size(gpui::px(width), gpui::px(height)));
+        draw(&mut visual);
+        let page = visual.debug_bounds("settings-page").unwrap();
+        assert!(
+            page.right() <= gpui::px(width),
+            "settings must stay in the workspace: {page:?}"
+        );
+    }
+    click(&mut visual, "settings-file-open");
+    settle(&mut visual);
+    let editor = visual.debug_bounds("settings-editor").unwrap();
+    assert!(
+        editor.right() <= gpui::px(1680.),
+        "the TOML input must receive real pointer input inside the window"
+    );
+}
