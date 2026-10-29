@@ -113,3 +113,64 @@ impl FilesPanel {
         cx.notify();
     }
 }
+
+/// FileViewer's two-line title; each line gets the available width independently.
+pub(super) fn file_heading(path: &str, _cx: &mut Context<FilesPanel>) -> impl IntoElement {
+    let (folder, name) = path.rsplit_once('/').unwrap_or(("", path));
+    let name_text = gpui::StyledText::new(name.to_owned());
+    let folder_text = gpui::StyledText::new(if folder.is_empty() {
+        "/".to_owned()
+    } else {
+        folder.to_owned()
+    });
+    #[cfg(test)]
+    _cx.set_global(super::tests::HeadingLayouts {
+        name: name_text.layout().clone(),
+        folder: folder_text.layout().clone(),
+    });
+    div()
+        .id("files-viewer-title")
+        .flex_1()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(3.))
+        .tooltip({
+            let path = path.to_owned();
+            move |_, cx| cx.new(|_| crate::icon::Tip(path.clone().into())).into()
+        })
+        .child(
+            div()
+                .debug_selector(|| "files-viewer-name".into())
+                .w_full()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_normal()
+                .line_clamp(1)
+                .text_ellipsis()
+                .font_family(theme().font_ui)
+                .text_size(px(13.5))
+                .line_height(px(17.))
+                .font_weight(gpui::FontWeight::LIGHT)
+                .text_color(theme().text)
+                .child(name_text),
+        )
+        .when(path.contains('/'), |heading| {
+            heading.child(
+                div()
+                    .debug_selector(|| "files-viewer-folder".into())
+                    .w_full()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_normal()
+                    .line_clamp(1)
+                    .text_ellipsis()
+                    .font_family(theme().font_ui)
+                    .text_size(px(9.5))
+                    .line_height(px(12.))
+                    .font_weight(gpui::FontWeight(260.))
+                    .text_color(theme().text_muted)
+                    .child(folder_text),
+            )
+        })
+}

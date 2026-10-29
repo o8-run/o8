@@ -1,14 +1,21 @@
 use super::*;
+#[path = "test_support.rs"]
+mod support;
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
 use std::{
     fs,
-    io::{BufRead, BufReader},
     path::PathBuf,
-    process::{Child, Command, Stdio},
-    sync::atomic::{AtomicU64, Ordering},
+    process::Command,
     time::{Duration, Instant},
 };
+use support::*;
+
+pub(super) struct HeadingLayouts {
+    pub name: gpui::TextLayout,
+    pub folder: gpui::TextLayout,
+}
+impl gpui::Global for HeadingLayouts {}
 
 #[test]
 fn classic_repo_relative_pin_validation() {
@@ -41,138 +48,10 @@ fn directory_decoder_retains_ignored_files_and_directories() {
     assert_ne!(file_icon("data.json"), FILE);
 }
 
-static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
-
-struct Fixture {
-    child: Child,
-    client: Client,
-    root: PathBuf,
-    repo: String,
-}
-impl Fixture {
-    fn new() -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "o8-files-{}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&root).unwrap();
-        let root = fs::canonicalize(root).unwrap();
-        let mut child = Command::new("node")
-            .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
-            .args([
-                "--import",
-                "./scripts/register-server-only-stub.mjs",
-                "--import",
-                "tsx",
-                "native/o8-next/src/files_panel/fixture.ts",
-            ])
-            .env("O8_FILES_FIXTURE_ROOT", &root)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap();
-        let mut output = BufReader::new(child.stdout.take().unwrap()).lines();
-        let info: Value = output
-            .by_ref()
-            .find_map(|line| serde_json::from_str(&line.ok()?).ok())
-            .expect("owned fixture origin");
-        // Route dependencies can log after startup. Retain and drain the pipe
-        // until the owned server exits, rather than closing its stdout early.
-        std::thread::spawn(move || for _ in output {});
-        Self {
-            child,
-            client: Client::authenticated(info["origin"].as_str().unwrap(), None).unwrap(),
-            repo: info["repo"].as_str().unwrap().into(),
-            root,
-        }
-    }
-    fn requests(&self) -> Vec<String> {
-        match fs::read_to_string(self.root.join("requests.json")) {
-            Ok(log) => serde_json::from_str(&log).unwrap(),
-            // Native results may arrive before the first HTTP request.
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => vec![],
-            Err(error) => panic!("fixture request log: {error}"),
-        }
-    }
-}
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = fs::remove_dir_all(&self.root);
-    }
-}
-fn draw(cx: &mut VisualTestContext) {
-    cx.run_until_parked();
-    cx.update(|window, cx| {
-        window.refresh();
-        window.draw(cx).clear();
-    });
-}
-fn wait(cx: &mut VisualTestContext, selector: &'static str) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    while Instant::now() < deadline {
-        draw(cx);
-        if cx.debug_bounds(selector).is_some() {
-            return;
-        }
-        cx.cx.executor().advance_clock(Duration::from_millis(10));
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("missing native Files control {selector}");
-}
-fn wait_requests(cx: &mut VisualTestContext, fixture: &Fixture, ready: impl Fn(&[String]) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        draw(cx);
-        if ready(&fixture.requests()) {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "missing expected Files HTTP request"
-        );
-        cx.cx.executor().advance_clock(Duration::from_millis(10));
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-fn click(cx: &mut VisualTestContext, selector: &'static str) {
-    wait(cx, selector);
-    let target = cx.debug_bounds(selector).unwrap().center();
-    cx.simulate_click(target, gpui::Modifiers::default());
-    draw(cx);
-}
-fn search(cx: &mut VisualTestContext, selector: &'static str, text: &str) {
-    click(cx, selector);
-    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
-        "cmd-a backspace"
-    } else {
-        "ctrl-a backspace"
-    });
-    cx.simulate_input(text);
-    cx.run_until_parked();
-    cx.cx.executor().advance_clock(Duration::from_millis(150));
-    draw(cx);
-}
-
 #[gpui::test]
 fn classic_search_preview_escape_preserves_expanded_ignored_tree(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
-    let (panel, cx) = cx.add_window_view(|window, cx| {
-        let panel = FilesPanel::new(
-            fixture.client.clone(),
-            fixture.repo.clone(),
-            Mode::Files,
-            cx,
-        );
-        panel.focus(window);
-        panel
-    });
+    let (panel, cx) = test_panel(&fixture, cx);
     wait(cx, "files-row-PARITY-BOARD.local.md");
     click(cx, "files-row-src");
     wait(cx, "files-row-src/useful.rs");
@@ -214,16 +93,7 @@ fn classic_search_preview_escape_preserves_expanded_ignored_tree(cx: &mut TestAp
 #[gpui::test]
 fn quick_docs_pin_unpin_and_global_preview_without_server_pin_route(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
-    let (panel, cx) = cx.add_window_view(|window, cx| {
-        let panel = FilesPanel::new(
-            fixture.client.clone(),
-            fixture.repo.clone(),
-            Mode::Files,
-            cx,
-        );
-        panel.focus(window);
-        panel
-    });
+    let (panel, cx) = test_panel(&fixture, cx);
     let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let observed = events.clone();
     let _subscription = cx.update(|_, cx| {
@@ -266,16 +136,7 @@ fn quick_docs_pin_unpin_and_global_preview_without_server_pin_route(cx: &mut Tes
 #[gpui::test]
 fn search_debounces_and_rejects_late_results(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
-    let (_panel, cx) = cx.add_window_view(|window, cx| {
-        let panel = FilesPanel::new(
-            fixture.client.clone(),
-            fixture.repo.clone(),
-            Mode::Files,
-            cx,
-        );
-        panel.focus(window);
-        panel
-    });
+    let (_panel, cx) = test_panel(&fixture, cx);
     wait(cx, "files-row-src");
     click(cx, "files-search");
     cx.simulate_input("u");
@@ -317,16 +178,7 @@ fn search_debounces_and_rejects_late_results(cx: &mut TestAppContext) {
 #[gpui::test]
 fn picker_escape_restores_focus_and_selected_file_without_collapsing_tree(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
-    let (panel, cx) = cx.add_window_view(|window, cx| {
-        let panel = FilesPanel::new(
-            fixture.client.clone(),
-            fixture.repo.clone(),
-            Mode::Files,
-            cx,
-        );
-        panel.focus(window);
-        panel
-    });
+    let (panel, cx) = test_panel(&fixture, cx);
     search(cx, "files-search", "useful");
     click(cx, "file-search-src/useful.rs");
     click(cx, "files-search");
@@ -448,16 +300,7 @@ fn native_pins_persist_in_shell_state_with_repo_isolation_and_limit() {
 #[gpui::test]
 fn ignored_file_search_uses_one_flat_listing_per_search_session(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
-    let (_panel, cx) = cx.add_window_view(|window, cx| {
-        let panel = FilesPanel::new(
-            fixture.client.clone(),
-            fixture.repo.clone(),
-            Mode::Files,
-            cx,
-        );
-        panel.focus(window);
-        panel
-    });
+    let (_panel, cx) = test_panel(&fixture, cx);
     search(cx, "files-search", "parity board");
     wait(cx, "file-search-PARITY-BOARD.local.md");
     click(cx, "files-search");
@@ -528,16 +371,7 @@ fn native_git_fills_incomplete_server_search_and_flat_listing(cx: &mut TestAppCo
         "search": {"entries": [native.clone()], "truncated": false},
         "flat": {"entries": [native, {"name":"PARITY-BOARD.local.md", "path":"PARITY-BOARD.local.md", "kind":"file"}], "truncated": true}
     })).unwrap()).unwrap();
-    let (panel, cx) = cx.add_window_view(|window, cx| {
-        let panel = FilesPanel::new(
-            fixture.client.clone(),
-            fixture.repo.clone(),
-            Mode::Files,
-            cx,
-        );
-        panel.focus(window);
-        panel
-    });
+    let (panel, cx) = test_panel(&fixture, cx);
     search(cx, "files-search", "parity");
     wait(cx, "file-search-.github/workflows/next-parity.yml");
     wait(cx, "file-search-docs/internals/o8-next-parity.md");
@@ -646,14 +480,7 @@ fn viewer_markdown_opens_formatted_heading_list_and_code(cx: &mut TestAppContext
         MARKDOWN_FIXTURE,
     )
     .unwrap();
-    let (panel, cx) = cx.add_window_view(|_, cx| {
-        FilesPanel::new(
-            fixture.client.clone(),
-            fixture.repo.clone(),
-            Mode::Files,
-            cx,
-        )
-    });
+    let (panel, cx) = test_panel(&fixture, cx);
     click(cx, "files-row-AGENTS.md");
     wait(cx, "files-markdown-1");
     assert!(cx.debug_bounds("files-source-1").is_none());
@@ -684,14 +511,7 @@ fn viewer_preview_source_toggle_remembers_each_file(cx: &mut TestAppContext) {
         MARKDOWN_FIXTURE,
     )
     .unwrap();
-    let (panel, cx) = cx.add_window_view(|_, cx| {
-        FilesPanel::new(
-            fixture.client.clone(),
-            fixture.repo.clone(),
-            Mode::Files,
-            cx,
-        )
-    });
+    let (panel, cx) = test_panel(&fixture, cx);
     click(cx, "files-row-AGENTS.md");
     wait(cx, "files-markdown-1");
     click(cx, "files-source-toggle");
@@ -719,14 +539,7 @@ fn viewer_long_source_line_wraps_and_reflows_at_panel_width(cx: &mut TestAppCont
         "x".repeat(180)
     );
     fs::write(PathBuf::from(&fixture.repo).join("src/useful.rs"), &line).unwrap();
-    let (_panel, cx) = cx.add_window_view(|_, cx| {
-        FilesPanel::new(
-            fixture.client.clone(),
-            fixture.repo.clone(),
-            Mode::Files,
-            cx,
-        )
-    });
+    let (_panel, cx) = test_panel(&fixture, cx);
     click(cx, "files-row-src");
     click(cx, "files-row-src/useful.rs");
     wait(cx, "files-source-line-1-0");
@@ -773,14 +586,7 @@ fn viewer_plain_text_wraps_by_default_and_toggle_works_from_keyboard(cx: &mut Te
         "A readable long line of plain text. ".repeat(70),
     )
     .unwrap();
-    let (_panel, cx) = cx.add_window_view(|_, cx| {
-        FilesPanel::new(
-            fixture.client.clone(),
-            fixture.repo.clone(),
-            Mode::Files,
-            cx,
-        )
-    });
+    let (_panel, cx) = test_panel(&fixture, cx);
     click(cx, "files-row-notes.txt");
     wait(cx, "files-source-line-1-0");
     assert!(
@@ -806,5 +612,50 @@ fn viewer_plain_text_wraps_by_default_and_toggle_works_from_keyboard(cx: &mut Te
             .size
             .height
             > px(19.)
+    );
+}
+
+#[gpui::test]
+fn viewer_header_filename_and_folder_truncate_independently(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let path = format!(
+        "src/{}/{}.txt",
+        "nested-folder-".repeat(10),
+        "long-filename-".repeat(10)
+    );
+    let file = PathBuf::from(&fixture.repo).join(&path);
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(file, "readable").unwrap();
+    let (panel, cx) = test_panel(&fixture, cx);
+    panel.update(cx, |panel, cx| panel.open_file(path.clone(), cx));
+    wait(cx, "files-source-line-1-0");
+    cx.simulate_resize(gpui::size(px(700.), px(700.)));
+    draw(cx);
+    let name = cx.debug_bounds("files-viewer-name").unwrap();
+    let folder = cx.debug_bounds("files-viewer-folder").unwrap();
+    assert_eq!(name.size.height, px(17.));
+    assert_eq!(folder.size.height, px(12.));
+    assert!(folder.top() >= name.bottom());
+    assert_eq!(name.size.width, folder.size.width);
+    assert!(
+        name.size.width < px(500.),
+        "both long strings must ellipsize inside the narrow header"
+    );
+    assert!(name.size.width > px(0.));
+    let (name_text, folder_text) = panel.read_with(cx, |_, cx| {
+        let heading = cx.global::<HeadingLayouts>();
+        (heading.name.text(), heading.folder.text())
+    });
+    assert!(
+        name_text.ends_with('…') && name_text.chars().count() > 5,
+        "show filename characters before the ellipsis: {name_text}"
+    );
+    assert!(folder_text.ends_with('…') && folder_text.chars().count() > 5);
+    cx.simulate_resize(gpui::size(px(1200.), px(700.)));
+    draw(cx);
+    let wider = panel.read_with(cx, |_, cx| cx.global::<HeadingLayouts>().name.text());
+    assert!(
+        wider.chars().count() > name_text.chars().count(),
+        "title must remeasure when available width grows"
     );
 }
