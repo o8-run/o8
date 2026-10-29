@@ -14,6 +14,7 @@ import { spawn } from '@/lib/providers/child-process';
 import { readFileSync, rmSync } from 'node:fs';
 import type { CodexAppBridgeSpec } from './app-bridge-spec';
 import { appBridgeContext, retainedAppBridgeContextHashes } from './app-bridge-context';
+import { orchestratorErrorMessage } from '@/lib/transcripts/orchestrator-error';
 
 type Json = Record<string, unknown>;
 class RpcRefusal extends Error {}
@@ -283,7 +284,7 @@ async function main(): Promise<void> {
     if (stopping && turnId) send({ id: ++nextId, method: 'turn/interrupt', params: { threadId, turnId } });
   };
   run().catch((error: unknown) => {
-    const message = `${error instanceof Error ? error.name : 'Error'}: ${runtimeStep}: ${error instanceof Error ? error.message : String(error)}`;
+    const message = orchestratorErrorMessage(error, runtimeStep);
     out({ type: 'error', message });
     process.stderr.write(`${message}\n${error instanceof Error ? error.stack ?? '' : ''}\n`);
     finish(1);

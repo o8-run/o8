@@ -1,9 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { orchestratorErrorText } from './orchestrator-error';
+import { orchestratorErrorMessage, orchestratorErrorText } from './orchestrator-error';
 
 const frame = 'file:///bundle/bridge.mjs:2\nError: {void 0;}; throw failure;\n  ^\n\n';
 
 describe('orchestrator error display limits', () => {
+  it('keeps a plain server Error message unchanged', () => {
+    const error = new Error('Choose a project first.');
+    expect(orchestratorErrorText(error.message, 'Failed to send message').replace(/\s+/g, ' '))
+      .toBe('Choose a project first.');
+  });
+
+  it('uses an exception name and message instead of its source-bearing stack', () => {
+    const error = new TypeError('first line\nactual reason');
+    error.stack = `${frame}SyntaxError: unrelated stack summary`;
+    expect(orchestratorErrorMessage(error)).toBe('TypeError: first line actual reason');
+  });
+
+  it('cleans a source-bearing message before adding bridge context', () => {
+    const error = new SyntaxError(`${frame}SyntaxError [ERR_INVALID_MODULE_SYNTAX]: invalid import\n    at load (bridge.mjs:2:1)`);
+    expect(orchestratorErrorMessage(error, 'initialize'))
+      .toBe('SyntaxError [ERR_INVALID_MODULE_SYNTAX]: initialize: invalid import');
+    expect(orchestratorErrorMessage(`Error: initialize: ${error.message}`))
+      .toBe('SyntaxError [ERR_INVALID_MODULE_SYNTAX]: invalid import');
+  });
+
   it.each([1, 20, 80, 500, 2000])('selects the error before a %i-character cut', limit => {
     const error = 'TypeError [ERR_INVALID_ARG_TYPE]: invalid input (turn/start)';
     expect(orchestratorErrorText(frame + error + '\n    at main (bridge.mjs:2:1)').slice(0, limit)).toBe(error.slice(0, limit));

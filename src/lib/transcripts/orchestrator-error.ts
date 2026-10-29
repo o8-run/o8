@@ -11,7 +11,10 @@ export function orchestratorErrorText(
   let afterCaret = -1;
   for (let index = 0; index < lines.length; index += 1) {
     // Includes node:internal, relative paths and other non-file URL schemes.
-    if (/^(?:[A-Za-z]:[\\/].+|[\\/].+|\S+):\d+(?::\d+)?$/.test(lines[index].trim())) {
+    const location = /^\s*\^/.test(lines[index + 2] ?? '')
+      ? lines[index].trim().replace(/^[\w.$]*(?:Error|Exception)(?: \[[^\]]+\])?:\s*(?:[\w/-]+:\s*)?(?=file:\/\/|[\\/]|[A-Za-z]:[\\/])/, '')
+      : lines[index].trim();
+    if (/^(?:[A-Za-z]:[\\/].+|[\\/].+|\S+):\d+(?::\d+)?$/.test(location)) {
       sourceLines.add(index);
       sourceLines.add(index + 1);
       if (/^\s*\^/.test(lines[index + 2] ?? '')) afterCaret = index + 3;
@@ -41,4 +44,15 @@ export function orchestratorErrorText(
     if (errorHeader.test(lines[end]) && isV8Frame(lines[end + 1] ?? '')) break;
   }
   return lines.slice(start, end).join('\n').trim() || fallback;
+}
+
+/** Chat stores an exception summary; callers log the original Error/stack separately. */
+export function orchestratorErrorMessage(error: unknown, context?: string): string {
+  const name = error instanceof Error ? error.name || 'Error' : undefined;
+  const diagnostic = error instanceof Error ? error.message : String(error);
+  const detail = orchestratorErrorText(diagnostic, `${name ?? 'Error'}: Orchestrator turn failed`)
+    .replace(/\s+/g, ' ');
+  const header = detail.match(/^([\w.$]*(?:Error|Exception)(?: \[[^\]]+\])?):\s*/);
+  return [header?.[1] ?? name, context, header ? detail.slice(header[0].length) : detail]
+    .filter(Boolean).join(': ');
 }

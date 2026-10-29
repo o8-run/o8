@@ -364,8 +364,8 @@ describe.skipIf(process.platform === 'win32')('app bridge failure diagnostics (#
     try {
       const events = await turn(cwd, 'Fail initialization.');
       expect(events.filter(event => event.type === 'error')).toEqual([
-        { type: 'error', error: `Error: initialize: ${reason}` },
-        { type: 'error', error: `Error: initialize: ${reason}` },
+        { type: 'error', error: `Error: initialize: ${reason.replace(/\s+/g, ' ')}` },
+        { type: 'error', error: `Error: initialize: ${reason.replace(/\s+/g, ' ')}` },
       ]);
       const diagnostic = log.mock.calls.map(args => args.join(' ')).join('\n');
       expect(diagnostic).toContain(`Error: ${reason}`);
