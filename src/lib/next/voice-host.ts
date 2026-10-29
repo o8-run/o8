@@ -7,8 +7,8 @@ export interface VoiceBinding {
   repoPath: string;
 }
 export interface VoiceTerminal {
-  userMessageId: string;
-  outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed';
+  queueItemId: string;
+  outcome: 'completed' | 'failed' | 'held';
   text: string;
 }
 export interface VoiceHostPayload extends Partial<VoiceBinding> {
@@ -19,7 +19,8 @@ export interface VoiceHostPayload extends Partial<VoiceBinding> {
   state?: string;
   detail?: string;
   delegationId?: string;
-  userMessageId?: string;
+  queueItemId?: string;
+  transcriptUserMessageId?: string;
   text?: string;
   messages?: MobileTranscriptEntry[];
   busy?: boolean;
@@ -40,8 +41,8 @@ export function sameVoiceBinding(a: Partial<VoiceBinding>, b: Partial<VoiceBindi
 export function isVoiceTerminal(value: unknown): value is VoiceTerminal {
   if (!value || typeof value !== 'object') return false;
   const terminal = value as VoiceTerminal;
-  return voiceHostId(terminal.userMessageId) && typeof terminal.text === 'string'
-    && ['completed', 'failed', 'interrupted', 'unconfirmed'].includes(terminal.outcome);
+  return voiceHostId(terminal.queueItemId) && typeof terminal.text === 'string'
+    && ['completed', 'failed', 'held'].includes(terminal.outcome);
 }
 
 /** Only voice frames cross this host's transport; desktop UI commands stay off it. */

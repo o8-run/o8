@@ -8,8 +8,11 @@ import { useManagedVoicePresentation } from './useManagedVoicePresentation';
 import { useTurnByTurnVoice } from './useTurnByTurnVoice';
 import { VoiceModeChooser } from './VoiceModeChooser';
 
+// Classic keeps the existing turn-by-turn terminal contract.
+type ManagedLiveButtonOptions = ChatLiveOptions & Parameters<typeof useTurnByTurnVoice>[0];
+
 /** The selected conversation remains the only agent; voice has no tool executor. */
-export function ManagedLiveButton(props: ChatLiveOptions) {
+export function ManagedLiveButton(props: ManagedLiveButtonOptions) {
   const [available, setAvailable] = useState(false);
   const [localPreview, setLocalPreview] = useState(false);
   const [personalAvailable, setPersonalAvailable] = useState(false);

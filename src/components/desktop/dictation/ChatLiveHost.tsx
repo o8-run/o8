@@ -20,12 +20,13 @@ async function publish(kind: 'voice-host-state' | 'voice-delegate', payload: Voi
     headers: { 'Content-Type': 'application/json', authorization: `Bearer ${getMobileWsToken()}` }, body: JSON.stringify({ action: 'publish', kind, payload }) });
   if (!response.ok) throw new Error('Voice host relay unavailable.');
 }
-type Pending = { resolve: (value: { userMessageId: string } | null) => void; timer: ReturnType<typeof setTimeout> };
+type QueueTerminal = VoiceTerminal & { transcriptUserMessageId?: string };
+type Pending = { resolve: (value: { queueItemId: string } | null) => void; timer: ReturnType<typeof setTimeout> };
 interface BoundProps {
   command: VoiceHostPayload & VoiceBinding;
   hostId: string;
   stopping: boolean;
-  terminals: Record<string, VoiceTerminal>;
+  terminals: Record<string, QueueTerminal>;
   pending: Map<string, Pending>;
   remember: (payload: VoiceHostPayload) => void;
 }
@@ -81,7 +82,7 @@ export function ChatLiveHost() {
   const binding = useRef<VoiceBinding | null>(null);
   const snapshot = useRef<VoiceHostPayload | null>(null);
   const [stopping, setStopping] = useState(false);
-  const [terminals, setTerminals] = useState<Record<string, VoiceTerminal>>({});
+  const [terminals, setTerminals] = useState<Record<string, QueueTerminal>>({});
   const pending = useRef(new Map<string, Pending>());
   useEffect(() => {
     if (!canUseTauriEvents() || !(window as Window & { __O8_VOICE_HOST__?: boolean }).__O8_VOICE_HOST__) return;
@@ -157,12 +158,12 @@ export function ChatLiveHost() {
         if (!binding.current || !sameVoiceBinding(binding.current, payload)) return;
         if (payload.action === 'stop') setStopping(true);
         if (payload.action === 'context') setCommand(value => value ? { ...value, messages: payload.messages, busy: payload.busy } : value);
-        if (payload.action === 'accepted' && payload.delegationId && payload.userMessageId) {
+        if (payload.action === 'accepted' && payload.delegationId && payload.queueItemId) {
           const item = pending.current.get(payload.delegationId);
-          if (item) { clearTimeout(item.timer); pending.current.delete(payload.delegationId); item.resolve({ userMessageId: payload.userMessageId }); }
+          if (item) { clearTimeout(item.timer); pending.current.delete(payload.delegationId); item.resolve({ queueItemId: payload.queueItemId }); }
         }
         if (payload.action === 'terminal' && payload.voiceTerminal) {
-          setTerminals(value => ({ ...value, [payload.voiceTerminal!.userMessageId]: payload.voiceTerminal! }));
+          setTerminals(value => ({ ...value, [payload.voiceTerminal!.queueItemId]: { ...payload.voiceTerminal!, transcriptUserMessageId: payload.transcriptUserMessageId } }));
         }
       });
       socket.addEventListener('close', () => {

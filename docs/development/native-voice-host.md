@@ -28,7 +28,7 @@ Requests are bounded to 64 KiB; the internal HTTP timeout is 2.5 seconds.
 | `start` | Next supplies `requestId`, `binding`, fresh `nonce`, `threadId`, `repoPath`, explicit `source: byok`; optional `messages` and `busy` provide conversation context. HTTP 202 means dispatched, not connected. |
 | `stop` | Same binding fields and a new `requestId`; closes voice through its existing lifecycle. |
 | `context` | Updates messages and busy state for the current binding. |
-| `accepted` | Same binding fields, `delegationId`, and the existing chat submission's `userMessageId`. |
+| `accepted` | Same binding fields, `delegationId`, and the durable composer submission's `queueItemId`. |
 | `terminal` | Requests replay for an accepted delegation. Client text cannot replace server-observed evidence; missing evidence returns 409. |
 | `symon-toggle` | Reaches Symon's existing toggle. |
 | `decision` | Explicit boolean `allow` and an existing `confirmationId`; invokes its existing gate-owned callback. |
@@ -44,18 +44,40 @@ The voice route broadcasts `voice-delegate` and `voice-host-state` frames:
 ```
 
 ```json
-{"type":"ui-command","kind":"voice-host-state","payload":{"hostId":"host","action":"terminal","binding":"chat","nonce":"voice","threadId":"thread","repoPath":"/workspace","delegationId":"delegation","voiceTerminal":{"userMessageId":"user-message","outcome":"completed","text":"The build passed."}}}
+{"type":"ui-command","kind":"voice-host-state","payload":{"hostId":"host","action":"terminal","binding":"chat","nonce":"voice","threadId":"thread","repoPath":"/workspace","delegationId":"delegation","voiceTerminal":{"queueItemId":"next-voice-123","outcome":"completed","text":"The build passed."}}}
 ```
 
 `voice-host-state` also carries start, stop, acceptance, session state, captions,
 interrupt requests, Symon state, confirmations, dismissals and decisions.
 
-Next submits through its existing chat entry point. The broker matches thread,
-repository and accepted user ID against actual orchestrator terminal publication,
-including terminals arriving before acceptance. Only correlated terminal
-receipts reach the shared chat controller's reply callback. Busy=false, partial
-text and submission acknowledgments are not completion evidence. Confirmed
-outcomes cannot be replaced by later uncertainty.
+Next submits delegated text with `POST /api/orchestrator/composer-queue`,
+`intent: send-next`, and an item ID of `next-<nonce>-<pid>`. After the durable
+POST succeeds, next sends `accepted` with that `queueItemId`. The broker checks
+the queue item's saved thread, canonical repository, intent and nonce prefix;
+a queue item cannot belong to two delegations. No socket send or synthetic
+`orch-user-*` identity is required.
+
+```json
+{"action":"accepted","binding":"chat","nonce":"voice","threadId":"thoughts-chat","repoPath":"/workspace","delegationId":"delegation","queueItemId":"next-voice-123"}
+```
+
+The server polls pending accepted items every 250 ms. A held queue row yields
+`outcome: held`, with its saved reason; a removed item also stays held for voice.
+For an applied bound chat item, the server reads the final text and terminal
+receipt of exactly `assistant-queued-<queueItemId>`. For a persistent lead it
+resolves `composer-queue:<queueItemId>` to the admitted turn, then reads that
+turn's authoritative terminal (including its root's continuations). Lead queue
+admission can mark the queue item applied while execution is still running;
+that never produces a voice completion. Only an explicit completed receipt
+produces `completed`; a definite backend failure produces `failed`. Blocked,
+approval-required, interrupted and unconfirmed outcomes stay `held`.
+
+Terminal frames carry `voiceTerminal: {queueItemId, outcome, text}`. Durable
+receipts also cover a terminal arriving before acceptance. Only that queue ID's
+terminal reaches the shared chat controller's reply callback. Its outer frame
+may also include `transcriptUserMessageId`, resolved from an actual persisted
+user row, solely to link and deduplicate voice captions. A queue ID is never
+stored as a transcript user ID. Busy=false, partial text and submission acknowledgments are not completion evidence.
 
 Stopping voice leaves submitted backend work running. Spoken task cancellation
 emits an interrupt request for next's existing stop path. Transport loss stops
@@ -78,8 +100,8 @@ reconnect. Unknown or expired decisions do not invoke a callback.
 
 ## Verification boundary
 
-The route test runs actual API handlers, the WS server, command admission,
-transcript persistence and authoritative terminal publication. Only provider
+The route test runs actual API handlers, the WS server, durable composer
+admission and settlement, transcript persistence and authoritative terminal mapping. Only provider
 execution is deterministic. On baseline `53a9d3016`, the new route returns 404.
 Controller tests drive frames, stale bindings and confirmation callbacks without
 hardware. Rust tests drive host construction, the desktop show entry point,
@@ -135,3 +157,26 @@ The broker validates the lease and correlation before broadcasting its existing
 `ui-command` frame. The generic `/api/next/ui-command` and `/internal/ui-command`
 routes are not part of this port. The internal voice route reuses the unchanged
 `isAuthorizedInternalRequest` check.
+
+## Durable queue amendment
+
+Acceptance uses `queueItemId` rather than a socket command's user message ID.
+The real server test posts queued sends through the native HTTP registry and
+verifies completed, held and failed outcomes. Lead coverage drives the queue
+route, heartbeat, persistent lead lifecycle and broker, including applied
+admission before execution has settled. The controller also covers a terminal
+received before acceptance. No confirmation gate or dispatcher changed.
+
+
+Amendment verification:
+
+- The updated route test failed on `547f3cc87` at queue acceptance (HTTP 400),
+  then passed after the queue contract and mapping changed.
+- Focused suite: 75 tests passed across eight files in 37.88 seconds. It covers
+  completed, failed and held queue receipts; applied lead admission before its
+  terminal; a later lead stop; early terminal replay; and caption persistence.
+- Hermetic regression suite: 9,916 tests passed, five skipped, in 398.79 seconds.
+  Fast type checking,
+  touched-file ESLint, classification manifest, rule and whitespace checks passed.
+- Rust and `native/o8-next` sources did not change in this amendment. The packaged
+  checks listed above remain pending.

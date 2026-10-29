@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { isVoiceBinding, isVoiceTerminal, sameVoiceBinding, voiceHostId, type VoiceBinding, type VoiceHostPayload, type VoiceTerminal } from '@/lib/next/voice-host';
-import { isVoiceHostFrame, type VoiceHostFrame } from '@/lib/next/voice-host';
+import { isVoiceBinding, sameVoiceBinding, voiceHostId, isVoiceHostFrame, type VoiceHostFrame, type VoiceBinding, type VoiceHostPayload, type VoiceTerminal } from '@/lib/next/voice-host';
+import { readVoiceQueueReceipt, readVoiceQueueTranscriptId } from './voice-host-queue';
 
 type Result = { status: number; body: Record<string, unknown> };
-type Delegation = { text: string; userMessageId?: string };
+type Delegation = { text: string; queueItemId?: string };
 const result = (status: number, body: Record<string, unknown>): Result => ({ status, body });
 const invalid = () => result(400, { ok: false, code: 'INVALID_VOICE_HOST_REQUEST' });
 const conflict = () => result(409, { ok: false, code: 'VOICE_BINDING_MISMATCH' });
@@ -22,8 +22,8 @@ export class VoiceHostBroker {
   private frame(payload: VoiceHostPayload) {
     this.publish({ type: 'ui-command', kind: 'voice-host-state', payload });
   }
-  private terminalKey(threadId: string, repoPath: string, userMessageId: string) {
-    return JSON.stringify([threadId, repoPath, userMessageId]);
+  private terminalKey(threadId: string, repoPath: string, queueItemId: string) {
+    return JSON.stringify([threadId, repoPath, queueItemId]);
   }
   state(): Result {
     return this.available() ? result(200, { ok: true, available: true, active: this.active, confirmations: [...this.confirmations.values()].filter(value => Number(value.expiresAt) > this.now()) })
@@ -86,10 +86,12 @@ export class VoiceHostBroker {
     const delegation = this.delegations.get(body.delegationId);
     if (!delegation) return conflict();
     if (body.action === 'accepted') {
-      if (!voiceHostId(body.userMessageId)) return invalid();
-      if (delegation.userMessageId && delegation.userMessageId !== body.userMessageId) return conflict();
-      delegation.userMessageId = body.userMessageId;
-      this.frame({ ...this.active, action: 'accepted', hostId: this.hostId, delegationId: body.delegationId, userMessageId: body.userMessageId });
+      if (!voiceHostId(body.queueItemId)) return invalid();
+      if (!readVoiceQueueReceipt(this.active, body.queueItemId)) return conflict();
+      if ([...this.delegations.values()].some(other => other !== delegation && other.queueItemId === body.queueItemId)) return conflict();
+      if (delegation.queueItemId && delegation.queueItemId !== body.queueItemId) return conflict();
+      delegation.queueItemId = body.queueItemId;
+      this.frame({ ...this.active, action: 'accepted', hostId: this.hostId, delegationId: body.delegationId, queueItemId: body.queueItemId });
       this.forwardTerminal(body.delegationId, delegation);
       return result(200, { ok: true });
     }
@@ -130,24 +132,30 @@ export class VoiceHostBroker {
     } else if (body.action !== 'transcript' && body.action !== 'interrupt') return invalid();
     return result(200, { ok: true });
   }
-  /** Called only from the server's existing orchestrator event publication. */
-  observe(frame: Record<string, unknown>) {
-    if (!this.available() || !this.active || frame.channel !== 'orchestrator') return;
-    const data = frame.data as Record<string, unknown> | undefined;
-    if (!data || typeof data.threadId !== 'string' || typeof data.repoPath !== 'string' || !isVoiceTerminal(data.voiceTerminal)) return;
-    if (this.active.threadId !== data.threadId || this.active.repoPath !== data.repoPath) return;
-    const key = this.terminalKey(data.threadId, data.repoPath, data.voiceTerminal.userMessageId);
-    const prior = this.terminals.get(key);
-    if (!prior || prior.outcome === 'unconfirmed') this.terminals.set(key, data.voiceTerminal);
-    if (this.terminals.size > 256) this.terminals.delete(this.terminals.keys().next().value!);
-    if (this.active?.threadId !== data.threadId || this.active.repoPath !== data.repoPath) return;
-    for (const [id, delegation] of this.delegations) this.forwardTerminal(id, delegation);
+  /** Settlement can happen after streaming, or in another HTTP worker. */
+  refreshQueuedTerminals() {
+    if (!this.available() || !this.active) return;
+    for (const [id, delegation] of this.delegations) {
+      if (!delegation.queueItemId) continue;
+      const key = this.terminalKey(this.active.threadId, this.active.repoPath, delegation.queueItemId);
+      if (this.terminals.has(key)) continue;
+      const receipt = readVoiceQueueReceipt(this.active, delegation.queueItemId);
+      if (!receipt?.terminal) continue;
+      this.terminals.set(key, receipt.terminal);
+      this.forwardTerminal(id, delegation);
+    }
   }
   private forwardTerminal(delegationId: string, delegation: Delegation): boolean {
-    if (!this.active || !delegation.userMessageId || !this.available()) return false;
-    const terminal = this.terminals.get(this.terminalKey(this.active.threadId, this.active.repoPath, delegation.userMessageId));
-    if (!terminal) return false;
-    this.frame({ ...this.active, action: 'terminal', hostId: this.hostId, delegationId, voiceTerminal: terminal });
+    if (!this.active || !delegation.queueItemId || !this.available()) return false;
+    const terminal = this.terminals.get(this.terminalKey(this.active.threadId, this.active.repoPath, delegation.queueItemId));
+    if (!terminal) {
+      const receipt = readVoiceQueueReceipt(this.active, delegation.queueItemId);
+      if (!receipt?.terminal) return false;
+      this.terminals.set(this.terminalKey(this.active.threadId, this.active.repoPath, delegation.queueItemId), receipt.terminal);
+      return this.forwardTerminal(delegationId, delegation);
+    }
+    this.frame({ ...this.active, action: 'terminal', hostId: this.hostId, delegationId, voiceTerminal: terminal,
+      transcriptUserMessageId: readVoiceQueueTranscriptId(this.active, delegation.queueItemId) });
     return true;
   }
 }

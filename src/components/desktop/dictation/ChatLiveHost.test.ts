@@ -61,17 +61,22 @@ it('starts without a composer and speaks only the correlated authoritative termi
   await act(async () => { await fixture.backend!.delegate('Also change another file', 'second', second); });
   expect(posted.filter(item => item.kind === 'voice-delegate')).toHaveLength(1);
   expect(second).toHaveBeenCalledWith(expect.stringContaining('have not changed the task'));
-  await frame({ action: 'accepted', ...target, nonce: 'old', delegationId: 'delegate', userMessageId: 'wrong' });
+  await frame({ action: 'accepted', ...target, nonce: 'old', delegationId: 'delegate', queueItemId: 'wrong' });
   expect(submitted).not.toHaveBeenCalled();
-  await frame({ action: 'accepted', ...target, delegationId: 'delegate', userMessageId: 'user' });
-  expect(submitted).toHaveBeenCalledWith('user');
-  await frame({ action: 'terminal', ...target, voiceTerminal: { userMessageId: 'other', outcome: 'completed', text: 'Wrong result' } });
+  await frame({ action: 'accepted', ...target, delegationId: 'delegate', queueItemId: 'user' });
+  expect(submitted).not.toHaveBeenCalled(); // A queue receipt is not a transcript user row.
+  await frame({ action: 'terminal', ...target, voiceTerminal: { queueItemId: 'other', outcome: 'completed', text: 'Wrong result' } });
   expect(update).not.toHaveBeenCalledWith('Wrong result', true);
-  await frame({ action: 'terminal', ...target, voiceTerminal: { userMessageId: 'user', outcome: 'unconfirmed', text: 'Partial' } });
-  expect(update).not.toHaveBeenCalledWith('Partial', true);
-  await frame({ action: 'terminal', ...target, voiceTerminal: { userMessageId: 'user', outcome: 'completed', text: 'Verified build' } });
+  await frame({ action: 'terminal', ...target, voiceTerminal: { queueItemId: 'user', outcome: 'held', text: 'Partial' } });
+  await completion;
+  expect(update).toHaveBeenCalledWith('The queued request is held. Partial');
+  // A new delegation remains distinct from the held queue item.
+  await act(async () => { completion = fixture.backend!.delegate('Check again', 'again', update, submitted); });
+  await frame({ action: 'accepted', ...target, delegationId: 'again', queueItemId: 'new-user' });
+  await frame({ action: 'terminal', ...target, transcriptUserMessageId: 'review-user-assistant-queued-new-user', voiceTerminal: { queueItemId: 'new-user', outcome: 'completed', text: 'Verified build' } });
   await completion;
   expect(update).toHaveBeenCalledWith('Verified build');
+  expect(submitted).toHaveBeenCalledWith('review-user-assistant-queued-new-user');
   await frame({ action: 'stop', ...target }); expect(fixture.close).toHaveBeenCalledOnce();
 });
 it('relays the native gate identity visibly and calls its existing exact decision command', async () => {
@@ -81,4 +86,15 @@ it('relays the native gate identity visibly and calls its existing exact decisio
   await frame({ action: 'decision', confirmationId: 'unknown', allow: true }); expect(fixture.invoke).not.toHaveBeenCalled();
   await frame({ action: 'decision', confirmationId: 'gate', allow: false });
   expect(fixture.invoke).toHaveBeenCalledWith('agent_confirm_exact', { confirmationId: 'gate', taskId: 'task', allow: false });
+});
+it('settles a queue terminal received before acceptance, without borrowing another item', async () => {
+  await frame({ action: 'start', ...target, source: 'byok' });
+  const update = vi.fn(async () => {});
+  let completion!: Promise<void>;
+  await act(async () => { completion = fixture.backend!.delegate('Check the queued task', 'early', update); });
+  await frame({ action: 'terminal', ...target, voiceTerminal: { queueItemId: 'early-item', outcome: 'completed', text: 'Durable result' } });
+  expect(update).not.toHaveBeenCalledWith('Durable result');
+  await frame({ action: 'accepted', ...target, delegationId: 'early', queueItemId: 'early-item' });
+  await completion;
+  expect(update).toHaveBeenCalledWith('Durable result');
 });
