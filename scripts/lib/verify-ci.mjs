@@ -168,6 +168,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     CARGO_HOME: '${{ github.workspace }}/.o8-next-cargo',
     CARGO_TARGET_DIR: '${{ github.workspace }}/native/o8-next/target',
     CARGO_PROFILE_DEV_DEBUG: '0', CARGO_INCREMENTAL: '0',
+    O8_NATIVE_REAL_WINDOW_TESTS: 'true',
     O8D_HTTP_TEST_BINARY: '${{ github.workspace }}/native/o8-next/target/debug/o8d',
     O8_NATIVE_TEST_SHARD: '${{ matrix.shard }}/4',
   };
