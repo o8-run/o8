@@ -11,6 +11,7 @@ let reference: Awaited<ReturnType<typeof startParityReference>>;
 let api: Server;
 let base = '';
 let socket: WebSocket;
+let heartbeat: ReturnType<typeof setInterval>;
 const frames: Array<{ kind?: string; payload?: Record<string, unknown> }> = [];
 const target = { binding: 'bound-chat', nonce: 'voice-one', threadId: 'thoughts-voice-thread', repoPath: '' };
 beforeAll(async () => {
@@ -38,11 +39,25 @@ beforeAll(async () => {
   await once(socket, 'open');
 }, 60_000);
 afterAll(async () => {
-  socket?.terminate();
+  clearInterval(heartbeat); socket?.terminate();
   if (api?.listening) await new Promise<void>(done => api.close(() => done()));
   await reference?.stop(); vi.unstubAllEnvs();
 });
 const post = (body: unknown) => fetch(`${base}/api/next/voice-host`, { method: 'POST', body: JSON.stringify(body) });
+const native = (path: string, body: unknown) => fetch(reference.url.replace('ws:', 'http:').replace('/ws', path), {
+  method: 'POST', headers: { authorization: `Bearer ${reference.token}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
+});
+async function seed() {
+  const response = await native('/api/v2/chat-history', { tabId: target.threadId, repoPath: target.repoPath, backend: 'codex', messages: [] });
+  expect(response.status).toBe(200);
+}
+async function enqueue(id: string, text: string) {
+  const response = await native('/api/orchestrator/composer-queue', { id, repoPath: target.repoPath, threadId: target.threadId, intent: 'send-next',
+    payload: { text, wireMessage: text, images: [], routing: { backend: 'codex', model: 'gpt-5.4', effort: 'high', permissionMode: 'plan', mode: 'single', pickedMode: 'solo', collide: false } },
+  });
+  expect(await response.json()).toMatchObject({ item: { id } });
+  expect(response.status).toBe(200);
+}
 async function ui(kind: string, payload: Record<string, unknown>) {
   return fetch(reference.url.replace('ws:', 'http:').replace('/ws', '/internal/next/voice-host'), {
     method: 'POST', headers: { authorization: `Bearer ${reference.token}` }, body: JSON.stringify({ action: 'publish', kind, payload }),
@@ -69,27 +84,50 @@ it('headless requests fail promptly without starting a provider', async () => {
 });
 it('routes ready, start, delegate, acceptance and stop through the actual WS bridge', async () => {
   expect((await post({ action: 'ready', hostId: 'host-one' })).status).toBe(200);
+  heartbeat = setInterval(() => { void post({ action: 'ready', hostId: 'host-one' }); }, 4000);
   expect((await post({ action: 'start', requestId: 'start-one', ...target, source: 'byok' })).status).toBe(202);
   await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ kind: 'voice-host-state', payload: expect.objectContaining({ action: 'start', ...target }) })));
   expect((await ui('voice-delegate', { hostId: 'host-one', ...target, delegationId: 'delegate-one', text: 'Inspect the build.' })).status).toBe(200);
-  expect((await post({ action: 'accepted', ...target, delegationId: 'delegate-one', userMessageId: 'orch-user-fixture-turn' })).status).toBe(200);
-  await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ kind: 'voice-host-state', payload: expect.objectContaining({ action: 'accepted', delegationId: 'delegate-one', userMessageId: 'orch-user-fixture-turn' }) })));
+  await seed();
+  await enqueue('next-voice-one-fixture-turn', 'Inspect the fixture.');
+  expect((await post({ action: 'accepted', ...target, delegationId: 'delegate-one', queueItemId: 'next-voice-one-fixture-turn' })).status).toBe(200);
+  await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ kind: 'voice-host-state', payload: expect.objectContaining({ action: 'accepted', delegationId: 'delegate-one', queueItemId: 'next-voice-one-fixture-turn' }) })));
   // The client cannot fabricate a terminal outcome.
-  expect((await post({ action: 'terminal', ...target, delegationId: 'delegate-one', voiceTerminal: { userMessageId: 'orch-user-fixture-turn', outcome: 'completed', text: 'invented' } })).status).toBe(409);
-  socket.send(JSON.stringify({ type: 'orchestrator-send', repoPath: target.repoPath, threadId: target.threadId,
-    backend: 'codex', message: 'Inspect the fixture.', clientMessageId: 'fixture-turn' }));
+  expect((await post({ action: 'terminal', ...target, delegationId: 'delegate-one', voiceTerminal: { queueItemId: 'next-voice-one-fixture-turn', outcome: 'completed', text: 'invented' } })).status).toBe(409);
   await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ kind: 'voice-host-state', payload: expect.objectContaining({
-    action: 'terminal', delegationId: 'delegate-one', voiceTerminal: expect.objectContaining({ outcome: 'completed', text: 'Verified fixture answer.' }),
+    action: 'terminal', delegationId: 'delegate-one', transcriptUserMessageId: 'review-user-assistant-queued-next-voice-one-fixture-turn', voiceTerminal: expect.objectContaining({ queueItemId: 'next-voice-one-fixture-turn', outcome: 'completed', text: 'Verified fixture answer.' }),
   }) })), { timeout: 15_000 });
   expect(readFileSync(resolve(reference.directory, 'chat-history', `${target.threadId}.json`), 'utf8')).toContain('Verified fixture answer.');
   expect((await ui('voice-delegate', { hostId: 'host-one', ...target, delegationId: 'delegate-long', text: 'Read the long result.' })).status).toBe(200);
-  expect((await post({ action: 'accepted', ...target, delegationId: 'delegate-long', userMessageId: 'orch-user-fixture-long' })).status).toBe(200);
-  socket.send(JSON.stringify({ type: 'orchestrator-send', repoPath: target.repoPath, threadId: target.threadId,
-    backend: 'codex', message: 'fixture-long-result', clientMessageId: 'fixture-long' }));
+  await enqueue('next-voice-one-fixture-long', 'fixture-long-result');
+  expect((await post({ action: 'accepted', ...target, delegationId: 'delegate-long', queueItemId: 'next-voice-one-fixture-long' })).status).toBe(200);
   await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ kind: 'voice-host-state', payload: expect.objectContaining({
     action: 'terminal', delegationId: 'delegate-long', voiceTerminal: expect.objectContaining({ outcome: 'completed', text: 'x'.repeat(50_000) }),
   }) })), { timeout: 15_000 });
 
+  expect((await ui('voice-delegate', { hostId: 'host-one', ...target, delegationId: 'delegate-held', text: 'Hold this request.' })).status).toBe(200);
+  await enqueue('next-voice-one-fixture-held', 'fixture-held');
+  expect((await post({ action: 'accepted', ...target, delegationId: 'delegate-held', queueItemId: 'next-voice-one-fixture-held' })).status).toBe(200);
+  await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ kind: 'voice-host-state', payload: expect.objectContaining({
+    action: 'terminal', delegationId: 'delegate-held', voiceTerminal: expect.objectContaining({ queueItemId: 'next-voice-one-fixture-held', outcome: 'held' }),
+  }) })), { timeout: 15_000 });
+  expect(frames).not.toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ delegationId: 'delegate-held', voiceTerminal: expect.objectContaining({ outcome: 'completed' }) }) }));
+  const removed = await fetch(reference.url.replace('ws:', 'http:').replace('/ws', '/api/orchestrator/composer-queue'), {
+    method: 'DELETE', headers: { authorization: `Bearer ${reference.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ ...target, id: 'next-voice-one-fixture-held' }),
+  });
+  expect(removed.status).toBe(200);
+  // A terminal persisted before acceptance is replayed from the exact item.
+  expect((await ui('voice-delegate', { hostId: 'host-one', ...target, delegationId: 'delegate-failed', text: 'Inspect this failure.' })).status).toBe(200);
+  await enqueue('next-voice-one-fixture-failed', 'fixture-failed');
+  await vi.waitFor(() => {
+    const saved = JSON.parse(readFileSync(resolve(reference.directory, 'chat-history', `${target.threadId}.json`), 'utf8'));
+    expect(saved.messages.find((row: { id: string }) => row.id === 'assistant-queued-next-voice-one-fixture-failed')?.receipt?.terminal?.outcome).toBe('failed');
+  }, { timeout: 15_000 });
+  expect((await post({ action: 'accepted', ...target, delegationId: 'delegate-failed', queueItemId: 'next-voice-one-fixture-failed' })).status).toBe(200);
+  await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({
+    action: 'terminal', delegationId: 'delegate-failed', voiceTerminal: expect.objectContaining({ queueItemId: 'next-voice-one-fixture-failed', outcome: 'failed' }),
+  }) })));
   expect((await post({ action: 'stop', requestId: 'stop-one', ...target })).status).toBe(202);
 });
 it('rejects stale delegation and retains the exact existing internal bearer gate', async () => {

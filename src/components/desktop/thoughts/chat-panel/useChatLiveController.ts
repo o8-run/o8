@@ -17,9 +17,9 @@ export interface ChatLiveOptions {
   answerVisual?: (text: string) => Promise<string | null>;
   sendVisual?: (text: string, afterTaskId: string | undefined, current: () => boolean) => Promise<QueuedComposerSendRecord | null>;
   messages: MobileTranscriptEntry[];
-  terminals: Record<string, { outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed'; text: string }>;
+  terminals: Record<string, { outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed' | 'held'; text: string; transcriptUserMessageId?: string }>;
   busy: boolean;
-  sendDelegation?: (text: string, delegationId: string) => Promise<{ userMessageId: string } | null>;
+  sendDelegation?: (text: string, delegationId: string) => Promise<{ queueItemId: string } | null>;
   send: (text: string) => { userMessageId: string } | null;
   transcript?: (entries: MobileTranscriptEntry[]) => void;
   interrupt: () => void;
@@ -35,6 +35,7 @@ export function useChatLiveController(props: ChatLiveOptions, onStarting?: (sour
   const targetState = useRef<LiveState>('idle');
   const level = useRef(0);
   const [detail, setDetail] = useState('');
+  const [acceptedDelegations, setAcceptedDelegations] = useState(0);
   const current = useRef(props);
   const session = useRef<LiveSession | null>(null);
   const generation = useRef(0);
@@ -58,8 +59,11 @@ export function useChatLiveController(props: ChatLiveOptions, onStarting?: (sour
         ? await current.current.sendDelegation(text, id) : current.current.send(text);
       if (run !== generation.current) return;
       if (!receipt) { void update('The conversation did not accept the request.'); return Promise.resolve(); }
-      submitted?.(receipt.userMessageId);
-      const completion = new Promise<void>(resolve => { pending.current.set(id, { userId: receipt.userMessageId, update, resolve }); });
+      const receiptId = 'queueItemId' in receipt ? receipt.queueItemId : receipt.userMessageId;
+      if ('userMessageId' in receipt) submitted?.(receipt.userMessageId);
+      const completion = new Promise<void>(resolve => { pending.current.set(id, { userId: receiptId, update, resolve,
+        ...('queueItemId' in receipt ? { submitted } : {}) }); });
+      if (current.current.sendDelegation) setAcceptedDelegations(count => count + 1);
       void update('Request submitted to the existing conversation. Acceptance and completion are not yet confirmed.', false).catch(() => {});
       return completion;
     };
@@ -102,12 +106,14 @@ export function useChatLiveController(props: ChatLiveOptions, onStarting?: (sour
         continue;
       }
       pending.current.delete(id);
+      if (terminal.transcriptUserMessageId) item.submitted?.(terminal.transcriptUserMessageId);
       const reply = terminal.outcome === 'completed' ? terminal.text || 'The backend confirmed completion without a text answer.'
+        : terminal.outcome === 'held' ? `The queued request is held. ${terminal.text || 'Inspect the conversation before retrying.'}`
         : terminal.outcome === 'interrupted' ? 'The backend confirmed interruption.' : terminal.text || 'The backend reported failure. Check the conversation for details.';
       void item.update(reply).catch(() => {}).finally(item.resolve);
     }
   }, []);
-  useEffect(() => { settlePending(); }, [terminals, settlePending]);
+  useEffect(() => { settlePending(); }, [terminals, acceptedDelegations, settlePending]);
   useEffect(() => {
     if (!hasVisual) return;
     let alive = true; let loading = false;

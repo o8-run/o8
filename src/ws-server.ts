@@ -1161,7 +1161,6 @@ const ORCH_SNAPSHOT_STALE_MS = 120_000;
 const latestOrchestratorPlanBySession = new Map<string, Record<string, unknown>>();
 
 function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): void {
-  try { voiceHostBroker.observe(JSON.parse(rawMsg)); } catch { /* Existing transport handles malformed frames. */ }
   lastOrchestratorActivityAt.set(sessionName, Date.now());
   // Stamp the event with a monotonic seq and buffer it so a (re)subscribing
   // client can replay what it missed (reload / reconnect / first-turn re-
@@ -2261,7 +2260,6 @@ function handleE2eeInit(client: ClientState, msg: Record<string, unknown>): void
 }
 
 function send(client: ClientState, msg: Record<string, unknown>) {
-  voiceHostBroker.observe(msg);
   if (client.ws.readyState !== WebSocket.OPEN) return;
   // #5 — during the E2EE handshake window, suppress app frames so nothing leaks
   // in plaintext before the key is agreed. The post-ready full sync + durable-
@@ -2353,6 +2351,11 @@ function recordTerminalBenchDrop(preStringified: string) {
 }
 
 const voiceHostBroker = new VoiceHostBroker(frame => broadcast(frame));
+// Settlement may follow the last stream event, or happen in another HTTP worker.
+const voiceQueueTimer = setInterval(() => {
+  try { voiceHostBroker.refreshQueuedTerminals(); } catch (error) { console.warn('[voice-host] Queue receipt read failed:', error); }
+}, 250);
+voiceQueueTimer.unref();
 
 function broadcast(msg: Record<string, unknown>, filter?: (c: ClientState) => boolean) {
   const json = JSON.stringify(msg);
@@ -10111,6 +10114,7 @@ async function shutdown(signal: string, exitCode = 0) {
   if (browserDiscoveryTimer) clearInterval(browserDiscoveryTimer);
   if (attachedBrowserRefreshTimer) clearInterval(attachedBrowserRefreshTimer);
 
+  clearInterval(voiceQueueTimer);
   // Destroy all terminal PTY handles (tmux sessions persist independently)
   for (const [, att] of terminalAttachments) {
     if (att.batchTimer) clearTimeout(att.batchTimer);
