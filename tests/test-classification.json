@@ -1078,6 +1078,13 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/owned-session/store-orphan-sweep-chat-owned.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/shared/owned-session/store-orphan-sweep-guard.test.ts",
       "reasons": [
         "child-process",

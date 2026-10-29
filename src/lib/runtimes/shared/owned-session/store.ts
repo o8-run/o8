@@ -753,12 +753,13 @@ export function createOwnedSessionStore(
 
   async function sweepRecentlyOrphanedActiveRuns(): Promise<number> {
     const { listActiveLanes } = await import('@/lib/lane/registry');
+    const { listRunningSharedCheckoutSurfaceIds } = await import('@/lib/orchestrator/shared-checkout-team');
     const activeSurfaceIds = new Set(
       listActiveLanes()
         .map((lane) => lane.sessionKey?.trim())
         .filter((key): key is string => Boolean(key)),
     );
-    return fleetComputer.sweepOrphanedSessions(activeSurfaceIds, ACTIVE_ORPHAN_GRACE_MS);
+    return fleetComputer.sweepOrphanedSessions(activeSurfaceIds, ACTIVE_ORPHAN_GRACE_MS, listRunningSharedCheckoutSurfaceIds());
   }
 
   void sweepRecentlyOrphanedActiveRuns().catch(() => {});

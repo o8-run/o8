@@ -625,8 +625,8 @@ export async function ownedGeminiSessionState(surfaceId: string) {
   return geminiStore.sessionState(surfaceId);
 }
 
-export async function sweepOrphanedGeminiSessions(activeSurfaceIds: Set<string>, maxAgeMs: number) {
-  return geminiStore.sweepOrphanedSessions(activeSurfaceIds, maxAgeMs);
+export async function sweepOrphanedGeminiSessions(activeSurfaceIds: Set<string>, maxAgeMs: number, chatOwnedSurfaceIds?: ReadonlySet<string>) {
+  return geminiStore.sweepOrphanedSessions(activeSurfaceIds, maxAgeMs, chatOwnedSurfaceIds);
 }
 
 export async function launchOwnedGeminiSession(

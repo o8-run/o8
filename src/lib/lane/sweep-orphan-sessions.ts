@@ -1,4 +1,5 @@
 import { listActiveLanes } from '@/lib/lane/registry';
+import { listRunningSharedCheckoutSurfaceIds } from '@/lib/orchestrator/shared-checkout-team';
 
 /**
  * #1292 — on startup, archive owned-session dirs that are NOT bound to an active
@@ -19,19 +20,21 @@ export async function sweepOrphanedOwnedSessions(): Promise<number> {
         .map((lane) => lane.sessionKey?.trim())
         .filter((key): key is string => Boolean(key)),
     );
+    // Workers a chat launched into its shared checkout have no lane; never stop their live runs.
+    const chatOwnedSurfaceIds = listRunningSharedCheckoutSurfaceIds();
 
     const sweeps: Array<Promise<number>> = [];
     try {
       const { sweepOrphanedCodexSessions } = await import('@/lib/codex/owned');
-      sweeps.push(sweepOrphanedCodexSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS));
+      sweeps.push(sweepOrphanedCodexSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS, chatOwnedSurfaceIds));
     } catch { /* runtime module unavailable — skip */ }
     try {
       const { sweepOrphanedClaudeCodeSessions } = await import('@/lib/claude-code/owned');
-      sweeps.push(sweepOrphanedClaudeCodeSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS));
+      sweeps.push(sweepOrphanedClaudeCodeSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS, chatOwnedSurfaceIds));
     } catch { /* runtime module unavailable — skip */ }
     try {
       const { sweepOrphanedGeminiSessions } = await import('@/lib/gemini/owned');
-      sweeps.push(sweepOrphanedGeminiSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS));
+      sweeps.push(sweepOrphanedGeminiSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS, chatOwnedSurfaceIds));
     } catch { /* skip */ }
     try {
       const { sweepOrphanedOpencodeSessions } = await import('@/lib/opencode/owned');
