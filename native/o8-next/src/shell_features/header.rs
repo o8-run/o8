@@ -61,7 +61,7 @@ fn render(
                 .gap(px(4.))
                 .mt(px(1.3))
                 .child(super::header_tools::play(s, window, cx))
-                .child(super::header_tools::tools(s, window, cx))
+                .child(super::activity_dock::toggle_button(s, cx))
                 .when(!panel_open, |row| {
                     row.child(super::right_panel::toggle_button(false, cx))
                 }),
@@ -454,7 +454,10 @@ fn strip(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
                             // The fill fades in 120ms (WorkspaceHeaderStrip's transition).
                             let hover = theme().hover;
                             let shown = crate::motion::hover(&group.clone());
-                            pill.bg(gpui::Rgba { a: hover.a * shown, ..hover })
+                            pill.bg(gpui::Rgba {
+                                a: hover.a * shown,
+                                ..hover
+                            })
                         })
                         .map(|pill| crate::motion::fade_hover(pill, group.clone(), 120))
                         .child(

@@ -27,10 +27,13 @@ fn render(
                 .and_then(|t| s.content.get(&s.key(t)))
                 .map(Content::element)
         });
+    // The Activity Dock floats at the top right of the chat column.
     let content = div()
         .flex_1()
         .min_h_0()
+        .relative()
         .child(content.unwrap_or_else(|| div().p(px(24.)).child(frame.empty).into_any_element()))
+        .children(super::activity_dock::element(s, window, cx))
         .into_any_element();
     // The right panel sits inside the sidebar decoration, beside the content.
     let content = match super::right_panel::element(s, window, cx) {

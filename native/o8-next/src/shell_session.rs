@@ -145,6 +145,23 @@ impl Surface {
             self.composer.read(cx).focus.is_focused(window),
         )
     }
+    /// The conversation's tool steps, oldest first, and whether a turn is
+    /// streaming, for the Activity Dock.
+    pub(crate) fn shell_steps(&self) -> (Vec<crate::activity::Step>, bool) {
+        let mut live = false;
+        let steps = self
+            .rows
+            .iter()
+            .flat_map(|row| match &row.borrow().row {
+                Row::Activity { steps, trace, .. } => {
+                    live |= trace.live;
+                    steps.clone()
+                }
+                _ => vec![],
+            })
+            .collect();
+        (steps, live)
+    }
     #[cfg(test)]
     pub(crate) fn shell_selected(&self) -> String {
         self.selected.clone().unwrap()
