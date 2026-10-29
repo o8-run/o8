@@ -37,3 +37,21 @@ it('shows a passive input below live ink and fences old native events without op
   await event('o8:visual-capture-finish', { id: 'capture-owned', generation: 42 });
   expect(bridge.emit).toHaveBeenCalledWith('o8:spatial-ink-strokes', expect.objectContaining({ visualCaptureId: 'capture-owned', visualCaptureGeneration: 42 }));
 });
+it('keeps a reduced-motion mark visible when a move repeats the first point', async () => {
+  await act(async () => root.unmount());
+  let frame: FrameRequestCallback | undefined;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frame = callback; return 1; });
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
+  vi.stubGlobal('Path2D', class { constructor(readonly d: string) {} });
+  const fill = vi.fn(); const arc = vi.fn();
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ setTransform() {}, clearRect() {}, beginPath() {}, arc, fill, createRadialGradient: () => ({ addColorStop() {} }) } as unknown as CanvasRenderingContext2D);
+  root = createRoot(node);
+  await act(async () => root.render(React.createElement(SpatialInkPage)));
+  await event('o8:visual-capture-begin', { id: 'capture-still', generation: 7 });
+  for (const phase of ['start', 'move'] as const) {
+    await event('o8:visual-capture-ink', { id: 'capture-still', generation: 7, phase, point: { x: 0.5, y: 0.5, t: phase === 'start' ? 0 : 16 } });
+  }
+  await act(async () => frame?.(0));
+  expect(fill).toHaveBeenCalled();
+  expect(arc).toHaveBeenCalledWith(512, 384, 2.6, 0, Math.PI * 2);
+});
