@@ -104,6 +104,15 @@ fn reuse_uses_last_reported_prompt_excludes_output_and_prior_turns() {
     );
     assert!(latest_reuse(&[turn(json!({"input":100,"output":5}))]).is_none());
     assert!(latest_reuse(&[]).is_none());
+    assert_eq!(
+        latest_reuse(&[
+            turn(json!({"input":200,"cacheRead":800})),
+            turn(Value::Null)
+        ])
+        .unwrap()
+        .percent,
+        80.
+    );
     assert!(latest_reuse(&[turn(json!({"input":0,"cacheRead":0,"cacheWrite":0}))]).is_none());
     assert!(
         latest_reuse(&[
@@ -381,6 +390,9 @@ fn terminal_usage_matches_classic_optional_counter_evidence() {
 
 #[test]
 fn compact_counts_match_classic_one_decimal_labels() {
+    assert_eq!(format_tokens(f64::NAN), "0");
+    assert_eq!(format_tokens(f64::INFINITY), "0");
+    assert_eq!(format_tokens(-1200.), "-1.2k");
     for (count, expected) in [
         (0., "0"),
         (100., "100"),

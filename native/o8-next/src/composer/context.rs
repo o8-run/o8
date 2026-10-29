@@ -98,7 +98,7 @@ pub fn latest_reuse(entries: &[Entry]) -> Option<Reuse> {
     let usage = entries
         .iter()
         .rev()
-        .find(|e| e.role == "assistant" && e.extra.contains_key("tokens"))?
+        .find(|e| e.role == "assistant" && e.extra.get("tokens").is_some_and(Value::is_object))?
         .extra
         .get("tokens")?;
     if usage.get("cacheRead").is_none() && usage.get("cacheWrite").is_none() {
@@ -308,7 +308,7 @@ pub fn observe(
                 }
                 let usages: Vec<_> = assistant
                     .iter()
-                    .filter(|e| e.extra.contains_key("tokens"))
+                    .filter(|e| e.extra.get("tokens").is_some_and(Value::is_object))
                     .collect();
                 let model = usages
                     .first()
@@ -426,9 +426,12 @@ pub fn fetch(client: &crate::client::Client, thread: &str, backend: &str) -> Res
         .map(|value| telemetry(&value))
 }
 pub fn format_tokens(value: f64) -> String {
-    let (scale, suffix) = if value >= 999_950. {
+    if !value.is_finite() {
+        return "0".into();
+    }
+    let (scale, suffix) = if value.abs() >= 999_950. {
         (1_000_000., "M")
-    } else if value >= 999.95 {
+    } else if value.abs() >= 999.95 {
         (1_000., "k")
     } else {
         (1., "")

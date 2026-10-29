@@ -56,6 +56,9 @@ impl Surface {
         routing: &Value,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if open == "context" {
+            return self.context_popover(cx);
+        }
         let mut menu = div()
             .id("composer-picker")
             .debug_selector(|| "composer-picker".into())

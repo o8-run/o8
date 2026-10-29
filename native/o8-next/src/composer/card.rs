@@ -2,6 +2,9 @@ use super::*;
 use crate::composer::controls::{mode_label, model_label};
 use gpui::{AnyElement, Div, KeyDownEvent, SharedString, Stateful};
 
+#[path = "context_view.rs"]
+mod context_view;
+
 /// An icon-only footer control: a 28px target with the label as its tooltip.
 fn icon_only(button: Stateful<Div>, path: &str, color: gpui::Rgba, label: String) -> Stateful<Div> {
     let label = SharedString::from(label);
@@ -15,7 +18,11 @@ fn icon_only(button: Stateful<Div>, path: &str, color: gpui::Rgba, label: String
 }
 
 impl Surface {
-    pub(crate) fn composer_footer(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn composer_footer(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
         let picked = routing["pickedMode"].as_str().unwrap_or("solo");
         let mode = mode_label(picked);
@@ -185,7 +192,7 @@ impl Surface {
             .px(px(8.))
             .pb(px(8.))
             .child(leading)
-            .child(div().flex_1().min_w(px(0.)))
+            .child(self.context_meter(window, cx))
             .child(trailing)
             .into_any_element()
     }
@@ -428,6 +435,7 @@ impl Surface {
     ) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
         let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("solo"));
+        self.sync_context_meter(&routing, cx);
         let (open, busy, error, model) = self.composer.update(cx, |i, cx| {
             i.controls.attachment_target = true;
             i.controls.images_enabled = self.queue_ready
@@ -458,6 +466,7 @@ impl Surface {
         let mut card = div()
             .id("composer-card")
             .debug_selector(|| "composer-card".into())
+            .relative()
             .border_1()
             .border_color(theme().border)
             .rounded(px(crate::theme::GEOMETRY.composer_radius))
@@ -507,10 +516,26 @@ impl Surface {
             .child(self.composer.clone())
             .child(self.composer.update(cx, |i, cx| i.image_chips(cx)))
             .child(footer);
+        let owner = cx.entity().downgrade();
+        card = card.child(
+            canvas(
+                |_, _, _| (),
+                move |bounds, _, _, cx| {
+                    let _ = owner.update(cx, |s, cx| {
+                        s.composer
+                            .update(cx, |i, _| i.controls.context.card_bounds = Some(bounds));
+                    });
+                },
+            )
+            .absolute()
+            .inset_0(),
+        );
         if let Some(open) = open {
             card = card
                 .relative()
                 .child(self.composer_popover(open, busy, model, &routing, cx));
+        } else if let Some(help) = self.context_focus_help(window, cx) {
+            card = card.relative().child(help);
         }
         card.when(!error.is_empty(), |d| {
             d.child(

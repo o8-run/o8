@@ -1,4 +1,6 @@
 use super::*;
+#[path = "context_card_tests.rs"]
+mod context_tests;
 mod image_tests;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use std::{
