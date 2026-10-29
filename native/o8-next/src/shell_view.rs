@@ -43,6 +43,16 @@ impl Render for Shell {
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
             .children(slots)
+            // The traffic-light corner above the rail moves the window too.
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .w(px(rail::WIDTH))
+                    .h(px(crate::theme::GEOMETRY.header))
+                    .window_control_area(gpui::WindowControlArea::Drag),
+            )
             // Painted after the veil so the rail sits on the same glass as the content.
             .child(rail)
     }

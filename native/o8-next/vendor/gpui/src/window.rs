@@ -1167,8 +1167,16 @@ impl Window {
             Box::new(move || {
                 handle
                     .update(&mut cx, |_, window, _cx| {
+                        // macOS moves the window from a drag area only when it is the
+                        // topmost hitbox, so tabs and buttons laid over it keep the press.
+                        let ids = &window.mouse_hit_test.ids;
+                        let ids = if cfg!(target_os = "macos") {
+                            &ids[..ids.len().min(1)]
+                        } else {
+                            &ids[..]
+                        };
                         for (area, hitbox) in &window.rendered_frame.window_control_hitboxes {
-                            if window.mouse_hit_test.ids.contains(&hitbox.id) {
+                            if ids.contains(&hitbox.id) {
                                 return Some(*area);
                             }
                         }

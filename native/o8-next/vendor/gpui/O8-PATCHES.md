@@ -16,6 +16,13 @@ Local changes:
 - `src/platform/mac/metal_renderer.rs`: an opt-in counter incremented only after
   submitting the Metal command buffer, used by the native regression probe.
 - `Cargo.toml`: the opt-in `frame-diagnostics` feature.
+- `src/window.rs`, `src/platform/mac/window.rs`: macOS window-control drag
+  areas. The view reports itself opaque through AppKit's private
+  `_opaqueRectForWindowMoveWhenInTitlebar` (as WKWebView does), so AppKit no
+  longer moves a transparent-titlebar window from its whole title band; a left press whose topmost hitbox is a
+  `WindowControlArea::Drag` calls `performWindowDragWithEvent:`, and a double
+  press runs the title bar double-click action. Tabs and buttons laid over the
+  area keep their own presses and drags. Other platforms are unchanged.
 
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit
