@@ -100,6 +100,16 @@ impl Transition {
         }
     }
 
+    /// A transition already at rest in `open`, for state that should not
+    /// animate in.
+    pub const fn settled(milliseconds: u64, open: bool) -> Self {
+        Self {
+            open,
+            changed: None,
+            duration: Duration::from_millis(milliseconds),
+        }
+    }
+
     pub fn is_open(&self) -> bool {
         self.open
     }

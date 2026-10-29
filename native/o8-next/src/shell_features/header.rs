@@ -1,4 +1,6 @@
 use super::*;
+#[path = "header/pills.rs"]
+mod pills;
 struct Header;
 register_shell_feature!(Header);
 impl ShellFeature for Header {
@@ -28,6 +30,14 @@ fn render(
     let hidden = s.surfaces.sidebar.hidden;
     let panel = super::right_panel::width(s, window);
     let panel_open = super::right_panel::is_open(s);
+    let shown = pill_list(s);
+    let workspace_key = s.state.selected.clone().unwrap_or_default();
+    if s.features
+        .get::<pills::Pills>()
+        .update(&workspace_key, &shown)
+    {
+        window.request_animation_frame();
+    }
     let history = |id: &'static str, path, tip, target: Option<usize>, cx: &mut Context<Shell>| {
         icon_button(id, path, 15., 1.7, tip, target.is_some()).when_some(target, |button, visit| {
             button.on_click(cx.listener(move |this, _, window, cx| {
@@ -382,6 +392,73 @@ fn tabs(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
         })
 }
 
+/// A tab's pill label: its rename, the chat's title, or the surface name.
+fn tab_label(s: &Shell, t: &Tab) -> String {
+    super::header_tabs::label(s, t).unwrap_or_else(|| match t {
+        Tab::Session(id) => {
+            let selected = s.current().and_then(|w| w.selections.get(id)).unwrap_or(id);
+            s.sessions
+                .iter()
+                .find(|s| &s.id == selected)
+                .map(|s| s.title.clone())
+                .unwrap_or_else(|| "Chat".into())
+        }
+        _ => t.label().into(),
+    })
+}
+
+fn pill_list(s: &Shell) -> Vec<pills::Shown> {
+    let active = s.active();
+    s.current()
+        .map(|w| w.tabs.clone())
+        .unwrap_or_default()
+        .iter()
+        .map(|t| pills::Shown {
+            key: s.key(t),
+            label: tab_label(s, t),
+            glyph: glyph(t),
+            selected: active.as_ref() == Some(t),
+        })
+        .collect()
+}
+
+/// A closed pill's copy while it leaves: no hover, no handlers.
+fn ghost(ghost: &pills::Ghost, height: f32, radius: f32) -> gpui::Div {
+    let color = if ghost.selected {
+        theme().text
+    } else {
+        theme().text_muted
+    };
+    div()
+        .flex_shrink_0()
+        .h(px(height))
+        .px(px(10.))
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .rounded(px(radius))
+        .font_weight(gpui::FontWeight::LIGHT)
+        .text_color(color)
+        .when(ghost.selected, |pill| pill.bg(theme().selection))
+        .child(
+            div()
+                .size(px(14.))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(crate::icon::stroke(ghost.glyph, color, 11., 2.)),
+        )
+        .child(
+            div()
+                .max_w(px(180.))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(ghost.label.clone()),
+        )
+}
+
 fn strip(
     s: &Shell,
     scroll: Option<gpui::ScrollHandle>,
@@ -389,6 +466,7 @@ fn strip(
 ) -> impl IntoElement {
     let active = s.active();
     let geometry = crate::theme::GEOMETRY;
+    let motion = s.features.read::<pills::Pills>();
     div()
         .flex()
         .size_full()
@@ -412,27 +490,21 @@ fn strip(
                 super::header_tabs::drop(this, drag.index, window, cx);
             }),
         )
-        .children(
-            s.current()
+        .children({
+            let mut pills = s
+                .current()
                 .map(|w| w.tabs.clone())
                 .unwrap_or_default()
                 .into_iter()
                 .enumerate()
                 .map(|(i, t)| {
                     let selected = active.as_ref() == Some(&t);
-                    let group = gpui::SharedString::from(format!("surface-tab-{i}"));
-                    let label = super::header_tabs::label(s, &t).unwrap_or_else(|| match &t {
-                        Tab::Session(id) => {
-                            let selected =
-                                s.current().and_then(|w| w.selections.get(id)).unwrap_or(id);
-                            s.sessions
-                                .iter()
-                                .find(|s| &s.id == selected)
-                                .map(|s| s.title.clone())
-                                .unwrap_or_else(|| "Chat".into())
-                        }
-                        _ => t.label().into(),
+                    let key = s.key(&t);
+                    let sel = motion.map_or(f32::from(u8::from(selected)), |m| {
+                        m.selected(&key, selected)
                     });
+                    let group = gpui::SharedString::from(format!("surface-tab-{i}"));
+                    let label = tab_label(s, &t);
                     let editing = super::header_tabs::editing(s, i);
                     let insertion = super::header_tabs::insertion(s).filter(|(at, _)| *at == i);
                     let dragged = super::header_tabs::Dragged {
@@ -440,7 +512,7 @@ fn strip(
                         label: label.clone().into(),
                         glyph: glyph(&t),
                     };
-                    div()
+                    let pill = div()
                         .id(("surface-tab", i))
                         .relative()
                         .group(group.clone())
@@ -454,22 +526,20 @@ fn strip(
                         .flex_shrink_0()
                         .rounded(px(geometry.tab_radius))
                         .font_weight(gpui::FontWeight::LIGHT)
-                        .text_color(if selected {
-                            theme().text
-                        } else {
-                            theme().text_muted
-                        })
-                        .when(selected, |pill| pill.bg(theme().selection))
-                        .when(!selected, |pill| {
-                            // The fill fades in 120ms (WorkspaceHeaderStrip's transition).
+                        .text_color(crate::motion::mix(theme().text_muted, theme().text, sel))
+                        .bg({
+                            // Hover and selection fills fade over 120ms
+                            // (WorkspaceHeaderStrip's background transition).
                             let hover = theme().hover;
-                            let shown = crate::motion::hover(&group.clone());
-                            pill.bg(gpui::Rgba {
+                            let shown = crate::motion::hover(&group.clone()) * (1. - sel);
+                            let rest = gpui::Rgba {
                                 a: hover.a * shown,
                                 ..hover
-                            })
+                            };
+                            crate::motion::mix(rest, theme().selection, sel)
                         })
                         .map(|pill| crate::motion::fade_hover(pill, group.clone(), 120))
+                        .children(motion.and_then(|m| m.probe(&key)))
                         .child(
                             div()
                                 .relative()
@@ -485,11 +555,11 @@ fn strip(
                                         .group_hover(group.clone(), |view| view.opacity(0.))
                                         .child(crate::icon::stroke(
                                             glyph(&t),
-                                            if selected {
-                                                theme().text
-                                            } else {
-                                                theme().text_muted
-                                            },
+                                            crate::motion::mix(
+                                                theme().text_muted,
+                                                theme().text,
+                                                sel,
+                                            ),
                                             11.,
                                             2.,
                                         )),
@@ -591,7 +661,19 @@ fn strip(
                                     .when(after, |line| line.right(px(-1.)))
                                     .when(!after, |line| line.left(px(-1.))),
                             )
-                        })
-                }),
-        )
+                        });
+                    match motion {
+                        Some(m) => m.wrap(&key, pill).into_any_element(),
+                        None => pill.into_any_element(),
+                    }
+                })
+                .collect::<Vec<_>>();
+            // Closed pills leave from where they were.
+            for (gone, wrapper) in motion.into_iter().flat_map(|m| m.ghosts()) {
+                let at = gone.index.min(pills.len());
+                let copy = ghost(gone, geometry.tab_height, geometry.tab_radius);
+                pills.insert(at, wrapper.child(copy).into_any_element());
+            }
+            pills
+        })
 }
