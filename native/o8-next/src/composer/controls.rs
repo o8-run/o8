@@ -4,7 +4,11 @@ use gpui::{Entity, FocusHandle, RenderImage};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
+#[path = "context.rs"]
+pub(crate) mod context;
+
 pub(crate) struct State {
+    pub context: context::MeterState,
     pub open: Option<&'static str>,
     pub model: Option<Entity<Composer>>,
     pub busy: bool,
@@ -22,6 +26,7 @@ pub(crate) struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            context: Default::default(),
             open: None,
             model: None,
             busy: false,
