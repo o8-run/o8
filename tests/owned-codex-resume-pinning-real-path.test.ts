@@ -160,7 +160,7 @@ describe.skipIf(process.platform === 'win32')('owned Codex persisted resume pins
     if (boundary.startsWith('final-git')) expect(seam.finalGit).toBeUndefined();
     if (boundary === 'supervisor-head') expect(seam.beforeSupervisor).toBeUndefined();
     if (boundary === 'bridge') { expect(seam.bridgeAttempts).toBe(bridgesBefore); seam.beforeBridge = undefined; }
-    expect(getApproval(approval.id)?.resolution?.continuationStatus).toBe(boundary === 'bridge' ? 'completed' : 'failed');
+    expect(getApproval(approval.id)?.resolution?.continuationStatus, getApproval(approval.id)?.audit.at(-1)?.note).toBe(boundary === 'bridge' ? 'completed' : 'failed');
     expect(readFileSync(join(repoPath, 'argv-receipts.jsonl'), 'utf8').trim().split('\n')).toHaveLength(boundary === 'bridge' ? 2 : 1);
     expect(readSession(session.surfaceId).recentRuns.filter(run => run.spawnState === 'started')).toHaveLength(boundary === 'bridge' ? 2 : 1);
   }, 30_000);
