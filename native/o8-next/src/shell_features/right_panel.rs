@@ -34,6 +34,26 @@ impl ShellFeature for RightPanel {
                     return KeyResult::Handled;
                 }
                 let modifiers = event.keystroke.modifiers;
+                let step = match event.keystroke.key.as_str() {
+                    "left" => 16.,
+                    "right" => -16.,
+                    _ => 0.,
+                };
+                if step != 0.
+                    && !modifiers.modified()
+                    && s.features
+                        .read::<Panel>()
+                        .and_then(|panel| panel.edge.as_ref())
+                        .is_some_and(|edge| edge.is_focused(window))
+                {
+                    let viewport = f32::from(window.viewport_size().width);
+                    let (min, max) = width_bounds(s, viewport);
+                    let width = full_width(s, viewport);
+                    s.state.right_panel_width = Some((width + step).clamp(min, max));
+                    s.persist();
+                    cx.notify();
+                    return KeyResult::Handled;
+                }
                 if (modifiers.platform || modifiers.control)
                     && modifiers.alt
                     && !modifiers.shift
@@ -214,6 +234,13 @@ struct Panel {
     /// Files and o8.md views, keyed like panel content.
     files: std::collections::HashMap<String, gpui::Entity<crate::files_panel::FilesPanel>>,
     browsers: std::collections::HashMap<String, gpui::Entity<crate::browser_panel::BrowserPanel>>,
+    /// The left edge is being dragged; the width saves when it is let go.
+    resizing: bool,
+    /// Where the press on the edge began and the width then (useColumnResize's
+    /// startX and startWidth), so the drag threshold never shifts the edge.
+    drag_from: Option<(f32, f32)>,
+    /// The edge takes focus when pressed, so Left and Right resize by 16 px.
+    edge: Option<gpui::FocusHandle>,
 }
 
 impl Default for Panel {
@@ -226,6 +253,9 @@ impl Default for Panel {
             menu: None,
             files: Default::default(),
             browsers: Default::default(),
+            resizing: false,
+            drag_from: None,
+            edge: None,
         }
     }
 }
@@ -266,8 +296,129 @@ pub(super) fn width(s: &Shell, window: &Window) -> Option<(f32, f32)> {
     if travel <= 0. && !moving {
         return None;
     }
-    let full = crate::theme::right_panel_width(f32::from(window.viewport_size().width));
+    let full = full_width(s, f32::from(window.viewport_size().width));
     Some((full, full * travel))
+}
+
+// RightPanelResizeEdge with useColumnResize's limits for the o8 panel
+// (useRightPanelWidths.ts): 400 to 1200 px, and the workspace keeps
+// WORKSPACE_RESERVE beside it plus RIGHT_COLUMN_CHROME.
+const MIN_WIDTH: f32 = 400.;
+const MAX_WIDTH: f32 = 1200.;
+const WORKSPACE_RESERVE: f32 = 420.;
+const COLUMN_CHROME: f32 = 8.;
+/// The edge's grab target reaches this far either side of the boundary.
+const EDGE_SLOP: f32 = 8.;
+
+/// The narrowest and widest the panel may be in this window.
+fn width_bounds(s: &Shell, viewport: f32) -> (f32, f32) {
+    let sidebar = if s.surfaces.sidebar.hidden {
+        0.
+    } else {
+        super::super::sidebar::width(s)
+    };
+    let available = viewport - super::super::rail::WIDTH - sidebar;
+    let max = MAX_WIDTH.min((available - WORKSPACE_RESERVE - COLUMN_CHROME).max(0.));
+    (MIN_WIDTH.min(max), max)
+}
+
+/// The column's full width: the dragged one within this window's bounds,
+/// else the default.
+fn full_width(s: &Shell, viewport: f32) -> f32 {
+    match s.state.right_panel_width.filter(|width| width.is_finite()) {
+        Some(width) => {
+            let (min, max) = width_bounds(s, viewport);
+            width.clamp(min, max)
+        }
+        None => crate::theme::right_panel_width(viewport),
+    }
+}
+
+/// A drag of the panel's left edge.
+pub(super) struct Resize;
+impl gpui::Render for Resize {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
+
+/// Moves the edge with the pointer from where the press began.
+pub(super) fn resize(s: &mut Shell, event: &gpui::DragMoveEvent<Resize>, window: &Window) {
+    let Some((from, start)) = s.features.read::<Panel>().and_then(|panel| panel.drag_from) else {
+        return;
+    };
+    let width = start + from - f32::from(event.event.position.x);
+    let (min, max) = width_bounds(s, f32::from(window.viewport_size().width));
+    s.state.right_panel_width = Some(width.clamp(min, max));
+    s.features.get::<Panel>().resizing = true;
+}
+
+/// Saves the width once the edge is let go, as the sidebar's edge does.
+pub(super) fn settle_resize(s: &mut Shell, cx: &Context<Shell>) {
+    if s.features
+        .read::<Panel>()
+        .is_some_and(|panel| panel.resizing)
+        && !cx.has_active_drag()
+    {
+        let panel = s.features.get::<Panel>();
+        panel.resizing = false;
+        panel.drag_from = None;
+        s.persist();
+    }
+}
+
+/// A wide grab target over the panel's left boundary, `shown` from the row's
+/// right, with a quiet line that glows on hover, focus and drag (ResizeEdge).
+pub(super) fn edge(
+    s: &mut Shell,
+    shown: f32,
+    window: &Window,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement {
+    let focus = s
+        .features
+        .get::<Panel>()
+        .edge
+        .get_or_insert_with(|| cx.focus_handle())
+        .clone();
+    let lit = s.features.get::<Panel>().resizing || focus.is_focused(window);
+    let accent = theme().accent;
+    div()
+        .id("panel-resize")
+        .debug_selector(|| "panel-resize".into())
+        .group("panel-resize")
+        .track_focus(&focus)
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right(px(shown - EDGE_SLOP - 0.5))
+        .w(px(EDGE_SLOP * 2. + 1.))
+        .cursor(gpui::CursorStyle::ResizeLeftRight)
+        .on_mouse_down(
+            gpui::MouseButton::Left,
+            cx.listener(|this, event: &gpui::MouseDownEvent, window, _| {
+                let width = full_width(this, f32::from(window.viewport_size().width));
+                this.features.get::<Panel>().drag_from = Some((f32::from(event.position.x), width));
+            }),
+        )
+        .on_drag(Resize, |_, _, _, cx| cx.new(|_| Resize))
+        .child(
+            div()
+                .absolute()
+                .top(px(22.))
+                .bottom(px(22.))
+                .left(px(EDGE_SLOP))
+                .w(px(1.))
+                .bg(accent)
+                .shadow(vec![gpui::BoxShadow {
+                    color: accent.into(),
+                    offset: gpui::point(px(0.), px(0.)),
+                    blur_radius: px(8.),
+                    spread_radius: px(0.),
+                }])
+                .opacity(if lit { 0.85 } else { 0. })
+                .group_hover("panel-resize", |style| style.opacity(0.85)),
+        )
 }
 
 /// Opens the panel on one tool, creating that tool's view the first time.

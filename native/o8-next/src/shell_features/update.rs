@@ -6,6 +6,13 @@ use std::time::{Duration, Instant};
 // o8 next is the app window, so it reads the update state from
 // /api/panel/update/apply (GET) and asks the native updater to install
 // through the same route (POST), which the classic update card used.
+//
+// The button's checking, downloading and restart states and the Tools
+// section's "Update all" follow T3 Code (MIT, Copyright (c) 2026 T3 Tools
+// Inc.): https://github.com/pingdotgg/t3code
+// apps/web/src/components/sidebar/DesktopUpdateStatusIcon.tsx and
+// apps/web/src/components/ProviderUpdatesAction.tsx at
+// 5b4f2aa1532730d4dd51d2cb48a57ff74a0f54eb.
 struct Update;
 register_shell_feature!(Update);
 impl ShellFeature for Update {

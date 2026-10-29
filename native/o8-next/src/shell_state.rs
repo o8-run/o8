@@ -38,6 +38,9 @@ pub struct State {
     /// The chat list width the person dragged; absent keeps the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidebar_width: Option<f32>,
+    /// The right panel width the person dragged; absent keeps the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right_panel_width: Option<f32>,
     /// Names the person gave tabs, by tab key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tab_labels: BTreeMap<String, String>,
@@ -54,6 +57,7 @@ impl Default for State {
             selected: None,
             workspaces: BTreeMap::new(),
             sidebar_width: None,
+            right_panel_width: None,
             tab_labels: BTreeMap::new(),
             retain_file: false,
             backup_file: Arc::default(),

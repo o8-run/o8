@@ -36,12 +36,20 @@ fn render(
         .children(super::activity_dock::element(s, window, cx))
         .into_any_element();
     // The right panel sits inside the sidebar decoration, beside the content.
+    super::right_panel::settle_resize(s, cx);
     let content = match super::right_panel::element(s, window, cx) {
-        Some((panel, _, shown)) => div()
+        Some((panel, full, shown)) => div()
+            .relative()
             .flex()
             .flex_1()
             .min_h_0()
             .min_w_0()
+            .on_drag_move(cx.listener(
+                |s, event: &gpui::DragMoveEvent<super::right_panel::Resize>, window, cx| {
+                    super::right_panel::resize(s, event, window);
+                    cx.notify();
+                },
+            ))
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
             .child(
                 div()
@@ -53,6 +61,10 @@ fn render(
                     .border_color(theme().border)
                     .child(panel),
             )
+            // The edge only once the column has finished opening.
+            .when(shown >= full, |row| {
+                row.child(super::right_panel::edge(s, shown, window, cx))
+            })
             .into_any_element(),
         None => content,
     };
