@@ -88,6 +88,10 @@ pub fn menu_fill() -> Rgba {
         current().surface_raised
     }
 }
+/// A merged pull request's status, GitHub's merged purple.
+pub fn pull_merged() -> Rgba {
+    rgb(0x8957e5)
+}
 
 /// The right panel column: 30% of the window, at most GEOMETRY.right_width.
 pub fn right_panel_width(viewport: f32) -> f32 {

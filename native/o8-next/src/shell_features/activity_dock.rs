@@ -1251,7 +1251,7 @@ fn branch(data: &Data, cx: &mut Context<Shell>) -> impl IntoElement {
         )
         .when_some(pr.cloned(), |card, pr| {
             let (label, color) = match (pr.state.as_str(), pr.draft) {
-                ("merged", _) => ("Merged", gpui::rgb(0x8957e5)),
+                ("merged", _) => ("Merged", crate::theme::pull_merged()),
                 (_, true) => ("Draft", theme().text_muted),
                 ("closed", _) => ("Closed", theme().danger),
                 _ => ("Open", theme().success),
