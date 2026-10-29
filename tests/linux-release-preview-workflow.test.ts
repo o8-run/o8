@@ -4,8 +4,8 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
-// Linux previews ship with every stable release (#1672): a published, non-
-// prerelease GitHub release dispatches Port Build for that tag, Linux only.
+// Linux previews ship with every stable release (#1672): a released (published
+// stable or promoted from prerelease) GitHub release dispatches Port Build for that tag, Linux only.
 // Port Build owns the build, signing, attestation and upload gates.
 
 type Mapping = Record<string, unknown>;
@@ -17,8 +17,10 @@ const steps = job.steps as Mapping[];
 const script = String(steps[0].run);
 
 describe('linux-release-preview workflow', () => {
-  it('runs only for published stable releases', () => {
-    expect(workflow.on).toEqual({ release: { types: ['published'] } });
+  it('runs for stable releases, including prereleases promoted to stable', () => {
+    // `released` fires on direct stable publication and on a prerelease ->
+    // release promotion (scripts/promote.mjs); `published` misses promotions.
+    expect(workflow.on).toEqual({ release: { types: ['released'] } });
     expect(job.if).toBe('${{ !github.event.release.prerelease && !github.event.release.draft }}');
     expect(script).toContain('^v[0-9]+\\.[0-9]+\\.[0-9]+$');
   });

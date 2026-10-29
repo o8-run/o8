@@ -48,7 +48,8 @@ provide.
    source release. For a stable release this happens automatically: the
    `Linux Release Preview` workflow (`.github/workflows/linux-release-preview.yml`)
    dispatches `Port Build` with `publish_target: linux` when the release is
-   published. Check that run before continuing.
+   released (published as stable, or promoted from prerelease). Check that
+   run before continuing.
 2. Dispatch `Port Build` again with `release_tag` set and
    `publish_to_mirror: true` — the `publish-mirror` job copies the
    (still-unsigned) AppImage to the mirror release for the same tag.

@@ -8,11 +8,18 @@ name: Linux Release Preview
 # attested, and existing assets are never replaced. workflow_dispatch is the one
 # event GITHUB_TOKEN is allowed to start.
 #
+# Trigger is `released`, not `published`: release candidates are published as
+# prereleases (scripts/release-beta.mjs) and later promoted with
+# `gh release edit --prerelease=false` (scripts/promote.mjs). A promotion fires
+# `released` but never `published`, so `published` skipped every promoted
+# release (v0.1.812, v0.1.813). `released` also fires for a release published
+# directly as stable, so it covers both paths exactly once.
+#
 # Not covered: the updater mirror copy and the minisign .sig stay the manual
 # steps in docs/operations/linux-updater-mirror-publish.md.
 on:
   release:
-    types: [published]
+    types: [released]
 
 permissions:
   contents: read
