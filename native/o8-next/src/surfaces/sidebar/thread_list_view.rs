@@ -14,6 +14,24 @@ impl Render for ThreadList {
             .choice_row()
             .and_then(|r| r.id.as_ref())
             .is_some_and(|id| !id.contains(':'));
+        let status = if self.saving {
+            "Saving…".to_string()
+        } else if self.loading && self.rows.is_empty() {
+            // Background refreshes keep the current list without a status flash.
+            "Refreshing…".to_string()
+        } else if self.search_running || self.search_pending.is_some() {
+            "Searching messages…".to_string()
+        } else if self.notice.is_empty() {
+            if !self.search_error.is_empty() {
+                self.search_error.clone()
+            } else if !self.query.trim().is_empty() && self.rows.is_empty() {
+                "No matching threads".into()
+            } else {
+                String::new()
+            }
+        } else {
+            self.notice.clone()
+        };
         div()
             .id("thread-sidebar")
             .debug_selector(|| "thread-sidebar".into())
@@ -31,12 +49,27 @@ impl Render for ThreadList {
             .capture_key_down(cx.listener(Self::key))
             .child(self.project_header(window, cx))
             .child(
+                // A desktop-style nav row: search glyph and muted label, filled on hover.
                 div()
                     .id("thread-search")
                     .debug_selector(|| "thread-search".into())
                     .cursor_pointer()
-                    .p(px(12.))
-                    .text_size(px(11.))
+                    .mx(px(6.))
+                    .h(px(28.))
+                    .px(px(6.))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .rounded(px(8.))
+                    .hover(|style| style.bg(theme().hover))
+                    .text_size(px(12.5))
+                    .text_color(theme().text_secondary)
+                    .child(crate::icon::stroke(
+                        "M11 4a7 7 0 1 0 0 14 7 7 0 1 0 0-14Z M20 20l-3.5-3.5",
+                        theme().text_muted,
+                        15.,
+                        1.7,
+                    ))
                     .child(if self.rename.is_some() {
                         "Rename thread"
                     } else {
@@ -47,29 +80,15 @@ impl Render for ThreadList {
             .when(self.editing || !self.query.is_empty(), |view| {
                 view.child(self.editor.clone())
             })
-            .child(
-                div()
-                    .text_size(px(10.))
-                    .text_color(theme().text_muted)
-                    .px(px(12.))
-                    .child(if self.saving {
-                        "Saving…".to_string()
-                    } else if self.loading {
-                        "Refreshing…".to_string()
-                    } else if self.search_running || self.search_pending.is_some() {
-                        "Searching messages…".to_string()
-                    } else if self.notice.is_empty() {
-                        if !self.search_error.is_empty() {
-                            self.search_error.clone()
-                        } else if !self.query.trim().is_empty() && self.rows.is_empty() {
-                            "No matching threads".into()
-                        } else {
-                            String::new()
-                        }
-                    } else {
-                        self.notice.clone()
-                    }),
-            )
+            .when(!status.is_empty(), |view| {
+                view.child(
+                    div()
+                        .text_size(px(10.))
+                        .text_color(theme().text_muted)
+                        .px(px(12.))
+                        .child(status),
+                )
+            })
             .child(
                 uniform_list(
                     "native-threads",

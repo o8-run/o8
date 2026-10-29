@@ -31,29 +31,24 @@ pub(super) const REGISTRATION: Registration = Registration {
         if position != NavPosition::BeforeWorkspaces {
             return vec![];
         }
-        let mut nav = vec![
-            div()
-                .id("customize-open")
-                .debug_selector(|| "customize-open".into())
-                .p(px(6.))
-                .cursor_pointer()
-                .child("Customize")
-                .on_click(cx.listener(|s, _, window, cx| s.execute(Command::Customize, window, cx)))
-                .into_any_element(),
-        ];
-        if s.surfaces.customize.open {
-            nav.push(
-                div()
-                    .id("customize-close")
-                    .debug_selector(|| "customize-close".into())
-                    .p(px(6.))
-                    .cursor_pointer()
-                    .child("Close Customize")
-                    .on_click(cx.listener(|s, _, window, cx| s.close_customize(window, cx)))
-                    .into_any_element(),
-            );
-        }
-        nav
+        // One rail target: it opens Customize, and closes it while open.
+        let open = s.surfaces.customize.open;
+        vec![
+            super::rail::button(
+                if open { "customize-close" } else { "customize-open" },
+                super::rail::Icon::Plugins,
+                "Customize",
+                open,
+            )
+            .on_click(cx.listener(move |s, _, window, cx| {
+                if open {
+                    s.close_customize(window, cx)
+                } else {
+                    s.execute(Command::Customize, window, cx)
+                }
+            }))
+            .into_any_element(),
+        ]
     },
     ..Registration::new("", "Open Customize", |s, _, window, cx| {
         s.open_customize(window, cx);

@@ -16,31 +16,22 @@ fn render(
     _: &mut Window,
     cx: &mut Context<Shell>,
 ) -> Option<AnyElement> {
-    let before_workspaces = registrations()
-        .iter()
-        .flat_map(|r| (r.nav)(s, NavPosition::BeforeWorkspaces, cx))
-        .collect::<Vec<_>>();
-    let after_workspaces = registrations()
-        .iter()
-        .flat_map(|r| (r.nav)(s, NavPosition::AfterWorkspaces, cx))
-        .collect::<Vec<_>>();
+    // Surface entries and the brand live in the navigation rail (shell_rail.rs);
+    // the open tabs share this band, as in the desktop workspace header.
     Some(
         (div()
             .flex()
             .items_center()
             .flex_shrink_0()
             .gap(px(12.))
-            .p(px(8.))
+            .h(px(crate::theme::GEOMETRY.header))
+            // Clears the traffic lights, which extend past the rail column.
+            .pl(px(20.))
+            .pr(px(8.))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
-            .children(
-                frame
-                    .brand
-                    .map(|brand| div().debug_selector(move || brand.into()).child(brand)),
-            )
-            .children(before_workspaces)
             .child(
                 div()
                     .id("workspace-switcher")
@@ -69,7 +60,7 @@ fn render(
                         cx.notify();
                     })),
             )
-            .children(after_workspaces)
+            .child(tabs(s, cx))
             .child(
                 div()
                     .id("shell-palette")
@@ -106,4 +97,78 @@ fn render(
             }))
         .into_any_element(),
     )
+}
+
+/// The desktop header's pill strip: the active tab is a filled pill, the rest
+/// are quiet labels that fill on hover.
+fn tabs(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
+    let active = s.active();
+    let geometry = crate::theme::GEOMETRY;
+    div()
+        .flex()
+        .flex_1()
+        .min_w_0()
+        .items_center()
+        .gap(px(2.))
+        .id("surface-tabs")
+        .overflow_x_scroll()
+        .children(
+            s.current()
+                .map(|w| w.tabs.clone())
+                .unwrap_or_default()
+                .into_iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    let selected = active.as_ref() == Some(&t);
+                    div()
+                        .id(("surface-tab", i))
+                        .debug_selector(move || format!("surface-tab-{i}"))
+                        .cursor_pointer()
+                        .h(px(geometry.tab_height))
+                        .max_w(px(200.))
+                        .px(px(10.))
+                        .flex()
+                        .items_center()
+                        .flex_shrink_0()
+                        .overflow_hidden()
+                        .whitespace_normal()
+                        .line_clamp(1)
+                        .text_ellipsis()
+                        .rounded(px(geometry.tab_radius))
+                        .text_color(if selected {
+                            theme().text
+                        } else {
+                            theme().text_muted
+                        })
+                        .when(selected, |pill| pill.bg(theme().selection))
+                        .when(!selected, |pill| pill.hover(|pill| pill.bg(theme().hover)))
+                        .child(match &t {
+                            Tab::Session(id) => {
+                                let selected =
+                                    s.current().and_then(|w| w.selections.get(id)).unwrap_or(id);
+                                s.sessions
+                                    .iter()
+                                    .find(|s| &s.id == selected)
+                                    .map(|s| s.title.clone())
+                                    .unwrap_or_else(|| "Chat".into())
+                            }
+                            _ => t.label().into(),
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.capture(window, cx);
+                            for registration in registrations() {
+                                (registration.after_tab)(this);
+                            }
+                            this.state
+                                .workspaces
+                                .get_mut(this.state.selected.as_deref().unwrap_or(""))
+                                .unwrap()
+                                .active = i;
+                            this.ensure(window, cx);
+                            this.restore_focus(window, cx);
+                            this.persist();
+                            cx.notify();
+                        }))
+                }),
+        )
 }

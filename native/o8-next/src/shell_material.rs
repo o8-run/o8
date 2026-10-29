@@ -52,6 +52,8 @@ pub(super) fn veil() -> gpui::AnyElement {
     // desktop's middle stop exactly, without layers of alpha or a blur shader.
     div()
         .absolute()
+        .top_0()
+        .left_0()
         .size_full()
         .child(
             canvas(

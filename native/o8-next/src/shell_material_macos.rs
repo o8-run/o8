@@ -32,14 +32,72 @@ pub(super) fn install(window: &gpui::Window) -> bool {
         if effect == nil {
             return false;
         }
-        NSVisualEffectView::setMaterial_(effect, NSVisualEffectMaterial::FullScreenUI);
+        NSVisualEffectView::setMaterial_(effect, material());
         NSVisualEffectView::setBlendingMode_(effect, NSVisualEffectBlendingMode::BehindWindow);
+        // All Glass is a dark material; keep it dark when the system is in light mode.
+        let name = <id as cocoa::foundation::NSString>::init_str(
+            cocoa::foundation::NSString::alloc(nil),
+            "NSAppearanceNameDarkAqua",
+        );
+        let appearance: id = msg_send![class!(NSAppearance), appearanceNamed: name];
+        let _: () = msg_send![effect, setAppearance: appearance];
+        let _: () = msg_send![name, release];
         NSVisualEffectView::setState_(effect, NSVisualEffectState::Active);
         NSView::setAutoresizingMask_(effect, NSViewWidthSizable | NSViewHeightSizable);
         let _: () = msg_send![parent, addSubview:effect positioned:NSWindowOrderingMode::NSWindowBelow relativeTo:content];
         let _: () = msg_send![effect, release];
     }
     true
+}
+
+// chrome_vibrancy_material in src-tauri/src/lib.rs (#1543): HudWindow stopped
+// rendering behind windows on macOS 15.7.8 and 26.x, where UnderWindowBackground
+// is the verified replacement.
+fn material() -> NSVisualEffectMaterial {
+    let mut buffer = [0u8; 32];
+    let mut length = buffer.len();
+    // SAFETY: the name is NUL-terminated and the buffer length is passed in and out.
+    let found = unsafe {
+        sysctlbyname(
+            b"kern.osproductversion\0".as_ptr().cast(),
+            buffer.as_mut_ptr().cast(),
+            &mut length,
+            std::ptr::null_mut(),
+            0,
+        )
+    } == 0;
+    let version = found
+        .then(|| std::str::from_utf8(&buffer[..length.saturating_sub(1)]).ok())
+        .flatten()
+        .unwrap_or("");
+    let mut parts = version
+        .split('.')
+        .map(|part| part.parse::<u32>().unwrap_or(0));
+    let (major, minor, patch) = (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    );
+    if major >= 26 || (major == 15 && minor == 7 && patch >= 8) {
+        NSVisualEffectMaterial::UnderWindowBackground
+    } else {
+        NSVisualEffectMaterial::HudWindow
+    }
+}
+
+// The pinned syntax reader treats macro token trees opaquely (as in
+// sidebar/calendar.rs); the compiler still checks the declaration.
+macro_rules! system_abi {
+    ($($declaration:tt)*) => { unsafe extern "C" { $($declaration)* } };
+}
+system_abi! {
+    fn sysctlbyname(
+        name: *const std::ffi::c_char,
+        oldp: *mut std::ffi::c_void,
+        oldlenp: *mut usize,
+        newp: *mut std::ffi::c_void,
+        newlen: usize,
+    ) -> std::ffi::c_int;
 }
 
 pub(super) fn reduced_transparency() -> bool {

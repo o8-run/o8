@@ -32,13 +32,13 @@ pub(super) const REGISTRATION: Registration =
                 return vec![];
             }
             vec![
-                div()
-                    .id("shortcuts-open")
-                    .debug_selector(|| "shortcuts-open".into())
-                    .p(px(6.))
-                    .cursor_pointer()
-                    .child("Shortcuts")
-                    .on_click(cx.listener(|s, _, window, cx| {
+                super::rail::button(
+                    "shortcuts-open",
+                    super::rail::Icon::Keyboard,
+                    "Keyboard shortcuts",
+                    s.surfaces.shortcuts.view.is_some(),
+                )
+                .on_click(cx.listener(|s, _, window, cx| {
                         s.execute(Command::ShortcutReference, window, cx)
                     }))
                     .into_any_element(),

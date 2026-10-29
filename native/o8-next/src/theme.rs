@@ -65,6 +65,19 @@ pub fn plain_background() -> Rgba {
     })
     .background
 }
+// --t-brand-orange in src/lib/theme/registry.ts.
+pub fn brand_orange() -> Rgba {
+    rgb(0xff5a1f)
+}
+/// Floating menus and tooltips stay opaque: glass surfaces are translucent and
+/// would show the content underneath.
+pub fn menu_fill() -> Rgba {
+    if glass() {
+        Theme::for_appearance(Appearance::Dark).surface_raised
+    } else {
+        current().surface_raised
+    }
+}
 
 // src/lib/theme/glass-material.ts: the only window-wide fill in All Glass.
 pub const GLASS_VEIL: [(f32, f32); 3] = [(0., 0.78), (0.55, 0.44), (1., 0.06)];
