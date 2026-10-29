@@ -3,6 +3,7 @@
 //! and previews a file through /api/v2/files; o8.md reads /api/repo-spec.
 mod quick_docs;
 mod search;
+mod source;
 mod viewer;
 use quick_docs::QuickDocs;
 #[cfg(test)]
@@ -39,6 +40,7 @@ enum File {
         lines: Vec<SharedString>,
         truncated: bool,
         markdown: std::rc::Rc<std::cell::RefCell<crate::retained::RowState>>,
+        source: source::Source,
     },
     Failed(String),
 }
@@ -70,6 +72,7 @@ pub struct FilesPanel {
     _subscriptions: Vec<Subscription>,
     file_generation: u64,
     view_modes: HashMap<String, viewer::ViewMode>,
+    wrap_lines: bool,
 }
 
 impl FilesPanel {
@@ -117,6 +120,7 @@ impl FilesPanel {
                 .collect(),
             file_generation: 0,
             view_modes: HashMap::new(),
+            wrap_lines: true,
         };
         match mode {
             Mode::Files => panel.load_directory(String::new(), cx),
@@ -238,9 +242,10 @@ impl FilesPanel {
                             File::Failed("This binary file has no text preview.".into())
                         } else {
                             File::Loaded {
+                                source: source::Source::new(content.split('\n').count()),
                                 lines: content
                                     .split('\n')
-                                    .map(|line| SharedString::from(line.replace('\t', "    ")))
+                                    .map(|line| SharedString::from(line.replace('\t', "  ")))
                                     .collect(),
                                 truncated: body["truncated"] == true,
                                 markdown: viewer::markdown(
@@ -397,8 +402,7 @@ impl FilesPanel {
         .py(px(4.))
     }
 
-    fn viewer(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let generation = self.file_generation;
+    fn viewer(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let title = self.selected.clone().unwrap_or_default();
         let previewable = viewer::is_markdown(&title);
         let preview = self.view_mode() == viewer::ViewMode::Preview;
@@ -406,59 +410,8 @@ impl FilesPanel {
             File::Loaded { markdown, .. } if previewable && preview => {
                 viewer::markdown_view(markdown.clone(), self.file_generation)
             }
-            File::Loaded {
-                lines, truncated, ..
-            } => {
-                let lines = lines.clone();
-                let gutter = (lines.len().max(1).to_string().len() as f32) * 7.5 + 16.;
-                div()
-                    .id("files-source")
-                    .debug_selector(move || format!("files-source-{generation}"))
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .child(
-                        uniform_list("files-lines", lines.len(), move |range, _, _| {
-                            range
-                                .map(|i| {
-                                    div()
-                                        .h(px(19.))
-                                        .flex()
-                                        .font_family(theme().font_mono)
-                                        .text_size(px(12.))
-                                        .line_height(px(19.))
-                                        .whitespace_nowrap()
-                                        .child(
-                                            div()
-                                                .w(px(gutter))
-                                                .flex_shrink_0()
-                                                .pr(px(10.))
-                                                .flex()
-                                                .justify_end()
-                                                .text_color(theme().text_faint)
-                                                .child((i + 1).to_string()),
-                                        )
-                                        .child(
-                                            div().text_color(theme().text).child(lines[i].clone()),
-                                        )
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                        .flex_1()
-                        .py(px(6.)),
-                    )
-                    .when(*truncated, |view| {
-                        view.child(
-                            div()
-                                .px(px(12.))
-                                .py(px(6.))
-                                .text_size(px(11.))
-                                .text_color(theme().text_muted)
-                                .child("Showing the first 1 MB."),
-                        )
-                    })
-                    .into_any_element()
+            File::Loaded { lines, source, .. } => {
+                source.view(lines, self.wrap_lines, self.file_generation, window)
             }
             File::Failed(error) => status(error.clone()).into_any_element(),
             _ => status("Loading…".into()).into_any_element(),
@@ -493,6 +446,7 @@ impl FilesPanel {
                             .child(title),
                     )
                     .when(previewable, |bar| bar.child(self.preview_toggle(cx)))
+                    .when(!preview, |bar| bar.child(self.wrap_toggle(cx)))
                     .when(self.mode == Mode::Files, |bar| {
                         let label = if self.tree_visible {
                             "Hide file tree"
@@ -534,6 +488,11 @@ impl FilesPanel {
                         )
                     }),
             )
+            .when(matches!(self.file, File::Loaded { truncated: true, .. }), |view| {
+                view.child(div().px(px(12.)).py(px(6.)).text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child("Read-only preview · first 1 MB. Use an editor to change the full file."))
+            })
             .child(body)
     }
 }
@@ -558,7 +517,7 @@ impl Render for FilesPanel {
             .size_full()
             .flex()
             .min_h_0()
-            .when(viewing, |pane| pane.child(self.viewer(cx)))
+            .when(viewing, |pane| pane.child(self.viewer(window, cx)))
             .when(
                 self.mode == Mode::Files && (self.tree_visible || !viewing),
                 |pane| {

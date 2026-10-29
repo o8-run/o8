@@ -708,3 +708,103 @@ fn viewer_preview_source_toggle_remembers_each_file(cx: &mut TestAppContext) {
         Some("AGENTS.md")
     );
 }
+
+#[gpui::test]
+fn viewer_long_source_line_wraps_and_reflows_at_panel_width(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    // Include indentation, Unicode, and an unbroken token as well as words.
+    let line = format!(
+        "    let readable = {:?}; // {}",
+        "wrapped text λ ".repeat(30),
+        "x".repeat(180)
+    );
+    fs::write(PathBuf::from(&fixture.repo).join("src/useful.rs"), &line).unwrap();
+    let (_panel, cx) = cx.add_window_view(|_, cx| {
+        FilesPanel::new(
+            fixture.client.clone(),
+            fixture.repo.clone(),
+            Mode::Files,
+            cx,
+        )
+    });
+    click(cx, "files-row-src");
+    click(cx, "files-row-src/useful.rs");
+    wait(cx, "files-source-line-1-0");
+    click(cx, "files-tree-toggle");
+    cx.simulate_resize(gpui::size(px(700.), px(700.)));
+    draw(cx);
+    let narrow = cx.debug_bounds("files-source-line-1-0").unwrap();
+    let panel = cx.debug_bounds("files-source-1").unwrap();
+    assert!(narrow.size.height > px(19.), "long source line must wrap");
+    assert!(
+        narrow.size.width <= panel.size.width,
+        "wrapped line must fit panel"
+    );
+    cx.simulate_resize(gpui::size(px(1200.), px(700.)));
+    draw(cx);
+    let wide = cx.debug_bounds("files-source-line-1-0").unwrap();
+    assert!(wide.size.width > narrow.size.width);
+    assert!(
+        wide.size.height < narrow.size.height,
+        "resize must reflow existing rows"
+    );
+    click(cx, "files-wrap-toggle");
+    let unwrapped = cx.debug_bounds("files-source-line-1-0").unwrap();
+    assert_eq!(unwrapped.size.height, px(19.));
+    assert!(
+        unwrapped.size.width > wide.size.width,
+        "unwrapped source can scroll horizontally"
+    );
+    click(cx, "files-wrap-toggle");
+    assert_eq!(
+        cx.debug_bounds("files-source-line-1-0")
+            .unwrap()
+            .size
+            .height,
+        wide.size.height
+    );
+}
+
+#[gpui::test]
+fn viewer_plain_text_wraps_by_default_and_toggle_works_from_keyboard(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    fs::write(
+        PathBuf::from(&fixture.repo).join("notes.txt"),
+        "A readable long line of plain text. ".repeat(70),
+    )
+    .unwrap();
+    let (_panel, cx) = cx.add_window_view(|_, cx| {
+        FilesPanel::new(
+            fixture.client.clone(),
+            fixture.repo.clone(),
+            Mode::Files,
+            cx,
+        )
+    });
+    click(cx, "files-row-notes.txt");
+    wait(cx, "files-source-line-1-0");
+    assert!(
+        cx.debug_bounds("files-source-line-1-0")
+            .unwrap()
+            .size
+            .height
+            > px(19.)
+    );
+    click(cx, "files-wrap-toggle");
+    assert_eq!(
+        cx.debug_bounds("files-source-line-1-0")
+            .unwrap()
+            .size
+            .height,
+        px(19.)
+    );
+    cx.simulate_keystrokes("space");
+    draw(cx);
+    assert!(
+        cx.debug_bounds("files-source-line-1-0")
+            .unwrap()
+            .size
+            .height
+            > px(19.)
+    );
+}
