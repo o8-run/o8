@@ -45,6 +45,7 @@ static SELECTED: LazyLock<Appearance> =
         Ok("light") => Appearance::Light,
         Ok("glass") => Appearance::Glass,
         Ok("plain") => Appearance::Dark,
+        Ok("light") => Appearance::Light,
         _ if cfg!(target_os = "macos") && std::env::args().any(|arg| arg == "--app-shell") => {
             Appearance::Glass
         }

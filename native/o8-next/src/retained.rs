@@ -12,11 +12,22 @@ use gpui::{
 };
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(crate) struct PaintedGeometry {
+    pub row: Bounds<Pixels>,
+    pub backdrop: Option<Bounds<Pixels>>,
+    pub text_origin: Option<Point<Pixels>>,
+}
+
 pub struct RowState {
     pub row: Row,
     pub layouts: usize,
+    #[cfg(test)]
+    pub(crate) painted_geometry: RefCell<PaintedGeometry>,
     expanded: Option<bool>,
     cache: Option<Layout>,
+    pub(crate) images: crate::ui::images::Cache,
     pub cards: crate::visualizations::Cards,
 }
 impl RowState {
@@ -32,14 +43,20 @@ impl RowState {
                 .collect(),
         )
     }
+    pub(crate) fn invalidate_image_layout(&mut self) {
+        self.cache = None;
+    }
     pub fn new(row: Row) -> Self {
         let expanded = matches!(&row, Row::Message { nodes, .. } if nodes.iter().any(crate::rich::system_event))
             .then_some(false);
         Self {
             row,
             layouts: 0,
+            #[cfg(test)]
+            painted_geometry: RefCell::new(PaintedGeometry::default()),
             expanded,
             cache: None,
+            images: Default::default(),
             cards: Default::default(),
         }
     }
@@ -85,20 +102,35 @@ struct Backdrop {
     bounds: Bounds<Pixels>,
     color: gpui::Rgba,
 }
+struct Thumbnail {
+    bounds: Bounds<Pixels>,
+    image: Option<std::sync::Arc<gpui::RenderImage>>,
+    selector: String,
+    name: String,
+    unavailable: bool,
+}
 struct Layout {
     size: Size<Pixels>,
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
+    images: Vec<Thumbnail>,
     cards: Vec<(String, Bounds<Pixels>)>,
 }
 struct Builder {
+    row_id: String,
+    image_cache: crate::ui::images::Cache,
     width: Pixels,
     y: Pixels,
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
+    images: Vec<Thumbnail>,
 }
 impl Builder {
     fn rich_node(&mut self, kind: &str, data: &serde_json::Value, expanded: bool, window: &Window) {
+        if kind == "media" && data["kind"] == "image" {
+            self.image(data);
+            return;
+        }
         let label = |value: &serde_json::Value| value.as_str().unwrap_or("").to_owned();
         if kind == "table" {
             let headers = data["headers"].as_array().cloned().unwrap_or_default();
@@ -116,6 +148,9 @@ impl Builder {
                 let mut bottom = top;
                 for (column, cell) in cells.iter().enumerate() {
                     let mut builder = Builder {
+                        row_id: self.row_id.clone(),
+                        image_cache: self.image_cache.clone(),
+                        images: vec![],
                         width: width + px(48.),
                         y: top,
                         lines: vec![],
@@ -244,6 +279,46 @@ impl Builder {
             self.y += height;
         }
     }
+    fn image(&mut self, data: &serde_json::Value) {
+        use crate::ui::images::ImageState;
+        let state = self
+            .image_cache
+            .borrow()
+            .get(data["path"].as_str().unwrap_or(""))
+            .cloned();
+        let unavailable = matches!(state, Some(ImageState::Unavailable));
+        let image = match state {
+            Some(ImageState::Ready(image)) => Some(image),
+            _ => None,
+        };
+        let width = (self.width - px(48.)).max(px(1.));
+        let dimensions = image.as_ref().map(|image| {
+            let pixels = image.size(0);
+            let scale = (f32::from(width) / pixels.width.0 as f32)
+                .min(240. / pixels.height.0 as f32)
+                .min(1.);
+            size(
+                pixels.width.0 as f32 * scale,
+                pixels.height.0 as f32 * scale,
+            )
+        });
+        let dimensions = dimensions
+            .map(|s| s.map(px))
+            .unwrap_or(size(width, px(18.)));
+        let index = self.images.len();
+        self.images.push(Thumbnail {
+            bounds: Bounds::new(point(px(24.), self.y + px(4.)), dimensions),
+            selector: format!(
+                "transcript-image-{}{}-{index}",
+                if unavailable { "error-" } else { "" },
+                self.row_id
+            ),
+            name: data["name"].as_str().unwrap_or("Image").to_owned(),
+            image,
+            unavailable,
+        });
+        self.y += dimensions.height + px(12.);
+    }
     fn plain(&mut self, text: String, font_size: f32, line_height: f32, window: &Window) {
         self.text(
             &[Run {
@@ -357,10 +432,14 @@ fn layout(
     row: &Row,
     width: Pixels,
     expanded: bool,
+    images: crate::ui::images::Cache,
     cards: &crate::visualizations::Cards,
     window: &Window,
 ) -> Layout {
     let mut b = Builder {
+        row_id: row.id().into(),
+        image_cache: images,
+        images: vec![],
         width,
         y: px(8.),
         lines: vec![],
@@ -496,6 +575,7 @@ fn layout(
         size: size(width, b.y + px(8.)),
         lines: b.lines,
         backgrounds: b.backgrounds,
+        images: b.images,
         cards: placements,
     }
 }
@@ -590,7 +670,7 @@ impl IntoElement for RetainedRow {
 }
 impl Element for RetainedRow {
     type RequestLayoutState = ();
-    type PrepaintState = ();
+    type PrepaintState = Vec<gpui::AnyElement>;
     fn id(&self) -> Option<ElementId> {
         (!self.state.borrow().cards.is_empty()).then(|| {
             ElementId::Name(format!("visualization-row:{}", self.state.borrow().row.id()).into())
@@ -624,6 +704,7 @@ impl Element for RetainedRow {
                     &state.row,
                     width,
                     state.expanded.unwrap_or(false),
+                    state.images.clone(),
                     &state.cards,
                     window,
                 ));
@@ -637,11 +718,12 @@ impl Element for RetainedRow {
         &mut self,
         global_id: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
+        row_bounds: Bounds<Pixels>,
         _: &mut (),
         window: &mut Window,
-        _: &mut App,
-    ) {
+        cx: &mut App,
+    ) -> Vec<gpui::AnyElement> {
+        use gpui::{prelude::*, *};
         if let Some(global_id) = global_id {
             let cards: Vec<_> = self.state.borrow().cards.values().cloned().collect();
             window.with_element_state::<crate::visualizations::Lease, _>(global_id, |lease, _| {
@@ -656,17 +738,61 @@ impl Element for RetainedRow {
             });
         }
         let state = self.state.borrow();
-        if let Some(cache) = &state.cache {
-            for (id, placement) in &cache.cards {
-                if let Some(card) = state.cards.get(id) {
-                    card.borrow_mut().paint(
-                        Bounds::new(bounds.origin + placement.origin, placement.size),
-                        window.content_mask().bounds,
-                        window,
-                    );
-                }
+        let cache = state.cache.as_ref().expect("measured row");
+        let origin = row_bounds.origin
+            + point(
+                ((row_bounds.size.width - cache.size.width) / 2.).max(px(0.)),
+                px(0.),
+            );
+        for (id, placement) in &cache.cards {
+            if let Some(card) = state.cards.get(id) {
+                card.borrow_mut().paint(
+                    Bounds::new(origin + placement.origin, placement.size),
+                    window.content_mask().bounds,
+                    window,
+                );
             }
         }
+        cache
+            .images
+            .iter()
+            .map(|image| {
+                let selector = image.selector.clone();
+                let mut child = div()
+                    .id(SharedString::from(selector.clone()))
+                    .debug_selector(move || selector.clone())
+                    .w(image.bounds.size.width)
+                    .h(image.bounds.size.height);
+                if let Some(data) = &image.image {
+                    let data = data.clone();
+                    let name = image.name.clone();
+                    child = child
+                        .cursor_pointer()
+                        .child(
+                            img(data.clone())
+                                .size_full()
+                                .rounded(px(10.))
+                                .object_fit(ObjectFit::Contain),
+                        )
+                        .on_click(move |_, _, cx| {
+                            crate::ui::images::open(data.clone(), name.clone(), cx)
+                        });
+                } else {
+                    child = child
+                        .text_size(px(12.))
+                        .text_color(theme().text_muted)
+                        .child(if image.unavailable {
+                            "Image unavailable"
+                        } else {
+                            "Loading image..."
+                        });
+                }
+                let mut child = child.into_any_element();
+                child.layout_as_root(image.bounds.size.map(AvailableSpace::Definite), window, cx);
+                child.prepaint_at(origin + image.bounds.origin, window, cx);
+                child
+            })
+            .collect()
     }
     fn paint(
         &mut self,
@@ -674,42 +800,47 @@ impl Element for RetainedRow {
         _: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _: &mut (),
-        _: &mut (),
+        images: &mut Vec<gpui::AnyElement>,
         window: &mut Window,
         cx: &mut App,
     ) {
         let state = self.state.borrow();
         let cache = state.cache.as_ref().expect("measured row");
+        #[cfg(test)]
+        state.painted_geometry.replace(PaintedGeometry {
+            row: bounds,
+            ..Default::default()
+        });
         for background in &cache.backgrounds {
-            window.paint_quad(gpui::fill(
-                Bounds::new(
-                    bounds.origin + background.bounds.origin,
-                    background.bounds.size,
-                ),
-                background.color,
-            ));
+            let painted_bounds = Bounds::new(
+                bounds.origin + background.bounds.origin,
+                background.bounds.size,
+            );
+            #[cfg(test)]
+            state
+                .painted_geometry
+                .borrow_mut()
+                .backdrop
+                .get_or_insert(painted_bounds);
+            window.paint_quad(gpui::fill(painted_bounds, background.color));
         }
         for line in &cache.lines {
+            let painted_origin = bounds.origin + line.origin;
+            #[cfg(test)]
+            state
+                .painted_geometry
+                .borrow_mut()
+                .text_origin
+                .get_or_insert(painted_origin);
             line.line
-                .paint_background(
-                    bounds.origin + line.origin,
-                    line.height,
-                    line.align,
-                    None,
-                    window,
-                    cx,
-                )
+                .paint_background(painted_origin, line.height, line.align, None, window, cx)
                 .unwrap();
             line.line
-                .paint(
-                    bounds.origin + line.origin,
-                    line.height,
-                    line.align,
-                    None,
-                    window,
-                    cx,
-                )
+                .paint(painted_origin, line.height, line.align, None, window, cx)
                 .unwrap();
+        }
+        for image in images {
+            image.paint(window, cx);
         }
         self.painted.borrow_mut().insert(self.index);
     }

@@ -9,6 +9,8 @@ mod composer_regions;
 mod conversation;
 #[path = "history.rs"]
 mod history;
+#[path = "transcript_images.rs"]
+pub(crate) mod images;
 #[path = "session_sidebar.rs"]
 mod session_sidebar;
 #[path = "shell_session.rs"]
@@ -58,6 +60,7 @@ pub(crate) struct Surface {
     sessions: Vec<Session>,
     selected: Option<String>,
     rows: Rc<Vec<Rc<RefCell<RowState>>>>,
+    images: images::Cache,
     transcript: Option<Transcript>,
     subscription: Option<Subscription>,
     list: ListState,
@@ -93,6 +96,7 @@ impl Surface {
             sessions: vec![],
             selected: None,
             rows: Rc::new(vec![]),
+            images: Default::default(),
             transcript: None,
             subscription: None,
             list: ListState::new(0, ListAlignment::Top, px(400.)),
@@ -150,6 +154,7 @@ impl Surface {
         self.transcript = None;
         self.selected = Some(id.clone());
         self.rows = Rc::new(vec![]);
+        self.images.borrow_mut().clear();
         self.list = ListState::new(0, ListAlignment::Top, px(400.));
         self.notice = "Reading history…".into();
         cx.notify();
@@ -180,7 +185,7 @@ impl Surface {
                     Ok((history, queue, routing)) => {
                         let key = history.session_key.clone();
                         let transcript = Transcript::new(history);
-                        this.install_rows(transcript.rows.clone());
+                        this.install_rows(transcript.rows.clone(), cx);
                         this.transcript = Some(transcript);
                         this.subscription = Some(transport::subscribe(this.client.clone(), key));
                         this.notice = "Connecting live stream".into();
@@ -203,7 +208,7 @@ impl Surface {
         })
         .detach();
     }
-    fn install_rows(&mut self, next: Vec<Row>) {
+    fn install_rows(&mut self, next: Vec<Row>, cx: &mut Context<Self>) {
         let old = &self.rows;
         let initial = old.is_empty();
         let prefix = old
@@ -237,6 +242,7 @@ impl Surface {
                     .map(|state| state.borrow().cards.clone())
                     .unwrap_or_default();
                 let mut state = RowState::new(row);
+                state.images = self.images.clone();
                 state.cards = cards;
                 state.attach_visualizations(&self.client);
                 Rc::new(RefCell::new(state))
@@ -245,6 +251,7 @@ impl Surface {
         self.list
             .splice(prefix..old.len() - suffix, states.len() - prefix - suffix);
         self.rows = Rc::new(states);
+        self.load_images(cx);
         if initial {
             self.list = self.list.clone().measure_all();
         }
@@ -293,7 +300,7 @@ impl Surface {
             }
         }
         if changed {
-            self.install_rows(self.transcript.as_ref().unwrap().rows.clone());
+            self.install_rows(self.transcript.as_ref().unwrap().rows.clone(), cx);
             if follow_tail && !self.rows.is_empty() {
                 self.list.scroll_to(ListOffset {
                     item_ix: self.rows.len() - 1,
@@ -354,6 +361,7 @@ impl Surface {
                             this.transcript = None;
                             this.selected = None;
                             this.rows = Rc::new(vec![]);
+                            this.images.borrow_mut().clear();
                             this.list = ListState::new(0, ListAlignment::Top, px(400.));
                             this.notice = "No saved sessions.".into();
                         }
@@ -379,6 +387,7 @@ impl Surface {
 
 impl Render for Surface {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.load_images(cx);
         let painted = self.painted.clone();
         let revision = self.key_revision;
         let geometry = &crate::theme::GEOMETRY;
@@ -772,6 +781,14 @@ mod tests;
 #[cfg(test)]
 #[path = "transcript_tests.rs"]
 mod transcript_tests;
+
+#[cfg(test)]
+#[path = "image_history_tests.rs"]
+mod image_history_tests;
+
+#[cfg(test)]
+#[path = "image_cache_tests.rs"]
+mod image_cache_tests;
 
 #[cfg(test)]
 #[path = "visualization_tests.rs"]
