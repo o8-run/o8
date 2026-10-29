@@ -341,8 +341,9 @@ export interface MobileTranscriptCommand {
 }
 
 export interface MobileTurnReceipt {
-  /** Server-correlated outcome; idle state and assistant text are not completion. */
-  terminal?: { userMessageId: string; outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed' };
+  /** Server-correlated outcome; idle state and assistant text are not completion.
+   *  `completedAt` (epoch ms) is when the server saw it; absent on turns saved before 2026-10-29. */
+  terminal?: { userMessageId: string; outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed'; completedAt?: number };
   permissionMode?: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode;
   leadModel: string;
   effort: ThinkingEffort;

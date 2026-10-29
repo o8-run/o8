@@ -42,10 +42,13 @@ export function observeOrchestratorToolHistory(
         const index = event.id ? tools.findIndex(tool => tool.id === event.id)
           : event.type === 'tool_result' ? tools.findIndex(tool => !tool.id && tool.name === event.name && tool.status === 'running') : -1;
         const prior = index >= 0 ? tools[index] : undefined;
+        // When each call started and finished lets a saved turn show which
+        // calls overlapped (ran at the same time) and how long they took.
+        const at = Date.now();
         const tool: MobileTranscriptToolCall = {
           ...prior, id: event.id ?? null, name: prior?.name || event.name,
-          args: args ?? prior?.args, backend,
-          ...(event.type === 'tool_result' ? { status: event.isError ? 'error' : 'done', result: event.output }
+          args: args ?? prior?.args, backend, startedAt: prior?.startedAt ?? at,
+          ...(event.type === 'tool_result' ? { status: event.isError ? 'error' : 'done', result: event.output, finishedAt: at }
             : { status: prior?.status ?? 'running' }),
         };
         tools = index >= 0 ? tools.map((value, position) => position === index ? tool : value) : [...tools, tool];
