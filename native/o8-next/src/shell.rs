@@ -72,6 +72,8 @@ mod features;
 pub struct Shell {
     features: features::State,
     system_glass: bool,
+    /// A window drawn without being shown keeps an opaque root.
+    offscreen: bool,
     chrome: crate::render_region::Regions<Shell>,
     client: Client,
     file: PathBuf,
@@ -107,6 +109,7 @@ impl Shell {
         let mut shell = Self {
             features: features::State::default(),
             system_glass: false,
+            offscreen: false,
             chrome: crate::render_region::Regions::default(),
             client,
             file,

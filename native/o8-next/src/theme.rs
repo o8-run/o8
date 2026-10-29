@@ -2,8 +2,9 @@
 //! views consume semantic tokens and never choose their own palette or fonts.
 use gpui::{Rgba, rgb};
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Appearance {
     Dark,
     Light,
@@ -41,21 +42,62 @@ pub struct Theme {
 // This is the only appearance selection. A future system-appearance hook can
 // replace it without changing any view's choice of semantic tokens.
 // An explicit launch setting wins over the choice saved from the profile menu.
-static SELECTED: LazyLock<Appearance> = LazyLock::new(|| {
+static LAUNCH: LazyLock<Appearance> = LazyLock::new(|| {
     match std::env::var("O8_NEXT_APPEARANCE")
         .ok()
         .or_else(saved_appearance)
         .as_deref()
+        .and_then(named)
     {
-        Some("light") => Appearance::Light,
-        Some("glass") => Appearance::Glass,
-        Some("plain" | "dark") => Appearance::Dark,
-        _ if cfg!(target_os = "macos") && std::env::args().any(|arg| arg == "--app-shell") => {
+        Some(appearance) => appearance,
+        None if cfg!(target_os = "macos") && std::env::args().any(|arg| arg == "--app-shell") => {
             Appearance::Glass
         }
-        _ => Appearance::Dark,
+        None => Appearance::Dark,
     }
 });
+fn named(mode: &str) -> Option<Appearance> {
+    match mode {
+        "light" => Some(Appearance::Light),
+        "glass" => Some(Appearance::Glass),
+        "plain" | "dark" => Some(Appearance::Dark),
+        _ => None,
+    }
+}
+/// The profile menu's choice while the app runs; unset until it switches.
+static CHOSEN: AtomicU8 = AtomicU8::new(u8::MAX);
+fn selected() -> Appearance {
+    match CHOSEN.load(Ordering::Relaxed) {
+        0 => Appearance::Dark,
+        1 => Appearance::Light,
+        2 => Appearance::Glass,
+        _ => *LAUNCH,
+    }
+}
+fn appearance_id(appearance: Appearance) -> u8 {
+    match appearance {
+        Appearance::Dark => 0,
+        Appearance::Light => 1,
+        Appearance::Glass => 2,
+    }
+}
+/// Switches the running appearance and saves it for the next launch. True
+/// when it changed; the caller then refreshes the window and its material.
+pub fn set_appearance(mode: &str) -> bool {
+    let Some(next) = named(mode) else {
+        return false;
+    };
+    save_appearance(mode);
+    if next == selected() {
+        return false;
+    }
+    CHOSEN.store(appearance_id(next), Ordering::Relaxed);
+    true
+}
+/// Changes with the appearance, for caches that keep painted colors.
+pub fn generation() -> u8 {
+    appearance_id(selected())
+}
 fn saved_path() -> Option<std::path::PathBuf> {
     if cfg!(test) {
         return None;
@@ -71,7 +113,7 @@ fn saved_appearance() -> Option<String> {
     )
 }
 /// Saves the profile menu's appearance choice for the next launch.
-pub fn save_appearance(mode: &str) {
+fn save_appearance(mode: &str) {
     if let Some(path) = saved_path() {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -81,21 +123,27 @@ pub fn save_appearance(mode: &str) {
 }
 /// The running appearance as the menu names it: "light", "dark" or "glass".
 pub fn appearance_name() -> &'static str {
-    match *SELECTED {
+    match selected() {
         Appearance::Light => "light",
         Appearance::Glass => "glass",
         Appearance::Dark => "dark",
     }
 }
-static CURRENT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(*SELECTED));
+static DARK: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Dark));
+static LIGHT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Light));
+static GLASS: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Glass));
 pub fn current() -> &'static Theme {
-    &CURRENT
+    match selected() {
+        Appearance::Dark => &DARK,
+        Appearance::Light => &LIGHT,
+        Appearance::Glass => &GLASS,
+    }
 }
 pub fn glass() -> bool {
-    matches!(*SELECTED, Appearance::Glass)
+    matches!(selected(), Appearance::Glass)
 }
 pub fn plain_background() -> Rgba {
-    Theme::for_appearance(if matches!(*SELECTED, Appearance::Light) {
+    Theme::for_appearance(if matches!(selected(), Appearance::Light) {
         Appearance::Light
     } else {
         Appearance::Dark
@@ -105,7 +153,7 @@ pub fn plain_background() -> Rgba {
 /// Floating cards (the desktop overlay material). Opaque, because the native
 /// shell has no backdrop blur to frost a translucent card over glass.
 pub fn popover_background() -> Rgba {
-    match *SELECTED {
+    match selected() {
         Appearance::Light => rgb(0xffffff),
         Appearance::Glass => rgb(0x3e3f47),
         _ => rgb(0x2c2c2e),
@@ -352,7 +400,7 @@ pub fn visualization() -> serde_json::Value {
             color.a
         )
     };
-    serde_json::json!({"colorScheme": if matches!(*SELECTED, Appearance::Light) { "light" } else { "dark" }, "variables": {
+    serde_json::json!({"colorScheme": if matches!(selected(), Appearance::Light) { "light" } else { "dark" }, "variables": {
         "--background":"transparent", "--foreground":css(theme.text), "--muted":css(theme.hover),
         "--muted-foreground":css(theme.text_muted), "--card":css(theme.surface), "--card-foreground":css(theme.text),
         "--popover":css(theme.surface_raised), "--border":css(theme.border), "--accent":css(theme.accent),

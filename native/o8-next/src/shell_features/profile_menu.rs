@@ -247,13 +247,9 @@ fn menu(s: &mut Shell, viewport_width: f32, cx: &mut Context<Shell>) -> gpui::An
                             .when(selected, |option| {
                                 option.child(crate::icon::stroke(CHECK, theme().accent, 13., 2.))
                             })
-                            .on_click(cx.listener(move |this, _, _, cx| {
+                            .on_click(cx.listener(move |this, _, window, cx| {
                                 close(this, cx);
-                                if mode != crate::theme::appearance_name() {
-                                    crate::theme::save_appearance(mode);
-                                    this.notice =
-                                        format!("{label} applies the next time o8 opens.");
-                                }
+                                this.set_appearance(mode, window, cx);
                             }))
                     })),
             )
@@ -372,3 +368,20 @@ const EXTERNAL: &str =
 const CHEVRON_RIGHT: &str = "m9 18 6-6-6-6";
 const CHEVRON_DOWN: &str = "m6 9 6 6 6-6";
 const CHECK: &str = "m5 12 4 4L19 6";
+
+impl Shell {
+    /// Light, Dark or All Glass, switched in place: the window's material
+    /// follows, every view repaints, and the choice is kept for next launch.
+    pub(crate) fn set_appearance(
+        &mut self,
+        mode: &str,
+        window: &mut Window,
+        cx: &mut Context<Shell>,
+    ) {
+        if crate::theme::set_appearance(mode) {
+            self.system_glass = crate::shell::material::switch(window, self.offscreen);
+            window.refresh();
+        }
+        cx.notify();
+    }
+}

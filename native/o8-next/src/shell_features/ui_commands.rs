@@ -58,7 +58,7 @@ fn symon(s: &mut Shell, data: &Value, window: &mut Window, cx: &mut Context<Shel
                 draft(s, text, window, cx);
             }
         }
-        "set" => set(s, data["key"].as_str(), data["value"].as_str(), cx),
+        "set" => set(s, data["key"].as_str(), data["value"].as_str(), window, cx),
         "mobile_qr" => s.notice = "Mobile pairing is not in o8 next yet.".into(),
         "automations" => s.notice = "Automations are not in o8 next yet.".into(),
         _ => {
@@ -88,9 +88,15 @@ fn draft(s: &mut Shell, text: &str, window: &mut Window, cx: &mut Context<Shell>
     }
 }
 
-/// o8_ui_set: theme and surface choose the appearance o8 next opens with;
-/// canvas_mode is the experimentalCanvas operator default.
-fn set(s: &mut Shell, key: Option<&str>, value: Option<&str>, cx: &mut Context<Shell>) {
+/// o8_ui_set: theme and surface switch the appearance and keep it for the next
+/// launch; canvas_mode is the experimentalCanvas operator default.
+fn set(
+    s: &mut Shell,
+    key: Option<&str>,
+    value: Option<&str>,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
     let current = crate::theme::appearance_name();
     let mode = match (key, value) {
         (Some("theme"), Some(theme @ ("dark" | "light"))) => theme,
@@ -110,15 +116,7 @@ fn set(s: &mut Shell, key: Option<&str>, value: Option<&str>, cx: &mut Context<S
             return;
         }
     };
-    if mode != current {
-        crate::theme::save_appearance(mode);
-    }
-    let label = match mode {
-        "glass" => "All Glass",
-        "light" => "Light",
-        _ => "Dark",
-    };
-    s.notice = format!("{label} applies the next time o8 opens.");
+    s.set_appearance(mode, window, cx);
 }
 
 fn canvas_mode(s: &mut Shell, on: bool, cx: &mut Context<Shell>) {

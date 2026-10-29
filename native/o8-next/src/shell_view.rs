@@ -215,6 +215,7 @@ pub(super) fn open_window(
             cx.new(|cx| {
                 let mut shell = Shell::new(client, file, state, window, cx);
                 shell.system_glass = system_glass;
+                shell.offscreen = offscreen;
                 shell
             })
         },

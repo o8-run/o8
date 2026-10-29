@@ -9,17 +9,64 @@ use cocoa::{
 use objc::{class, msg_send, sel, sel_impl};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-pub(super) fn install(window: &gpui::Window) -> bool {
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
-        return false;
-    };
+/// Marks the backdrop this file adds, so a later switch removes only it.
+const IDENTIFIER: &str = "o8-next-glass";
+
+fn content_view(window: &gpui::Window) -> Option<id> {
+    let handle = HasWindowHandle::window_handle(window).ok()?;
     let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return None;
+    };
+    Some(handle.ns_view.as_ptr() as id)
+}
+
+fn identifier() -> id {
+    unsafe {
+        let name = <id as cocoa::foundation::NSString>::init_str(
+            cocoa::foundation::NSString::alloc(nil),
+            IDENTIFIER,
+        );
+        let _: id = msg_send![name, autorelease];
+        name
+    }
+}
+
+/// Removes the backdrop `install` added, when an opaque appearance replaces it.
+pub(super) fn remove(window: &gpui::Window) {
+    let Some(content) = content_view(window) else {
+        return;
+    };
+    // UI thread, native window alive; removing releases the parent's retain.
+    unsafe {
+        let parent = NSView::superview(content);
+        if parent == nil {
+            return;
+        }
+        let subviews: id = msg_send![parent, subviews];
+        let count: usize = msg_send![subviews, count];
+        let mine = identifier();
+        let mut marked = Vec::new();
+        for index in 0..count {
+            let view: id = msg_send![subviews, objectAtIndex: index];
+            let name: id = msg_send![view, identifier];
+            let same: cocoa::base::BOOL = msg_send![name, isEqualToString: mine];
+            if name != nil && same != cocoa::base::NO {
+                marked.push(view);
+            }
+        }
+        for view in marked {
+            let _: () = msg_send![view, removeFromSuperview];
+        }
+    }
+}
+
+pub(super) fn install(window: &gpui::Window) -> bool {
+    let Some(content) = content_view(window) else {
         return false;
     };
-    // This is called once on the UI thread while the native window is alive.
+    // This is called on the UI thread while the native window is alive.
     // addSubview retains the effect; its parent releases it at window teardown.
     unsafe {
-        let content = handle.ns_view.as_ptr() as id;
         // The GPUI content view owns its Metal backing layer. A subview paints
         // above that layer even when ordered below its other subviews.
         let parent = NSView::superview(content);
@@ -44,6 +91,7 @@ pub(super) fn install(window: &gpui::Window) -> bool {
         let _: () = msg_send![name, release];
         NSVisualEffectView::setState_(effect, NSVisualEffectState::Active);
         NSView::setAutoresizingMask_(effect, NSViewWidthSizable | NSViewHeightSizable);
+        let _: () = msg_send![effect, setIdentifier: identifier()];
         let _: () = msg_send![parent, addSubview:effect positioned:NSWindowOrderingMode::NSWindowBelow relativeTo:content];
         let _: () = msg_send![effect, release];
     }
