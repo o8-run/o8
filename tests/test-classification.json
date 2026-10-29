@@ -1373,6 +1373,16 @@
       ]
     },
     {
+      "path": "src/lib/worktree/default-isolation-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "src/lib/worktree/dependency-install-manager-real-path.test.ts",
       "reasons": [
         "apfs-tool",
