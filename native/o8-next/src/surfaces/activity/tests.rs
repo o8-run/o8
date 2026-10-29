@@ -343,9 +343,16 @@ fn activity_empty_local_auth_and_scoped_retention(cx: &mut TestAppContext) {
     );
     // An unregistered local-only workspace never acquires the previous remote feed.
     view.update(cx, |v, _| v.client = fixture.client.clone());
-    activity_click(cx, "workspace-switcher");
-    activity_click(cx, "command-1");
+    // The header switcher is gone; switch the way the palette's workspace
+    // entry does.
+    let second = shell.read_with(cx, |s, _| s.workspaces[1].clone());
+    assert!(second.ends_with("/second-repo"), "{second}");
+    shell.update_in(cx, |s, window, cx| s.switch(second.clone(), window, cx));
     ready(&shell, cx);
+    assert_eq!(
+        shell.read_with(cx, |s, _| s.state.selected.clone()),
+        Some(second)
+    );
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("a c t i v i t y enter");
     ready(&shell, cx);
@@ -553,5 +560,60 @@ fn activity_fork_keyboard_focus_stays_on_the_selected_row(cx: &mut TestAppContex
         view.read_with(&visual, |view, _| view.expanded.clone()),
         None,
         "Opening another fork must keep keyboard focus on its repository-qualified row"
+    );
+}
+
+#[gpui::test]
+fn activity_in_the_right_panel_refreshes_on_its_own(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("activity.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    // Symon's o8_ui_open puts Activity in front in the right panel.
+    let frame = serde_json::json!({"type": "ui-command", "kind": "symon-ui",
+        "payload": {"data": {"surface": "activity"}}});
+    shell.update_in(cx, |s, window, cx| s.ui_command(&frame, window, cx));
+    cx.run_until_parked();
+    draw(cx);
+    let view = shell
+        .read_with(cx, |s, _| {
+            s.content.iter().find_map(|(key, content)| match content {
+                Content::Activity(view) if key.starts_with("panel|") => Some(view.clone()),
+                _ => None,
+            })
+        })
+        .expect("Activity opens in the right panel");
+    for _ in 0..100 {
+        cx.run_until_parked();
+        draw(cx);
+        if view.read_with(cx, |v, _| v.ready()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_ne!(
+        shell.read_with(cx, |s, _| s.active()),
+        Some(Tab::Activity),
+        "the main area shows something else"
+    );
+    view.update(cx, |v, _| {
+        v.loaded_at = Instant::now() - Duration::from_secs(301);
+    });
+    shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+    for _ in 0..100 {
+        cx.run_until_parked();
+        if view.read_with(cx, |v, _| v.ready()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        view.read_with(cx, |v, _| v.loaded_at.elapsed() < Duration::from_secs(60)),
+        "a five-minute-old feed in the panel loads again without a click"
     );
 }

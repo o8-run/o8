@@ -62,10 +62,14 @@ impl ShellView for ActivityPane {
         let view = view.clone();
         cx.defer(move |cx| {
             let _ = shell.update(cx, |shell, cx| {
-                if shell.active() == Some(Tab::Activity)
-                    && matches!(shell.content.get(&shell.key(&Tab::Activity)),
+                let shows = |key: &str| {
+                    matches!(shell.content.get(key),
                         Some(Content::Activity(current)) if current == &view)
-                {
+                };
+                // The main area's Activity tab, or Activity in front in the right panel.
+                let main =
+                    shell.active() == Some(Tab::Activity) && shows(&shell.key(&Tab::Activity));
+                if main || shell.panel_front_key().is_some_and(|key| shows(&key)) {
                     view.update(cx, |activity, cx| activity.tick(cx));
                 }
             });

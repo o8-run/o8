@@ -53,7 +53,7 @@ pub struct ActivityPane {
     pub(super) pending: bool,
     pub(super) notice: String,
     generation: u64,
-    loaded_at: Instant,
+    pub(super) loaded_at: Instant,
     stop_identity: Option<(String, String)>,
     pub(super) focus: FocusHandle,
     pub(super) controls: Vec<(String, Action)>,

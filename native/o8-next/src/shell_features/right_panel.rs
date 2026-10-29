@@ -276,6 +276,15 @@ fn key(s: &Shell, tool: Tool) -> String {
     )
 }
 
+impl Shell {
+    /// The content key of the open panel's front tool, so a surface knows it
+    /// is on screen there as well as in the main area.
+    pub(crate) fn panel_front_key(&self) -> Option<String> {
+        let panel = self.features.read::<Panel>()?;
+        panel.motion.is_open().then(|| key(self, panel.current()))
+    }
+}
+
 pub(super) fn is_open(s: &Shell) -> bool {
     s.features
         .read::<Panel>()
