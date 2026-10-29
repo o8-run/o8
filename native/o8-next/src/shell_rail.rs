@@ -23,8 +23,6 @@ pub(super) enum Icon {
     Folder,
     PullRequest,
     Setup,
-    Keyboard,
-    Account,
 }
 
 impl Icon {
@@ -50,12 +48,6 @@ impl Icon {
             }
             Self::Setup => {
                 "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z"
-            }
-            Self::Keyboard => {
-                "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z M6 8h.01 M10 8h.01 M14 8h.01 M18 8h.01 M8 12h.01 M12 12h.01 M16 12h.01 M7 16h10"
-            }
-            Self::Account => {
-                "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20Z M12 7a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"
             }
         }
     }
@@ -231,7 +223,11 @@ fn brand() -> impl IntoElement {
 }
 
 impl Shell {
-    pub(super) fn render_rail(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_rail(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let top = registrations()
             .iter()
             .flat_map(|r| (r.nav)(self, NavPosition::BeforeWorkspaces, cx))
@@ -313,6 +309,7 @@ impl Shell {
             .child(divider())
             .child(div().flex_1().min_h_0())
             .child(gauge())
+            .children(features::rail(self, window, cx))
             .children(bottom)
             .into_any_element()
     }

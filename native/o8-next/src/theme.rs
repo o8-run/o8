@@ -40,17 +40,53 @@ pub struct Theme {
 
 // This is the only appearance selection. A future system-appearance hook can
 // replace it without changing any view's choice of semantic tokens.
-static SELECTED: LazyLock<Appearance> =
-    LazyLock::new(|| match std::env::var("O8_NEXT_APPEARANCE").as_deref() {
-        Ok("light") => Appearance::Light,
-        Ok("glass") => Appearance::Glass,
-        Ok("plain") => Appearance::Dark,
-        Ok("light") => Appearance::Light,
+// An explicit launch setting wins over the choice saved from the profile menu.
+static SELECTED: LazyLock<Appearance> = LazyLock::new(|| {
+    match std::env::var("O8_NEXT_APPEARANCE")
+        .ok()
+        .or_else(saved_appearance)
+        .as_deref()
+    {
+        Some("light") => Appearance::Light,
+        Some("glass") => Appearance::Glass,
+        Some("plain" | "dark") => Appearance::Dark,
         _ if cfg!(target_os = "macos") && std::env::args().any(|arg| arg == "--app-shell") => {
             Appearance::Glass
         }
         _ => Appearance::Dark,
-    });
+    }
+});
+fn saved_path() -> Option<std::path::PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
+    std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".o8/next-appearance"))
+}
+fn saved_appearance() -> Option<String> {
+    Some(
+        std::fs::read_to_string(saved_path()?)
+            .ok()?
+            .trim()
+            .to_string(),
+    )
+}
+/// Saves the profile menu's appearance choice for the next launch.
+pub fn save_appearance(mode: &str) {
+    if let Some(path) = saved_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, mode);
+    }
+}
+/// The running appearance as the menu names it: "light", "dark" or "glass".
+pub fn appearance_name() -> &'static str {
+    match *SELECTED {
+        Appearance::Light => "light",
+        Appearance::Glass => "glass",
+        Appearance::Dark => "dark",
+    }
+}
 static CURRENT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(*SELECTED));
 pub fn current() -> &'static Theme {
     &CURRENT
@@ -87,6 +123,10 @@ pub fn menu_fill() -> Rgba {
     } else {
         current().surface_raised
     }
+}
+/// The rail Update control's ready fill, RailUpdateControl's #3b82f6.
+pub fn update_ready() -> Rgba {
+    rgb(0x3b82f6)
 }
 /// A merged pull request's status, GitHub's merged purple.
 pub fn pull_merged() -> Rgba {

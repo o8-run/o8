@@ -24,7 +24,7 @@ impl Render for Shell {
             cx,
         );
         let slots = features::render_content(self, &frame, chrome.into_any_element(), window, cx);
-        let rail = self.render_rail(cx);
+        let rail = self.render_rail(window, cx);
         div()
             .size_full()
             .flex()

@@ -31,6 +31,11 @@ pub(super) struct PaletteCommands {
     pub order: i32,
     pub collect: fn(&Shell) -> Vec<Command>,
 }
+/// A control in the rail's bottom group, under the usage gauge.
+pub(super) struct RailItem {
+    pub order: i32,
+    pub render: fn(&mut Shell, &mut Window, &mut Context<Shell>) -> Option<AnyElement>,
+}
 pub(super) struct PreferenceObserver {
     pub order: i32,
     pub install: Hook,
@@ -70,6 +75,9 @@ pub(super) trait ShellFeature: Sync {
         false
     }
     fn observers(&self) -> &'static [PreferenceObserver] {
+        &[]
+    }
+    fn rail(&self) -> &'static [RailItem] {
         &[]
     }
 }
@@ -128,6 +136,13 @@ static COMMANDS: LazyLock<Vec<&'static PaletteCommands>> =
     LazyLock::new(|| ordered(|f| f.commands(), |h| h.order));
 static OBSERVERS: LazyLock<Vec<&'static PreferenceObserver>> =
     LazyLock::new(|| ordered(|f| f.observers(), |h| h.order));
+static RAIL: LazyLock<Vec<&'static RailItem>> =
+    LazyLock::new(|| ordered(|f| f.rail(), |h| h.order));
+pub(super) fn rail(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) -> Vec<AnyElement> {
+    RAIL.iter()
+        .filter_map(|item| (item.render)(s, w, cx))
+        .collect()
+}
 pub(super) fn observe(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
     for observer in OBSERVERS.iter() {
         (observer.install)(s, w, cx);
