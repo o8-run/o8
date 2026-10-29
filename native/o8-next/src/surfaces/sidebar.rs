@@ -18,6 +18,9 @@ pub(super) struct Runtime {
     pub hidden: bool,
     /// The column's edge is being dragged; the width saves on release.
     pub resizing: bool,
+    /// Where the press on the edge began and the width then (useColumnResize's
+    /// startX and startWidth), so the drag threshold never shifts the edge.
+    pub press: std::rc::Rc<std::cell::Cell<Option<(f32, f32)>>>,
     workspace_ledger: Option<Ledger>,
     bootstrapped: bool,
 }
@@ -37,24 +40,31 @@ pub(super) fn width(shell: &Shell) -> f32 {
         .map_or(WIDTH, |width| width.clamp(MIN_WIDTH, MAX_WIDTH))
 }
 
-/// A drag of the column's edge; holds where in the grab target it began.
-pub(super) struct Resize(std::rc::Rc<std::cell::Cell<f32>>);
+/// A drag of the column's edge.
+pub(super) struct Resize;
 impl Render for Resize {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         gpui::Empty
     }
 }
 
-/// Follows the edge under the pointer; `bounds` starts at the column's left.
-pub(super) fn resize(shell: &mut Shell, event: &gpui::DragMoveEvent<Resize>, cx: &App) {
-    let grab = event.drag(cx).0.get() - EDGE_SLOP - 0.5;
-    let x = f32::from(event.event.position.x - event.bounds.left()) - grab;
-    shell.state.sidebar_width = Some(x.clamp(MIN_WIDTH, MAX_WIDTH));
+/// Moves the edge with the pointer from where the press began.
+pub(super) fn resize(shell: &mut Shell, event: &gpui::DragMoveEvent<Resize>) {
+    let Some((from, start)) = shell.surfaces.sidebar.press.get() else {
+        return;
+    };
+    let width = start + f32::from(event.event.position.x) - from;
+    shell.state.sidebar_width = Some(width.clamp(MIN_WIDTH, MAX_WIDTH));
     shell.surfaces.sidebar.resizing = true;
 }
 
 /// A wide grab target over the boundary with a quiet line that glows on hover.
-fn edge(width: f32, resizing: bool, glass: bool) -> impl IntoElement {
+fn edge(
+    width: f32,
+    resizing: bool,
+    glass: bool,
+    press: std::rc::Rc<std::cell::Cell<Option<(f32, f32)>>>,
+) -> impl IntoElement {
     let accent = crate::theme::current().accent;
     div()
         .id("sidebar-resize")
@@ -66,11 +76,10 @@ fn edge(width: f32, resizing: bool, glass: bool) -> impl IntoElement {
         .left(px(width - EDGE_SLOP - 0.5))
         .w(px(EDGE_SLOP * 2. + 1.))
         .cursor(gpui::CursorStyle::ResizeLeftRight)
-        .on_drag(Resize(Default::default()), |drag, offset, _, cx| {
-            drag.0.set(f32::from(offset.x));
-            let grab = drag.0.clone();
-            cx.new(|_| Resize(grab))
+        .on_mouse_down(gpui::MouseButton::Left, move |event, _, _| {
+            press.set(Some((f32::from(event.position.x), width)));
         })
+        .on_drag(Resize, |_, _, _, cx| cx.new(|_| Resize))
         .child(
             div()
                 .absolute()
@@ -159,7 +168,12 @@ pub(super) const REGISTRATION: Registration = Registration {
                 ),
             )
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
-            .child(edge(width, shell.surfaces.sidebar.resizing, shell.system_glass))
+            .child(edge(
+                width,
+                shell.surfaces.sidebar.resizing,
+                shell.system_glass,
+                shell.surfaces.sidebar.press.clone(),
+            ))
             .into_any_element()
     },
     key_down: |shell, event, window, cx| {

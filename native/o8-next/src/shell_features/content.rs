@@ -71,6 +71,7 @@ fn render(
     // The width saves once, when the edge is let go.
     if s.surfaces.sidebar.resizing && !cx.has_active_drag() {
         s.surfaces.sidebar.resizing = false;
+        s.surfaces.sidebar.press.set(None);
         s.persist();
     }
     let content = registrations()
@@ -86,7 +87,7 @@ fn render(
             .min_w_0()
             .on_drag_move(cx.listener(
                 |s, event: &gpui::DragMoveEvent<super::super::sidebar::Resize>, _, cx| {
-                    super::super::sidebar::resize(s, event, cx);
+                    super::super::sidebar::resize(s, event);
                     cx.notify();
                 },
             ))
