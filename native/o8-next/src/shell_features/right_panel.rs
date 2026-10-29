@@ -536,7 +536,7 @@ pub(super) fn open_surface(
             .and_then(|panel| panel.browsers.get(&key(s, Tool::Browser)))
             .cloned()
     {
-        view.update(cx, |browser, cx| browser.navigate(url, cx));
+        view.update(cx, |browser, cx| browser.agent_navigate(url, cx));
     }
     true
 }

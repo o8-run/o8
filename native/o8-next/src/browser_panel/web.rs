@@ -31,6 +31,7 @@ mod macos {
         error: Option<String>,
         popups: Vec<String>,
         navigating: bool,
+        document: bool,
     }
     unsafe fn string(value: id) -> Option<String> {
         if value == nil {
@@ -76,7 +77,8 @@ mod macos {
                 events.error = None; events.navigating = true;
             }
             extern "C" fn finished(object: &Object, _: Sel, _: id, _: id) {
-                events(object).borrow_mut().navigating = false;
+                let mut events = events(object).borrow_mut();
+                events.navigating = false; events.document = true;
             }
             extern "C" fn failed(object: &Object, _: Sel, _: id, _: id, error: id) {
                 unsafe {
@@ -129,6 +131,11 @@ mod macos {
                 // Its own cookies and storage, gone when the app quits.
                 let store: id = msg_send![class!(WKWebsiteDataStore), nonPersistentDataStore];
                 let _: () = msg_send![configuration, setWebsiteDataStore: store];
+                let controller: id = msg_send![configuration, userContentController];
+                let script: id = msg_send![class!(WKUserScript), alloc];
+                let script: id = msg_send![script, initWithSource: ns(include_str!("scrollbars.js")) injectionTime: 0usize forMainFrameOnly: NO];
+                let _: () = msg_send![controller, addUserScript: script];
+                let _: () = msg_send![script, release];
                 let preferences: id = msg_send![configuration, preferences];
                 let _: () = msg_send![preferences, setJavaScriptCanOpenWindowsAutomatically: NO];
                 let rect = NSRect::new(NSPoint::new(0., 0.), NSSize::new(1., 1.));
@@ -170,6 +177,16 @@ mod macos {
             }
         }
 
+        pub fn focus_chrome(&self) {
+            unsafe {
+                let window: id = msg_send![self.view, window];
+                let parent: id = msg_send![self.view, superview];
+                let _: BOOL = msg_send![window, makeFirstResponder: parent];
+            }
+        }
+        pub fn has_document(&self) -> bool {
+            self.events.borrow().document
+        }
         pub fn is_focused(&self) -> bool {
             unsafe {
                 let window: id = msg_send![self.view, window];
@@ -294,6 +311,10 @@ impl Web {
     pub fn reload(&self) {}
     pub fn hide(&self) {}
     pub fn position(&self, _: gpui::Bounds<gpui::Pixels>, _: &gpui::Window) {}
+    pub fn focus_chrome(&self) {}
+    pub fn has_document(&self) -> bool {
+        false
+    }
     pub fn is_focused(&self) -> bool {
         false
     }

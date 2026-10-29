@@ -1,6 +1,7 @@
 //! Browser page lifecycle, ported from classic O8BrowserPane.
-use crate::composer::{Composer, Submit};
+use crate::composer::Submit;
 use crate::theme::current as theme;
+use address::Address;
 use gpui::{
     AnyElement, Bounds, ClipboardItem, Context, Div, Entity, EventEmitter, FocusHandle, FontWeight,
     IntoElement, ParentElement, Pixels, Render, SharedString, Stateful, Styled, Subscription,
@@ -12,6 +13,8 @@ use std::{
     rc::Rc,
     time::{Duration, Instant},
 };
+mod address;
+mod favicon;
 mod model;
 mod state;
 mod view;
@@ -44,8 +47,42 @@ impl Default for Page {
         }
     }
 }
+impl Page {
+    fn observe_status(&mut self, tab: &mut Tab, status: web::Status) -> bool {
+        let mut changed = false;
+        if self.loading != status.loading
+            || self.back != status.back
+            || self.forward != status.forward
+            || self.error != status.error
+        {
+            self.loading = status.loading;
+            self.back = status.back;
+            self.forward = status.forward;
+            self.error = status.error;
+            changed = true;
+        }
+        if let Some(url) = status.url
+            && !status.loading
+            && self.error.is_none()
+            && url != tab.url
+        {
+            tab.url = url;
+            changed = true;
+        }
+        if let Some(title) = status.title
+            && !status.loading
+            && self.error.is_none()
+            && !title.is_empty()
+            && title != tab.title
+        {
+            tab.title = title;
+            changed = true;
+        }
+        changed
+    }
+}
 pub struct BrowserPanel {
-    address: Entity<Composer>,
+    address: Entity<Address>,
     address_focus: FocusHandle,
     tabs: Vec<Tab>,
     active: Option<u64>,
@@ -63,15 +100,15 @@ pub struct BrowserPanel {
     seeded: bool,
     previews: Vec<u16>,
     last_saved: (Vec<Tab>, Option<u64>),
+    favicons: HashMap<String, Option<std::sync::Arc<gpui::Image>>>,
+    favicon_loading: usize,
     _subscriptions: Vec<Subscription>,
 }
 impl BrowserPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let address = cx.new(|cx| {
-            let mut field = Composer::new(cx);
+            let mut field = Address::new(cx);
             field.placeholder = "Enter URL or search...".into();
-            field.inline = true;
-            field.framed = false;
             field
         });
         let submit = cx.subscribe(&address, |this, address, _: &Submit, cx| {
@@ -114,6 +151,8 @@ impl BrowserPanel {
             seeded: false,
             previews: vec![],
             last_saved: (vec![], None),
+            favicons: HashMap::new(),
+            favicon_loading: 0,
             _subscriptions: vec![submit],
         }
     }
@@ -202,7 +241,49 @@ impl BrowserPanel {
             cx.emit(PagesChanged(Snapshot::durable(&self.tabs, self.active)));
         }
     }
+    fn request_favicons(&mut self, cx: &mut Context<Self>) {
+        let hosts: std::collections::BTreeSet<_> = self
+            .tabs
+            .iter()
+            .filter_map(|tab| favicon::host(&tab.url))
+            .collect();
+        self.favicons.retain(|host, _| hosts.contains(host));
+        for host in hosts.into_iter().take(64) {
+            if self.favicon_loading >= 4 {
+                break;
+            }
+            if self.favicons.contains_key(&host) {
+                continue;
+            }
+            self.favicons.insert(host.clone(), None);
+            self.favicon_loading += 1;
+            cx.spawn(async move |this, cx| {
+                let requested = host.clone();
+                let image = cx
+                    .background_executor()
+                    .spawn(async move { favicon::fetch(requested) })
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    this.favicon_loading = this.favicon_loading.saturating_sub(1);
+                    if let Some(slot) = this.favicons.get_mut(&host) {
+                        *slot = image.map(std::sync::Arc::new);
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+    }
+    fn focus_chrome(&self) {
+        for page in self.pages.values() {
+            if let Some(web) = page.web.borrow().as_ref() {
+                web.focus_chrome();
+                break;
+            }
+        }
+    }
     pub fn focus(&self, window: &mut Window) {
+        self.focus_chrome();
         self.address_focus.focus(window);
     }
     pub fn cover(&mut self, covered: bool) {
@@ -279,7 +360,11 @@ impl BrowserPanel {
         } else {
             self.add(url, cx);
         }
+    }
+    pub fn agent_navigate(&mut self, raw: &str, cx: &mut Context<Self>) {
+        self.navigate(raw, cx);
         self.agent_glow = Some(Instant::now());
+        cx.notify();
     }
     fn load_current(&mut self, url: &str, cx: &mut Context<Self>) {
         let Some(id) = self.active else {
@@ -292,7 +377,8 @@ impl BrowserPanel {
         }
         if let Some(page) = self.pages.get_mut(&id) {
             page.error = None;
-            page.loading = true;
+            page.creation_failed.set(false);
+            page.loading = cfg!(target_os = "macos");
             match page.web.borrow().as_ref() {
                 Some(web) => web.load(url),
                 None => *page.pending.borrow_mut() = Some(url.into()),
@@ -315,39 +401,17 @@ impl BrowserPanel {
                 page.loading = false;
                 changed = true;
             }
-            let slot = page.web.borrow();
+            let owned = page.web.clone();
+            let slot = owned.borrow();
             let Some(web) = slot.as_ref() else {
                 continue;
             };
             let status = web.status();
-            if page.loading != status.loading
-                || page.back != status.back
-                || page.forward != status.forward
-                || page.error != status.error
-            {
-                page.loading = status.loading;
-                page.back = status.back;
-                page.forward = status.forward;
-                page.error = status.error;
+            if page.observe_status(tab, status) {
                 changed = true;
             }
             if page.error.is_some() {
                 web.hide();
-            }
-            if let Some(url) = status.url
-                && !status.loading
-                && url != tab.url
-            {
-                tab.url = url;
-                changed = true;
-            }
-            if let Some(title) = status.title
-                && !status.loading
-                && !title.is_empty()
-                && title != tab.title
-            {
-                tab.title = title;
-                changed = true;
             }
             popups.extend(web.take_popups());
         }
@@ -372,7 +436,11 @@ impl BrowserPanel {
         // Never replace an unsubmitted draft. IME-only suppression loses ordinary typing.
         let focused = self.editing;
         if !focused
-            && self.address.read(cx).text != self.current().map_or("", |tab| tab.url.as_str())
+            && !self.address.read(cx).text.chars().eq(self
+                .current()
+                .map_or("", |tab| tab.url.as_str())
+                .chars()
+                .filter(|ch| !matches!(ch, '\r' | '\n')))
         {
             self.sync_address(cx);
         }
@@ -404,6 +472,19 @@ impl BrowserPanel {
             }
         }
         cx.notify();
+    }
+    fn reload(&mut self, cx: &mut Context<Self>) {
+        if self
+            .active
+            .and_then(|id| self.pages.get(&id))
+            .is_some_and(|page| page.error.is_some())
+        {
+            if let Some(url) = self.current().map(|tab| tab.url.clone()) {
+                self.load_current(&url, cx);
+            }
+        } else {
+            self.act(web::Web::reload, cx);
+        }
     }
     fn copy_url(&mut self, cx: &mut Context<Self>) {
         if let Some(tab) = self.current().filter(|tab| !tab.url.is_empty()) {

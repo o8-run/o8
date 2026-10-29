@@ -20,6 +20,23 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
 #[gpui::test]
 fn browser_tabs_open_switch_close_neighbor_and_empty(cx: &mut TestAppContext) {
     let (panel, cx) = cx.add_window_view(|_, cx| BrowserPanel::new(cx));
+    assert_eq!(
+        favicon::host("https://www.example.org/a"),
+        Some("www.example.org".into())
+    );
+    assert_eq!(favicon::host("http://localhost:8123"), None);
+    assert_eq!(favicon::host("http://192.168.1.9:8123"), None);
+    assert_eq!(normalize("  LOCALHOST:8123  "), "https://LOCALHOST:8123");
+    assert_eq!(normalize("12.3.4.5/path"), "http://12.3.4.5/path");
+    assert_eq!(
+        normalize("\u{feff}localhost:8123\u{feff}"),
+        "http://localhost:8123"
+    );
+    assert_eq!(
+        normalize("\u{0085}localhost:8123"),
+        "https://\u{0085}localhost:8123"
+    );
+
     click(cx, "browser-new-tab");
     click(cx, "browser-add-page");
     click(cx, "browser-page-1");
@@ -71,10 +88,43 @@ fn browser_navigation_toolbar_enter_blurs_and_preserves_address_draft(cx: &mut T
         f32::from(cx.debug_bounds("browser-reload").unwrap().size.height),
         22.
     );
+    panel.update(cx, |p, cx| {
+        let tab = p.tabs.first_mut().unwrap();
+        p.pages.get_mut(&tab.id).unwrap().observe_status(
+            tab,
+            web::Status {
+                url: Some("https://example.org/redirected".into()),
+                title: Some("Live title".into()),
+                back: true,
+                forward: false,
+                ..Default::default()
+            },
+        );
+        p.follow(cx);
+    });
+    draw(cx);
+    assert_eq!(
+        panel.read_with(cx, |p, cx| p.address.read(cx).text.clone()),
+        "https://example.org/redirected"
+    );
+    assert!(panel.read_with(cx, |p, _| p.pages[&1].back && !p.pages[&1].forward));
     click(cx, "browser-address");
     cx.simulate_keystrokes("cmd-a");
     cx.simulate_input("localhost:8123/path");
-    panel.update(cx, |p, cx| p.follow(cx));
+    panel.update(cx, |p, cx| {
+        let tab = p.tabs.first_mut().unwrap();
+        p.pages.get_mut(&tab.id).unwrap().observe_status(
+            tab,
+            web::Status {
+                url: Some("https://example.org/moved-while-typing".into()),
+                title: Some("Moved".into()),
+                back: true,
+                forward: true,
+                ..Default::default()
+            },
+        );
+        p.follow(cx);
+    });
     assert_eq!(
         panel.read_with(cx, |p, cx| p.address.read(cx).text.clone()),
         "localhost:8123/path"
@@ -100,6 +150,89 @@ fn browser_navigation_toolbar_enter_blurs_and_preserves_address_draft(cx: &mut T
         .map(|id| cx.debug_bounds(id).expect(id).left())
         .collect();
     assert!(lefts.windows(2).all(|w| w[0] < w[1]));
+    cx.simulate_keystrokes("shift-tab shift-tab space");
+    assert!(
+        panel.read_with(cx, |p, _| p.copied.is_some()),
+        "Copy URL must be reachable and operable from the keyboard"
+    );
+
+    click(cx, "browser-address");
+    cx.simulate_keystrokes("cmd-a");
+    let long = format!("https://example.org/{}", "segment/".repeat(80));
+    cx.simulate_input(&long);
+    for _ in 0..4 {
+        draw(cx);
+    }
+    let field = panel.read_with(cx, |p, _| p.address.clone());
+    let well = cx.debug_bounds("browser-address").unwrap();
+    let (start, end) = cx.update(|window, cx| {
+        field.update(cx, |field, cx| {
+            let len = field.text.encode_utf16().count();
+            (
+                gpui::EntityInputHandler::bounds_for_range(field, 0..0, well, window, cx).unwrap(),
+                gpui::EntityInputHandler::bounds_for_range(field, len..len, well, window, cx)
+                    .unwrap(),
+            )
+        })
+    });
+    assert_eq!(start.top(), end.top(), "long URLs stay on one line");
+    assert!(
+        end.left() >= well.left() && end.left() <= well.right(),
+        "horizontal scroll keeps the cursor visible"
+    );
+    cx.simulate_keystrokes("cmd-a");
+    cx.update(|window, cx| {
+        field.update(cx, |field, cx| {
+            gpui::EntityInputHandler::replace_and_mark_text_in_range(
+                field,
+                None,
+                "日本",
+                Some(2..2),
+                window,
+                cx,
+            );
+        })
+    });
+    cx.simulate_keystrokes("enter");
+    assert!(panel.read_with(cx, |p, cx| p.address.read(cx).composing()));
+    assert_eq!(
+        panel.read_with(cx, |p, _| p.current().unwrap().url.clone()),
+        "http://localhost:8123/path",
+        "IME confirmation must not navigate"
+    );
+    cx.update(|window, cx| {
+        field.update(cx, |field, cx| {
+            gpui::EntityInputHandler::unmark_text(field, window, cx)
+        })
+    });
+    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_input("localhost:8123/path");
+    cx.simulate_keystrokes("shift-enter");
+    draw(cx);
+    panel.update(cx, |p, cx| {
+        let tab = p.tabs.first_mut().unwrap();
+        p.pages.get_mut(&tab.id).unwrap().observe_status(
+            tab,
+            web::Status {
+                url: Some("https://example.org/old-document".into()),
+                title: Some("Old document".into()),
+                error: Some("Could not connect to the server".into()),
+                ..Default::default()
+            },
+        );
+        p.follow(cx);
+    });
+    draw(cx);
+    assert_eq!(
+        panel.read_with(cx, |p, cx| p.address.read(cx).text.clone()),
+        "http://localhost:8123/path"
+    );
+    assert!(cx.debug_bounds("browser-recover").is_some());
+    click(cx, "browser-reload");
+    assert_eq!(
+        panel.read_with(cx, |p, _| p.pages[&1].pending.borrow().clone()),
+        Some("http://localhost:8123/path".into())
+    );
 }
 
 #[gpui::test]
