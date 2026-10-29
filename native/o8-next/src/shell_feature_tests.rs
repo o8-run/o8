@@ -199,7 +199,8 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        panic!("the voice host never received {count} controls");
+        let notice = shell.read_with(visual, |s, _| s.notice.clone());
+        panic!("the voice host never received {count} controls; notice: {notice}");
     };
     let mic = |visual: &mut VisualTestContext| {
         shell.read_with(visual, |s, cx| {

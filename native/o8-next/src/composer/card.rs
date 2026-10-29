@@ -115,64 +115,51 @@ impl Surface {
                 |s, w, cx| s.open_composer_picker("effort", w, cx),
             ))
             .child(
-                self.composer_button("composer-microphone", "", true, cx, |_, window, cx| {
-                    window.dispatch_action(Box::new(super::ToggleVoice), cx);
-                })
-                .w(px(26.))
-                .tooltip({
-                    let tip = match self.voice {
-                        super::VoiceState::Off => "Start voice",
-                        super::VoiceState::Connecting => "Connecting voice…",
-                        super::VoiceState::Live => "Stop voice",
-                    };
-                    move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into()
-                })
-                .when(self.voice != super::VoiceState::Off, |button| {
-                    button.bg(theme().selection)
-                })
-                .child(
-                    canvas(|_, _, _| (), {
-                        let voice = self.voice;
-                        move |bounds, _, window, _| {
-                            // A stroked path activates viewport-sized GPU/MSAA
-                            // targets. This small icon fits the existing quad pass.
-                            let rect = |x, y, w, h| {
-                                Bounds::new(bounds.origin + point(px(x), px(y)), size(px(w), px(h)))
-                            };
-                            let color = match voice {
-                                super::VoiceState::Off => theme().text_secondary,
-                                super::VoiceState::Connecting => theme().text_muted,
-                                super::VoiceState::Live => theme().accent,
-                            };
-                            let stroke = px(1.3);
-                            window.paint_quad(
-                                gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
-                                    .corner_radii(px(3.))
-                                    .border_widths(stroke),
-                            );
-                            window.paint_quad(
-                                gpui::outline(rect(1., 7., 12., 8.), color, Default::default())
-                                    .corner_radii(gpui::Corners {
-                                        top_left: px(0.),
-                                        top_right: px(0.),
-                                        bottom_right: px(6.),
-                                        bottom_left: px(6.),
-                                    })
-                                    .border_widths(gpui::Edges {
-                                        top: px(0.),
-                                        right: stroke,
-                                        bottom: stroke,
-                                        left: stroke,
-                                    }),
-                            );
-                            window.paint_quad(gpui::fill(rect(6.35, 14., 1.3, 4.), color));
-                            window.paint_quad(gpui::fill(rect(4., 17.35, 6., 1.3), color));
-                        }
-                    })
-                    .w(px(14.))
-                    .h(px(20.)),
-                ),
+                self.composer_button("composer-microphone", "", false, cx, |_, _, _| {})
+                    .w(px(26.))
+                    .child(
+                        canvas(
+                            |_, _, _| (),
+                            |bounds, _, window, _| {
+                                // A stroked path activates viewport-sized GPU/MSAA
+                                // targets. This small icon fits the existing quad pass.
+                                let rect = |x, y, w, h| {
+                                    Bounds::new(
+                                        bounds.origin + point(px(x), px(y)),
+                                        size(px(w), px(h)),
+                                    )
+                                };
+                                let color = theme().text_secondary;
+                                let stroke = px(1.3);
+                                window.paint_quad(
+                                    gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
+                                        .corner_radii(px(3.))
+                                        .border_widths(stroke),
+                                );
+                                window.paint_quad(
+                                    gpui::outline(rect(1., 7., 12., 8.), color, Default::default())
+                                        .corner_radii(gpui::Corners {
+                                            top_left: px(0.),
+                                            top_right: px(0.),
+                                            bottom_right: px(6.),
+                                            bottom_left: px(6.),
+                                        })
+                                        .border_widths(gpui::Edges {
+                                            top: px(0.),
+                                            right: stroke,
+                                            bottom: stroke,
+                                            left: stroke,
+                                        }),
+                                );
+                                window.paint_quad(gpui::fill(rect(6.35, 14., 1.3, 4.), color));
+                                window.paint_quad(gpui::fill(rect(4., 17.35, 6., 1.3), color));
+                            },
+                        )
+                        .w(px(14.))
+                        .h(px(20.)),
+                    ),
             )
+            .child(self.voice_button(cx))
             .child(
                 self.composer_button(
                     "send",
@@ -211,6 +198,34 @@ impl Surface {
             .into_any_element()
     }
 
+    /// GPT Live for this chat (ManagedLiveButton), beside the dictation mic
+    /// as in the desktop footer: a waveform that turns accent while voice
+    /// connects or is live. The shell owns the session; Caps Lock toggles it.
+    fn voice_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let active = self.voice != super::VoiceState::Off;
+        let tip = if active {
+            "Live with your OpenAI key · voice usage is billed to your key. Caps Lock stops voice."
+        } else {
+            "GPT Live for this chat · Caps Lock starts or stops voice."
+        };
+        self.composer_button("composer-voice", "", true, cx, |_, window, cx| {
+            window.dispatch_action(Box::new(super::ToggleVoice), cx);
+        })
+        .w(px(26.))
+        .px(px(0.))
+        .justify_center()
+        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
+        .child(crate::icon::stroke(
+            WAVEFORM,
+            if active {
+                theme().accent
+            } else {
+                theme().text_muted
+            },
+            17.,
+            1.7,
+        ))
+    }
     pub(super) fn composer_routing(&self, cx: &App) -> Option<Value> {
         let mut routing = self.routing.clone()?;
         for (key, value) in self.composer.read(cx).controls.overrides.as_object()? {
@@ -562,3 +577,6 @@ impl Surface {
         .into_any_element()
     }
 }
+
+/// Lucide audio-lines, as the desktop Live button draws it.
+const WAVEFORM: &str = "M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4";
