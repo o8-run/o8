@@ -24,6 +24,9 @@ export interface VoiceHostPayload extends Partial<VoiceBinding> {
   text?: string;
   messages?: MobileTranscriptEntry[];
   busy?: boolean;
+  submit?: boolean;
+  final?: boolean;
+  error?: string;
   voiceTerminal?: VoiceTerminal;
   confirmation?: Record<string, unknown>;
   confirmationId?: string;
@@ -47,10 +50,10 @@ export function isVoiceTerminal(value: unknown): value is VoiceTerminal {
 
 /** Only voice frames cross this host's transport; desktop UI commands stay off it. */
 export interface VoiceHostFrame {
-  kind: 'voice-host-state' | 'voice-delegate';
+  kind: 'voice-host-state' | 'voice-delegate' | 'dictation-text' | 'dictation-state';
   payload: Record<string, unknown>;
 }
 export function isVoiceHostFrame(value: Record<string, unknown>): value is Record<string, unknown> & VoiceHostFrame {
-  return ['voice-host-state', 'voice-delegate'].includes(String(value.kind))
+  return ['voice-host-state', 'voice-delegate', 'dictation-text', 'dictation-state'].includes(String(value.kind))
     && !!value.payload && typeof value.payload === 'object' && !Array.isArray(value.payload);
 }

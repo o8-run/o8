@@ -126,6 +126,7 @@ export function ChatLiveHost() {
     const ready = async () => {
       await request({ action: 'ready', hostId: hostId.current });
       if (snapshot.current) await emit(snapshot.current);
+      window.dispatchEvent(new CustomEvent('o8:voice-host-ready', { detail: hostId.current }));
       symonState();
       for (const item of confirmations.values()) await emit({ action: 'confirmation', confirmation: item.data });
     };
@@ -142,6 +143,9 @@ export function ChatLiveHost() {
         try { frame = JSON.parse(event.data); } catch { return; }
         const payload = frame.payload;
         if (frame.type !== 'ui-command' || frame.kind !== 'voice-host-state' || !payload || payload.hostId !== hostId.current) return;
+        if (payload.action === 'dictation-start' || payload.action === 'dictation-stop') {
+          window.dispatchEvent(new CustomEvent('o8:voice-host-dictation-command', { detail: payload })); return;
+        }
         if (payload.action === 'symon-toggle') { window.dispatchEvent(new Event('o8:symon-voice-toggle')); return; }
         if (payload.action === 'decision') {
           const item = confirmations.get(payload.confirmationId ?? '');

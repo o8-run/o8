@@ -4522,11 +4522,38 @@ mod stt_engine {
     /// the in-window DictationHost react only to mic-button (`in-window`)
     /// sessions, so neither double-renders. `is_system_origin()` is set at
     /// Fn-down BEFORE `start()`, so it is stable for the whole session here.
-    fn origin_str() -> &'static str {
-        if crate::fn_hotkey::is_system_origin() {
+    // Headless results stay in-window even if a later Fn gesture changes the
+    // global mode while this session's transcription/polish is still running.
+    fn headless_sessions() -> &'static Mutex<std::collections::HashSet<u64>> {
+        static SESSIONS: OnceLock<Mutex<std::collections::HashSet<u64>>> = OnceLock::new();
+        SESSIONS.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+    }
+
+    fn is_headless_session(session_id: u64) -> bool {
+        headless_sessions()
+            .lock()
+            .map(|sessions| sessions.contains(&session_id))
+            .unwrap_or(true)
+    }
+
+    fn session_origin_with_system(session_id: Option<u64>, system: bool) -> &'static str {
+        if system && !session_id.is_some_and(is_headless_session) {
             "system"
         } else {
             "in-window"
+        }
+    }
+
+    fn session_origin(session_id: Option<u64>) -> &'static str {
+        session_origin_with_system(session_id, crate::fn_hotkey::is_system_origin())
+    }
+
+    struct HeadlessFinalize(u64);
+    impl Drop for HeadlessFinalize {
+        fn drop(&mut self) {
+            if let Ok(mut sessions) = headless_sessions().lock() {
+                sessions.remove(&self.0);
+            }
         }
     }
 
@@ -4601,7 +4628,16 @@ mod stt_engine {
     /// passed straight through for live UI; Final triggers the finalize chain.
     fn forward_event(app: &AppHandle, event: crate::stt::TranscriptEvent) {
         use crate::stt::TranscriptEvent as TE;
-        let origin = origin_str();
+        let session_id = match &event {
+            TE::Partial { session_id, .. }
+            | TE::Final { session_id, .. }
+            | TE::Level { session_id, .. }
+            | TE::AudioFile { session_id, .. }
+            | TE::Complete { session_id } => Some(*session_id),
+            TE::Status { session_id, .. } | TE::Error { session_id, .. } => *session_id,
+            TE::Ready => None,
+        };
+        let origin = session_origin(session_id);
         match event {
             TE::Partial { session_id, text } => {
                 if origin == "system" {
@@ -4815,7 +4851,7 @@ mod stt_engine {
         if !audio_file.is_empty() {
             let _ = std::fs::remove_file(audio_file);
         }
-        if crate::fn_hotkey::is_system_origin() {
+        if session_origin(Some(session_id)) == "system" {
             crate::live_dictation::cancel_session(session_id);
             crate::fn_hotkey::set_system_origin(false);
             #[cfg(target_os = "macos")]
@@ -4856,11 +4892,13 @@ mod stt_engine {
         if !audio_file.is_empty() {
             let _ = std::fs::remove_file(audio_file);
         }
-        let system_origin = crate::fn_hotkey::is_system_origin();
-        crate::live_dictation::cancel_session(session_id);
-        crate::fn_hotkey::set_system_origin(false);
-        #[cfg(target_os = "macos")]
-        crate::spatial_ink_window::disarm(app);
+        let system_origin = session_origin(Some(session_id)) == "system";
+        if !is_headless_session(session_id) {
+            crate::live_dictation::cancel_session(session_id);
+            crate::fn_hotkey::set_system_origin(false);
+            #[cfg(target_os = "macos")]
+            crate::spatial_ink_window::disarm(app);
+        }
         let error = serde_json::json!({
             "type": "error",
             "origin": if system_origin { "system" } else { "in-window" },
@@ -4884,6 +4922,8 @@ mod stt_engine {
     /// control plane emits the named terminal error instead.
     fn run_finalize(app: AppHandle, session_id: u64, audio_file: String, apple_text: String) {
         std::thread::spawn(move || {
+            let headless = is_headless_session(session_id);
+            let _origin_lifetime = HeadlessFinalize(session_id);
             // Long-form Escape-cancel: drop THIS session's finalize entirely — no
             // Whisper, no polish, no paste, no composer emit. Matched by session id
             // so a concurrent (non-cancelled) finalize can't eat the discard. The
@@ -4900,14 +4940,14 @@ mod stt_engine {
             // early return below (discard / voice-command Cancel) could strand it
             // true and mis-route the NEXT dictation to Ask. Routed at the bottom
             // (after polish) via this local. Always false off the macOS Ask path.
-            let is_ask = crate::fn_hotkey::take_ask_mode();
+            let is_ask = !headless && crate::fn_hotkey::take_ask_mode();
             // Same for the Right-Option agent flag — routed at the bottom to the
             // Symon voice agent. Always false off the macOS agent path.
-            let is_agent = crate::fn_hotkey::take_agent_mode();
+            let is_agent = !headless && crate::fn_hotkey::take_agent_mode();
             // Control+Fn Smart Compose uses the same recognizer and target
             // transaction, but routes the cleaned instruction through the
             // subscription-billed Sonnet writer before committing at the caret.
-            let is_smart_compose = crate::fn_hotkey::take_smart_compose_mode();
+            let is_smart_compose = !headless && crate::fn_hotkey::take_smart_compose_mode();
 
             // ── Silence gate (net 1, BEFORE transcription) — #1544-adjacent ──
             // Parse the recorded WAV, compute RMS + duration; if it's below the
@@ -5040,7 +5080,8 @@ mod stt_engine {
             // it. `is_system_origin()` is always false off the macOS system path.
             // Also skipped for an Ask question (`!is_ask`) — a spoken question
             // must reach Gemini verbatim, not be mangled by the command parser.
-            let raw_text = if crate::fn_hotkey::is_system_origin()
+            let raw_text = if !headless
+                && crate::fn_hotkey::is_system_origin()
                 && !is_ask
                 && !is_agent
                 && !is_smart_compose
@@ -5122,7 +5163,7 @@ mod stt_engine {
                 && !crate::stt::polish::should_skip_polish(&ctx)
             {
                 // Publish the actual processing phase before the provider call.
-                let origin = origin_str();
+                let origin = session_origin(Some(session_id));
                 emit_session_stt(
                     &app,
                     origin,
@@ -5242,7 +5283,7 @@ mod stt_engine {
             // event (which would double-fire into the in-window composer). A
             // dictation started by the in-window mic button emits as before. These
             // are mutually exclusive — never paste AND emit.
-            if crate::fn_hotkey::is_system_origin() {
+            if !headless && crate::fn_hotkey::is_system_origin() {
                 // Clear the flag first so a daemon hiccup can't re-paste a stale
                 // session, then paste into whatever app the user is focused on.
                 crate::fn_hotkey::set_system_origin(false);
@@ -5404,6 +5445,25 @@ mod stt_engine {
     /// subsequent `o8:stt-event` payloads.
     pub fn start() -> Result<u64, String> {
         start_with_gate(None)
+    }
+
+    pub fn start_exclusive() -> Result<u64, String> {
+        let input = crate::voice_input::reserve_native_exclusive(next_session_id())?;
+        let session_id = input.session();
+        headless_sessions()
+            .lock()
+            .map_err(|_| "Dictation routing unavailable.")?
+            .insert(session_id);
+        match start_prepared(input, None) {
+            Ok(session_id) => Ok(session_id),
+            Err(error) => {
+                headless_sessions()
+                    .lock()
+                    .map_err(|_| "Dictation routing unavailable.")?
+                    .remove(&session_id);
+                Err(error)
+            }
+        }
     }
 
     /// Like [`start`], but hands the capture pump a duck-settle gate so the mic
@@ -5568,6 +5628,28 @@ mod stt_engine {
         }
 
         #[test]
+        fn headless_origin_survives_a_later_fn_mode_until_finalize_returns() {
+            let _guard = test_lock().lock().unwrap();
+            let session_id = 9_000_001;
+            headless_sessions().lock().unwrap().insert(session_id);
+            let lifetime = HeadlessFinalize(session_id);
+            assert_eq!(
+                session_origin_with_system(Some(session_id), true),
+                "in-window"
+            );
+            assert_eq!(
+                session_origin_with_system(Some(session_id + 1), true),
+                "system"
+            );
+            assert_eq!(
+                session_origin_with_system(Some(session_id + 1), false),
+                "in-window"
+            );
+            drop(lifetime);
+            assert!(!is_headless_session(session_id));
+        }
+
+        #[test]
         fn final_store_hands_transcript_to_first_finalize_path_only() {
             let _guard = test_lock().lock().unwrap();
             finalizing_store().lock().unwrap().clear();
@@ -5626,15 +5708,22 @@ mod stt_engine {
 /// id so the frontend can correlate `o8:stt-event` payloads. macOS only.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
-fn o8_stt_start() -> Result<u64, String> {
-    stt_engine::start()
+fn o8_stt_start(exclusive: Option<bool>) -> Result<u64, String> {
+    if exclusive == Some(true) {
+        stt_engine::start_exclusive()
+    } else {
+        stt_engine::start()
+    }
 }
 
 /// End the active native dictation; triggers the finalize chain. macOS only.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
-fn o8_stt_stop() -> Result<(), String> {
-    stt_engine::stop()
+fn o8_stt_stop(session_id: Option<u64>) -> Result<(), String> {
+    match session_id {
+        Some(session_id) => stt_engine::stop_session(session_id),
+        None => stt_engine::stop(),
+    }
 }
 
 /// Finish the active system-wide dictation from a UI surface. macOS only.

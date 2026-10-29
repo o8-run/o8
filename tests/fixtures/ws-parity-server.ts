@@ -80,6 +80,7 @@ export async function startParityReference(options: {
       CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'),
       CORTEX_IDE_REVIEW_REPO_ROOT: directory, WS_TOKEN: token,
       O8_API_PORT: String(address.port), O8_WS_PORT: String(port),
+      CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${port}`,
       O8_WS_O8D: (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
       O8_NEXT_O8D: options.nativeHttp ? '1' : '0',
       O8D_BINARY: options.binary ?? process.env.O8D_TEST_BINARY,

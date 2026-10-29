@@ -13,6 +13,7 @@ export class VoiceHostBroker {
   private hostId = '';
   private heartbeat = 0;
   private active: (VoiceBinding & { state: string; requestId: string }) | null = null;
+  private dictation: (VoiceBinding & { requestId: string; state: string; submit: boolean; final: boolean }) | null = null;
   private delegations = new Map<string, Delegation>();
   private terminals = new Map<string, VoiceTerminal>();
   private confirmations = new Map<string, Record<string, unknown>>();
@@ -26,7 +27,7 @@ export class VoiceHostBroker {
     return JSON.stringify([threadId, repoPath, queueItemId]);
   }
   state(): Result {
-    return this.available() ? result(200, { ok: true, available: true, active: this.active, confirmations: [...this.confirmations.values()].filter(value => Number(value.expiresAt) > this.now()) })
+    return this.available() ? result(200, { ok: true, available: true, active: this.active, dictation: this.dictation, confirmations: [...this.confirmations.values()].filter(value => Number(value.expiresAt) > this.now()) })
       : result(503, { ok: false, available: false, code: 'VOICE_HOST_UNAVAILABLE' });
   }
   request(input: unknown): Result {
@@ -44,7 +45,7 @@ export class VoiceHostBroker {
       if (!voiceHostId(body.hostId)) return invalid();
       if (this.available() && this.hostId !== body.hostId) return conflict();
       if (this.hostId !== body.hostId) {
-        this.active = null; this.delegations.clear(); this.requests.clear(); this.terminals.clear(); this.confirmations.clear();
+        this.active = null; this.dictation = null; this.delegations.clear(); this.requests.clear(); this.terminals.clear(); this.confirmations.clear();
       }
       this.hostId = body.hostId; this.heartbeat = this.now();
       return result(200, { ok: true, leaseMs: 15_000 });
@@ -60,6 +61,7 @@ export class VoiceHostBroker {
       return result(202, { ok: true });
     }
     if (!isVoiceBinding(body)) return invalid();
+    if (body.action === 'dictation-start' || body.action === 'dictation-stop') return this.dictationRequest(body);
     if (body.action === 'start' || body.action === 'stop') {
       if (!voiceHostId(body.requestId) || (body.action === 'start' && body.source !== 'byok')) return invalid();
       const prior = this.requests.get(body.requestId);
@@ -103,6 +105,7 @@ export class VoiceHostBroker {
     return invalid();
   }
   ui(command: VoiceHostFrame): Result | null {
+    if (command.kind === 'dictation-text' || command.kind === 'dictation-state') return this.dictationFrame(command);
     if (command.kind !== 'voice-host-state' && command.kind !== 'voice-delegate') return null;
     const body = command.payload as unknown as VoiceHostPayload;
     if (!this.available() || body.hostId !== this.hostId) return conflict();
@@ -130,6 +133,46 @@ export class VoiceHostBroker {
       if (this.active.state === 'closing' && ['connecting', 'live'].includes(body.state!)) return conflict();
       this.active.state = body.state!;
     } else if (body.action !== 'transcript' && body.action !== 'interrupt') return invalid();
+    return result(200, { ok: true });
+  }
+  private dictationRequest(body: VoiceHostPayload & VoiceBinding): Result {
+    if (!voiceHostId(body.requestId) || body.action === 'dictation-stop' && typeof body.submit !== 'boolean') return invalid();
+    const prior = this.requests.get(body.requestId);
+    if (prior) return prior.body === JSON.stringify(body) ? prior.result : conflict();
+    if (body.action === 'dictation-start') {
+      if (this.dictation && !['idle', 'error'].includes(this.dictation.state)) return result(409, {
+        ok: false, code: 'VOICE_INPUT_BUSY', state: 'error', error: 'Another dictation is active. Finish it before starting another microphone.',
+      });
+      this.dictation = { binding: body.binding, nonce: body.nonce, threadId: body.threadId, repoPath: body.repoPath,
+        requestId: body.requestId, state: 'starting', submit: false, final: false };
+    } else {
+      if (!this.dictation || !sameVoiceBinding(this.dictation, body) || ['idle', 'error'].includes(this.dictation.state)) return conflict();
+      this.dictation.state = 'stopping'; this.dictation.submit = body.submit!;
+    }
+    this.frame({ ...body, hostId: this.hostId });
+    const receipt = result(202, { ok: true, requestId: body.requestId, state: this.dictation!.state });
+    this.requests.set(body.requestId, { body: JSON.stringify(body), result: receipt });
+    if (this.requests.size > 128) this.requests.delete(this.requests.keys().next().value!);
+    return receipt;
+  }
+  private dictationFrame(command: VoiceHostFrame): Result {
+    const body = command.payload as unknown as VoiceHostPayload;
+    const active = this.dictation;
+    if (!this.available() || body.hostId !== this.hostId || !active || !sameVoiceBinding(active, body) || body.requestId !== active.requestId) return conflict();
+    if (command.kind === 'dictation-text') {
+      if (typeof body.text !== 'string' || typeof body.final !== 'boolean') return invalid();
+      if (['idle', 'error'].includes(active.state) || active.state === 'stopping' && !active.submit || active.final) return conflict();
+      if (body.final) {
+        if (active.state !== 'stopping' || !active.submit) return conflict();
+        active.final = true;
+      }
+    } else {
+      if (!['listening', 'idle', 'error'].includes(body.state ?? '') || body.error !== undefined && typeof body.error !== 'string') return invalid();
+      if (body.state === 'listening') {
+        if (['idle', 'error'].includes(active.state)) return conflict();
+        if (active.state !== 'stopping') active.state = 'listening';
+      } else active.state = body.state!;
+    }
     return result(200, { ok: true });
   }
   /** Settlement can happen after streaming, or in another HTTP worker. */
