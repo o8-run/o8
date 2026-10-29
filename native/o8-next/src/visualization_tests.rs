@@ -210,10 +210,20 @@ fn visualization_card_moves_with_the_centred_reading_column(cx: &mut gpui::TestA
             window.draw(cx).clear();
         });
         let card = view.read_with(cx, |s, _| {
-            s.rows[index].borrow().cards.values().next().unwrap().clone()
+            s.rows[index]
+                .borrow()
+                .cards
+                .values()
+                .next()
+                .unwrap()
+                .clone()
         });
         let card = card.borrow().bounds.expect("card painted").center().x;
-        let composer = cx.debug_bounds("composer-card").expect("composer").center().x;
+        let composer = cx
+            .debug_bounds("composer-card")
+            .expect("composer")
+            .center()
+            .x;
         centres.push((card, composer));
     }
     let card_shift = centres[1].0 - centres[0].0;

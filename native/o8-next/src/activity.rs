@@ -12,6 +12,86 @@ pub struct Step {
     pub group: usize,
     #[serde(skip)]
     pub group_key: String,
+    #[serde(skip)]
+    rollup_kind: RollupKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RollupKind {
+    Read,
+    Spec,
+    Shell,
+    Delegate,
+    Write,
+    Generic,
+}
+
+/// ToolCallChipCluster.classifyTool + ToolCallChip.classifyToolCall. Counting
+/// uses the tool's kind, independently of executable grouping in expanded rows.
+fn rollup_kind(name: &str, args: &Value) -> RollupKind {
+    if name == "o8_command_help" {
+        RollupKind::Generic
+    } else if name.contains("read") || name.contains("cat") || name == "view" {
+        RollupKind::Read
+    } else if name.contains("write")
+        || matches!(name, "edit" | "multiedit")
+        || name.contains("apply")
+    {
+        RollupKind::Write
+    } else if name.contains("dispatch")
+        || name.contains("delegate")
+        || name.contains("spawn")
+        || name == "task"
+    {
+        RollupKind::Delegate
+    } else if name.ends_with("cortex_ask") {
+        RollupKind::Read
+    } else if name.contains("spec") {
+        RollupKind::Spec
+    } else if ["bash", "shell", "exec", "run"]
+        .iter()
+        .any(|part| name.contains(part))
+    {
+        // The desktop only threads a command into classification for these
+        // four shell tools; aliases with a shell-like name still count as Run.
+        let command = matches!(name, "exec" | "exec_command" | "bash" | "shell")
+            .then(|| {
+                ["command", "cmd", "shell"].iter().find_map(|key| {
+                    args[*key]
+                        .as_str()
+                        .map(crate::text::sanitize)
+                        .filter(|value| !value.trim().is_empty())
+                })
+            })
+            .flatten();
+        if command.as_deref().is_some_and(is_brain_command) {
+            RollupKind::Read
+        } else {
+            RollupKind::Shell
+        }
+    } else {
+        RollupKind::Generic
+    }
+}
+
+fn is_brain_command(command: &str) -> bool {
+    use std::sync::LazyLock;
+    static ASK: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"(?:^|[;&|]\s*)\s*o8\s+ask\s+(.+)").unwrap());
+    static QUOTED: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r#"["']([^"']+)["']"#).unwrap());
+    let Some(question) = ASK.captures(command) else {
+        return false;
+    };
+    let rest = question[1].trim();
+    if let Some(quoted) = QUOTED.captures(rest) {
+        !quoted[1].trim().is_empty()
+    } else {
+        rest.split_whitespace()
+            .take_while(|word| !word.starts_with("--"))
+            .next()
+            .is_some()
+    }
 }
 
 fn words(text: &str, depth: usize) -> Vec<String> {
@@ -319,6 +399,7 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
         reason,
         group: 0,
         group_key: key,
+        rollup_kind: rollup_kind(&name, args),
     }
 }
 
@@ -342,9 +423,16 @@ pub fn summary(steps: &[Step]) -> String {
     if let Some(step) = steps.iter().rev().find(|s| s.status == "running") {
         return format!("Running {}", step.command.lines().next().unwrap_or(""));
     }
-    let count = |key: &str| steps.iter().filter(|s| s.group_key == key).count();
-    let (explored, edited) = (count("read"), count("edit"));
-    let ran = steps.len() - explored - edited;
+    let (mut explored, mut ran, mut dispatched, mut edited, mut other) = (0, 0, 0, 0, 0);
+    for step in steps {
+        match step.rollup_kind {
+            RollupKind::Read | RollupKind::Spec => explored += 1,
+            RollupKind::Shell => ran += 1,
+            RollupKind::Delegate => dispatched += 1,
+            RollupKind::Write => edited += 1,
+            RollupKind::Generic => other += 1,
+        }
+    }
     let failed = steps.iter().filter(|s| s.status == "failed").count();
     let noun = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     let mut parts = vec![];
@@ -354,8 +442,17 @@ pub fn summary(steps: &[Step]) -> String {
     if ran > 0 {
         parts.push(format!("Ran {}", noun(ran, "command", "commands")));
     }
+    if dispatched > 0 {
+        parts.push(format!(
+            "Dispatched {}",
+            noun(dispatched, "agent", "agents")
+        ));
+    }
     if edited > 0 {
         parts.push(format!("Edited {}", noun(edited, "file", "files")));
+    }
+    if other > 0 {
+        parts.push(noun(other, "tool call", "tool calls"));
     }
     if failed > 0 {
         parts.push(format!("{failed} failed"));
@@ -367,6 +464,35 @@ pub fn summary(steps: &[Step]) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn rollup_matches_all_desktop_corpus_categories() {
+        let corpus: Value =
+            serde_json::from_str(include_str!("../fixtures/rollup-desktop.json")).unwrap();
+        let mut mismatches = vec![];
+        for case in corpus.as_array().unwrap() {
+            let steps: Vec<_> = case["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .map(|(index, tool)| activity(&index.to_string(), tool, ""))
+                .collect();
+            let actual = summary(&steps);
+            if actual != case["expected"].as_str().unwrap() {
+                mismatches.push(format!(
+                    "{}: native={actual:?}, desktop={:?}",
+                    case["case"], case["expected"]
+                ));
+            }
+        }
+        assert!(
+            mismatches.is_empty(),
+            "{}/56 desktop rollup mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     fn step(command: &str, key: &str, status: &str) -> Step {
         Step {
             id: command.into(),
@@ -375,6 +501,11 @@ mod tests {
             reason: None,
             group: 0,
             group_key: key.into(),
+            rollup_kind: match key {
+                "read" => RollupKind::Read,
+                "edit" => RollupKind::Write,
+                _ => RollupKind::Shell,
+            },
         }
     }
 

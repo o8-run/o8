@@ -8,7 +8,7 @@ use crate::{
 use gpui::{
     App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId, InspectorElementId,
     IntoElement, LayoutId, Pixels, Point, Size, Style, TextAlign, TextRun, Window, WrappedLine,
-    font, point, px, size,
+    point, px, size,
 };
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
@@ -19,6 +19,16 @@ pub(crate) struct PaintedGeometry {
     pub backdrop: Option<Bounds<Pixels>>,
     pub text_origin: Option<Point<Pixels>>,
 }
+
+#[path = "retained/geometry_tests.rs"]
+mod geometry_tests;
+
+#[path = "retained/user_bubble.rs"]
+mod user_bubble;
+
+#[path = "retained/text.rs"]
+mod row_text;
+use row_text::text_run;
 
 pub struct RowState {
     pub row: Row,
@@ -502,43 +512,7 @@ fn layout(
             }
         }
         Row::Message { role, nodes, .. } if role == "user" => {
-            // The desktop user bubble: right-aligned and sized to its text, at most
-            // 80% of the reading column.
-            let pad = px(12.);
-            let top = b.y + px(4.);
-            let mut bubble = Builder {
-                width: ((width - px(48.)) * 0.8).max(px(1.)) + px(48.),
-                y: top + px(8.),
-                lines: vec![],
-                backgrounds: vec![],
-            };
-            for node in nodes {
-                bubble.node(node, expanded, window);
-            }
-            let text = bubble
-                .lines
-                .iter()
-                .map(|line| line.origin.x - px(24.) + line.line.width())
-                .fold(px(1.), Pixels::max);
-            let right = width - px(24.);
-            let shift = right - pad - text - px(24.);
-            b.backgrounds.push(Backdrop {
-                bounds: Bounds::new(
-                    point(right - text - pad * 2., top),
-                    size(text + pad * 2., bubble.y - top + px(8.)),
-                ),
-                color: theme().selection,
-                radius: px(14.),
-            });
-            for mut background in bubble.backgrounds {
-                background.bounds.origin.x += shift;
-                b.backgrounds.push(background);
-            }
-            for mut line in bubble.lines {
-                line.origin.x += shift;
-                b.lines.push(line);
-            }
-            b.y = bubble.y + px(16.);
+            user_bubble::layout(&mut b, width, nodes, expanded, window);
         }
         Row::Message { nodes, .. } => {
             for node in nodes {
@@ -912,51 +886,5 @@ impl Element for RetainedRow {
             image.paint(window, cx);
         }
         self.painted.borrow_mut().insert(self.index);
-    }
-}
-
-fn text_run(run: &Run) -> TextRun {
-    let mut face = font(if run.style == "code" || run.style.starts_with("diff-") {
-        theme().font_mono
-    } else {
-        theme().font_ui
-    });
-    face.weight = if run.style == "strong" {
-        gpui::FontWeight::MEDIUM
-    } else {
-        gpui::FontWeight::LIGHT
-    };
-    if run.style == "em" {
-        face.style = gpui::FontStyle::Italic;
-    }
-    TextRun {
-        len: run.text.len(),
-        font: face,
-        color: (if run.style == "diff-add" {
-            theme().success
-        } else if run.style == "diff-remove" {
-            theme().danger
-        } else if run.style == "link" {
-            theme().accent
-        } else if run.style == "muted" {
-            theme().text_muted
-        } else {
-            theme().text
-        })
-        .into(),
-        background_color: if run.style == "code" {
-            Some(theme().surface.into())
-        } else {
-            None
-        },
-        underline: None,
-        strikethrough: if run.style == "strike" {
-            Some(gpui::StrikethroughStyle {
-                thickness: px(1.),
-                color: None,
-            })
-        } else {
-            None
-        },
     }
 }
