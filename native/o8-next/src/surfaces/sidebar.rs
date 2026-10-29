@@ -14,11 +14,79 @@ pub(super) struct Runtime {
     pub view: Option<Entity<ThreadList>>,
     /// The header's sidebar toggle (Cmd+B) hides the column.
     pub hidden: bool,
+    /// The column's edge is being dragged; the width saves on release.
+    pub resizing: bool,
     workspace_ledger: Option<Ledger>,
     bootstrapped: bool,
 }
 /// The sidebar column; the header lays its toggle and search over it.
 pub(super) const WIDTH: f32 = 280.;
+const MIN_WIDTH: f32 = 160.;
+const MAX_WIDTH: f32 = 500.;
+/// The edge's grab target reaches this far either side of the boundary.
+const EDGE_SLOP: f32 = 8.;
+
+/// The column's width: the dragged one, else the default.
+pub(super) fn width(shell: &Shell) -> f32 {
+    shell
+        .state
+        .sidebar_width
+        .filter(|width| width.is_finite())
+        .map_or(WIDTH, |width| width.clamp(MIN_WIDTH, MAX_WIDTH))
+}
+
+/// A drag of the column's edge; holds where in the grab target it began.
+pub(super) struct Resize(std::rc::Rc<std::cell::Cell<f32>>);
+impl Render for Resize {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
+
+/// Follows the edge under the pointer; `bounds` starts at the column's left.
+pub(super) fn resize(shell: &mut Shell, event: &gpui::DragMoveEvent<Resize>, cx: &App) {
+    let grab = event.drag(cx).0.get() - EDGE_SLOP - 0.5;
+    let x = f32::from(event.event.position.x - event.bounds.left()) - grab;
+    shell.state.sidebar_width = Some(x.clamp(MIN_WIDTH, MAX_WIDTH));
+    shell.surfaces.sidebar.resizing = true;
+}
+
+/// A wide grab target over the boundary with a quiet line that glows on hover.
+fn edge(width: f32, resizing: bool, glass: bool) -> impl IntoElement {
+    let accent = crate::theme::current().accent;
+    div()
+        .id("sidebar-resize")
+        .debug_selector(|| "sidebar-resize".into())
+        .group("sidebar-resize")
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left(px(width - EDGE_SLOP - 0.5))
+        .w(px(EDGE_SLOP * 2. + 1.))
+        .cursor(gpui::CursorStyle::ResizeLeftRight)
+        .on_drag(Resize(Default::default()), |drag, offset, _, cx| {
+            drag.0.set(f32::from(offset.x));
+            let grab = drag.0.clone();
+            cx.new(|_| Resize(grab))
+        })
+        .child(
+            div()
+                .absolute()
+                .top(px(18.))
+                .bottom(px(if glass { 0. } else { 18. }))
+                .left(px(EDGE_SLOP))
+                .w(px(1.))
+                .bg(accent)
+                .shadow(vec![gpui::BoxShadow {
+                    color: accent.into(),
+                    offset: gpui::point(px(0.), px(0.)),
+                    blur_radius: px(8.),
+                    spread_radius: px(0.),
+                }])
+                .opacity(if resizing { 0.85 } else { 0. })
+                .group_hover("sidebar-resize", |style| style.opacity(0.85)),
+        )
+}
 pub(super) const REGISTRATION: Registration = Registration {
     initialize,
     overlay_command: true,
@@ -74,19 +142,22 @@ pub(super) const REGISTRATION: Registration = Registration {
                 .child(content)
                 .into_any_element();
         }
+        let width = width(shell);
         div()
+            .relative()
             .flex()
             .flex_1()
             .min_h_0()
             .child(
                 gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
                     gpui::StyleRefinement::default()
-                        .w(px(WIDTH))
+                        .w(px(width))
                         .h_full()
                         .flex_shrink_0(),
                 ),
             )
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
+            .child(edge(width, shell.surfaces.sidebar.resizing, shell.system_glass))
             .into_any_element()
     },
     key_down: |shell, event, window, cx| {
