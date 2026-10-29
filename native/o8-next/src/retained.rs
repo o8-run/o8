@@ -578,6 +578,7 @@ fn layout(
                     size: size(width, b.y + px(8.)),
                     lines: b.lines,
                     backgrounds: b.backgrounds,
+                    images: vec![],
                     cards: vec![],
                 };
             }
