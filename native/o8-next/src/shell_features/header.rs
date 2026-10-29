@@ -26,6 +26,7 @@ fn render(
     let forward = adjacent(s, 1);
     let hidden = s.surfaces.sidebar.hidden;
     let panel = super::right_panel::width(s, window);
+    let panel_open = super::right_panel::is_open(s);
     let history = |id: &'static str, path, tip, target: Option<usize>, cx: &mut Context<Shell>| {
         icon_button(id, path, 15., 1.7, tip, target.is_some()).when_some(target, |button, visit| {
             button.on_click(cx.listener(move |this, _, window, cx| {
@@ -58,9 +59,9 @@ fn render(
                 .items_center()
                 .gap(px(4.))
                 .mt(px(1.3))
-                .child(super::header_tools::play(s, cx))
-                .child(super::header_tools::tools(s, cx))
-                .when(panel.is_none(), |row| {
+                .child(super::header_tools::play(s, window, cx))
+                .child(super::header_tools::tools(s, window, cx))
+                .when(!panel_open, |row| {
                     row.child(super::right_panel::toggle_button(false, cx))
                 }),
         )
@@ -104,8 +105,8 @@ fn render(
                 )
             })
             .child(workspace)
-            .when_some(panel, |row, width| {
-                row.child(super::right_panel::header(width, cx))
+            .when_some(panel, |row, (full, shown)| {
+                row.child(super::right_panel::header(s, full, shown, cx))
             })
             .into_any_element(),
     )
@@ -301,14 +302,47 @@ pub(super) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &m
 /// are quiet labels that fill on hover. Each pill leads with its kind's glyph,
 /// which turns into a close mark while the pill is hovered.
 fn tabs(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
+    // The strip scrolls; an 18px fade at its right edge reveals more pills
+    // behind it instead of cutting one off (HeaderPillStrip's edge mask).
+    let fade = if s.system_glass {
+        crate::theme::veil_color(crate::theme::GLASS_VEIL[0].1)
+    } else {
+        theme().background
+    };
+    div()
+        .relative()
+        .flex()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .items_center()
+        .child(strip(s, cx))
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right_0()
+                .w(px(18.))
+                .bg(gpui::linear_gradient(
+                    90.,
+                    gpui::linear_color_stop(gpui::Rgba { a: 0., ..fade }, 0.),
+                    gpui::linear_color_stop(fade, 1.),
+                )),
+        )
+}
+
+fn strip(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
     let active = s.active();
     let geometry = crate::theme::GEOMETRY;
     div()
         .flex()
-        .flex_1()
+        .size_full()
         .min_w_0()
         .items_center()
         .gap(px(2.))
+        .pl(px(6.))
+        .pr(px(18.))
         .id("surface-tabs")
         .overflow_x_scroll()
         .children(

@@ -14,7 +14,7 @@ fn render(
     s: &mut Shell,
     frame: &Frame,
     window: &mut Window,
-    _: &mut Context<Shell>,
+    cx: &mut Context<Shell>,
 ) -> Option<AnyElement> {
     let active = s.active();
     let content = registrations()
@@ -33,8 +33,8 @@ fn render(
         .child(content.unwrap_or_else(|| div().p(px(24.)).child(frame.empty).into_any_element()))
         .into_any_element();
     // The right panel sits inside the sidebar decoration, beside the content.
-    let content = match super::right_panel::element(s, window) {
-        Some((panel, width)) => div()
+    let content = match super::right_panel::element(s, window, cx) {
+        Some((panel, _, shown)) => div()
             .flex()
             .flex_1()
             .min_h_0()
@@ -42,11 +42,10 @@ fn render(
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
             .child(
                 div()
-                    .w(px(width))
+                    .w(px(shown))
                     .h_full()
                     .flex_shrink_0()
-                    .flex()
-                    .flex_col()
+                    .overflow_hidden()
                     .border_l_1()
                     .border_color(theme().border)
                     .child(panel),
