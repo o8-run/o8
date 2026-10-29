@@ -403,7 +403,7 @@ impl Surface {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Attach images".into()),
+            prompt: Some("Attach images or files".into()),
         });
         let editor = self.composer.clone();
         cx.spawn(async move |_, cx| {
@@ -467,6 +467,13 @@ impl Surface {
                                 .focus
                                 .get("composer-image-remove-0")
                                 .filter(|_| !input.controls.images.is_empty())
+                                .or_else(|| {
+                                    input
+                                        .controls
+                                        .focus
+                                        .get("composer-file-remove-0")
+                                        .filter(|_| !input.controls.files.is_empty())
+                                })
                             {
                                 focus.focus(window);
                             } else {

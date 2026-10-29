@@ -288,3 +288,183 @@ fn native_image_remove_full_enter_press_once(cx: &mut TestAppContext) {
 fn native_image_remove_full_space_press_once(cx: &mut TestAppContext) {
     check_full_remove_press("space", cx);
 }
+
+#[gpui::test]
+fn native_video_drop_attaches_by_path_and_sends_the_path(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    image_session(cx, &surface);
+    let dir = std::env::temp_dir().join(format!("o8-drop-files-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let video = dir.join("screen recording.mov");
+    let log = dir.join("build.log");
+    fs::write(&video, b"not decoded").unwrap();
+    fs::write(&log, b"line").unwrap();
+    let position = cx.debug_bounds("composer-input").unwrap().center();
+    cx.simulate_event(FileDropEvent::Entered {
+        position,
+        paths: ExternalPaths::new([video.clone(), log.clone(), dir.clone()]),
+    });
+    draw(cx);
+    cx.simulate_event(FileDropEvent::Submit { position });
+    cx.run_until_parked();
+    draw(cx);
+    // Files are never decoded as pictures; the folder is refused with a reason.
+    assert!(images(&surface, cx).is_empty());
+    surface.read_with(cx, |s, cx| {
+        let controls = &s.composer.read(cx).controls;
+        assert_eq!(controls.files, vec![video.clone(), log.clone()]);
+        assert_eq!(controls.error, "Choose a file, not a folder.");
+    });
+    assert!(cx.debug_bounds("composer-file-0").is_some());
+    click("composer-file-remove-1", cx);
+    click("composer-input", cx);
+    cx.simulate_input("What is in this recording?");
+    click("send", cx);
+    let expected = format!(
+        "What is in this recording?\n\nAttached video: {}",
+        video.display()
+    );
+    surface.read_with(cx, |s, cx| {
+        let payload = &s.queue["items"][0]["payload"];
+        assert_eq!(payload["text"], expected);
+        assert!(
+            payload["wireMessage"]
+                .as_str()
+                .unwrap()
+                .ends_with(&expected)
+        );
+        assert_eq!(payload["images"], json!([]));
+        assert!(s.composer.read(cx).controls.files.is_empty());
+    });
+    fs::remove_dir_all(dir).unwrap();
+}
+
+fn drop_paths(paths: Vec<std::path::PathBuf>, cx: &mut VisualTestContext) {
+    let position = cx.debug_bounds("composer-input").unwrap().center();
+    cx.simulate_event(FileDropEvent::Entered {
+        position,
+        paths: ExternalPaths::new(paths),
+    });
+    draw(cx);
+    cx.simulate_event(FileDropEvent::Submit { position });
+    cx.run_until_parked();
+    draw(cx);
+}
+
+fn check_file_remove_press(key: &str, cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    image_session(cx, &surface);
+    cx.simulate_input("Keep the file draft");
+    let dir = std::env::temp_dir().join(format!("o8-file-keys-{}-{key}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let files = vec![dir.join("recording.mov"), dir.join("notes.log")];
+    for path in &files {
+        fs::write(path, b"attached by path").unwrap();
+    }
+    let focused = |index: usize, cx: &mut VisualTestContext| {
+        surface.update_in(cx, |s, window, cx| {
+            s.composer
+                .read(cx)
+                .controls
+                .focus
+                .get(&format!("composer-file-remove-{index}"))
+                .is_some_and(|focus| focus.is_focused(window))
+        })
+    };
+    // Exercise both original positions independently, using real Tab and full
+    // key down/frame/key up input, so a synthetic click cannot remove twice.
+    for index in [0, 1] {
+        drop_paths(files.clone(), cx);
+        click("composer-input", cx);
+        cx.simulate_keystrokes("tab");
+        draw(cx);
+        assert!(
+            focused(0, cx),
+            "Tab must reach the first file remove control"
+        );
+        if index == 1 {
+            cx.simulate_keystrokes("tab");
+            draw(cx);
+            assert!(
+                focused(1, cx),
+                "Tab must reach the second file remove control"
+            );
+        }
+        full_remove_press(key, cx);
+        surface.read_with(cx, |s, cx| {
+            assert_eq!(
+                s.composer.read(cx).controls.files,
+                vec![files[1 - index].clone()],
+                "one full {key} press removes only the selected file at {index}"
+            );
+        });
+        if index == 0 {
+            assert!(
+                focused(0, cx),
+                "the following file inherits the focused slot"
+            );
+        } else {
+            surface.update_in(cx, |s, window, cx| {
+                assert!(s.composer.read(cx).focus.is_focused(window));
+            });
+            cx.simulate_keystrokes("tab");
+            draw(cx);
+            assert!(focused(0, cx));
+        }
+        full_remove_press(key, cx);
+        surface.update_in(cx, |s, window, cx| {
+            let input = s.composer.read(cx);
+            assert!(input.controls.files.is_empty());
+            assert!(
+                input.focus.is_focused(window),
+                "last removal restores the editor"
+            );
+            assert_eq!(input.text, "Keep the file draft");
+            assert!(
+                s.queue["items"].as_array().unwrap().is_empty(),
+                "removal must not send"
+            );
+        });
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[gpui::test]
+fn native_file_remove_full_enter_reaches_each_chip(cx: &mut TestAppContext) {
+    check_file_remove_press("enter", cx);
+}
+
+#[gpui::test]
+fn native_file_remove_full_space_reaches_each_chip(cx: &mut TestAppContext) {
+    check_file_remove_press("space", cx);
+}
+
+#[gpui::test]
+fn native_mixed_image_folder_drop_keeps_rejection_feedback(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    image_session(cx, &surface);
+    let dir = std::env::temp_dir().join(format!("o8-mixed-folder-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let picture = dir.join("picture.png");
+    fs::write(&picture, png()).unwrap();
+    drop_paths(vec![picture.clone(), dir.clone()], cx);
+    assert_eq!(
+        images(&surface, cx).len(),
+        1,
+        "the accepted picture still attaches"
+    );
+    assert!(cx.debug_bounds("composer-image-0").is_some());
+    surface.read_with(cx, |s, cx| {
+        let controls = &s.composer.read(cx).controls;
+        assert!(
+            controls.files.is_empty(),
+            "folders must not attach as files"
+        );
+        assert_eq!(controls.pending_images, 0);
+        assert_eq!(controls.error, "Choose a file, not a folder.");
+    });
+    fs::remove_dir_all(dir).unwrap();
+}
