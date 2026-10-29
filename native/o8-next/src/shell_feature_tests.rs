@@ -179,7 +179,11 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
     ready(&shell, &mut visual);
     // A chat whose queue the composer fixture owns.
     shell.update_in(&mut visual, |s, window, cx| {
-        s.open_thread("thoughts-composer-first".into(), window, cx)
+        s.execute(
+            Command::Session("thoughts-composer-first".into()),
+            window,
+            cx,
+        )
     });
     ready(&shell, &mut visual);
     let send = |kind: &str, payload: Value, visual: &mut VisualTestContext| {

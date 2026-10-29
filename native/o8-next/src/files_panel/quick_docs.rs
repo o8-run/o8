@@ -219,6 +219,78 @@ impl Render for QuickDocs {
                         .id("quick-docs-items")
                         .max_h(px(220.))
                         .overflow_y_scroll()
+                        // Pins lead the list, so they show without scrolling
+                        // past every Quick doc.
+                        .when(!self.pins.is_empty(), |d| {
+                            d.child(
+                                div()
+                                    .p(px(6.))
+                                    .text_size(px(11.))
+                                    .text_color(theme().text_faint)
+                                    .child("Pinned files"),
+                            )
+                        })
+                        .children(self.pins.clone().into_iter().enumerate().map(|(i, path)| {
+                            let select = path.clone();
+                            let unpin = path.clone();
+                            div()
+                                .mx(px(6.))
+                                .flex()
+                                .items_center()
+                                .rounded(px(5.))
+                                .when(self.selected.as_ref() == Some(&path), |d| {
+                                    d.bg(theme().selection)
+                                })
+                                .child(
+                                    div()
+                                        .id(("pinned-file", i))
+                                        .debug_selector(move || format!("pinned-file-{select}"))
+                                        .flex_1()
+                                        .min_w_0()
+                                        .h(px(26.))
+                                        .px(px(6.))
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(7.))
+                                        .text_size(px(12.))
+                                        .text_color(theme().text_secondary)
+                                        .cursor_pointer()
+                                        .hover(|d| d.bg(theme().hover))
+                                        .child(crate::icon::stroke(
+                                            file_icon(&path),
+                                            file_color(&path),
+                                            14.,
+                                            1.6,
+                                        ))
+                                        .child(
+                                            div()
+                                                .overflow_hidden()
+                                                .text_ellipsis()
+                                                .whitespace_nowrap()
+                                                .child(
+                                                    path.rsplit('/')
+                                                        .next()
+                                                        .unwrap_or(&path)
+                                                        .to_owned(),
+                                                ),
+                                        )
+                                        .on_click(cx.listener(move |_, _, _, cx| {
+                                            cx.emit(Pick(path.clone()))
+                                        })),
+                                )
+                                .child(
+                                    button(("unpin", i), "Unpin file")
+                                        .debug_selector({
+                                            let path = unpin.clone();
+                                            move || format!("unpin-{path}")
+                                        })
+                                        .child("×")
+
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.mutate(unpin.clone(), false, cx)
+                                        })),
+                                )
+                        }))
                         .children(
                             self.groups
                                 .clone()
@@ -294,76 +366,6 @@ impl Render for QuickDocs {
                                         ))
                                 }),
                         )
-                        .when(!self.pins.is_empty(), |d| {
-                            d.child(
-                                div()
-                                    .p(px(6.))
-                                    .text_size(px(11.))
-                                    .text_color(theme().text_faint)
-                                    .child("Pinned files"),
-                            )
-                        })
-                        .children(self.pins.clone().into_iter().enumerate().map(|(i, path)| {
-                            let select = path.clone();
-                            let unpin = path.clone();
-                            div()
-                                .mx(px(6.))
-                                .flex()
-                                .items_center()
-                                .rounded(px(5.))
-                                .when(self.selected.as_ref() == Some(&path), |d| {
-                                    d.bg(theme().selection)
-                                })
-                                .child(
-                                    div()
-                                        .id(("pinned-file", i))
-                                        .debug_selector(move || format!("pinned-file-{select}"))
-                                        .flex_1()
-                                        .min_w_0()
-                                        .h(px(26.))
-                                        .px(px(6.))
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(7.))
-                                        .text_size(px(12.))
-                                        .text_color(theme().text_secondary)
-                                        .cursor_pointer()
-                                        .hover(|d| d.bg(theme().hover))
-                                        .child(crate::icon::stroke(
-                                            file_icon(&path),
-                                            file_color(&path),
-                                            14.,
-                                            1.6,
-                                        ))
-                                        .child(
-                                            div()
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .child(
-                                                    path.rsplit('/')
-                                                        .next()
-                                                        .unwrap_or(&path)
-                                                        .to_owned(),
-                                                ),
-                                        )
-                                        .on_click(cx.listener(move |_, _, _, cx| {
-                                            cx.emit(Pick(path.clone()))
-                                        })),
-                                )
-                                .child(
-                                    button(("unpin", i), "Unpin file")
-                                        .debug_selector({
-                                            let path = unpin.clone();
-                                            move || format!("unpin-{path}")
-                                        })
-                                        .child("×")
-
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.mutate(unpin.clone(), false, cx)
-                                        })),
-                                )
-                        }))
                         .when(total == 0, |d| {
                             d.child(status("Pin files you reach for often.".into()))
                         }),
