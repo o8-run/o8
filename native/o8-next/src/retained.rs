@@ -57,6 +57,7 @@ impl RowState {
         self.cache = None;
     }
     pub fn new(row: Row) -> Self {
+        crate::trace::note(&row);
         let expanded = (matches!(&row, Row::Activity { .. })
             || matches!(&row, Row::Message { nodes, .. } if nodes.iter().any(crate::rich::system_event)))
         .then_some(false);
@@ -69,6 +70,27 @@ impl RowState {
             cache: None,
             images: Default::default(),
             cards: Default::default(),
+        }
+    }
+    /// A row that changed in place (a tool step finished) keeps its disclosure;
+    /// a trace watched while live stays open once it finishes.
+    pub fn keep_disclosure(&mut self, previous: &RowState) {
+        if self.expanded.is_some() && previous.expanded.is_some() {
+            self.expanded = previous.expanded;
+        }
+        if let (Row::Activity { .. }, Row::Activity { trace, .. }) = (&self.row, &previous.row)
+            && trace.live
+        {
+            self.expanded = Some(true);
+        }
+    }
+    pub(crate) fn disclosure(&self) -> bool {
+        self.expanded.unwrap_or(false)
+    }
+    pub(crate) fn toggle_disclosure(&mut self) {
+        if let Some(expanded) = self.expanded.as_mut() {
+            *expanded = !*expanded;
+            self.cache = None;
         }
     }
     pub fn attach_visualizations(&mut self, client: &crate::client::Client) {
@@ -101,12 +123,6 @@ impl RowState {
             self.cache = None;
         }
         changed
-    }
-    /// A row that changed in place (a tool step finished) keeps its disclosure.
-    pub fn keep_disclosure(&mut self, previous: &RowState) {
-        if self.expanded.is_some() && previous.expanded.is_some() {
-            self.expanded = previous.expanded;
-        }
     }
 }
 struct Line {
@@ -624,6 +640,9 @@ pub struct RetainedRow {
 impl RetainedRow {
     pub fn interactive(self, list: &gpui::ListState) -> gpui::AnyElement {
         use gpui::prelude::*;
+        if matches!(self.state.borrow().row, Row::Activity { .. }) {
+            return crate::trace::element(self.state.clone(), self.index, list);
+        }
         if !self.state.borrow().cards.is_empty() {
             let state = self.state.clone();
             let list = list.clone();

@@ -85,6 +85,7 @@ fn emit(
 fn run(
     client: &Client,
     stream: &str,
+    live: Option<&Value>,
     sender: &SyncSender<Incoming>,
     cancel: &Cancel,
     backoff: &mut u64,
@@ -120,6 +121,11 @@ fn run(
                 .into(),
         ))
         .map_err(|_| ())?;
+    if let Some(live) = live {
+        socket
+            .send(Message::Text(live.to_string().into()))
+            .map_err(|_| ())?;
+    }
     if !emit(sender, cancel, client, Incoming::Status("Live · read-only")) {
         return Ok(());
     }
@@ -156,19 +162,43 @@ fn run(
     Ok(())
 }
 pub fn subscribe(client: Client, key: String) -> Subscription {
-    subscribe_stream(client, format!("session:{key}"))
+    subscribe_stream(client, format!("session:{key}"), None)
+}
+/// A conversation's history plus its orchestrator stream, which carries the
+/// in-flight turn's thinking, tool calls and reply text as they happen.
+pub fn subscribe_live(
+    client: Client,
+    key: String,
+    repo: String,
+    backend: Option<String>,
+) -> Subscription {
+    let thread = key.strip_prefix("llm-chat:").unwrap_or(&key).to_owned();
+    // since 0 replays the turn in flight; Transcript drops replayed seqs.
+    let mut live =
+        json!({"type":"orchestrator-subscribe","repoPath":repo,"threadId":thread,"since":0});
+    if let Some(backend) = backend {
+        live["backend"] = Value::String(backend);
+    }
+    subscribe_stream(client, format!("session:{key}"), Some(live))
 }
 pub fn subscribe_global(client: Client) -> Subscription {
-    subscribe_stream(client, "global".into())
+    subscribe_stream(client, "global".into(), None)
 }
-fn subscribe_stream(client: Client, stream: String) -> Subscription {
+fn subscribe_stream(client: Client, stream: String, live: Option<Value>) -> Subscription {
     let (sender, receiver) = mpsc::sync_channel(64);
     let cancel = Arc::new(Cancel::default());
     let stopped = cancel.clone();
     thread::spawn(move || {
         let mut backoff = 1;
         while !stopped.is_stopped() {
-            let _ = run(&client, &stream, &sender, &stopped, &mut backoff);
+            let _ = run(
+                &client,
+                &stream,
+                live.as_ref(),
+                &sender,
+                &stopped,
+                &mut backoff,
+            );
             if stopped.is_stopped() {
                 break;
             }

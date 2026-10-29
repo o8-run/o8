@@ -114,6 +114,9 @@ impl Surface {
         self.generation += 1;
         let generation = self.generation;
         self.saving = true;
+        if !remove && self.following.is_none() {
+            self.following = Some(self.rows.len());
+        }
         self.notice = if remove {
             "Removing queued message…"
         } else {
@@ -284,6 +287,7 @@ impl Surface {
             .child(
                 div()
                     .id("composer-queue")
+                    .min_w_0()
                     .max_h(px(120.))
                     .overflow_y_scroll()
                     .children(queue.into_iter().map(|item| {
@@ -305,11 +309,15 @@ impl Surface {
                         div()
                             .flex()
                             .flex_col()
+                            .min_w_0()
                             .text_size(px(11.))
-                            .child(format!(
-                                "{} · {}",
-                                item["status"].as_str().unwrap_or("queued"),
-                                item["payload"]["text"].as_str().unwrap_or("")
+                            // Wrapped then clamped: a nowrap line would widen the column.
+                            .child(div().overflow_hidden().text_ellipsis().line_clamp(1).child(
+                                format!(
+                                    "{} · {}",
+                                    item["status"].as_str().unwrap_or("queued"),
+                                    item["payload"]["text"].as_str().unwrap_or("")
+                                ),
                             ))
                             .when(item["reason"].is_string(), |d| {
                                 d.child(item["reason"].as_str().unwrap_or("").to_owned())

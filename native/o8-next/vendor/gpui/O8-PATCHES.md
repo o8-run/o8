@@ -16,6 +16,11 @@ Local changes:
 - `src/platform/mac/metal_renderer.rs`: an opt-in counter incremented only after
   submitting the Metal command buffer, used by the native regression probe.
 - `Cargo.toml`: the opt-in `frame-diagnostics` feature.
+- `src/elements/text.rs`: each text measure starts from the original runs.
+  Truncation (`text_ellipsis`, `line_clamp`) shortened the captured runs in
+  place, so a later measure paired short runs with the full text and a run
+  boundary could fall inside a multibyte character, panicking in
+  `layout_line` ("end byte index 13 is not a char boundary; it is inside '·'").
 
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit
