@@ -83,8 +83,14 @@ struct State {
     opened: Option<Instant>,
     /// Bumped on every open and leave, so a stale close timer does nothing.
     leave: u64,
-    /// The identity route was asked for the installed version once.
-    identity_asked: bool,
+    /// The update route reported `currentVersion` itself.
+    reported: bool,
+    /// The identity route's version is current. False at start, after a
+    /// reconnect and whenever the panel opens, so a restarted server's new
+    /// version replaces the one read before.
+    identity_fresh: bool,
+    /// The server connection as the last tick saw it.
+    connected: bool,
 }
 
 /// The version a completed updater check found, or `None` when nothing waits.
@@ -464,11 +470,12 @@ fn read(state: &mut State, body: &Value) {
     }
     state.pending = pending;
     let info = &body["state"]["info"];
-    if let Some(current) = body["currentVersion"]
+    let reported = body["currentVersion"]
         .as_str()
         .or(info["currentVersion"].as_str())
-        .or(info["current_version"].as_str())
-    {
+        .or(info["current_version"].as_str());
+    state.reported = reported.is_some();
+    if let Some(current) = reported {
         state.current = Some(current.to_string());
     } else if state.current.is_none() {
         state.current = bundle_version();
@@ -500,6 +507,16 @@ fn read(state: &mut State, body: &Value) {
 /// Reads the update state about once a minute, and every second while the
 /// native updater installs.
 fn check(s: &mut Shell, cx: &mut Context<Shell>) {
+    let connected = s.connected;
+    let state = s.features.get::<State>();
+    if connected && !state.connected {
+        state.identity_fresh = false;
+    }
+    state.connected = connected;
+    if connected && !state.reported && !state.identity_fresh {
+        state.identity_fresh = true;
+        read_identity(s, cx);
+    }
     let state = s.features.get::<State>();
     let every = if state.phase.is_some() || state.applying {
         1
@@ -523,11 +540,6 @@ fn check(s: &mut Shell, cx: &mut Context<Shell>) {
         let _ = this.update(cx, |this, cx| {
             let state = this.features.get::<State>();
             read(state, &body);
-            if state.current.is_none() && !state.identity_asked {
-                state.identity_asked = true;
-                read_identity(this, cx);
-            }
-            let state = this.features.get::<State>();
             let version = state.pending.clone();
             if state.open && state.notes_for != version.clone().or(Some("latest".into())) {
                 load_notes(this, cx);
@@ -548,7 +560,7 @@ fn read_identity(s: &mut Shell, cx: &mut Context<Shell>) {
         let Ok(body) = task.await else { return };
         let _ = this.update(cx, |this, cx| {
             let state = this.features.get::<State>();
-            if state.current.is_none()
+            if !state.reported
                 && let Some(version) = body["version"].as_str().filter(|v| !v.is_empty())
             {
                 state.current = Some(version.to_string());
@@ -864,6 +876,7 @@ fn show(s: &mut Shell, animate: bool, cx: &mut Context<Shell>) {
     state.leave += 1;
     if !state.open {
         state.open = true;
+        state.identity_fresh = false;
         state.opened = animate.then(Instant::now);
         load_notes(s, cx);
     }

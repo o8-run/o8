@@ -114,3 +114,21 @@ fn the_download_ring_runs_clockwise_from_the_top() {
     assert_eq!(arc(1.), arc(1.4));
     assert_eq!(arc(0.251), arc(0.25));
 }
+
+#[test]
+fn an_identity_version_stands_until_the_update_route_reports_one() {
+    use super::{State, read};
+    let mut state = State {
+        current: Some("0.1.814".into()),
+        ..State::default()
+    };
+    read(&mut state, &json!({ "state": {} }));
+    assert!(!state.reported);
+    assert_eq!(state.current.as_deref(), Some("0.1.814"));
+    read(
+        &mut state,
+        &json!({ "currentVersion": "0.1.815", "state": {} }),
+    );
+    assert!(state.reported);
+    assert_eq!(state.current.as_deref(), Some("0.1.815"));
+}
