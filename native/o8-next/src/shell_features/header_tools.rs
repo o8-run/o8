@@ -67,6 +67,11 @@ impl Snapshot {
     }
 }
 
+/// Whether a header card or menu is open (native views hide under it).
+pub(super) fn any_open(s: &Shell) -> bool {
+    s.features.read::<Menus>().is_some_and(|menus| menus.play || menus.tools)
+}
+
 fn close(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     let menus = s.features.get::<Menus>();
     menus.play = false;
