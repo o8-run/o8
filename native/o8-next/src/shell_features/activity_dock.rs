@@ -226,14 +226,18 @@ fn turn(s: &Shell, cx: &App) -> Turn {
 }
 
 fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
-    let Some(dock) = s.features.read::<Dock>() else {
-        return;
-    };
+    let dock = s.features.get::<Dock>();
+    // Hidden, the data still refreshes slowly, so the toolbar opens with
+    // every tab instead of growing as the first loads return.
+    let every = if dock.shown.is_open() { 5 } else { 60 };
+    let stale = dock.loaded.is_none_or(|at| at.elapsed().as_secs() >= every)
+        || dock.scope != s.state.selected;
     if !dock.shown.is_open() {
+        if stale {
+            load(s, cx);
+        }
         return;
     }
-    let stale =
-        dock.loaded.is_none_or(|at| at.elapsed().as_secs() >= 5) || dock.scope != s.state.selected;
     // Running steps without saved times count from when the dock first saw them.
     let running: Vec<String> = match s.active().and_then(|tab| s.content.get(&s.key(&tab))) {
         Some(Content::Session(view)) => view
@@ -562,15 +566,9 @@ fn panes(s: &Shell, turn: &Turn) -> Vec<Pane> {
 /// The header's Activity toggle.
 pub(super) fn toggle_button(s: &Shell, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
     let shown = is_shown(s);
-    super::header::pill(
-        "header-activity",
-        if shown {
-            "Hide activity"
-        } else {
-            "Show activity"
-        },
-        true,
-    )
+    // One label: a tooltip keeps the text it opened with while the pointer
+    // stays, so a show/hide label read backwards right after each click.
+    super::header::pill("header-activity", "Activity", true)
     .w(px(30.))
     .when(shown, |pill| pill.bg(theme().hover))
     .child(crate::icon::stroke(
