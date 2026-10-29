@@ -170,3 +170,39 @@ fn ui_command_frames_reach_settings_panel_tools_and_the_draft(cx: &mut TestAppCo
     }
     panic!("open-settings must open Settings");
 }
+
+#[gpui::test]
+fn sidebar_edge_follows_the_pointer_from_the_press(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("sidebar-resize.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    draw(&mut visual);
+    let start = shell.read_with(&visual, |s, _| super::sidebar::width(s));
+    let edge = visual
+        .debug_bounds("sidebar-resize")
+        .expect("sidebar resize edge");
+    let at = edge.center();
+    let left = gpui::MouseButton::Left;
+    let modifiers = gpui::Modifiers::default();
+    visual.simulate_mouse_down(at, left, modifiers);
+    // A first step past the drag threshold, then the rest of a 60 px drag.
+    for dx in [5., 20., 45., 60.] {
+        visual.simulate_mouse_move(gpui::point(at.x + px(dx), at.y), left, modifiers);
+        draw(&mut visual);
+    }
+    visual.simulate_mouse_up(gpui::point(at.x + px(60.), at.y), left, modifiers);
+    visual.run_until_parked();
+    draw(&mut visual);
+    let saved = shell
+        .read_with(&visual, |s, _| s.state.sidebar_width)
+        .expect("the dragged width is saved");
+    assert!(
+        (saved - (start + 60.)).abs() < 0.5,
+        "a 60 px drag must widen the sidebar by 60 px: {start} -> {saved}"
+    );
+}
