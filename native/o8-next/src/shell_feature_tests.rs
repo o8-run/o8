@@ -177,6 +177,11 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
         cx,
     );
     ready(&shell, &mut visual);
+    // A chat whose queue the composer fixture owns.
+    shell.update_in(&mut visual, |s, window, cx| {
+        s.open_thread("thoughts-composer-first".into(), window, cx)
+    });
+    ready(&shell, &mut visual);
     let send = |kind: &str, payload: Value, visual: &mut VisualTestContext| {
         let frame = json!({"type": "ui-command", "kind": kind, "payload": payload});
         shell.update_in(visual, |s, window, cx| s.ui_command(&frame, window, cx));
