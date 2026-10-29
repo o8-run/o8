@@ -3,6 +3,7 @@
 //! and previews a file through /api/v2/files; o8.md reads /api/repo-spec.
 mod quick_docs;
 mod search;
+mod viewer;
 use quick_docs::QuickDocs;
 #[cfg(test)]
 mod tests;
@@ -37,6 +38,7 @@ enum File {
     Loaded {
         lines: Vec<SharedString>,
         truncated: bool,
+        markdown: std::rc::Rc<std::cell::RefCell<crate::retained::RowState>>,
     },
     Failed(String),
 }
@@ -67,6 +69,7 @@ pub struct FilesPanel {
     quick_docs: Option<Entity<QuickDocs>>,
     _subscriptions: Vec<Subscription>,
     file_generation: u64,
+    view_modes: HashMap<String, viewer::ViewMode>,
 }
 
 impl FilesPanel {
@@ -113,6 +116,7 @@ impl FilesPanel {
                 .chain(pins_changed)
                 .collect(),
             file_generation: 0,
+            view_modes: HashMap::new(),
         };
         match mode {
             Mode::Files => panel.load_directory(String::new(), cx),
@@ -228,16 +232,27 @@ impl FilesPanel {
                     return;
                 }
                 this.file = match result {
-                    Ok(body) if body["error"].is_null() => File::Loaded {
-                        lines: body["content"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .lines()
-                            // File text shows as written; tabs become four spaces.
-                            .map(|line| SharedString::from(line.replace('\t', "    ")))
-                            .collect(),
-                        truncated: body["truncated"] == true,
-                    },
+                    Ok(body) if body["error"].is_null() => {
+                        let content = body["content"].as_str().unwrap_or_default();
+                        if content.contains('\0') {
+                            File::Failed("This binary file has no text preview.".into())
+                        } else {
+                            File::Loaded {
+                                lines: content
+                                    .split('\n')
+                                    .map(|line| SharedString::from(line.replace('\t', "    ")))
+                                    .collect(),
+                                truncated: body["truncated"] == true,
+                                markdown: viewer::markdown(
+                                    if this.selected.as_deref().is_some_and(viewer::is_markdown) {
+                                        content
+                                    } else {
+                                        ""
+                                    },
+                                ),
+                            }
+                        }
+                    }
                     Ok(body) => {
                         File::Failed(body["error"].as_str().unwrap_or("File unavailable").into())
                     }
@@ -383,32 +398,22 @@ impl FilesPanel {
     }
 
     fn viewer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let generation = self.file_generation;
         let title = self.selected.clone().unwrap_or_default();
+        let previewable = viewer::is_markdown(&title);
+        let preview = self.view_mode() == viewer::ViewMode::Preview;
         let body = match &self.file {
-            // o8.md is a notes document: wrapped body text, not numbered code.
-            File::Loaded { lines, .. } if self.mode == Mode::Spec => div()
-                .id("spec-body")
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .px(px(16.))
-                .py(px(12.))
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .text_size(px(13.))
-                .line_height(px(20.))
-                .text_color(theme().text)
-                .children(
-                    lines
-                        .iter()
-                        .map(|line| div().min_h(px(20.)).child(line.clone())),
-                )
-                .into_any_element(),
-            File::Loaded { lines, truncated } => {
+            File::Loaded { markdown, .. } if previewable && preview => {
+                viewer::markdown_view(markdown.clone(), self.file_generation)
+            }
+            File::Loaded {
+                lines, truncated, ..
+            } => {
                 let lines = lines.clone();
                 let gutter = (lines.len().max(1).to_string().len() as f32) * 7.5 + 16.;
                 div()
+                    .id("files-source")
+                    .debug_selector(move || format!("files-source-{generation}"))
                     .flex()
                     .flex_col()
                     .flex_1()
@@ -487,6 +492,7 @@ impl FilesPanel {
                             .text_color(theme().text_secondary)
                             .child(title),
                     )
+                    .when(previewable, |bar| bar.child(self.preview_toggle(cx)))
                     .when(self.mode == Mode::Files, |bar| {
                         let label = if self.tree_visible {
                             "Hide file tree"

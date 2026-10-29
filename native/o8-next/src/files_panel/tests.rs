@@ -635,3 +635,76 @@ fn native_git_fills_incomplete_server_search_and_flat_listing(cx: &mut TestAppCo
         "refining searches the full cached Git list, beyond the result cap"
     );
 }
+
+const MARKDOWN_FIXTURE: &str = "# Readable heading\n\n- A list item\n\n```rust\nfn formatted() {}\n```\n\n| Name | Value |\n| --- | --- |\n| *emphasis* | [link](https://example.com) |\n";
+
+#[gpui::test]
+fn viewer_markdown_opens_formatted_heading_list_and_code(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    fs::write(
+        PathBuf::from(&fixture.repo).join("AGENTS.md"),
+        MARKDOWN_FIXTURE,
+    )
+    .unwrap();
+    let (panel, cx) = cx.add_window_view(|_, cx| {
+        FilesPanel::new(
+            fixture.client.clone(),
+            fixture.repo.clone(),
+            Mode::Files,
+            cx,
+        )
+    });
+    click(cx, "files-row-AGENTS.md");
+    wait(cx, "files-markdown-1");
+    assert!(cx.debug_bounds("files-source-1").is_none());
+    let nodes = panel.read_with(cx, |p, _| match &p.file {
+        File::Loaded { lines, .. } => crate::text::markdown(
+            &lines
+                .iter()
+                .map(|s| s.as_ref())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ),
+        _ => panic!("fixture did not load"),
+    });
+    for kind in ["h1", "ul", "code-block", "table"] {
+        assert!(
+            nodes.iter().any(|n| n.kind == kind),
+            "missing formatted {kind}"
+        );
+    }
+    assert!(cx.debug_bounds("files-markdown-1").unwrap().size.height > px(100.));
+}
+
+#[gpui::test]
+fn viewer_preview_source_toggle_remembers_each_file(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    fs::write(
+        PathBuf::from(&fixture.repo).join("AGENTS.md"),
+        MARKDOWN_FIXTURE,
+    )
+    .unwrap();
+    let (panel, cx) = cx.add_window_view(|_, cx| {
+        FilesPanel::new(
+            fixture.client.clone(),
+            fixture.repo.clone(),
+            Mode::Files,
+            cx,
+        )
+    });
+    click(cx, "files-row-AGENTS.md");
+    wait(cx, "files-markdown-1");
+    click(cx, "files-source-toggle");
+    wait(cx, "files-source-1");
+    click(cx, "files-row-PARITY-BOARD.local.md");
+    wait(cx, "files-markdown-2");
+    click(cx, "files-row-AGENTS.md");
+    wait(cx, "files-source-3");
+    assert!(cx.debug_bounds("files-markdown-3").is_none());
+    click(cx, "files-preview-toggle");
+    wait(cx, "files-markdown-3");
+    assert_eq!(
+        panel.read_with(cx, |p, _| p.selected.clone()).as_deref(),
+        Some("AGENTS.md")
+    );
+}
