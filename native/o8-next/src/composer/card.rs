@@ -115,49 +115,63 @@ impl Surface {
                 |s, w, cx| s.open_composer_picker("effort", w, cx),
             ))
             .child(
-                self.composer_button("composer-microphone", "", false, cx, |_, _, _| {})
-                    .w(px(26.))
-                    .child(
-                        canvas(
-                            |_, _, _| (),
-                            |bounds, _, window, _| {
-                                // A stroked path activates viewport-sized GPU/MSAA
-                                // targets. This small icon fits the existing quad pass.
-                                let rect = |x, y, w, h| {
-                                    Bounds::new(
-                                        bounds.origin + point(px(x), px(y)),
-                                        size(px(w), px(h)),
-                                    )
-                                };
-                                let color = theme().text_secondary;
-                                let stroke = px(1.3);
-                                window.paint_quad(
-                                    gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
-                                        .corner_radii(px(3.))
-                                        .border_widths(stroke),
-                                );
-                                window.paint_quad(
-                                    gpui::outline(rect(1., 7., 12., 8.), color, Default::default())
-                                        .corner_radii(gpui::Corners {
-                                            top_left: px(0.),
-                                            top_right: px(0.),
-                                            bottom_right: px(6.),
-                                            bottom_left: px(6.),
-                                        })
-                                        .border_widths(gpui::Edges {
-                                            top: px(0.),
-                                            right: stroke,
-                                            bottom: stroke,
-                                            left: stroke,
-                                        }),
-                                );
-                                window.paint_quad(gpui::fill(rect(6.35, 14., 1.3, 4.), color));
-                                window.paint_quad(gpui::fill(rect(4., 17.35, 6., 1.3), color));
-                            },
-                        )
-                        .w(px(14.))
-                        .h(px(20.)),
-                    ),
+                self.composer_button("composer-microphone", "", true, cx, |_, window, cx| {
+                    window.dispatch_action(Box::new(super::ToggleVoice), cx);
+                })
+                .w(px(26.))
+                .tooltip({
+                    let tip = match self.voice {
+                        super::VoiceState::Off => "Start voice",
+                        super::VoiceState::Connecting => "Connecting voice…",
+                        super::VoiceState::Live => "Stop voice",
+                    };
+                    move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into()
+                })
+                .when(self.voice != super::VoiceState::Off, |button| {
+                    button.bg(theme().selection)
+                })
+                .child(
+                    canvas(|_, _, _| (), {
+                        let voice = self.voice;
+                        move |bounds, _, window, _| {
+                            // A stroked path activates viewport-sized GPU/MSAA
+                            // targets. This small icon fits the existing quad pass.
+                            let rect = |x, y, w, h| {
+                                Bounds::new(bounds.origin + point(px(x), px(y)), size(px(w), px(h)))
+                            };
+                            let color = match voice {
+                                super::VoiceState::Off => theme().text_secondary,
+                                super::VoiceState::Connecting => theme().text_muted,
+                                super::VoiceState::Live => theme().accent,
+                            };
+                            let stroke = px(1.3);
+                            window.paint_quad(
+                                gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
+                                    .corner_radii(px(3.))
+                                    .border_widths(stroke),
+                            );
+                            window.paint_quad(
+                                gpui::outline(rect(1., 7., 12., 8.), color, Default::default())
+                                    .corner_radii(gpui::Corners {
+                                        top_left: px(0.),
+                                        top_right: px(0.),
+                                        bottom_right: px(6.),
+                                        bottom_left: px(6.),
+                                    })
+                                    .border_widths(gpui::Edges {
+                                        top: px(0.),
+                                        right: stroke,
+                                        bottom: stroke,
+                                        left: stroke,
+                                    }),
+                            );
+                            window.paint_quad(gpui::fill(rect(6.35, 14., 1.3, 4.), color));
+                            window.paint_quad(gpui::fill(rect(4., 17.35, 6., 1.3), color));
+                        }
+                    })
+                    .w(px(14.))
+                    .h(px(20.)),
+                ),
             )
             .child(
                 self.composer_button(

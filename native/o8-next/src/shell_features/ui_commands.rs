@@ -32,7 +32,9 @@ impl Shell {
             .unwrap_or(frame);
         match frame["kind"].as_str() {
             Some("open-settings") => self.execute(Command::Settings, window, cx),
-            Some("voice-toggle") => self.notice = "Voice chat is not in o8 next yet.".into(),
+            Some("voice-toggle") => self.toggle_voice(cx),
+            Some("voice-host-state") => super::voice::host_state(self, payload, cx),
+            Some("voice-delegate") => super::voice::delegate(self, payload, cx),
             Some("symon-ui") => symon(self, &payload["data"], window, cx),
             Some("ink-mark") => {
                 self.features.get::<Ink>().event = payload["event"].as_str().map(String::from);

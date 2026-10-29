@@ -44,6 +44,23 @@ use std::{
     time::Instant,
 };
 
+gpui::actions!(
+    o8_next,
+    [
+        /// The composer mic: start or stop chat Live voice, which the shell owns.
+        ToggleVoice
+    ]
+);
+
+/// Chat Live voice as this chat's mic shows it; the shell sets it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum VoiceState {
+    #[default]
+    Off,
+    Connecting,
+    Live,
+}
+
 pub(crate) struct Surface {
     client: Client,
     embedded: bool,
@@ -79,6 +96,7 @@ pub(crate) struct Surface {
     key_revision: u64,
     painted: Rc<Cell<u64>>,
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
+    voice: VoiceState,
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -117,6 +135,7 @@ impl Surface {
             key_revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
+            voice: VoiceState::Off,
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {

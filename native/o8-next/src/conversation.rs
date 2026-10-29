@@ -38,6 +38,89 @@ impl Surface {
     pub(super) fn remove_queued(&mut self, id: String, cx: &mut Context<Self>) {
         self.mutate_message(Some(id), true, cx);
     }
+    pub(crate) fn voice(&self) -> VoiceState {
+        self.voice
+    }
+    pub(crate) fn set_voice(&mut self, voice: VoiceState, cx: &mut Context<Self>) {
+        if self.voice != voice {
+            self.voice = voice;
+            cx.notify();
+        }
+    }
+    /// The selected chat's Live voice binding (ManagedChatVoiceEntry's
+    /// identity): who, which repository and thread, and how it runs. A change
+    /// closes the voice session it pinned.
+    pub(crate) fn voice_binding(&self, cx: &App) -> Option<String> {
+        let session = self
+            .sessions
+            .iter()
+            .find(|s| Some(&s.id) == self.selected.as_ref())?;
+        let repo = session.repo_path.as_deref()?;
+        let routing = self.composer_routing(cx)?;
+        Some(
+            json!([
+                "local",
+                repo,
+                session.id,
+                routing["backend"],
+                routing["model"],
+                routing["effort"],
+                routing["permissionMode"],
+                routing["pickedMode"]
+            ])
+            .to_string(),
+        )
+    }
+    /// Sends a Live delegation as a new message through this chat's queue,
+    /// leaving the draft alone. Resolves to the queue item id once the
+    /// receipt matches; acceptance is not completion.
+    pub(crate) fn send_spoken(
+        &mut self,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> Result<gpui::Task<Result<String, String>>, String> {
+        if !self.queue_ready {
+            return Err("This chat's queue is not ready.".into());
+        }
+        let session = self
+            .sessions
+            .iter()
+            .find(|s| Some(&s.id) == self.selected.as_ref())
+            .cloned()
+            .ok_or("No chat is selected.")?;
+        let repo = session
+            .repo_path
+            .clone()
+            .ok_or("This chat has no repository.")?;
+        let routing = self
+            .composer_routing(cx)
+            .ok_or("This chat's routing is not loaded.")?;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let id = format!("next-{nonce:x}-{:x}", std::process::id());
+        let wire = crate::composer::controls::wire(
+            &text,
+            routing["pickedMode"].as_str().unwrap_or("solo"),
+        );
+        let body = json!({"repoPath":repo,"threadId":session.id,"id":id,"intent":"send-next",
+            "payload":{"text":text,"wireMessage":wire,"images":[],"routing":routing}});
+        let client = self.client.clone();
+        Ok(cx.spawn(async move |this, cx| {
+            let sent = body.clone();
+            let receipt = cx
+                .background_executor()
+                .spawn(async move { client.mutate_queue("POST", &sent) })
+                .await
+                .map_err(|error| error.message)?;
+            if !receipt_matches("POST", &body, &receipt) {
+                return Err("The chat did not confirm the spoken request.".into());
+            }
+            let _ = this.update(cx, |this, cx| this.reconcile(cx));
+            Ok(id)
+        }))
+    }
     fn mutate_message(&mut self, promote: Option<String>, remove: bool, cx: &mut Context<Self>) {
         if self.saving
             || !self.queue_ready

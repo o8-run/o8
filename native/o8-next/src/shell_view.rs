@@ -42,6 +42,7 @@ impl Render for Shell {
             .line_height(gpui::relative(crate::theme::TYPE.chrome_line))
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(|this, _: &crate::ui::ToggleVoice, _, cx| this.toggle_voice(cx)))
             .children(slots)
             // The traffic-light corner above the rail moves the window too.
             .child(

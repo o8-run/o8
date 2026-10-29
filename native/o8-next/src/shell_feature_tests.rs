@@ -139,17 +139,12 @@ fn ui_command_frames_reach_settings_panel_tools_and_the_draft(cx: &mut TestAppCo
         "I don't know the o8 surface \"canvas\"."
     );
     send(
-        json!({"type": "ui-command", "kind": "voice-toggle", "payload": {}}),
-        &mut visual,
-    );
-    assert_eq!(notice(&mut visual), "Voice chat is not in o8 next yet.");
-    send(
         json!({"type": "ui-command", "kind": "reboot", "payload": {}}),
         &mut visual,
     );
     assert_eq!(
         notice(&mut visual),
-        "Voice chat is not in o8 next yet.",
+        "I don't know the o8 surface \"canvas\".",
         "unknown kinds are ignored"
     );
     send(
@@ -169,6 +164,109 @@ fn ui_command_frames_reach_settings_panel_tools_and_the_draft(cx: &mut TestAppCo
         draw(&mut visual);
     }
     panic!("open-settings must open Settings");
+}
+
+#[gpui::test]
+fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppContext) {
+    use crate::ui::VoiceState;
+    let fixture = Fixture::start_mode(false, "--voice-host");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("voice.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    let send = |kind: &str, payload: Value, visual: &mut VisualTestContext| {
+        let frame = json!({"type": "ui-command", "kind": kind, "payload": payload});
+        shell.update_in(visual, |s, window, cx| s.ui_command(&frame, window, cx));
+        visual.run_until_parked();
+        draw(visual);
+    };
+    // What the window posted to the voice host, once `count` controls arrived.
+    let controls = |count: usize, visual: &mut VisualTestContext| {
+        for _ in 0..200 {
+            visual.run_until_parked();
+            let sent = fixture
+                .client
+                .get::<Value>("/api/next/voice-host", &[])
+                .unwrap()["controls"]
+                .as_array()
+                .cloned()
+                .unwrap();
+            if sent.len() >= count {
+                return sent;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("the voice host never received {count} controls");
+    };
+    let mic = |visual: &mut VisualTestContext| {
+        shell.read_with(visual, |s, cx| {
+            match s.content.get(&s.key(&s.active().unwrap())) {
+                Some(Content::Session(view)) => view.read(cx).voice(),
+                _ => panic!("session"),
+            }
+        })
+    };
+
+    // Caps Lock's relay starts Live for the selected chat.
+    send("voice-toggle", json!({}), &mut visual);
+    let start = controls(1, &mut visual)[0].clone();
+    assert_eq!(start["action"], "start");
+    assert_eq!(start["source"], "byok");
+    let (binding, nonce) = (start["binding"].clone(), start["nonce"].clone());
+    let selected = shell.read_with(&visual, |s, _| s.active().unwrap());
+    let Tab::Session(thread) = selected else {
+        panic!("a chat is selected")
+    };
+    assert!(
+        binding.as_str().unwrap().contains(&thread),
+        "the binding pins the chat: {binding}"
+    );
+    assert_eq!(mic(&mut visual), VoiceState::Connecting);
+    send(
+        "voice-host-state",
+        json!({"binding": binding, "nonce": nonce, "state": "live"}),
+        &mut visual,
+    );
+    assert_eq!(mic(&mut visual), VoiceState::Live);
+
+    // A delegation posts through the chat's queue once, however often the host
+    // relays it; another session's nonce posts nothing.
+    let delegation = json!({"binding": binding, "nonce": nonce, "delegationId": "d1",
+        "text": "List the open pull requests"});
+    send("voice-delegate", delegation.clone(), &mut visual);
+    send("voice-delegate", delegation, &mut visual);
+    send(
+        "voice-delegate",
+        json!({"binding": binding, "nonce": "v-stale", "delegationId": "d2", "text": "Ignored"}),
+        &mut visual,
+    );
+    let sent = controls(2, &mut visual);
+    let accepted = sent
+        .iter()
+        .filter(|control| control["action"] == "accepted")
+        .collect::<Vec<_>>();
+    assert_eq!(accepted.len(), 1, "one acceptance: {sent:?}");
+    assert_eq!(accepted[0]["delegationId"], "d1");
+    assert_eq!(accepted[0]["nonce"], nonce);
+    assert!(
+        accepted[0]["queueItemId"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("next-")),
+        "the acceptance names the queue item: {sent:?}"
+    );
+
+    // A second toggle closes voice with the same identity.
+    send("voice-toggle", json!({}), &mut visual);
+    let stop = controls(3, &mut visual)[2].clone();
+    assert_eq!(stop["action"], "stop");
+    assert_eq!(
+        (stop["binding"].clone(), stop["nonce"].clone()),
+        (binding, nonce)
+    );
+    assert_eq!(mic(&mut visual), VoiceState::Off);
 }
 
 #[gpui::test]
