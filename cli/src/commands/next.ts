@@ -7,10 +7,13 @@ import { runServe } from './serve.js';
 
 const INSTALLED_BINARY = '/Applications/o8.app/Contents/MacOS/o8-next';
 
-async function serverIsHealthy(origin: string): Promise<boolean> {
+// A loaded machine can hold a healthy daemon's answer past the quick probe (#5081).
+const ATTACH_TIMEOUT_MS = 10_000;
+
+async function serverIsHealthy(origin: string, timeoutMs = 1_000): Promise<boolean> {
   try {
     const response = await fetch(`${origin}/api/setup/identity`, {
-      signal: AbortSignal.timeout(1_000), redirect: 'error',
+      signal: AbortSignal.timeout(timeoutMs), redirect: 'error',
     });
     if (!response.ok) return false;
     return (await response.json() as { product?: unknown }).product === 'o8';
@@ -23,6 +26,8 @@ async function ensureServer(): Promise<void> {
   try {
     await runServe({ human: true, verbose: false }, undefined, []);
   } catch (error) {
+    if (error instanceof CliError && error.code === 'serve_already_running'
+      && await serverIsHealthy(resolveConfig().apiBase, ATTACH_TIMEOUT_MS)) return;
     throw new CliError('next_server_start_failed',
       `Could not start o8 serve: ${error instanceof Error ? error.message : String(error)}`,
       EXIT.CONNECTION_REFUSED, 'Run `o8 serve status` and inspect the serve log.');

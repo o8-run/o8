@@ -6,6 +6,7 @@ vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
 vi.mock('node:fs', () => ({ accessSync: mocks.access, constants: { X_OK: 1 } }));
 vi.mock('./serve.js', () => ({ runServe: mocks.serve }));
 vi.mock('../config.js', () => ({ resolveConfig: mocks.config, resolveCliDataDir: () => '/fixture', resolveCliTokenFiles: () => ['/fixture/ws-token'] }));
+import { CliError, EXIT } from '../api.js';
 import { runNext } from './next.js';
 
 const config = (port = 49123) => ({ apiBase: `http://127.0.0.1:${port}`, dataDir: '/fixture',
@@ -53,6 +54,21 @@ describe('o8 next standalone launcher', () => {
     health.mockRejectedValue(new Error('refused'));
     mocks.serve.mockRejectedValue(new Error('startup deadline'));
     await expect(runNext([])).rejects.toThrow(/Could not start.*startup deadline/);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('attaches to a running daemon that missed the quick probe (#5081)', async () => {
+    health.mockRejectedValueOnce(new DOMException('The operation timed out.', 'TimeoutError'));
+    mocks.serve.mockRejectedValue(new CliError('serve_already_running', 'Headless o8 is already running with pid 4242.', EXIT.CONFLICT));
+    expect(await runNext([])).toBe(0);
+    expect(health).toHaveBeenCalledTimes(2);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+  });
+
+  it('still fails when serve refuses and the running daemon never answers', async () => {
+    health.mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError'));
+    mocks.serve.mockRejectedValue(new CliError('serve_already_running', 'Headless o8 is already running with pid 4242.', EXIT.CONFLICT));
+    await expect(runNext([])).rejects.toThrow(/Could not start.*already running/);
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
 
