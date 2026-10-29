@@ -73,6 +73,11 @@ struct State {
     tools: Vec<Tool>,
     tools_open: bool,
     tools_checking: bool,
+    /// Streamed discovery: tools checked of the total, while a check runs.
+    discovery: Option<(usize, usize)>,
+    /// The last check finished its report.
+    tools_checked: bool,
+    tools_error: bool,
     tool_busy: Option<String>,
     /// "Update all" is running, and what the last run reported.
     tools_all: bool,
@@ -91,7 +96,19 @@ struct State {
     identity_fresh: bool,
     /// The server connection as the last tick saw it.
     connected: bool,
+    /// When the update state first read "never checked". The desktop updater
+    /// checks at launch, so a later read that still says so means none is
+    /// attached.
+    never_since: Option<Instant>,
+    /// No desktop updater answers this server (`o8 serve` without the app).
+    no_updater: bool,
 }
+
+/// How long a server may read "never checked" before o8 next stops asking;
+/// shorter than the minute between state reads, so the second read decides.
+const NO_UPDATER_AFTER: Duration = Duration::from_secs(30);
+const NO_UPDATER: &str =
+    "Update checks need the o8 app. This window is connected to the o8 server without it.";
 
 /// The version a completed updater check found, or `None` when nothing waits.
 fn pending(body: &Value) -> Option<String> {
@@ -422,22 +439,150 @@ struct Tool {
     status: String,
 }
 
+fn tool(tool: &Value) -> Option<Tool> {
+    Some(Tool {
+        runtime: tool["runtimeId"].as_str()?.to_string(),
+        label: tool["label"].as_str().unwrap_or("CLI").to_string(),
+        installed: tool["installedVersion"].as_str().map(String::from),
+        latest: tool["latestVersion"].as_str().map(String::from),
+        status: tool["status"].as_str().unwrap_or("unknown").to_string(),
+    })
+}
+
 fn tools(body: &Value) -> Vec<Tool> {
     body["tools"]
         .as_array()
         .into_iter()
         .flatten()
         .filter(|tool| tool["status"] != "not-installed")
-        .filter_map(|tool| {
-            Some(Tool {
-                runtime: tool["runtimeId"].as_str()?.to_string(),
-                label: tool["label"].as_str().unwrap_or("CLI").to_string(),
-                installed: tool["installedVersion"].as_str().map(String::from),
-                latest: tool["latestVersion"].as_str().map(String::from),
-                status: tool["status"].as_str().unwrap_or("unknown").to_string(),
-            })
-        })
+        .filter_map(tool)
         .collect()
+}
+
+/// One event of the streamed tool discovery (readCliDiscoveryResponse in
+/// src/lib/app-update/cli-discovery-response.ts).
+#[derive(Debug, PartialEq)]
+enum Discovery {
+    /// Tools checked of the total.
+    Progress(usize, usize),
+    /// A tool finished its probe, with the count so far.
+    Tool(Tool, Option<(usize, usize)>),
+    /// The final report.
+    Done(Vec<Tool>),
+    Failed,
+}
+
+/// Parses one `event:`/`data:` frame; other events and bad data yield `None`.
+fn discovery(frame: &str) -> Option<Discovery> {
+    let mut event = "";
+    let mut data = Vec::new();
+    for line in frame.lines() {
+        if let Some(name) = line.strip_prefix("event:") {
+            event = name.trim();
+        } else if let Some(line) = line.strip_prefix("data:") {
+            data.push(line.trim_start());
+        }
+    }
+    let body = serde_json::from_str::<Value>(&data.join("\n")).ok()?;
+    let count = Option::zip(
+        body["completed"].as_u64().map(|count| count as usize),
+        body["total"].as_u64().map(|count| count as usize),
+    );
+    match event {
+        "progress" => count.map(|(completed, total)| Discovery::Progress(completed, total)),
+        "tool" => tool(&body["tool"]).map(|tool| Discovery::Tool(tool, count)),
+        "result" if body["tools"].is_array() => Some(Discovery::Done(tools(&body))),
+        "result" | "error" => Some(Discovery::Failed),
+        _ => None,
+    }
+}
+
+/// Folds one discovery event into the panel. Streamed rows replace their old
+/// row or join the end; the final report keeps that arrival order.
+fn discovered(state: &mut State, event: Discovery) {
+    match event {
+        Discovery::Progress(completed, total) => state.discovery = Some((completed, total)),
+        Discovery::Tool(tool, count) => {
+            if count.is_some() {
+                state.discovery = count;
+            }
+            let at = state
+                .tools
+                .iter()
+                .position(|row| row.runtime == tool.runtime);
+            match (at, tool.status == "not-installed") {
+                (Some(at), true) => {
+                    state.tools.remove(at);
+                }
+                (Some(at), false) => state.tools[at] = tool,
+                (None, true) => {}
+                (None, false) => state.tools.push(tool),
+            }
+        }
+        Discovery::Done(mut tools) => {
+            let order = |tool: &Tool| {
+                state
+                    .tools
+                    .iter()
+                    .position(|row| row.runtime == tool.runtime)
+                    .unwrap_or(usize::MAX)
+            };
+            tools.sort_by_key(order);
+            state.tools = tools;
+            state.tools_checked = true;
+        }
+        Discovery::Failed => state.tools_error = true,
+    }
+}
+
+/// GET /api/setup/cli-updates as an event stream, each event sent on as it
+/// arrives. A server that answers with JSON sends one final report.
+fn stream_tools(
+    client: &crate::client::Client,
+    refresh: bool,
+    events: &async_channel::Sender<Discovery>,
+) -> Result<(), ()> {
+    use std::io::BufRead;
+    let mut url = client.url("/api/setup/cli-updates").map_err(drop)?;
+    if refresh {
+        url.query_pairs_mut().append_pair("refresh", "1");
+    }
+    // Cold version probes can take minutes; classic bounds the whole check at five.
+    let response = client
+        .request("GET", &url)
+        .set("Accept", "text/event-stream")
+        .timeout(Duration::from_secs(300))
+        .call()
+        .map_err(drop)?;
+    if response.content_type() != "text/event-stream" {
+        let body = crate::client::Client::read::<Value>(response).map_err(drop)?;
+        let event = if body["tools"].is_array() {
+            Discovery::Done(tools(&body))
+        } else {
+            Discovery::Failed
+        };
+        let _ = events.send_blocking(event);
+        return Ok(());
+    }
+    let mut frame = String::new();
+    for line in std::io::BufReader::new(response.into_reader()).lines() {
+        let line = line.map_err(drop)?;
+        let line = line.trim_end_matches('\r');
+        if !line.is_empty() {
+            frame.push_str(line);
+            frame.push('\n');
+            continue;
+        }
+        if let Some(event) = discovery(&std::mem::take(&mut frame)) {
+            let last = matches!(event, Discovery::Done(_) | Discovery::Failed);
+            // A closed panel state drops the receiver; stop reading.
+            if events.send_blocking(event).is_err() || last {
+                return Ok(());
+            }
+        }
+    }
+    // The stream ended before its report.
+    Err(())
 }
 
 /// CFBundleShortVersionString from an Info.plist.
@@ -496,6 +641,13 @@ fn read(state: &mut State, body: &Value) {
             live: as_list(&waiting["live"]),
             parked: as_list(&waiting["parked"]),
         });
+    }
+    if body["state"]["check"]["outcome"] == "never" {
+        let since = *state.never_since.get_or_insert_with(Instant::now);
+        state.no_updater |= since.elapsed() >= NO_UPDATER_AFTER;
+    } else {
+        state.never_since = None;
+        state.no_updater = false;
     }
     if let Some(Phase::Failed(error)) = &state.phase {
         state.error = Some(format!("The update failed: {error}"));
@@ -577,9 +729,15 @@ fn check_now(s: &mut Shell, cx: &mut Context<Shell>) {
     if state.checking || state.applying {
         return;
     }
-    state.checking = true;
     state.error = None;
     state.status = None;
+    // Nothing would answer; say so instead of waiting out the server.
+    if state.no_updater {
+        s.notice = "Update checks need the o8 app.".into();
+        cx.notify();
+        return;
+    }
+    state.checking = true;
     s.notice = "Checking o8…".into();
     let client = s.client.clone();
     let task = cx.background_executor().spawn(async move {
@@ -605,7 +763,11 @@ fn check_now(s: &mut Shell, cx: &mut Context<Shell>) {
             match result {
                 Ok(body) => {
                     read(state, &body);
-                    let failed = body["ok"] != true;
+                    // The server waited for a check no updater ever ran.
+                    let headless = body["error"]["code"] == "update_check_unavailable"
+                        && body["state"]["check"]["outcome"] == "never";
+                    state.no_updater |= headless;
+                    let failed = body["ok"] != true && !headless;
                     if failed {
                         let message = body["error"]["message"]
                             .as_str()
@@ -613,7 +775,9 @@ fn check_now(s: &mut Shell, cx: &mut Context<Shell>) {
                         state.error = Some(error_text(message));
                     }
                     let ready = state.pending.is_some();
-                    this.notice = if failed {
+                    this.notice = if headless {
+                        "Update checks need the o8 app.".into()
+                    } else if failed {
                         "The o8 update check could not finish. Try again.".into()
                     } else if ready {
                         "o8 update is ready.".into()
@@ -734,18 +898,31 @@ fn load_tools(s: &mut Shell, refresh: bool, cx: &mut Context<Shell>) {
         return;
     }
     state.tools_checking = true;
+    state.discovery = None;
+    state.tools_checked = false;
+    state.tools_error = false;
     let client = s.client.clone();
-    let task = cx.background_executor().spawn(async move {
-        let query: &[(&str, &str)] = if refresh { &[("refresh", "1")] } else { &[] };
-        client.get::<Value>("/api/setup/cli-updates", query)
-    });
+    let (events, received) = async_channel::unbounded();
+    let task = cx
+        .background_executor()
+        .spawn(async move { stream_tools(&client, refresh, &events) });
     cx.spawn(async move |this, cx| {
+        while let Ok(event) = received.recv().await {
+            let applied = this.update(cx, |this, cx| {
+                discovered(this.features.get::<State>(), event);
+                cx.notify();
+            });
+            if applied.is_err() {
+                return;
+            }
+        }
         let result = task.await;
         let _ = this.update(cx, |this, cx| {
             let state = this.features.get::<State>();
             state.tools_checking = false;
-            if let Ok(body) = result {
-                state.tools = tools(&body);
+            state.discovery = None;
+            if result.is_err() || !state.tools_checked {
+                state.tools_error = true;
             }
             cx.notify();
         });
@@ -1121,7 +1298,8 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
         .error
         .clone()
         .map(|error| (error, true))
-        .or_else(|| state.status.clone().map(|status| (status, false)));
+        .or_else(|| state.status.clone().map(|status| (status, false)))
+        .or_else(|| state.no_updater.then(|| (NO_UPDATER.to_string(), false)));
     let bar = state.progress.as_ref().map(describe);
     let blockers = state.blockers.clone();
     let can_update = state.pending.is_some() && blockers.is_none();
@@ -1129,6 +1307,9 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
     let tools_open = state.tools_open;
     let tools_rows = state.tools.clone();
     let tools_checking = state.tools_checking;
+    let discovery = state.discovery;
+    let tools_checked = state.tools_checked;
+    let tools_error = state.tools_error;
     let tool_busy = state.tool_busy.clone();
     let tools_all = state.tools_all;
     let tools_status = state.tools_status.clone();
@@ -1360,106 +1541,178 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
                         })),
                 )
                 .when(tools_open, |section| {
-                    section
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.))
-                                .pt(px(4.))
-                                .child(
-                                    muted(
-                                        "Update each tool explicitly. Running sessions stay protected."
-                                            .into(),
-                                        10.5,
-                                    )
+                    // One size for the section's three small buttons.
+                    let small = |button: gpui::Stateful<gpui::Div>| {
+                        button
+                            .flex_shrink_0()
+                            .h(px(26.))
+                            .px(px(10.))
+                            .text_size(px(11.5))
+                    };
+                    // One status line beside the buttons; the summary of the
+                    // last "Update all" sits under it.
+                    let status = if tools_checking {
+                        match discovery {
+                            Some((completed, total)) => {
+                                format!("Checking tools… {completed} of {total} checked")
+                            }
+                            None => "Checking installed tools…".into(),
+                        }
+                    } else if tools_error {
+                        "CLI checks couldn’t finish. Try again.".into()
+                    } else if tools_rows.is_empty() {
+                        "No supported CLI installation was found.".into()
+                    } else if tools_checked {
+                        "Tool discovery complete.".into()
+                    } else {
+                        String::new()
+                    };
+                    let fraction = discovery
+                        .filter(|(_, total)| *total > 0)
+                        .map(|(completed, total)| completed as f32 / total as f32);
+                    let rows = tools_rows.into_iter().map(|tool| {
+                        let available = tool.status == "update-available";
+                        let busy = tool_busy.as_deref() == Some(tool.runtime.as_str())
+                            || (tools_all && available);
+                        let versions = match (&tool.installed, &tool.latest) {
+                            (Some(installed), Some(latest)) if available => {
+                                format!("{installed} → {latest}")
+                            }
+                            (Some(installed), _) => installed.clone(),
+                            _ => tool.status.replace('-', " "),
+                        };
+                        let runtime = tool.runtime.clone();
+                        // Every row is the same height, with or without its button.
+                        div()
+                            .h(px(32.))
+                            .flex()
+                            .items_center()
+                            .gap(px(12.))
+                            .child(
+                                div()
                                     .flex_1()
-                                    .min_w_0(),
-                                )
-                                .when(tools_ready || tools_all, |row| {
-                                    row.child(
-                                        button(
-                                            "update-tools-all",
-                                            if tools_all { "Updating…" } else { "Update all" }
-                                                .into(),
-                                            false,
-                                        )
-                                        .flex_shrink_0()
-                                        .h(px(26.))
-                                        .px(px(8.))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            update_all(this, cx)
-                                        })),
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.))
+                                    .child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .line_height(px(16.))
+                                            .truncate()
+                                            .child(tool.label.clone()),
                                     )
-                                })
-                                .child(
-                                    button("update-tools-check", "Check".into(), false)
-                                        .flex_shrink_0()
-                                        .h(px(26.))
-                                        .px(px(8.))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            load_tools(this, true, cx)
+                                    .child(
+                                        div()
+                                            .text_size(px(10.5))
+                                            .line_height(px(14.))
+                                            .text_color(theme().text_muted)
+                                            .truncate()
+                                            .child(versions),
+                                    ),
+                            )
+                            .when(available, |row| {
+                                row.child(small(
+                                    div()
+                                        .id(SharedString::from(format!(
+                                            "update-tool-{}",
+                                            tool.runtime
+                                        )))
+                                        .flex()
+                                        .items_center()
+                                        .rounded(px(7.))
+                                        .bg(theme().hover)
+                                        .text_color(theme().text)
+                                        .cursor_pointer()
+                                        .child(if busy { "Updating…" } else { "Update" })
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            update_tool(this, runtime.clone(), cx)
                                         })),
-                                ),
-                        )
-                        .when_some(tools_status, |section, status| {
-                            section.child(muted(status.into(), 11.))
-                        })
-                        .when(tools_checking, |section| {
-                            section.child(muted("Checking installed tools…".into(), 11.))
-                        })
-                        .when(!tools_checking && tools_rows.is_empty(), |section| {
-                            section.child(muted(
-                                "No supported CLI installation was found.".into(),
+                                ))
+                            })
+                    });
+                    section.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(12.))
+                            .child(muted(
+                                "Update each tool explicitly. Running sessions stay protected."
+                                    .into(),
                                 11.,
                             ))
-                        })
-                        .children(tools_rows.into_iter().map(|tool| {
-                            let available = tool.status == "update-available";
-                            let busy = tool_busy.as_deref() == Some(tool.runtime.as_str())
-                                || (tools_all && available);
-                            let versions = match (&tool.installed, &tool.latest) {
-                                (Some(installed), Some(latest)) if available => {
-                                    format!("{installed} → {latest}")
-                                }
-                                (Some(installed), _) => installed.clone(),
-                                _ => tool.status.replace('-', " "),
-                            };
-                            let runtime = tool.runtime.clone();
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.))
-                                .py(px(4.))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .child(div().text_size(px(12.)).child(tool.label.clone()))
-                                        .child(muted(versions.into(), 10.5)),
-                                )
-                                .when(available, |row| {
-                                    row.child(
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(8.))
+                                    .child(
                                         div()
-                                            .id(SharedString::from(format!(
-                                                "update-tool-{}",
-                                                tool.runtime
-                                            )))
-                                            .h(px(26.))
-                                            .px(px(10.))
+                                            .min_h(px(26.))
                                             .flex()
                                             .items_center()
-                                            .rounded(px(7.))
-                                            .bg(theme().hover)
-                                            .text_size(px(11.5))
-                                            .cursor_pointer()
-                                            .child(if busy { "Updating…" } else { "Update" })
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                update_tool(this, runtime.clone(), cx)
-                                            })),
+                                            .gap(px(12.))
+                                            .child(muted(status.into(), 11.).flex_1().min_w_0())
+                                            .child(
+                                                div()
+                                                    .flex_shrink_0()
+                                                    .flex()
+                                                    .gap(px(6.))
+                                                    .when(tools_ready || tools_all, |actions| {
+                                                        actions.child(small(
+                                                            button(
+                                                                "update-tools-all",
+                                                                if tools_all {
+                                                                    "Updating…"
+                                                                } else {
+                                                                    "Update all"
+                                                                }
+                                                                .into(),
+                                                                false,
+                                                            )
+                                                            .on_click(cx.listener(
+                                                                |this, _, _, cx| update_all(this, cx),
+                                                            )),
+                                                        ))
+                                                    })
+                                                    .child(small(
+                                                        button(
+                                                            "update-tools-check",
+                                                            if tools_error { "Retry" } else { "Check" }
+                                                                .into(),
+                                                            false,
+                                                        )
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            load_tools(this, true, cx)
+                                                        })),
+                                                    )),
+                                            ),
                                     )
-                                })
-                        }))
+                                    .when(tools_checking, |block| {
+                                        block.child(
+                                            div()
+                                                .id("update-tools-discovery")
+                                                .debug_selector(|| "update-tools-discovery".into())
+                                                .h(px(3.))
+                                                .rounded(px(2.))
+                                                .bg(theme().hover)
+                                                .overflow_hidden()
+                                                .child(
+                                                    div()
+                                                        .h_full()
+                                                        .w(gpui::relative(
+                                                            fraction.unwrap_or(0.15).min(1.),
+                                                        ))
+                                                        .bg(theme().accent),
+                                                ),
+                                        )
+                                    })
+                                    .when_some(tools_status, |block, summary| {
+                                        block.child(muted(summary.into(), 11.))
+                                    }),
+                            )
+                            .child(div().flex().flex_col().gap(px(8.)).children(rows)),
+                    )
                 }),
         )
         .child(rule())
