@@ -456,7 +456,21 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         s.features.get::<Panel>().files.insert(key.clone(), view);
     }
     if tool == Tool::Browser && !s.features.get::<Panel>().browsers.contains_key(&key) {
-        let view = cx.new(crate::browser_panel::BrowserPanel::new);
+        let saved = s.state.browser_pages.get(&workspace).cloned();
+        let client = s.client.in_workspace(&workspace);
+        let view = cx.new(|cx| {
+            let mut view = crate::browser_panel::BrowserPanel::new(cx);
+            view.configure(saved, client, cx);
+            view
+        });
+        s.subscriptions.push(cx.observe(&view, |_, _, cx| cx.notify()));
+        s.subscriptions.push(cx.subscribe(
+            &view,
+            move |s, _, event: &crate::browser_panel::PagesChanged, _| {
+                crate::browser_panel::save_pages(&mut s.state, &workspace, event.0.clone());
+                s.persist();
+            },
+        ));
         s.features.get::<Panel>().browsers.insert(key.clone(), view);
     }
     let panel = s.features.get::<Panel>();
@@ -1122,7 +1136,22 @@ pub(super) fn header(
     let travel = panel.map_or(0., |panel| panel.motion.value().0);
     let mut pills = vec![];
     for (index, tool) in tabs.iter().enumerate() {
-        pills.push(tab_pill(index, *tool, index == active, cx).into_any_element());
+        if *tool == Tool::Browser
+            && let Some(view) = panel.and_then(|panel| panel.browsers.get(&key(s, Tool::Browser)))
+        {
+            let pages = view.update(cx, |browser, cx| browser.page_strip(cx));
+            pills.push(
+                div()
+                    .child(pages)
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|s, _, window, cx| show(s, Tool::Browser, window, cx)),
+                    )
+                    .into_any_element(),
+            );
+        } else {
+            pills.push(tab_pill(index, *tool, index == active, cx).into_any_element());
+        }
     }
     let menu = panel
         .and_then(|panel| panel.menu)
