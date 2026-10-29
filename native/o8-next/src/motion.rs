@@ -1,6 +1,63 @@
 //! Desktop motion. Durations and the ease follow the framer-motion transitions
 //! they mirror; callers request animation frames while `value` reports travel.
-use std::time::{Duration, Instant};
+use gpui::{Rgba, SharedString, StatefulInteractiveElement};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    time::{Duration, Instant},
+};
+
+thread_local! {
+    /// Hover fills in flight, by element id; GPUI's hover style switches instantly.
+    static HOVERS: RefCell<HashMap<SharedString, Transition>> = RefCell::default();
+}
+
+/// How far an element's hover fill has faded in: 0 at rest, 1 hovered.
+pub fn hover(key: &SharedString) -> f32 {
+    HOVERS.with(|hovers| hovers.borrow().get(key).map_or(0., |motion| motion.value().0))
+}
+
+/// Fades the element's hover fill over `milliseconds` instead of switching it;
+/// the element reads its progress with [`hover`].
+pub fn fade_hover<E: StatefulInteractiveElement>(
+    element: E,
+    key: SharedString,
+    milliseconds: u64,
+) -> E {
+    element.on_hover(move |hovered, window, cx| {
+        HOVERS.with(|hovers| {
+            hovers
+                .borrow_mut()
+                .entry(key.clone())
+                .or_insert_with(|| Transition::new(milliseconds))
+                .set(*hovered)
+        });
+        // Redraw each frame until the fade settles.
+        window
+            .spawn(cx, async move |cx| {
+                for _ in 0..milliseconds / 16 + 2 {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(16))
+                        .await;
+                    if cx.update(|window, _| window.refresh()).is_err() {
+                        break;
+                    }
+                }
+            })
+            .detach();
+    })
+}
+
+/// A colour `t` of the way from `from` to `to`.
+pub fn mix(from: Rgba, to: Rgba, t: f32) -> Rgba {
+    let t = t.clamp(0., 1.);
+    Rgba {
+        r: from.r + (to.r - from.r) * t,
+        g: from.g + (to.g - from.g) * t,
+        b: from.b + (to.b - from.b) * t,
+        a: from.a + (to.a - from.a) * t,
+    }
+}
 
 /// cubic-bezier(0.22, 1, 0.36, 1), the desktop's panel and popover ease.
 pub fn ease_out(t: f32) -> f32 {

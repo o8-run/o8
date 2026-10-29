@@ -153,12 +153,15 @@ fn search_button(cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
 }
 
 /// The desktop's 26px header icon pill (HeaderIconPill): 7px padding either
-/// side of the glyph, transparent at rest, hover fill, 0.35 when disabled.
+/// side of the glyph, transparent at rest, a hover fill that crossfades in
+/// 140ms, 0.35 when disabled.
 pub(super) fn pill(
     id: &'static str,
     tip: &'static str,
     enabled: bool,
 ) -> gpui::Stateful<gpui::Div> {
+    let hover = theme().hover;
+    let shown = crate::motion::hover(&id.into());
     div()
         .id(id)
         .debug_selector(move || id.into())
@@ -171,9 +174,14 @@ pub(super) fn pill(
         .justify_center()
         .rounded(px(7.))
         .when(enabled, |button| {
-            button
-                .cursor_pointer()
-                .hover(|button| button.bg(theme().hover))
+            crate::motion::fade_hover(
+                button.cursor_pointer().bg(gpui::Rgba {
+                    a: hover.a * shown,
+                    ..hover
+                }),
+                id.into(),
+                140,
+            )
         })
         .when(!enabled, |button| button.opacity(0.35))
         .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
@@ -187,9 +195,15 @@ pub(super) fn icon_button(
     tip: &'static str,
     enabled: bool,
 ) -> gpui::Stateful<gpui::Div> {
+    // The glyph brightens with the fill, as HeaderIconPill's colour does.
+    let shown = if enabled {
+        crate::motion::hover(&id.into())
+    } else {
+        0.
+    };
     pill(id, tip, enabled).child(crate::icon::stroke(
         path,
-        theme().text_secondary,
+        crate::motion::mix(theme().text_secondary, theme().text, shown),
         size,
         weight,
     ))
@@ -436,7 +450,13 @@ fn strip(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
                             theme().text_muted
                         })
                         .when(selected, |pill| pill.bg(theme().selection))
-                        .when(!selected, |pill| pill.hover(|pill| pill.bg(theme().hover)))
+                        .when(!selected, |pill| {
+                            // The fill fades in 120ms (WorkspaceHeaderStrip's transition).
+                            let hover = theme().hover;
+                            let shown = crate::motion::hover(&group.clone());
+                            pill.bg(gpui::Rgba { a: hover.a * shown, ..hover })
+                        })
+                        .map(|pill| crate::motion::fade_hover(pill, group.clone(), 120))
                         .child(
                             div()
                                 .relative()
