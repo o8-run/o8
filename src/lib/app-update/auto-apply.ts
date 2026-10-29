@@ -33,6 +33,18 @@ export async function controlAutoApply(input: Record<string, unknown>) {
     if (input.force === true) recordForcedRestart('native-inspection', idle);
     return { allowed: input.force === true || idle.idle || idle.idleExceptParked, idle };
   }
+  if (input.action === 'progress') {
+    const current = getAppUpdateState().autoApply;
+    if (!current?.attemptId || input.attemptId !== current.attemptId || current.phase !== 'installing') return { allowed: false, attemptMissing: true };
+    const receivedBytes = input.receivedBytes;
+    const totalBytes = input.totalBytes ?? null;
+    if (!Number.isSafeInteger(receivedBytes) || (receivedBytes as number) < 0
+      || (totalBytes !== null && (!Number.isSafeInteger(totalBytes) || (totalBytes as number) <= 0))) {
+      return { allowed: false, error: { code: 'invalid_progress' } };
+    }
+    recordAutoApply({ ...current, progress: { stage: 'downloading', receivedBytes: receivedBytes as number, totalBytes: totalBytes as number | null } });
+    return { allowed: true };
+  }
   // A terminal wait report already proves the download ended without installing.
   // Do not misreport its stopped-task receipt as an abandoned installation.
   if (input.action !== 'wait') recoverStoppedNativeTask();
@@ -92,6 +104,10 @@ export async function controlAutoApply(input: Record<string, unknown>) {
       && state.lastInstall.version === state.version),
     phase: allowed ? input.action === 'restart' ? 'restarting' as const : 'installing' as const : 'waiting' as const,
     blockers, error: null,
+    progress: !allowed ? null : {
+      stage: input.action === 'restart' ? 'restarting' as const : input.action === 'install' ? 'installing' as const : 'downloading' as const,
+      receivedBytes: 0, totalBytes: null,
+    },
   };
   if (allowed && input.action === 'admit') recordAppUpdateInstall({ outcome: 'started', version: activity.version });
   if (allowed && manual && input.action === 'admit') manualApply = { ...manual, attemptId: activity.attemptId };

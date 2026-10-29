@@ -82,6 +82,58 @@ impl<R: Runtime> NativeEffects<R> {
         relaunch()
     }
 
+    /// Downloads the update while reporting its bytes to the server twice a
+    /// second, for the Update panel's progress bar.
+    async fn download_reporting(
+        &self,
+        update: &tauri_plugin_updater::Update,
+        attempt_id: &str,
+    ) -> Result<Vec<u8>, String> {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Arc;
+        let received = Arc::new(AtomicU64::new(0));
+        let total = Arc::new(AtomicU64::new(0));
+        let done = Arc::new(AtomicBool::new(false));
+        let reporter = tauri::async_runtime::spawn({
+            let (client, token, attempt_id) = (
+                self.client.clone(),
+                self.token.clone(),
+                attempt_id.to_string(),
+            );
+            let url = format!("{}/api/panel/app/update-state", self.base);
+            let (received, total, done) = (received.clone(), total.clone(), done.clone());
+            async move {
+                let mut reported = None;
+                while !done.load(Ordering::Acquire) {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    let bytes = received.load(Ordering::Relaxed);
+                    if reported == Some(bytes) {
+                        continue;
+                    }
+                    reported = Some(bytes);
+                    let length = total.load(Ordering::Relaxed);
+                    let progress = json!({ "action": "progress", "attemptId": attempt_id,
+                        "receivedBytes": bytes, "totalBytes": (length > 0).then_some(length) });
+                    let _ = control(&client, &url, &token, progress).await;
+                }
+            }
+        });
+        let result = download(
+            update,
+            |chunk, length| {
+                received.fetch_add(chunk as u64, Ordering::Relaxed);
+                if let Some(length) = length {
+                    total.store(length, Ordering::Relaxed);
+                }
+            },
+            || {},
+        )
+        .await;
+        done.store(true, Ordering::Release);
+        reporter.abort();
+        result
+    }
+
     pub(crate) async fn install_candidate(
         &self,
         update: tauri_plugin_updater::Update,
@@ -116,7 +168,7 @@ impl<R: Runtime> NativeEffects<R> {
             }
         }
         crate::update_ping::ensure_update_channel(&self.app, &update)?;
-        let bytes = download(&update, |_, _| {}, || {}).await?;
+        let bytes = self.download_reporting(&update, attempt_id).await?;
         crate::update_ping::ensure_epoch(&self.app, generation)?;
         let admission = control(
             &self.client,

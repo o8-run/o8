@@ -74,3 +74,22 @@ it('keeps sending the click to the classic window when it exists', async () => {
   expect((await nativeRead()).applyRequestedAt).toBeNull();
   expect(await native({ action: 'admit', attemptId: 'automatic' })).toMatchObject({ allowed: false });
 });
+
+it('shows the native download, install and restart steps for the progress bar', async () => {
+  vi.stubEnv('O8_NEXT_MAIN_WINDOW', '1');
+  expect((await apply({})).status).toBe(202);
+  const progress = async () => (await (await applyRoute.GET()).json()).state.autoApply.progress;
+  expect(await native({ action: 'admit', attemptId: 'clicked' })).toMatchObject({ allowed: true });
+  expect(await progress()).toEqual({ stage: 'downloading', receivedBytes: 0, totalBytes: null });
+  expect(await native({ action: 'progress', attemptId: 'clicked', receivedBytes: 5_242_880, totalBytes: 20_971_520 }))
+    .toMatchObject({ allowed: true });
+  expect(await progress()).toEqual({ stage: 'downloading', receivedBytes: 5_242_880, totalBytes: 20_971_520 });
+  expect(await native({ action: 'progress', attemptId: 'stale', receivedBytes: 1, totalBytes: null }))
+    .toMatchObject({ allowed: false, attemptMissing: true });
+  expect(await native({ action: 'progress', attemptId: 'clicked', receivedBytes: -1, totalBytes: null }))
+    .toMatchObject({ allowed: false, error: { code: 'invalid_progress' } });
+  expect(await native({ action: 'install', attemptId: 'clicked' })).toMatchObject({ allowed: true });
+  expect(await progress()).toMatchObject({ stage: 'installing' });
+  expect(await native({ action: 'restart', attemptId: 'clicked' })).toMatchObject({ allowed: true });
+  expect(await progress()).toMatchObject({ stage: 'restarting' });
+});
