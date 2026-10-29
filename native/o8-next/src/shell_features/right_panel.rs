@@ -48,16 +48,18 @@ impl ShellFeature for RightPanel {
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Tool {
     Launcher,
-    Inbox,
+    Files,
     Terminal,
     Review,
+    Inbox,
+    Spec,
 }
 
 impl Tool {
-    const PICKER: [Tool; 3] = [Tool::Terminal, Tool::Review, Tool::Inbox];
+    const PICKER: [Tool; 5] = [Tool::Files, Tool::Terminal, Tool::Review, Tool::Inbox, Tool::Spec];
     fn tab(self) -> Option<Tab> {
         match self {
-            Tool::Launcher => None,
+            Tool::Launcher | Tool::Files | Tool::Spec => None,
             Tool::Inbox => Some(Tab::Inbox),
             Tool::Terminal => Some(Tab::Terminal),
             Tool::Review => Some(Tab::Diff),
@@ -66,6 +68,8 @@ impl Tool {
     fn label(self) -> &'static str {
         match self {
             Tool::Launcher => "New tab",
+            Tool::Files => "Files",
+            Tool::Spec => "o8.md",
             Tool::Inbox => "Inbox",
             Tool::Terminal => "Terminal",
             Tool::Review => "Review",
@@ -74,6 +78,8 @@ impl Tool {
     fn description(self) -> &'static str {
         match self {
             Tool::Launcher => "",
+            Tool::Files => "Browse and read repository files",
+            Tool::Spec => "Workspace notes and instructions",
             Tool::Inbox => "GitHub replies, approvals, and agent issues",
             Tool::Terminal => "Run commands in an interactive shell",
             Tool::Review => "Worker changes waiting for review",
@@ -82,6 +88,8 @@ impl Tool {
     fn icon(self) -> &'static str {
         match self {
             Tool::Launcher => PLUS,
+            Tool::Files => FILES,
+            Tool::Spec => SPEC,
             Tool::Inbox => INBOX,
             Tool::Terminal => TERMINAL,
             Tool::Review => REVIEW,
@@ -95,6 +103,8 @@ struct Panel {
     /// The tool's own fade and 12px slide: 200ms.
     content: Transition,
     tool: Tool,
+    /// Files and o8.md views, keyed like panel content.
+    files: std::collections::HashMap<String, gpui::Entity<crate::files_panel::FilesPanel>>,
 }
 
 impl Default for Panel {
@@ -103,6 +113,7 @@ impl Default for Panel {
             motion: Transition::new(260),
             content: Transition::new(200),
             tool: Tool::Launcher,
+            files: Default::default(),
         }
     }
 }
@@ -115,7 +126,7 @@ pub(super) fn is_open(s: &Shell) -> bool {
     s.features.read::<Panel>().is_some_and(|panel| panel.motion.is_open())
 }
 
-/// The column's full width (30% of the window, at most 440) and the width it
+/// The column's full width (theme::right_panel_width) and the width it
 /// shows at this frame of its open or close travel. None once fully closed.
 pub(super) fn width(s: &Shell, window: &Window) -> Option<(f32, f32)> {
     let panel = s.features.read::<Panel>()?;
@@ -126,8 +137,7 @@ pub(super) fn width(s: &Shell, window: &Window) -> Option<(f32, f32)> {
     if travel <= 0. && !moving {
         return None;
     }
-    let viewport = f32::from(window.viewport_size().width);
-    let full = (viewport * 0.30).min(crate::theme::GEOMETRY.right_width);
+    let full = crate::theme::right_panel_width(f32::from(window.viewport_size().width));
     Some((full, full * travel))
 }
 
@@ -144,9 +154,26 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
             cx.notify();
             return;
         }
-        if let Some(content) = (tab.registration().create)(s, tab, workspace, window, cx) {
+        if let Some(content) = (tab.registration().create)(s, tab, workspace.clone(), window, cx) {
             s.content.insert(key.clone(), content);
         }
+    }
+    if matches!(tool, Tool::Files | Tool::Spec)
+        && !s.features.get::<Panel>().files.contains_key(&key)
+    {
+        if workspace.is_empty() {
+            s.notice = "Open a workspace before using this tool.".into();
+            cx.notify();
+            return;
+        }
+        let mode = if tool == Tool::Files {
+            crate::files_panel::Mode::Files
+        } else {
+            crate::files_panel::Mode::Spec
+        };
+        let client = s.client.in_workspace(&workspace);
+        let view = cx.new(|cx| crate::files_panel::FilesPanel::new(client, workspace.clone(), mode, cx));
+        s.features.get::<Panel>().files.insert(key.clone(), view);
     }
     let panel = s.features.get::<Panel>();
     if panel.tool != tool || !panel.motion.is_open() {
@@ -157,6 +184,8 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     panel.motion.set(true);
     if let Some(content) = s.content.get(&key) {
         content.focus(false, window, cx);
+    } else if let Some(view) = s.features.read::<Panel>().and_then(|panel| panel.files.get(&key)) {
+        view.read(cx).focus(window);
     }
     cx.notify();
 }
@@ -192,6 +221,7 @@ pub(super) fn element(
             .content
             .get(&key(s, tool))
             .map(Content::element)
+            .or_else(|| panel.files.get(&key(s, tool)).map(|view| view.clone().into_any_element()))
             .unwrap_or_else(|| launcher(cx).into_any_element()),
     };
     // A fixed-width inner column, clipped by the travelling outer width, so the
@@ -367,6 +397,9 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
 const PANEL: &str = "M6 4h12a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z M16 4v16 M10 9l3 3-3 3";
 const COLUMNS: &str = "M5 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z";
 const PLUS: &str = "M12 5v14M5 12h14";
-const INBOX: &str = "M22 12h-6l-2 3h-4l-2-3H2 M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z";
-const TERMINAL: &str = "M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z M7 10l3 2-3 2 M12 15h5";
-const REVIEW: &str = "M3 12l4 4 8-8 M11 16l1 1 9-9";
+// PanelToolIcon in o8-panel/panel-tools.tsx.
+const INBOX: &str = "M5 4h14l3 9v7H2v-7l3-9Z M2 13h6l2 3h4l2-3h6";
+const TERMINAL: &str = "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z M7 9l3 3-3 3 M12 16h5";
+const REVIEW: &str = "M3 12l4 4L17 6 M12 15l3 3 7-8";
+const FILES: &str = "M3 7V4h7l2 3h9v13H3V7h7";
+const SPEC: &str = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5 M14 3l5 5v3 M8 9h6 M8 13h4 M18.4 13.6a1.4 1.4 0 0 1 2 2L16 20l-3 1 1-3Z";

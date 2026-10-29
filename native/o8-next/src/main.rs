@@ -11,6 +11,7 @@ mod diff;
 #[cfg(test)]
 mod diff_tests;
 mod diff_ui;
+mod files_panel;
 mod grid_sessions;
 mod icon;
 mod inbox;
