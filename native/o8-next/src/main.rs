@@ -8,6 +8,7 @@ mod browser_panel;
 mod client;
 mod clock;
 mod composer;
+mod devices_panel;
 mod diff;
 #[cfg(test)]
 mod diff_tests;

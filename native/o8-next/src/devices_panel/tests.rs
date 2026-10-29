@@ -1,0 +1,329 @@
+//! Black-box tests enter through the existing shell Devices surface. This same
+//! module compiles on the pre-port shell, where every case fails at that entry.
+use super::super::*;
+use crate::{
+    client::Client,
+    shell::test_support::{draw, open},
+    shell_state::State,
+};
+use gpui::{TestAppContext, VisualTestContext};
+use serde_json::{Value, json};
+use std::{
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
+};
+struct Fixture {
+    client: Client,
+    state: Arc<Mutex<Value>>,
+    requests: Arc<Mutex<Vec<Value>>>,
+    hold: Arc<AtomicBool>,
+    fail: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    root: PathBuf,
+}
+impl Fixture {
+    fn new() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let state = Arc::new(Mutex::new(
+            json!({"phase":"idle", "tools":{"hub":{"installed":false},"agent":{"installed":false}}, "platforms":{"ios":{"available":true,"detail":"Xcode simulator available"},"android":{"available":false,"detail":"Android SDK not found"}},"devices":[],"controllers":[],"controllerRevision":0}),
+        ));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let hold = Arc::new(AtomicBool::new(false));
+        let fail = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (s, r, h, f, done) = (
+            state.clone(),
+            requests.clone(),
+            hold.clone(),
+            fail.clone(),
+            stop.clone(),
+        );
+        std::thread::spawn(move || {
+            while !done.load(Ordering::Acquire) {
+                match listener.accept() {
+                    Ok((socket, _)) => {
+                        let (s, r, h, f, done) =
+                            (s.clone(), r.clone(), h.clone(), f.clone(), done.clone());
+                        std::thread::spawn(move || serve(socket, s, r, h, f, done));
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(2)),
+                }
+            }
+        });
+        let root = std::env::temp_dir().join(format!(
+            "o8-device-test-{}-{}",
+            std::process::id(),
+            origin.rsplit(':').next().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        Self {
+            client: Client::authenticated(&origin, Some("fixture-device-operator".into())).unwrap(),
+            state,
+            requests,
+            hold,
+            fail,
+            stop,
+            root,
+        }
+    }
+    fn logs(&self) -> Vec<Value> {
+        self.requests.lock().unwrap().clone()
+    }
+    fn running(&self) {
+        let mut state = self.state.lock().unwrap();
+        state["phase"] = json!("running");
+        state["tools"]["hub"]["installed"] = json!(true);
+        state["embedUrl"] = json!("http://127.0.0.1:1/?token=fixture");
+        state["devices"] =
+            json!([{"id":"sim-1","name":"iPhone fixture","platform":"ios","state":"running"}]);
+        state["controllers"] = json!([{"deviceId":"sim-1","active":null,"busy":false,"waiting":[{"session":"worker-1","label":"Waiting worker","kind":"worker"}]}]);
+    }
+}
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+fn serve(
+    mut socket: TcpStream,
+    state: Arc<Mutex<Value>>,
+    requests: Arc<Mutex<Vec<Value>>>,
+    hold: Arc<AtomicBool>,
+    fail: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+) {
+    socket
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut bytes = Vec::new();
+    let mut chunk = [0; 4096];
+    let boundary = loop {
+        let Ok(n) = socket.read(&mut chunk) else {
+            return;
+        };
+        if n == 0 {
+            return;
+        }
+        bytes.extend_from_slice(&chunk[..n]);
+        if let Some(i) = bytes.windows(4).position(|v| v == b"\r\n\r\n") {
+            break i + 4;
+        }
+    };
+    let header = String::from_utf8_lossy(&bytes[..boundary]).to_string();
+    let path = header
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("");
+    let len = header
+        .lines()
+        .find_map(|line| {
+            line.to_lowercase()
+                .strip_prefix("content-length:")
+                .and_then(|v| v.trim().parse::<usize>().ok())
+        })
+        .unwrap_or(0);
+    while bytes.len() < boundary + len {
+        let Ok(n) = socket.read(&mut chunk) else {
+            return;
+        };
+        if n == 0 {
+            return;
+        }
+        bytes.extend_from_slice(&chunk[..n]);
+    }
+    if !path.starts_with("/api/panel/devices") {
+        let body = if path.starts_with("/api/mobile/orchestrator/threads") {
+            json!({"threads":[]})
+        } else {
+            json!({"projects":[],"workspaces":[]})
+        };
+        respond(&mut socket, 200, &body);
+        return;
+    }
+    assert!(
+        header
+            .to_lowercase()
+            .contains("authorization: bearer fixture-device-operator")
+    );
+    if path.contains("stream=controllers") {
+        let _ = socket.write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+        );
+        let mut last = Value::Null;
+        while !stop.load(Ordering::Acquire) {
+            let snapshot = {
+                let s = state.lock().unwrap();
+                json!({"revision":s["controllerRevision"],"controllers":s["controllers"]})
+            };
+            if snapshot != last {
+                if write!(socket, "data: {snapshot}\n\n").is_err() {
+                    return;
+                }
+                last = snapshot;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        return;
+    }
+    let body: Value =
+        serde_json::from_slice(&bytes[boundary..boundary + len]).unwrap_or(json!({"action":"GET"}));
+    let held = (body["action"] == "GET" && hold.load(Ordering::Acquire))
+        .then(|| state.lock().unwrap().clone());
+    requests.lock().unwrap().push(body.clone());
+    while held.is_some() && hold.load(Ordering::Acquire) && !stop.load(Ordering::Acquire) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    if fail.load(Ordering::Acquire) {
+        respond(
+            &mut socket,
+            503,
+            &json!({"error":{"message":"Fixture device failure"}}),
+        );
+        return;
+    }
+    if let Some(old) = held {
+        respond(&mut socket, 200, &old);
+        return;
+    }
+    let mut s = state.lock().unwrap();
+    match body["action"].as_str().unwrap_or("") {
+        "install" => {
+            s["phase"] = json!("installing");
+            s["stage"] = json!("Downloading device helper");
+        }
+        "start" => {
+            s["phase"] = json!("starting");
+            s["stage"] = json!("Starting the device dashboard");
+        }
+        "stop" => {
+            s["phase"] = json!("idle");
+            s.as_object_mut().unwrap().remove("embedUrl");
+        }
+        "take-control" => {
+            assert_eq!(
+                body["expectedSession"],
+                s["controllers"][0]["active"]["session"]
+            );
+            s["controllers"][0]["active"] =
+                json!({"session":"operator-1","label":"Operator","kind":"operator"});
+            s["controllerRevision"] = json!(1);
+        }
+        "release-control" => {
+            assert_eq!(body["expectedSession"], json!("operator-1"));
+            s["controllers"][0]["active"] = Value::Null;
+            s["controllerRevision"] = json!(2);
+        }
+        "handoff" => {
+            assert_eq!(body["targetSession"], json!("worker-1"));
+            s["controllers"][0]["active"] =
+                json!({"session":"worker-1","label":"Waiting worker","kind":"worker"});
+            s["controllerRevision"] = json!(3);
+        }
+        _ => {}
+    }
+    respond(&mut socket, 200, &s);
+}
+fn respond(socket: &mut TcpStream, status: u16, body: &Value) {
+    let body = body.to_string();
+    let _ = write!(
+        socket,
+        "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+}
+fn start(f: &Fixture, cx: &mut TestAppContext) -> (gpui::Entity<Shell>, VisualTestContext) {
+    let (shell, mut visual) = open(
+        f.client.clone(),
+        f.root.join("shell.json"),
+        State::default(),
+        cx,
+    );
+    visual.update(|window, _| window.activate_window());
+    shell.update_in(&mut visual, |s, w, cx| {
+        assert!(
+            super::super::right_panel::open_surface(s, "devices", None, w, cx),
+            "Devices must be reachable through the shell tool entry"
+        );
+    });
+    (shell, visual)
+}
+fn pump(shell: &gpui::Entity<Shell>, cx: &mut VisualTestContext) {
+    cx.run_until_parked();
+    cx.cx.executor().advance_clock(Duration::from_millis(25));
+    shell.update_in(cx, |s, w, cx| {
+        s.connected = true;
+        s.tick(false, w, cx);
+    });
+    draw(cx);
+    std::thread::sleep(Duration::from_millis(5));
+}
+fn wait(shell: &gpui::Entity<Shell>, cx: &mut VisualTestContext, selector: &'static str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        pump(shell, cx);
+        if cx.debug_bounds(selector).is_some() {
+            return;
+        }
+        assert!(Instant::now() < deadline, "missing {selector}");
+    }
+}
+fn click(shell: &gpui::Entity<Shell>, cx: &mut VisualTestContext, selector: &'static str) {
+    wait(shell, cx, selector);
+    let p = cx.debug_bounds(selector).unwrap().center();
+    cx.simulate_click(p, gpui::Modifiers::default());
+    pump(shell, cx);
+}
+fn requested(shell: &gpui::Entity<Shell>, cx: &mut VisualTestContext, f: &Fixture, action: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !f.logs().iter().any(|r| r["action"] == action) {
+        pump(shell, cx);
+        assert!(Instant::now() < deadline, "missing {action}");
+    }
+}
+#[gpui::test]
+fn devices_status_cards_and_passive_inspection(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    let (s, mut v) = start(&f, cx);
+    wait(&s, &mut v, "devices-ios");
+    wait(&s, &mut v, "devices-android");
+    wait(&s, &mut v, "devices-guide-android");
+    assert!(v.debug_bounds("devices-guide-ios").is_none());
+    assert!(f.logs().iter().all(|r| r["action"] == "GET"));
+}
+#[gpui::test]
+fn devices_setup_and_open_stages_disable_duplicate_actions(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    let (s, mut v) = start(&f, cx);
+    click(&s, &mut v, "devices-open");
+    requested(&s, &mut v, &f, "install");
+    wait(&s, &mut v, "devices-stage-installing");
+    click(&s, &mut v, "devices-open");
+    assert_eq!(
+        f.logs().iter().filter(|r| r["action"] == "install").count(),
+        1
+    );
+    {
+        let mut state = f.state.lock().unwrap();
+        state["phase"] = json!("idle");
+        state["tools"]["hub"]["installed"] = json!(true);
+    }
+    v.cx.executor().advance_clock(Duration::from_millis(1600));
+    for _ in 0..60 {
+        pump(&s, &mut v);
+    }
+    click(&s, &mut v, "devices-open");
+    requested(&s, &mut v, &f, "start");
+    wait(&s, &mut v, "devices-stage-starting");
+}
