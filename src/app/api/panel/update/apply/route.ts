@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 import { getUpdateIdleWindow, type UpdateIdleWindow } from '@/lib/app-update/idle-window';
 import { getAppUpdateState } from '@/lib/app-update/relaunch-state';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import packageJson from '../../../../../../package.json';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,7 +45,8 @@ async function readIdleWindow(): Promise<UpdateIdleWindow> {
 export async function GET() {
   const idle = await readIdleWindow();
   // The state carries the last install attempt, so a caller can read a failed apply back (#3588).
-  return response({ ok: true, idle, state: getAppUpdateState() });
+  // currentVersion names the running server, so the o8 next Update pill can show it (#5069).
+  return response({ ok: true, idle, state: getAppUpdateState(), currentVersion: packageJson.version });
 }
 
 export async function POST(request: Request) {
