@@ -203,6 +203,88 @@ mod tests {
     fn valid() -> Value {
         json!({"kind":"o8-visualization", "id":"vis-00000000-0000-0000-0000-000000000001", "title":"Chart", "createdAt":"2026-10-01T00:00:00.000Z", "height":320})
     }
+    #[gpui::test]
+    fn backfill_reanchors_leading_charts_to_the_first_history_row(cx: &mut gpui::TestAppContext) {
+        let (client, request) = server(json!({
+            "sessionKey":"llm-chat:thoughts-leading",
+            "transcript":(0..20).map(|i| json!({
+                "id":if i == 19 {"producing".to_owned()} else {format!("older-{i}")},
+                "role":if i % 2 == 0 {"user"} else {"assistant"},
+                "text":format!("Earlier row {i}"),"timestamp":1790812780000_u64 + i * 1000
+            })).collect::<Vec<_>>(),
+            "page":{"hasMore":true,"beforeCursor":"next-page"}
+        }));
+        let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+        view.update(cx, |s, cx| {
+            s.selected = Some("thoughts-leading".into());
+            s.transcript = Some(Transcript::new(serde_json::from_value(json!({
+                "sessionKey":"llm-chat:thoughts-leading",
+                "transcript":(0..30).map(|i| json!({
+                    "id":format!("history-{i}"),"role":if i % 2 == 0 {"user"} else {"assistant"},
+                    "text":format!("History row {i}"),"timestamp":1790812810000_u64 + i * 1000
+                })).collect::<Vec<_>>(),
+                "page":{"hasMore":true,"beforeCursor":"older-page"}
+            })).unwrap()));
+            // Two leading rows exercise the accumulated pixel adjustment.
+            for i in 1..=2 {
+                let mut reference = valid();
+                reference["id"] = json!(format!("vis-00000000-0000-0000-0000-{i:012}"));
+                reference["height"] = json!(80);
+                s.saved_visualizations
+                    .refs
+                    .push(Reference::parse(&reference).unwrap());
+            }
+            s.install_rows(s.transcript.as_ref().unwrap().rows.clone(), cx);
+            // This regression measures list geometry, without document HTTP.
+            for row in s.rows.iter() {
+                for card in row.borrow().cards.values() {
+                    card.borrow_mut().error = Some("Fixture chart".into());
+                }
+            }
+            s.list.scroll_to(ListOffset {
+                item_ix: 0,
+                offset_in_item: px(7.),
+            });
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let (retained, before, offset) = view.update(cx, |s, cx| {
+            assert_eq!(s.list.logical_scroll_top().item_ix, 0);
+            assert!(
+                s.rows[0]
+                    .borrow()
+                    .row
+                    .id()
+                    .starts_with("\0o8:leading-visualization:")
+            );
+            assert_eq!(s.rows[2].borrow().row.id(), "history-0");
+            let before = s.list.bounds_for_item(2).unwrap();
+            let offset = (0..2).fold(px(7.), |offset, i| {
+                offset - s.list.bounds_for_item(i).unwrap().size.height
+            });
+            s.on_transcript_scroll(cx);
+            assert!(s.history_loading);
+            (s.rows[2].clone(), before, offset)
+        });
+        cx.run_until_parked();
+        assert!(request.recv().unwrap().contains("before=older-page"));
+        view.update(cx, |s, cx| {
+            assert!(!s.history_loading && s.history_error.is_none());
+            assert!(s.rows.iter().all(|row| !row.borrow().row.id().starts_with("\0o8:leading-visualization:")));
+            assert!(matches!(&s.rows[19].borrow().row, Row::Message { id, nodes, .. }
+                if id == "producing" && nodes.iter().filter(|n| n.kind == "visualization").count() == 2));
+            let top = s.list.logical_scroll_top();
+            assert_eq!(top.item_ix, 20, "anchor to the retained history row, not the removed chart");
+            assert_eq!(top.offset_in_item, offset);
+            assert!(Rc::ptr_eq(&retained, &s.rows[top.item_ix]));
+            assert_eq!(s.list.bounds_for_item(top.item_ix).unwrap().top(), before.top());
+            s.on_transcript_scroll(cx);
+            assert!(!s.history_loading, "relocation must not cascade into another backfill");
+        });
+    }
     #[test]
     fn saved_list_scopes_and_validates_every_reference_through_client() {
         let scope = Scope::new(Some("/repo with spaces"), "thoughts-test", None).unwrap();

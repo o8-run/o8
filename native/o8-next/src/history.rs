@@ -62,11 +62,24 @@ impl Surface {
                         // Read at completion: the reader may have moved while
                         // the request was in flight. Row identity also survives
                         // deduplication and visualization placement on prepend.
-                        let anchor = this.list.logical_scroll_top();
-                        let anchor_id = this
-                            .rows
-                            .get(anchor.item_ix)
-                            .map(|row| row.borrow().row.id().to_owned());
+                        let mut anchor = this.list.logical_scroll_top();
+                        let anchor_id = this.rows.iter().enumerate().skip(anchor.item_ix).find_map(
+                            |(index, row)| {
+                                let row = row.borrow();
+                                if row.row.id().starts_with("\0o8:leading-visualization:") {
+                                    // Leading cards can move into newly loaded turns.
+                                    // Anchor the next history row at its current pixel
+                                    // position, including measured cards above it.
+                                    anchor.offset_in_item -= this
+                                        .list
+                                        .bounds_for_item(index)
+                                        .map_or(px(0.), |bounds| bounds.size.height);
+                                    None
+                                } else {
+                                    Some(row.row.id().to_owned())
+                                }
+                            },
+                        );
                         if let Some(transcript) = &mut this.transcript {
                             transcript.prepend(history);
                             let rows = transcript.rows.clone();
