@@ -75,7 +75,10 @@ impl<P: Port> Picker<P> {
         self.failed = false;
         let client = self.client.clone();
         let workspace = self.workspace.clone();
-        let open = !self.offered_own && self.requested.is_none() && self.selected.is_none();
+        // The first load always adopts the surface's own target (a terminal's owner
+        // key returns the same shell every time), so a second view of the surface or
+        // a saved choice the server no longer lists still opens it.
+        let open = !self.offered_own;
         self.offered_own = true;
         let task = cx.background_executor().spawn(async move {
             let own = open.then(|| P::own(&client, &workspace)).flatten();
@@ -87,15 +90,7 @@ impl<P: Port> Picker<P> {
                 s.loading = false;
                 match result {
                     Ok(mut choices) => {
-                        if let Some(Ok(id)) = own {
-                            if !choices.iter().any(|choice| choice.id == id) {
-                                choices.push(Choice {
-                                    id: id.clone(),
-                                    label: id.clone(),
-                                });
-                            }
-                            s.requested.get_or_insert(id);
-                        }
+                        adopt(&mut choices, &mut s.requested, own);
                         choices.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.id.cmp(&b.id)));
                         choices.dedup_by(|a, b| a.id == b.id);
                         s.choices = choices;
@@ -271,10 +266,74 @@ impl<P: Port> ShellView for Picker<P> {
     }
 }
 
+/// Adds the surface's own target to the listed choices and opens the saved
+/// choice while it is still listed, else the own target.
+fn adopt(
+    choices: &mut Vec<Choice>,
+    requested: &mut Option<String>,
+    own: Option<Result<String, String>>,
+) {
+    let Some(Ok(id)) = own else {
+        return;
+    };
+    if !choices.iter().any(|choice| choice.id == id) {
+        choices.push(Choice {
+            id: id.clone(),
+            label: id.clone(),
+        });
+    }
+    if !requested
+        .as_ref()
+        .is_some_and(|saved| choices.iter().any(|choice| &choice.id == saved))
+    {
+        *requested = Some(id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::shell::palette::tests::{run, settled};
+
+    fn choice(id: &str) -> Choice {
+        Choice {
+            id: id.into(),
+            label: id.into(),
+        }
+    }
+
+    #[test]
+    fn own_target_opens_when_the_saved_choice_is_not_listed() {
+        // A server that leaves the owned shell out of its inventory, with the
+        // shell saved by an earlier view of the same surface.
+        let mut choices = vec![];
+        let mut requested = Some("owned".to_string());
+        adopt(&mut choices, &mut requested, Some(Ok("owned".into())));
+        assert_eq!(choices.len(), 1);
+        assert_eq!(requested.as_deref(), Some("owned"));
+
+        let mut choices = vec![choice("other")];
+        let mut requested = Some("gone".to_string());
+        adopt(&mut choices, &mut requested, Some(Ok("owned".into())));
+        assert_eq!(requested.as_deref(), Some("owned"));
+        assert_eq!(choices.len(), 2);
+    }
+
+    #[test]
+    fn a_listed_saved_choice_stays_and_failures_change_nothing() {
+        let mut choices = vec![choice("saved")];
+        let mut requested = Some("saved".to_string());
+        adopt(&mut choices, &mut requested, Some(Ok("owned".into())));
+        assert_eq!(requested.as_deref(), Some("saved"));
+        assert!(choices.iter().any(|c| c.id == "owned"));
+
+        let mut choices = vec![choice("saved")];
+        let mut requested = None;
+        adopt(&mut choices, &mut requested, Some(Err("down".into())));
+        adopt(&mut choices, &mut requested, None);
+        assert_eq!(requested, None);
+        assert_eq!(choices.len(), 1);
+    }
     use crate::shell::test_support::*;
 
     #[gpui::test]
