@@ -190,8 +190,13 @@ export default function SpatialInkPage() {
       const pts = stroke.pts;
       if (pts.length === 0) return;
       const reduced = reducedRef.current;
+      const n = pts.length;
+      const complete = !(isHead && phaseRef.current === 'live');
+      // A tap, or a stroke whose moves have not left its first point, has no
+      // outline yet; it is drawn as a dot so the mark never disappears.
+      const body = n > 1 ? inkPath(inkOutline(pts, reduced ? 3 : 6, complete)) : '';
 
-      if (pts.length === 1) {
+      if (!body) {
         ctx.globalAlpha = alpha;
         ctx.fillStyle = ORANGE;
         if (!reduced) {
@@ -199,7 +204,7 @@ export default function SpatialInkPage() {
           ctx.shadowBlur = 12 * glow;
         }
         ctx.beginPath();
-        ctx.arc(pts[0].x, pts[0].y, 2.6, 0, Math.PI * 2);
+        ctx.arc(pts[n - 1].x, pts[n - 1].y, 2.6, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
         return;
@@ -207,16 +212,13 @@ export default function SpatialInkPage() {
 
       // Glow pass: a smoothed, pressure-shaped outline whose tail tapers into
       // the head (comet trail). The live stroke keeps its leading edge open.
-      const n = pts.length;
-      const complete = !(isHead && phaseRef.current === 'live');
       ctx.globalAlpha = alpha;
       ctx.fillStyle = ORANGE;
       if (!reduced) {
         ctx.shadowColor = ORANGE;
         ctx.shadowBlur = 11 * glow;
       }
-      const body = inkPath(inkOutline(pts, reduced ? 3 : 6, complete));
-      if (body) ctx.fill(new Path2D(body));
+      ctx.fill(new Path2D(body));
 
       // Hot core — thin, bright, no shadow, over the glow.
       ctx.shadowBlur = 0;
