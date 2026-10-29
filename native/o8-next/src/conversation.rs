@@ -98,6 +98,7 @@ impl Surface {
     pub(crate) fn send_spoken(
         &mut self,
         text: String,
+        voice: &str,
         cx: &mut Context<Self>,
     ) -> Result<gpui::Task<Result<String, String>>, String> {
         if !self.queue_ready {
@@ -120,7 +121,8 @@ impl Surface {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let id = format!("next-{nonce:x}-{:x}", std::process::id());
+        // The broker admits only queue items named for the Live session's nonce.
+        let id = format!("next-{voice}-{nonce:x}");
         let wire = crate::composer::controls::wire(
             &text,
             routing["pickedMode"].as_str().unwrap_or("solo"),

@@ -297,7 +297,7 @@ pub(super) fn delegate(s: &mut Shell, payload: &Value, cx: &mut Context<Shell>) 
         return;
     };
     let nonce = live.nonce.clone();
-    let task = match view.update(cx, |view, cx| view.send_spoken(text, cx)) {
+    let task = match view.update(cx, |view, cx| view.send_spoken(text, &nonce, cx)) {
         Ok(task) => task,
         Err(error) => {
             s.notice = format!("Voice request not sent: {error}");

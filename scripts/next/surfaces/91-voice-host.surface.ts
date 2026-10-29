@@ -41,7 +41,11 @@ export default async function register(): Promise<SurfaceRoutes> {
     }
     if (!active || !same(active, body)) return conflict();
     if (body.action === 'context') return reply(200, { ok: true });
-    if (body.action === 'accepted') return id(body.delegationId) && id(body.queueItemId) ? reply(200, { ok: true }) : invalid();
+    if (body.action === 'accepted') {
+      if (!id(body.delegationId) || !id(body.queueItemId)) return invalid();
+      // The broker reads the queue item back and admits only this nonce's sends.
+      return body.queueItemId.startsWith(`next-${body.nonce}-`) ? reply(200, { ok: true }) : conflict();
+    }
     return invalid();
   };
   return {

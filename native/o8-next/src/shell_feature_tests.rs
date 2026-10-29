@@ -285,10 +285,10 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
     assert_eq!(accepted[0]["delegationId"], "d1");
     assert_eq!(accepted[0]["threadId"], thread.as_str());
     assert!(
-        accepted[0]["queueItemId"]
-            .as_str()
-            .is_some_and(|id| id.starts_with("next-")),
-        "the acceptance names the queue item: {sent:?}"
+        accepted[0]["queueItemId"].as_str().is_some_and(
+            |id| id.starts_with(&format!("next-{}-", start["nonce"].as_str().unwrap()))
+        ),
+        "the acceptance names a queue item of this Live session: {sent:?}"
     );
 
     // A spoken cancel reaches the chat's stop path and leaves voice on.
@@ -331,16 +331,17 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
     assert_eq!(decision["action"], "decision");
     assert_eq!(decision["confirmationId"], "gate");
     assert_eq!(decision["allow"], true);
-    // The card leaves once the host admits the answer.
-    for _ in 0..100 {
-        visual.run_until_parked();
-        draw(&mut visual);
-        if visual.debug_bounds("voice-confirm-allow-gate").is_none() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    assert!(visual.debug_bounds("voice-confirm-allow-gate").is_none());
+    // The answered card leaves: a second click on its place posts nothing.
+    // (GPUI keeps debug bounds across frames, so the hitbox is the evidence.)
+    visual.run_until_parked();
+    draw(&mut visual);
+    visual.simulate_click(allow.center(), gpui::Modifiers::default());
+    visual.run_until_parked();
+    assert_eq!(
+        controls(3, &mut visual).len(),
+        3,
+        "the answered card took a second click"
+    );
 
     // A second toggle asks the host to close; the mic stays busy until the
     // host reports closure.
