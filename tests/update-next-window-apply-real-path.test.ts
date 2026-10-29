@@ -75,6 +75,11 @@ it('keeps sending the click to the classic window when it exists', async () => {
   expect(await native({ action: 'admit', attemptId: 'automatic' })).toMatchObject({ allowed: false });
 });
 
+it('reports the running server version for the Update pill', async () => {
+  const { version } = (await import('../package.json')).default;
+  expect(await (await applyRoute.GET()).json()).toMatchObject({ currentVersion: version });
+});
+
 it('shows the native download, install and restart steps for the progress bar', async () => {
   vi.stubEnv('O8_NEXT_MAIN_WINDOW', '1');
   expect((await apply({})).status).toBe(202);
