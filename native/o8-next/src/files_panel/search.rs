@@ -119,14 +119,57 @@ fn listing(body: Value, workspace: &str, limit: usize) -> Result<Listing, String
         truncated: body["truncated"] == true,
     })
 }
-/// Same path matching as the server, extended to the ignored flat-list entries.
-pub(super) fn merge_matches(query: &str, server: &[Entry], flat: &[Entry]) -> (Vec<Entry>, bool) {
+// The older server can silently fall back to a capped directory walk when its
+// Git command times out or exceeds 4 MB. Read the complete local index once per
+// search session, without either server limit. This runs on a background thread.
+fn git_listing(workspace: &str) -> Result<Listing, String> {
+    let output = std::process::Command::new("git")
+        .args([
+            "-C",
+            workspace,
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|_| "Couldn't read repository index")?;
+    if !output.status.success() {
+        return Err("Couldn't read repository index".into());
+    }
+    let entries = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter_map(|path| std::str::from_utf8(path).ok())
+        .filter(|path| repo_relative(workspace, path) == Some(*path))
+        .map(|path| Entry {
+            name: path.rsplit('/').next().unwrap_or(path).to_owned().into(),
+            path: path.to_owned(),
+            dir: false,
+            ignored: false,
+        })
+        .collect::<Vec<_>>();
+    Ok(Listing {
+        entries: entries.into(),
+        truncated: false,
+    })
+}
+/// Same path matching as the server, extended to the complete Git and flat lists.
+pub(super) fn merge_matches(
+    query: &str,
+    server: &[Entry],
+    flat: &[Entry],
+    git: &[Entry],
+) -> (Vec<Entry>, bool) {
     let query = query.trim().to_lowercase();
     let terms: Vec<_> = query.split_whitespace().collect();
     let mut seen = std::collections::HashSet::new();
     let mut entries: Vec<_> = server
         .iter()
         .chain(flat)
+        .chain(git)
         .filter(|entry| {
             let path = entry.path.to_lowercase();
             !entry.dir
@@ -161,6 +204,9 @@ pub(super) struct Search {
     server: Option<Result<Listing, String>>,
     flat: Option<Result<Listing, String>>,
     flat_pending: Option<Task<()>>,
+    git: Option<Result<Listing, String>>,
+    git_pending: Option<Task<()>>,
+    pub(super) scroll: UniformListScrollHandle,
     merge_pending: Option<Task<()>>,
     session: u64,
     merge_generation: u64,
@@ -212,6 +258,9 @@ impl Search {
             server: None,
             flat: None,
             flat_pending: None,
+            git: None,
+            git_pending: None,
+            scroll: UniformListScrollHandle::new(),
             merge_pending: None,
             session: 0,
             merge_generation: 0,
@@ -253,6 +302,7 @@ impl Search {
         }
         let starting = self.query.is_empty() && !query.is_empty();
         self.query = query.clone();
+        self.scroll = UniformListScrollHandle::new();
         self.generation += 1;
         self.merge_generation += 1;
         let generation = self.generation;
@@ -265,14 +315,18 @@ impl Search {
             self.session += 1;
             self.flat_pending = None;
             self.flat = None;
+            self.git_pending = None;
+            self.git = None;
         }
         cx.notify();
         if starting {
             self.load_flat(cx);
+            self.load_git(cx);
         }
         if !self.picker && query.is_empty() {
             return;
         }
+        self.merge(cx);
         let client = self.client.clone();
         let workspace = self.workspace.clone();
         self.pending = Some(cx.spawn(async move |this, cx| {
@@ -334,6 +388,23 @@ impl Search {
             });
         }));
     }
+    fn load_git(&mut self, cx: &mut Context<Self>) {
+        let workspace = self.workspace.clone();
+        let session = self.session;
+        let task = cx
+            .background_executor()
+            .spawn(async move { git_listing(&workspace) });
+        self.git_pending = Some(cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                if session != this.session {
+                    return;
+                }
+                this.git = Some(result);
+                this.merge(cx);
+            });
+        }));
+    }
     fn merge(&mut self, cx: &mut Context<Self>) {
         if self.query.is_empty() {
             self.entries = self
@@ -343,20 +414,22 @@ impl Search {
             cx.notify();
             return;
         }
-        if self.server.is_none() && self.flat.is_none() {
+        if self.server.is_none() && self.flat.is_none() && self.git.is_none() {
             return;
         }
         let server = self.server.clone();
         let flat = self.flat.clone();
+        let git = self.git.clone();
         let query = self.query.clone();
         self.merge_generation += 1;
         let generation = self.merge_generation;
-        // Matching, deduplication and ranking of up to 20,000 files never block paint.
+        // Matching, deduplication and ranking of all source paths never block paint.
         let task = cx.background_executor().spawn(async move {
             let available = server.as_ref().is_some_and(Result::is_ok)
-                || flat.as_ref().is_some_and(Result::is_ok);
+                || flat.as_ref().is_some_and(Result::is_ok)
+                || git.as_ref().is_some_and(Result::is_ok);
             if !available {
-                return if server.is_some() && flat.is_some() {
+                return if server.is_some() && flat.is_some() && git.is_some() {
                     Some(Err("Couldn't load files".to_string()))
                 } else {
                     None
@@ -364,12 +437,15 @@ impl Search {
             }
             let server = server.and_then(Result::ok);
             let flat = flat.and_then(Result::ok);
+            let git = git.and_then(Result::ok);
             let (entries, capped) = merge_matches(
                 &query,
                 server
                     .as_ref()
                     .map_or(&[], |listing| listing.entries.as_slice()),
                 flat.as_ref()
+                    .map_or(&[], |listing| listing.entries.as_slice()),
+                git.as_ref()
                     .map_or(&[], |listing| listing.entries.as_slice()),
             );
             Some(Ok((
@@ -393,7 +469,7 @@ impl Search {
             });
         }));
     }
-    fn visible_entries(&self) -> Vec<Entry> {
+    pub(super) fn visible_entries(&self) -> Vec<Entry> {
         let mut entries = self
             .entries
             .as_ref()
@@ -571,6 +647,7 @@ impl Render for Search {
                                 .collect::<Vec<_>>()
                         }),
                     )
+                    .track_scroll(self.scroll.clone())
                     .flex_1()
                     .min_h_0(),
                 )

@@ -6,6 +6,7 @@ use std::{
     io::{BufRead, BufReader},
     path::PathBuf,
     process::{Child, Command, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
@@ -40,6 +41,8 @@ fn directory_decoder_retains_ignored_files_and_directories() {
     assert_ne!(file_icon("data.json"), FILE);
 }
 
+static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
+
 struct Fixture {
     child: Child,
     client: Client,
@@ -49,12 +52,13 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "o8-files-{}-{}",
+            "o8-files-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(&root).unwrap();
         let root = fs::canonicalize(root).unwrap();
@@ -88,7 +92,12 @@ impl Fixture {
         }
     }
     fn requests(&self) -> Vec<String> {
-        serde_json::from_str(&fs::read_to_string(self.root.join("requests.json")).unwrap()).unwrap()
+        match fs::read_to_string(self.root.join("requests.json")) {
+            Ok(log) => serde_json::from_str(&log).unwrap(),
+            // Native results may arrive before the first HTTP request.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => vec![],
+            Err(error) => panic!("fixture request log: {error}"),
+        }
     }
 }
 impl Drop for Fixture {
@@ -112,9 +121,25 @@ fn wait(cx: &mut VisualTestContext, selector: &'static str) {
         if cx.debug_bounds(selector).is_some() {
             return;
         }
+        cx.cx.executor().advance_clock(Duration::from_millis(10));
         std::thread::sleep(Duration::from_millis(10));
     }
     panic!("missing native Files control {selector}");
+}
+fn wait_requests(cx: &mut VisualTestContext, fixture: &Fixture, ready: impl Fn(&[String]) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        draw(cx);
+        if ready(&fixture.requests()) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing expected Files HTTP request"
+        );
+        cx.cx.executor().advance_clock(Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     wait(cx, selector);
@@ -153,6 +178,9 @@ fn classic_search_preview_escape_preserves_expanded_ignored_tree(cx: &mut TestAp
     wait(cx, "files-row-src/useful.rs");
     search(cx, "files-search", "useful");
     wait(cx, "file-search-src/useful.rs");
+    wait_requests(cx, &fixture, |requests| {
+        requests.iter().any(|r| r.contains("search=useful"))
+    });
     click(cx, "file-search-src/useful.rs");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -263,6 +291,9 @@ fn search_debounces_and_rejects_late_results(cx: &mut TestAppContext) {
     );
     cx.cx.executor().advance_clock(Duration::from_millis(1));
     wait(cx, "file-search-src/useful.rs");
+    wait_requests(cx, &fixture, |requests| {
+        requests.iter().any(|r| r.contains("search=useful"))
+    });
     assert_eq!(
         fixture
             .requests()
@@ -273,16 +304,9 @@ fn search_debounces_and_rejects_late_results(cx: &mut TestAppContext) {
     );
     search(cx, "files-search", "slow");
     // Let the earlier request enter the owned HTTP host, then replace it.
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !fixture
-        .requests()
-        .iter()
-        .any(|request| request.contains("search=slow"))
-    {
-        draw(cx);
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    wait_requests(cx, &fixture, |requests| {
+        requests.iter().any(|r| r.contains("search=slow"))
+    });
     search(cx, "files-search", "useful");
     wait(cx, "file-search-src/useful.rs");
     std::thread::sleep(Duration::from_millis(300));
@@ -359,10 +383,10 @@ fn ignored_flat_listing_matches_all_terms_and_ranks_exact_basename_first() {
     let server = parse_entries(
         &json!({"entries":[{"name":"parity.md","path":"src/parity.md","kind":"file"}]}),
     );
-    let (matches, _) = search::merge_matches("parity board", &server, &flat);
+    let (matches, _) = search::merge_matches("parity board", &server, &flat, &[]);
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].path, "PARITY-BOARD.local.md");
-    let (matches, _) = search::merge_matches("PARITY.MD", &server, &flat);
+    let (matches, _) = search::merge_matches("PARITY.MD", &server, &flat, &[]);
     assert_eq!(
         matches.len(),
         1,
@@ -375,7 +399,7 @@ fn ignored_flat_listing_matches_all_terms_and_ranks_exact_basename_first() {
         dir: false,
         ignored: false,
     });
-    let (matches, _) = search::merge_matches("parity.md", &more, &flat);
+    let (matches, _) = search::merge_matches("parity.md", &more, &flat, &[]);
     assert_eq!(matches[0].path, "src/parity.md");
     let many: Vec<_> = (0..600)
         .map(|i| Entry {
@@ -385,7 +409,7 @@ fn ignored_flat_listing_matches_all_terms_and_ranks_exact_basename_first() {
             ignored: false,
         })
         .collect();
-    let (matches, truncated) = search::merge_matches("file", &[], &many);
+    let (matches, truncated) = search::merge_matches("file", &[], &many, &[]);
     assert_eq!(matches.len(), 500);
     assert!(truncated);
 }
@@ -459,15 +483,155 @@ fn ignored_file_search_uses_one_flat_listing_per_search_session(cx: &mut TestApp
     draw(cx);
     search(cx, "files-search", "parity board");
     wait(cx, "file-search-PARITY-BOARD.local.md");
+    wait_requests(cx, &fixture, |requests| {
+        requests
+            .iter()
+            .filter(|r| r.contains("recursive=files"))
+            .count()
+            >= 2
+    });
+}
+
+// Reproduce an older server's incomplete BFS fallback, including paths absent
+// from both HTTP responses. Git's full session index must supply those paths.
+#[gpui::test]
+fn native_git_fills_incomplete_server_search_and_flat_listing(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    for path in [
+        ".github/workflows/next-parity.yml",
+        "docs/internals/o8-next-parity.md",
+        "native/o8-next/PARITY.md",
+    ] {
+        let file = PathBuf::from(&fixture.repo).join(path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, "parity fixture").unwrap();
+    }
+    // Include a tracked file in a dot directory, an untracked document, and an
+    // ignored file only in the flat listing. This is the real git subprocess.
+    assert!(
+        Command::new("git")
+            .args(["-C", &fixture.repo, "add", ".github"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::create_dir_all(PathBuf::from(&fixture.repo).join("z-parity")).unwrap();
+    for i in 0..600 {
+        fs::write(
+            PathBuf::from(&fixture.repo).join(format!("z-parity/file-{i}.txt")),
+            "fixture",
+        )
+        .unwrap();
+    }
+    let native = json!({"name":"PARITY.md", "path":"native/o8-next/PARITY.md", "kind":"file"});
+    fs::write(fixture.root.join("fallback-files.json"), serde_json::to_vec(&json!({
+        "search": {"entries": [native.clone()], "truncated": false},
+        "flat": {"entries": [native, {"name":"PARITY-BOARD.local.md", "path":"PARITY-BOARD.local.md", "kind":"file"}], "truncated": true}
+    })).unwrap()).unwrap();
+    let (panel, cx) = cx.add_window_view(|window, cx| {
+        let panel = FilesPanel::new(
+            fixture.client.clone(),
+            fixture.repo.clone(),
+            Mode::Files,
+            cx,
+        );
+        panel.focus(window);
+        panel
+    });
+    search(cx, "files-search", "parity");
+    wait(cx, "file-search-.github/workflows/next-parity.yml");
+    wait(cx, "file-search-docs/internals/o8-next-parity.md");
+    wait(cx, "file-search-PARITY-BOARD.local.md");
+    let paths = panel.read_with(cx, |p, cx| {
+        p.search
+            .read(cx)
+            .visible_entries()
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(
+        &paths[..3],
+        [
+            ".github/workflows/next-parity.yml",
+            "docs/internals/o8-next-parity.md",
+            "native/o8-next/PARITY.md"
+        ]
+    );
+    assert_eq!(
+        paths
+            .iter()
+            .filter(|p| *p == "native/o8-next/PARITY.md")
+            .count(),
+        1
+    );
+    assert_eq!(
+        paths.len(),
+        500,
+        "cap results after ranking the full Git index"
+    );
+    let scroll = panel.read_with(cx, |p, cx| p.search.read(cx).scroll.clone());
+    scroll.scroll_to_item(40, gpui::ScrollStrategy::Top);
+    draw(cx);
+    assert!(scroll.0.borrow().base_handle.offset().y < gpui::px(0.));
+    click(cx, "files-search");
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-a"
+    } else {
+        "ctrl-a"
+    });
+    cx.simulate_input("PARITY");
+    cx.run_until_parked();
+    cx.cx.executor().advance_clock(Duration::from_millis(150));
     let deadline = Instant::now() + Duration::from_secs(5);
-    while fixture
-        .requests()
-        .iter()
-        .filter(|r| r.contains("recursive=files"))
-        .count()
-        < 2
-    {
+    loop {
         draw(cx);
+        if panel.read_with(cx, |p, cx| p.search.read(cx).visible_entries().len()) == 500 {
+            break;
+        }
         assert!(Instant::now() < deadline);
     }
+    assert_eq!(
+        panel.read_with(cx, |p, cx| p
+            .search
+            .read(cx)
+            .scroll
+            .0
+            .borrow()
+            .base_handle
+            .offset()
+            .y),
+        gpui::px(0.)
+    );
+    click(cx, "files-search");
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-a"
+    } else {
+        "ctrl-a"
+    });
+    cx.simulate_input("parity file-599");
+    cx.run_until_parked();
+    cx.cx.executor().advance_clock(Duration::from_millis(150));
+    wait(cx, "file-search-z-parity/file-599.txt");
+    assert_eq!(
+        panel.read_with(cx, |p, cx| p
+            .search
+            .read(cx)
+            .scroll
+            .logical_scroll_top_index()),
+        0
+    );
+    let paths = panel.read_with(cx, |p, cx| {
+        p.search
+            .read(cx)
+            .visible_entries()
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(
+        paths,
+        ["z-parity/file-599.txt"],
+        "refining searches the full cached Git list, beyond the result cap"
+    );
 }
