@@ -2,6 +2,7 @@
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod protocol;
+pub mod transcript;
 use crate::client::Client;
 use protocol::{Message, Reference, UNAVAILABLE, valid_state};
 use serde_json::{Value, json};

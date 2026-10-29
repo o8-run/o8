@@ -26,6 +26,10 @@ pub struct Transcript {
     live_backend: Option<String>,
 }
 impl Transcript {
+    pub(crate) fn shown_entries(&self) -> &[Entry] {
+        &self.shown
+    }
+
     /// The existing sync cursor excludes its last id, even when that assistant
     /// is still streaming. Refresh the saved tail without dropping backfilled
     /// rows or racing a newer WebSocket checkpoint. HTTP never advances seq.

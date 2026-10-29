@@ -18,6 +18,8 @@ mod shell_session;
 #[cfg(test)]
 #[path = "speed_receipt.rs"]
 mod speed_receipt;
+#[path = "transcript_visualizations.rs"]
+mod transcript_visualizations;
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
@@ -65,6 +67,7 @@ pub(crate) struct Surface {
     rows: Rc<Vec<Rc<RefCell<RowState>>>>,
     images: images::Cache,
     transcript: Option<Transcript>,
+    saved_visualizations: transcript_visualizations::Saved,
     subscription: Option<Subscription>,
     list: ListState,
     focus: FocusHandle,
@@ -102,6 +105,7 @@ impl Surface {
             rows: Rc::new(vec![]),
             images: Default::default(),
             transcript: None,
+            saved_visualizations: Default::default(),
             subscription: None,
             list: ListState::new(0, ListAlignment::Top, px(400.)),
             focus,
@@ -165,6 +169,17 @@ impl Surface {
         cx.notify();
         let client = self.client.clone();
         let session = self.sessions.iter().find(|s| s.id == id).cloned();
+        self.saved_visualizations
+            .select(session.as_ref().and_then(|session| {
+                transcript_visualizations::Scope::new(
+                    session.repo_path.as_deref(),
+                    &session.id,
+                    session
+                        .packet_header
+                        .as_ref()
+                        .and_then(|h| h["packetId"].as_str()),
+                )
+            }));
         // Runtime workers are read-only history; conversations also stream their live turn.
         let repo = session
             .as_ref()
@@ -195,8 +210,9 @@ impl Surface {
                     Ok((history, queue, routing)) => {
                         let key = history.session_key.clone();
                         let transcript = Transcript::new(history);
-                        this.install_rows(transcript.rows.clone(), cx);
+                        let rows = transcript.rows.clone();
                         this.transcript = Some(transcript);
+                        this.install_rows(rows, cx);
                         let backend = routing
                             .as_ref()
                             .ok()
@@ -228,7 +244,11 @@ impl Surface {
         })
         .detach();
     }
-    fn install_rows(&mut self, next: Vec<Row>, cx: &mut Context<Self>) {
+    fn install_rows(&mut self, mut next: Vec<Row>, cx: &mut Context<Self>) {
+        if let Some(transcript) = &self.transcript {
+            self.saved_visualizations
+                .attach(&mut next, transcript.shown_entries());
+        }
         let old = &self.rows;
         let initial = old.is_empty();
         let prefix = old
@@ -309,6 +329,7 @@ impl Surface {
         }
     }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
+        self.poll_saved_visualizations(cx);
         let mut visualizations_changed = false;
         for (index, row) in self.rows.iter().enumerate() {
             if row.borrow_mut().poll_visualizations() {
@@ -412,6 +433,7 @@ impl Surface {
                             this.subscription = None;
                             this.transcript = None;
                             this.selected = None;
+                            this.saved_visualizations.select(None);
                             this.rows = Rc::new(vec![]);
                             this.images.borrow_mut().clear();
                             this.list = ListState::new(0, ListAlignment::Top, px(400.));
@@ -592,6 +614,9 @@ impl Render for Surface {
                     )
                     .child(self.brain_panel(px(right_width), cx)),
             )
+            .child(transcript_visualizations::Visible(
+                self.saved_visualizations.visible.clone(),
+            ))
             .child(
                 canvas(
                     |_, _, _| (),
