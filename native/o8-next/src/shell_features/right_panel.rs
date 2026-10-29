@@ -49,6 +49,7 @@ impl ShellFeature for RightPanel {
 enum Tool {
     Launcher,
     Files,
+    Browser,
     Terminal,
     Review,
     Inbox,
@@ -56,10 +57,10 @@ enum Tool {
 }
 
 impl Tool {
-    const PICKER: [Tool; 5] = [Tool::Files, Tool::Terminal, Tool::Review, Tool::Inbox, Tool::Spec];
+    const PICKER: [Tool; 6] = [Tool::Files, Tool::Browser, Tool::Terminal, Tool::Review, Tool::Inbox, Tool::Spec];
     fn tab(self) -> Option<Tab> {
         match self {
-            Tool::Launcher | Tool::Files | Tool::Spec => None,
+            Tool::Launcher | Tool::Files | Tool::Browser | Tool::Spec => None,
             Tool::Inbox => Some(Tab::Inbox),
             Tool::Terminal => Some(Tab::Terminal),
             Tool::Review => Some(Tab::Diff),
@@ -69,6 +70,7 @@ impl Tool {
         match self {
             Tool::Launcher => "New tab",
             Tool::Files => "Files",
+            Tool::Browser => "Browser",
             Tool::Spec => "o8.md",
             Tool::Inbox => "Inbox",
             Tool::Terminal => "Terminal",
@@ -79,6 +81,7 @@ impl Tool {
         match self {
             Tool::Launcher => "",
             Tool::Files => "Browse and read repository files",
+            Tool::Browser => "Open websites and local previews",
             Tool::Spec => "Workspace notes and instructions",
             Tool::Inbox => "GitHub replies, approvals, and agent issues",
             Tool::Terminal => "Run commands in an interactive shell",
@@ -89,6 +92,7 @@ impl Tool {
         match self {
             Tool::Launcher => PLUS,
             Tool::Files => FILES,
+            Tool::Browser => BROWSER,
             Tool::Spec => SPEC,
             Tool::Inbox => INBOX,
             Tool::Terminal => TERMINAL,
@@ -105,6 +109,7 @@ struct Panel {
     tool: Tool,
     /// Files and o8.md views, keyed like panel content.
     files: std::collections::HashMap<String, gpui::Entity<crate::files_panel::FilesPanel>>,
+    browsers: std::collections::HashMap<String, gpui::Entity<crate::browser_panel::BrowserPanel>>,
 }
 
 impl Default for Panel {
@@ -114,6 +119,7 @@ impl Default for Panel {
             content: Transition::new(200),
             tool: Tool::Launcher,
             files: Default::default(),
+            browsers: Default::default(),
         }
     }
 }
@@ -175,6 +181,10 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         let view = cx.new(|cx| crate::files_panel::FilesPanel::new(client, workspace.clone(), mode, cx));
         s.features.get::<Panel>().files.insert(key.clone(), view);
     }
+    if tool == Tool::Browser && !s.features.get::<Panel>().browsers.contains_key(&key) {
+        let view = cx.new(crate::browser_panel::BrowserPanel::new);
+        s.features.get::<Panel>().browsers.insert(key.clone(), view);
+    }
     let panel = s.features.get::<Panel>();
     if panel.tool != tool || !panel.motion.is_open() {
         panel.content = Transition::new(200);
@@ -185,6 +195,8 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     if let Some(content) = s.content.get(&key) {
         content.focus(false, window, cx);
     } else if let Some(view) = s.features.read::<Panel>().and_then(|panel| panel.files.get(&key)) {
+        view.read(cx).focus(window);
+    } else if let Some(view) = s.features.read::<Panel>().and_then(|panel| panel.browsers.get(&key)).cloned() {
         view.read(cx).focus(window);
     }
     cx.notify();
@@ -211,6 +223,7 @@ pub(super) fn element(
     window: &Window,
     cx: &mut Context<Shell>,
 ) -> Option<(AnyElement, f32, f32)> {
+    cover_browsers(s, cx);
     let (full, shown) = width(s, window)?;
     let panel = s.features.read::<Panel>()?;
     let (travel, _) = panel.motion.value();
@@ -222,6 +235,7 @@ pub(super) fn element(
             .get(&key(s, tool))
             .map(Content::element)
             .or_else(|| panel.files.get(&key(s, tool)).map(|view| view.clone().into_any_element()))
+            .or_else(|| panel.browsers.get(&key(s, tool)).map(|view| view.clone().into_any_element()))
             .unwrap_or_else(|| launcher(cx).into_any_element()),
     };
     // A fixed-width inner column, clipped by the travelling outer width, so the
@@ -237,6 +251,24 @@ pub(super) fn element(
         .child(body)
         .into_any_element();
     Some((element, full, shown))
+}
+
+/// A native page draws above everything the window paints, so it shows only
+/// while its Browser is the settled, uncovered panel tool.
+fn cover_browsers(s: &Shell, cx: &mut Context<Shell>) {
+    let Some(panel) = s.features.read::<Panel>() else {
+        return;
+    };
+    let showing = (panel.tool == Tool::Browser
+        && panel.motion.is_open()
+        && !panel.motion.value().1
+        && !s.palette
+        && !super::header_tools::any_open(s))
+    .then(|| key(s, Tool::Browser));
+    for (key, view) in panel.browsers.clone() {
+        let covered = showing.as_deref() != Some(key.as_str());
+        view.update(cx, |browser, _| browser.cover(covered));
+    }
 }
 
 /// The New tab picker: one card per panel tool.
@@ -402,4 +434,5 @@ const INBOX: &str = "M5 4h14l3 9v7H2v-7l3-9Z M2 13h6l2 3h4l2-3h6";
 const TERMINAL: &str = "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z M7 9l3 3-3 3 M12 16h5";
 const REVIEW: &str = "M3 12l4 4L17 6 M12 15l3 3 7-8";
 const FILES: &str = "M3 7V4h7l2 3h9v13H3V7h7";
+const BROWSER: &str = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z M2 12h20 M12 2c5 5 5 15 0 20-5-5-5-15 0-20Z";
 const SPEC: &str = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5 M14 3l5 5v3 M8 9h6 M8 13h4 M18.4 13.6a1.4 1.4 0 0 1 2 2L16 20l-3 1 1-3Z";

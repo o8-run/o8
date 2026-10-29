@@ -3,6 +3,7 @@ mod render_region;
 mod activity;
 mod app_parent;
 mod brain;
+mod browser_panel;
 #[path = "shell_features/connection/client.rs"]
 mod client;
 mod clock;
