@@ -278,7 +278,9 @@ impl Surface {
         let Some(repo) = session.repo_path.clone() else {
             return;
         };
-        let fresh = !self.rows.is_empty();
+        // Saved messages remain authoritative before their rows are retained.
+        // Keep live rows as well: a new reply can precede the next session list.
+        let fresh = session.message_count > 0 || !self.rows.is_empty();
         let id = if fresh {
             format!(
                 "thoughts-next-{}",
