@@ -68,12 +68,16 @@ impl Surface {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
+        self.follow_frame();
         let rows = self.rows.clone();
         let painted_rows = self.painted_rows.clone();
         div()
             .size_full()
             .flex()
             .flex_col()
+            .on_scroll_wheel(cx.listener(|this, _: &gpui::ScrollWheelEvent, _, _| {
+                this.following = None;
+            }))
             .when(!self.notice.is_empty(), |view| {
                 view.child(
                     div()
