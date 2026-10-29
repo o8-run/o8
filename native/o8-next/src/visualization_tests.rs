@@ -180,3 +180,50 @@ fn missing_visualization_shows_error_and_retries_from_transcript(cx: &mut gpui::
         "the transcript retry must start a fresh sealed document load"
     );
 }
+
+#[gpui::test]
+fn visualization_card_moves_with_the_centred_reading_column(cx: &mut gpui::TestAppContext) {
+    let (_host, client) = fixture();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| s.load_sessions(cx));
+    cx.run_until_parked();
+    view.update(cx, |s, cx| s.select("thoughts-visualization".into(), cx));
+    cx.run_until_parked();
+    let index = view.read_with(cx, |s, _| {
+        s.rows
+            .iter()
+            .position(|r| r.borrow().row.id() == "visual-3")
+            .unwrap()
+    });
+    let mut centres = vec![];
+    for width in [1680., 2080.] {
+        cx.simulate_resize(gpui::size(px(width), px(1050.)));
+        view.update(cx, |s, cx| {
+            s.list.scroll_to(ListOffset {
+                item_ix: index,
+                offset_in_item: px(0.),
+            });
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let card = view.read_with(cx, |s, _| {
+            s.rows[index].borrow().cards.values().next().unwrap().clone()
+        });
+        let card = card.borrow().bounds.expect("card painted").center().x;
+        let composer = cx.debug_bounds("composer-card").expect("composer").center().x;
+        centres.push((card, composer));
+    }
+    let card_shift = centres[1].0 - centres[0].0;
+    let composer_shift = centres[1].1 - centres[0].1;
+    assert!(
+        composer_shift > px(100.),
+        "the reading column must recentre in a wider pane: {centres:?}"
+    );
+    assert!(
+        (card_shift - composer_shift).abs() < px(1.),
+        "the card must move with the centred text column, not stay at the row's left edge: {centres:?}"
+    );
+}
