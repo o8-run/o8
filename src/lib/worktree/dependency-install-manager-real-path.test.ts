@@ -100,6 +100,34 @@ afterEach(() => {
 
 describe('managed creation dependency recipe real path', () => {
   it.skipIf(process.platform !== 'darwin')(
+    'gives a repo with no saved isolation setting an APFS clone, unless the clone flag is 0 (#5079)',
+    async () => {
+      // The caller passes no isolationPreference, as for a repo whose setup was never saved.
+      const { repo, setup } = createFixture();
+      const unsaved: RepoSetupConfig = { ...setup, installOnCreateWorkspace: false };
+      process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
+      process.env.O8_WORKTREE_ROOT = mkdtempSync(path.join(os.tmpdir(), 'o8-manager-default-isolation-root-'));
+      roots.push(process.env.O8_WORKTREE_ROOT);
+      const manager = new WorktreeManager(repo);
+      Object.defineProperty(manager, 'injectSafetyHooks', { value: async () => {} });
+      const created: string[] = [];
+      try {
+        const clone = await manager.create({ agentType: 'codex', taskName: 'default isolation', baseBranch: 'main', repoSetup: unsaved });
+        created.push(clone.id);
+        expect(clone.isolationKind).toBe('apfs-cow-clone');
+
+        process.env.O8_APFS_COW_WORKSPACES = '0';
+        const worktree = await manager.create({ agentType: 'codex', taskName: 'opted out isolation', baseBranch: 'main', repoSetup: unsaved });
+        created.push(worktree.id);
+        expect(worktree.isolationKind).toBe('git-worktree');
+      } finally {
+        for (const id of created) await manager.cleanup(id, { force: true, deleteBranch: true });
+      }
+    },
+    120_000,
+  );
+
+  it.skipIf(process.platform !== 'darwin')(
     'reuses lifecycle-disabled APFS dependencies and falls back when the recipe changes',
     async () => {
       const { repo, setup } = createFixture();
