@@ -89,6 +89,11 @@ pub fn menu_fill() -> Rgba {
     }
 }
 
+/// The right panel column: 30% of the window, at most GEOMETRY.right_width.
+pub fn right_panel_width(viewport: f32) -> f32 {
+    (viewport * 0.30).min(GEOMETRY.right_width)
+}
+
 // src/lib/theme/glass-material.ts: the only window-wide fill in All Glass.
 // Darker through the top third, still clear at the bottom.
 pub const GLASS_VEIL: [(f32, f32); 4] = [(0., 0.9), (0.3, 0.7), (0.65, 0.32), (1., 0.06)];
