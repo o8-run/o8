@@ -85,6 +85,16 @@ fn stamp(entry: &Entry) -> Option<f64> {
     }
 }
 
+/// When the server recorded the turn's outcome, epoch ms.
+fn completed(entry: &Entry) -> Option<f64> {
+    entry
+        .extra
+        .get("receipt")?
+        .get("terminal")?
+        .get("completedAt")?
+        .as_f64()
+}
+
 /// The turn's work counts as live this long after its last entry without an outcome.
 const LIVE_WINDOW_MS: f64 = 15. * 60_000.;
 
@@ -166,12 +176,14 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!("{}:tool:{index}", entry.id));
             let step = activity(&id, tool, &entry.text);
+            trace.include(step.finished);
             if let Some(&i) = indices.get(&id) {
                 if tool["args"].is_object() {
                     steps[i] = step;
                 } else {
                     steps[i].status = step.status;
                     steps[i].reason = step.reason;
+                    steps[i].finished = step.finished.or(steps[i].finished);
                 }
             } else {
                 indices.insert(id, steps.len());
@@ -210,7 +222,7 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                 &steps,
                 &mut trace,
                 &trace_id,
-                stamp(entry).filter(|_| answer),
+                answer.then(|| completed(entry).or(stamp(entry))).flatten(),
             );
             if previous.get(&entry.id).is_some_and(|old| **old == *entry)
                 && let Some(row @ Row::Message { .. }) = cached.get(entry.id.as_str())
@@ -298,6 +310,7 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
     for (index, row) in rows.iter_mut().enumerate() {
         if let Row::Activity { steps, trace, .. } = row {
             crate::activity::group(steps);
+            crate::activity::batch_by_time(steps);
             trace.live = steps.iter().any(|s| s.status == "running")
                 || (Some(index) == open_block && (reasoning || (!settled && recent)));
         }
