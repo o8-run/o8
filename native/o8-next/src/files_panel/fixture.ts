@@ -23,6 +23,7 @@ execFileSync('git', ['init', '-q', repo]);
 const files = await import('../../../../src/app/api/panel/files/route');
 const docs = await import('../../../../src/app/api/v2/files/quick-docs/route');
 const preview = await import('../../../../src/app/api/v2/files/route');
+const asset = await import('../../../../src/app/api/panel/file-asset/route');
 const log: string[] = [];
 const server = createServer(async (req, res) => {
   try {
@@ -41,10 +42,10 @@ const server = createServer(async (req, res) => {
     const fallback = route === '/api/panel/files' && fallbackKey && existsSync(fallbackPath)
       ? JSON.parse(readFileSync(fallbackPath, 'utf8'))[fallbackKey] : null;
     const response = fallback ? Response.json(fallback) : route === '/api/v2/files/quick-docs' ? await docs.GET(request)
-        : route === '/api/v2/files' ? await preview.GET(request) : await files.GET(request);
+        : route === '/api/v2/files' ? await preview.GET(request) : route === '/api/panel/file-asset' ? await asset.GET(request) : await files.GET(request);
     // Exercise stale completion: the earlier query/file finishes last.
     if (url.searchParams.get('search') === 'slow' || url.searchParams.get('path') === 'AGENTS.md') await new Promise(resolve => setTimeout(resolve, 250));
-    res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text());
+    res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(Buffer.from(await response.arrayBuffer()));
   } catch { res.writeHead(500).end('{}'); }
 });
 server.listen(0, '127.0.0.1', () => {

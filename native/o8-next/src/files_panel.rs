@@ -1,6 +1,7 @@
 //! The right panel's Files and o8.md tools (WorkspaceFilesPane, O8SpecPane).
 //! Files lists the workspace a directory at a time through /api/panel/files
 //! and previews a file through /api/v2/files; o8.md reads /api/repo-spec.
+mod media;
 mod quick_docs;
 mod search;
 mod source;
@@ -41,7 +42,9 @@ enum File {
         truncated: bool,
         markdown: std::rc::Rc<std::cell::RefCell<crate::retained::RowState>>,
         source: source::Source,
+        image: Option<media::Preview>,
     },
+    Image(std::sync::Arc<gpui::RenderImage>),
     Failed(String),
 }
 
@@ -199,6 +202,16 @@ impl FilesPanel {
         }
         self.selected = Some(path.clone());
         self.file = File::Loading;
+        if media::is_image(&path) {
+            self.open_image(path, cx);
+            return;
+        }
+        if let Some(kind) = media::unsupported(&path) {
+            self.file_generation += 1;
+            self.file = File::Failed(format!("{kind} preview is not available yet."));
+            cx.notify();
+            return;
+        }
         let client = self.client.clone();
         let workspace = self.workspace.clone();
         let task = cx.background_executor().spawn(async move {
@@ -229,6 +242,29 @@ impl FilesPanel {
     fn finish_file(&mut self, task: gpui::Task<Result<Value, String>>, cx: &mut Context<Self>) {
         self.file_generation += 1;
         let generation = self.file_generation;
+        let svg = self
+            .selected
+            .as_deref()
+            .is_some_and(media::is_svg)
+            .then(|| {
+                let path = media::svg_path();
+                let decoder = <gpui::ImageAssetLoader as gpui::Asset>::load(
+                    gpui::Resource::Path(path.clone().into()),
+                    cx,
+                );
+                (path, decoder)
+            });
+        let task = cx.background_executor().spawn(async move {
+            let body = task.await?;
+            let image = match svg {
+                Some((path, decoder)) if body["error"].is_null() => Some(
+                    media::decode_svg(path, body["content"].as_str().unwrap_or_default(), decoder)
+                        .await,
+                ),
+                _ => None,
+            };
+            Ok::<_, String>((body, image))
+        });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -236,12 +272,13 @@ impl FilesPanel {
                     return;
                 }
                 this.file = match result {
-                    Ok(body) if body["error"].is_null() => {
+                    Ok((body, image)) if body["error"].is_null() => {
                         let content = body["content"].as_str().unwrap_or_default();
                         if content.contains('\0') {
                             File::Failed("This binary file has no text preview.".into())
                         } else {
                             File::Loaded {
+                                image,
                                 source: source::Source::new(content.split('\n').count()),
                                 lines: content
                                     .split('\n')
@@ -258,7 +295,7 @@ impl FilesPanel {
                             }
                         }
                     }
-                    Ok(body) => {
+                    Ok((body, _)) => {
                         File::Failed(body["error"].as_str().unwrap_or("File unavailable").into())
                     }
                     Err(error) => File::Failed(error),
@@ -404,16 +441,29 @@ impl FilesPanel {
 
     fn viewer(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let title = self.selected.clone().unwrap_or_default();
-        let previewable = viewer::is_markdown(&title);
+        let previewable = viewer::is_markdown(&title) || media::is_svg(&title);
         let preview = self.view_mode() == viewer::ViewMode::Preview;
         let body = match &self.file {
+            File::Image(image) => media::view(image.clone(), self.file_generation, false),
+            File::Loaded {
+                image: Some(image), ..
+            } if media::is_svg(&title) && preview => match image {
+                Ok(image) => {
+                    #[cfg(test)]
+                    cx.set_global(tests::RenderedMedia(image.clone()));
+                    media::view(image.clone(), self.file_generation, true)
+                }
+                Err(error) => self.file_error(error, cx),
+            },
             File::Loaded { markdown, .. } if previewable && preview => {
+                #[cfg(test)]
+                cx.set_global(tests::RenderedMarkdown(markdown.clone()));
                 viewer::markdown_view(markdown.clone(), self.file_generation)
             }
             File::Loaded { lines, source, .. } => {
                 source.view(lines, self.wrap_lines, self.file_generation, window)
             }
-            File::Failed(error) => status(error.clone()).into_any_element(),
+            File::Failed(error) => self.file_error(error, cx),
             _ => status("Loading…".into()).into_any_element(),
         };
         div()
@@ -438,7 +488,7 @@ impl FilesPanel {
                     .child(crate::icon::stroke(file_icon(&title), file_color(&title), 14., 1.6))
                     .child(viewer::file_heading(&title, cx))
                     .when(previewable, |bar| bar.child(self.preview_toggle(cx)))
-                    .when(!preview, |bar| bar.child(self.wrap_toggle(cx)))
+                    .when(!preview && matches!(self.file, File::Loaded { .. }), |bar| bar.child(self.wrap_toggle(cx)))
                     .when(self.mode == Mode::Files, |bar| {
                         let label = if self.tree_visible {
                             "Hide file tree"

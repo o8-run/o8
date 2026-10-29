@@ -49,7 +49,11 @@ impl FilesPanel {
             .as_ref()
             .and_then(|path| self.view_modes.get(path).copied())
             .unwrap_or_else(|| {
-                if self.selected.as_deref().is_some_and(is_markdown) {
+                if self
+                    .selected
+                    .as_deref()
+                    .is_some_and(|path| is_markdown(path) || super::media::is_svg(path))
+                {
                     ViewMode::Preview
                 } else {
                     ViewMode::Source
@@ -173,4 +177,37 @@ pub(super) fn file_heading(path: &str, _cx: &mut Context<FilesPanel>) -> impl In
                     .child(folder_text),
             )
         })
+}
+
+impl FilesPanel {
+    pub(super) fn file_error(&self, error: &str, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let name = self
+            .selected
+            .as_deref()
+            .unwrap_or("file")
+            .rsplit('/')
+            .next()
+            .unwrap_or("file");
+        div().debug_selector(|| "files-load-error".into()).p(px(20.)).flex().flex_col().gap(px(8.))
+            .font_family(theme().font_ui).text_size(px(13.)).font_weight(gpui::FontWeight::LIGHT).text_color(theme().text)
+            .child(format!("Could not load {name}"))
+            .child(div().text_color(theme().text_muted).child(error.to_owned()))
+            .child(div().text_size(px(11.)).text_color(theme().text_muted).child("Retry, or reopen the file from Search if it moved or its repository changed."))
+            .child(div().id("files-retry").debug_selector(|| "files-retry".into()).focusable()
+                .px(px(8.)).py(px(5.)).rounded(px(7.)).border_1().border_color(theme().border)
+                .hover(|button| button.bg(theme().hover)).active(|button| button.bg(theme().selection))
+                .focus(|button| button.border_color(theme().accent)).cursor_pointer().child("Retry")
+                .on_click(cx.listener(|this, _, _, cx| this.retry_file(cx)))
+                .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") { this.retry_file(cx); cx.stop_propagation(); }
+                })))
+            .into_any_element()
+    }
+    fn retry_file(&mut self, cx: &mut Context<Self>) {
+        if self.mode == Mode::Spec {
+            self.load_spec(cx);
+        } else if let Some(path) = self.selected.clone() {
+            self.open_file(path, cx);
+        }
+    }
 }

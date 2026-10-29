@@ -11,12 +11,6 @@ use std::{
 };
 use support::*;
 
-pub(super) struct HeadingLayouts {
-    pub name: gpui::TextLayout,
-    pub folder: gpui::TextLayout,
-}
-impl gpui::Global for HeadingLayouts {}
-
 #[test]
 fn classic_repo_relative_pin_validation() {
     for file in [
@@ -470,6 +464,17 @@ fn native_git_fills_incomplete_server_search_and_flat_listing(cx: &mut TestAppCo
     );
 }
 
+pub(super) struct HeadingLayouts {
+    pub name: gpui::TextLayout,
+    pub folder: gpui::TextLayout,
+}
+impl gpui::Global for HeadingLayouts {}
+
+// Observe the actual retained row mounted by Files, including its painted text.
+// The baseline never mounts one, so the same test remains runnable there.
+pub(super) struct RenderedMarkdown(pub std::rc::Rc<std::cell::RefCell<crate::retained::RowState>>);
+impl gpui::Global for RenderedMarkdown {}
+
 const MARKDOWN_FIXTURE: &str = "# Readable heading\n\n- A list item\n\n```rust\nfn formatted() {}\n```\n\n| Name | Value |\n| --- | --- |\n| *emphasis* | [link](https://example.com) |\n";
 
 #[gpui::test]
@@ -480,20 +485,29 @@ fn viewer_markdown_opens_formatted_heading_list_and_code(cx: &mut TestAppContext
         MARKDOWN_FIXTURE,
     )
     .unwrap();
+    fs::write(
+        PathBuf::from(&fixture.repo).join("guide.mdx"),
+        MARKDOWN_FIXTURE,
+    )
+    .unwrap();
     let (panel, cx) = test_panel(&fixture, cx);
     click(cx, "files-row-AGENTS.md");
     wait(cx, "files-markdown-1");
     assert!(cx.debug_bounds("files-source-1").is_none());
-    let nodes = panel.read_with(cx, |p, _| match &p.file {
-        File::Loaded { lines, .. } => crate::text::markdown(
-            &lines
-                .iter()
-                .map(|s| s.as_ref())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        ),
-        _ => panic!("fixture did not load"),
+    let (nodes, rendered) = panel.read_with(cx, |_, cx| {
+        let state = cx
+            .try_global::<RenderedMarkdown>()
+            .expect("Files must mount transcript Markdown")
+            .0
+            .borrow();
+        let crate::model::Row::Message { nodes, .. } = &state.row else {
+            panic!("formatted document row")
+        };
+        (nodes.clone(), state.rendered().1)
     });
+    assert!(rendered.iter().any(|line| line == "Readable heading"));
+    assert!(rendered.iter().any(|line| line == "• A list item"));
+    assert!(rendered.iter().any(|line| line == "fn formatted() {}"));
     for kind in ["h1", "ul", "code-block", "table"] {
         assert!(
             nodes.iter().any(|n| n.kind == kind),
@@ -501,6 +515,9 @@ fn viewer_markdown_opens_formatted_heading_list_and_code(cx: &mut TestAppContext
         );
     }
     assert!(cx.debug_bounds("files-markdown-1").unwrap().size.height > px(100.));
+    click(cx, "files-row-guide.mdx");
+    wait(cx, "files-markdown-2");
+    assert!(cx.debug_bounds("files-source-2").is_none());
 }
 
 #[gpui::test]
@@ -658,4 +675,101 @@ fn viewer_header_filename_and_folder_truncate_independently(cx: &mut TestAppCont
         wider.chars().count() > name_text.chars().count(),
         "title must remeasure when available width grows"
     );
+}
+
+pub(super) struct RenderedMedia(pub std::sync::Arc<gpui::RenderImage>);
+impl gpui::Global for RenderedMedia {}
+
+const PNG_FIXTURE: &str = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADklEQVR4nGP4z8DwHwQBEPgD/U6VwW8AAAAASUVORK5CYII=";
+const SVG_FIXTURE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64" viewBox="0 0 96 64"><rect x="8" y="8" width="80" height="48" fill="#0088ff"/></svg>"##;
+
+#[gpui::test]
+fn viewer_svg_defaults_to_preview_and_switches_to_wrapped_source(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    fs::write(PathBuf::from(&fixture.repo).join("vector.svg"), SVG_FIXTURE).unwrap();
+    let (panel, cx) = test_panel(&fixture, cx);
+    click(cx, "files-row-vector.svg");
+    wait(cx, "files-media-1");
+    let card = cx.debug_bounds("files-image-card").unwrap();
+    assert_eq!(
+        card.size,
+        gpui::size(px(134.), px(102.)),
+        "natural SVG size plus classic's 18px padding and border"
+    );
+    let pixel = panel.read_with(cx, |_, cx| {
+        let image = &cx.global::<RenderedMedia>().0;
+        let width = image.size(0).width.0 as usize;
+        let x = width * 10 / 96;
+        let y = image.size(0).height.0 as usize * 10 / 64;
+        let at = (y * width + x) * 4;
+        image.as_bytes(0).unwrap()[at..at + 4].to_vec()
+    });
+    assert_eq!(
+        pixel,
+        [255, 136, 0, 255],
+        "SVG #0088ff must reach the BGRA atlas without swapping red and blue"
+    );
+    click(cx, "files-source-toggle");
+    wait(cx, "files-source-line-1-0");
+    click(cx, "files-tree-toggle");
+    cx.simulate_resize(gpui::size(px(400.), px(600.)));
+    draw(cx);
+    assert!(
+        cx.debug_bounds("files-source-line-1-0")
+            .unwrap()
+            .size
+            .height
+            > px(19.)
+    );
+    click(cx, "files-preview-toggle");
+    draw(cx);
+    assert!(cx.debug_bounds("files-media-1").is_some());
+}
+
+#[gpui::test]
+fn viewer_raster_image_uses_checked_asset_route_and_contained_card(cx: &mut TestAppContext) {
+    use base64::Engine;
+    let fixture = Fixture::new();
+    fs::write(
+        PathBuf::from(&fixture.repo).join("picture.png"),
+        base64::engine::general_purpose::STANDARD
+            .decode(PNG_FIXTURE)
+            .unwrap(),
+    )
+    .unwrap();
+    let (_panel, cx) = test_panel(&fixture, cx);
+    click(cx, "files-row-picture.png");
+    wait(cx, "files-media-1");
+    assert_eq!(
+        cx.debug_bounds("files-image-card").unwrap().size,
+        gpui::size(px(40.), px(39.))
+    );
+    let requests = fixture.requests();
+    assert!(
+        requests
+            .iter()
+            .any(|r| r.contains("/api/panel/file-asset?path=picture.png"))
+    );
+    assert!(
+        !requests
+            .iter()
+            .any(|r| r.contains("/api/v2/files?path=picture.png")),
+        "binary images never use the text endpoint"
+    );
+}
+
+#[gpui::test]
+fn viewer_failed_svg_keeps_source_available_and_retry_recovers(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let path = PathBuf::from(&fixture.repo).join("broken.svg");
+    fs::write(&path, "<svg invalid").unwrap();
+    let (_panel, cx) = test_panel(&fixture, cx);
+    click(cx, "files-row-broken.svg");
+    wait(cx, "files-load-error");
+    click(cx, "files-source-toggle");
+    wait(cx, "files-source-line-1-0");
+    click(cx, "files-preview-toggle");
+    fs::write(&path, SVG_FIXTURE).unwrap();
+    click(cx, "files-retry");
+    wait(cx, "files-media-2");
 }
