@@ -113,20 +113,24 @@ fn retire(s: &mut Shell, cx: &mut Context<Shell>) {
     cx.notify();
 }
 
-/// A different chat, or new routing for this one, retires the session.
+/// Another chat in front, new routing for this one, or the chat closing
+/// retires the session.
 fn follow(s: &mut Shell, cx: &mut Context<Shell>) {
     if !s.features.get::<Live>().on {
         return;
     }
-    let current = active_view(s).and_then(|view| {
-        let binding = view.read(cx).voice_binding(cx)?;
-        Some((view.downgrade(), binding))
-    });
     let live = s.features.get::<Live>();
-    let same = current.is_some_and(|(view, binding)| {
-        live.view.as_ref() == Some(&view) && binding == live.binding
-    });
-    if !same {
+    let (pinned, binding) = (
+        live.view.as_ref().and_then(|view| view.upgrade()),
+        live.binding.clone(),
+    );
+    let changed = match (pinned, active_view(s)) {
+        (None, _) => true,
+        (Some(pinned), Some(active)) if active != pinned => true,
+        // A tab that is not a chat in front keeps the pinned chat's voice.
+        (Some(pinned), _) => pinned.read(cx).voice_binding(cx) != Some(binding),
+    };
+    if changed {
         stop(s, cx);
     }
 }
