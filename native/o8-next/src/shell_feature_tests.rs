@@ -211,6 +211,7 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
         let notice = shell.read_with(visual, |s, _| s.notice.clone());
         panic!("the voice host never received {count} controls; notice: {notice}");
     };
+    let notice = |visual: &mut VisualTestContext| shell.read_with(visual, |s, _| s.notice.clone());
     let mic = |visual: &mut VisualTestContext| {
         shell.read_with(visual, |s, cx| {
             match s.content.get(&s.key(&s.active().unwrap())) {
@@ -225,34 +226,56 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
     let start = controls(1, &mut visual)[0].clone();
     assert_eq!(start["action"], "start");
     assert_eq!(start["source"], "byok");
-    let (binding, nonce) = (start["binding"].clone(), start["nonce"].clone());
     let selected = shell.read_with(&visual, |s, _| s.active().unwrap());
     let Tab::Session(thread) = selected else {
         panic!("a chat is selected")
     };
+    // The broker's binding fields ride on every binding-scoped control.
+    assert_eq!(start["threadId"], thread.as_str());
     assert!(
-        binding.as_str().unwrap().contains(&thread),
-        "the binding pins the chat: {binding}"
+        start["repoPath"]
+            .as_str()
+            .is_some_and(|repo| !repo.is_empty())
     );
+    assert!(start["requestId"].as_str().is_some_and(|id| !id.is_empty()));
+    assert!(
+        start["binding"].as_str().unwrap().contains(&thread),
+        "the binding pins the chat: {start}"
+    );
+    let scope = json!({"binding": start["binding"], "nonce": start["nonce"],
+        "threadId": start["threadId"], "repoPath": start["repoPath"]});
+    let with = |extra: Value| {
+        let mut frame = scope.clone();
+        frame
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        frame
+    };
     assert_eq!(mic(&mut visual), VoiceState::Connecting);
     send(
         "voice-host-state",
-        json!({"binding": binding, "nonce": nonce, "state": "live"}),
+        with(json!({"action": "state", "state": "live"})),
+        &mut visual,
+    );
+    assert_eq!(mic(&mut visual), VoiceState::Live);
+    // State spread onto other frames is not session state.
+    send(
+        "voice-host-state",
+        with(json!({"action": "accepted", "state": "closed", "delegationId": "d0"})),
         &mut visual,
     );
     assert_eq!(mic(&mut visual), VoiceState::Live);
 
     // A delegation posts through the chat's queue once, however often the host
     // relays it; another session's nonce posts nothing.
-    let delegation = json!({"binding": binding, "nonce": nonce, "delegationId": "d1",
-        "text": "List the open pull requests"});
+    let delegation = with(json!({"action": "delegate", "delegationId": "d1",
+        "text": "List the open pull requests"}));
     send("voice-delegate", delegation.clone(), &mut visual);
     send("voice-delegate", delegation, &mut visual);
-    send(
-        "voice-delegate",
-        json!({"binding": binding, "nonce": "v-stale", "delegationId": "d2", "text": "Ignored"}),
-        &mut visual,
-    );
+    let mut stale = with(json!({"action": "delegate", "delegationId": "d2", "text": "Ignored"}));
+    stale["nonce"] = json!("v-stale");
+    send("voice-delegate", stale, &mut visual);
     let sent = controls(2, &mut visual);
     let accepted = sent
         .iter()
@@ -260,7 +283,7 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
         .collect::<Vec<_>>();
     assert_eq!(accepted.len(), 1, "one acceptance: {sent:?}");
     assert_eq!(accepted[0]["delegationId"], "d1");
-    assert_eq!(accepted[0]["nonce"], nonce);
+    assert_eq!(accepted[0]["threadId"], thread.as_str());
     assert!(
         accepted[0]["queueItemId"]
             .as_str()
@@ -268,15 +291,71 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
         "the acceptance names the queue item: {sent:?}"
     );
 
-    // A second toggle closes voice with the same identity.
-    send("voice-toggle", json!({}), &mut visual);
-    let stop = controls(3, &mut visual)[2].clone();
-    assert_eq!(stop["action"], "stop");
+    // A spoken cancel reaches the chat's stop path and leaves voice on.
+    send(
+        "voice-host-state",
+        with(json!({"action": "interrupt"})),
+        &mut visual,
+    );
+    for _ in 0..100 {
+        visual.run_until_parked();
+        if notice(&mut visual).starts_with("Voice") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     assert_eq!(
-        (stop["binding"].clone(), stop["nonce"].clone()),
-        (binding, nonce)
+        notice(&mut visual),
+        "Voice asked this chat to stop. The chat has not confirmed it yet."
+    );
+    assert_eq!(mic(&mut visual), VoiceState::Live);
+
+    // Symon's confirmation shows until the person answers it.
+    let expires = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        + 60_000;
+    send(
+        "voice-host-state",
+        json!({"action": "confirmation", "confirmation": {"confirmationId": "gate",
+            "tool": "write", "summary": "Confirm write", "expiresAt": expires, "source": "native"}}),
+        &mut visual,
+    );
+    let allow = visual
+        .debug_bounds("voice-confirm-allow-gate")
+        .expect("the confirmation is visible");
+    assert!(visual.debug_bounds("voice-confirm-deny-gate").is_some());
+    visual.simulate_click(allow.center(), gpui::Modifiers::default());
+    let decision = controls(3, &mut visual)[2].clone();
+    assert_eq!(decision["action"], "decision");
+    assert_eq!(decision["confirmationId"], "gate");
+    assert_eq!(decision["allow"], true);
+    draw(&mut visual);
+    assert!(visual.debug_bounds("voice-confirm-allow-gate").is_none());
+
+    // A second toggle asks the host to close; the mic stays busy until the
+    // host reports closure.
+    send("voice-toggle", json!({}), &mut visual);
+    let stop = controls(4, &mut visual)[3].clone();
+    assert_eq!(stop["action"], "stop");
+    assert_ne!(stop["requestId"], start["requestId"]);
+    for key in ["binding", "nonce", "threadId", "repoPath"] {
+        assert_eq!(stop[key], start[key], "{key}");
+    }
+    assert_eq!(mic(&mut visual), VoiceState::Closing);
+    send(
+        "voice-host-state",
+        with(json!({"action": "state", "state": "closed"})),
+        &mut visual,
     );
     assert_eq!(mic(&mut visual), VoiceState::Off);
+    let rejected = fixture
+        .client
+        .get::<Value>("/api/next/voice-host", &[])
+        .unwrap()["rejected"]
+        .clone();
+    assert_eq!(rejected, json!([]), "the broker contract refused nothing");
 }
 
 #[gpui::test]

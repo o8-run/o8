@@ -202,13 +202,20 @@ impl Surface {
     /// as in the desktop footer: a waveform that turns accent while voice
     /// connects or is live. The shell owns the session; Caps Lock toggles it.
     fn voice_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let active = self.voice != super::VoiceState::Off;
-        let tip = if active {
-            "Live with your OpenAI key · voice usage is billed to your key. Caps Lock stops voice."
-        } else {
-            "GPT Live for this chat · Caps Lock starts or stops voice."
+        let active = matches!(
+            self.voice,
+            super::VoiceState::Connecting | super::VoiceState::Live
+        );
+        let tip = match self.voice {
+            super::VoiceState::Off => "GPT Live for this chat · Caps Lock starts or stops voice.",
+            super::VoiceState::Closing => "Closing voice…",
+            _ => {
+                "Live with your OpenAI key · voice usage is billed to your key. Caps Lock stops voice."
+            }
         };
-        self.composer_button("composer-voice", "", true, cx, |_, window, cx| {
+        // Closing admits no new start until the host confirms closure.
+        let enabled = self.voice != super::VoiceState::Closing;
+        self.composer_button("composer-voice", "", enabled, cx, |_, window, cx| {
             window.dispatch_action(Box::new(super::ToggleVoice), cx);
         })
         .w(px(26.))

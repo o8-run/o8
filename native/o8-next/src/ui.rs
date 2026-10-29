@@ -59,6 +59,19 @@ pub(crate) enum VoiceState {
     Off,
     Connecting,
     Live,
+    /// Stop was asked; the mic is off but cannot start again until the host
+    /// confirms closure.
+    Closing,
+}
+
+/// The chat a Live session binds to: the broker's binding, thread and
+/// repository, plus the runtime its stop path addresses.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct VoiceTarget {
+    pub binding: String,
+    pub thread: String,
+    pub repo: String,
+    pub backend: Option<String>,
 }
 
 pub(crate) struct Surface {

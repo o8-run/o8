@@ -82,6 +82,36 @@ fn emit(
     client.wake();
     true
 }
+/// Sends the desktop stop pill's `orchestrator-interrupt` for one chat over a
+/// one-shot socket; session sockets stay read-only.
+pub(crate) fn interrupt(
+    client: &Client,
+    repo: &str,
+    thread: &str,
+    backend: Option<&str>,
+) -> Result<(), String> {
+    let (url, address) = client.websocket()?;
+    let tcp = TcpStream::connect_timeout(&address, Duration::from_secs(2))
+        .map_err(|_| "Could not reach the chat server.".to_string())?;
+    tcp.set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|_| "Could not reach the chat server.".to_string())?;
+    let request = url
+        .as_str()
+        .into_client_request()
+        .map_err(|_| "Invalid chat socket.".to_string())?;
+    let (mut socket, _) = tungstenite::client::client(request, tcp)
+        .map_err(|_| "The chat server refused the socket.".to_string())?;
+    let mut frame = json!({"type":"orchestrator-interrupt","repoPath":repo,"threadId":thread});
+    if let Some(backend) = backend {
+        frame["backend"] = json!(backend);
+    }
+    socket
+        .send(Message::Text(frame.to_string().into()))
+        .map_err(|_| "The stop request was not sent.".to_string())?;
+    let _ = socket.close(None);
+    let _ = socket.flush();
+    Ok(())
+}
 fn run(
     client: &Client,
     stream: &str,

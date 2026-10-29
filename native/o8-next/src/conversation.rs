@@ -50,26 +50,47 @@ impl Surface {
     /// The selected chat's Live voice binding (ManagedChatVoiceEntry's
     /// identity): who, which repository and thread, and how it runs. A change
     /// closes the voice session it pinned.
-    pub(crate) fn voice_binding(&self, cx: &App) -> Option<String> {
+    pub(crate) fn voice_binding(&self, cx: &App) -> Option<VoiceTarget> {
         let session = self
             .sessions
             .iter()
             .find(|s| Some(&s.id) == self.selected.as_ref())?;
-        let repo = session.repo_path.as_deref()?;
+        let repo = session.repo_path.clone()?;
         let routing = self.composer_routing(cx)?;
-        Some(
-            json!([
-                "local",
-                repo,
-                session.id,
-                routing["backend"],
-                routing["model"],
-                routing["effort"],
-                routing["permissionMode"],
-                routing["pickedMode"]
-            ])
-            .to_string(),
-        )
+        let binding = json!([
+            "local",
+            repo,
+            session.id,
+            routing["backend"],
+            routing["model"],
+            routing["effort"],
+            routing["permissionMode"],
+            routing["pickedMode"]
+        ])
+        .to_string();
+        Some(VoiceTarget {
+            binding,
+            thread: session.id.clone(),
+            repo,
+            backend: routing["backend"].as_str().map(String::from),
+        })
+    }
+    /// A spoken cancel: the desktop stop pill's interrupt for this chat's turn.
+    /// Resolves once the server has the request, not when the turn stops.
+    pub(crate) fn interrupt_turn(
+        &self,
+        target: &VoiceTarget,
+        cx: &App,
+    ) -> gpui::Task<Result<(), String>> {
+        let (client, target) = (self.client.clone(), target.clone());
+        cx.background_executor().spawn(async move {
+            crate::transport::interrupt(
+                &client,
+                &target.repo,
+                &target.thread,
+                target.backend.as_deref(),
+            )
+        })
     }
     /// Sends a Live delegation as a new message through this chat's queue,
     /// leaving the draft alone. Resolves to the queue item id once the
