@@ -70,7 +70,7 @@ fn native_composer_lead_picker_uses_saved_history_without_retained_rows(cx: &mut
     let (surface, cx) = open(cx, &fixture);
     // Retained presentation is not the source of truth for saved history.
     // Exercise the choice with no retained rows, without waiting for more paint.
-    surface.update(cx, |s, _| {
+    surface.update(cx, |s, cx| {
         assert_eq!(
             s.sessions
                 .iter()
@@ -79,7 +79,7 @@ fn native_composer_lead_picker_uses_saved_history_without_retained_rows(cx: &mut
                 .message_count,
             1
         );
-        s.install_rows(vec![]);
+        s.install_rows(vec![], cx);
     });
     click("composer-model", cx);
     assert!(surface.read_with(cx, |s, _| s.rows.is_empty()));
