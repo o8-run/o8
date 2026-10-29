@@ -65,7 +65,7 @@ pub(super) fn entries(shell: &Shell) -> Vec<Entry> {
         .filter(|entry| entry.label(&shell.sessions).to_lowercase().contains(&query))
         .collect()
 }
-fn toggle(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+pub(super) fn toggle(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     if !shell.palette {
         shell.capture(window, cx);
     }
