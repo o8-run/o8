@@ -506,3 +506,58 @@ fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
 
 #[path = "brain_dock_tests.rs"]
 mod brain_dock_tests;
+
+#[gpui::test]
+fn settled_tool_runs_collapse_to_a_trace_header_and_expand_on_click(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-tools".into(), cx);
+    });
+    cx.run_until_parked();
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        })
+    };
+    draw(cx);
+    draw(cx);
+    let index = surface.read_with(cx, |s, _| {
+        s.rows
+            .iter()
+            .position(|row| matches!(row.borrow().row, Row::Activity { .. }))
+            .expect("activity row")
+    });
+    // Settled history starts as the trace's one header line; tools.history.json
+    // has three shell reads, then the cargo test that failed.
+    let header: &'static str = format!("trace-header-{index}").leak();
+    let first: &'static str = format!("trace-line-{index}-0").leak();
+    assert!(cx.debug_bounds(header).is_some(), "the trace header draws");
+    assert!(cx.debug_bounds(first).is_none(), "collapsed until opened");
+    let height = surface.read_with(cx, |s, _| {
+        s.list.bounds_for_item(index).unwrap().size.height
+    });
+    let toggle = cx.debug_bounds(header).unwrap().center();
+    cx.simulate_click(toggle, gpui::Modifiers::default());
+    draw(cx);
+    draw(cx);
+    assert!(
+        cx.debug_bounds(first).is_some(),
+        "the header opens the steps"
+    );
+    let expanded = surface.read_with(cx, |s, _| {
+        s.list.bounds_for_item(index).unwrap().size.height
+    });
+    assert!(expanded > height, "expansion must remeasure the row");
+    let steps = surface.read_with(cx, |s, _| match &s.rows[index].borrow().row {
+        Row::Activity { steps, .. } => steps.clone(),
+        _ => unreachable!(),
+    });
+    assert_eq!(
+        crate::activity::summary(&steps),
+        "Ran 4 commands · 1 failed"
+    );
+}

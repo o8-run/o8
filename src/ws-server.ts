@@ -7059,6 +7059,7 @@ function materializePendingDashSession(
     sessionName,
     kind: 'dash-shell',
     transient: pending.directPty,
+    cwd,
     ptyProcess,
     clientIds: new Set([client.id]),
     clientViews: new Map(),

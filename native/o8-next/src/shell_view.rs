@@ -191,8 +191,7 @@ pub(super) fn open_window(
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("o8 next".into()),
                 appears_transparent: cfg!(target_os = "macos"),
-                traffic_light_position: cfg!(target_os = "macos")
-                    .then(|| point(px(16.), px(14.))),
+                traffic_light_position: cfg!(target_os = "macos").then(|| point(px(16.), px(14.))),
             }),
             ..Default::default()
         },

@@ -17,6 +17,13 @@ pub struct Transcript {
     pub page: Option<crate::model::Page>,
     backfilled: bool,
     boot: Option<String>,
+    /// The in-flight reply built from orchestrator events, shown until saved
+    /// history carries that turn's work.
+    live: Option<Entry>,
+    /// Entries as last rendered, with the live reply applied.
+    shown: Vec<Entry>,
+    live_seq: u64,
+    live_backend: Option<String>,
 }
 impl Transcript {
     /// The existing sync cursor excludes its last id, even when that assistant
@@ -92,6 +99,10 @@ impl Transcript {
             page: history.page,
             backfilled: false,
             boot: None,
+            live: None,
+            shown: vec![],
+            live_seq: 0,
+            live_backend: None,
         };
         this.merge(history.transcript, true);
         this
@@ -122,10 +133,216 @@ impl Transcript {
         if next == self.entries {
             return false;
         }
-        let rows = render_tree_cached(&next, &self.entries, &self.rows);
+        self.rows = self.render(&next);
         self.entries = next;
-        self.rows = rows;
         true
+    }
+    /// Rows for `entries` with the live reply over its saved placeholder; a saved
+    /// reply with text or tools replaces the live one.
+    fn render(&mut self, entries: &[Entry]) -> Vec<Row> {
+        if let Some(live) = &self.live
+            && entries.iter().any(|entry| {
+                entry.id == live.id
+                    && (!entry.text.trim().is_empty()
+                        || entry.tools.as_ref().is_some_and(|tools| !tools.is_empty()))
+            })
+        {
+            self.live = None;
+        }
+        let mut shown = entries.to_vec();
+        if let Some(live) = &self.live {
+            match shown.iter_mut().find(|entry| entry.id == live.id) {
+                Some(saved) => {
+                    saved.text = live.text.clone();
+                    saved.tools = live.tools.clone();
+                    // The saved placeholder keeps its turn-start timestamp.
+                    for (key, value) in &live.extra {
+                        if key != "timestamp" || !saved.extra.contains_key(key) {
+                            saved.extra.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+                None => shown.push(live.clone()),
+            }
+        }
+        let rows = render_tree_cached(&shown, &self.shown, &self.rows);
+        self.shown = shown;
+        rows
+    }
+    /// Desktop socket.ts: thinking markers, tool calls and reply text for this
+    /// thread's in-flight turn, de-duplicated by the stream's seq.
+    fn orchestrator(&mut self, message: &Value) -> bool {
+        let data = &message["data"];
+        let thread = self.key.strip_prefix("llm-chat:").unwrap_or(&self.key);
+        if data["threadId"].as_str().is_some_and(|id| id != thread) {
+            return false;
+        }
+        let event = message["event"].as_str().unwrap_or("");
+        if data["snapshot"] == true {
+            // A subscribe snapshot reporting an idle session settles a stale reply.
+            return matches!(data["status"].as_str(), Some("ready" | "dead"))
+                && self.settle("completed");
+        }
+        if let Some(backend) = data["backend"].as_str()
+            && self.live_backend.as_deref() != Some(backend)
+        {
+            self.live_seq = 0;
+            self.live_backend = Some(backend.into());
+        }
+        if let Some(seq) = message["seq"].as_u64() {
+            if seq <= self.live_seq {
+                return false;
+            }
+            self.live_seq = seq;
+        }
+        match event {
+            "output" => {
+                let text = data["text"].as_str().unwrap_or("");
+                let thinking = data["thinking"] == true;
+                if text.is_empty() && !thinking {
+                    return false;
+                }
+                let Some(live) = self.reply(data) else {
+                    return false;
+                };
+                if thinking {
+                    live.extra
+                        .insert("thinkingActive".into(), Value::Bool(true));
+                    if !text.is_empty() {
+                        let mut thought = live
+                            .extra
+                            .get("thinking")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_owned();
+                        thought.push_str(text);
+                        live.extra.insert("thinking".into(), Value::String(thought));
+                    }
+                } else {
+                    live.extra
+                        .insert("thinkingActive".into(), Value::Bool(false));
+                    live.text.push_str(text);
+                }
+            }
+            "tool-use" => {
+                let id = data["toolUseId"].as_str().map(str::to_owned);
+                let name = data["name"].as_str().unwrap_or("unknown").to_owned();
+                let args = data["args"].clone();
+                let Some(live) = self.reply(data) else {
+                    return false;
+                };
+                live.extra
+                    .insert("thinkingActive".into(), Value::Bool(false));
+                let tools = live.tools.get_or_insert_with(Vec::new);
+                match tools
+                    .iter_mut()
+                    .find(|tool| id.is_some() && tool["id"].as_str() == id.as_deref())
+                {
+                    Some(tool) => {
+                        tool["name"] = Value::String(name);
+                        if args.is_object() {
+                            tool["args"] = args;
+                        }
+                    }
+                    None => {
+                        // A call that starts while another still runs joins its batch.
+                        let batch = tools
+                            .iter()
+                            .rev()
+                            .find(|tool| tool["status"] == "running")
+                            .and_then(|tool| tool["batch"].as_str())
+                            .map(str::to_owned)
+                            .or_else(|| id.clone());
+                        if let (Some(id), Some(batch)) = (&id, &batch) {
+                            crate::activity::note_batch(id, batch);
+                        }
+                        tools.push(serde_json::json!({
+                            "id":id,"name":name,"args":args,"status":"running","batch":batch
+                        }));
+                    }
+                }
+            }
+            "tool-result" => {
+                let Some(live) = self.live.as_mut() else {
+                    return false;
+                };
+                let id = data["toolUseId"].as_str();
+                let name = data["name"].as_str().unwrap_or("");
+                let Some(tool) = live.tools.iter_mut().flatten().rev().find(|tool| match id {
+                    Some(id) => tool["id"].as_str() == Some(id),
+                    None => {
+                        (name.is_empty() || tool["name"] == name) && tool["status"] == "running"
+                    }
+                }) else {
+                    return false;
+                };
+                tool["status"] = Value::String(
+                    if data["isError"] == true {
+                        "error"
+                    } else {
+                        "done"
+                    }
+                    .into(),
+                );
+                tool["result"] = data["output"].clone();
+            }
+            "status" if matches!(data["status"].as_str(), Some("ready" | "dead")) => {
+                return self.settle("completed");
+            }
+            "error" => return self.settle("failed"),
+            _ => return false,
+        }
+        self.refresh()
+    }
+    /// The live reply for this event's assistant message, started on first sight.
+    fn reply(&mut self, data: &Value) -> Option<&mut Entry> {
+        let id = data["assistantMessageId"]
+            .as_str()
+            .filter(|id| !id.is_empty());
+        if self
+            .live
+            .as_ref()
+            .is_none_or(|live| id.is_some_and(|id| live.id != id))
+        {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0., |d| d.as_millis() as f64);
+            self.live = Some(Entry {
+                id: id?.to_owned(),
+                role: "assistant".into(),
+                text: String::new(),
+                tools: Some(vec![]),
+                extra: [("timestamp".to_owned(), serde_json::json!(now))].into(),
+            });
+        }
+        self.live.as_mut()
+    }
+    /// The turn ended: stop the marker, close open tools and record the outcome
+    /// until saved history arrives.
+    fn settle(&mut self, outcome: &str) -> bool {
+        let Some(live) = self.live.as_mut() else {
+            return false;
+        };
+        live.extra
+            .insert("thinkingActive".into(), Value::Bool(false));
+        live.extra.insert(
+            "receipt".into(),
+            serde_json::json!({"terminal":{"outcome":outcome}}),
+        );
+        for tool in live.tools.iter_mut().flatten() {
+            if tool["status"] == "running" {
+                tool["status"] = Value::String("done".into());
+            }
+        }
+        self.refresh()
+    }
+    fn refresh(&mut self) -> bool {
+        let entries = std::mem::take(&mut self.entries);
+        let rows = self.render(&entries);
+        self.entries = entries;
+        let changed = rows != self.rows;
+        self.rows = rows;
+        changed
     }
     pub fn prepend(&mut self, history: History) -> bool {
         if history.session_key != self.key {
@@ -136,9 +353,8 @@ impl Transcript {
         next.retain(|entry| !self.entries.iter().any(|current| current.id == entry.id));
         next.extend(self.entries.clone());
         self.backfilled = true;
-        let rows = render_tree_cached(&next, &self.entries, &self.rows);
+        self.rows = self.render(&next);
         self.entries = next;
-        self.rows = rows;
         true
     }
     fn history(&mut self, payload: &Value) -> bool {
@@ -170,6 +386,7 @@ impl Transcript {
                 if let Some(boot) = data["bootId"].as_str() {
                     if self.boot.as_deref().is_some_and(|old| old != boot) {
                         self.seq = 0;
+                        self.live_seq = 0;
                     }
                     self.boot = Some(boot.into());
                 }
@@ -200,6 +417,7 @@ impl Transcript {
                 changed
             }
             (Some("history"), Some("update")) => self.history(data),
+            (Some("orchestrator"), Some(_)) => self.orchestrator(message),
             _ => false,
         }
     }
@@ -266,6 +484,105 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn orchestrator_events_build_the_live_trace_until_history_carries_the_turn() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            .to_string();
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:thoughts-live","transcript":[
+                    {"id":"ask","role":"user","text":"Look around","timestamp":now},
+                    {"id":"reply","role":"assistant","text":"","timestamp":now}
+                ]}),
+            )
+            .unwrap(),
+        );
+        let event = |seq: u64, event: &str, data: Value| {
+            let mut data = data;
+            data["threadId"] = "thoughts-live".into();
+            data["assistantMessageId"] = "reply".into();
+            serde_json::json!({"channel":"orchestrator","event":event,"seq":seq,"data":data})
+        };
+        let trace = |transcript: &Transcript| {
+            transcript.rows.iter().find_map(|row| match row {
+                Row::Activity { steps, trace, .. } => Some((steps.clone(), trace.clone())),
+                _ => None,
+            })
+        };
+        assert!(
+            trace(&transcript).is_none(),
+            "an empty placeholder has no trace"
+        );
+        assert!(transcript.apply(&event(
+            1,
+            "output",
+            serde_json::json!({"text":"","thinking":true})
+        )));
+        let (steps, live) = trace(&transcript).expect("the thinking marker opens a trace");
+        assert!(steps.is_empty() && live.live && live.thinking);
+        assert!(transcript.apply(&event(
+            2,
+            "tool-use",
+            serde_json::json!({
+            "toolUseId":"t1","name":"Read","args":{"file_path":"src/a.rs"}})
+        )));
+        let (steps, live) = trace(&transcript).unwrap();
+        assert_eq!((steps.len(), steps[0].status.as_str()), (1, "running"));
+        assert_eq!(steps[0].subject.as_deref(), Some("src/a.rs"));
+        assert!(live.live);
+        assert!(
+            !transcript.apply(&event(
+                2,
+                "tool-result",
+                serde_json::json!({"toolUseId":"t1"})
+            )),
+            "replayed seq"
+        );
+        assert!(transcript.apply(&event(
+            3,
+            "tool-result",
+            serde_json::json!({"toolUseId":"t1","output":"ok"})
+        )));
+        assert_eq!(trace(&transcript).unwrap().0[0].status, "ok");
+        let other = serde_json::json!({"channel":"orchestrator","event":"tool-use","seq":4,
+            "data":{"threadId":"thoughts-other","assistantMessageId":"x","toolUseId":"t9","name":"Bash"}});
+        assert!(
+            !transcript.apply(&other),
+            "another thread's events are ignored"
+        );
+        for (seq, id) in [(5, "t2"), (6, "t3")] {
+            assert!(transcript.apply(&event(
+                seq,
+                "tool-use",
+                serde_json::json!({"toolUseId":id,"name":"WebFetch",
+                    "args":{"url":format!("https://example.com/{id}")}})
+            )));
+        }
+        let (steps, _) = trace(&transcript).unwrap();
+        assert_eq!(
+            steps.iter().map(|s| s.batch.as_deref()).collect::<Vec<_>>(),
+            [Some("t1"), Some("t2"), Some("t2")],
+            "a call that starts while another runs joins its batch"
+        );
+        assert!(transcript.apply(&event(7, "status", serde_json::json!({"status":"ready"}))));
+        assert!(
+            !trace(&transcript).unwrap().1.live,
+            "ready settles the trace"
+        );
+        // Saved history with the reply's work replaces the live copy.
+        assert!(transcript.history(&serde_json::json!({"sessionKey":"llm-chat:thoughts-live","entries":[
+            {"id":"reply","role":"assistant","text":"Done.","timestamp":now,
+             "toolCalls":[{"id":"t1","name":"Read","args":{"file_path":"src/a.rs"},"status":"done"},
+                          {"id":"t2","name":"Read","args":{"file_path":"src/b.rs"},"status":"done"}],
+             "receipt":{"terminal":{"outcome":"completed"}}}
+        ]})));
+        assert!(transcript.live.is_none());
+        assert_eq!(trace(&transcript).unwrap().0.len(), 2);
+    }
+
     #[test]
     fn retention_matches_web_store() {
         let mut transcript = Transcript::new(History {

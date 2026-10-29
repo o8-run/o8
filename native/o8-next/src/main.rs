@@ -17,6 +17,7 @@ mod inbox;
 mod issues;
 mod merge;
 mod model;
+mod motion;
 mod pane;
 mod pane_grid;
 mod pane_layout;
@@ -38,6 +39,7 @@ mod text;
 mod theme;
 #[cfg(test)]
 mod theme_tests;
+mod trace;
 mod transport;
 mod ui;
 mod visualizations;

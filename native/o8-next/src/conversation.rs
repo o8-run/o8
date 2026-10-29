@@ -3,6 +3,8 @@ use crate::theme::current as theme;
 
 #[path = "composer/card.rs"]
 mod composer_card;
+#[path = "composer/picker.rs"]
+mod composer_picker;
 
 #[cfg(test)]
 #[path = "composer/card_tests.rs"]
@@ -57,14 +59,24 @@ impl Surface {
             return;
         };
         let draft = self.composer.read(cx).text.clone();
+        let files = self.composer.read(cx).controls.files.clone();
         // Match the default composer's attachment-only queue payload.
-        let text = if draft.trim().is_empty() && !self.composer.read(cx).controls.images.is_empty()
+        let text = if draft.trim().is_empty()
+            && files.is_empty()
+            && !self.composer.read(cx).controls.images.is_empty()
         {
-            "[Image attached]"
+            "[Image attached]".to_owned()
+        } else if files.is_empty() {
+            draft.trim().to_owned()
         } else {
-            draft.trim()
-        }
-        .to_owned();
+            // Attached files travel as paths the agent opens from disk.
+            [draft.trim(), &crate::composer::images::file_lines(&files)]
+                .iter()
+                .filter(|part| !part.is_empty())
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        };
         let fresh = !self.pending.contains_key(&session.id);
         let (method, body) = if let Some(id) = promote {
             (
@@ -114,6 +126,9 @@ impl Surface {
         self.generation += 1;
         let generation = self.generation;
         self.saving = true;
+        if !remove && self.following.is_none() {
+            self.following = Some(self.rows.len());
+        }
         self.notice = if remove {
             "Removing queued message…"
         } else {
@@ -166,15 +181,13 @@ impl Surface {
                                     i.controls
                                         .images
                                         .retain(|image| !sent_images.contains(image));
+                                    i.controls.files.retain(|file| !files.contains(file));
                                 });
                             }
                         }
-                        this.notice = if method == "DELETE" {
-                            "Queued message removed."
-                        } else {
-                            "Message saved. Delivery status is shown below."
-                        }
-                        .into();
+                        // The queue rows under the composer show delivery, as on
+                        // the desktop; the transcript keeps no confirmation line.
+                        this.notice.clear();
                         match queue {
                             Ok(queue) => this.queue = queue,
                             Err(error) => this.notice = error,
@@ -287,6 +300,7 @@ impl Surface {
             .child(
                 div()
                     .id("composer-queue")
+                    .min_w_0()
                     .max_h(px(120.))
                     .overflow_y_scroll()
                     .children(queue.into_iter().map(|item| {
@@ -308,11 +322,15 @@ impl Surface {
                         div()
                             .flex()
                             .flex_col()
+                            .min_w_0()
                             .text_size(px(11.))
-                            .child(format!(
-                                "{} · {}",
-                                item["status"].as_str().unwrap_or("queued"),
-                                item["payload"]["text"].as_str().unwrap_or("")
+                            // Wrapped then clamped: a nowrap line would widen the column.
+                            .child(div().overflow_hidden().text_ellipsis().line_clamp(1).child(
+                                format!(
+                                    "{} · {}",
+                                    item["status"].as_str().unwrap_or("queued"),
+                                    item["payload"]["text"].as_str().unwrap_or("")
+                                ),
                             ))
                             .when(item["reason"].is_string(), |d| {
                                 d.child(item["reason"].as_str().unwrap_or("").to_owned())

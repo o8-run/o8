@@ -59,6 +59,10 @@ impl Port for Terminal {
     fn tick(view: &Entity<Self::View>, cx: &mut Context<Shell>) {
         view.update(cx, |pane, cx| pane.poll(cx));
     }
+    fn own(client: &Client, workspace: &str) -> Option<Result<String, String>> {
+        // Fixture servers in unit tests host no terminal process.
+        (!cfg!(test)).then(|| client.own_terminal(workspace))
+    }
     #[cfg(test)]
     fn ready(view: &Entity<Self::View>, cx: &App) -> bool {
         view.read(cx).ready && view.read(cx).painted_bytes.get() > 0
@@ -83,5 +87,73 @@ impl Client {
                 })
             })
             .collect())
+    }
+}
+
+impl Client {
+    /// The desktop workspace shell: `terminal-create` with a stable owner key adopts
+    /// the session that survived a restart, or reserves one in the workspace that
+    /// the pane then attaches to (DesktopWebSocketContext.tsx).
+    fn own_terminal(&self, workspace: &str) -> Result<String, String> {
+        use std::time::{Duration, Instant};
+        use tungstenite::Message;
+        let (url, address) = self.websocket()?;
+        let tcp = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(2))
+            .map_err(|e| e.to_string())?;
+        tcp.set_read_timeout(Some(Duration::from_secs(1)))
+            .map_err(|e| e.to_string())?;
+        let (mut socket, _) = tungstenite::client(url.as_str(), tcp).map_err(|e| e.to_string())?;
+        let request = format!("o8-next-{}", std::process::id());
+        socket
+            .send(Message::Text(
+                serde_json::json!({
+                    "type": "terminal-create", "cols": 120, "rows": 30, "requestId": request,
+                    "cwd": workspace, "ownerKey": format!("o8-next:{workspace}:terminal"),
+                })
+                .to_string()
+                .into(),
+            ))
+            .map_err(|e| e.to_string())?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let result = loop {
+            if Instant::now() > deadline {
+                break Err("Terminal did not start".into());
+            }
+            let text = match socket.read() {
+                Ok(Message::Text(text)) => text,
+                Ok(_) => continue,
+                Err(tungstenite::Error::Io(e))
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    continue;
+                }
+                Err(e) => break Err(e.to_string()),
+            };
+            let message: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+            if message["channel"] != "terminal" {
+                continue;
+            }
+            let data = &message["data"];
+            match message["event"].as_str() {
+                Some("created") if data["requestId"] == request.as_str() => {
+                    break data["sessionName"]
+                        .as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "Terminal did not start".into());
+                }
+                Some("error") if data["sessionName"] == "" => {
+                    break Err(data["error"]
+                        .as_str()
+                        .unwrap_or("Terminal did not start")
+                        .into());
+                }
+                _ => {}
+            }
+        };
+        let _ = socket.close(None);
+        result
     }
 }
