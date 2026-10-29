@@ -164,8 +164,8 @@ export async function collectClientDiagnostics(): Promise<ClientDiagnostics> {
  * POST a report to the private team intake. `route` records where it fired.
  *
  * Resolves the short report id the server assigned. That id is the operator's
- * receipt: a commit carrying `Fixes-Report: <id>` announces the fix in the public
- * #fixed channel, credited to them. Show it — an id they never saw is a fix they
+ * receipt: a commit carrying `Fixes-Report: <id>` puts the fix in the public
+ * manifest their own app reads. Show it — an id they never saw is a fix they
  * can never connect back to the thing they reported.
  *
  * Diagnostics ride along by DEFAULT (Q ruling 2026-07-15 — "when he sends a

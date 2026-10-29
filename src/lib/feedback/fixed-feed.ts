@@ -3,8 +3,8 @@ import 'server-only';
 /**
  * The in-app receipt: "your report was fixed in this version."
  *
- * #fixed only reaches people who joined the Discord. This reaches everyone who
- * ever filed a report — which is the whole point of a receipt.
+ * This reaches everyone who ever filed a report — which is the whole point of
+ * a receipt.
  *
  * How it costs nothing and leaks nothing:
  *   - We DOWNLOAD a public manifest (fixed.json) that release.mjs ships next to

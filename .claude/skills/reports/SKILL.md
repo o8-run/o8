@@ -31,13 +31,11 @@ fix(chat): commands popup stays up after clearing the composer
 Fixes-Report: FYPPHK
 ```
 
-That single line is the entire workflow. At ship time it:
-1. posts the fix to the public `#fixed` channel, credited to the reporter's GitHub handle,
-2. ships it in `fixed.json`, so **the reporter's own app tells them** — *"You reported this — it's fixed."*
+That single line is the entire workflow. At ship time it ships the fix in `fixed.json`, so **the reporter's own app tells them** — *"You reported this — it's fixed."* (The public `#fixed` Discord channel was retired on 2026-10-28.)
 
 Multiple ids: `Fixes-Report: FYPPHK, B2M9QP`.
 
-**Never set `fixed` by hand.** The trailer is the only path, so the code and the announcement can't disagree. The CLI refuses.
+**Never set `fixed` by hand.** The trailer is the only path, so the code and the receipt can't disagree. The CLI refuses.
 
 ## Tried and failed? Say so.
 
@@ -66,7 +64,7 @@ The model is the polish, never the guard — if OpenRouter is down we publish th
 
 ```
 raw    (private):  "the diff panel crashes when I open /Users/bob/clients/acme-secret"
-public (#fixed):   "Diff panel crashes when opening file"
+public (fixed.json): "Diff panel crashes when opening file"
 ```
 
 The **reporter still sees their own words** — their app reads the raw title from its own local ledger and only falls back to the public one. They get "you reported this — <what you actually said>"; the world gets the clean line.
@@ -77,7 +75,7 @@ The fix manifest is a **public** download, so we publish **wins and asks — nev
 
 | status | reporter sees it? |
 |---|---|
-| `fixed` | **Yes** — green card in their app + `#fixed` |
+| `fixed` | **Yes** — green card in their app |
 | `needs-info` | **Yes** — amber card in their app, with your note as the ask |
 | `attempted` · `cant-reproduce` · `wont-fix` · `triaged` | **No** — internal only |
 
