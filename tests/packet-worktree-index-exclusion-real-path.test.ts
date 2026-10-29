@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
@@ -129,3 +131,47 @@ it.each([undefined, 'pkt-external-claude'])('preserves the external Claude direc
   expect(path.basename(created.path)).toBe(created.id);
   await expect(lstat(created.path)).rejects.toMatchObject({ code: 'ENOENT' });
 }, 60_000);
+
+it.skipIf(process.platform !== 'darwin' || process.env.O8_TEST_SPOTLIGHT !== '1')(
+  'excludes a real managed checkout from indexed metadata after an unmarked control is indexed',
+  async (context) => {
+    // /tmp is normally excluded. Put both siblings under the user's home so
+    // an unindexed control cannot accidentally count as successful exclusion.
+    const probe = await realpath(await mkdtemp(path.join(os.homedir(), 'o8-spotlight-test-')));
+    const oldRoot = process.env.O8_WORKTREE_ROOT!;
+    const name = `o8-spotlight-${randomUUID()}.txt`;
+    try {
+      vi.stubEnv('O8_WORKTREE_ROOT', path.join(probe, 'worktrees'));
+      await mkdir(path.join(probe, 'control'));
+      const control = path.join(probe, 'control', name);
+      await writeFile(control, 'Spotlight control\n');
+      const created = await create(`fixture/spotlight-${randomUUID()}`, `spotlight-${randomUUID()}`);
+      expect(path.basename(created.path)).toMatch(/-index\.noindex$/);
+      const excluded = path.join(created.path, name);
+      await writeFile(excluded, 'Spotlight managed checkout\n');
+      // Filename-only queries can use filesystem metadata even when content
+      // indexing is disabled. Require importer metadata as well.
+      const query = `kMDItemFSName == "${name}" && kMDItemContentTypeTree == "public.text"`;
+      const deadline = Date.now() + 60_000;
+      let controlSeenAt: number | undefined;
+      do {
+        const result = await run('/usr/bin/mdfind', ['-onlyin', probe, query], { timeout: 5_000 });
+        const matches = result.stdout.trim().split('\n');
+        expect(matches).not.toContain(excluded);
+        if (matches.includes(control)) controlSeenAt ??= Date.now();
+        if (controlSeenAt && Date.now() - controlSeenAt >= 10_000) return;
+        await new Promise(resolve => setTimeout(resolve, 1_000));
+      } while (Date.now() < deadline);
+      if (!controlSeenAt) {
+        const reason = 'Spotlight indexing disabled or unavailable: no indexed metadata for the unmarked control within 60 seconds.';
+        console.warn(`[spotlight] SKIP: ${reason}`);
+        context.skip(reason);
+      }
+      throw new Error('Spotlight control appeared too late to complete the observation window.');
+    } finally {
+      vi.stubEnv('O8_WORKTREE_ROOT', oldRoot);
+      await rm(probe, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
