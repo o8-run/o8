@@ -22,6 +22,7 @@ fn render(
     // at the sidebar's right edge and back/forward start the workspace header;
     // with it closed, toggle, search, back and forward share one row.
     record_visit(s);
+    super::header_tabs::settle(s, cx);
     let back = adjacent(s, -1);
     let forward = adjacent(s, 1);
     let hidden = s.surfaces.sidebar.hidden;
@@ -84,6 +85,8 @@ fn render(
             .h(px(crate::theme::GEOMETRY.header))
             .text_size(px(12.))
             .pr(px(4.))
+            // Bare header moves the window, as the desktop's drag region does.
+            .window_control_area(gpui::WindowControlArea::Drag)
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),
@@ -116,7 +119,11 @@ fn render(
 fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
     pill(
         "header-sidebar",
-        if hidden { "Show sidebar  ⌘B" } else { "Hide sidebar  ⌘B" },
+        if hidden {
+            "Show sidebar  ⌘B"
+        } else {
+            "Hide sidebar  ⌘B"
+        },
         true,
     )
     .child(crate::icon::stroke(
@@ -137,17 +144,21 @@ fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui:
 
 /// Search opens the command palette from the top, as the desktop's does.
 fn search_button(cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
-    icon_button("header-search", SEARCH, 16., 1.7, "Search chats  ⌘K", true).on_click(
-        cx.listener(|this, _, window, cx| {
+    icon_button("header-search", SEARCH, 16., 1.7, "Search chats  ⌘K", true).on_click(cx.listener(
+        |this, _, window, cx| {
             super::super::palette::toggle(this, window, cx);
             cx.notify();
-        }),
-    )
+        },
+    ))
 }
 
 /// The desktop's 26px header icon pill (HeaderIconPill): 7px padding either
 /// side of the glyph, transparent at rest, hover fill, 0.35 when disabled.
-pub(super) fn pill(id: &'static str, tip: &'static str, enabled: bool) -> gpui::Stateful<gpui::Div> {
+pub(super) fn pill(
+    id: &'static str,
+    tip: &'static str,
+    enabled: bool,
+) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .debug_selector(move || id.into())
@@ -160,7 +171,9 @@ pub(super) fn pill(id: &'static str, tip: &'static str, enabled: bool) -> gpui::
         .justify_center()
         .rounded(px(7.))
         .when(enabled, |button| {
-            button.cursor_pointer().hover(|button| button.bg(theme().hover))
+            button
+                .cursor_pointer()
+                .hover(|button| button.bg(theme().hover))
         })
         .when(!enabled, |button| button.opacity(0.35))
         .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
@@ -174,7 +187,12 @@ pub(super) fn icon_button(
     tip: &'static str,
     enabled: bool,
 ) -> gpui::Stateful<gpui::Div> {
-    pill(id, tip, enabled).child(crate::icon::stroke(path, theme().text_secondary, size, weight))
+    pill(id, tip, enabled).child(crate::icon::stroke(
+        path,
+        theme().text_secondary,
+        size,
+        weight,
+    ))
 }
 
 pub(super) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
@@ -205,7 +223,11 @@ fn record_visit(s: &mut Shell) {
     if visits.tabs.get(visits.index) == Some(&tab) {
         return;
     }
-    let keep = if visits.tabs.is_empty() { 0 } else { visits.index + 1 };
+    let keep = if visits.tabs.is_empty() {
+        0
+    } else {
+        visits.index + 1
+    };
     visits.tabs.truncate(keep);
     visits.tabs.push(tab);
     if visits.tabs.len() > 100 {
@@ -231,10 +253,17 @@ fn adjacent(s: &Shell, direction: isize) -> Option<usize> {
 }
 
 fn revisit(s: &mut Shell, visit: usize, window: &mut Window, cx: &mut Context<Shell>) {
-    let Some(tab) = s.features.read::<Visits>().and_then(|v| v.tabs.get(visit).cloned()) else {
+    let Some(tab) = s
+        .features
+        .read::<Visits>()
+        .and_then(|v| v.tabs.get(visit).cloned())
+    else {
         return;
     };
-    let Some(index) = s.current().and_then(|w| w.tabs.iter().position(|t| t == &tab)) else {
+    let Some(index) = s
+        .current()
+        .and_then(|w| w.tabs.iter().position(|t| t == &tab))
+    else {
         return;
     };
     s.features.get::<Visits>().index = visit;
@@ -256,7 +285,8 @@ fn select_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context
     cx.notify();
 }
 
-const SIDEBAR: &str = "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z M9 3v18";
+const SIDEBAR: &str =
+    "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z M9 3v18";
 const BACK: &str = "M19 12H5m6-6-6 6 6 6";
 const FORWARD: &str = "M5 12h14m-6-6 6 6-6 6";
 const SEARCH: &str = "M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z M16 16l5 5";
@@ -281,6 +311,7 @@ pub(super) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &m
         return;
     };
     s.content.remove(&s.key(&tab));
+    s.state.tab_labels.remove(&s.key(&tab));
     let saved = s
         .state
         .workspaces
@@ -344,7 +375,19 @@ fn strip(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
         .pl(px(6.))
         .pr(px(18.))
         .id("surface-tabs")
+        // Space between and after the pills still moves the window.
+        .window_control_area(gpui::WindowControlArea::Drag)
         .overflow_x_scroll()
+        .on_drag_move(cx.listener(
+            |this, _: &gpui::DragMoveEvent<super::header_tabs::Dragged>, _, cx| {
+                super::header_tabs::leave(this, cx);
+            },
+        ))
+        .on_drop(
+            cx.listener(|this, drag: &super::header_tabs::Dragged, window, cx| {
+                super::header_tabs::drop(this, drag.index, window, cx);
+            }),
+        )
         .children(
             s.current()
                 .map(|w| w.tabs.clone())
@@ -354,7 +397,7 @@ fn strip(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
                 .map(|(i, t)| {
                     let selected = active.as_ref() == Some(&t);
                     let group = gpui::SharedString::from(format!("surface-tab-{i}"));
-                    let label = match &t {
+                    let label = super::header_tabs::label(s, &t).unwrap_or_else(|| match &t {
                         Tab::Session(id) => {
                             let selected =
                                 s.current().and_then(|w| w.selections.get(id)).unwrap_or(id);
@@ -365,9 +408,17 @@ fn strip(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
                                 .unwrap_or_else(|| "Chat".into())
                         }
                         _ => t.label().into(),
+                    });
+                    let editing = super::header_tabs::editing(s, i);
+                    let insertion = super::header_tabs::insertion(s).filter(|(at, _)| *at == i);
+                    let dragged = super::header_tabs::Dragged {
+                        index: i,
+                        label: label.clone().into(),
+                        glyph: glyph(&t),
                     };
                     div()
                         .id(("surface-tab", i))
+                        .relative()
                         .group(group.clone())
                         .debug_selector(move || format!("surface-tab-{i}"))
                         .cursor_pointer()
@@ -423,7 +474,8 @@ fn strip(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
                                         .opacity(0.)
                                         .group_hover(group, |view| view.opacity(1.))
                                         .tooltip(|_, cx| {
-                                            cx.new(|_| crate::icon::Tip("Close tab  ⌘W".into())).into()
+                                            cx.new(|_| crate::icon::Tip("Close tab  ⌘W".into()))
+                                                .into()
                                         })
                                         .child(crate::icon::stroke(CLOSE, theme().text, 11., 2.4))
                                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -433,18 +485,80 @@ fn strip(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
                                         })),
                                 ),
                         )
-                        .child(
-                            div()
-                                .max_w(px(180.))
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .child(label),
-                        )
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.capture(window, cx);
-                            select_tab(this, i, window, cx);
-                        }))
+                        .map(|pill| match editing {
+                            // A column so the field stretches to its width.
+                            Some(field) => pill.child(
+                                div()
+                                    .w(px((field.read(cx).text.chars().count() as f32 * 7.)
+                                        .clamp(100., 220.)))
+                                    .flex()
+                                    .flex_col()
+                                    .text_color(theme().text)
+                                    .child(field),
+                            ),
+                            None => {
+                                let shown = label.clone();
+                                pill.child(
+                                    div()
+                                        .max_w(px(180.))
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .child(label.clone()),
+                                )
+                                .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                                .on_click(cx.listener(
+                                    move |this, event: &gpui::ClickEvent, window, cx| {
+                                        this.capture(window, cx);
+                                        if event.click_count() >= 2 {
+                                            super::header_tabs::rename(
+                                                this,
+                                                i,
+                                                label.clone(),
+                                                window,
+                                                cx,
+                                            );
+                                        } else {
+                                            select_tab(this, i, window, cx);
+                                        }
+                                    },
+                                ))
+                                .on_mouse_down(
+                                    gpui::MouseButton::Right,
+                                    cx.listener(move |this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        this.capture(window, cx);
+                                        super::header_tabs::rename(
+                                            this,
+                                            i,
+                                            shown.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    }),
+                                )
+                            }
+                        })
+                        .on_drag_move(cx.listener(
+                            move |this,
+                                  event: &gpui::DragMoveEvent<super::header_tabs::Dragged>,
+                                  _,
+                                  cx| {
+                                super::header_tabs::hover(this, i, event, cx);
+                            },
+                        ))
+                        .when_some(insertion, |pill, (_, after)| {
+                            pill.child(
+                                div()
+                                    .absolute()
+                                    .top(px(3.))
+                                    .bottom(px(3.))
+                                    .w(px(1.))
+                                    .bg(theme().accent)
+                                    .when(after, |line| line.right(px(-1.)))
+                                    .when(!after, |line| line.left(px(-1.))),
+                            )
+                        })
                 }),
         )
 }

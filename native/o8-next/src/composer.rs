@@ -35,6 +35,8 @@ pub struct Composer {
     typing: Option<std::time::Instant>,
     pub(crate) placeholder: String,
     pub(crate) framed: bool,
+    /// One unpadded line, for a field inside a pill or row.
+    pub(crate) inline: bool,
     pub(crate) controls: controls::State,
 }
 impl Composer {
@@ -59,8 +61,14 @@ impl Composer {
             typing: None,
             placeholder: String::new(),
             framed: true,
+            inline: false,
             controls: controls::State::default(),
         }
+    }
+    pub(crate) fn select_all(&mut self, cx: &mut Context<Self>) {
+        self.anchor = 0;
+        self.selection = 0..self.text.len();
+        self.changed(cx);
     }
     pub fn composing(&self) -> bool {
         self.marked.is_some()
@@ -518,6 +526,12 @@ impl Render for Composer {
             .when(!self.framed, |d| {
                 d.min_h(px(52.)).pt(px(11.)).px(px(14.)).pb(px(4.))
             })
+            .when(self.inline, |d| {
+                d.min_h_0()
+                    .max_h(px(crate::theme::TYPE.body_line))
+                    .p_0()
+                    .border_0()
+            })
             .on_key_down(cx.listener(Self::key))
             .on_mouse_down(
                 MouseButton::Left,
@@ -721,7 +735,13 @@ impl Render for Composer {
                                     let top = -scroll.y;
                                     // The viewport excludes the input's padding and border.
                                     let visible = (input.scroll.bounds().size.height
-                                        - px(if input.framed { 18. } else { 15. }))
+                                        - px(if input.inline {
+                                        0.
+                                    } else if input.framed {
+                                        18.
+                                    } else {
+                                        15.
+                                    }))
                                     .max(px(20.));
                                     let bottom = top + visible;
                                     let next = if cursor_y < top {
