@@ -249,7 +249,7 @@ screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }
 objc2 = "0.6"
 # NSString/NSData/NSJSONSerialization power browser_view::eval_result — the host
 # reads the WKWebView evaluateJavaScript return value back as JSON (see browser_view.rs).
-objc2-foundation = { version = "0.3", features = ["NSString", "NSData", "NSJSONSerialization", "NSError"] }
+objc2-foundation = { version = "0.3", features = ["NSBundle", "NSString", "NSData", "NSJSONSerialization", "NSError"] }
 # WKWebView.evaluateJavaScript_completionHandler for the same eval-with-return path.
 objc2-web-kit = { version = "0.3", features = ["WKWebView", "block2"] }
 core-graphics = "0.24"

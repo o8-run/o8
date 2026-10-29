@@ -2,6 +2,7 @@
 mod agent;
 #[cfg(target_os = "macos")]
 mod ai;
+mod app_version;
 mod agent_partials_window;
 mod spatial_ink_window;
 #[cfg(target_os = "macos")]
@@ -1196,7 +1197,7 @@ fn inspect_desktop_attach() -> DesktopAttachAttempt {
         })
     });
     let identity_is_o8 = identity.is_some();
-    let app_version = env!("CARGO_PKG_VERSION");
+    let app_version = crate::app_version::app_version();
     let versions_match = state.version == app_version;
     let decision = decide_desktop_attach(
         Some(true),
@@ -2883,7 +2884,7 @@ fn get_desktop_info() -> DesktopInfo {
     DesktopInfo {
         is_desktop: true,
         platform: std::env::consts::OS.to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: crate::app_version::app_version().to_string(),
         arch: std::env::consts::ARCH.to_string(),
     }
 }
@@ -7226,7 +7227,7 @@ impl BundledWsSpawn {
             .env("WS_PORT", self.ws_port.to_string())
             .env("NEXT_ORIGIN", &self.next_origin)
             .env("O8_PACKAGED_APP", "1")
-            .env("O8_APP_VERSION", env!("CARGO_PKG_VERSION"))
+            .env("O8_APP_VERSION", crate::app_version::app_version())
             .env("O8_BOOT_ID", &self.boot_identity.boot_id)
             .env("O8_INSTANCE_ID", &self.boot_identity.instance_id)
             .env("O8_SIDECAR_PID", std::process::id().to_string())
@@ -8118,6 +8119,7 @@ pub fn run() {
 
     boot_trace("BEFORE generate_context!");
     let mut context = app_context();
+    app_version::apply(&mut context);
     log::info!("[boot] tauri context at {}ms", boot_ms());
     boot_trace("generate_context! DONE");
 

@@ -271,7 +271,7 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
     expect(f.events().filter(row => row.phase === 'bundle').map(row => row.version)).toEqual(['0.1.0', '0.1.0', '0.1.0']);
   });
 
-  it('rebuilds a version-only change while the native runtime still embeds the version', () => {
+  it('reuses the executable across a version-only change and bundles the new version', () => {
     const f = compilerFixture(); f.run();
     for (const path of ['package.json', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'src-tauri/tauri.conf.json']) {
       put(f.root, path, readFileSync(join(f.root, path), 'utf8').replaceAll('0.1.0', '0.1.1'));
@@ -279,8 +279,8 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
     commit(f.root);
     rmSync(join(f.root, 'src-tauri/target'), { recursive: true, force: true });
     const output = f.run();
-    expect(output).toContain('native restore=miss');
-    expect(f.events().filter(row => row.phase === 'compile')).toHaveLength(4);
+    expect(output).toContain('native restore=hit_compatible');
+    expect(f.events().filter(row => row.phase === 'compile')).toHaveLength(2);
     expect(f.events().filter(row => row.phase === 'prebuild')).toHaveLength(2);
     expect(f.events().filter(row => row.phase === 'bundle').map(row => row.version)).toEqual(['0.1.0', '0.1.1']);
   });
@@ -416,8 +416,9 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
       mkdirSync('out', { recursive: true }); writeFileSync('out/server.js', 'fixture export');
     `);
     put(f.root, 'node_modules/next/dist/bin/next', `
-      const fs = require('node:fs'); fs.mkdirSync('.next/cache', { recursive: true });
-      fs.writeFileSync('.next/cache/proof', 'fixture web compiler output');
+      // An unreserved build may not leave .next/cache behind (#4911).
+      const fs = require('node:fs'); fs.mkdirSync('.next', { recursive: true });
+      fs.writeFileSync('.next/fixture-build', 'fixture web compiler output');
     `);
     mkdirSync(join(f.root, '.fixture')); commit(f.root);
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).trim();
@@ -483,8 +484,9 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
       mkdirSync('out', { recursive: true }); writeFileSync('out/server.js', 'export');
     `);
     put(f.root, 'node_modules/next/dist/bin/next', `
-      const fs = require('node:fs'); fs.mkdirSync('.next/cache', { recursive: true });
-      fs.writeFileSync('.next/cache/proof', 'web compiler state');
+      // An unreserved build may not leave .next/cache behind (#4911).
+      const fs = require('node:fs'); fs.mkdirSync('.next', { recursive: true });
+      fs.writeFileSync('.next/fixture-build', 'web compiler state');
     `);
     mkdirSync(join(f.root, '.fixture')); commit(f.root);
     const script = `
