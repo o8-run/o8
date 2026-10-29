@@ -12,9 +12,13 @@ pub(super) type Slice = EmptyState;
 #[derive(Default)]
 pub(super) struct Runtime {
     pub view: Option<Entity<ThreadList>>,
+    /// The header's sidebar toggle (Cmd+B) hides the column.
+    pub hidden: bool,
     workspace_ledger: Option<Ledger>,
     bootstrapped: bool,
 }
+/// The sidebar column; the header lays its toggle and search over it.
+pub(super) const WIDTH: f32 = 280.;
 pub(super) const REGISTRATION: Registration = Registration {
     initialize,
     overlay_command: true,
@@ -60,6 +64,16 @@ pub(super) const REGISTRATION: Registration = Registration {
             });
     },
     decorate: |shell, content| {
+        if shell.surfaces.sidebar.hidden {
+            return div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .child(content)
+                .into_any_element();
+        }
         div()
             .flex()
             .flex_1()
@@ -67,7 +81,7 @@ pub(super) const REGISTRATION: Registration = Registration {
             .child(
                 gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
                     gpui::StyleRefinement::default()
-                        .w(px(280.))
+                        .w(px(WIDTH))
                         .h_full()
                         .flex_shrink_0(),
                 ),
