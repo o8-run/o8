@@ -12,6 +12,8 @@ pub(super) type Slice = EmptyState;
 #[derive(Default)]
 pub(super) struct Runtime {
     pub view: Option<Entity<ThreadList>>,
+    /// The header's sidebar toggle (Cmd+B) hides the column.
+    pub hidden: bool,
     workspace_ledger: Option<Ledger>,
     bootstrapped: bool,
 }
@@ -60,6 +62,16 @@ pub(super) const REGISTRATION: Registration = Registration {
             });
     },
     decorate: |shell, content| {
+        if shell.surfaces.sidebar.hidden {
+            return div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .child(content)
+                .into_any_element();
+        }
         div()
             .flex()
             .flex_1()

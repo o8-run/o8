@@ -16,14 +16,18 @@ fn render(
     _: &mut Window,
     cx: &mut Context<Shell>,
 ) -> Option<AnyElement> {
-    // Surface entries and the brand live in the navigation rail (shell_rail.rs);
-    // the open tabs share this band, as in the desktop workspace header.
+    // The desktop workspace header, left to right: sidebar toggle, search,
+    // back and forward through visited tabs, the tab pills, then Run.
+    record_visit(s);
+    let back = adjacent(s, -1);
+    let forward = adjacent(s, 1);
+    let hidden = s.surfaces.sidebar.hidden;
     Some(
         (div()
             .flex()
             .items_center()
             .flex_shrink_0()
-            .gap(px(6.))
+            .gap(px(2.))
             .h(px(crate::theme::GEOMETRY.header))
             .text_size(px(12.))
             // Clears the traffic lights, which extend past the rail column.
@@ -34,76 +38,64 @@ fn render(
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
             .child(
-                div()
-                    .id("workspace-switcher")
-                    .debug_selector(|| "workspace-switcher".into())
-                    .h(px(26.))
-                    .px(px(8.))
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .flex_shrink_0()
-                    .rounded(px(7.))
-                    .cursor_pointer()
-                    .text_color(theme().text_secondary)
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .hover(|view| view.bg(theme().hover).text_color(theme().text))
-                    .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Switch workspace".into())).into())
-                    .child(
-                        div()
-                            .max_w(px(160.))
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .child(
-                                s.state
-                                    .selected
-                                    .as_deref()
-                                    .and_then(|path| std::path::Path::new(path).file_name())
-                                    .map(|name| name.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| "Workspaces".into()),
-                            ),
-                    )
-                    .child(crate::icon::stroke(CHEVRON, theme().text_muted, 10., 2.))
+                icon_button(
+                    "header-sidebar",
+                    SIDEBAR,
+                    16.,
+                    1.8,
+                    if hidden { "Show sidebar  ⌘B" } else { "Hide sidebar  ⌘B" },
+                    true,
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.capture(window, cx);
+                    toggle_sidebar(this, window, cx);
+                })),
+            )
+            .child(
+                icon_button("header-search", SEARCH, 15., 1.8, "Search conversations  ⌘F", true)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.capture(window, cx);
-                        this.palette = true;
-                        this.workspace_picker = true;
-                        this.shortcuts = false;
-                        this.query.clear();
-                        this.choice = 0;
-                        this.palette_scroll.scroll_to_item(1);
-                        this.focus.focus(window);
+                        this.surfaces.sidebar.hidden = false;
+                        if let Some(sidebar) = this.surfaces.sidebar.view.clone() {
+                            sidebar.update(cx, |sidebar, cx| sidebar.search(window, cx));
+                        }
                         cx.notify();
                     })),
             )
+            .child(
+                icon_button("header-back", BACK, 15., 1.7, "Back", back.is_some()).when_some(
+                    back,
+                    |button, visit| {
+                        button.on_click(cx.listener(move |this, _, window, cx| {
+                            this.capture(window, cx);
+                            revisit(this, visit, window, cx);
+                        }))
+                    },
+                ),
+            )
+            .child(
+                icon_button("header-forward", FORWARD, 15., 1.7, "Forward", forward.is_some())
+                    .when_some(forward, |button, visit| {
+                        button.on_click(cx.listener(move |this, _, window, cx| {
+                            this.capture(window, cx);
+                            revisit(this, visit, window, cx);
+                        }))
+                    }),
+            )
+            .child(div().w(px(4.)).flex_shrink_0())
             .child(tabs(s, cx))
             .child(
-                div()
-                    .id("shell-palette")
-                    .debug_selector(move || frame.commands.into())
-                    .size(px(28.))
-                    .flex()
-                    .flex_shrink_0()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(7.))
-                    .cursor_pointer()
-                    .hover(|view| view.bg(theme().hover))
-                    .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Search and commands  ⌘K".into())).into())
-                    .child(crate::icon::stroke(SEARCH, theme().text_secondary, 15., 1.8))
-                    .on_click(cx.listener(|this, _, window, cx| {
+                // Opens the workspace orchestrator with its composer focused, as
+                // the rail's Run button does.
+                icon_button("header-run", PLAY, 15., 1.8, "Run orchestrator", true).on_click(
+                    cx.listener(|this, _, window, cx| {
                         this.capture(window, cx);
-                        this.palette = true;
-                        this.workspace_picker = false;
-                        this.shortcuts = false;
-                        this.query.clear();
-                        this.choice = 0;
-                        this.palette_scroll.scroll_to_item(1);
-                        this.focus.focus(window);
-                        this.revision += 1;
-                        cx.notify();
-                    })),
+                        match this.workspace_sessions().first().map(|s| s.id.clone()) {
+                            Some(id) => this.execute(Command::Message(id), window, cx),
+                            None => this.execute(Command::Setup, window, cx),
+                        }
+                    }),
+                ),
             )
             .when(frame.retry, |view| {
                 view.child(
@@ -120,14 +112,126 @@ fn render(
     )
 }
 
-const CHEVRON: &str = "m6 9 6 6 6-6";
+/// The desktop's 26px header icon pill (HeaderIconPill).
+fn icon_button(
+    id: &'static str,
+    path: &'static str,
+    size: f32,
+    weight: f32,
+    tip: &'static str,
+    enabled: bool,
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .h(px(26.))
+        .min_w(px(26.))
+        .px(px(5.))
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .rounded(px(7.))
+        .when(enabled, |button| {
+            button.cursor_pointer().hover(|button| button.bg(theme().hover))
+        })
+        .when(!enabled, |button| button.opacity(0.35))
+        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
+        .child(crate::icon::stroke(path, theme().text_secondary, size, weight))
+}
+
+pub(super) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    s.surfaces.sidebar.hidden = !s.surfaces.sidebar.hidden;
+    s.restore_focus(window, cx);
+    cx.notify();
+}
+
+/// Visits to open tabs in this workspace, newest last (WorkspaceHistoryControls).
+#[derive(Default)]
+struct Visits {
+    scope: Option<String>,
+    tabs: Vec<Tab>,
+    index: usize,
+}
+
+fn record_visit(s: &mut Shell) {
+    let scope = s.state.selected.clone();
+    let active = s.active();
+    let visits = s.features.get::<Visits>();
+    if visits.scope != scope {
+        *visits = Visits {
+            scope,
+            ..Default::default()
+        };
+    }
+    let Some(tab) = active else { return };
+    if visits.tabs.get(visits.index) == Some(&tab) {
+        return;
+    }
+    let keep = if visits.tabs.is_empty() { 0 } else { visits.index + 1 };
+    visits.tabs.truncate(keep);
+    visits.tabs.push(tab);
+    if visits.tabs.len() > 100 {
+        visits.tabs.remove(0);
+    }
+    visits.index = visits.tabs.len() - 1;
+}
+
+/// The nearest earlier (-1) or later (1) visit to a tab that is still open.
+fn adjacent(s: &Shell, direction: isize) -> Option<usize> {
+    let visits = s.features.read::<Visits>()?;
+    let open = &s.current()?.tabs;
+    let current = visits.tabs.get(visits.index)?;
+    let mut index = visits.index as isize + direction;
+    while index >= 0 && (index as usize) < visits.tabs.len() {
+        let tab = &visits.tabs[index as usize];
+        if tab != current && open.contains(tab) {
+            return Some(index as usize);
+        }
+        index += direction;
+    }
+    None
+}
+
+fn revisit(s: &mut Shell, visit: usize, window: &mut Window, cx: &mut Context<Shell>) {
+    let Some(tab) = s.features.read::<Visits>().and_then(|v| v.tabs.get(visit).cloned()) else {
+        return;
+    };
+    let Some(index) = s.current().and_then(|w| w.tabs.iter().position(|t| t == &tab)) else {
+        return;
+    };
+    s.features.get::<Visits>().index = visit;
+    select_tab(s, index, window, cx);
+}
+
+fn select_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<Shell>) {
+    for registration in registrations() {
+        (registration.after_tab)(s);
+    }
+    s.state
+        .workspaces
+        .get_mut(s.state.selected.as_deref().unwrap_or(""))
+        .unwrap()
+        .active = index;
+    s.ensure(window, cx);
+    s.restore_focus(window, cx);
+    s.persist();
+    cx.notify();
+}
+
+const SIDEBAR: &str = "M6 4h12a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z M9 4v16";
+const BACK: &str = "M19 12H5m6-6-6 6 6 6";
+const FORWARD: &str = "M5 12h14m-6-6 6 6-6 6";
+const PLAY: &str = "M7 4.5v15a.5.5 0 0 0 .77.42l11.5-7.5a.5.5 0 0 0 0-.84L7.77 4.08A.5.5 0 0 0 7 4.5Z";
 const SEARCH: &str = "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z M21 21l-4.3-4.3";
 const CLOSE: &str = "M6 6l12 12M18 6L6 18";
 
 /// The desktop's single-colour pill glyphs (PillRuntimeGlyph), chosen by label.
 fn glyph(tab: &Tab) -> &'static str {
     match tab {
-        Tab::Session(_) => "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+        Tab::Session(_) => {
+            "M12 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z M6 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z M18 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z M12 8v4M12 12l-6 4M12 12l6 4"
+        }
         _ => match tab.label() {
             "Terminal" => "m4 17 6-6-6-6 M12 19h8",
             "Pull requests" => {
@@ -276,18 +380,7 @@ fn tabs(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
                         )
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.capture(window, cx);
-                            for registration in registrations() {
-                                (registration.after_tab)(this);
-                            }
-                            this.state
-                                .workspaces
-                                .get_mut(this.state.selected.as_deref().unwrap_or(""))
-                                .unwrap()
-                                .active = i;
-                            this.ensure(window, cx);
-                            this.restore_focus(window, cx);
-                            this.persist();
-                            cx.notify();
+                            select_tab(this, i, window, cx);
                         }))
                 }),
         )

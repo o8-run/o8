@@ -21,6 +21,8 @@ fn dispatch(
         .iter()
         .any(|r| (r.key_down)(s, event, window, cx))
     {
+    } else if (modifiers.control || modifiers.platform) && !modifiers.shift && key == "b" {
+        super::header::toggle_sidebar(s, window, cx);
     } else if (modifiers.control || modifiers.platform) && key == "k" {
         if !s.palette {
             s.capture(window, cx);
