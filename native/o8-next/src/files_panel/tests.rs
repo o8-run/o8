@@ -9,7 +9,10 @@ use std::{
     process::Command,
     time::{Duration, Instant},
 };
+pub(super) use support::HeadingLayouts;
 use support::*;
+#[path = "markdown_tests.rs"]
+pub(super) mod markdown_tests;
 
 #[test]
 fn classic_repo_relative_pin_validation() {
@@ -464,14 +467,7 @@ fn native_git_fills_incomplete_server_search_and_flat_listing(cx: &mut TestAppCo
     );
 }
 
-pub(super) struct HeadingLayouts {
-    pub name: gpui::TextLayout,
-    pub folder: gpui::TextLayout,
-}
-impl gpui::Global for HeadingLayouts {}
-
-// Observe the actual retained row mounted by Files, including its painted text.
-// The baseline never mounts one, so the same test remains runnable there.
+// Observe the parsed document selected by the production Files preview.
 pub(super) struct RenderedMarkdown(pub std::rc::Rc<std::cell::RefCell<crate::retained::RowState>>);
 impl gpui::Global for RenderedMarkdown {}
 
@@ -503,10 +499,17 @@ fn viewer_markdown_opens_formatted_heading_list_and_code(cx: &mut TestAppContext
         let crate::model::Row::Message { nodes, .. } = &state.row else {
             panic!("formatted document row")
         };
-        (nodes.clone(), state.rendered().1)
+        (
+            nodes.clone(),
+            cx.global::<markdown_tests::DocumentView>()
+                .text
+                .iter()
+                .map(|(_, text)| text.text())
+                .collect::<Vec<_>>(),
+        )
     });
     assert!(rendered.iter().any(|line| line == "Readable heading"));
-    assert!(rendered.iter().any(|line| line == "• A list item"));
+    assert!(rendered.iter().any(|line| line == "A list item"));
     assert!(rendered.iter().any(|line| line == "fn formatted() {}"));
     for kind in ["h1", "ul", "code-block", "table"] {
         assert!(
@@ -772,4 +775,25 @@ fn viewer_failed_svg_keeps_source_available_and_retry_recovers(cx: &mut TestAppC
     fs::write(&path, SVG_FIXTURE).unwrap();
     click(cx, "files-retry");
     wait(cx, "files-media-2");
+}
+
+#[gpui::test]
+fn file_markdown_reflows_soft_paragraph_and_list_lines(cx: &mut TestAppContext) {
+    markdown_tests::soft_breaks(cx);
+}
+#[gpui::test]
+fn file_markdown_preserves_explicit_hard_breaks_and_blank_paragraphs(cx: &mut TestAppContext) {
+    markdown_tests::hard_breaks(cx);
+}
+#[gpui::test]
+fn file_markdown_headings_use_classic_sizes_and_spacing(cx: &mut TestAppContext) {
+    markdown_tests::headings(cx);
+}
+#[gpui::test]
+fn file_markdown_tables_keep_content_width_and_scroll_horizontally(cx: &mut TestAppContext) {
+    markdown_tests::tables(cx);
+}
+#[gpui::test]
+fn chat_markdown_single_newline_keeps_transcript_behavior(cx: &mut TestAppContext) {
+    markdown_tests::chat_unchanged(cx);
 }

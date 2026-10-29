@@ -144,3 +144,9 @@ pub(super) fn test_panel<'a>(
         panel
     })
 }
+
+pub(in crate::files_panel) struct HeadingLayouts {
+    pub name: gpui::TextLayout,
+    pub folder: gpui::TextLayout,
+}
+impl gpui::Global for HeadingLayouts {}

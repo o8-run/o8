@@ -1,10 +1,7 @@
-//! FileViewer's preview/source contract, using the transcript's Markdown layout.
+//! FileViewer preview/source modes and per-file session preferences.
 use super::*;
-use crate::{
-    model::Row,
-    retained::{RetainedRow, RowState},
-};
-use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
+use crate::{model::Row, retained::RowState};
+use std::{cell::RefCell, rc::Rc};
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum ViewMode {
@@ -22,25 +19,8 @@ pub(super) fn markdown(source: &str) -> Rc<RefCell<RowState>> {
     Rc::new(RefCell::new(RowState::new(Row::Message {
         id: "file-markdown".into(),
         role: "assistant".into(),
-        nodes: crate::text::markdown(source),
+        nodes: super::markdown::parse(source),
     })))
-}
-
-pub(super) fn markdown_view(state: Rc<RefCell<RowState>>, generation: u64) -> gpui::AnyElement {
-    div()
-        .id("files-markdown")
-        .debug_selector(move || format!("files-markdown-{generation}"))
-        .flex_1()
-        .min_w_0()
-        .min_h_0()
-        .overflow_y_scroll()
-        .py(px(10.))
-        .child(RetainedRow {
-            state,
-            index: 0,
-            painted: Rc::new(RefCell::new(BTreeSet::new())),
-        })
-        .into_any_element()
 }
 
 impl FilesPanel {

@@ -1,6 +1,8 @@
 //! The right panel's Files and o8.md tools (WorkspaceFilesPane, O8SpecPane).
 //! Files lists the workspace a directory at a time through /api/panel/files
 //! and previews a file through /api/v2/files; o8.md reads /api/repo-spec.
+mod markdown;
+mod markdown_view;
 mod media;
 mod quick_docs;
 mod search;
@@ -458,7 +460,7 @@ impl FilesPanel {
             File::Loaded { markdown, .. } if previewable && preview => {
                 #[cfg(test)]
                 cx.set_global(tests::RenderedMarkdown(markdown.clone()));
-                viewer::markdown_view(markdown.clone(), self.file_generation)
+                markdown_view::view(markdown.clone(), self.file_generation, window, cx)
             }
             File::Loaded { lines, source, .. } => {
                 source.view(lines, self.wrap_lines, self.file_generation, window)
