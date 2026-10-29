@@ -143,4 +143,4 @@ pub(super) fn rows(
 }
 
 #[path = "calendar.rs"]
-mod calendar;
+pub(crate) mod calendar;

@@ -768,7 +768,7 @@ mod races;
 mod project_header;
 
 #[path = "recents.rs"]
-mod recents;
+pub(crate) mod recents;
 
 #[path = "archive_controls.rs"]
 mod archive_controls;

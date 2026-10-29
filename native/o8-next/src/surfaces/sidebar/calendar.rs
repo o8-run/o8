@@ -36,31 +36,40 @@ calendar_abi! {
     fn _mktime64(calendar: *mut Calendar) -> i64;
 }
 
-pub(super) fn midnight(now: u64) -> u64 {
-    let fallback = now / 86400 * 86400;
+/// The platform's local calendar fields for an epoch second.
+fn local(now: u64) -> Option<Calendar> {
     let mut calendar = Calendar::default();
     #[cfg(unix)]
     {
-        let Ok(time) = c_long::try_from(now) else {
-            return fallback;
-        };
+        let time = c_long::try_from(now).ok()?;
         // SAFETY: Calendar has the platform C tm layout on the supported 64-bit
         // Unix targets. Both pointers refer to live, correctly aligned storage;
         // the reentrant conversion writes only the supplied result.
         if unsafe { localtime_r(&time, &mut calendar) }.is_null() {
-            return fallback;
+            return None;
         }
     }
     #[cfg(windows)]
     {
-        let Ok(time) = i64::try_from(now) else {
-            return fallback;
-        };
+        let time = i64::try_from(now).ok()?;
         // SAFETY: the Windows tm consists of the nine integer fields above.
         if unsafe { _localtime64_s(&mut calendar, &time) } != 0 {
-            return fallback;
+            return None;
         }
     }
+    Some(calendar)
+}
+
+/// Local weekday (0 is Sunday), hour and minute for an epoch second.
+pub(crate) fn clock(now: u64) -> Option<(i32, i32, i32)> {
+    local(now).map(|calendar| (calendar.weekday, calendar.hour, calendar.minute))
+}
+
+pub(super) fn midnight(now: u64) -> u64 {
+    let fallback = now / 86400 * 86400;
+    let Some(mut calendar) = local(now) else {
+        return fallback;
+    };
     calendar.hour = 0;
     calendar.minute = 0;
     calendar.second = 0;

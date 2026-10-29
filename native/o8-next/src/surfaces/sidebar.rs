@@ -3,6 +3,8 @@ use super::*;
 use crate::projects_model::Ledger;
 #[path = "sidebar/thread_list.rs"]
 mod thread_list;
+/// Local weekday, hour and minute, for the rail usage card's reset times.
+pub(crate) use thread_list::recents::calendar::clock as calendar_clock;
 #[path = "sidebar/thread_list_client.rs"]
 mod thread_list_client;
 #[path = "sidebar/thread_mutations_client.rs"]
