@@ -90,7 +90,8 @@ pub fn menu_fill() -> Rgba {
 }
 
 // src/lib/theme/glass-material.ts: the only window-wide fill in All Glass.
-pub const GLASS_VEIL: [(f32, f32); 3] = [(0., 0.78), (0.55, 0.44), (1., 0.06)];
+// Darker through the top third, still clear at the bottom.
+pub const GLASS_VEIL: [(f32, f32); 4] = [(0., 0.9), (0.3, 0.7), (0.65, 0.32), (1., 0.06)];
 pub fn veil_color(alpha: f32) -> Rgba {
     translucent(0x0a0c12, alpha)
 }

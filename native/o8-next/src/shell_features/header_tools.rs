@@ -29,6 +29,8 @@ struct Menus {
     loading: bool,
     snapshot: Option<Snapshot>,
     error: Option<String>,
+    /// When the open card started its 150ms appearance.
+    opened: Option<std::time::Instant>,
 }
 
 /// The fields of /api/review/workspace the card shows.
@@ -126,8 +128,9 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
 }
 
 /// Play: opens the add-pane menu (Chat, Terminal).
-pub(super) fn play(s: &mut Shell, cx: &mut Context<Shell>) -> impl IntoElement {
+pub(super) fn play(s: &mut Shell, window: &Window, cx: &mut Context<Shell>) -> impl IntoElement {
     let open = s.features.get::<Menus>().play;
+    let appear = appear(s, window);
     div()
         .relative()
         .flex_shrink_0()
@@ -140,6 +143,7 @@ pub(super) fn play(s: &mut Shell, cx: &mut Context<Shell>) -> impl IntoElement {
                     let menus = this.features.get::<Menus>();
                     menus.play = !menus.play;
                     menus.tools = false;
+                    menus.opened = Some(std::time::Instant::now());
                     cx.notify();
                 })),
         )
@@ -147,6 +151,7 @@ pub(super) fn play(s: &mut Shell, cx: &mut Context<Shell>) -> impl IntoElement {
             wrapper.child(popover(
                 "header-play-menu",
                 220.,
+                appear,
                 div()
                     .py(px(4.))
                     .child(item("header-play-chat", "Chat", cx, |this, window, cx| {
@@ -164,7 +169,8 @@ pub(super) fn play(s: &mut Shell, cx: &mut Context<Shell>) -> impl IntoElement {
 }
 
 /// Workspace tools: the circles-and-lines button and its workspace card.
-pub(super) fn tools(s: &mut Shell, cx: &mut Context<Shell>) -> impl IntoElement {
+pub(super) fn tools(s: &mut Shell, window: &Window, cx: &mut Context<Shell>) -> impl IntoElement {
+    let appear = appear(s, window);
     let menus = s.features.get::<Menus>();
     let open = menus.tools;
     let card = open.then(|| card(menus, s.state.selected.clone(), cx));
@@ -180,6 +186,7 @@ pub(super) fn tools(s: &mut Shell, cx: &mut Context<Shell>) -> impl IntoElement 
                     let menus = this.features.get::<Menus>();
                     menus.tools = !menus.tools;
                     menus.play = false;
+                    menus.opened = Some(std::time::Instant::now());
                     if menus.tools {
                         load(this, cx);
                     }
@@ -187,7 +194,7 @@ pub(super) fn tools(s: &mut Shell, cx: &mut Context<Shell>) -> impl IntoElement 
                 })),
         )
         .when_some(card, |wrapper, card| {
-            wrapper.child(popover("header-workspace-card", 304., card, cx))
+            wrapper.child(popover("header-workspace-card", 304., appear, card, cx))
         })
 }
 
@@ -426,6 +433,19 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
         )
 }
 
+/// The open card's 150ms appearance (the desktop overlay's scale-in from its
+/// trigger), as opacity and a short drop.
+fn appear(s: &Shell, window: &Window) -> f32 {
+    let Some(opened) = s.features.read::<Menus>().and_then(|menus| menus.opened) else {
+        return 1.;
+    };
+    let t = opened.elapsed().as_secs_f32() / 0.15;
+    if t < 1. {
+        window.request_animation_frame();
+    }
+    crate::motion::ease_out(t.min(1.))
+}
+
 /// `~/o8` for a path under the home directory, as the desktop card shows it.
 fn home_relative(path: &str) -> String {
     match std::env::var("HOME") {
@@ -439,6 +459,7 @@ fn home_relative(path: &str) -> String {
 fn popover(
     id: &'static str,
     width: f32,
+    appear: f32,
     child: impl IntoElement,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement {
@@ -475,6 +496,9 @@ fn popover(
                             .debug_selector(move || id.into())
                             .occlude()
                             .w(px(width))
+                            .opacity(appear)
+                            .relative()
+                            .top(px(-6. * (1. - appear)))
                             .rounded(px(12.))
                             .bg(crate::theme::popover_background())
                             .border_1()
