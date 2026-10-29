@@ -2,6 +2,8 @@
 //! Inspection is passive; only explicit actions start or install helpers.
 mod transport;
 mod view;
+#[cfg(target_os = "macos")]
+mod web;
 use crate::client::Client;
 use gpui::{Context, FocusHandle};
 use serde_json::{Value, json};
@@ -21,7 +23,14 @@ pub struct DevicesPanel {
     mutating: bool,
     active: bool,
     generation: u64,
+    stream: Option<Arc<AtomicBool>>,
+    ownership_live: bool,
+    expanded: bool,
+    copied: bool,
+    copy_error: bool,
     focus: FocusHandle,
+    #[cfg(target_os = "macos")]
+    web: std::rc::Rc<std::cell::RefCell<Option<web::Viewer>>>,
 }
 impl DevicesPanel {
     pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
@@ -33,7 +42,14 @@ impl DevicesPanel {
             mutating: false,
             active: false,
             generation: 0,
+            stream: None,
+            ownership_live: false,
+            expanded: false,
+            copied: false,
+            copy_error: false,
             focus: cx.focus_handle(),
+            #[cfg(target_os = "macos")]
+            web: Default::default(),
         }
     }
     pub fn focus(&self, window: &mut gpui::Window) {
@@ -50,6 +66,11 @@ impl DevicesPanel {
             self.generation += 1;
             self.pending = false;
             self.mutating = false;
+            self.stop_stream();
+            #[cfg(target_os = "macos")]
+            if let Some(web) = self.web.borrow().as_ref() {
+                web.hide();
+            }
         }
         cx.notify();
     }
@@ -71,7 +92,33 @@ impl DevicesPanel {
             || (self.pending && self.state.is_none())
             || matches!(self.phase(), "installing" | "starting")
     }
-
+    fn manual(&self) -> bool {
+        if !self.active || !self.ownership_live || self.mutating || self.error.is_some() {
+            return false;
+        }
+        let Some(state) = &self.state else {
+            return false;
+        };
+        let devices: Vec<_> = rows(state, "devices")
+            .filter(|d| d["state"] == "running")
+            .collect();
+        !devices.is_empty()
+            && devices.iter().all(|d| {
+                d["platform"] == "ios"
+                    && rows(state, "controllers").any(|r| {
+                        r["deviceId"] == d["id"]
+                            && r["active"]["kind"] == "operator"
+                            && (r["busy"] != true || r["operatorInput"] == true)
+                            && r["error"].as_str().is_none_or(str::is_empty)
+                    })
+            })
+    }
+    fn stop_stream(&mut self) {
+        if let Some(cancel) = self.stream.take() {
+            cancel.store(true, Ordering::Release);
+        }
+        self.ownership_live = false;
+    }
     fn accept(&mut self, mut value: Value) {
         if let Some(old) = &self.state
             && revision(old) > revision(&value)
@@ -111,6 +158,11 @@ impl DevicesPanel {
                 match result {
                     Ok(state) => this.accept(state),
                     Err(error) => this.error = Some(error),
+                }
+                if this.running() {
+                    this.start_stream(cx);
+                } else {
+                    this.stop_stream();
                 }
                 this.schedule(cx);
                 cx.notify();
@@ -160,14 +212,70 @@ impl DevicesPanel {
         })
         .detach();
     }
-
+    fn start_stream(&mut self, cx: &mut Context<Self>) {
+        if self.stream.is_some() || !self.active {
+            return;
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.stream = Some(cancel.clone());
+        let (send, receive) = async_channel::bounded(32);
+        let current_stream = cancel.clone();
+        let client = self.client.clone();
+        std::thread::spawn(move || transport::stream(client, cancel, send));
+        cx.spawn(async move |this, cx| {
+            while let Ok(message) = receive.recv().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if !this.active || !this.running() || current_stream.load(Ordering::Acquire)
+                        {
+                            return;
+                        }
+                        match message {
+                            Some(snapshot) => {
+                                if let Some(state) = this.state.as_mut()
+                                    && snapshot["revision"].as_u64().unwrap_or(0) >= revision(state)
+                                {
+                                    state["controllers"] = snapshot["controllers"].clone();
+                                    state["controllerRevision"] = snapshot["revision"].clone();
+                                }
+                                this.ownership_live = true;
+                            }
+                            None => {
+                                this.ownership_live = false;
+                            }
+                        }
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            // A closed/overloaded reader also revokes input, even when no
+            // explicit disconnect frame fitted in the bounded channel.
+            let _ = this.update(cx, |this, cx| {
+                if !current_stream.load(Ordering::Acquire) {
+                    this.stop_stream();
+                    if this.active && this.running() {
+                        this.start_stream(cx);
+                    }
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
     fn action(&mut self, action: &str, cx: &mut Context<Self>) {
         if !self.busy() {
             self.read(Some(json!({"action":action})), cx);
         }
     }
 }
-
+impl Drop for DevicesPanel {
+    fn drop(&mut self) {
+        self.stop_stream();
+    }
+}
 fn revision(state: &Value) -> u64 {
     state["controllerRevision"].as_u64().unwrap_or(0)
 }

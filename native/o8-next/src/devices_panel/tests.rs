@@ -327,3 +327,117 @@ fn devices_setup_and_open_stages_disable_duplicate_actions(cx: &mut TestAppConte
     requested(&s, &mut v, &f, "start");
     wait(&s, &mut v, "devices-stage-starting");
 }
+#[gpui::test]
+fn devices_server_error_preserves_refresh_recovery(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    f.fail.store(true, Ordering::Release);
+    let (s, mut v) = start(&f, cx);
+    wait(&s, &mut v, "devices-error");
+    f.fail.store(false, Ordering::Release);
+    f.running();
+    click(&s, &mut v, "devices-refresh");
+    click(&s, &mut v, "devices-control-sim-1");
+    // Operator input only opens after the error actually clears. GPUI's
+    // debug-bounds map retains removed selectors, so absence is not evidence.
+    wait(&s, &mut v, "devices-viewer-operator-1");
+}
+#[gpui::test]
+fn devices_timeout_clears_busy_and_late_response_cannot_replace_recovery(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    f.hold.store(true, Ordering::Release);
+    let (s, mut v) = start(&f, cx);
+    wait(&s, &mut v, "devices-checking");
+    requested(&s, &mut v, &f, "GET");
+    v.cx.executor().advance_clock(Duration::from_secs(16));
+    wait(&s, &mut v, "devices-error");
+    f.running();
+    click(&s, &mut v, "devices-refresh");
+    click(&s, &mut v, "devices-control-sim-1");
+    wait(&s, &mut v, "devices-viewer-operator-1");
+    f.hold.store(false, Ordering::Release);
+    for _ in 0..30 {
+        pump(&s, &mut v);
+    }
+    // The late idle response must not replace the recovered running workspace.
+    click(&s, &mut v, "devices-control-sim-1");
+    requested(&s, &mut v, &f, "release-control");
+}
+#[gpui::test]
+fn devices_roster_take_release_handoff_and_stop(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    f.running();
+    let (s, mut v) = start(&f, cx);
+    click(&s, &mut v, "devices-control-sim-1");
+    requested(&s, &mut v, &f, "take-control");
+    wait(&s, &mut v, "devices-viewer-operator-1");
+    for _ in 0..30 {
+        pump(&s, &mut v);
+    }
+    click(&s, &mut v, "devices-control-sim-1");
+    requested(&s, &mut v, &f, "release-control");
+    wait(&s, &mut v, "devices-viewer-passive-2");
+    for _ in 0..30 {
+        pump(&s, &mut v);
+    }
+    click(&s, &mut v, "devices-handoff-worker-1");
+    requested(&s, &mut v, &f, "handoff");
+    click(&s, &mut v, "devices-stop");
+    requested(&s, &mut v, &f, "stop");
+    wait(&s, &mut v, "devices-introduction-idle");
+    v.simulate_keystrokes("ctrl-shift-p");
+    pump(&s, &mut v);
+    assert!(
+        s.read_with(&v, |s, _| s.palette),
+        "stopping the viewer must preserve shell keyboard focus"
+    );
+}
+
+#[gpui::test]
+fn devices_stream_updates_input_gate_and_panel_visibility(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    f.running();
+    let (s, mut v) = start(&f, cx);
+    wait(&s, &mut v, "devices-viewer-passive-0");
+    {
+        let mut state = f.state.lock().unwrap();
+        state["controllers"][0]["active"] =
+            json!({"session":"operator-1","kind":"operator","label":"Operator"});
+        state["controllerRevision"] = json!(9);
+    }
+    wait(&s, &mut v, "devices-viewer-operator-9");
+    // A lagging helper status response must not revoke newer stream ownership.
+    {
+        let mut state = f.state.lock().unwrap();
+        state["controllers"][0]["active"] = Value::Null;
+        state["controllerRevision"] = json!(8);
+    }
+    click(&s, &mut v, "devices-refresh");
+    for _ in 0..25 {
+        pump(&s, &mut v);
+    }
+    // The control action itself must still carry revision 9's operator session.
+    click(&s, &mut v, "devices-control-sim-1");
+    requested(&s, &mut v, &f, "release-control");
+    {
+        let mut state = f.state.lock().unwrap();
+        state["controllers"][0]["active"] = Value::Null;
+        state["controllerRevision"] = json!(10);
+    }
+    wait(&s, &mut v, "devices-viewer-passive-10");
+    s.update_in(&mut v, |s, w, cx| {
+        super::super::right_panel::toggle(s, w, cx)
+    });
+    for _ in 0..25 {
+        pump(&s, &mut v);
+    }
+    let reads = f.logs().len();
+    v.cx.executor().advance_clock(Duration::from_secs(10));
+    for _ in 0..10 {
+        pump(&s, &mut v);
+    }
+    assert_eq!(f.logs().len(), reads, "closed Devices must stop polling");
+    s.update_in(&mut v, |s, w, cx| {
+        super::super::right_panel::toggle(s, w, cx)
+    });
+    wait(&s, &mut v, "devices-viewer-passive-10");
+}
