@@ -34,6 +34,7 @@ mod first_run_install;
 mod fn_hotkey;
 mod voice_surfaces;
 mod voice_input;
+mod voice_host;
 mod managed_voice_window;
 mod launch_updater;
 mod update_ping;
@@ -3796,11 +3797,14 @@ fn set_tray_visible(visible: bool) {
     }
 }
 
-fn show_desktop_window(app: &AppHandle) {
+fn show_desktop_window<R: tauri::Runtime>(app: &AppHandle<R>) {
+    if voice_host::active(app) {
+        return;
+    }
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     set_tray_visible(false);
     background::set_background_mode(app, false, true);
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = voice_host::classic_window(&app) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -3810,7 +3814,7 @@ fn show_desktop_window(app: &AppHandle) {
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 fn background_desktop_app(app: &AppHandle) {
     set_tray_visible(true);
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = voice_host::classic_window(&app) {
         let _ = window.hide();
     }
     let _ = app.emit("window-hidden", ());
@@ -6624,7 +6628,7 @@ fn o8_debug_show_dock(app: tauri::AppHandle) {
     use tauri::{Emitter, Manager};
     // NSWindow ops are main-thread-only — schedule show() on the main thread
     // (the real Fn path does the same).
-    if let Some(win) = app.get_webview_window("main") {
+    if let Some(win) = voice_host::classic_window(&app) {
         let a = app.clone();
         let _ = win.run_on_main_thread(move || {
             dock_window::show(&a);
@@ -6703,7 +6707,7 @@ fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), St
     {
         use tauri::Manager;
         use window_vibrancy::NSVisualEffectMaterial as M;
-        let Some(window) = app.get_webview_window("main") else {
+        let Some(window) = voice_host::classic_window(&app) else {
             return Err("main window not found".into());
         };
         let target = window.clone();
@@ -6774,7 +6778,7 @@ fn set_canvas_backdrop_blur(app: tauri::AppHandle, radius: u32) -> Result<(), St
     #[cfg(target_os = "macos")]
     {
         use tauri::Manager;
-        let Some(window) = app.get_webview_window("main") else {
+        let Some(window) = voice_host::classic_window(&app) else {
             return Err("main window not found".into());
         };
         let target = window.clone();
@@ -8255,7 +8259,7 @@ pub fn run() {
         use tauri_plugin_window_state::StateFlags;
         builder = builder.plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_denylist(window_state_sanitizer::DERIVED_OVERLAY_WINDOW_LABELS)
+                .with_denylist(&voice_host::state_denylist(voice_host::enabled()))
                 .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
                 .build(),
         );
@@ -9164,7 +9168,9 @@ pub fn run() {
             // ── Window FIRST ──
             // Built before any sidecar work so the loader paints the moment the
             // event loop starts, rather than after the whole bootstrap has run.
-            if app.get_webview_window("main").is_none() {
+            if voice_host::enabled() {
+                voice_host::start(app.handle().clone(), api_port, boot_identity.boot_id.clone());
+            } else if app.get_webview_window("main").is_none() {
                 if let Some(config) = main_window_config.as_ref() {
                     // __O8_HTML_TRAFFIC_LIGHTS__ tells the frontend this shell
                     // hides the native traffic lights, so it must render the
@@ -9201,7 +9207,7 @@ pub fn run() {
                 }
             }
             if desktop_attached {
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = voice_host::classic_window(app.handle()) {
                     if let Err(error) = window.set_title("o8 (attached)") {
                         log::warn!("[desktop-attach] could not set attached window title: {error}");
                     }
@@ -9217,7 +9223,7 @@ pub fn run() {
             // vibrancy, the #1543 re-assert ladder, corner rounding, launch
             // clamps, close-to-hide, and the #1136 drag-drop bridge with it.
             let app_handle = app.handle().clone();
-            if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = voice_host::classic_window(app.handle()) {
                 window_restore::schedule_launch_clamps(&app_handle);
 
                 #[cfg(target_os = "macos")]
@@ -9313,7 +9319,7 @@ pub fn run() {
                             // active work; the tray appears only after consent.
                             #[cfg(target_os = "macos")]
                             {
-                                if let Some(w) = app_handle.get_webview_window("main") {
+                                if let Some(w) = voice_host::classic_window(&app_handle) {
                                     let _ = w.hide();
                                 }
                                 let _ = app_handle.emit("window-hidden", ());
@@ -9365,7 +9371,7 @@ pub fn run() {
                             // enter/exit and style-mask changes, and both
                             // paths land here as a Resized event.
                             #[cfg(target_os = "macos")]
-                            if let Some(w) = app_handle.get_webview_window("main") {
+                            if let Some(w) = voice_host::classic_window(&app_handle) {
                                 hide_native_traffic_lights(&w);
                             }
                             // A monitor crossing does not always deliver the scale event before
@@ -9380,7 +9386,7 @@ pub fn run() {
                             ..
                         } => {
                             window_restore::schedule_event_clamp(&app_handle);
-                            if let Some(w) = app_handle.get_webview_window("main") {
+                            if let Some(w) = voice_host::classic_window(&app_handle) {
                                 log::info!(
                                     "[display-scale] main window changed to {scale_factor:.2}x at {}x{} physical pixels",
                                     new_inner_size.width,
@@ -9397,7 +9403,7 @@ pub fn run() {
                         }
                         #[cfg(target_os = "macos")]
                         tauri::WindowEvent::Focused(_) => {
-                            if let Some(w) = app_handle.get_webview_window("main") {
+                            if let Some(w) = voice_host::classic_window(&app_handle) {
                                 hide_native_traffic_lights(&w);
                             }
                         }
@@ -9568,7 +9574,7 @@ pub fn run() {
                     if let Ok(mut pending) = pending_file_opens().lock() {
                         pending.extend(paths.clone());
                     }
-                    if let Some(window) = _app_handle.get_webview_window("main") {
+                    if let Some(window) = voice_host::classic_window(_app_handle) {
                         let _ = window.emit("file-open-request", &paths);
                         let _ = window.set_focus();
                     }
