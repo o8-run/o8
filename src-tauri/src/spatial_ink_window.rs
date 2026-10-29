@@ -375,6 +375,7 @@ mod imp {
             let _ = win.set_ignore_cursor_events(true);
         }
         // Clear the page canvas (also its belt for a missed terminal STT event).
+        crate::next_main::forward_ui_event("o8:spatial-ink-clear", serde_json::json!({}));
         let _ = app.emit_to(
             SPATIAL_INK_LABEL,
             "o8:spatial-ink-clear",
@@ -496,26 +497,34 @@ mod imp {
         use tauri::Listener;
         {
             let a = app.clone();
-            app.listen("o8:spatial-ink-first-stroke", move |_event| {
+            app.listen("o8:spatial-ink-first-stroke", move |event| {
+                forward_ink_event("o8:spatial-ink-first-stroke", event.payload());
                 on_first_stroke(&a, None);
             });
         }
         {
-            app.listen(
-                "o8:spatial-ink-strokes",
-                move |event| match serde_json::from_str::<StrokesPayload>(event.payload()) {
+            app.listen("o8:spatial-ink-strokes", move |event| {
+                forward_ink_event("o8:spatial-ink-strokes", event.payload());
+                match serde_json::from_str::<StrokesPayload>(event.payload()) {
                     Ok(p) => stash_strokes(p),
                     Err(e) => log::warn!("[spatial-ink] bad strokes payload: {e}"),
-                },
-            );
+                }
+            });
         }
         {
             let a = app.clone();
-            app.listen("o8:spatial-ink-disarm-request", move |_event| {
+            app.listen("o8:spatial-ink-disarm-request", move |event| {
+                forward_ink_event("o8:spatial-ink-disarm-request", event.payload());
                 disarm(&a);
             });
         }
         log::info!("[spatial-ink] event listeners registered");
+    }
+
+    fn forward_ink_event(event: &str, payload: &str) {
+        if let Ok(data) = serde_json::from_str(payload) {
+            crate::next_main::forward_ui_event(event, data);
+        }
     }
 
     // ── Drain at finalize ──

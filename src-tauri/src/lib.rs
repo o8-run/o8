@@ -8886,6 +8886,7 @@ pub fn run() {
                             if event.state != ShortcutState::Pressed {
                                 return;
                             }
+                            crate::next_main::forward_ui_event("o8:open-settings", serde_json::json!({}));
                             let _ = h.emit_to("main", "o8:open-settings", ());
                         }) {
                             log::warn!("[hotkey] failed to register CmdShiftComma (settings): {e}");

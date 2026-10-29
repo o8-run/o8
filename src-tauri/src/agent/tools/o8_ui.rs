@@ -68,7 +68,7 @@ pub fn open(app: &tauri::AppHandle, args: Value) -> Result<Value, String> {
     {
         payload["url"] = json!(normalize_url(url));
     }
-    let _ = app.emit_to("main", "o8:ui-command", payload);
+    emit_ui_command(app, payload);
     log::info!("[symon-o8ui] open {surface}");
     Ok(json!({ "opened": surface }))
 }
@@ -125,11 +125,7 @@ pub fn set_setting(app: &tauri::AppHandle, args: Value) -> Result<Value, String>
         let _ = win.set_focus();
     }
 
-    let _ = app.emit_to(
-        "main",
-        "o8:ui-command",
-        json!({ "surface": "set", "key": key, "value": value }),
-    );
+    emit_ui_command(app, json!({ "surface": "set", "key": key, "value": value }));
     log::info!("[symon-o8ui] set {key}={value}");
     Ok(json!({ "set": key, "value": value }))
 }
@@ -152,13 +148,17 @@ pub fn orchestrator_draft(app: &tauri::AppHandle, args: Value) -> Result<Value, 
         let _ = win.unminimize();
         let _ = win.set_focus();
     }
-    let _ = app.emit_to(
-        "main",
-        "o8:ui-command",
+    emit_ui_command(
+        app,
         json!({ "surface": "orchestrator_draft", "text": message }),
     );
     log::info!("[symon-o8ui] orchestrator draft ({} chars)", message.len());
     Ok(json!({ "drafted": true, "note": "The message is in the orchestrator composer — the user sends it." }))
+}
+
+fn emit_ui_command(app: &tauri::AppHandle, payload: Value) {
+    crate::next_main::forward_ui_event("o8:ui-command", payload.clone());
+    let _ = app.emit_to("main", "o8:ui-command", payload);
 }
 
 /// Spoken URLs arrive bare ("anthropic.com") — give them a scheme.

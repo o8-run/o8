@@ -43,6 +43,40 @@ pub(crate) fn show() {
     });
 }
 
+/// Keep the classic events intact; only the packaged native main window needs
+/// the server relay. The existing loopback client owns port and token resolution.
+pub(crate) fn forward_ui_event(event: &str, data: serde_json::Value) {
+    if !enabled() {
+        return;
+    }
+    let Some(body) = ui_command(event, data) else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = crate::agent::o8_http::post_json("/api/next/ui-command", body).await {
+            log::warn!("[next-main] could not relay UI command: {error}");
+        }
+    });
+}
+
+fn ui_command(event: &str, data: serde_json::Value) -> Option<serde_json::Value> {
+    use serde_json::json;
+    let (kind, payload) = match event {
+        "o8:open-settings" => ("open-settings", data),
+        "o8:managed-chat-voice-toggle" => ("voice-toggle", data),
+        "o8:ui-command" => ("symon-ui", json!({ "event": event, "data": data })),
+        "o8:spatial-ink-first-stroke"
+        | "o8:spatial-ink-strokes"
+        | "o8:spatial-ink-clear"
+        | "o8:spatial-ink-disarm-request" => (
+            "ink-mark",
+            json!({ "event": event.strip_prefix("o8:spatial-ink-")?, "data": data }),
+        ),
+        _ => return None,
+    };
+    Some(json!({ "kind": kind, "payload": payload }))
+}
+
 #[cfg(target_os = "macos")]
 fn activate_running() -> bool {
     use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
@@ -89,7 +123,68 @@ fn is_next_executable(pid: i32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::packaged_next_beside;
+    use super::{packaged_next_beside, ui_command};
+    use serde_json::json;
+
+    #[test]
+    fn main_window_shortcuts_keep_object_payloads() {
+        for (event, kind) in [
+            ("o8:open-settings", "open-settings"),
+            ("o8:managed-chat-voice-toggle", "voice-toggle"),
+        ] {
+            assert_eq!(
+                ui_command(event, json!({})),
+                Some(json!({ "kind": kind, "payload": {} }))
+            );
+        }
+    }
+
+    #[test]
+    fn symon_commands_preserve_the_event_and_data() {
+        for data in [
+            json!({ "surface": "settings" }),
+            json!({ "surface": "set", "key": "theme", "value": "light" }),
+            json!({ "surface": "orchestrator_draft", "text": "draft only" }),
+        ] {
+            assert_eq!(
+                ui_command("o8:ui-command", data.clone()),
+                Some(
+                    json!({ "kind": "symon-ui", "payload": { "event": "o8:ui-command", "data": data } })
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn ink_commands_strip_only_the_spatial_ink_prefix() {
+        for event in ["first-stroke", "strokes", "clear", "disarm-request"] {
+            let data = json!({ "sessionId": "ink-session", "strokes": [[0.1, 0.2]] });
+            assert_eq!(
+                ui_command(&format!("o8:spatial-ink-{event}"), data.clone()),
+                Some(json!({ "kind": "ink-mark", "payload": { "event": event, "data": data } }))
+            );
+        }
+    }
+
+    #[test]
+    fn state_and_request_reply_events_are_not_ui_commands() {
+        for event in [
+            "o8:agent-task-event",
+            "o8:agent-confirm",
+            "o8:agent-confirm-dismissed",
+            "o8:worker-status",
+            "o8:symon-machine",
+            "o8:realtime-status",
+            "o8:edit-capture",
+            "o8:edit-apply",
+            "o8:edit-applied",
+            "o8:edit-revert-settled",
+            "o8:spatial-ink-unknown",
+            "unknown",
+        ] {
+            assert_eq!(ui_command(event, json!({})), None, "{event}");
+        }
+    }
 
     #[test]
     fn only_a_bundle_that_carries_o8_next_uses_it_as_the_main_window() {
