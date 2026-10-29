@@ -30,6 +30,7 @@ import { isTauri } from '@/lib/tauri/bridge';
 import { VisualCaptureInput, type VisualCaptureBounds, type VisualCaptureVoice } from '@/components/desktop/visual-instructions/VisualCaptureInput';
 import { VisualCaptureControls } from '@/components/desktop/visual-instructions/VisualCaptureControls';
 import { getPalette, resolveTheme } from '@/lib/theme/registry';
+import { inkOutline, inkPath } from './stroke';
 
 export const dynamic = 'force-dynamic';
 
@@ -189,10 +190,13 @@ export default function SpatialInkPage() {
       const pts = stroke.pts;
       if (pts.length === 0) return;
       const reduced = reducedRef.current;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      const n = pts.length;
+      const complete = !(isHead && phaseRef.current === 'live');
+      // A tap, or a stroke whose moves have not left its first point, has no
+      // outline yet; it is drawn as a dot so the mark never disappears.
+      const body = n > 1 ? inkPath(inkOutline(pts, reduced ? 3 : 6, complete)) : '';
 
-      if (pts.length === 1) {
+      if (!body) {
         ctx.globalAlpha = alpha;
         ctx.fillStyle = ORANGE;
         if (!reduced) {
@@ -200,36 +204,29 @@ export default function SpatialInkPage() {
           ctx.shadowBlur = 12 * glow;
         }
         ctx.beginPath();
-        ctx.arc(pts[0].x, pts[0].y, 2.6, 0, Math.PI * 2);
+        ctx.arc(pts[n - 1].x, pts[n - 1].y, 2.6, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
         return;
       }
 
-      // Glow + taper pass: thin tail → thick head (comet trail).
-      ctx.strokeStyle = ORANGE;
-      if (!reduced) ctx.shadowColor = ORANGE;
-      const n = pts.length;
-      for (let i = 1; i < n; i++) {
-        const f = i / (n - 1); // 0 tail .. 1 head
-        ctx.beginPath();
-        ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
-        ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.lineWidth = reduced ? 3 : 1.4 + f * 2.4;
-        ctx.globalAlpha = reduced ? alpha : alpha * (0.55 + 0.45 * f);
-        ctx.shadowBlur = reduced ? 0 : 11 * glow;
-        ctx.stroke();
+      // Glow pass: a smoothed, pressure-shaped outline whose tail tapers into
+      // the head (comet trail). The live stroke keeps its leading edge open.
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = ORANGE;
+      if (!reduced) {
+        ctx.shadowColor = ORANGE;
+        ctx.shadowBlur = 11 * glow;
       }
+      ctx.fill(new Path2D(body));
 
       // Hot core — thin, bright, no shadow, over the glow.
       ctx.shadowBlur = 0;
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = reduced ? ORANGE : CORE_HOT;
-      ctx.lineWidth = reduced ? 3 : 1.5;
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.stroke();
+      if (!reduced) {
+        ctx.fillStyle = CORE_HOT;
+        const core = inkPath(inkOutline(pts, 2.2, complete));
+        if (core) ctx.fill(new Path2D(core));
+      }
 
       // Live head pulse — a bright breathing dot at the leading point.
       if (isHead && !reduced && phaseRef.current === 'live') {
