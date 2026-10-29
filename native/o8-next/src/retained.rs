@@ -20,6 +20,7 @@ pub(crate) struct PaintedGeometry {
     pub text_origin: Option<Point<Pixels>>,
 }
 
+#[cfg(test)]
 #[path = "retained/geometry_tests.rs"]
 mod geometry_tests;
 
