@@ -282,3 +282,15 @@ SOFTWARE.
 - Upstream: <https://github.com/t3tools/t3code>
 - Use in o8: adapted native transcript, SQLite, metadata, and pricing readers
 - License text: [usage readers](src/lib/usage/history-readers/LICENSE.txt)
+
+## o8 next right panel tab strip
+
+- Copyright: Copyright (c) 2026 T3 Tools Inc.
+- License: MIT
+- Upstream: <https://github.com/pingdotgg/t3code> at commit
+  `5b4f2aa1532730d4dd51d2cb48a57ff74a0f54eb`, files
+  `apps/web/src/components/RightPanelTabs.tsx` and
+  `apps/web/src/components/ui/panel-tab-close-button.tsx`
+- Use in o8: the tab strip, add menu, and hover close control in
+  `native/o8-next/src/shell_features/right_panel.rs`
+- License text: [T3 Code](src/lib/usage/history-readers/LICENSE.txt)

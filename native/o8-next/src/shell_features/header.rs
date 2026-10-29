@@ -184,7 +184,10 @@ pub(super) fn pill(
             )
         })
         .when(!enabled, |button| button.opacity(0.35))
-        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
+        // An empty tip draws no tooltip, e.g. while the button's own menu is open.
+        .when(!tip.is_empty(), |button| {
+            button.tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
+        })
 }
 
 pub(super) fn icon_button(

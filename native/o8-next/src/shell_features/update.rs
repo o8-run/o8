@@ -12,14 +12,7 @@ impl ShellFeature for Update {
     fn ticks(&self) -> &'static [TickHook] {
         &[TickHook {
             order: 70,
-            run: |s, _, window, cx| {
-                check(s, cx);
-                if s.features.read::<State>().is_some_and(|state| {
-                    state.open && (appear(state).1 || state.applying || state.phase.is_some())
-                }) {
-                    window.request_animation_frame();
-                }
-            },
+            run: |s, _, _, cx| check(s, cx),
         }]
     }
     fn keys(&self) -> &'static [KeyContext] {
@@ -80,6 +73,8 @@ struct State {
     opened: Option<Instant>,
     /// Bumped on every open and leave, so a stale close timer does nothing.
     leave: u64,
+    /// The identity route was asked for the installed version once.
+    identity_asked: bool,
 }
 
 /// The version a completed updater check found, or `None` when nothing waits.
@@ -518,11 +513,37 @@ fn check(s: &mut Shell, cx: &mut Context<Shell>) {
         let _ = this.update(cx, |this, cx| {
             let state = this.features.get::<State>();
             read(state, &body);
+            if state.current.is_none() && !state.identity_asked {
+                state.identity_asked = true;
+                read_identity(this, cx);
+            }
+            let state = this.features.get::<State>();
             let version = state.pending.clone();
             if state.open && state.notes_for != version.clone().or(Some("latest".into())) {
                 load_notes(this, cx);
             }
             cx.notify();
+        });
+    })
+    .detach();
+}
+
+/// Servers before `currentVersion` report their version on the identity route.
+fn read_identity(s: &mut Shell, cx: &mut Context<Shell>) {
+    let client = s.client.clone();
+    let task = cx
+        .background_executor()
+        .spawn(async move { client.get::<Value>("/api/setup/identity", &[]) });
+    cx.spawn(async move |this, cx| {
+        let Ok(body) = task.await else { return };
+        let _ = this.update(cx, |this, cx| {
+            let state = this.features.get::<State>();
+            if state.current.is_none()
+                && let Some(version) = body["version"].as_str().filter(|v| !v.is_empty())
+            {
+                state.current = Some(version.to_string());
+                cx.notify();
+            }
         });
     })
     .detach();
@@ -803,6 +824,11 @@ fn appear(state: &State) -> (f32, bool) {
 
 fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::AnyElement {
     let state = s.features.get::<State>();
+    // Frames are requested while rendering: ticks run outside any view, where
+    // GPUI has no current view to schedule them for.
+    if state.open && (appear(state).1 || state.applying || state.phase.is_some()) {
+        window.request_animation_frame();
+    }
     let ready = state.pending.is_some();
     let tools_ready = state
         .tools
@@ -1149,10 +1175,12 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
                                             .into(),
                                         10.5,
                                     )
-                                    .flex_1(),
+                                    .flex_1()
+                                    .min_w_0(),
                                 )
                                 .child(
                                     button("update-tools-check", "Check".into(), false)
+                                        .flex_shrink_0()
                                         .h(px(26.))
                                         .px(px(8.))
                                         .on_click(cx.listener(|this, _, _, cx| {
