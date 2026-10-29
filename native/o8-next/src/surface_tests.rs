@@ -508,7 +508,7 @@ fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
 mod brain_dock_tests;
 
 #[gpui::test]
-fn settled_tool_runs_collapse_to_a_counted_line_and_expand_on_click(cx: &mut TestAppContext) {
+fn settled_tool_runs_collapse_to_a_trace_header_and_expand_on_click(cx: &mut TestAppContext) {
     let (_server, client) = fixture();
     let saved = client.clone();
     let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
@@ -531,17 +531,33 @@ fn settled_tool_runs_collapse_to_a_counted_line_and_expand_on_click(cx: &mut Tes
             .position(|row| matches!(row.borrow().row, Row::Activity { .. }))
             .expect("activity row")
     });
-    let row = surface.read_with(cx, |s, _| s.rows[index].clone());
-    let (height, lines) = row.borrow().rendered();
-    assert_eq!(lines.len(), 1, "one summary line: {lines:?}");
-    // Three reads, then the cargo test that failed (tools.history.json).
-    assert_eq!(lines[0], "› Explored 3 files · Ran 1 command · 1 failed");
-    assert!(!lines[0].contains("cat src/a.rs"), "{lines:?}");
-    let bounds = surface.read_with(cx, |s, _| s.list.bounds_for_item(index).unwrap());
-    cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    // Settled history starts as the trace's one header line; tools.history.json
+    // has three reads, then the cargo test that failed.
+    let header: &'static str = format!("trace-header-{index}").leak();
+    let first: &'static str = format!("trace-line-{index}-0").leak();
+    assert!(cx.debug_bounds(header).is_some(), "the trace header draws");
+    assert!(cx.debug_bounds(first).is_none(), "collapsed until opened");
+    let height = surface.read_with(cx, |s, _| {
+        s.list.bounds_for_item(index).unwrap().size.height
+    });
+    let toggle = cx.debug_bounds(header).unwrap().center();
+    cx.simulate_click(toggle, gpui::Modifiers::default());
     draw(cx);
-    let (expanded, lines) = row.borrow().rendered();
+    draw(cx);
+    assert!(
+        cx.debug_bounds(first).is_some(),
+        "the header opens the steps"
+    );
+    let expanded = surface.read_with(cx, |s, _| {
+        s.list.bounds_for_item(index).unwrap().size.height
+    });
     assert!(expanded > height, "expansion must remeasure the row");
-    assert!(lines[0].starts_with("⌄ "), "{lines:?}");
-    assert!(lines.iter().any(|line| line.contains("cat src/a.rs")), "{lines:?}");
+    let steps = surface.read_with(cx, |s, _| match &s.rows[index].borrow().row {
+        Row::Activity { steps, .. } => steps.clone(),
+        _ => unreachable!(),
+    });
+    assert_eq!(
+        crate::activity::summary(&steps),
+        "Explored 3 files · Ran 1 command · 1 failed"
+    );
 }

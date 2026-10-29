@@ -12,6 +12,9 @@ pub struct Step {
     pub group: usize,
     #[serde(skip)]
     pub group_key: String,
+    /// The file, folder, pattern or address the step worked on, for the trace's chips.
+    #[serde(skip)]
+    pub subject: Option<String>,
 }
 
 fn words(text: &str, depth: usize) -> Vec<String> {
@@ -312,6 +315,22 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
     } else {
         None
     };
+    let subject = [
+        "file_path",
+        "filePath",
+        "notebook_path",
+        "path",
+        "filename",
+        "target_file",
+        "pattern",
+        "query",
+        "url",
+        "glob",
+    ]
+    .iter()
+    .find_map(|k| args[*k].as_str())
+    .filter(|s| !s.trim().is_empty())
+    .map(str::to_owned);
     Step {
         id: id.into(),
         command,
@@ -319,6 +338,7 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
         reason,
         group: 0,
         group_key: key,
+        subject,
     }
 }
 
@@ -375,6 +395,7 @@ mod tests {
             reason: None,
             group: 0,
             group_key: key.into(),
+            subject: None,
         }
     }
 

@@ -23,6 +23,11 @@ Local changes:
   `WindowControlArea::Drag` calls `performWindowDragWithEvent:`, and a double
   press runs the title bar double-click action. Tabs and buttons laid over the
   area keep their own presses and drags. Other platforms are unchanged.
+- `src/elements/text.rs`: each text measure starts from the original runs.
+  Truncation (`text_ellipsis`, `line_clamp`) shortened the captured runs in
+  place, so a later measure paired short runs with the full text and a run
+  boundary could fall inside a multibyte character, panicking in
+  `layout_line` ("end byte index 13 is not a char boundary; it is inside '·'").
 
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit

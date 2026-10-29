@@ -41,6 +41,7 @@ mod text;
 mod theme;
 #[cfg(test)]
 mod theme_tests;
+mod trace;
 mod transport;
 mod ui;
 mod visualizations;

@@ -55,6 +55,9 @@ pub(crate) struct Surface {
     queue: Value,
     queue_ready: bool,
     saving: bool,
+    /// After a send from this view, the row count it started at; the view
+    /// follows that turn to its reply.
+    following: Option<usize>,
     send_next: bool,
     subscriptions: Vec<gpui::Subscription>,
     sessions: Vec<Session>,
@@ -91,6 +94,7 @@ impl Surface {
             queue: Value::Null,
             queue_ready: false,
             saving: false,
+            following: None,
             send_next: false,
             subscriptions: vec![],
             sessions: vec![],
@@ -142,6 +146,7 @@ impl Surface {
             self.drafts.insert(id.clone(), editor);
         }
         self.composer = self.drafts[&id].clone();
+        self.following = None;
         self.routing = None;
         self.queue_ready = false;
         self.queue = Value::Null;
@@ -160,6 +165,11 @@ impl Surface {
         cx.notify();
         let client = self.client.clone();
         let session = self.sessions.iter().find(|s| s.id == id).cloned();
+        // Runtime workers are read-only history; conversations also stream their live turn.
+        let repo = session
+            .as_ref()
+            .and_then(|s| s.repo_path.clone())
+            .filter(|_| !id.contains(':'));
         let task = cx.background_executor().spawn(async move {
             let session = session.ok_or("Selected session disappeared")?;
             let mut history = client.history(&id)?;
@@ -187,7 +197,17 @@ impl Surface {
                         let transcript = Transcript::new(history);
                         this.install_rows(transcript.rows.clone(), cx);
                         this.transcript = Some(transcript);
-                        this.subscription = Some(transport::subscribe(this.client.clone(), key));
+                        let backend = routing
+                            .as_ref()
+                            .ok()
+                            .and_then(|routing| routing["backend"].as_str())
+                            .map(str::to_owned);
+                        this.subscription = Some(match repo {
+                            Some(repo) => {
+                                transport::subscribe_live(this.client.clone(), key, repo, backend)
+                            }
+                            None => transport::subscribe(this.client.clone(), key),
+                        });
                         this.notice = "Connecting live stream".into();
                         match (queue, routing) {
                             (Ok(queue), Ok(routing)) => {
@@ -257,6 +277,27 @@ impl Surface {
         self.load_images(cx);
         if initial {
             self.list = self.list.clone().measure_all();
+        }
+        // After a send, keep the turn in view until its reply lands and nothing runs.
+        if let Some(start) = self.following
+            && let Some(last) = self.rows.last()
+        {
+            self.list.scroll_to_reveal_item(self.rows.len() - 1);
+            let turn = self
+                .rows
+                .get(start.min(self.rows.len())..)
+                .unwrap_or_default();
+            let asked = turn.iter().any(
+                |row| matches!(&row.borrow().row, Row::Message { role, .. } if role == "user"),
+            );
+            let working = turn
+                .iter()
+                .any(|row| matches!(&row.borrow().row, Row::Activity { trace, .. } if trace.live));
+            let answered =
+                matches!(&last.borrow().row, Row::Message { role, .. } if role == "assistant");
+            if asked && answered && !working {
+                self.following = None;
+            }
         }
     }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
