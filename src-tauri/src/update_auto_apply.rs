@@ -207,6 +207,10 @@ impl AutoApply {
             owner: None,
         }
     }
+    /// The next tick admits immediately instead of waiting out the interval.
+    pub fn expedite(&mut self) {
+        self.last_attempt = None;
+    }
     pub async fn tick(&mut self, client: &Client, url: &str, token: &str, effects: &impl Effects) {
         if self
             .last_attempt
