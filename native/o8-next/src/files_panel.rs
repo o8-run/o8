@@ -47,6 +47,12 @@ pub enum Mode {
     Spec,
 }
 
+pub(crate) struct PinsChanged {
+    pub workspace: String,
+    pub paths: Vec<String>,
+}
+impl gpui::EventEmitter<PinsChanged> for FilesPanel {}
+
 pub struct FilesPanel {
     client: Client,
     workspace: String,
@@ -77,6 +83,14 @@ impl FilesPanel {
                 this.open_file(pick.0.clone(), cx)
             })
         });
+        let pins_changed = quick_docs.as_ref().map(|docs| {
+            cx.subscribe(docs, |this, _, pins: &quick_docs::PinsChanged, cx| {
+                cx.emit(PinsChanged {
+                    workspace: this.workspace.clone(),
+                    paths: pins.0.clone(),
+                });
+            })
+        });
         let mut panel = Self {
             client,
             workspace,
@@ -96,6 +110,7 @@ impl FilesPanel {
             _subscriptions: vec![picked, observed]
                 .into_iter()
                 .chain(quick_pick)
+                .chain(pins_changed)
                 .collect(),
             file_generation: 0,
         };
@@ -106,6 +121,13 @@ impl FilesPanel {
         panel
     }
 
+    pub(crate) fn set_pins(&mut self, workspace: &str, paths: Vec<String>, cx: &mut Context<Self>) {
+        if self.workspace == workspace
+            && let Some(docs) = &self.quick_docs
+        {
+            docs.update(cx, |docs, cx| docs.set_pins(paths, cx));
+        }
+    }
     pub fn focus(&self, window: &mut Window) {
         self.focus.focus(window);
     }

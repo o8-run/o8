@@ -22,7 +22,6 @@ for (const [path, content] of [
 execFileSync('git', ['init', '-q', repo]);
 const files = await import('../../../../src/app/api/panel/files/route');
 const docs = await import('../../../../src/app/api/v2/files/quick-docs/route');
-const pins = await import('../../../../src/app/api/v2/files/quick-doc-pins/route');
 const preview = await import('../../../../src/app/api/v2/files/route');
 const log: string[] = [];
 const server = createServer(async (req, res) => {
@@ -34,8 +33,7 @@ const server = createServer(async (req, res) => {
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const request = new NextRequest(url, { method: req.method, headers: { 'content-type': 'application/json' }, ...(req.method === 'POST' ? { body: Buffer.concat(chunks) } : {}) });
     const route = url.pathname;
-    const response = route === '/api/v2/files/quick-doc-pins' ? await (req.method === 'POST' ? pins.POST : pins.GET)(request)
-      : route === '/api/v2/files/quick-docs' ? await docs.GET(request)
+    const response = route === '/api/v2/files/quick-docs' ? await docs.GET(request)
         : route === '/api/v2/files' ? await preview.GET(request) : await files.GET(request);
     // Exercise stale completion: the earlier query/file finishes last.
     if (url.searchParams.get('search') === 'slow' || url.searchParams.get('path') === 'AGENTS.md') await new Promise(resolve => setTimeout(resolve, 250));

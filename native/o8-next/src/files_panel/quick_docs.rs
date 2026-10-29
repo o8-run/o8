@@ -1,4 +1,4 @@
-//! Classic QuickDocs groups and a shared pin store, migrated by classic's hook.
+//! Classic QuickDocs groups with pins owned and persisted by the native shell.
 use super::{
     CHEVRON_DOWN, CHEVRON_RIGHT,
     search::{Pick, Search, file_color, file_icon},
@@ -6,10 +6,8 @@ use super::{
 };
 use crate::{client::Client, theme::current as theme};
 use gpui::{prelude::*, *};
-use serde_json::{Value, json};
-use std::time::Duration;
+use serde_json::Value;
 
-const PINS: &str = "/api/v2/files/quick-doc-pins";
 #[derive(Clone)]
 struct Doc {
     label: String,
@@ -44,37 +42,14 @@ fn groups(body: &Value) -> Vec<Group> {
         })
         .collect()
 }
-fn pins(body: &Value, workspace: &str) -> Result<Vec<String>, String> {
-    let paths = body["paths"]
-        .as_array()
-        .ok_or("Quick docs pins unavailable")?;
-    let mut result = vec![];
-    for path in paths.iter().filter_map(Value::as_str) {
-        if super::search::repo_relative(workspace, path) == Some(path)
-            && !result.iter().any(|p| p == path)
-            && result.len() < 50
-        {
-            result.push(path.to_owned());
-        }
-    }
-    Ok(result)
-}
-fn change(client: Client, workspace: String, path: String, pin: bool) -> Result<Value, String> {
-    let url = client.url(PINS).map_err(|_| "Invalid pins route")?;
-    let response = client.request("POST", &url).send_json(json!({ "workspace": workspace, "path": path, "action": if pin { "pin" } else { "unpin" } }))
-        .map_err(|_| "Could not save Quick docs pins")?;
-    Client::read(response)
-}
+pub(super) struct PinsChanged(pub Vec<String>);
+impl EventEmitter<PinsChanged> for QuickDocs {}
 pub(super) struct QuickDocs {
     client: Client,
     workspace: String,
     groups: Vec<Group>,
     pins: Vec<String>,
     expanded: bool,
-    busy: bool,
-    error: Option<String>,
-    load_error: Option<String>,
-    generation: u64,
     pub(super) selected: Option<String>,
     pub(super) picker: Option<Entity<Search>>,
     picker_subscription: Option<Subscription>,
@@ -91,10 +66,6 @@ impl QuickDocs {
             groups: vec![],
             pins: vec![],
             expanded: false,
-            busy: false,
-            error: None,
-            load_error: None,
-            generation: 0,
             selected: None,
             picker: None,
             picker_subscription: None,
@@ -120,49 +91,6 @@ impl QuickDocs {
             });
         })
         .detach();
-        // Shared state may change in classic or a second native pane. Only one
-        // read is in flight and mutations suppress reads until they settle.
-        cx.spawn(async move |this, cx| {
-            loop {
-                let request = this
-                    .update(cx, |this, _| {
-                        (!this.busy)
-                            .then(|| (this.client.clone(), this.workspace.clone(), this.generation))
-                    })
-                    .ok()
-                    .flatten();
-                if let Some((client, workspace, generation)) = request {
-                    let task = cx.background_executor().spawn(async move {
-                        client.get::<Value>(PINS, &[("workspace", workspace.as_str())])
-                    });
-                    let result = task.await;
-                    if this
-                        .update(cx, |this, cx| {
-                            if !this.busy && generation == this.generation {
-                                match result.and_then(|body| pins(&body, &this.workspace)) {
-                                    Ok(paths) => {
-                                        this.load_error = None;
-                                        if this.pins != paths {
-                                            this.pins = paths;
-                                            this.sync_picker(cx);
-                                        }
-                                    }
-                                    Err(error) => this.load_error = Some(error),
-                                }
-                                cx.notify();
-                            }
-                        })
-                        .is_err()
-                    {
-                        break;
-                    }
-                } else if this.upgrade().is_none() {
-                    break;
-                }
-                cx.background_executor().timer(Duration::from_secs(2)).await;
-            }
-        })
-        .detach();
         docs
     }
     fn sync_picker(&self, cx: &mut Context<Self>) {
@@ -182,9 +110,6 @@ impl QuickDocs {
         cx.notify();
     }
     fn picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.busy {
-            return;
-        }
         self.add_focus.focus(window);
         self.expanded = true;
         self.return_focus = window.focused(cx);
@@ -206,34 +131,20 @@ impl QuickDocs {
         self.picker = Some(picker);
         cx.notify();
     }
-    fn mutate(&mut self, path: String, pin: bool, cx: &mut Context<Self>) {
-        if self.busy {
-            return;
-        }
-        self.busy = true;
-        self.error = None;
-        self.generation += 1;
-        let client = self.client.clone();
-        let workspace = self.workspace.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move { change(client, workspace, path, pin) });
-        cx.spawn(async move |this, cx| {
-            let result = task.await;
-            let _ = this.update(cx, |this, cx| {
-                this.busy = false;
-                match result.and_then(|body| pins(&body, &this.workspace)) {
-                    Ok(paths) => {
-                        this.pins = paths;
-                        this.sync_picker(cx);
-                    }
-                    Err(error) => this.error = Some(error),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+    pub(super) fn set_pins(&mut self, paths: Vec<String>, cx: &mut Context<Self>) {
+        self.pins = crate::shell_state::clean_pins(paths);
+        self.sync_picker(cx);
         cx.notify();
+    }
+    fn mutate(&mut self, path: String, pin: bool, cx: &mut Context<Self>) {
+        let mut paths = self.pins.clone();
+        if pin {
+            paths.push(path);
+        } else {
+            paths.retain(|current| current != &path);
+        }
+        self.set_pins(paths, cx);
+        cx.emit(PinsChanged(self.pins.clone()));
     }
 }
 fn button(id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
@@ -296,7 +207,7 @@ impl Render for QuickDocs {
                             })),
                     )
                     .child(
-                        button("quick-docs-add", "Pin a file").track_focus(&self.add_focus).tab_stop(true).when(self.busy, |d| d.opacity(0.5)).on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| { if matches!(event.keystroke.key.as_str(), "enter" | "space") { this.picker(window, cx); cx.stop_propagation(); } }))
+                        button("quick-docs-add", "Pin a file").track_focus(&self.add_focus).tab_stop(true).on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| { if matches!(event.keystroke.key.as_str(), "enter" | "space") { this.picker(window, cx); cx.stop_propagation(); } }))
                             .debug_selector(|| "quick-docs-add".into())
                             .child("+")
                             .on_click(cx.listener(|this, _, window, cx| this.picker(window, cx))),
@@ -447,12 +358,10 @@ impl Render for QuickDocs {
                                             move || format!("unpin-{path}")
                                         })
                                         .child("×")
-                                        .when(self.busy, |d| d.opacity(0.5))
-                                        .when(!self.busy, |d| {
-                                            d.on_click(cx.listener(move |this, _, _, cx| {
-                                                this.mutate(unpin.clone(), false, cx)
-                                            }))
-                                        }),
+
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.mutate(unpin.clone(), false, cx)
+                                        })),
                                 )
                         }))
                         .when(total == 0, |d| {
@@ -460,10 +369,6 @@ impl Render for QuickDocs {
                         }),
                 )
             })
-            .when_some(
-                self.error.clone().or(self.load_error.clone()),
-                |d, error| d.child(status(error)),
-            )
             .when_some(self.picker.clone(), |d, picker| {
                 d.child(
                     div().absolute().top(px(32.)).right(px(6.)).child(
@@ -540,7 +445,7 @@ impl Render for QuickDocs {
 
 #[cfg(test)]
 mod tests {
-    use super::{groups, pins};
+    use super::groups;
     use serde_json::json;
     #[test]
     fn classic_groups_keep_global_absolute_paths_and_repo_paths() {
@@ -552,20 +457,5 @@ mod tests {
         assert_eq!(groups[0].label, "Global");
         assert_eq!(groups[0].entries[0].path, "/home/test/.codex/AGENTS.md");
         assert_eq!(groups[1].entries[0].path, "AGENTS.md");
-    }
-    #[test]
-    fn classic_pin_decode_deduplicates_validates_and_caps_at_fifty() {
-        let mut paths = vec![
-            "../outside".to_owned(),
-            "/repo/file".into(),
-            "C:/file".into(),
-            "src/useful.rs".into(),
-            "src/useful.rs".into(),
-        ];
-        paths.extend((0..60).map(|i| format!("src/{i}.rs")));
-        let result = pins(&json!({"paths":paths}), "/repo").unwrap();
-        assert_eq!(result.len(), 50);
-        assert_eq!(result[0], "src/useful.rs");
-        assert!(pins(&json!({"error":"failed"}), "/repo").is_err());
     }
 }
