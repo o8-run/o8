@@ -17,6 +17,7 @@ mod inbox;
 mod issues;
 mod merge;
 mod model;
+mod motion;
 mod pane;
 mod pane_grid;
 mod pane_layout;
