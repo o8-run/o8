@@ -252,11 +252,17 @@ fn start(f: &Fixture, cx: &mut TestAppContext) -> (gpui::Entity<Shell>, VisualTe
     );
     visual.update(|window, _| window.activate_window());
     shell.update_in(&mut visual, |s, w, cx| {
-        assert!(
-            super::super::right_panel::open_surface(s, "devices", None, w, cx),
-            "Devices must be reachable through the shell tool entry"
-        );
+        super::super::right_panel::toggle(s, w, cx)
     });
+    // The production panel has a 260 ms opening transition. Drive its actual
+    // render frames before clicking, rather than querying render-only helpers.
+    let settled = Instant::now() + Duration::from_millis(320);
+    while Instant::now() < settled {
+        pump(&shell, &mut visual);
+    }
+    // Use the catalog control that already exists on base. A red run must
+    // demonstrate the missing Devices UI, rather than a newly named shortcut.
+    click(&shell, &mut visual, "panel-tool-devices");
     (shell, visual)
 }
 fn pump(shell: &gpui::Entity<Shell>, cx: &mut VisualTestContext) {
@@ -440,4 +446,44 @@ fn devices_stream_updates_input_gate_and_panel_visibility(cx: &mut TestAppContex
         super::super::right_panel::toggle(s, w, cx)
     });
     wait(&s, &mut v, "devices-viewer-passive-10");
+}
+
+#[gpui::test]
+fn devices_keyboard_scroll_and_tab_activation_reach_lower_controls(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    f.state.lock().unwrap()["platforms"]["android"]["detail"] =
+        json!("Install Android SDK platform tools and emulator. ".repeat(60));
+    let (s, mut v) = start(&f, cx);
+    wait(&s, &mut v, "devices-ios");
+    v.simulate_keystrokes("end");
+    for _ in 0..5 {
+        pump(&s, &mut v);
+    }
+    let bounds = v
+        .debug_bounds("devices-copy")
+        .or_else(|| v.debug_bounds("devices-agent-install"))
+        .expect("lower agent controls must paint after keyboard scroll");
+    let viewport = v.update(|window, _| window.viewport_size().height);
+    assert!(
+        bounds.top() >= gpui::px(0.) && bounds.bottom() <= viewport,
+        "keyboard End must reveal the lower control: {bounds:?}"
+    );
+    let before = v.update(|window, cx| window.focused(cx));
+    v.simulate_keystrokes("tab");
+    let after = v.update(|window, cx| window.focused(cx));
+    assert_ne!(before, after, "Tab must traverse native Devices controls");
+    v.simulate_keystrokes("space");
+    requested(&s, &mut v, &f, "refresh");
+    for _ in 0..10 {
+        pump(&s, &mut v);
+    }
+    v.simulate_keystrokes("enter");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while f.logs().iter().filter(|r| r["action"] == "refresh").count() < 2 {
+        pump(&s, &mut v);
+        assert!(
+            Instant::now() < deadline,
+            "Enter must activate the focused control"
+        );
+    }
 }

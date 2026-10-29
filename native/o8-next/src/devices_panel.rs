@@ -5,7 +5,7 @@ mod view;
 #[cfg(target_os = "macos")]
 mod web;
 use crate::client::Client;
-use gpui::{Context, FocusHandle};
+use gpui::{Context, FocusHandle, ScrollHandle};
 use serde_json::{Value, json};
 use std::{
     sync::{
@@ -29,6 +29,11 @@ pub struct DevicesPanel {
     copied: bool,
     copy_error: bool,
     focus: FocusHandle,
+    intro_scroll: ScrollHandle,
+    agent_scroll: ScrollHandle,
+    roster_scroll: ScrollHandle,
+    agent_focus: FocusHandle,
+    roster_focus: FocusHandle,
     #[cfg(target_os = "macos")]
     web: std::rc::Rc<std::cell::RefCell<Option<web::Viewer>>>,
 }
@@ -48,6 +53,11 @@ impl DevicesPanel {
             copied: false,
             copy_error: false,
             focus: cx.focus_handle(),
+            intro_scroll: ScrollHandle::new(),
+            agent_scroll: ScrollHandle::new(),
+            roster_scroll: ScrollHandle::new(),
+            agent_focus: cx.focus_handle(),
+            roster_focus: cx.focus_handle(),
             #[cfg(target_os = "macos")]
             web: Default::default(),
         }

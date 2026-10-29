@@ -126,7 +126,7 @@ impl DevicesPanel {
                 .pt(px(16.))
                 .child(div().text_size(px(12.)).child("Agent controls"));
         }
-        let mut content = div().id("devices-agent-content").flex().flex_col().items_start().gap(px(8.)).pt(px(8.)).overflow_y_scroll()
+        let mut content = div().id("devices-agent-content").track_focus(&self.agent_focus).tab_stop(false).track_scroll(&self.agent_scroll).flex().flex_col().items_start().gap(px(8.)).pt(px(8.)).overflow_y_scroll()
             .child(prose("This is a shared phone. Each connected agent receives its own controller session automatically. Occupied devices require an explicit handoff."))
             .child(prose("Viewing is passive. Taking operator control pauses agent input until you hand control back."));
         if compact {
@@ -174,7 +174,7 @@ impl DevicesPanel {
     }
     fn roster(&self, height: f32, cx: &mut Context<Self>) -> AnyElement {
         let state = self.state.as_ref().unwrap();
-        let mut roster = div().id("devices-roster").max_h(px(height * 0.3)).overflow_y_scroll().flex_shrink_0().px(px(16.)).py(px(8.))
+        let mut roster = div().id("devices-roster").track_focus(&self.roster_focus).tab_stop(false).track_scroll(&self.roster_scroll).max_h(px(height * 0.3)).overflow_y_scroll().flex_shrink_0().px(px(16.)).py(px(8.))
             .border_b_1().border_color(theme().border).text_size(px(11.5))
             .child(prose("Viewing is passive. Take operator control of each open simulator before using the viewer."));
         let devices: Vec<_> = rows(state, "devices")
@@ -321,6 +321,47 @@ impl Render for DevicesPanel {
             .id("devices-panel")
             .debug_selector(|| "devices-panel".into())
             .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.modifiers.modified() {
+                    if event.keystroke.key == "tab"
+                        && event.keystroke.modifiers.shift
+                        && !event.keystroke.modifiers.control
+                        && !event.keystroke.modifiers.platform
+                        && !event.keystroke.modifiers.alt
+                    {
+                        window.focus_prev();
+                        cx.stop_propagation();
+                    }
+                    return;
+                }
+                if event.keystroke.key == "tab" {
+                    window.focus_next();
+                    cx.stop_propagation();
+                    return;
+                }
+                let scroll = if !this.running() {
+                    &this.intro_scroll
+                } else if this.roster_focus.contains_focused(window, cx) || !this.expanded {
+                    &this.roster_scroll
+                } else {
+                    &this.agent_scroll
+                };
+                let mut offset = scroll.offset();
+                let page = scroll.bounds().size.height.max(px(32.)) * 0.9;
+                offset.y = match event.keystroke.key.as_str() {
+                    "down" => offset.y - px(32.),
+                    "up" => offset.y + px(32.),
+                    "pagedown" => offset.y - page,
+                    "pageup" => offset.y + page,
+                    "home" => px(0.),
+                    "end" => -scroll.max_offset().height,
+                    _ => return,
+                }
+                .clamp(-scroll.max_offset().height, px(0.));
+                scroll.set_offset(offset);
+                cx.notify();
+                cx.stop_propagation();
+            }))
             .size_full()
             .min_w_0()
             .min_h_0()
@@ -380,7 +421,7 @@ impl Render for DevicesPanel {
                 web.hide();
             }
             let phase = self.phase().to_owned();
-            let mut intro = div().id("devices-introduction").debug_selector(move || format!("devices-introduction-{phase}")).overflow_y_scroll().p(px(20.)).flex().flex_col().gap(px(20.))
+            let mut intro = div().id("devices-introduction").track_scroll(&self.intro_scroll).debug_selector(move || format!("devices-introduction-{phase}")).overflow_y_scroll().p(px(20.)).flex().flex_col().gap(px(20.))
                 .child(div().pt(px(12.)).child(div().size(px(48.)).mb(px(18.)).rounded(px(14.)).bg(theme().hover).flex().items_center().justify_center().child(crate::icon::stroke(DEVICE,theme().accent,25.,1.5)))
                     .child(div().text_size(px(20.)).mb(px(8.)).child("Build for the screen in your hand."))
                     .child(prose("Run your installed iOS simulators and Android emulators here. See the app, interact with it, and capture what needs work.")));
