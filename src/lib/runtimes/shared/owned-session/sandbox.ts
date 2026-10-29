@@ -34,7 +34,7 @@ import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
-import { backingProjectConfigPaths } from './project-config';
+import { assertBackingProjectConfigReadable, backingProjectConfigPaths } from './project-config';
 import { ownerInstructionPaths } from './owner-instructions';
 import { SandboxUnavailableError } from './sandbox-error';
 import { homeToolchainPolicy } from './sandbox-toolchain';
@@ -690,15 +690,13 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
   const readOnlyDenyWrite = input.enforceReadOnly
     ? workspacePaths
     : [];
-  const finalImmutableWrite = await resolveAll([
-    ...(input.finalImmutableWritePaths ?? []), ...projectConfigPaths,
-  ]);
+  const finalImmutableWrite = await resolveAll(input.finalImmutableWritePaths ?? []);
   const finalImmutableAncestors = await resolveAll(input.finalImmutableAncestorPaths ?? []);
-  const finalAllowRead = await resolveAll([
-    ...(input.finalAllowReadPaths ?? []), ...projectConfigPaths,
-  ]);
+  const finalAllowRead = await resolveAll(input.finalAllowReadPaths ?? []);
   // Never resolve these again after validation: a replaced symlink must not
   // manufacture a grant on its new target. These remain exact literal paths.
+  finalImmutableWrite.push(...projectConfigPaths);
+  finalAllowRead.push(...projectConfigPaths);
   const ownerInstructions = input.readOwnerInstructions ? await ownerInstructionPaths(homeReal) : [];
   finalImmutableWrite.push(...ownerInstructions);
   finalAllowRead.push(...ownerInstructions);
@@ -766,6 +764,10 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
       `Failed to write seatbelt profile to ${profilePath}: ${(error as Error).message}`,
     );
   }
+
+  await assertBackingProjectConfigReadable(SANDBOX_EXEC_PATH, profilePath, projectConfigPaths).catch((error: Error) => {
+    throw new SandboxUnavailableError(error.message);
+  });
 
   return {
     binary: SANDBOX_EXEC_PATH,

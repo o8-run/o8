@@ -362,6 +362,9 @@ export async function prepareSingleOrchestratorLaunch(input: {
       repoPath: input.repoPath,
       binary: launchBinaryPath,
       args: input.args,
+      // A linked checkout still loads its backing project's startup config.
+      // Grant that exact immutable file, never its directory or credentials.
+      readBackingProjectConfig: true,
       extraDenyPaths: dataDirs,
       // Codex resume state lives under ~/.o8. Re-open only this runtime home,
       // then close the files that can reintroduce operator-controlled tools.
