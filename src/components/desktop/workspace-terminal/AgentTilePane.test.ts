@@ -752,3 +752,40 @@ it('keeps one review action and state without a composer or cache helper when a 
   act(() => host!.querySelector<HTMLButtonElement>('[data-worker-open-review]')!.click());
   expect(review).toHaveBeenCalledOnce();
 });
+
+describe('AgentTilePane stopped owned worker (#3988)', () => {
+  const renderStopped = async (recovery: unknown) => {
+    const fetcher = vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () => (url.startsWith('/api/runtime/session-summary')
+        ? { session: { status: 'interrupted' }, recovery }
+        : {}),
+    }));
+    vi.stubGlobal('fetch', fetcher);
+    transcriptMock.slice.messages = [{ id: 'assistant-1', role: 'assistant', text: 'Stopped midway.' }];
+    await act(async () => root!.render(createElement(AgentTilePane, {
+      sessionKey: 'codex-owned:stopped',
+      agent: { name: 'Stopped worker', status: 'interrupted', runtime: 'codex' },
+      focused: true,
+      onClose: () => {},
+      onFocus: () => {},
+    })));
+    await act(async () => {});
+    return fetcher;
+  };
+
+  it('offers the saved-session Resume and Retire controls instead of no action', async () => {
+    const fetcher = await renderStopped({ actions: ['resume', 'retire'], worktreePath: '/tmp/wt', branch: 'worker/stopped', runId: 'run-1', retired: false });
+    expect(fetcher).toHaveBeenCalledWith('/api/runtime/session-summary?sessionKey=codex-owned%3Astopped', expect.anything());
+    const labels = [...host!.querySelectorAll('[data-worker-recovery] button')].map(button => button.textContent);
+    expect(labels).toEqual(['Resume', 'Retire']);
+    expect(host!.textContent).toContain('Interrupted');
+    expect(host!.textContent).not.toContain('Idle');
+    expect(host!.querySelector('textarea')).toBeNull();
+  });
+
+  it('says the worker cannot continue when the saved session has no recovery action', async () => {
+    await renderStopped(null);
+    expect(host!.querySelector('[data-worker-recovery]')?.textContent).toContain('Stopped. This worker cannot take new messages.');
+  });
+});
