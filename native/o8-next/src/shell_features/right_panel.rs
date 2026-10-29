@@ -178,7 +178,7 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
             crate::files_panel::Mode::Spec
         };
         let client = s.client.in_workspace(&workspace);
-        let view = cx.new(|cx| crate::files_panel::FilesPanel::new(client, workspace.clone(), mode, cx));
+        let view = files_view(s, client, workspace.clone(), mode, cx);
         s.features.get::<Panel>().files.insert(key.clone(), view);
     }
     if tool == Tool::Browser && !s.features.get::<Panel>().browsers.contains_key(&key) {
@@ -224,12 +224,47 @@ pub(super) fn open_files(
     if let Some(root) = root {
         let key = key(s, Tool::Files);
         let client = s.client.in_workspace(&root);
-        let view = cx.new(|cx| {
-            crate::files_panel::FilesPanel::new(client, root, crate::files_panel::Mode::Files, cx)
-        });
+        let view = files_view(s, client, root, crate::files_panel::Mode::Files, cx);
         s.features.get::<Panel>().files.insert(key, view);
     }
     show(s, Tool::Files, window, cx);
+}
+
+// Pins use the same shell state and save path as tabs, including scratch states.
+fn files_view(
+    s: &mut Shell,
+    client: crate::client::Client,
+    workspace: String,
+    mode: crate::files_panel::Mode,
+    cx: &mut Context<Shell>,
+) -> gpui::Entity<crate::files_panel::FilesPanel> {
+    let pins = s.state.pins(&workspace);
+    let view = cx.new(|cx| {
+        let mut view = crate::files_panel::FilesPanel::new(client, workspace.clone(), mode, cx);
+        view.set_pins(&workspace, pins, cx);
+        view
+    });
+    s.subscriptions.push(cx.subscribe(
+        &view,
+        |s, _, pins: &crate::files_panel::PinsChanged, cx| {
+            s.state.set_pins(pins.workspace.clone(), pins.paths.clone());
+            s.persist();
+            for view in s
+                .features
+                .get::<Panel>()
+                .files
+                .values()
+                .cloned()
+                .collect::<Vec<_>>()
+            {
+                view.update(cx, |view, cx| {
+                    view.set_pins(&pins.workspace, pins.paths.clone(), cx)
+                });
+            }
+            cx.notify();
+        },
+    ));
+    view
 }
 
 /// The Browser, at a page.

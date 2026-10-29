@@ -184,7 +184,7 @@ fn classic_search_preview_escape_preserves_expanded_ignored_tree(cx: &mut TestAp
 }
 
 #[gpui::test]
-fn classic_quick_docs_pin_persist_remount_unpin_and_global_preview(cx: &mut TestAppContext) {
+fn quick_docs_pin_unpin_and_global_preview_without_server_pin_route(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (panel, cx) = cx.add_window_view(|window, cx| {
         let panel = FilesPanel::new(
@@ -195,6 +195,13 @@ fn classic_quick_docs_pin_persist_remount_unpin_and_global_preview(cx: &mut Test
         );
         panel.focus(window);
         panel
+    });
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let observed = events.clone();
+    let _subscription = cx.update(|_, cx| {
+        cx.subscribe(&panel, move |_, event: &PinsChanged, _| {
+            observed.borrow_mut().push(event.paths.clone());
+        })
     });
     click(cx, "quick-docs-toggle");
     wait(cx, "quick-doc-AGENTS.md");
@@ -212,38 +219,19 @@ fn classic_quick_docs_pin_persist_remount_unpin_and_global_preview(cx: &mut Test
         panel.read_with(cx, |p, _| p.selected.clone()).as_deref(),
         Some("src/useful.rs")
     );
-    // New panel reads durable pins rather than retaining the first pane's model.
-    panel.update_in(cx, |p, _, cx| {
-        *p = FilesPanel::new(
-            fixture.client.clone(),
-            fixture.repo.clone(),
-            Mode::Files,
-            cx,
-        );
-    });
-    click(cx, "quick-docs-toggle");
-    wait(cx, "pinned-file-src/useful.rs");
     click(cx, "unpin-src/useful.rs");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        draw(cx);
-        let body: Value = fixture
-            .client
-            .get(
-                "/api/v2/files/quick-doc-pins",
-                &[("workspace", fixture.repo.as_str())],
-            )
-            .unwrap();
-        if body["paths"] == json!([]) {
-            break;
-        }
-        assert!(Instant::now() < deadline);
-    }
+    assert_eq!(
+        *events.borrow(),
+        vec![vec!["src/useful.rs".to_string()], vec![]]
+    );
+    assert!(panel.read_with(cx, |p, cx| {
+        p.quick_docs.as_ref().unwrap().read(cx).picker.is_none()
+    }));
     assert!(
         fixture
             .requests()
             .iter()
-            .any(|r| r.starts_with("POST /api/v2/files/quick-doc-pins"))
+            .all(|r| !r.contains("quick-doc-pins"))
     );
 }
 
@@ -360,4 +348,126 @@ fn picker_escape_restores_focus_and_selected_file_without_collapsing_tree(cx: &m
         |p, cx| p.quick_docs.as_ref().unwrap().read(cx).selected.as_deref()
             == Some("src/useful.rs")
     ));
+}
+
+#[test]
+fn ignored_flat_listing_matches_all_terms_and_ranks_exact_basename_first() {
+    let flat = parse_entries(&json!({"entries":[
+        {"name":"PARITY-BOARD.local.md","path":"PARITY-BOARD.local.md","kind":"file","ignored":true},
+        {"name":"parity.md","path":"src/parity.md","kind":"file"}
+    ]}));
+    let server = parse_entries(
+        &json!({"entries":[{"name":"parity.md","path":"src/parity.md","kind":"file"}]}),
+    );
+    let (matches, _) = search::merge_matches("parity board", &server, &flat);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].path, "PARITY-BOARD.local.md");
+    let (matches, _) = search::merge_matches("PARITY.MD", &server, &flat);
+    assert_eq!(
+        matches.len(),
+        1,
+        "same path from both sources is deduplicated"
+    );
+    let mut more = server.clone();
+    more.push(Entry {
+        name: "notes.md".into(),
+        path: "parity.md/notes.md".into(),
+        dir: false,
+        ignored: false,
+    });
+    let (matches, _) = search::merge_matches("parity.md", &more, &flat);
+    assert_eq!(matches[0].path, "src/parity.md");
+    let many: Vec<_> = (0..600)
+        .map(|i| Entry {
+            name: "file".into(),
+            path: format!("file-{i}"),
+            dir: false,
+            ignored: false,
+        })
+        .collect();
+    let (matches, truncated) = search::merge_matches("file", &[], &many);
+    assert_eq!(matches.len(), 500);
+    assert!(truncated);
+}
+
+#[test]
+fn native_pins_persist_in_shell_state_with_repo_isolation_and_limit() {
+    let root = std::env::temp_dir().join(format!("o8-native-pins-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let file = root.join("shell.json");
+    let mut state = crate::shell_state::State::default();
+    let mut paths = vec![
+        "../bad".into(),
+        "/bad".into(),
+        "C:/bad".into(),
+        "PARITY-BOARD.local.md".into(),
+        "PARITY-BOARD.local.md".into(),
+    ];
+    paths.extend((0..60).map(|i| format!("src/{i}.rs")));
+    state.set_pins("/repo".into(), paths);
+    state.save(&file).unwrap();
+    let mut restored = crate::shell_state::State::load(&file).unwrap();
+    assert_eq!(restored.pins("/repo").len(), 50);
+    assert_eq!(restored.pins("/repo")[0], "PARITY-BOARD.local.md");
+    assert!(restored.pins("/other").is_empty());
+    restored.set_pins("/repo".into(), vec![]);
+    restored.save(&file).unwrap();
+    assert!(
+        crate::shell_state::State::load(&file)
+            .unwrap()
+            .pins("/repo")
+            .is_empty()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[gpui::test]
+fn ignored_file_search_uses_one_flat_listing_per_search_session(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (_panel, cx) = cx.add_window_view(|window, cx| {
+        let panel = FilesPanel::new(
+            fixture.client.clone(),
+            fixture.repo.clone(),
+            Mode::Files,
+            cx,
+        );
+        panel.focus(window);
+        panel
+    });
+    search(cx, "files-search", "parity board");
+    wait(cx, "file-search-PARITY-BOARD.local.md");
+    click(cx, "files-search");
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-a"
+    } else {
+        "ctrl-a"
+    });
+    cx.simulate_input("parity");
+    cx.run_until_parked();
+    cx.cx.executor().advance_clock(Duration::from_millis(150));
+    wait(cx, "file-search-PARITY-BOARD.local.md");
+    assert_eq!(
+        fixture
+            .requests()
+            .iter()
+            .filter(|r| r.contains("recursive=files"))
+            .count(),
+        1
+    );
+    click(cx, "files-search");
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    search(cx, "files-search", "parity board");
+    wait(cx, "file-search-PARITY-BOARD.local.md");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while fixture
+        .requests()
+        .iter()
+        .filter(|r| r.contains("recursive=files"))
+        .count()
+        < 2
+    {
+        draw(cx);
+        assert!(Instant::now() < deadline);
+    }
 }

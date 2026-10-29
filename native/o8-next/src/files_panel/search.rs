@@ -97,6 +97,53 @@ pub(super) fn file_icon(path: &str) -> &'static str {
     }
 }
 
+const RESULT_LIMIT: usize = 500;
+#[derive(Clone)]
+struct Listing {
+    entries: std::sync::Arc<Vec<Entry>>,
+    truncated: bool,
+}
+fn listing(body: Value, workspace: &str, limit: usize) -> Result<Listing, String> {
+    if let Some(error) = body["error"].as_str() {
+        return Err(error.to_owned());
+    }
+    let entries: Vec<_> = parse_entries(&body)
+        .into_iter()
+        .filter(|entry| {
+            !entry.dir && repo_relative(workspace, &entry.path) == Some(entry.path.as_str())
+        })
+        .take(limit)
+        .collect();
+    Ok(Listing {
+        entries: entries.into(),
+        truncated: body["truncated"] == true,
+    })
+}
+/// Same path matching as the server, extended to the ignored flat-list entries.
+pub(super) fn merge_matches(query: &str, server: &[Entry], flat: &[Entry]) -> (Vec<Entry>, bool) {
+    let query = query.trim().to_lowercase();
+    let terms: Vec<_> = query.split_whitespace().collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut entries: Vec<_> = server
+        .iter()
+        .chain(flat)
+        .filter(|entry| {
+            let path = entry.path.to_lowercase();
+            !entry.dir
+                && terms.iter().all(|term| path.contains(term))
+                && seen.insert(entry.path.clone())
+        })
+        .cloned()
+        .collect();
+    entries.sort_by_cached_key(|entry| {
+        let path = entry.path.to_lowercase();
+        (path.rsplit('/').next().unwrap_or(&path) != query, path)
+    });
+    let truncated = entries.len() > RESULT_LIMIT;
+    entries.truncate(RESULT_LIMIT);
+    (entries, truncated)
+}
+
 pub(super) struct Pick(pub String);
 impl EventEmitter<Pick> for Search {}
 
@@ -111,6 +158,12 @@ pub(super) struct Search {
     pub(super) current: Option<String>,
     entries: Option<Result<Vec<Entry>, String>>,
     truncated: bool,
+    server: Option<Result<Listing, String>>,
+    flat: Option<Result<Listing, String>>,
+    flat_pending: Option<Task<()>>,
+    merge_pending: Option<Task<()>>,
+    session: u64,
+    merge_generation: u64,
     generation: u64,
     pending: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -156,6 +209,12 @@ impl Search {
             current: None,
             entries: None,
             truncated: false,
+            server: None,
+            flat: None,
+            flat_pending: None,
+            merge_pending: None,
+            session: 0,
+            merge_generation: 0,
             generation: 0,
             pending: None,
             _subscriptions: vec![observe, submit],
@@ -192,13 +251,25 @@ impl Search {
         if !force && query == self.query {
             return;
         }
+        let starting = self.query.is_empty() && !query.is_empty();
         self.query = query.clone();
         self.generation += 1;
+        self.merge_generation += 1;
         let generation = self.generation;
         self.pending = None;
+        self.merge_pending = None;
         self.entries = None;
+        self.server = None;
         self.truncated = false;
+        if query.is_empty() {
+            self.session += 1;
+            self.flat_pending = None;
+            self.flat = None;
+        }
         cx.notify();
+        if starting {
+            self.load_flat(cx);
+        }
         if !self.picker && query.is_empty() {
             return;
         }
@@ -233,21 +304,92 @@ impl Search {
                 if generation != this.generation {
                     return;
                 }
-                this.entries = Some(result.and_then(|body| {
-                    if let Some(error) = body["error"].as_str() {
-                        return Err(error.to_owned());
-                    }
-                    this.truncated = body["truncated"] == true;
-                    Ok(parse_entries(&body)
-                        .into_iter()
-                        .filter(|entry| {
-                            !entry.dir
-                                && repo_relative(&this.workspace, &entry.path)
-                                    == Some(entry.path.as_str())
-                        })
-                        .collect())
-                }));
+                this.server =
+                    Some(result.and_then(|body| listing(body, &this.workspace, RESULT_LIMIT)));
+                this.merge(cx);
                 cx.notify();
+            });
+        }));
+    }
+    fn load_flat(&mut self, cx: &mut Context<Self>) {
+        let client = self.client.clone();
+        let workspace = self.workspace.clone();
+        let session = self.session;
+        let task = cx.background_executor().spawn(async move {
+            client
+                .get::<Value>(
+                    "/api/panel/files",
+                    &[("workspace", workspace.as_str()), ("recursive", "files")],
+                )
+                .and_then(|body| listing(body, &workspace, 20_000))
+        });
+        self.flat_pending = Some(cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                if session != this.session {
+                    return;
+                }
+                this.flat = Some(result);
+                this.merge(cx);
+            });
+        }));
+    }
+    fn merge(&mut self, cx: &mut Context<Self>) {
+        if self.query.is_empty() {
+            self.entries = self
+                .server
+                .clone()
+                .map(|result| result.map(|listing| listing.entries.as_ref().clone()));
+            cx.notify();
+            return;
+        }
+        if self.server.is_none() && self.flat.is_none() {
+            return;
+        }
+        let server = self.server.clone();
+        let flat = self.flat.clone();
+        let query = self.query.clone();
+        self.merge_generation += 1;
+        let generation = self.merge_generation;
+        // Matching, deduplication and ranking of up to 20,000 files never block paint.
+        let task = cx.background_executor().spawn(async move {
+            let available = server.as_ref().is_some_and(Result::is_ok)
+                || flat.as_ref().is_some_and(Result::is_ok);
+            if !available {
+                return if server.is_some() && flat.is_some() {
+                    Some(Err("Couldn't load files".to_string()))
+                } else {
+                    None
+                };
+            }
+            let server = server.and_then(Result::ok);
+            let flat = flat.and_then(Result::ok);
+            let (entries, capped) = merge_matches(
+                &query,
+                server
+                    .as_ref()
+                    .map_or(&[], |listing| listing.entries.as_slice()),
+                flat.as_ref()
+                    .map_or(&[], |listing| listing.entries.as_slice()),
+            );
+            Some(Ok((
+                entries,
+                capped || server.is_some_and(|s| s.truncated) || flat.is_some_and(|s| s.truncated),
+            )))
+        });
+        self.merge_pending = Some(cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                if generation != this.merge_generation {
+                    return;
+                }
+                if let Some(result) = result {
+                    this.entries = Some(result.map(|(entries, truncated)| {
+                        this.truncated = truncated;
+                        entries
+                    }));
+                    cx.notify();
+                }
             });
         }));
     }

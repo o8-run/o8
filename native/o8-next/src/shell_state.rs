@@ -41,6 +41,9 @@ pub struct State {
     /// Names the person gave tabs, by tab key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tab_labels: BTreeMap<String, String>,
+    /// Native Quick docs pins, isolated by the workspace's repository path.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub quick_doc_pins: BTreeMap<String, Vec<String>>,
     #[serde(skip)]
     pub(crate) retain_file: bool,
     #[serde(skip)]
@@ -55,12 +58,41 @@ impl Default for State {
             workspaces: BTreeMap::new(),
             sidebar_width: None,
             tab_labels: BTreeMap::new(),
+            quick_doc_pins: BTreeMap::new(),
             retain_file: false,
             backup_file: Arc::default(),
         }
     }
 }
+pub(crate) fn clean_pins(paths: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut pins = Vec::new();
+    for path in paths {
+        let bytes = path.as_bytes();
+        if !path.starts_with('/')
+            && !(bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+            && !path
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
+            && !pins.contains(&path)
+            && pins.len() < 50
+        {
+            pins.push(path);
+        }
+    }
+    pins
+}
 impl State {
+    pub fn pins(&self, repo: &str) -> Vec<String> {
+        self.quick_doc_pins.get(repo).cloned().unwrap_or_default()
+    }
+    pub fn set_pins(&mut self, repo: String, paths: Vec<String>) {
+        let paths = clean_pins(paths);
+        if paths.is_empty() {
+            self.quick_doc_pins.remove(&repo);
+        } else {
+            self.quick_doc_pins.insert(repo, paths);
+        }
+    }
     fn recovered() -> Self {
         Self {
             backup_file: Arc::new(Mutex::new(true)),
@@ -76,8 +108,16 @@ impl State {
             || !(600. ..=16_384.).contains(&w)
             || !(400. ..=16_384.).contains(&h)
             || self.workspaces.len() > 500
+            || self.quick_doc_pins.len() > 500
+            || self
+                .quick_doc_pins
+                .values()
+                .any(|paths| clean_pins(paths.clone()) != *paths)
             || self.tab_labels.len() > 16_000
-            || self.tab_labels.values().any(|label| label.chars().count() > 80)
+            || self
+                .tab_labels
+                .values()
+                .any(|label| label.chars().count() > 80)
             || self
                 .workspaces
                 .values()
