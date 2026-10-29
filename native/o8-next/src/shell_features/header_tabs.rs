@@ -6,6 +6,15 @@ use gpui::{DragMoveEvent, SharedString};
 struct HeaderTabs;
 register_shell_feature!(HeaderTabs);
 impl ShellFeature for HeaderTabs {
+    fn ticks(&self) -> &'static [TickHook] {
+        // Creates the strip's scroll handle, which the header only reads.
+        &[TickHook {
+            order: 70,
+            run: |s, _, _, _| {
+                s.features.get::<Tabs>();
+            },
+        }]
+    }
     fn keys(&self) -> &'static [KeyContext] {
         &[KeyContext {
             order: 70,
@@ -38,6 +47,12 @@ struct Tabs {
     rename: Option<Rename>,
     /// Where a dragged tab would land: before, or after, this tab.
     insertion: Option<(usize, bool)>,
+    scroll: gpui::ScrollHandle,
+}
+
+/// The pill strip's scroll position, once the feature state exists.
+pub(super) fn scroll(s: &Shell) -> Option<gpui::ScrollHandle> {
+    s.features.read::<Tabs>().map(|tabs| tabs.scroll.clone())
 }
 
 /// A dragged tab, drawn as a pill that follows the pointer.
