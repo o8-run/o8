@@ -4,6 +4,12 @@ import { orchestratorErrorMessage, orchestratorErrorText } from './orchestrator-
 const frame = 'file:///bundle/bridge.mjs:2\nError: {void 0;}; throw failure;\n  ^\n\n';
 
 describe('orchestrator error display limits', () => {
+  it('keeps a plain server Error message unchanged', () => {
+    const error = new Error('Choose a project first.');
+    expect(orchestratorErrorText(error.message, 'Failed to send message').replace(/\s+/g, ' '))
+      .toBe('Choose a project first.');
+  });
+
   it('uses an exception name and message instead of its source-bearing stack', () => {
     const error = new TypeError('first line\nactual reason');
     error.stack = `${frame}SyntaxError: unrelated stack summary`;

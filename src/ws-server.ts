@@ -3,7 +3,7 @@ import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
 import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
-import { orchestratorErrorMessage } from '@/lib/transcripts/orchestrator-error';
+import { orchestratorErrorMessage, orchestratorErrorText } from '@/lib/transcripts/orchestrator-error';
 /**
  * Unified WebSocket server for o8 mobile.
  *
@@ -6240,7 +6240,9 @@ async function handleOrchestratorSendMsgOnce(
   } catch (err) {
     const projectError = err instanceof OrchestratorThreadProjectError ? err : null;
     console.error('[ws-server][orchestrator] send failed:', err);
-    const error = orchestratorErrorMessage(err);
+    const error = err instanceof Error
+      ? orchestratorErrorText(err.message, 'Failed to send message').replace(/\s+/g, ' ')
+      : 'Failed to send message';
     const turnWasUndone = undoneOrchestratorUserMessageIds.has(userMessageId);
     activeOrchestratorRoutes.release(activeRouteHandle);
     if (turnController) {
