@@ -13,6 +13,7 @@ fn inbox_is_reachable_from_the_real_shell_palette(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     ready(&shell, cx);
+    let active = shell.read_with(cx, |s, _| s.active());
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("i n b o x");
     assert_eq!(
@@ -28,8 +29,10 @@ fn inbox_is_reachable_from_the_real_shell_palette(cx: &mut TestAppContext) {
     cx.run_until_parked();
     draw(cx);
     assert_eq!(
-        shell.read_with(cx, |s, _| s.active().unwrap().label()),
-        "Inbox"
+        shell.read_with(cx, |s, _| s.active()),
+        active
     );
+    assert!(!shell.read_with(cx, |s, _| s.current().unwrap().tabs.contains(&Tab::Inbox)));
+    assert!(cx.debug_bounds("panel-tab").is_some());
     assert!(cx.debug_bounds("inbox-view-replies").is_some());
 }

@@ -56,7 +56,9 @@ impl Transition {
         let travelled = self.linear();
         self.open = open;
         let remaining = self.duration.mul_f32(1. - travelled);
-        self.changed = Instant::now().checked_sub(remaining).or(Some(Instant::now()));
+        self.changed = Instant::now()
+            .checked_sub(remaining)
+            .or(Some(Instant::now()));
     }
 
     /// Linear progress toward the current state, 0 to 1.

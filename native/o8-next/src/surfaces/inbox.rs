@@ -2,7 +2,14 @@ use super::*;
 use serde_json::{Value, json};
 
 use crate::inbox::{Inbox, OpenSession};
-pub(super) type Slice = EmptyState;
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Slice {
+    #[serde(default, skip_serializing_if = "panel_closed")]
+    pub panel_inbox_open: bool,
+}
+fn panel_closed(open: &bool) -> bool {
+    !open
+}
 pub(super) type Runtime = ();
 pub(super) type View = Inbox;
 pub(super) const REGISTRATION: Registration = Registration {

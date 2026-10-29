@@ -39,6 +39,12 @@ impl ShellFeature for RightPanel {
         if !matches!(command, Command::Inbox) {
             return false;
         }
+        // Inbox navigation still leaves foreground overlays, while retaining
+        // the workspace's active tab behind its new panel destination.
+        for registration in registrations() {
+            (registration.before_tab)(s);
+            (registration.after_tab)(s);
+        }
         s.palette = false;
         show(s, Tool::Inbox, window, cx);
         true
@@ -90,6 +96,7 @@ impl Tool {
 }
 
 struct Panel {
+    scope: Option<String>,
     /// The column's width and fade: 260ms, as the desktop column animates.
     motion: Transition,
     /// The tool's own fade and 12px slide: 200ms.
@@ -100,6 +107,7 @@ struct Panel {
 impl Default for Panel {
     fn default() -> Self {
         Self {
+            scope: None,
             motion: Transition::new(260),
             content: Transition::new(200),
             tool: Tool::Launcher,
@@ -144,17 +152,19 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
             cx.notify();
             return;
         }
-        if let Some(content) = (tab.registration().create)(s, tab, workspace, window, cx) {
+        if let Some(content) = (tab.registration().create)(s, tab, workspace.clone(), window, cx) {
             s.content.insert(key.clone(), content);
         }
     }
     let panel = s.features.get::<Panel>();
+    panel.scope = Some(workspace);
     if panel.tool != tool || !panel.motion.is_open() {
         panel.content = Transition::new(200);
         panel.content.set(true);
     }
     panel.tool = tool;
     panel.motion.set(true);
+    save_inbox(s, tool == Tool::Inbox);
     if let Some(content) = s.content.get(&key) {
         content.focus(false, window, cx);
     }
@@ -168,6 +178,7 @@ pub(super) fn open(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
 pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     if is_open(s) {
         s.features.get::<Panel>().motion.set(false);
+        save_inbox(s, false);
         s.restore_focus(window, cx);
         cx.notify();
     } else {
@@ -197,7 +208,8 @@ pub(super) fn element(
     // A fixed-width inner column, clipped by the travelling outer width, so the
     // tool never reflows while the panel opens or closes.
     let element = div()
-        .w(px(full))
+        // The outer column's one-pixel divider is inside its full width.
+        .w(px((full - 1.).max(0.)))
         .h_full()
         .flex()
         .flex_col()
@@ -274,6 +286,7 @@ fn move_inbox_tabs(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
     let mut moved = false;
     for saved in s.state.workspaces.values_mut() {
         while let Some(index) = saved.tabs.iter().position(|tab| tab == &Tab::Inbox) {
+            saved.surfaces.inbox.panel_inbox_open = true;
             saved.tabs.remove(index);
             if index < saved.active {
                 saved.active -= 1;
@@ -287,6 +300,30 @@ fn move_inbox_tabs(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         s.ensure(window, cx);
         s.persist();
         cx.notify();
+    }
+    let scope = s.state.selected.clone().unwrap_or_default();
+    if s.features.get::<Panel>().scope.as_ref() != Some(&scope) {
+        let restore = s.state.workspaces.get(&scope)
+            .is_some_and(|saved| saved.surfaces.inbox.panel_inbox_open);
+        let panel = s.features.get::<Panel>();
+        panel.scope = Some(scope);
+        panel.motion.set(false);
+        panel.tool = Tool::Launcher;
+        if restore {
+            show(s, Tool::Inbox, window, cx);
+        }
+    }
+}
+
+fn save_inbox(s: &mut Shell, open: bool) {
+    let scope = s.state.selected.clone().unwrap_or_default();
+    if !open && !s.state.workspaces.contains_key(&scope) {
+        return;
+    }
+    let saved = s.state.workspaces.entry(scope).or_default();
+    if saved.surfaces.inbox.panel_inbox_open != open {
+        saved.surfaces.inbox.panel_inbox_open = open;
+        s.persist();
     }
 }
 

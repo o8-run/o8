@@ -67,6 +67,18 @@ impl Snapshot {
     }
 }
 
+fn open_pull_requests(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    let command = registrations().iter()
+        .find(|registration| registration.command_label == "Open pull requests")
+        .and_then(|registration| registration.command);
+    if let Some((_, command)) = command {
+        s.execute(command(), window, cx);
+    } else {
+        s.notice = "Pull requests are unavailable in this build.".into();
+        cx.notify();
+    }
+}
+
 fn close(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     let menus = s.features.get::<Menus>();
     menus.play = false;
@@ -227,7 +239,8 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
         ))
     };
     let meta = |text: String| {
-        div()
+        let marker = format!("workspace-meta:{text}");
+        div().debug_selector(move || marker.clone())
             .text_size(px(9.5))
             .font_weight(crate::theme::TYPE.meta_weight)
             .text_color(theme().text_muted)
@@ -299,6 +312,7 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
                                 .whitespace_nowrap()
                                 .text_ellipsis()
                                 .text_size(px(12.))
+                                .debug_selector({ let text = branch.clone(); move || format!("workspace-branch:{text}") })
                                 .child(branch),
                         ),
                 )
@@ -353,7 +367,7 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
                             "…".into()
                         }))))
                         .child(action("workspace-pull-requests", cx, |this, window, cx| {
-                            this.execute(Command::PullRequests, window, cx)
+                            open_pull_requests(this, window, cx)
                         })
                         .flex_1()
                         .child(crate::icon::stroke(PULL_REQUEST, theme().text_secondary, 14., 1.6))
@@ -371,12 +385,14 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
                                     div()
                                         .text_size(px(9.5))
                                         .text_color(theme().success)
+                                        .debug_selector(move || format!("workspace-additions:+{}", snapshot.additions))
                                         .child(format!("+{}", snapshot.additions)),
                                 )
                                 .child(
                                     div()
                                         .text_size(px(9.5))
                                         .text_color(theme().danger)
+                                        .debug_selector(move || format!("workspace-deletions:−{}", snapshot.deletions))
                                         .child(format!("−{}", snapshot.deletions)),
                                 )
                             }),
@@ -401,7 +417,7 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
                     )
                     .child(
                         action("workspace-pull-request", cx, |this, window, cx| {
-                            this.execute(Command::PullRequests, window, cx)
+                            open_pull_requests(this, window, cx)
                         })
                         .w_full()
                         .child(crate::icon::stroke(PULL_REQUEST, theme().text_secondary, 14., 1.6))
@@ -412,6 +428,7 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
                                 .overflow_hidden()
                                 .whitespace_nowrap()
                                 .text_ellipsis()
+                                .debug_selector({ let title = title.clone(); move || format!("workspace-pr:#{number} {title}") })
                                 .child(format!("#{number} {title}")),
                         ),
                     ),

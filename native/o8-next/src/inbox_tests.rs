@@ -113,6 +113,14 @@ impl Drop for Fixture {
         let _ = fs::remove_dir_all(&self.root);
     }
 }
+fn panel(shell: &Shell) -> &Content {
+    let scope = format!("panel|{}|", shell.state.selected.as_deref().unwrap_or(""));
+    assert!(!shell.current().is_some_and(|w| w.tabs.contains(&Tab::Inbox)), "Inbox belongs in the panel, not the main tab strip");
+    shell.content.iter().find_map(|(key, content)| {
+        (key.starts_with(&scope) && matches!(content, Content::Inbox(_))).then_some(content)
+    }).expect("current workspace Inbox panel")
+}
+
 fn bounds(cx: &mut gpui::VisualTestContext, selector: &str) -> Option<Bounds<gpui::Pixels>> {
     cx.debug_bounds(Box::leak(selector.to_owned().into_boxed_str()))
 }
@@ -156,7 +164,7 @@ fn tab_to_action(shell: &Entity<Shell>, cx: &mut gpui::VisualTestContext, id: &s
         cx.simulate_keystrokes("tab");
         draw(cx);
         let focused = shell.update_in(cx, |shell, window, cx| {
-            match shell.content.get(&shell.key(&Tab::Inbox)).unwrap() {
+            match panel(shell) {
                 Content::Inbox(inbox) => {
                     inbox.read(cx).action_focus[id][usize::from(approve)].is_focused(window)
                 }
@@ -196,6 +204,7 @@ fn inbox_keyboard_buttons_activate_enter_space_and_skip_disabled(cx: &mut TestAp
     let cx = &mut visual;
     cx.run_until_parked();
     draw(cx);
+    let active_before_inbox = shell.read_with(cx, |s, _| s.active());
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("i n b o x enter");
     cx.run_until_parked();
@@ -208,7 +217,7 @@ fn inbox_keyboard_buttons_activate_enter_space_and_skip_disabled(cx: &mut TestAp
     draw(cx);
     assert_eq!(
         shell.read_with(cx, |s, cx| {
-            match s.content.get(&s.key(&Tab::Inbox)).unwrap() {
+            match panel(s) {
                 Content::Inbox(inbox) => inbox.read(cx).lane,
                 _ => usize::MAX,
             }
@@ -230,7 +239,7 @@ fn inbox_keyboard_buttons_activate_enter_space_and_skip_disabled(cx: &mut TestAp
     );
     assert_eq!(
         shell.read_with(cx, |s, _| s.active()),
-        Some(Tab::Inbox),
+        active_before_inbox,
         "Enter on a decision must not open its session"
     );
     tab_to_action(&shell, cx, &id("Native reject"), false);
@@ -260,7 +269,7 @@ fn inbox_keyboard_buttons_activate_enter_space_and_skip_disabled(cx: &mut TestAp
     }
     cx.simulate_keystrokes("shift-tab");
     draw(cx);
-    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Inbox));
+    assert_eq!(shell.read_with(cx, |s, _| s.active()), active_before_inbox);
 }
 
 #[gpui::test]
@@ -363,6 +372,7 @@ fn inbox_plan_session_header_preserves_desktop_authority_and_continuation(cx: &m
     let cx = &mut visual;
     cx.run_until_parked();
     draw(cx);
+    let active_before_inbox = shell.read_with(cx, |s, _| s.active());
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("i n b o x enter");
     cx.run_until_parked();
@@ -386,7 +396,7 @@ fn inbox_plan_session_header_preserves_desktop_authority_and_continuation(cx: &m
     }
     assert_eq!(after["resolution"]["continuationStatus"], "completed");
     assert_eq!(fs::read_to_string(&file).unwrap(), "bounded test edit");
-    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Inbox));
+    assert_eq!(shell.read_with(cx, |s, _| s.active()), active_before_inbox);
 }
 
 #[gpui::test]
@@ -403,13 +413,14 @@ fn inbox_cards_counts_statuses_and_approval_match_desktop_routes(cx: &mut TestAp
     let cx = &mut visual;
     cx.run_until_parked();
     draw(cx);
+    let active_before_inbox = shell.read_with(cx, |s, _| s.active());
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("i n b o x enter");
     cx.run_until_parked();
     draw(cx);
     assert_eq!(
-        shell.read_with(cx, |s, _| s.active().unwrap().label()),
-        "Inbox"
+        shell.read_with(cx, |s, _| { panel(s); s.active() }),
+        active_before_inbox
     );
     let mut counts = vec![];
     for lane in ["replies", "contributions", "approvals", "agents", "history"] {
@@ -482,7 +493,7 @@ fn inbox_cards_counts_statuses_and_approval_match_desktop_routes(cx: &mut TestAp
     assert!(record(&native)["resolvedAt"].is_number());
     assert_eq!(record(&native)["resolution"]["actor"], "desktop");
     let after_counts = shell.read_with(cx, |s, cx| {
-        match s.content.get(&s.key(&Tab::Inbox)).unwrap() {
+        match panel(s) {
             Content::Inbox(inbox) => inbox
                 .read(cx)
                 .cards
@@ -618,14 +629,15 @@ fn inbox_opens_related_session_and_pull_request_and_restores(cx: &mut TestAppCon
             .iter()
             .filter(|t| **t == Tab::Inbox)
             .count()),
-        1
+        0
     );
+    shell.read_with(cx, |s, _| { panel(s); });
     for (w, h) in [(900., 700.), (1680., 1050.)] {
         let handle = cx.update(|window, _| window.window_handle());
         cx.cx.simulate_window_resize(handle, size(px(w), px(h)));
         draw(cx);
         let area = bounds(cx, "inbox-cards").unwrap();
-        assert!(area.origin.x >= px(0.) && area.right() <= px(w));
+        assert!(area.origin.x >= px(0.) && area.right() <= px(w), "Inbox cards {area:?} must fit {w}x{h}");
         for (lane, _) in crate::inbox::VIEWS {
             assert!(bounds(cx, &format!("inbox-view-{lane}")).is_some());
         }
@@ -635,13 +647,16 @@ fn inbox_opens_related_session_and_pull_request_and_restores(cx: &mut TestAppCon
     let (restored, mut restored_cx) = open(fixture.client.clone(), file, saved, &mut cx.cx);
     restored_cx.run_until_parked();
     draw(&mut restored_cx);
+    restored.update_in(&mut restored_cx, |s, window, cx| s.tick(false, window, cx));
+    restored_cx.run_until_parked();
+    draw(&mut restored_cx);
     assert_eq!(
-        restored.read_with(&restored_cx, |s, _| s.active()),
-        Some(Tab::Inbox)
+        restored.read_with(&restored_cx, |s, _| { panel(s); s.active() }),
+        Some(Tab::Session("thoughts-review".into()))
     );
     assert!(bounds(&mut restored_cx, "inbox-view-replies").is_some());
     println!(
-        "Inbox palette to loaded CPU scene: {open_ms:.2} ms; compact=900x700 wide=1680x1050; restored Inbox surfaces=1"
+        "Inbox palette to loaded CPU scene: {open_ms:.2} ms; compact=900x700 wide=1680x1050; restored Inbox panels=1"
     );
 }
 
@@ -670,8 +685,9 @@ fn inbox_empty_and_server_error_never_claim_a_false_clean_state(cx: &mut TestApp
         assert!(bounds(cx, "inbox-empty").is_some());
         assert!(bounds(cx, &format!("inbox-count-{lane}-0")).is_some());
     }
-    cx.simulate_keystrokes("ctrl-w");
+    cx.simulate_keystrokes("ctrl-alt-b");
     assert!(shell.read_with(cx, |s, _| s.active().is_none()));
+    assert!(!State::load(&fixture.root.join("empty.json")).unwrap().workspaces[""].surfaces.inbox.panel_inbox_open);
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("i n b o x enter");
     cx.run_until_parked();
@@ -681,8 +697,9 @@ fn inbox_empty_and_server_error_never_claim_a_false_clean_state(cx: &mut TestApp
             .unwrap()
             .workspaces[""]
             .tabs,
-        vec![Tab::Inbox]
+        Vec::<Tab>::new()
     );
+    assert!(State::load(&fixture.root.join("empty.json")).unwrap().workspaces[""].surfaces.inbox.panel_inbox_open);
     let _ = Process::new("kill")
         .args(["-TERM", &fixture.server.id().to_string()])
         .status();
@@ -690,7 +707,7 @@ fn inbox_empty_and_server_error_never_claim_a_false_clean_state(cx: &mut TestApp
     click(cx, "inbox-refresh");
     assert!(shell.read_with(
         cx,
-        |s, cx| match s.content.get(&s.key(&Tab::Inbox)).unwrap() {
+        |s, cx| match panel(s) {
             Content::Inbox(inbox) =>
                 inbox.read(cx).error().is_some() && inbox.read(cx).errors[2].is_some(),
             _ => false,
@@ -699,7 +716,7 @@ fn inbox_empty_and_server_error_never_claim_a_false_clean_state(cx: &mut TestApp
     assert!(bounds(cx, "inbox-error").is_some());
     // Debug bounds persist in TestAppContext after removal; inspect current state too.
     shell.read_with(cx, |s, cx| {
-        match s.content.get(&s.key(&Tab::Inbox)).unwrap() {
+        match panel(s) {
             Content::Inbox(inbox) => assert!(
                 !inbox.read(cx).loading
                     && inbox.read(cx).loaded

@@ -18,7 +18,7 @@ fn correction_rebase_keeps_header_without_secondary_labels(cx: &mut TestAppConte
         visual.debug_bounds("Commands (Ctrl+K / Cmd+K)").is_none(),
         "rebasing the frame extension must not restore permanent shortcut text"
     );
-    assert!(visual.debug_bounds("workspace-switcher").is_some());
+    assert!(visual.debug_bounds("header-search").is_some());
 }
 
 #[cfg(target_os = "linux")]
@@ -148,9 +148,7 @@ fn correction_fifteenth_workspace_scrolls_into_view(cx: &mut TestAppContext) {
     for (width, height) in [(1200., 816.), (900., 700.)] {
         cx.simulate_resize(size(px(width), px(height)));
         draw(cx);
-        let switcher = cx.debug_bounds("workspace-switcher").unwrap();
-        cx.simulate_click(switcher.center(), gpui::Modifiers::default());
-        draw(cx);
+        workspace_picker(cx);
         for _ in 0..14 {
             cx.simulate_keystrokes("down");
             draw(cx);
@@ -224,7 +222,7 @@ fn correction_palette_brain_resumes_the_session_draft(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
+fn shell_chrome_fifteen_workspaces_use_one_palette(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--shell-many");
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -236,8 +234,8 @@ fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
     ready(&shell, cx);
     assert_eq!(shell.read_with(cx, |s, _| s.workspaces.len()), 15);
     assert!(
-        cx.debug_bounds("workspace-switcher").is_some(),
-        "15 workspaces must share one switcher"
+        cx.debug_bounds("header-search").is_some(),
+        "15 workspaces share header Search and its workspace palette"
     );
     assert!(
         cx.debug_bounds("workspace-0").is_none(),
@@ -255,17 +253,21 @@ fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
     for (width, height) in [(900., 700.), (1680., 1050.)] {
         cx.simulate_resize(size(px(width), px(height)));
         draw(cx);
-        let bounds = cx.debug_bounds("workspace-switcher").unwrap();
+        let bounds = cx.debug_bounds("header-search").unwrap();
         assert!(bounds.right() <= px(width));
         assert!(bounds.size.height <= px(40.));
-        layouts.push(json!({"viewport":[width,height], "switcher":[f32::from(bounds.origin.x),f32::from(bounds.origin.y),f32::from(bounds.size.width),f32::from(bounds.size.height)]}));
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
-        draw(cx);
+        layouts.push(json!({"viewport":[width,height], "search":[f32::from(bounds.origin.x),f32::from(bounds.origin.y),f32::from(bounds.size.width),f32::from(bounds.size.height)]}));
+        workspace_picker(cx);
         assert!(cx.debug_bounds("command-14").is_some());
-        assert!(
-            cx.debug_bounds("command-15").is_none(),
-            "the workspace switcher renders only its fifteen workspace rows"
-        );
+        shell.read_with(cx, |s, _| {
+            let choices = s.commands();
+            assert_eq!(choices.len(), 15, "only the fifteen workspace rows");
+            assert!(
+                choices
+                    .iter()
+                    .all(|choice| matches!(choice, palette::Entry::Workspace(_)))
+            );
+        });
         cx.simulate_keystrokes("escape");
     }
     if let Ok(file) = std::env::var("O8_NEXT_CHROME_EVIDENCE") {
@@ -274,7 +276,9 @@ fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn chrome_switcher_cancel_restores_composer_with_platform_shortcut(cx: &mut TestAppContext) {
+fn chrome_workspace_palette_cancel_restores_composer_with_platform_shortcut(
+    cx: &mut TestAppContext,
+) {
     let fixture = Fixture::new();
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -289,9 +293,7 @@ fn chrome_switcher_cancel_restores_composer_with_platform_shortcut(cx: &mut Test
     ready(&shell, cx);
     draw(cx);
     cx.simulate_input("Draft");
-    let switcher = cx.debug_bounds("workspace-switcher").unwrap();
-    cx.simulate_click(switcher.center(), gpui::Modifiers::default());
-    draw(cx);
+    workspace_picker(cx);
     cx.simulate_keystrokes("escape");
     draw(cx);
     cx.simulate_input(" retained");
@@ -367,8 +369,8 @@ fn correction_placement_uses_the_single_shell_header(cx: &mut TestAppContext) {
             "embedded conversation must not restore a Brain control"
         );
         assert!(
-            cx.debug_bounds("workspace-switcher").is_some(),
-            "workspace navigation must retain the single shell header"
+            cx.debug_bounds("header-search").is_some(),
+            "workspace navigation must retain Search in the single shell header"
         );
         assert!(cx.debug_bounds("composer-card").is_some());
     }

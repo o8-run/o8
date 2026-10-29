@@ -154,6 +154,15 @@ pub(super) fn draw(cx: &mut VisualTestContext) {
         window.draw(cx).clear();
     });
 }
+/// Workspace choices live in the command palette, reached from header Search.
+pub(super) fn workspace_picker(cx: &mut VisualTestContext) {
+    draw(cx);
+    let search = cx.debug_bounds("header-search").expect("header Search");
+    cx.simulate_click(search.center(), gpui::Modifiers::default());
+    cx.simulate_keystrokes("s w i t c h space w o r k s p a c e");
+    draw(cx);
+    assert!(cx.debug_bounds("command-palette").is_some());
+}
 pub(super) fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     for _ in 0..20 {
         cx.run_until_parked();

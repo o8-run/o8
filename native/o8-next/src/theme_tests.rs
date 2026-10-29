@@ -236,6 +236,10 @@ fn glass_tokens_match_the_desktop_overrides_and_window_veil() {
             );
         }
     }
+}
+
+#[test]
+fn workspace_glass_veil_stops_match_the_desktop_constant() {
     let veil = include_str!("../../../src/lib/theme/glass-material.ts")
         .lines()
         .find(|line| line.contains("WORKSPACE_GLASS_VEIL ="))
