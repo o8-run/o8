@@ -110,6 +110,12 @@ const NO_UPDATER_AFTER: Duration = Duration::from_secs(30);
 const NO_UPDATER: &str =
     "Update checks need the o8 app. This window is connected to the o8 server without it.";
 
+/// The installed app's server launched this window, so its desktop updater
+/// serves this server however long its first check takes.
+fn app_parent() -> bool {
+    std::env::var("O8_NEXT_PARENT_PIPE").as_deref() == Ok("1")
+}
+
 /// The version a completed updater check found, or `None` when nothing waits.
 fn pending(body: &Value) -> Option<String> {
     (body["state"]["updatePending"] == true)
@@ -642,7 +648,7 @@ fn read(state: &mut State, body: &Value) {
             parked: as_list(&waiting["parked"]),
         });
     }
-    if body["state"]["check"]["outcome"] == "never" {
+    if body["state"]["check"]["outcome"] == "never" && !app_parent() {
         let since = *state.never_since.get_or_insert_with(Instant::now);
         state.no_updater |= since.elapsed() >= NO_UPDATER_AFTER;
     } else {
@@ -765,7 +771,8 @@ fn check_now(s: &mut Shell, cx: &mut Context<Shell>) {
                     read(state, &body);
                     // The server waited for a check no updater ever ran.
                     let headless = body["error"]["code"] == "update_check_unavailable"
-                        && body["state"]["check"]["outcome"] == "never";
+                        && body["state"]["check"]["outcome"] == "never"
+                        && !app_parent();
                     state.no_updater |= headless;
                     let failed = body["ok"] != true && !headless;
                     if failed {
