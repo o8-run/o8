@@ -121,7 +121,11 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
             .get("type")
             .and_then(Value::as_str)
             .is_some_and(|kind| kind == "handoff" || kind == "compaction");
-        if entry.role != "tool" && (!entry.text.trim().is_empty() || extras || receipt) {
+        let visualizations =
+            !crate::visualizations::protocol::references(entry.tools.as_ref()).is_empty();
+        if (entry.role != "tool" || visualizations)
+            && (!entry.text.trim().is_empty() || extras || receipt || visualizations)
+        {
             if !pending.is_empty() {
                 blocks.push((rows.len(), pending.clone()));
             }

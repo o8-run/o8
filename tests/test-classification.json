@@ -181,6 +181,12 @@
       ]
     },
     {
+      "path": "src/app/api/v2/chat-history/completed-tools-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/v2/keys/route.launch.test.ts",
       "reasons": [
         "child-process",
@@ -1159,6 +1165,12 @@
       "path": "src/lib/terminal/managed-command-launch.test.ts",
       "reasons": [
         "child-process"
+      ]
+    },
+    {
+      "path": "src/lib/threads/redaction.test.ts",
+      "reasons": [
+        "git-cli"
       ]
     },
     {
@@ -2572,6 +2584,13 @@
       ]
     },
     {
+      "path": "tests/composer-queue-ledger-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/composer-queue-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -2800,6 +2819,15 @@
       ]
     },
     {
+      "path": "tests/dashboard-reading-position-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "child-process",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
       "path": "tests/dashboard-startup-real-path.test.ts",
       "reasons": [
         "browser",
@@ -2977,6 +3005,12 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/dispatch-held-recoverable-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -5768,6 +5802,14 @@
       ]
     },
     {
+      "path": "tests/promote-beta-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/prompt-inventory-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -6031,6 +6073,12 @@
       ]
     },
     {
+      "path": "tests/release-next-runtime-verification.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/release-output-delete-ownership-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -6063,6 +6111,15 @@
         "native-build",
         "process-signal",
         "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/release-runtime-files-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
       ]
     },
     {
@@ -6569,6 +6626,14 @@
       ]
     },
     {
+      "path": "tests/runtime-recovery-notice-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
       "path": "tests/sandbox-owned-stop-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -6687,6 +6752,15 @@
       "path": "tests/setup-config-project-hooks-real-path.test.ts",
       "reasons": [
         "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/shared-checkout-control-errors-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
         "real-path"
       ]
     },

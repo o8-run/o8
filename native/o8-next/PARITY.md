@@ -38,7 +38,7 @@ the desktop shell. Native registration lives in [shell.rs](src/shell.rs).
 | Customize (`customize`) | partial | See section inventory below and [detailed parity](docs/surfaces/customize/verification.md) |
 | README and Markdown documents (`readme`) | missing | Transcript prose is not a document surface |
 | Images and PDFs (`image`) | missing | Transcript placeholders only |
-| Interactive visualization cards (`visualization`) | missing | No interactive visualization surface |
+| Interactive visualization cards (`visualization`) | partial | [Inline cards](docs/surfaces/visualizations.md); interactive macOS documents, resizing, theme and saved state; Linux and Windows show an error and retry row; workspace expansion and version controls remain open |
 | Diagrams (`mermaid`) | missing | No diagram renderer |
 | Browser/preview (`preview`) | missing | No browser surface |
 | Timeline (`timeline`) | missing | No timeline surface |

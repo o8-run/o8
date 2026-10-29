@@ -131,6 +131,14 @@ impl Surface {
                         this.send(None, cx);
                     }
                 }));
+            self.subscriptions.push(cx.subscribe(
+                &editor,
+                |this, editor, _: &crate::composer::images::ImagesChanged, cx| {
+                    if this.composer == editor {
+                        cx.notify();
+                    }
+                },
+            ));
             self.drafts.insert(id.clone(), editor);
         }
         self.composer = self.drafts[&id].clone();
@@ -228,8 +236,15 @@ impl Surface {
                 .and_then(|candidates| candidates.iter().find(|state| state.borrow().row == row))
                 .cloned();
             states.push(retained.unwrap_or_else(|| {
+                let cards = indexed
+                    .get(row.id())
+                    .and_then(|candidates| candidates.first())
+                    .map(|state| state.borrow().cards.clone())
+                    .unwrap_or_default();
                 let mut state = RowState::new(row);
                 state.images = self.images.clone();
+                state.cards = cards;
+                state.attach_visualizations(&self.client);
                 Rc::new(RefCell::new(state))
             }));
         }
@@ -242,6 +257,16 @@ impl Surface {
         }
     }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut visualizations_changed = false;
+        for (index, row) in self.rows.iter().enumerate() {
+            if row.borrow_mut().poll_visualizations() {
+                self.list.splice(index..index + 1, 1);
+                visualizations_changed = true;
+            }
+        }
+        if visualizations_changed {
+            cx.notify();
+        }
         let follow_tail = !self.rows.is_empty()
             && self
                 .list
@@ -284,7 +309,7 @@ impl Surface {
             }
             cx.notify();
         }
-        changed
+        changed || visualizations_changed
     }
     fn snapshot_label(&self) -> String {
         let count = self
@@ -594,7 +619,7 @@ pub fn launch(
     stream_benchmark: Option<(String, u64)>,
     started: Instant,
 ) {
-    (if offscreen { Application::headless() } else { Application::new() }).run(move |cx: &mut App| {
+    (if offscreen { Application::headless() } else { Application::new() }).with_assets(crate::icon::Assets).run(move |cx: &mut App| {
         let handle = cx.open_window(WindowOptions { focus: false, show: !offscreen,
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(point(px(if offscreen { -10000. } else { 100. }), px(if offscreen { -10000. } else { 100. })), size(px(1200.), px(816.))))),
             titlebar: Some(gpui::TitlebarOptions { title: Some("o8 next".into()), ..Default::default() }),
@@ -764,3 +789,7 @@ mod image_history_tests;
 #[cfg(test)]
 #[path = "image_cache_tests.rs"]
 mod image_cache_tests;
+
+#[cfg(test)]
+#[path = "visualization_tests.rs"]
+mod visualization_tests;

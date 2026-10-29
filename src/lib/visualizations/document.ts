@@ -120,7 +120,12 @@ async function innerDocument(html: string, nonce: string, theme: VisualizationTh
   const sealed = await sealVisualizationScripts(page);
   // Both policies apply: hashes seal inline scripts; the base policy separately
   // denies external scripts even when an attacker supplies a matching SRI hash.
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${INNER_CSP}"><meta http-equiv="Content-Security-Policy" content="${sealed.policy}">${sealed.html}`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="${INNER_CSP}"><meta http-equiv="Content-Security-Policy" content="${sealed.policy}">${sealed.html}`;
+}
+
+/** Keep the same opaque frame boundary when hosted by a system web view. */
+export async function nativeVisualizationDocument(html: string, nonce: string): Promise<string> {
+  return visualizationSrcdoc(html, nonce, defaultVisualizationTheme(), {}, true);
 }
 
 /**
@@ -128,22 +133,23 @@ async function innerDocument(html: string, nonce: string, theme: VisualizationTh
  * restriction also blocks the document's self-navigation, which a CSP on a
  * single srcdoc frame cannot prevent. Neither frame has app/network authority.
  */
-export async function visualizationSrcdoc(html: string, nonce: string, theme: VisualizationTheme, initialState: unknown = {}): Promise<string> {
+export async function visualizationSrcdoc(html: string, nonce: string, theme: VisualizationTheme, initialState: unknown = {}, nativeHost = false): Promise<string> {
   const document = await innerDocument(html, nonce, theme, visualizationState(initialState) ?? {});
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${INNER_CSP}"><style>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="${INNER_CSP}"><style>
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
     iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
   </style></head><body><iframe sandbox="allow-scripts" title="Interactive visualization"></iframe><script>(() => {
     const frame = document.querySelector('iframe');
     const nonce = ${scriptJson(nonce)};
+    const deliver = ${nativeHost ? "data => dispatchEvent(new CustomEvent('o8:native-visualization-message', { detail: data }))" : "data => parent.postMessage(data, '*')"};
     frame.srcdoc = ${scriptJson(document)};
     addEventListener('message', event => {
       const data = event.data;
       if (!data || data.nonce !== nonce) return;
       if (event.source === frame.contentWindow) {
-        if (data.type === 'o8-visualization:height' && Number.isFinite(data.height)) parent.postMessage({ type: data.type, nonce, height: data.height,
-          width: Number.isFinite(data.width) ? data.width : undefined, overflow: Number.isFinite(data.overflow) ? data.overflow : undefined }, '*');
-        if (data.type === 'o8-visualization:state' || data.type === 'o8-visualization:question') parent.postMessage({ type: data.type, nonce, value: data.value }, '*');
+        if (data.type === 'o8-visualization:height' && Number.isFinite(data.height)) deliver({ type: data.type, nonce, height: data.height,
+          width: Number.isFinite(data.width) ? data.width : undefined, overflow: Number.isFinite(data.overflow) ? data.overflow : undefined });
+        if (data.type === 'o8-visualization:state' || data.type === 'o8-visualization:question') deliver({ type: data.type, nonce, value: data.value });
       } else if (event.source === parent && ['o8-visualization:theme', 'o8-visualization:state'].includes(data.type)) {
         frame.contentWindow.postMessage(data, '*');
       }

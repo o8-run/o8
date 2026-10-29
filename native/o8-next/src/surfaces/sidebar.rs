@@ -21,7 +21,10 @@ pub(super) const REGISTRATION: Registration = Registration {
     load: |shell, cx| {
         if !shell.loading {
             shell.loading = true;
-            shell.notice = "Connecting to local o8 server…".into();
+            // Stream wakeups refresh the catalog constantly; only the first connect is announced.
+            if !shell.connected {
+                shell.notice = "Connecting to local o8 server…".into();
+            }
             shell
                 .surfaces
                 .sidebar

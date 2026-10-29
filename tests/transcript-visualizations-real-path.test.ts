@@ -71,6 +71,27 @@ describe('transcript visualizations through authenticated routes and persisted S
     expect((await one.GET(request(`${BASE}/${latest.id}?source=1`, undefined, mintPacketWorkerToken('pkt-other')), params(latest.id))).status).toBe(404);
   });
 
+  it('returns the shared sealed document for a native view without widening read authority', async () => {
+    const input = { repoPath: repo, threadId: 'thoughts-native', title: 'Native view', height: 320,
+      html: '<section style="height:240px"><button>Explore</button></section>' };
+    const ref = (await (await route.POST(request(BASE, input))).json()).result.visualization;
+    const nonce = 'native-fixture-0123456789';
+    const read = await one.GET(request(`${BASE}/${ref.id}?nativeNonce=${nonce}`), params(ref.id));
+    const result = (await read.json()).result;
+    expect(result.visualization.id).toBe(ref.id);
+    expect(result.sealedHtml).toContain("connect-src 'none'");
+    expect(result.sealedHtml).toContain("base-uri 'none'");
+    expect(result.sealedHtml).toContain('sha256-');
+    expect(result.sealedHtml).toContain(nonce);
+    expect(result.sealedHtml).toContain('o8-visualization:height');
+    expect(result.sealedHtml).toContain('o8-visualization:state');
+    expect(result.sealedHtml).toContain('data-o8-toolkit=');
+    expect(result.sealedHtml).toContain('<iframe sandbox="allow-scripts"');
+    expect((await one.GET(request(`${BASE}/${ref.id}?nativeNonce=${nonce}`, undefined, null), params(ref.id))).status).toBe(401);
+    expect((await one.GET(request(`${BASE}/${ref.id}?nativeNonce=${nonce}`, undefined, mintPacketWorkerToken('other')), params(ref.id))).status).toBe(404);
+    expect((await one.GET(request(`${BASE}/${ref.id}?nativeNonce=bad`), params(ref.id))).status).toBe(400);
+  });
+
   it('writes only after preflight accepts the document and rejects ambiguous sources', async () => {
     const input = { repoPath: repo, threadId: 'thoughts-checks', title: 'Checked layout', html: '<p>Example</p>' };
     const { VisualizationError } = await import('@/lib/visualizations/errors');

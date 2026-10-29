@@ -111,5 +111,13 @@ pub fn nodes(entry: &Entry) -> Vec<Node> {
             data: Some(media.clone()),
         });
     }
+    for reference in crate::visualizations::protocol::references(entry.tools.as_ref()) {
+        nodes.push(Node {
+            kind: "visualization".into(),
+            runs: vec![],
+            language: None,
+            data: serde_json::to_value(reference).ok(),
+        });
+    }
     nodes
 }

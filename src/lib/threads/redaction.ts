@@ -1,15 +1,18 @@
 import { redactSensitiveTranscriptText } from '@/components/desktop/transcript-sanitize';
+import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { ThreadEvidence } from './types';
 
-const credentialField = '(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|secret|password|passwd|token)';
-const credentialKey = new RegExp(`^${credentialField}$`, 'i');
-const quotedCredential = new RegExp(String.raw`("${credentialField}"\s*:\s*)"(?:\\.|[^"\\])*"`, 'gi');
+const credentialField = '(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|private[_-]?key|secret[_-]?key|credentials?|cookie|secret|password|passwd|token)';
+// Whole name or its last `_`/`-`/`.`/camelCase segment: OPENAI_API_KEY, X-Api-Key, githubToken; not max_tokens.
+const credentialKey = new RegExp(`(?:^|[_.\\s-])${credentialField}$`, 'i');
+const isCredentialKey = (key: string) => credentialKey.test(key.replace(/([a-z0-9])([A-Z])/g, '$1_$2'));
+const quotedCredential = new RegExp(String.raw`("(?:[A-Za-z0-9]+[_.-]){0,6}${credentialField}"\s*:\s*)"(?:\\.|[^"\\])*"`, 'gi');
 
 export function redactThreadValue(value: unknown): unknown {
   if (typeof value === 'string') return redactThreadText(value);
   if (Array.isArray(value)) return value.map(redactThreadValue);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [
-    redactThreadText(key), credentialKey.test(key) ? '[redacted]' : redactThreadValue(item),
+    redactThreadText(key), isCredentialKey(key) ? '[redacted]' : redactThreadValue(item),
   ]));
   return value;
 }
@@ -27,6 +30,21 @@ export function redactThreadText(text: string): string {
     .replace(/\/Users\/[^/\s<>"']+(?=\/|\b)/g, '~')
     .replace(/\/home\/[^/\s<>"']+(?=\/|\b)/g, '~')
     .replace(/[A-Za-z]:\\Users\\[^\\\s<>"']+(?=\\|\b)/g, '~');
+}
+
+/**
+ * Tool args and command output can carry credentials and home paths. Every
+ * canonical chat-history write applies this, server-originated or client POST.
+ */
+export function redactToolCallForRest(tool: MobileTranscriptToolCall): MobileTranscriptToolCall {
+  // Client JSON is untrusted: a malformed entry is stored as before, never a 500.
+  if (!tool || typeof tool !== 'object') return tool;
+  return {
+    ...tool,
+    ...(tool.args !== undefined ? { args: redactThreadValue(tool.args) as Record<string, unknown> } : {}),
+    ...(tool.result !== undefined ? { result: redactThreadValue(tool.result) as string } : {}),
+    ...(tool.preview !== undefined ? { preview: redactThreadValue(tool.preview) as string } : {}),
+  };
 }
 
 export function redactThreadEvidence(evidence: ThreadEvidence): ThreadEvidence {

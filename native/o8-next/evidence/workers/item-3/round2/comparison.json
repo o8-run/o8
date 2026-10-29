@@ -1,0 +1,85 @@
+{
+  "main_commit": "af25fc155d7393f6970c09b01a56266d7ffdc7cb",
+  "main": [
+    320,
+    0,
+    8
+  ],
+  "head_clean": [
+    331,
+    0,
+    8
+  ],
+  "head_ci": [
+    331,
+    0,
+    8
+  ],
+  "main_cases": 328,
+  "head_cases": 339,
+  "missing_or_changed_main_cases": [],
+  "added_head_cases": [
+    {
+      "name": "shell::workers::action_tests::workers_actions_are_reachable_by_tab_and_enter",
+      "result": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::workers::action_tests::workers_adjust_lost_response_reuses_one_persisted_steer",
+      "result": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::workers::action_tests::workers_adjust_uses_desktop_steer_route_and_operator_provenance",
+      "result": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::workers::action_tests::workers_adjust_waits_for_durable_storage_before_delivery",
+      "result": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::workers::action_tests::workers_inspect_conflict_opens_real_worktree_diff",
+      "result": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::workers::action_tests::workers_keep_waiting_reads_current_lane_and_preserves_queue",
+      "result": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::workers::action_tests::workers_lost_steer_reopens_with_same_key_and_draft",
+      "result": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::workers::review_tests::workers_edits_during_delivery_survive_ack",
+      "result": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::workers::review_tests::workers_keep_waiting_retains_fetched_lane_state",
+      "result": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::workers::review_tests::workers_restart_outcome_unknown_retry_keeps_one_steer",
+      "result": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::workers::review_tests::workers_workspace_isolation_preserves_peer_draft_during_lane_refresh",
+      "result": "ok",
+      "count": 1
+    }
+  ],
+  "ignored_same": true,
+  "failing_tests": [],
+  "source_tree": "40b57da5ee6dbe12a86873a64f7de0db25b3cb26",
+  "fixture_blobs": {
+    "scripts/next/surfaces/35-workers.surface.ts": "cfa41630b0b19e95679ab60e759dfa143bcea7dd",
+    "scripts/next/workers-restart-fixture.ts": "dbc731d9e20ab2c91517034375ff45257436e3e7"
+  }
+}

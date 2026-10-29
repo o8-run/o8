@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { macosBuildPayloadIdentity, macosExecutablePayloadSha256 } from '../scripts/lib/macos-release-artifacts.mjs';
 import { afterEach, expect, it } from 'vitest';
+import { stageRuntimeInputs } from './helpers/packaged-runtime-inputs';
 
 const sourceRoot = process.cwd();
 const roots: string[] = [];
@@ -31,6 +32,7 @@ if (args.includes('--display')) console.error('TeamIdentifier=' + (process.env.F
     (['x86_64', 'arm64'] as const).map(arch => [arch, macosExecutablePayloadSha256(join(app, 'Contents/MacOS/o8-next'), arch)])) };
   mkdirSync(join(root, 'src-tauri/helpers'), { recursive: true });
   mkdirSync(join(app, 'Contents/Resources'));
+  stageRuntimeInputs(join(app, 'Contents/Resources/server'));
   for (const path of [join(root, 'src-tauri/helpers/o8-next-build.json'), join(app, 'Contents/Resources/o8-next-build.json')]) {
     writeFileSync(path, JSON.stringify(receipt));
   }

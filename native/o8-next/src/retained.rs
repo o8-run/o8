@@ -28,6 +28,7 @@ pub struct RowState {
     expanded: Option<bool>,
     cache: Option<Layout>,
     pub(crate) images: crate::ui::images::Cache,
+    pub cards: crate::visualizations::Cards,
 }
 impl RowState {
     #[cfg(test)]
@@ -56,7 +57,39 @@ impl RowState {
             expanded,
             cache: None,
             images: Default::default(),
+            cards: Default::default(),
         }
+    }
+    pub fn attach_visualizations(&mut self, client: &crate::client::Client) {
+        let mut keep = std::collections::HashSet::new();
+        if let Row::Message { nodes, .. } = &self.row {
+            for node in nodes.iter().filter(|n| n.kind == "visualization") {
+                if let Some(reference) = node
+                    .data
+                    .as_ref()
+                    .and_then(crate::visualizations::protocol::Reference::parse)
+                {
+                    keep.insert(reference.id.clone());
+                    self.cards.entry(reference.id.clone()).or_insert_with(|| {
+                        Rc::new(RefCell::new(crate::visualizations::Card::new(
+                            reference,
+                            client.clone(),
+                        )))
+                    });
+                }
+            }
+        }
+        self.cards.retain(|id, _| keep.contains(id));
+    }
+    pub fn poll_visualizations(&mut self) -> bool {
+        let mut changed = false;
+        for card in self.cards.values() {
+            changed |= card.borrow_mut().poll();
+        }
+        if changed {
+            self.cache = None;
+        }
+        changed
     }
 }
 struct Line {
@@ -81,6 +114,7 @@ struct Layout {
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
     images: Vec<Thumbnail>,
+    cards: Vec<(String, Bounds<Pixels>)>,
 }
 struct Builder {
     row_id: String,
@@ -399,6 +433,7 @@ fn layout(
     width: Pixels,
     expanded: bool,
     images: crate::ui::images::Cache,
+    cards: &crate::visualizations::Cards,
     window: &Window,
 ) -> Layout {
     let mut b = Builder {
@@ -410,6 +445,7 @@ fn layout(
         lines: vec![],
         backgrounds: vec![],
     };
+    let mut placements = vec![];
     match row {
         Row::PacketHeader {
             prompt, details, ..
@@ -452,7 +488,50 @@ fn layout(
         Row::Message { role, nodes, .. } => {
             let top = b.y;
             for node in nodes {
-                b.node(node, expanded, window);
+                let card = node
+                    .data
+                    .as_ref()
+                    .and_then(|data| data["id"].as_str())
+                    .and_then(|id| cards.get(id))
+                    .filter(|_| node.kind == "visualization");
+                if let Some(card) = card {
+                    let card = card.borrow();
+                    let top = b.y;
+                    if let Some(error) = &card.error {
+                        b.y += px(16.);
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            b.plain(
+                                crate::text::sanitize(&card.reference.title),
+                                13.,
+                                20.,
+                                window,
+                            );
+                            b.y += px(8.);
+                        }
+                        b.plain(crate::text::sanitize(error), 13., 20., window);
+                        b.y += px(10.);
+                        b.plain(
+                            crate::visualizations::protocol::RETRY.into(),
+                            12.,
+                            20.,
+                            window,
+                        );
+                        b.y += px(16.);
+                    } else if !card.ready {
+                        b.plain("Loading visualization…".into(), 12., 20., window);
+                    }
+                    b.y = (top + px(card.display_height())).max(b.y);
+                    placements.push((
+                        card.reference.id.clone(),
+                        Bounds::new(
+                            point(px(24.), top),
+                            size((width - px(48.)).max(px(1.)), b.y - top),
+                        ),
+                    ));
+                } else {
+                    b.node(node, expanded, window);
+                }
             }
             if role == "user" {
                 b.backgrounds.insert(
@@ -497,6 +576,7 @@ fn layout(
         lines: b.lines,
         backgrounds: b.backgrounds,
         images: b.images,
+        cards: placements,
     }
 }
 pub struct RetainedRow {
@@ -507,6 +587,45 @@ pub struct RetainedRow {
 impl RetainedRow {
     pub fn interactive(self, list: &gpui::ListState) -> gpui::AnyElement {
         use gpui::prelude::*;
+        if !self.state.borrow().cards.is_empty() {
+            let state = self.state.clone();
+            let list = list.clone();
+            let index = self.index;
+            let retry = move |position: Option<Point<Pixels>>, window: &mut Window| {
+                let mut state = state.borrow_mut();
+                let card = state
+                    .cards
+                    .values()
+                    .find(|card| {
+                        let card = card.borrow();
+                        card.error.is_some()
+                            && position.is_none_or(|p| card.bounds.is_some_and(|b| b.contains(&p)))
+                    })
+                    .cloned();
+                if let Some(card) = card {
+                    card.borrow_mut().retry();
+                    state.cache = None;
+                    list.splice(index..index + 1, 1);
+                    window.refresh();
+                }
+            };
+            let click = retry.clone();
+            return gpui::div()
+                .id(("visualization-message", self.index))
+                .focusable()
+                .debug_selector(move || format!("visualization-message-{index}").into())
+                .on_click(move |event, window, _| click(Some(event.position()), window))
+                .on_key_down(move |event, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        && !event.keystroke.modifiers.modified()
+                    {
+                        retry(None, window);
+                        cx.stop_propagation();
+                    }
+                })
+                .child(self)
+                .into_any_element();
+        }
         if self.state.borrow().expanded.is_none() {
             return self.into_any_element();
         }
@@ -553,7 +672,9 @@ impl Element for RetainedRow {
     type RequestLayoutState = ();
     type PrepaintState = Vec<gpui::AnyElement>;
     fn id(&self) -> Option<ElementId> {
-        None
+        (!self.state.borrow().cards.is_empty()).then(|| {
+            ElementId::Name(format!("visualization-row:{}", self.state.borrow().row.id()).into())
+        })
     }
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
         None
@@ -584,6 +705,7 @@ impl Element for RetainedRow {
                     width,
                     state.expanded.unwrap_or(false),
                     state.images.clone(),
+                    &state.cards,
                     window,
                 ));
                 state.layouts += 1;
@@ -594,7 +716,7 @@ impl Element for RetainedRow {
     }
     fn prepaint(
         &mut self,
-        _: Option<&GlobalElementId>,
+        global_id: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
         row_bounds: Bounds<Pixels>,
         _: &mut (),
@@ -602,6 +724,19 @@ impl Element for RetainedRow {
         cx: &mut App,
     ) -> Vec<gpui::AnyElement> {
         use gpui::{prelude::*, *};
+        if let Some(global_id) = global_id {
+            let cards: Vec<_> = self.state.borrow().cards.values().cloned().collect();
+            window.with_element_state::<crate::visualizations::Lease, _>(global_id, |lease, _| {
+                let lease = lease.filter(|lease| {
+                    lease.0.len() == cards.len()
+                        && lease.0.iter().zip(&cards).all(|(a, b)| Rc::ptr_eq(a, b))
+                });
+                (
+                    (),
+                    lease.unwrap_or_else(|| crate::visualizations::Lease::new(cards)),
+                )
+            });
+        }
         let state = self.state.borrow();
         let cache = state.cache.as_ref().expect("measured row");
         let origin = row_bounds.origin
@@ -609,6 +744,15 @@ impl Element for RetainedRow {
                 ((row_bounds.size.width - cache.size.width) / 2.).max(px(0.)),
                 px(0.),
             );
+        for (id, placement) in &cache.cards {
+            if let Some(card) = state.cards.get(id) {
+                card.borrow_mut().paint(
+                    Bounds::new(origin + placement.origin, placement.size),
+                    window.content_mask().bounds,
+                    window,
+                );
+            }
+        }
         cache
             .images
             .iter()

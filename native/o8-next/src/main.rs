@@ -11,6 +11,7 @@ mod diff;
 mod diff_tests;
 mod diff_ui;
 mod grid_sessions;
+mod icon;
 mod inbox;
 mod issues;
 mod merge;
@@ -38,6 +39,7 @@ mod theme;
 mod theme_tests;
 mod transport;
 mod ui;
+mod visualizations;
 mod wake;
 use crate::{
     client::Client,
