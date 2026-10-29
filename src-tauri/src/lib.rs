@@ -39,6 +39,8 @@ mod update_ping;
 #[cfg(target_os = "linux")]
 mod linux_ptt;
 #[cfg(target_os = "linux")]
+mod linux_session_env;
+#[cfg(target_os = "linux")]
 mod linux_voice;
 #[cfg(target_os = "macos")]
 mod live_dictation;
@@ -7986,6 +7988,11 @@ fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
 }
 
 pub fn run() {
+    // Linux: GPU/WebKit env defaults and the `o8` app id must be in place
+    // before anything starts a thread or initialises GTK.
+    #[cfg(target_os = "linux")]
+    linux_session_env::apply();
+
     // A disposable native test process runs beside the operator's installed app.
     // Treat its environment as an all-or-nothing safety contract and fail before
     // telemetry, lifecycle cleanup, plugins, ports, or persistent state when it

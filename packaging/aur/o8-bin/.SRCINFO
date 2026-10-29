@@ -1,0 +1,25 @@
+pkgbase = o8-bin
+	pkgdesc = o8 — governance layer for autonomous engineering teams (Linux preview)
+	pkgver = 0.1.810
+	pkgrel = 1
+	url = https://github.com/o8-run/o8
+	arch = x86_64
+	license = MIT
+	depends = webkit2gtk-4.1
+	depends = gtk3
+	depends = libayatana-appindicator
+	depends = glibc
+	depends = hicolor-icon-theme
+	optdepends = nodejs: Node 22 or 24 runtime for the o8 server (required unless one is on PATH, e.g. via mise or nvm)
+	optdepends = git: repository and worktree features
+	provides = o8
+	conflicts = o8
+	noextract = o8_0.1.810_amd64.deb
+	options = !strip
+	options = !debug
+	source = o8_0.1.810_amd64.deb::https://github.com/o8-run/o8/releases/download/v0.1.810/o8_0.1.810_linux_amd64_preview.deb
+	source = LICENSE-0.1.810::https://raw.githubusercontent.com/o8-run/o8/v0.1.810/LICENSE
+	sha256sums = 2ef55dac669842d4347e972272f5e2b2a78413b3093665e5101109c169518a44
+	sha256sums = 763f416b90fe16c1bb056fd42451bd4d863b70c403eff7f97ff162fb2d8f3e47
+
+pkgname = o8-bin

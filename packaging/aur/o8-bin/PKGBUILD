@@ -1,0 +1,34 @@
+# Maintainer: hurttlocker <195353125+hurttlocker@users.noreply.github.com>
+#
+# Repackages the official o8 Linux preview .deb from GitHub Releases so o8 runs
+# against Arch's own webkit2gtk-4.1 and gtk3 (no bundled libwayland, unlike the
+# AppImage). Bump: set pkgver, then `updpkgsums && makepkg --printsrcinfo > .SRCINFO`.
+pkgname=o8-bin
+pkgver=0.1.810
+pkgrel=1
+pkgdesc='o8 — governance layer for autonomous engineering teams (Linux preview)'
+arch=('x86_64')
+url='https://github.com/o8-run/o8'
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'glibc' 'hicolor-icon-theme')
+optdepends=('nodejs: Node 22 or 24 runtime for the o8 server (required unless one is on PATH, e.g. via mise or nvm)'
+            'git: repository and worktree features')
+provides=('o8')
+conflicts=('o8')
+options=('!strip' '!debug')
+source=("o8_${pkgver}_amd64.deb::https://github.com/o8-run/o8/releases/download/v${pkgver}/o8_${pkgver}_linux_amd64_preview.deb"
+        "LICENSE-${pkgver}::https://raw.githubusercontent.com/o8-run/o8/v${pkgver}/LICENSE")
+sha256sums=('2ef55dac669842d4347e972272f5e2b2a78413b3093665e5101109c169518a44'
+            '763f416b90fe16c1bb056fd42451bd4d863b70c403eff7f97ff162fb2d8f3e47')
+noextract=("o8_${pkgver}_amd64.deb")
+
+prepare() {
+  mkdir -p deb
+  bsdtar -xf "o8_${pkgver}_amd64.deb" -C deb
+  bsdtar -xf deb/data.tar.* -C deb
+}
+
+package() {
+  cp -a deb/usr "$pkgdir/"
+  install -Dm644 "LICENSE-${pkgver}" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
