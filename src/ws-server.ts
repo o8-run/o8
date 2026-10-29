@@ -3,6 +3,7 @@ import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
 import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
+import { MAX_UI_COMMAND_BYTES, parseUiCommand } from '@/lib/next/ui-command';
 /**
  * Unified WebSocket server for o8 mobile.
  *
@@ -8774,6 +8775,48 @@ const httpServer = createServer(async (req, res) => {
           ok: false,
           error: err instanceof Error ? err.message : 'invalid json',
         }));
+      }
+    });
+    return;
+  }
+
+  // Shell UI commands use the same authenticated internal bridge as URL pushes.
+  if (req.url === '/internal/ui-command' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    req.on('data', (chunk) => {
+      if (res.writableEnded) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += buffer.length;
+      if (bytes > MAX_UI_COMMAND_BYTES) {
+        chunks.length = 0;
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'UI command exceeds 64 KiB.' }));
+        return;
+      }
+      chunks.push(buffer);
+    });
+    req.on('end', () => {
+      if (res.writableEnded) return;
+      try {
+        const command = parseUiCommand(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        if (!command) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'A known kind and an object payload are required.' }));
+          return;
+        }
+        const recipients = clients.size;
+        broadcast({ type: 'ui-command', ...command });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, recipients }));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Invalid JSON body.' }));
       }
     });
     return;

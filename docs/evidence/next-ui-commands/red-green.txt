@@ -1,0 +1,57 @@
+Shell UI command relay (#5069), 2026-10-29
+
+Test: tests/next-ui-command-real-path.test.ts
+SHA256: 6423f0d71a7f90a40738c01e18237064eebe9db223497df336da358ec894f86d
+Runtime: Node 22.23.2; Vitest 4.1.11; existing installed dependencies.
+
+RED: current origin/main e5e0bc4956ee4f8e23267e3cb649fd3d9ea23c20
+Copied the identical test into a detached worktree and used its existing
+tests/fixtures/ws-parity-server.ts harness to start the real ws-server.
+The HTTP adapter returns 404 when the production route module is absent.
+Command: npm exec -- vitest run tests/next-ui-command-real-path.test.ts
+Package manager: npm 11.21.1
+Exit: 1
+Test Files  1 failed (1)
+Tests       13 failed (13)
+Duration    22.26s
+Failure examples: expected 404 to be 200; expected 404 to be 400.
+
+GREEN: feat/next-ui-commands, based on c0c8b912e
+Command: npm exec -- vitest run tests/next-ui-command-real-path.test.ts
+Package manager: npm 11.21.1
+Exit: 0
+Test Files  1 passed (1)
+Tests       13 passed (13)
+Duration    12.40s
+
+Coverage: POST to the real API handler, authenticated internal HTTP relay,
+real ws-server process, two authenticated WebSocket clients with no stream
+subscription, exact frames for all four kinds, recipient count, absent payload,
+unknown-kind 400, object validation, malformed JSON, UTF-8 byte bound, and the
+unchanged internal bearer gate. Both HTTP handlers enforce a 64 KiB body bound.
+
+Existing broadcast regression checks (npm 11.21.1):
+  tests/realtime-protocol-negotiation-real-path.test.ts: 7 passed
+  tests/repo-inventory-realtime-real-path.test.ts: 3 passed
+  tests/realtime-session-history-real-path.test.ts: 1 passed, 1 timed out
+    The bootstrap/poll/unsubscribe/reconnect test hit its existing 20s deadline
+    in the combined branch run, an isolated branch rerun, and unchanged main
+    e5e0bc495 (1 passed, 1 timed out; 42.68s total). No test deadlines changed.
+Combined branch invocation including the new relay test: 24 passed, 1 timed out.
+
+Static checks:
+  ESLint on all four changed TypeScript files: exit 0.
+  npm run rule-check -- --base=c0c8b912e: exit 0, 3 source files, zero violations.
+  npm run typecheck:fast initially found the already-declared perfect-freehand
+    package missing from installed dependencies. Restored lockfile version
+    1.2.3 after verifying its SHA512 integrity, without install scripts or
+    manifest changes. npm run typecheck:fast rerun: exit 0.
+  npm test -- tests/route-coverage.test.ts --experimental.fsModuleCache=false:
+    exit 0, 450 passed. The default experimental module cache initially raised
+    an ENOENT before test startup; the per-command cache override resolved it.
+
+The classification manifest also records the inherited update-next-window-apply
+real-path test, which was already present on this branch but absent from the
+manifest before regeneration.
+
+This proves server delivery. It does not claim packaged native-window acceptance.

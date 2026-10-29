@@ -4781,6 +4781,13 @@
       ]
     },
     {
+      "path": "tests/next-ui-command-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-workers-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -7499,6 +7506,12 @@
         "process-signal",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/update-next-window-apply-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
