@@ -17,6 +17,8 @@ pub(super) struct Runtime {
     workspace_ledger: Option<Ledger>,
     bootstrapped: bool,
 }
+/// The sidebar column; the header lays its toggle and search over it.
+pub(super) const WIDTH: f32 = 280.;
 pub(super) const REGISTRATION: Registration = Registration {
     initialize,
     overlay_command: true,
@@ -79,7 +81,7 @@ pub(super) const REGISTRATION: Registration = Registration {
             .child(
                 gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
                     gpui::StyleRefinement::default()
-                        .w(px(280.))
+                        .w(px(WIDTH))
                         .h_full()
                         .flex_shrink_0(),
                 ),

@@ -13,120 +13,146 @@ impl ShellFeature for Header {
 fn render(
     s: &mut Shell,
     frame: &Frame,
-    _: &mut Window,
+    window: &mut Window,
     cx: &mut Context<Shell>,
 ) -> Option<AnyElement> {
-    // The desktop workspace header, left to right: sidebar toggle, search,
-    // back and forward through visited tabs, the tab pills, then Run.
+    // The desktop header, measured from WorkspaceHeaderStrip, LeftHeaderStrip
+    // and PanelHeaderStrip. The sidebar toggle stays at x=74 (rail 60 + 14)
+    // whether the sidebar is open or not. With the sidebar open, search sits
+    // at the sidebar's right edge and back/forward start the workspace header;
+    // with it closed, toggle, search, back and forward share one row.
     record_visit(s);
     let back = adjacent(s, -1);
     let forward = adjacent(s, 1);
     let hidden = s.surfaces.sidebar.hidden;
+    let panel = super::right_panel::width(s, window);
+    let history = |id: &'static str, path, tip, target: Option<usize>, cx: &mut Context<Shell>| {
+        icon_button(id, path, 15., 1.7, tip, target.is_some()).when_some(target, |button, visit| {
+            button.on_click(cx.listener(move |this, _, window, cx| {
+                this.capture(window, cx);
+                revisit(this, visit, window, cx);
+            }))
+        })
+    };
+    let workspace = div()
+        .flex()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .items_center()
+        .gap(px(4.))
+        // 4px workspace inset, plus the strip's 10px collapsed padding, or its
+        // 8px padding after the 4px sidebar resize edge.
+        .pl(px(if hidden { 14. } else { 16. }))
+        .pr(px(8.))
+        .when(hidden, |row| {
+            row.child(sidebar_toggle(true, cx)).child(search_button(cx))
+        })
+        .child(history("header-back", BACK, "Back", back, cx))
+        .child(history("header-forward", FORWARD, "Forward", forward, cx))
+        .child(tabs(s, cx))
+        .child(
+            div()
+                .flex()
+                .flex_shrink_0()
+                .items_center()
+                .gap(px(4.))
+                .mt(px(1.3))
+                .child(super::header_tools::play(s, cx))
+                .child(super::header_tools::tools(s, cx))
+                .when(panel.is_none(), |row| {
+                    row.child(super::right_panel::toggle_button(false, cx))
+                }),
+        )
+        .when(frame.retry, |view| {
+            view.child(
+                div()
+                    .id("shell-retry")
+                    .debug_selector(|| "shell-retry".into())
+                    .cursor_pointer()
+                    .p(px(6.))
+                    .child("Retry")
+                    .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
+            )
+        });
     Some(
-        (div()
+        div()
             .flex()
             .items_center()
             .flex_shrink_0()
-            .gap(px(2.))
             .h(px(crate::theme::GEOMETRY.header))
             .text_size(px(12.))
-            // Clears the traffic lights, which extend past the rail column.
-            .pl(px(20.))
-            .pr(px(8.))
+            .pr(px(4.))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
-            .child(
-                icon_button(
-                    "header-sidebar",
-                    SIDEBAR,
-                    16.,
-                    1.8,
-                    if hidden { "Show sidebar  ⌘B" } else { "Hide sidebar  ⌘B" },
-                    true,
-                )
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.capture(window, cx);
-                    toggle_sidebar(this, window, cx);
-                })),
-            )
-            .child(
-                icon_button("header-search", SEARCH, 15., 1.8, "Search conversations  ⌘F", true)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.capture(window, cx);
-                        this.surfaces.sidebar.hidden = false;
-                        if let Some(sidebar) = this.surfaces.sidebar.view.clone() {
-                            sidebar.update(cx, |sidebar, cx| sidebar.search(window, cx));
-                        }
-                        cx.notify();
-                    })),
-            )
-            .child(
-                icon_button("header-back", BACK, 15., 1.7, "Back", back.is_some()).when_some(
-                    back,
-                    |button, visit| {
-                        button.on_click(cx.listener(move |this, _, window, cx| {
-                            this.capture(window, cx);
-                            revisit(this, visit, window, cx);
-                        }))
-                    },
-                ),
-            )
-            .child(
-                icon_button("header-forward", FORWARD, 15., 1.7, "Forward", forward.is_some())
-                    .when_some(forward, |button, visit| {
-                        button.on_click(cx.listener(move |this, _, window, cx| {
-                            this.capture(window, cx);
-                            revisit(this, visit, window, cx);
-                        }))
-                    }),
-            )
-            .child(div().w(px(4.)).flex_shrink_0())
-            .child(tabs(s, cx))
-            .child(
-                // Opens the workspace orchestrator with its composer focused, as
-                // the rail's Run button does.
-                icon_button("header-run", PLAY, 15., 1.8, "Run orchestrator", true).on_click(
-                    cx.listener(|this, _, window, cx| {
-                        this.capture(window, cx);
-                        match this.workspace_sessions().first().map(|s| s.id.clone()) {
-                            Some(id) => this.execute(Command::Message(id), window, cx),
-                            None => this.execute(Command::Setup, window, cx),
-                        }
-                    }),
-                ),
-            )
-            .when(frame.retry, |view| {
-                view.child(
+            .when(!hidden, |row| {
+                row.child(
                     div()
-                        .id("shell-retry")
-                        .debug_selector(|| "shell-retry".into())
-                        .cursor_pointer()
-                        .p(px(6.))
-                        .child("Retry")
-                        .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
+                        .w(px(super::super::sidebar::WIDTH))
+                        .h_full()
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.))
+                        .pl(px(14.))
+                        .pr(px(8.))
+                        .child(sidebar_toggle(false, cx))
+                        .child(div().flex_1())
+                        .child(search_button(cx)),
                 )
-            }))
-        .into_any_element(),
+            })
+            .child(workspace)
+            .when_some(panel, |row, width| {
+                row.child(super::right_panel::header(width, cx))
+            })
+            .into_any_element(),
     )
 }
 
-/// The desktop's 26px header icon pill (HeaderIconPill).
-fn icon_button(
-    id: &'static str,
-    path: &'static str,
-    size: f32,
-    weight: f32,
-    tip: &'static str,
-    enabled: bool,
-) -> gpui::Stateful<gpui::Div> {
+/// SidebarTogglePill: 14px panel glyph, orange while the sidebar is pinned open.
+fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
+    pill(
+        "header-sidebar",
+        if hidden { "Show sidebar  ⌘B" } else { "Hide sidebar  ⌘B" },
+        true,
+    )
+    .child(crate::icon::stroke(
+        SIDEBAR,
+        if hidden {
+            theme().text_secondary
+        } else {
+            crate::theme::brand_orange()
+        },
+        14.,
+        1.8,
+    ))
+    .on_click(cx.listener(|this, _, window, cx| {
+        this.capture(window, cx);
+        toggle_sidebar(this, window, cx);
+    }))
+}
+
+/// Search opens the command palette from the top, as the desktop's does.
+fn search_button(cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
+    icon_button("header-search", SEARCH, 16., 1.7, "Search chats  ⌘K", true).on_click(
+        cx.listener(|this, _, window, cx| {
+            super::super::palette::toggle(this, window, cx);
+            cx.notify();
+        }),
+    )
+}
+
+/// The desktop's 26px header icon pill (HeaderIconPill): 7px padding either
+/// side of the glyph, transparent at rest, hover fill, 0.35 when disabled.
+pub(super) fn pill(id: &'static str, tip: &'static str, enabled: bool) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .debug_selector(move || id.into())
         .h(px(26.))
         .min_w(px(26.))
-        .px(px(5.))
+        .px(px(7.))
         .flex()
         .flex_shrink_0()
         .items_center()
@@ -137,7 +163,17 @@ fn icon_button(
         })
         .when(!enabled, |button| button.opacity(0.35))
         .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
-        .child(crate::icon::stroke(path, theme().text_secondary, size, weight))
+}
+
+pub(super) fn icon_button(
+    id: &'static str,
+    path: &'static str,
+    size: f32,
+    weight: f32,
+    tip: &'static str,
+    enabled: bool,
+) -> gpui::Stateful<gpui::Div> {
+    pill(id, tip, enabled).child(crate::icon::stroke(path, theme().text_secondary, size, weight))
 }
 
 pub(super) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
@@ -219,11 +255,10 @@ fn select_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context
     cx.notify();
 }
 
-const SIDEBAR: &str = "M6 4h12a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z M9 4v16";
+const SIDEBAR: &str = "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z M9 3v18";
 const BACK: &str = "M19 12H5m6-6-6 6 6 6";
 const FORWARD: &str = "M5 12h14m-6-6 6 6-6 6";
-const PLAY: &str = "M7 4.5v15a.5.5 0 0 0 .77.42l11.5-7.5a.5.5 0 0 0 0-.84L7.77 4.08A.5.5 0 0 0 7 4.5Z";
-const SEARCH: &str = "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z M21 21l-4.3-4.3";
+const SEARCH: &str = "M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z M16 16l5 5";
 const CLOSE: &str = "M6 6l12 12M18 6L6 18";
 
 /// The desktop's single-colour pill glyphs (PillRuntimeGlyph), chosen by label.
@@ -234,12 +269,6 @@ fn glyph(tab: &Tab) -> &'static str {
         }
         _ => match tab.label() {
             "Terminal" => "m4 17 6-6-6-6 M12 19h8",
-            "Pull requests" => {
-                "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M13 6h3a2 2 0 0 1 2 2v7 M6 9v12"
-            }
-            "Inbox" => {
-                "M22 12h-6l-2 3h-4l-2-3H2 M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
-            }
             _ => "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M3 9h18",
         },
     }

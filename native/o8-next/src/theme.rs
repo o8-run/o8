@@ -66,6 +66,15 @@ pub fn plain_background() -> Rgba {
     })
     .background
 }
+/// Floating cards (the desktop overlay material). Opaque, because the native
+/// shell has no backdrop blur to frost a translucent card over glass.
+pub fn popover_background() -> Rgba {
+    match *SELECTED {
+        Appearance::Light => rgb(0xffffff),
+        Appearance::Glass => rgb(0x3e3f47),
+        _ => rgb(0x2c2c2e),
+    }
+}
 // --t-brand-orange in src/lib/theme/registry.ts.
 pub fn brand_orange() -> Rgba {
     rgb(0xff5a1f)

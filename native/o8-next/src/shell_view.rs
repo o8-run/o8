@@ -186,13 +186,15 @@ pub(super) fn open_window(
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(600.), px(400.))),
             // On macOS the traffic lights sit in the header band above the rail, as in
-            // the desktop shell. Elsewhere a transparent title bar needs a compositor,
-            // and bare X servers would show nothing.
+            // the desktop shell: first light centred at x=20, all three on y=20 (the
+            // position is the close button's frame origin, measured from a capture).
+            // Elsewhere a transparent title bar needs a compositor, and bare X servers
+            // would show nothing.
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("o8 next".into()),
                 appears_transparent: cfg!(target_os = "macos"),
                 traffic_light_position: cfg!(target_os = "macos")
-                    .then(|| point(px(16.), px(14.))),
+                    .then(|| point(px(13.25), px(12.25))),
             }),
             ..Default::default()
         },
