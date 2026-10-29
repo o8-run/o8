@@ -331,7 +331,15 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
     assert_eq!(decision["action"], "decision");
     assert_eq!(decision["confirmationId"], "gate");
     assert_eq!(decision["allow"], true);
-    draw(&mut visual);
+    // The card leaves once the host admits the answer.
+    for _ in 0..100 {
+        visual.run_until_parked();
+        draw(&mut visual);
+        if visual.debug_bounds("voice-confirm-allow-gate").is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     assert!(visual.debug_bounds("voice-confirm-allow-gate").is_none());
 
     // A second toggle asks the host to close; the mic stays busy until the
