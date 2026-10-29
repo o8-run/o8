@@ -429,6 +429,27 @@ fn tools(body: &Value) -> Vec<Tool> {
         .collect()
 }
 
+/// CFBundleShortVersionString from an Info.plist.
+fn plist_version(plist: &str) -> Option<String> {
+    let rest = &plist[plist.find("<key>CFBundleShortVersionString</key>")?..];
+    let start = rest.find("<string>")? + "<string>".len();
+    let end = start + rest[start..].find("</string>")?;
+    Some(rest[start..end].trim().to_string()).filter(|version| !version.is_empty())
+}
+
+/// The installed o8 version, read from the app bundle o8 next ships inside
+/// (o8.app/Contents/MacOS/o8-next). A dev build outside a bundle has none.
+fn bundle_version() -> Option<String> {
+    static VERSION: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    VERSION
+        .get_or_init(|| {
+            let exe = std::env::current_exe().ok()?;
+            let plist = exe.parent()?.parent()?.join("Info.plist");
+            plist_version(&std::fs::read_to_string(plist).ok()?)
+        })
+        .clone()
+}
+
 /// Applies a GET of the update route to the state.
 fn read(state: &mut State, body: &Value) {
     let pending = pending(body);
@@ -438,11 +459,14 @@ fn read(state: &mut State, body: &Value) {
     }
     state.pending = pending;
     let info = &body["state"]["info"];
-    if let Some(current) = info["currentVersion"]
+    if let Some(current) = body["currentVersion"]
         .as_str()
+        .or(info["currentVersion"].as_str())
         .or(info["current_version"].as_str())
     {
         state.current = Some(current.to_string());
+    } else if state.current.is_none() {
+        state.current = bundle_version();
     }
     state.phase = phase(body);
     state.progress = progress(body);
@@ -851,6 +875,9 @@ fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui:
 }
 
 fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElement {
+    if s.features.get::<State>().current.is_none() {
+        s.features.get::<State>().current = bundle_version();
+    }
     let state = s.features.get::<State>();
     let (t, _) = appear(state);
     let max_height = (viewport - 24.).clamp(160., 540.);
@@ -915,7 +942,7 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
                     .gap(px(6.))
                     .pl(px(4.))
                     .child("•")
-                    .child(div().flex_1().child(item))
+                    .child(div().flex_1().min_w_0().child(item))
             }))
             .when(more > 0, |list| {
                 list.child(
@@ -948,7 +975,9 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
     };
     let rule = || div().h(px(1.)).bg(theme().border);
 
+    // A definite width, so notes and blockers wrap inside the scrolling card.
     let body = div()
+        .w(px(PANEL_W - 2.))
         .p(px(16.))
         .flex()
         .flex_col()
@@ -981,7 +1010,6 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
                         .bg(theme().hover)
                         .cursor_pointer()
                         .when(checking, |refresh| refresh.opacity(0.5))
-                        .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Refresh updates".into())).into())
                         .child(crate::icon::stroke(REFRESH, theme().text, 14., 1.7))
                         .on_click(cx.listener(|this, _, _, cx| check_now(this, cx))),
                 ),
@@ -1243,7 +1271,7 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
                                     .flex()
                                     .gap(px(8.))
                                     .child("•")
-                                    .child(div().flex_1().child(entry))
+                                    .child(div().flex_1().min_w_0().child(entry))
                             })),
                     )
                 })

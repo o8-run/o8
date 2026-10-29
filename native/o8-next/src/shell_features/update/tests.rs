@@ -1,4 +1,4 @@
-use super::{Outcome, Phase, outcome, pending, phase};
+use super::{Outcome, Phase, outcome, pending, phase, plist_version};
 use serde_json::json;
 
 // Bodies follow src/app/api/panel/update/apply/route.ts.
@@ -66,4 +66,16 @@ fn the_native_updater_phase_follows_an_accepted_apply() {
     );
     assert_eq!(phase(&at(json!({"phase": "waiting"}))), None);
     assert_eq!(phase(&json!({"ok": true, "state": {}})), None);
+}
+
+#[test]
+fn the_installed_version_comes_from_the_bundle_plist() {
+    let plist = r#"<dict>
+	<key>CFBundleName</key>
+	<string>o8</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.815</string>
+</dict>"#;
+    assert_eq!(plist_version(plist).as_deref(), Some("0.1.815"));
+    assert_eq!(plist_version("<dict></dict>"), None);
 }

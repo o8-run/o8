@@ -63,9 +63,12 @@ fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::
                 .cursor_pointer()
                 .when(open, |button| button.bg(theme().hover))
                 .hover(|button| button.bg(theme().hover))
-                .tooltip(|_, cx| {
-                    cx.new(|_| crate::icon::Tip("Account and settings".into()))
-                        .into()
+                // The tooltip would sit over the open menu.
+                .when(!open, |button| {
+                    button.tooltip(|_, cx| {
+                        cx.new(|_| crate::icon::Tip("Account and settings".into()))
+                            .into()
+                    })
                 })
                 .child(crate::icon::stroke(
                     ACCOUNT,
@@ -306,10 +309,11 @@ fn menu(s: &mut Shell, viewport_width: f32, cx: &mut Context<Shell>) -> gpui::An
                     ),
             )
         });
+    // SettingsQuickDrawer opens 8 px above the button, left-aligned to it.
     div()
         .absolute()
-        .left(px(44. + 8.))
-        .bottom(px(0.))
+        .left(px(0.))
+        .top(px(-8.))
         .child(
             gpui::deferred(
                 gpui::anchored()
