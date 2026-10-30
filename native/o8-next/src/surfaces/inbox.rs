@@ -46,9 +46,13 @@ fn create(
                 this.capture(window, cx);
                 this.persist();
             } else {
-                this.notice =
-                    "Related session is unavailable. Refresh the server connection and try again."
-                        .into();
+                toasts::show(
+                    toasts::Kind::Info,
+                    "Related session is unavailable. Refresh the server connection and try again.",
+                    vec![],
+                    Some(toasts::NOTICE_TIMEOUT),
+                    cx,
+                );
                 cx.notify();
             }
         },

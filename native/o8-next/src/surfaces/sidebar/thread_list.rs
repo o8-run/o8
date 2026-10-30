@@ -710,6 +710,13 @@ impl ThreadList {
             .iter()
             .find(|session| session.id == id)
             .and_then(|session| session.repo_path.clone());
+        let archive_notice = patch.get("archivedAt").map(|value| {
+            if value.is_null() {
+                "Thread restored."
+            } else {
+                "Thread archived."
+            }
+        });
         let task = cx
             .background_executor()
             .spawn(async move { client.mutate_sidebar(workspace.as_deref(), &id, patch) });
@@ -722,6 +729,15 @@ impl ThreadList {
                     && this.rename == draft_owner;
                 match result {
                     Ok(()) => {
+                        if let Some(message) = archive_notice {
+                            crate::shell::toasts::show(
+                                crate::shell::toasts::Kind::Chat,
+                                message,
+                                vec![],
+                                Some(crate::shell::toasts::CHAT_TIMEOUT),
+                                cx,
+                            );
+                        }
                         if renaming && current_draft {
                             this.edit_generation += 1;
                             if let Some(id) = this.rename.take() {

@@ -88,6 +88,15 @@ macro_rules! register_shell_feature {
 }
 include!(concat!(env!("OUT_DIR"), "/shell_features.rs"));
 
+/// Stable public API; the host remains one discovered shell feature.
+pub(crate) mod toasts_api {
+    #[cfg(test)]
+    pub(crate) use super::toasts::texts;
+    pub(crate) use super::toasts::{
+        Action, CHAT_TIMEOUT, ERROR_TIMEOUT, Kind, NOTICE_TIMEOUT, ToastId, dismiss, show,
+    };
+}
+
 // GPUI entities and subscriptions stay window-local, never in the static registry.
 #[derive(Default)]
 pub(super) struct State(HashMap<TypeId, Box<dyn Any>>);

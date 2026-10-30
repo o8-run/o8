@@ -91,7 +91,7 @@ pub(super) fn open_pr(
     let id = format!("{repo}#{number}");
     if !s.features.get::<Panel>().contexts.prs.contains_key(&id) {
         let Some(view) = registered_view(s, &json!({"repo":repo,"number":number}), w, cx) else {
-            s.notice = "Pull requests are unavailable.".into();
+            toasts::info("Pull requests are unavailable.", cx);
             cx.notify();
             return;
         };

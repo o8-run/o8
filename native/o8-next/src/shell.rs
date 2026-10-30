@@ -38,8 +38,7 @@ pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --ser
 #[path = "surface_registry.rs"]
 mod registry;
 use registry::{
-    EmptyState, NavPosition, Registration, ShellView, WorkspaceLoad, github_item,
-    register_surfaces,
+    EmptyState, NavPosition, Registration, ShellView, WorkspaceLoad, github_item, register_surfaces,
 };
 
 register_surfaces! {
@@ -69,6 +68,7 @@ register_surfaces! {
 
 #[path = "shell_features.rs"]
 mod features;
+pub(crate) use features::toasts_api as toasts;
 
 pub struct Shell {
     features: features::State,
@@ -381,7 +381,13 @@ impl Shell {
             let saved = self.state.workspaces.entry(workspace).or_default();
             let index = saved.tabs.iter().position(|t| t == &tab);
             if index.is_none() && saved.tabs.len() >= 32 {
-                self.notice = "Close a surface before opening another.".into();
+                toasts::show(
+                    toasts::Kind::Info,
+                    "Close a surface before opening another.",
+                    vec![],
+                    Some(toasts::NOTICE_TIMEOUT),
+                    cx,
+                );
                 return;
             }
             saved.active = index.unwrap_or_else(|| {

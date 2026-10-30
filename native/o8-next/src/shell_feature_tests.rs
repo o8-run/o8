@@ -104,7 +104,14 @@ fn ui_command_frames_reach_settings_panel_tools_and_the_draft(cx: &mut TestAppCo
                 .to_string()
         })
     };
-    let notice = |visual: &mut VisualTestContext| shell.read_with(visual, |s, _| s.notice.clone());
+    let notice = |visual: &mut VisualTestContext| {
+        shell.read_with(visual, |s, cx| {
+            crate::shell::toasts::texts(cx)
+                .last()
+                .cloned()
+                .unwrap_or_else(|| s.notice.clone())
+        })
+    };
 
     send(
         symon(json!({"surface": "orchestrator_draft", "text": "first"})),
@@ -208,7 +215,12 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        let notice = shell.read_with(visual, |s, _| s.notice.clone());
+        let notice = shell.read_with(visual, |s, cx| {
+            crate::shell::toasts::texts(cx)
+                .last()
+                .cloned()
+                .unwrap_or_else(|| s.notice.clone())
+        });
         panic!("the voice host never received {count} controls; notice: {notice}");
     };
     let notice = |visual: &mut VisualTestContext| shell.read_with(visual, |s, _| s.notice.clone());
@@ -411,7 +423,12 @@ fn dictation_mic_fills_the_draft_and_sends_the_final_transcript(cx: &mut TestApp
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        let notice = shell.read_with(visual, |s, _| s.notice.clone());
+        let notice = shell.read_with(visual, |s, cx| {
+            crate::shell::toasts::texts(cx)
+                .last()
+                .cloned()
+                .unwrap_or_else(|| s.notice.clone())
+        });
         panic!("the voice host never received {count} controls; notice: {notice}");
     };
     let tap = |visual: &mut VisualTestContext| {
@@ -544,7 +561,10 @@ fn dictation_mic_fills_the_draft_and_sends_the_final_transcript(cx: &mut TestApp
     }
     assert_eq!(mic(&mut visual), DictationState::Off);
     assert_eq!(
-        shell.read_with(&visual, |s, _| s.notice.clone()),
+        shell.read_with(&visual, |s, cx| crate::shell::toasts::texts(cx)
+            .last()
+            .cloned()
+            .unwrap_or_else(|| s.notice.clone())),
         "Another voice input is active."
     );
 

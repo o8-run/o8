@@ -44,7 +44,7 @@ fn create(
                 {
                     shell.execute(Command::Session(session.id), window, cx);
                 } else {
-                    shell.notice = "This worker is not available in the selected workspace. Refresh the session list.".into();
+                    toasts::show(toasts::Kind::Info, "This worker is not available in the selected workspace. Refresh the session list.", vec![], Some(toasts::NOTICE_TIMEOUT), cx);
                     cx.notify();
                 }
             }
