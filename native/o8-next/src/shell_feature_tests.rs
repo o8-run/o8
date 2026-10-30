@@ -368,6 +368,229 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
 }
 
 #[gpui::test]
+fn dictation_mic_fills_the_draft_and_sends_the_final_transcript(cx: &mut TestAppContext) {
+    use crate::ui::{DictationState, VoiceState};
+    let fixture = Fixture::start_mode(false, "--voice-host");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("dictation.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    let (first, second) = ("thoughts-composer-first", "thoughts-composer-second");
+    shell.update_in(&mut visual, |s, window, cx| {
+        s.execute(Command::Session(first.into()), window, cx)
+    });
+    ready(&shell, &mut visual);
+    let view = shell.read_with(&visual, |s, _| {
+        match s.content.get(&s.key(&s.active().unwrap())) {
+            Some(Content::Session(view)) => view.clone(),
+            _ => panic!("session"),
+        }
+    });
+    view.update(&mut visual, |view, cx| view.dictate("Draft:", cx));
+    let send = |kind: &str, payload: Value, visual: &mut VisualTestContext| {
+        let frame = json!({"type": "ui-command", "kind": kind, "payload": payload});
+        shell.update_in(visual, |s, window, cx| s.ui_command(&frame, window, cx));
+        visual.run_until_parked();
+        draw(visual);
+    };
+    let controls = |count: usize, visual: &mut VisualTestContext| {
+        for _ in 0..200 {
+            visual.run_until_parked();
+            let sent = fixture
+                .client
+                .get::<Value>("/api/next/voice-host", &[])
+                .unwrap()["controls"]
+                .as_array()
+                .cloned()
+                .unwrap();
+            if sent.len() >= count {
+                return sent;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let notice = shell.read_with(visual, |s, _| s.notice.clone());
+        panic!("the voice host never received {count} controls; notice: {notice}");
+    };
+    let tap = |visual: &mut VisualTestContext| {
+        draw(visual);
+        let mic = visual
+            .debug_bounds("composer-microphone")
+            .expect("the composer mic is visible");
+        visual.simulate_click(mic.center(), gpui::Modifiers::default());
+        visual.run_until_parked();
+        draw(visual);
+    };
+    let mic = |visual: &mut VisualTestContext| view.read_with(visual, |view, _| view.dictation());
+    let draft = |visual: &mut VisualTestContext| view.read_with(visual, |view, cx| view.draft(cx));
+
+    // A tap asks the host for the microphone, for this chat, on a binding of
+    // its own beside Live's.
+    tap(&mut visual);
+    let start = controls(1, &mut visual)[0].clone();
+    assert_eq!(start["action"], "dictation-start");
+    assert_eq!(start["threadId"], first);
+    assert!(
+        start["binding"]
+            .as_str()
+            .is_some_and(|binding| binding.starts_with("[\"composer\"")),
+        "dictation has its own binding: {start}"
+    );
+    assert_eq!(mic(&mut visual), DictationState::Starting);
+    let scope = json!({"binding": start["binding"], "nonce": start["nonce"],
+        "threadId": start["threadId"], "repoPath": start["repoPath"],
+        "requestId": start["requestId"], "hostId": "host"});
+    let with = |extra: Value| {
+        let mut frame = scope.clone();
+        frame
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        frame
+    };
+    send(
+        "dictation-state",
+        with(json!({"state": "listening"})),
+        &mut visual,
+    );
+    assert_eq!(mic(&mut visual), DictationState::Listening);
+
+    // Snapshots replace what follows the draft; an earlier recording's frames
+    // change nothing.
+    send(
+        "dictation-text",
+        with(json!({"text": "check the", "final": false})),
+        &mut visual,
+    );
+    assert_eq!(draft(&mut visual), "Draft: check the");
+    send(
+        "dictation-text",
+        with(json!({"text": "check the build", "final": false})),
+        &mut visual,
+    );
+    assert_eq!(draft(&mut visual), "Draft: check the build");
+    let mut stale = with(json!({"text": "ignored", "final": false}));
+    stale["requestId"] = json!("m-earlier");
+    send("dictation-text", stale, &mut visual);
+    assert_eq!(draft(&mut visual), "Draft: check the build");
+
+    // The next tap stops and sends the polished transcript through the chat's
+    // own queue.
+    tap(&mut visual);
+    let stop = controls(2, &mut visual)[1].clone();
+    assert_eq!(stop["action"], "dictation-stop");
+    assert_eq!(stop["submit"], true);
+    assert_eq!(stop["nonce"], start["nonce"]);
+    assert_eq!(mic(&mut visual), DictationState::Finishing);
+    send(
+        "dictation-text",
+        with(json!({"text": "Check the build.", "final": true})),
+        &mut visual,
+    );
+    let repo = start["repoPath"].as_str().unwrap().to_owned();
+    let mut texts = vec![];
+    for _ in 0..200 {
+        visual.run_until_parked();
+        let queue: Value = fixture
+            .client
+            .get(
+                "/api/orchestrator/composer-queue",
+                &[("repoPath", &repo), ("threadId", first)],
+            )
+            .unwrap();
+        texts = queue["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item["payload"]["text"].as_str().map(String::from))
+            .collect::<Vec<_>>();
+        if texts.iter().any(|text| text == "Draft: Check the build.") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        texts.iter().any(|text| text == "Draft: Check the build."),
+        "the final transcript was sent: {texts:?}"
+    );
+    send(
+        "dictation-state",
+        with(json!({"state": "idle"})),
+        &mut visual,
+    );
+    assert_eq!(mic(&mut visual), DictationState::Off);
+
+    // The waveform stays GPT Live: dictation started no Live session.
+    assert!(
+        controls(2, &mut visual)
+            .iter()
+            .all(|control| control["action"] != "start")
+    );
+    assert_eq!(
+        view.read_with(&visual, |view, _| view.voice()),
+        VoiceState::Off
+    );
+
+    // A microphone the host still holds refuses another recording and says so.
+    tap(&mut visual);
+    for _ in 0..100 {
+        visual.run_until_parked();
+        if mic(&mut visual) == DictationState::Off {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(mic(&mut visual), DictationState::Off);
+    assert_eq!(
+        shell.read_with(&visual, |s, _| s.notice.clone()),
+        "Another voice input is active."
+    );
+
+    // Opening another chat mid-recording cancels it and puts the draft back.
+    fixture
+        .client
+        .request(
+            "POST",
+            &fixture
+                .client
+                .url("/api/next/voice-host/dictation-fixture")
+                .unwrap(),
+        )
+        .send_json(json!({"state": "idle"}))
+        .unwrap();
+    let before = draft(&mut visual);
+    tap(&mut visual);
+    let sent = controls(3, &mut visual);
+    let restart = sent.last().unwrap().clone();
+    assert_eq!(restart["action"], "dictation-start");
+    let mut partial = with(json!({"text": "stray words", "final": false}));
+    for key in ["nonce", "requestId"] {
+        partial[key] = restart[key].clone();
+    }
+    send(
+        "dictation-state",
+        {
+            let mut state = partial.clone();
+            state["state"] = json!("listening");
+            state
+        },
+        &mut visual,
+    );
+    send("dictation-text", partial, &mut visual);
+    assert!(draft(&mut visual).ends_with("stray words"));
+    shell.update_in(&mut visual, |s, window, cx| {
+        s.execute(Command::Session(second.into()), window, cx)
+    });
+    let cancel = controls(4, &mut visual).last().unwrap().clone();
+    assert_eq!(cancel["action"], "dictation-stop");
+    assert_eq!(cancel["submit"], false);
+    assert_eq!(draft(&mut visual), before);
+    assert_eq!(mic(&mut visual), DictationState::Off);
+}
+
+#[gpui::test]
 fn sidebar_edge_follows_the_pointer_from_the_press(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (shell, mut visual) = open(
