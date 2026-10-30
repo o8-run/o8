@@ -125,3 +125,28 @@ pub(super) fn save(
     }
     Ok(body["mtimeMs"].as_f64())
 }
+
+/// Structured status/body transport shared by notes and the existing Files I/O.
+pub(super) fn json_request(
+    client: &Client,
+    method: &str,
+    path: &str,
+    query: &[(&str, &str)],
+    body: Option<Value>,
+) -> Result<(u16, Value), String> {
+    let mut url = client.url(path).map_err(|_| "Invalid file route")?;
+    url.query_pairs_mut().extend_pairs(query.iter().copied());
+    let request = client
+        .request(method, &url)
+        .timeout(std::time::Duration::from_secs(30));
+    let response = match body {
+        Some(body) => request.send_json(body),
+        None => request.call(),
+    };
+    let response = match response {
+        Ok(r) | Err(ureq::Error::Status(_, r)) => r,
+        Err(_) => return Err("Could not reach the selected server.".into()),
+    };
+    let status = response.status();
+    Ok((status, Client::read(response)?))
+}

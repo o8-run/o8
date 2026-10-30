@@ -39,6 +39,7 @@ const server = createServer(async (req, res) => {
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const request = new NextRequest(url, { method: req.method, headers: { 'content-type': 'application/json', ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}) }, ...(['POST', 'PUT'].includes(req.method!) ? { body: Buffer.concat(chunks) } : {}) });
     const route = url.pathname;
+    if (chunks.length) writeFileSync(join(root, 'last-body.json'), Buffer.concat(chunks));
     // Simulate an older server's incomplete fallback, enabled only by
     // the regression test. Other tests exercise the production handlers.
     const fallbackPath = join(root, 'fallback-files.json');
@@ -48,7 +49,7 @@ const server = createServer(async (req, res) => {
     const delayPath = join(root, 'save-delay-ms');
     if (['POST', 'PUT'].includes(req.method!) && existsSync(delayPath)) await new Promise(resolve => setTimeout(resolve, Number(readFileSync(delayPath, 'utf8'))));
     const fault = route === '/api/review/workspace' ? 'changes-error' : route === '/api/panel/file-diff' ? 'diff-error' : '';
-    let response = fault && existsSync(join(root, fault)) ? Response.json({ error: 'Owned fixture unavailable' }, { status: 503 }) : route === '/api/review/workspace' ? await (await import('../../../../src/app/api/review/workspace/route')).GET(request) : route === '/api/panel/file-diff' ? await (await import('../../../../src/app/api/panel/file-diff/route')).GET(request) : fallback ? Response.json(fallback) : route === '/api/v2/files/quick-docs' ? await docs.GET(request)
+    let response = route === '/api/repo-spec' ? await (await import('../../../../src/app/api/repo-spec/route'))[req.method as 'GET' | 'PUT' | 'POST'](request) : fault && existsSync(join(root, fault)) ? Response.json({ error: 'Owned fixture unavailable' }, { status: 503 }) : route === '/api/review/workspace' ? await (await import('../../../../src/app/api/review/workspace/route')).GET(request) : route === '/api/panel/file-diff' ? await (await import('../../../../src/app/api/panel/file-diff/route')).GET(request) : fallback ? Response.json(fallback) : route === '/api/v2/files/quick-docs' ? await docs.GET(request)
         : route === '/api/v2/files' ? req.method === 'POST' ? await preview.POST(request) : await preview.GET(request) : route === '/api/panel/file-io' ? req.method === 'PUT' ? await fileIo.PUT(request) : await fileIo.GET(request) : route === '/api/panel/file-asset' ? await asset.GET(request) : await files.GET(request);
     if (req.method === 'GET' && route === '/api/v2/files' && existsSync(join(root, 'omit-content-hash'))) {
       const status = response.status; const body = await response.json(); delete body.contentHash;
