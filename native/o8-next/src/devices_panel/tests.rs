@@ -288,6 +288,16 @@ fn wait(shell: &gpui::Entity<Shell>, cx: &mut VisualTestContext, selector: &'sta
 }
 fn click(shell: &gpui::Entity<Shell>, cx: &mut VisualTestContext, selector: &'static str) {
     wait(shell, cx, selector);
+    // Loading controls already have bounds but reject input. Wait for the
+    // enabled paint (disabled is 0.6, including any parent animation opacity).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while cx
+        .debug_opacity(selector)
+        .is_none_or(|opacity| opacity <= 0.6)
+    {
+        pump(shell, cx);
+        assert!(Instant::now() < deadline, "disabled {selector}");
+    }
     let p = cx.debug_bounds(selector).unwrap().center();
     cx.simulate_click(p, gpui::Modifiers::default());
     pump(shell, cx);
@@ -316,7 +326,13 @@ fn devices_setup_and_open_stages_disable_duplicate_actions(cx: &mut TestAppConte
     click(&s, &mut v, "devices-open");
     requested(&s, &mut v, &f, "install");
     wait(&s, &mut v, "devices-stage-installing");
-    click(&s, &mut v, "devices-open");
+    assert!(
+        v.debug_opacity("devices-open")
+            .is_some_and(|opacity| opacity <= 0.6)
+    );
+    let disabled = v.debug_bounds("devices-open").unwrap();
+    v.simulate_click(disabled.center(), Default::default());
+    pump(&s, &mut v);
     assert_eq!(
         f.logs().iter().filter(|r| r["action"] == "install").count(),
         1
