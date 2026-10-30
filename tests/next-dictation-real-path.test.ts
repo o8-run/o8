@@ -74,7 +74,7 @@ it('drives the actual route, WS bridge and textarea-free native host', async () 
   await act(async () => root.render(createElement(Fragment, null, createElement(Headless), createElement(ChatLiveHost))));
   await vi.waitFor(async () => expect((await realFetch(`${origin}/api/next/voice-host`, { headers: { authorization: `Bearer ${hardware.token}` } })).status).toBe(200), { timeout: 8000 });
   expect((await post({ action: 'dictation-start', requestId: 'dictate-start', ...target })).status).toBe(202);
-  await vi.waitFor(() => expect(hardware.invoke).toHaveBeenCalledWith('o8_stt_start', { exclusive: true }));
+  await vi.waitFor(() => expect(hardware.invoke).toHaveBeenCalledWith('o8_stt_start', { exclusive: true, voiceHost: expect.objectContaining(target) }));
   expect(node.querySelector('textarea')).toBeNull();
   await received('dictation-state', target.nonce, { state: 'listening' });
   const sessionId = hardware.native;
@@ -146,12 +146,50 @@ it('keeps admitting sessions beyond its bounded request receipt cache', async ()
   await received('dictation-state', 'many-129', { state: 'error', requestId: 'reuse-recent' });
   hardware.native = 0;
 }, 30_000);
+it('relays Fn takeover as idle and discards late text without stopping Fn', async () => {
+  const next = { ...target, nonce: 'fn-takeover' };
+  expect((await post({ action: 'dictation-start', requestId: 'fn-takeover-start', ...next })).status).toBe(202);
+  await received('dictation-state', next.nonce, { state: 'listening' });
+  const sessionId = hardware.native;
+  hardware.native = ++hardware.next; // Native Fn admission replaces only this capture.
+  const fnSession = hardware.native;
+  await nativeEvent({ type: 'status', origin: 'in-window', sessionId, text: 'Stopped by Fn' });
+  await received('dictation-state', next.nonce, { state: 'idle', error: 'Stopped by Fn' });
+  await nativeEvent({ type: 'polished', origin: 'in-window', sessionId, text: 'Discard this text' });
+  expect(frames.some(frame => frame.kind === 'dictation-text' && frame.payload?.nonce === next.nonce)).toBe(false);
+  expect(hardware.native).toBe(fnSession);
+  expect(hardware.invoke).not.toHaveBeenCalledWith('o8_stt_stop', expect.objectContaining({ sessionId: fnSession }));
+  hardware.native = 0;
+});
+it('cancels its native session when the host document leaves', async () => {
+  const next = { ...target, nonce: 'page-leaving' };
+  expect((await post({ action: 'dictation-start', requestId: 'page-leaving-start', ...next })).status).toBe(202);
+  await received('dictation-state', next.nonce, { state: 'listening' });
+  const sessionId = hardware.native;
+  await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+  await vi.waitFor(() => expect(hardware.invoke).toHaveBeenCalledWith('o8_stt_stop', { sessionId, cancel: true }));
+  await received('dictation-state', next.nonce, { state: 'idle' });
+  expect(hardware.native).toBe(0);
+});
 it('releases its exact native session on transport loss', async () => {
   const next = { ...target, nonce: 'disconnect' };
   expect((await post({ action: 'dictation-start', requestId: 'disconnect-start', ...next })).status).toBe(202);
   await received('dictation-state', next.nonce, { state: 'listening' });
   const sessionId = hardware.native;
   await act(async () => hardware.socket!.close());
-  await vi.waitFor(() => expect(hardware.invoke).toHaveBeenCalledWith('o8_stt_stop', { sessionId }));
+  await vi.waitFor(() => expect(hardware.invoke).toHaveBeenCalledWith('o8_stt_stop', { sessionId, cancel: true }));
   await vi.waitFor(() => expect(hardware.native).toBe(0));
+});
+it('retires expired dictation before accepting a late ready receipt from the same host', async () => {
+  const { VoiceHostBroker } = await import('@/lib/ws-server/voice-host');
+  let now = 1000;
+  const broker = new VoiceHostBroker(() => {}, () => now);
+  expect(broker.request({ action: 'ready', hostId: 'expired-host' }).status).toBe(200);
+  expect(broker.request({ action: 'dictation-start', requestId: 'expired-start', ...target }).status).toBe(202);
+  now += 15_001;
+  expect(broker.state().status).toBe(503);
+  expect(broker.request({ action: 'ready', hostId: 'expired-host' }).status).toBe(200);
+  expect(broker.state().body.dictation).toBeNull();
+  expect(broker.ui({ kind: 'dictation-text', payload: { ...target, hostId: 'expired-host',
+    requestId: 'expired-start', text: 'Late result', final: true } })).toMatchObject({ status: 409 });
 });

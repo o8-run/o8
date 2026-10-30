@@ -48,6 +48,23 @@ impl Claims {
         self.pending_exclusive = true;
         Ok(())
     }
+    fn reserve_system_native(&mut self, session: u64) -> Result<Vec<u64>, String> {
+        if self.browser.is_some() || self.pending_native.is_some() && !self.pending_exclusive {
+            return Err(BUSY.into());
+        }
+        let mut cancelled = Vec::new();
+        if self.native_exclusive {
+            cancelled.extend(self.native.take());
+            self.native_exclusive = false;
+        }
+        if self.pending_exclusive {
+            cancelled.extend(self.pending_native.take());
+            self.pending_exclusive = false;
+        }
+        // Reserve Fn in the same critical section that releases headless input.
+        self.reserve_native(session)?;
+        Ok(cancelled)
+    }
     fn activate_native(&mut self, session: u64) -> Result<(), String> {
         if self.pending_native != Some(session) {
             return Err("Voice input reservation expired.".into());
@@ -147,6 +164,19 @@ pub(crate) fn reserve_native_exclusive(session: u64) -> Result<NativeInput, Stri
         .reserve_native_exclusive(session)?;
     Ok(NativeInput { session })
 }
+pub(crate) fn reserve_system_native(session: u64) -> Result<(NativeInput, Vec<u64>), String> {
+    let cancelled = CLAIMS
+        .lock()
+        .map_err(|_| "Voice input ownership unavailable.")?
+        .reserve_system_native(session)?;
+    Ok((NativeInput { session }, cancelled))
+}
+pub(crate) fn release_cancelled_native(session: u64) {
+    if let Ok(mut claims) = CLAIMS.lock() {
+        claims.release_native(session);
+        claims.release_pending(session);
+    }
+}
 /// Current and reserved native input own dictation; the STT session ID is only
 /// a monotonically advancing teardown fence. Browser Live may share visual capture.
 pub(crate) fn native_in_use() -> bool {
@@ -182,6 +212,24 @@ mod tests {
     use super::*;
     use tauri::test::{get_ipc_response, mock_builder, MockRuntime, INVOKE_KEY};
     use tauri::Manager;
+    #[test]
+    fn fn_reservation_atomically_preempts_active_and_pending_exclusive_input() {
+        for pending in [false, true] {
+            let mut claims = Claims::default();
+            claims.reserve_native_exclusive(1).unwrap();
+            if !pending {
+                claims.activate_native(1).unwrap();
+            }
+            assert_eq!(claims.reserve_system_native(2).unwrap(), vec![1]);
+            assert!(claims.browser("live").is_err());
+            assert!(claims.reserve_native_exclusive(3).is_err());
+            claims.release_native(1);
+            claims.release_pending(1);
+            claims.activate_native(2).unwrap();
+            assert_eq!(claims.native, Some(2));
+            assert!(!claims.native_exclusive);
+        }
+    }
     #[test]
     fn exclusive_dictation_refuses_live_fn_and_stale_cleanup() {
         let mut claims = Claims::default();

@@ -27,7 +27,7 @@ export class VoiceHostBroker {
     return JSON.stringify([threadId, repoPath, queueItemId]);
   }
   state(): Result {
-    return this.available() ? result(200, { ok: true, available: true, active: this.active, dictation: this.dictation, confirmations: [...this.confirmations.values()].filter(value => Number(value.expiresAt) > this.now()) })
+    return this.available() ? result(200, { ok: true, available: true, hostId: this.hostId, active: this.active, dictation: this.dictation, confirmations: [...this.confirmations.values()].filter(value => Number(value.expiresAt) > this.now()) })
       : result(503, { ok: false, available: false, code: 'VOICE_HOST_UNAVAILABLE' });
   }
   request(input: unknown): Result {
@@ -43,7 +43,9 @@ export class VoiceHostBroker {
     }
     if (body.action === 'ready') {
       if (!voiceHostId(body.hostId)) return invalid();
-      if (this.available() && this.hostId !== body.hostId) return conflict();
+      const available = this.available();
+      if (!available) this.dictation = null;
+      if (available && this.hostId !== body.hostId) return conflict();
       if (this.hostId !== body.hostId) {
         this.active = null; this.dictation = null; this.delegations.clear(); this.requests.clear(); this.terminals.clear(); this.confirmations.clear();
       }

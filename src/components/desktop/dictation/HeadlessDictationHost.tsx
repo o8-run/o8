@@ -35,11 +35,13 @@ export function HeadlessDictationHost() {
     window.addEventListener('o8:voice-host-dictation-command', command);
     window.addEventListener('o8:voice-host-stop-all', stop);
     window.addEventListener('o8:voice-host-ready', replay);
+    window.addEventListener('pagehide', stop);
     return () => {
       disposed = true; controller.dispose();
       window.removeEventListener('o8:voice-host-dictation-command', command);
       window.removeEventListener('o8:voice-host-stop-all', stop);
       window.removeEventListener('o8:voice-host-ready', replay);
+      window.removeEventListener('pagehide', stop);
       void ready.then(unlisten => unlisten()).catch(() => {});
     };
   }, []);
