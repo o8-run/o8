@@ -24,6 +24,7 @@ const bootstrapCommands = new Set([
   'npm ci --prefer-offline',
   `npm install -g "$(node -p 'require("./package.json").packageManager')"`,
 ]);
+const integrationPolicyCommand = 'node scripts/ci/prepare-integration-policy.mjs';
 
 function requireCondition(condition, message) {
   if (!condition) throw new Error(`verify:ci coverage: ${message}`);
@@ -266,6 +267,13 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   }), 'integration comparison refs need a verify:ci equivalent');
   const integrationRun = integration.steps.find(step => step.run === 'npm run test:integration -- ${{ steps.select.outputs.files }}');
   requireCondition(integrationRun?.if === "steps.select.outputs.count != '0'", 'integration command changed');
+  const policySteps = integration.steps.filter(step => step.run === integrationPolicyCommand);
+  const integrationPolicy = policySteps[0];
+  requireCondition(policySteps.length === 1
+    && isDeepStrictEqual(Object.fromEntries(Object.entries(integrationPolicy).filter(([key]) => key !== 'name')), {
+      if: "steps.select.outputs.count != '0'", run: integrationPolicyCommand,
+    }) && integration.steps.indexOf(integrationPolicy) < integration.steps.indexOf(integrationRun),
+  'integration immutable policy prerequisite needs a verify:ci equivalent');
   const browserCondition = "steps.select.outputs.browser == 'true'";
   const browserSteps = integration.steps.filter(step => step.if === browserCondition
     && step.run === 'npx --no-install playwright-core install --with-deps chromium');
@@ -273,7 +281,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   for (const step of integration.steps.filter(step => step.run)) {
     requireCondition(step.shell === undefined && step['working-directory'] === undefined, 'unsupported integration execution metadata');
     requireCondition(step === selection || browserSteps.includes(step) || (step.if === "steps.select.outputs.count != '0'"
-      && (bootstrapCommands.has(step.run.trim()) || step === integrationRun)),
+      && (bootstrapCommands.has(step.run.trim()) || step === integrationRun || step === integrationPolicy)),
     'integration step needs a verify:ci equivalent');
   }
   const full = jobs['integration-weekly'];
@@ -288,6 +296,13 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       uses: packageAction, with: { group: 'resources' },
     }), 'full integration package prerequisites need a verify:ci equivalent');
   const fullRun = full.steps.find(step => step.run === 'npm run test:integration');
+  const fullPolicySteps = full.steps.filter(step => step.run === integrationPolicyCommand);
+  const fullPolicy = fullPolicySteps[0];
+  requireCondition(fullPolicySteps.length === 1
+    && isDeepStrictEqual(Object.fromEntries(Object.entries(fullPolicy).filter(([key]) => key !== 'name')), {
+      run: integrationPolicyCommand,
+    }) && full.steps.indexOf(fullPolicy) < full.steps.indexOf(fullRun),
+  'full integration immutable policy prerequisite needs a verify:ci equivalent');
   const fullBrowser = full.steps.find(step => step.run === 'npx --no-install playwright-core install --with-deps chromium');
   const fullClassification = full.steps.find(step => step.run === 'npm run test:classification:check');
   requireCondition(fullRun && !fullRun.if && fullBrowser && !fullBrowser.if
@@ -296,7 +311,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   'full integration commands and prerequisites need a verify:ci equivalent');
   for (const step of full.steps.filter(step => step.run)) {
     requireCondition(!step['continue-on-error'] && !step.shell && !step['working-directory']
-      && (step === fullRun || step === fullBrowser || step === fullClassification
+      && (step === fullRun || step === fullBrowser || step === fullClassification || step === fullPolicy
         || (!step.if && bootstrapCommands.has(step.run.trim()))),
     'full integration step needs a verify:ci equivalent');
   }
@@ -304,6 +319,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     checks.push({ id: 'integration-weekly', after: dependencies(full), name: 'Weekly Integration Tests (all shards)',
       timeoutMs: full['timeout-minutes'] * 60_000,
       steps: [
+        { ...runStep(fullPolicy, full, 1, scripts), budgetGroup: 1, stopOnFailure: true },
         { ...runStep(fullBrowser, full, 1, scripts), budgetGroup: 1 },
         { ...runStep(fullClassification, full, 1, scripts), budgetGroup: 1 },
         ...full.strategy.matrix.shard.map(shard => ({ ...runStep(fullRun, full, shard, scripts), budgetGroup: shard })),
@@ -311,6 +327,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     });
   } else {
     checks.push({ id: 'integration-changed', after: dependencies(integration), name: integration.name, steps: [
+      { ...runStep(integrationPolicy, integration, undefined, scripts), requiresIntegration: true, stopOnFailure: true },
       ...browserSteps.map(step => ({ ...runStep(step, integration, undefined, scripts), requiresBrowser: true })),
       { ...runStep({ ...integrationRun, run: 'npm run test:integration --' }, integration, undefined, scripts), selectedFiles: true },
     ] });
