@@ -11,6 +11,9 @@ fn sidebar(shell: &Entity<Shell>, cx: &VisualTestContext) -> Entity<ThreadList> 
 fn settle(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     cx.run_until_parked();
     shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+    // Finish work that this tick starts before checking quiescence or issuing
+    // the next action on the deterministic executor.
+    cx.run_until_parked();
     draw(cx);
 }
 #[track_caller]
@@ -27,7 +30,8 @@ fn wait(
         }
         assert!(
             start.elapsed() < Duration::from_secs(10),
-            "fixture state must become visible"
+            "fixture state must become visible: {}",
+            sidebar(shell, cx).read_with(cx, |s, _| s.diagnostic())
         );
         std::thread::sleep(Duration::from_millis(10));
     }
