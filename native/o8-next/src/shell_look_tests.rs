@@ -18,7 +18,8 @@ fn correction_rebase_keeps_header_without_secondary_labels(cx: &mut TestAppConte
         visual.debug_bounds("Commands (Ctrl+K / Cmd+K)").is_none(),
         "rebasing the frame extension must not restore permanent shortcut text"
     );
-    assert!(visual.debug_bounds("workspace-switcher").is_some());
+    // The header's switcher became back/forward and search (166037ad2).
+    assert!(visual.debug_bounds("header-back").is_some());
 }
 
 #[cfg(target_os = "linux")]
@@ -367,8 +368,8 @@ fn correction_placement_uses_the_single_shell_header(cx: &mut TestAppContext) {
             "embedded conversation must not restore a Brain control"
         );
         assert!(
-            cx.debug_bounds("workspace-switcher").is_some(),
-            "workspace navigation must retain the single shell header"
+            cx.debug_bounds("header-back").is_some(),
+            "navigation must stay in the single shell header"
         );
         assert!(cx.debug_bounds("composer-card").is_some());
     }
