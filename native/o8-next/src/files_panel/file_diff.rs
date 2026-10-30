@@ -67,7 +67,7 @@ fn tone(kind: Kind) -> (gpui::Rgba, gpui::Rgba) {
         Kind::Del => (theme().danger_surface, theme().danger),
         Kind::Hunk => (theme().surface, crate::theme::brand_orange()),
         Kind::Meta => (theme().surface, theme().text_secondary),
-        Kind::Context => (gpui::rgba(0), theme().text_muted),
+        Kind::Context => (crate::theme::CLEAR, theme().text_muted),
     }
 }
 fn pair(lines: &[Line]) -> Vec<(Option<usize>, Option<usize>)> {
@@ -103,7 +103,7 @@ fn pair(lines: &[Line]) -> Vec<(Option<usize>, Option<usize>)> {
 fn side(line: Option<&Line>, before: bool) -> gpui::AnyElement {
     let (background, color) = line
         .map(|l| tone(l.kind))
-        .unwrap_or((gpui::rgba(0), theme().text_faint));
+        .unwrap_or((crate::theme::CLEAR, theme().text_faint));
     let number = line.and_then(|l| if before { l.old } else { l.new });
     div()
         .flex_1()

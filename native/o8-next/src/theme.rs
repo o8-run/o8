@@ -198,6 +198,14 @@ pub fn menu_fill() -> Rgba {
         current().surface_raised
     }
 }
+/// No fill: a row or line with nothing behind it.
+pub const CLEAR: Rgba = Rgba {
+    r: 0.,
+    g: 0.,
+    b: 0.,
+    a: 0.,
+};
+
 /// Activity's fixed tints, the same on every appearance: classic
 /// ACTIVITY_COLORS (o8-activity-helpers.tsx) and orchestratorStatusTone
 /// (src/lib/orchestrator/display.ts).

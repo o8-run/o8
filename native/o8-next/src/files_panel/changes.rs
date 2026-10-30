@@ -279,7 +279,7 @@ impl Changes {
                             .border_color(if selected {
                                 theme().border
                             } else {
-                                gpui::rgba(0)
+                                crate::theme::CLEAR
                             })
                             .cursor_pointer()
                             .when(selected, |d| d.bg(theme().surface))
