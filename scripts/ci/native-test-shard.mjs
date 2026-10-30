@@ -53,8 +53,16 @@ if (new Set(names).size !== names.length) {
 }
 // Frame-budget typing has the same isolation requirement as fixed-rate PTY
 // probes: sibling scene tests must not consume its measured CPU time.
+// The real SDK fixtures also keep their existing first-reply deadlines; cold
+// worker starts must not compete with sibling native tests.
+const sdk = new Set([
+  'shell::issues::tests::issues_worker_receives_linked_context_through_stream',
+  'shell::issues::tests::issues_view_search_link_clear_and_worker_task',
+  'ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency',
+]);
 const timed = name => name.startsWith('terminal::tests::production_pty_')
-  || name === 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark';
+  || name === 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark'
+  || sdk.has(name);
 const selected = names.filter(name =>
   createHash('sha256').update(name).digest().readUInt32BE(0) % count === index - 1
   && (timed(name) ? 'timed' : 'regular') === phase);

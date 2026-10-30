@@ -15,9 +15,14 @@ writeFileSync(path.join(crate, 'Cargo.lock'), 'version=4\n[[package]]\nname="sha
 const names = ['prefix', 'prefix_longer', ...Array.from({ length: 14 }, (_, i) => `case_${i}`)];
 const timed = 'terminal::tests::production_pty_fixture';
 const images = 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark';
+const sdk = [
+  'shell::issues::tests::issues_worker_receives_linked_context_through_stream',
+  'shell::issues::tests::issues_view_search_link_clear_and_worker_task',
+  'ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency',
+];
 const source = `fn record(name: &str) {
   use std::io::Write;
-  let expected = if name.starts_with("terminal::tests::production_pty_") || name == "${images}" { "timed" } else { "regular" };
+  let expected = if name.starts_with("terminal::tests::production_pty_") || name == "${images}" || ${JSON.stringify(sdk)}.contains(&name) { "timed" } else { "regular" };
   assert_eq!(std::env::var("O8_NATIVE_TEST_PHASE").unwrap_or_default(), expected);
   let mut file = std::fs::OpenOptions::new().create(true).append(true).open(${JSON.stringify(receipt)}).unwrap();
   file.write_all(format!("{name}\\n").as_bytes()).unwrap();
@@ -26,6 +31,12 @@ const source = `fn record(name: &str) {
 mod terminal { mod tests { #[test] fn production_pty_fixture() { crate::record("${timed}"); } } }
 mod shell { mod session { mod image_loaded_shell_tests {
   #[test] fn native_composer_loaded_shell_images_typing_benchmark() { crate::record("${images}"); }
+} } mod issues { mod tests {
+  #[test] fn issues_worker_receives_linked_context_through_stream() { crate::record("${sdk[0]}"); }
+  #[test] fn issues_view_search_link_clear_and_worker_task() { crate::record("${sdk[1]}"); }
+} } }
+mod ui { mod tests { mod worker_tests {
+  #[test] fn worker_send_steer_queue_promote_remove_and_streaming_latency() { crate::record("${sdk[2]}"); }
 } } }
 #[test] #[ignore] fn ignored_case() { panic!("must stay ignored"); }\n`;
 writeFileSync(path.join(crate, 'src/lib.rs'), source);
@@ -59,7 +70,7 @@ it.skipIf(process.platform !== 'linux' || process.arch !== 'x64')('runs every re
       output += result.stdout;
     }
   }
-  expect(readFileSync(receipt, 'utf8').trim().split('\n').sort()).toEqual([...names, timed, images].sort());
+  expect(readFileSync(receipt, 'utf8').trim().split('\n').sort()).toEqual([...names, timed, images, ...sdk].sort());
   expect(output.match(/ignored_case \.\.\. ignored/g)).toHaveLength(1);
   for (const fault of ['prefix', timed, images]) {
     let failures = 0;
