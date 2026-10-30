@@ -73,6 +73,7 @@ impl Surface {
         let painted_rows = self.painted_rows.clone();
         div()
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .on_scroll_wheel(cx.listener(|this, _: &gpui::ScrollWheelEvent, _, _| {
@@ -88,7 +89,6 @@ impl Surface {
                         .child(self.notice.clone()),
                 )
             })
-            .child(self.history_control(cx))
             .child(
                 list(self.list.clone(), {
                     let list_state = self.list.clone();
@@ -104,6 +104,7 @@ impl Surface {
                 .flex_1()
                 .min_h_0(),
             )
+            .child(self.history_control(cx))
             .into_any_element()
     }
 }

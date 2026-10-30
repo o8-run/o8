@@ -23,8 +23,6 @@ pub(super) enum Icon {
     Folder,
     PullRequest,
     Setup,
-    Keyboard,
-    Account,
 }
 
 impl Icon {
@@ -50,12 +48,6 @@ impl Icon {
             }
             Self::Setup => {
                 "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z"
-            }
-            Self::Keyboard => {
-                "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z M6 8h.01 M10 8h.01 M14 8h.01 M18 8h.01 M8 12h.01 M12 12h.01 M16 12h.01 M7 16h10"
-            }
-            Self::Account => {
-                "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20Z M12 7a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"
             }
         }
     }
@@ -113,6 +105,9 @@ static USAGE: Mutex<Usage> = Mutex::new(Usage {
     highest: None,
 });
 
+/// The whole capacity snapshot, for the gauge's hover card.
+static SNAPSHOT: Mutex<Option<Value>> = Mutex::new(None);
+
 fn weekly(snapshot: &Value, runtime: &str) -> Option<f32> {
     let identity = snapshot["identities"].as_array().and_then(|all| {
         all.iter()
@@ -160,6 +155,7 @@ fn watch_usage(client: &Client) {
             loop {
                 if let Ok(snapshot) = client.get::<Value>("/api/runtime/capacity", &[]) {
                     *USAGE.lock().unwrap() = read_usage(&snapshot);
+                    *SNAPSHOT.lock().unwrap() = Some(snapshot);
                 }
                 std::thread::sleep(Duration::from_secs(60));
             }
@@ -167,20 +163,37 @@ fn watch_usage(client: &Client) {
     });
 }
 
-fn percent(ratio: Option<f32>) -> String {
-    ratio.map_or("not reported".into(), |r| {
-        format!("{}% used", (r * 100.).round())
-    })
+/// The gauge's hover card (CompactNavigationRail's rail-usage-preview).
+#[derive(Default)]
+struct UsageCard {
+    open: bool,
+    /// Bumped on every hover in and out, so a stale close timer does nothing.
+    leave: u64,
 }
 
-fn gauge() -> Stateful<Div> {
+/// Leaving the gauge or its card closes the card after 160 ms.
+fn leave_usage(s: &mut Shell, cx: &mut Context<Shell>) {
+    let card = s.features.get::<UsageCard>();
+    card.leave += 1;
+    let generation = card.leave;
+    cx.spawn(async move |this, cx| {
+        cx.background_executor()
+            .timer(Duration::from_millis(160))
+            .await;
+        let _ = this.update(cx, |this, cx| {
+            let card = this.features.get::<UsageCard>();
+            if card.leave == generation {
+                card.open = false;
+                cx.notify();
+            }
+        });
+    })
+    .detach();
+}
+
+fn gauge(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
     let usage = *USAGE.lock().unwrap();
-    let label: SharedString = format!(
-        "Weekly usage: Codex {}, Claude {}",
-        percent(usage.codex),
-        percent(usage.claude)
-    )
-    .into();
+    let open = s.features.get::<UsageCard>().open;
     let meter = |ratio: Option<f32>, color: Rgba, bottom: f32| {
         div()
             .absolute()
@@ -193,19 +206,284 @@ fn gauge() -> Stateful<Div> {
             .bg(theme().border)
             .children(ratio.map(|r| div().h_full().w(px(12. * r)).bg(color)))
     };
-    target("rail-usage")
+    div()
         .relative()
-        .tooltip(move |_, cx| cx.new(|_| Tip(label.clone())).into())
-        .child(glyph(
-            Icon::Gauge,
-            if usage.highest.is_some_and(|r| r >= 0.8) {
-                crate::theme::brand_orange()
-            } else {
-                theme().text_muted
-            },
-        ))
-        .child(meter(usage.codex, theme().accent, 6.))
-        .child(meter(usage.claude, crate::theme::brand_orange(), 2.))
+        .flex_shrink_0()
+        .child(
+            target("rail-usage")
+                .relative()
+                .when(open, |view| view.bg(theme().hover))
+                .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                    if *hovered {
+                        let card = this.features.get::<UsageCard>();
+                        card.open = true;
+                        card.leave += 1;
+                        cx.notify();
+                    } else {
+                        leave_usage(this, cx);
+                    }
+                }))
+                .child(glyph(
+                    Icon::Gauge,
+                    if usage.highest.is_some_and(|r| r >= 0.8) {
+                        crate::theme::brand_orange()
+                    } else {
+                        theme().text_muted
+                    },
+                ))
+                .child(meter(usage.codex, theme().accent, 6.))
+                .child(meter(usage.claude, crate::theme::brand_orange(), 2.)),
+        )
+        .when(open, |anchor| anchor.child(usage_card(cx)))
+        .into_any_element()
+}
+
+fn runtime_name(runtime: &str) -> String {
+    match runtime {
+        "codex" => "Codex".into(),
+        "claude-code" => "Claude".into(),
+        other => other.into(),
+    }
+}
+
+/// RuntimeUsageSummary's line under each runtime's name.
+fn state_label(capacity: &Value) -> &'static str {
+    if capacity["status"] == "stale" {
+        "Last observation · stale"
+    } else if capacity["confidence"] == "exact" {
+        "Subscription limits"
+    } else if capacity["buckets"]
+        .as_array()
+        .is_some_and(|buckets| buckets.iter().any(|bucket| bucket["unit"] == "tokens"))
+    {
+        "Local activity · quota not reported"
+    } else if capacity["reason"] == "subscription_limits_unsupported" {
+        "No subscription limits"
+    } else {
+        "Not available"
+    }
+}
+
+/// A bucket's used share, tokens or remaining count, as RuntimeUsageSummary reads it.
+fn value_label(bucket: &Value) -> String {
+    if let Some(ratio) = bucket["usedRatio"].as_f64() {
+        format!("{}% used", (ratio * 100.).round())
+    } else if let (Some(used), "tokens") = (
+        bucket["used"].as_f64(),
+        bucket["unit"].as_str().unwrap_or(""),
+    ) {
+        format!("{} tokens", tokens(used))
+    } else if let Some(remaining) = bucket["remaining"].as_f64() {
+        format!("{remaining} remaining")
+    } else {
+        "Not reported".into()
+    }
+}
+
+/// formatTokens: 950, 12.3K, 4.5M.
+fn tokens(count: f64) -> String {
+    if count >= 1_000_000. {
+        format!("{:.1}M", count / 1_000_000.)
+    } else if count >= 1_000. {
+        format!("{:.1}K", count / 1_000.)
+    } else {
+        format!("{count}")
+    }
+}
+
+/// Epoch seconds for a UTC ISO timestamp ("2026-11-02T15:00:00.000Z"), by the
+/// same civil-date conversion as the activity dock's epoch_ms.
+fn epoch_seconds(iso: &str) -> Option<u64> {
+    let number = |range: std::ops::Range<usize>| iso.get(range)?.parse::<i64>().ok();
+    if !iso.ends_with('Z') {
+        return None;
+    }
+    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
+    let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    u64::try_from(days * 86_400 + hour * 3600 + minute * 60 + second).ok()
+}
+
+/// "Thu 3:00 PM" in local time, as toLocaleString's weekday/hour/minute.
+fn reset_label(iso: &str) -> Option<String> {
+    let (weekday, hour, minute) = crate::shell::sidebar::calendar_clock(epoch_seconds(iso)?)?;
+    let day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].get(weekday as usize)?;
+    let (twelve, half) = match hour {
+        0 => (12, "AM"),
+        1..=11 => (hour, "AM"),
+        12 => (12, "PM"),
+        _ => (hour - 12, "PM"),
+    };
+    Some(format!("{day} {twelve}:{minute:02} {half}"))
+}
+
+/// The hover card: each connected runtime's windows, bars and resets
+/// (RuntimeUsageSummary, compact).
+fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
+    let snapshot = SNAPSHOT.lock().unwrap().clone();
+    let muted = |text: SharedString, size: f32| {
+        div()
+            .text_size(px(size))
+            .text_color(theme().text_muted)
+            .child(text)
+    };
+    let mut sections = vec![];
+    let capacities = snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot["capacities"].as_array().cloned())
+        .unwrap_or_default();
+    for capacity in &capacities {
+        let identity = snapshot.as_ref().and_then(|snapshot| {
+            snapshot["identities"].as_array().and_then(|all| {
+                all.iter()
+                    .find(|identity| identity["id"] == capacity["identityId"])
+                    .and_then(|identity| identity["label"].as_str().map(String::from))
+            })
+        });
+        let exact = capacity["confidence"] == "exact";
+        let buckets = capacity["buckets"].as_array().cloned().unwrap_or_default();
+        let mut section = div()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .pt(px(14.))
+            .border_t_1()
+            .border_color(theme().border)
+            .child(div().text_size(px(13.5)).child(match identity {
+                Some(label) => format!(
+                    "{} · {label}",
+                    runtime_name(capacity["runtime"].as_str().unwrap_or(""))
+                ),
+                None => runtime_name(capacity["runtime"].as_str().unwrap_or("")),
+            }))
+            .child(muted(state_label(capacity).into(), 10.));
+        for bucket in &buckets {
+            let percent = bucket["usedRatio"]
+                .as_f64()
+                .map(|ratio| (ratio * 100.).clamp(0., 100.) as f32);
+            let reset = exact
+                .then(|| bucket["resetsAt"].as_str().and_then(reset_label))
+                .flatten();
+            section = section.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .gap(px(12.))
+                            .text_size(px(11.))
+                            .child(
+                                div()
+                                    .text_color(theme().text_secondary)
+                                    .child(bucket["label"].as_str().unwrap_or("").to_string()),
+                            )
+                            .child(value_label(bucket)),
+                    )
+                    .children(percent.map(|percent| {
+                        div()
+                            .h(px(3.))
+                            .rounded(px(2.))
+                            .overflow_hidden()
+                            .bg(theme().border)
+                            .child(div().h_full().w(gpui::relative(percent / 100.)).bg(
+                                if percent >= 80. {
+                                    crate::theme::brand_orange()
+                                } else {
+                                    theme().accent
+                                },
+                            ))
+                    }))
+                    .children(reset.map(|reset| muted(format!("Resets {reset}").into(), 9.5))),
+            );
+        }
+        if buckets.is_empty() {
+            section = section.child(muted(
+                if capacity["reason"] == "subscription_limits_unsupported" {
+                    "This login does not report plan allowances."
+                } else {
+                    "No usage windows were reported. Refresh to try again."
+                }
+                .into(),
+                11.,
+            ));
+        }
+        sections.push(section);
+    }
+    let body = div()
+        .p(px(16.))
+        .flex()
+        .flex_col()
+        .gap(px(12.))
+        .text_color(theme().text)
+        .font_weight(gpui::FontWeight::LIGHT)
+        .child(
+            div()
+                .flex()
+                .justify_between()
+                .items_baseline()
+                .gap(px(8.))
+                .child(div().text_size(px(13.5)).child("Runtime usage"))
+                .child(muted(
+                    if snapshot.is_some() {
+                        "Connected accounts"
+                    } else {
+                        "Loading…"
+                    }
+                    .into(),
+                    10.,
+                )),
+        )
+        .child(div().flex().flex_col().gap(px(14.)).children(sections))
+        .when(snapshot.is_some() && capacities.is_empty(), |body| {
+            body.child(muted("No connected runtime reports usage yet.".into(), 12.))
+        })
+        .when(snapshot.is_none(), |body| {
+            body.child(muted("Reading connected runtimes…".into(), 10.5))
+        });
+    // Fixed beside the gauge, bottom-aligned with it, as the desktop places it.
+    div()
+        .absolute()
+        .left(px(TARGET + 16.))
+        .bottom(px(0.))
+        .child(
+            gpui::deferred(
+                gpui::anchored()
+                    .anchor(gpui::Corner::BottomLeft)
+                    .snap_to_window_with_margin(px(12.))
+                    .child(
+                        div()
+                            .id("rail-usage-card")
+                            .debug_selector(|| "rail-usage-card".into())
+                            .occlude()
+                            .w(px(284.))
+                            .max_h(px(360.))
+                            .overflow_y_scroll()
+                            .rounded(px(12.))
+                            .bg(crate::theme::popover_background())
+                            .border_1()
+                            .border_color(theme().border)
+                            .shadow_lg()
+                            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                                if *hovered {
+                                    this.features.get::<UsageCard>().leave += 1;
+                                } else {
+                                    leave_usage(this, cx);
+                                }
+                            }))
+                            .child(body),
+                    ),
+            )
+            .with_priority(2),
+        )
 }
 
 fn divider() -> Div {
@@ -231,7 +509,11 @@ fn brand() -> impl IntoElement {
 }
 
 impl Shell {
-    pub(super) fn render_rail(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_rail(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let top = registrations()
             .iter()
             .flat_map(|r| (r.nav)(self, NavPosition::BeforeWorkspaces, cx))
@@ -312,7 +594,8 @@ impl Shell {
             .children(top)
             .child(divider())
             .child(div().flex_1().min_h_0())
-            .child(gauge())
+            .child(gauge(self, cx))
+            .children(features::rail(self, window, cx))
             .children(bottom)
             .into_any_element()
     }

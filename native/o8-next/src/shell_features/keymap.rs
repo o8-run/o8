@@ -21,6 +21,8 @@ fn dispatch(
         .iter()
         .any(|r| (r.key_down)(s, event, window, cx))
     {
+    } else if (modifiers.control || modifiers.platform) && !modifiers.shift && !modifiers.alt && key == "b" {
+        super::header::toggle_sidebar(s, window, cx);
     } else if (modifiers.control || modifiers.platform) && key == "k" {
         if !s.palette {
             s.capture(window, cx);
@@ -85,19 +87,9 @@ fn dispatch(
         && !modifiers.shift
         && key == "w"
     {
-        if let Some(tab) = s.active() {
-            s.content.remove(&s.key(&tab));
-            let saved = s
-                .state
-                .workspaces
-                .get_mut(s.state.selected.as_deref().unwrap_or(""))
-                .unwrap();
-            (tab.registration().remove)(saved, &tab);
-            saved.tabs.remove(saved.active);
-            saved.active = saved.active.min(saved.tabs.len().saturating_sub(1));
-            s.ensure(window, cx);
-            s.restore_focus(window, cx);
-            s.persist();
+        if s.active().is_some() {
+            let index = s.current().map_or(0, |w| w.active);
+            super::header::close_tab(s, index, window, cx);
         }
     } else {
         return KeyResult::Unhandled;

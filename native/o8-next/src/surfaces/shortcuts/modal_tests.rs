@@ -102,7 +102,7 @@ fn shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs(cx: &mut Tes
                     "settings" => visual.simulate_keystrokes("cmd-,"),
                     "projects" => shortcuts_click(&mut visual, "shell-projects"),
                     "setup" => shortcuts_click(&mut visual, "setup-open"),
-                    "help" => shortcuts_click(&mut visual, "shortcuts-open"),
+                    "help" => shortcuts_open(&mut visual),
                     "palette" => visual.simulate_keystrokes("cmd-shift-p"),
                     "shell-help" => shell.update_in(&mut visual, |s, window, cx| {
                         s.execute(Command::Shortcuts, window, cx)

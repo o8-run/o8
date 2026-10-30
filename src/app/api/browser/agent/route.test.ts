@@ -3,6 +3,9 @@ import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
   evalJs: vi.fn(),
+  nextRequest: vi.fn(),
+  hasEngineSession: vi.fn(),
+  engineRead: vi.fn(),
 }));
 
 vi.mock('@/lib/mcp/o8-webview-client', () => ({
@@ -12,8 +15,9 @@ vi.mock('@/lib/mcp/o8-webview-client', () => ({
 }));
 
 vi.mock('@/lib/browser-engine/engine', () => ({
-  getBrowserEngine: () => ({ hasSession: () => false }),
+  getBrowserEngine: () => ({ hasSession: mocks.hasEngineSession, read: mocks.engineRead }),
 }));
+vi.mock('@/lib/next/browser-pipe', () => ({ requestNextBrowser: mocks.nextRequest }));
 
 vi.mock('@/lib/lane/events', () => ({ recordLaneEvent: vi.fn() }));
 vi.mock('@/lib/lane/registry', () => ({ findLatestLaneByPacket: vi.fn(() => null) }));
@@ -30,6 +34,29 @@ function request(verb: string, args: Record<string, unknown>) {
 describe('/api/browser/agent localization verbs', () => {
   beforeEach(() => {
     mocks.evalJs.mockReset();
+    mocks.nextRequest.mockReset().mockReturnValue(null);
+    mocks.hasEngineSession.mockReset().mockReturnValue(false);
+    mocks.engineRead.mockReset();
+  });
+
+  it('keeps default verbs on the existing engine session while a Next child is open', async () => {
+    const engine = { ok: true, url: 'https://example.org/', title: 'Engine page', text: 'Engine text', interactive: [] };
+    mocks.hasEngineSession.mockReturnValue(true);
+    mocks.engineRead.mockResolvedValue(engine);
+    mocks.nextRequest.mockReturnValue(Promise.resolve({ ok: true, title: 'Next page' }));
+    expect(await (await POST(request('read', {}))).json()).toEqual(engine);
+    expect(mocks.nextRequest).not.toHaveBeenCalled();
+    expect(mocks.engineRead).toHaveBeenCalledOnce();
+  });
+
+  it('targets explicit panel at Next even when an engine session exists, without replay on a failed receipt', async () => {
+    mocks.hasEngineSession.mockReturnValue(true);
+    const receipt = { ok: false, actionDispatched: null, automaticReplay: false };
+    mocks.nextRequest.mockReturnValue(Promise.resolve(receipt));
+    expect(await (await POST(request('click', { surface: 'panel', selector: '#link' }))).json()).toEqual(receipt);
+    expect(mocks.nextRequest).toHaveBeenCalledWith('click', { surface: 'panel', selector: '#link' });
+    expect(mocks.engineRead).not.toHaveBeenCalled();
+    expect(mocks.evalJs).not.toHaveBeenCalled();
   });
 
   it('drives localize through the real iframe-agent route', async () => {

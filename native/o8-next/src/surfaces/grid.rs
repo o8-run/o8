@@ -23,7 +23,15 @@ fn create(
         file: shell.file.with_extension("grid.json"),
     };
     if let Err(error) = options.load() {
-        shell.notice = error;
+        toasts::show(
+            toasts::Kind::Error {
+                detail: error.into(),
+            },
+            "Could not open the grid.",
+            vec![],
+            Some(toasts::ERROR_TIMEOUT),
+            cx,
+        );
         return None;
     }
     let grid = cx.new(|cx| Grid::new(client, options, window, cx));

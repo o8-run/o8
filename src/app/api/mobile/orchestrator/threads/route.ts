@@ -15,6 +15,7 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { inboxProjection, inboxSubject } from '@/lib/inbox/store';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileOrchestratorBackend } from '@/lib/mobile/types';
 import { OrchestratorThreadProjectError } from '@/lib/mobile/orchestrator-thread-project';
@@ -59,7 +60,9 @@ export async function GET(request: NextRequest) {
 
   try {
     const threads = listMobileOrchestratorThreads({ backend, limit, ...(offset === undefined ? {} : { offset }) });
-    return NextResponse.json({ threads }, { headers: NO_STORE });
+    return NextResponse.json({ threads: threads.map(thread => ({ ...thread,
+      ...inboxProjection(inboxSubject('conversation', thread.id, thread.repoPath, thread.projectId)),
+    })) }, { headers: NO_STORE });
   } catch (error) {
     console.log('[mobile-orchestrator] thread list failed', error);
     return NextResponse.json({ threads: [] }, { headers: NO_STORE });

@@ -181,7 +181,7 @@ it('persists the exact-task voice precondition through the route and reload, the
   createChatContinuationHeartbeat(hooks)();
   await vi.waitFor(() => expect(queue.readComposerSend('voice-original')?.status).toBe('applied'));
   const receipt = readPersistedLlmChat(threadId)!.history.messages.at(-1)?.receipt;
-  expect(receipt?.terminal).toEqual({ userMessageId: 'review-user-assistant-queued-voice-original', outcome: 'completed' });
+  expect(receipt?.terminal).toEqual({ userMessageId: 'review-user-assistant-queued-voice-original', outcome: 'completed', completedAt: expect.any(Number) });
   closeDb(); createChatContinuationHeartbeat(hooks)();
   expect(mocks.send).toHaveBeenCalledTimes(1);
 });

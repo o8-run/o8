@@ -32,6 +32,9 @@ pub struct Step {
     pub started: Option<f64>,
     #[serde(skip)]
     pub finished: Option<f64>,
+    /// A plan tool's items, (text, status: pending | in_progress | completed).
+    #[serde(skip)]
+    pub todos: Vec<(String, String)>,
     #[serde(skip)]
     rollup_kind: RollupKind,
 }
@@ -712,6 +715,7 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
             .or_else(|| batch_of(id)),
         started: tool["startedAt"].as_f64(),
         finished: tool["finishedAt"].as_f64(),
+        todos: todos(args),
         status,
         reason,
         group: 0,
@@ -720,6 +724,23 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
         subject: parts[0].subject.clone().or(subject),
         parts,
     }
+}
+
+/// TodoWrite's `todos` (content, status) or update_plan's `plan` (step, status).
+fn todos(args: &Value) -> Vec<(String, String)> {
+    let (items, text) = match (args["todos"].as_array(), args["plan"].as_array()) {
+        (Some(items), _) => (items, "content"),
+        (None, Some(items)) => (items, "step"),
+        _ => return vec![],
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let text = crate::text::sanitize(item[text].as_str()?);
+            let status = item["status"].as_str().unwrap_or("pending").to_owned();
+            (!text.trim().is_empty()).then_some((text, status))
+        })
+        .collect()
 }
 
 pub fn group(steps: &mut [Step]) {
@@ -857,6 +878,7 @@ mod tests {
             batch: None,
             started: None,
             finished: None,
+            todos: vec![],
         }
     }
 

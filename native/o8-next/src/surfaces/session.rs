@@ -132,8 +132,22 @@ pub struct Session {
     pub tmux_session: Option<String>,
     #[serde(default)]
     pub packet_state: bool,
+    /// Inbox settlement (docs/internals/inbox-settlement.md); older hosts
+    /// omit these and the sidebar stays as it was.
+    #[serde(default)]
+    pub inbox_subject: Option<Value>,
+    /// Set on a child worker, which its parent conversation already lists.
+    #[serde(default)]
+    pub parent_inbox_subject: Option<Value>,
+    #[serde(default)]
+    pub settled_override: Option<String>,
+    #[serde(default)]
+    pub settled_at: Option<String>,
 }
 impl Session {
+    pub fn settled(&self) -> bool {
+        self.settled_override.as_deref() == Some("settled")
+    }
     pub fn key(&self) -> String {
         if self.id.contains(':') {
             self.id.clone()

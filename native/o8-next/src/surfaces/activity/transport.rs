@@ -34,7 +34,13 @@ impl Client {
                 let payload = Self::read::<Value>(response).ok();
                 let reason = payload
                     .as_ref()
-                    .and_then(|v| v["error"].as_str().or(v["error"]["message"].as_str()))
+                    .and_then(|v| {
+                        v["error"]
+                            .as_str()
+                            .or(v["error"]["message"].as_str())
+                            // Lane commands explain a refusal in `note`.
+                            .or(v["note"].as_str())
+                    })
                     .unwrap_or("Server refused this request")
                     .chars()
                     .take(400)
