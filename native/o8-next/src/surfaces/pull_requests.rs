@@ -45,13 +45,20 @@ pub(super) const REGISTRATION: Registration = Registration {
             .into_any_element(),
         ]
     },
+    claim_link: |shell, url, window, cx| {
+        let Some((repo, number)) = github_item(url, "pull") else {
+            return false;
+        };
+        open_pull_request(shell, &repo, number, window, cx);
+        true
+    },
     ..Registration::new("Pull requests", "Open pull requests", |_, _, _, _| {
         Some((Tab::PullRequests, false))
     })
 };
-/// Opens the Pull requests tab on one pull request: Activity's destination
-/// for a pull request row, as classic opens PrPanel.
-pub(super) fn open_pull_request(
+/// Opens the Pull requests tab on one pull request, as classic Activity
+/// opens PrPanel.
+fn open_pull_request(
     shell: &mut Shell,
     repo: &str,
     number: u64,

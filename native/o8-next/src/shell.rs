@@ -38,7 +38,8 @@ pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --ser
 #[path = "surface_registry.rs"]
 mod registry;
 use registry::{
-    EmptyState, NavPosition, Registration, ShellView, WorkspaceLoad, register_surfaces,
+    EmptyState, NavPosition, Registration, ShellView, WorkspaceLoad, github_item,
+    register_surfaces,
 };
 
 register_surfaces! {
@@ -321,6 +322,15 @@ impl Shell {
                         .contains(&self.query.to_lowercase())
             })
             .collect()
+    }
+    /// Opens a GitHub link in the surface that claims it, else in the browser.
+    pub(super) fn open_link(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !registrations()
+            .iter()
+            .any(|registration| (registration.claim_link)(self, url, window, cx))
+        {
+            cx.open_url(url);
+        }
     }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {

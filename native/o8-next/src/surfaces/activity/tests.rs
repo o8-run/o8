@@ -135,16 +135,23 @@ fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
         shell.read_with(cx, |s, _| s.active()),
         Some(Tab::PullRequests)
     );
-    let pr = shell.read_with(cx, |s, cx| {
+    let (pr, state) = shell.read_with(cx, |s, cx| {
         match s.content.get(&s.key(&Tab::PullRequests)) {
-            Some(Content::PullRequests(view)) => view.read(cx).selected,
-            _ => None,
+            Some(Content::PullRequests(view)) => {
+                let view = view.read(cx);
+                let state = format!(
+                    "pending {:?}, page repo {}, error {:?}",
+                    view.pending, view.page["repo"], view.error
+                );
+                (view.selected, state)
+            }
+            _ => (None, "no Pull requests tab".into()),
         }
     });
     assert_eq!(
         pr,
         Some(7),
-        "the pull request is selected in the Pull requests tab"
+        "the pull request is selected in the Pull requests tab: {state}"
     );
     let back = |cx: &mut VisualTestContext| {
         shell.update_in(cx, |s, window, cx| s.execute(Command::Activity, window, cx));

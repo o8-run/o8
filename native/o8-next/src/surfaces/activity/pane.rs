@@ -11,9 +11,9 @@ use std::{
 #[derive(Clone)]
 pub enum ActivityEvent {
     Worker(String),
-    /// A pull request or issue row's in-app destination: kind, repository
-    /// and number.
-    Open(&'static str, String, u64),
+    /// A row's GitHub link, for the shell to open in the surface that
+    /// claims it (pull requests, issues) or in the browser.
+    Open(String),
 }
 #[derive(Clone)]
 pub(super) enum Action {
@@ -400,16 +400,8 @@ impl ActivityPane {
             Action::RetryDetail(row) => self.detail(row,true,cx),
             Action::Link(url) => cx.open_url(&url),
             Action::Open(row) => {
-                let repo = row.repo.clone().filter(|r| feed::valid_slug(r));
-                match (row.kind, repo, row.id.parse::<u64>()) {
-                    ("pr" | "issue", Some(repo), Ok(number)) => {
-                        cx.emit(ActivityEvent::Open(row.kind, repo, number))
-                    }
-                    _ => {
-                        if let Some(url) = row.url() {
-                            cx.open_url(&url);
-                        }
-                    }
+                if let Some(url) = row.url() {
+                    cx.emit(ActivityEvent::Open(url));
                 }
             }
             Action::Worker(key) => cx.emit(ActivityEvent::Worker(key)),

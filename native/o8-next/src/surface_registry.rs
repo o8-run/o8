@@ -109,6 +109,10 @@ pub(super) struct Registration {
     pub tick: fn(&mut Shell, &mut Window, &mut Context<Shell>),
     pub decorate: fn(&Shell, AnyElement) -> AnyElement,
     pub catalog_changed: fn(&mut Shell, &mut Context<Shell>),
+    /// Opens a GitHub link inside this surface, such as a pull request or
+    /// issue page. Unclaimed links open in the browser, so removing a
+    /// registration only sends its links back to GitHub.
+    pub claim_link: fn(&mut Shell, &str, &mut Window, &mut Context<Shell>) -> bool,
 }
 impl Registration {
     pub const fn new(
@@ -141,8 +145,25 @@ impl Registration {
             tick: |_, _, _| {},
             decorate: |_, content| content,
             catalog_changed: |_, _| {},
+            claim_link: |_, _, _, _| false,
         }
     }
+}
+
+/// The repository and number of a GitHub `/{kind}/{number}` link, such as
+/// `https://github.com/owner/repo/pull/7` for kind "pull".
+pub(super) fn github_item(url: &str, kind: &str) -> Option<(String, u64)> {
+    let path = url.strip_prefix("https://github.com/")?;
+    let mut parts = path.split('/');
+    let (owner, repo) = (parts.next()?, parts.next()?);
+    if parts.next()? != kind || owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    let number = parts.next()?.parse().ok()?;
+    parts
+        .next()
+        .is_none()
+        .then(|| (format!("{owner}/{repo}"), number))
 }
 
 pub(super) trait ShellView: Render {
@@ -240,3 +261,36 @@ macro_rules! register_surfaces {
     };
 }
 pub(super) use register_surfaces;
+
+#[cfg(test)]
+mod link_tests {
+    use super::github_item;
+
+    #[test]
+    fn github_items_name_their_repository_and_number() {
+        assert_eq!(
+            github_item("https://github.com/example/activity/pull/7", "pull"),
+            Some(("example/activity".into(), 7))
+        );
+        assert_eq!(
+            github_item("https://github.com/example/activity/issues/8", "issues"),
+            Some(("example/activity".into(), 8))
+        );
+        assert_eq!(
+            github_item("https://github.com/example/activity/pull/7", "issues"),
+            None
+        );
+        assert_eq!(
+            github_item("https://github.com/example/activity/pull/7/files", "pull"),
+            None
+        );
+        assert_eq!(
+            github_item(
+                "https://github.com/example/activity/actions/runs/91",
+                "pull"
+            ),
+            None
+        );
+        assert_eq!(github_item("https://example.com/a/b/pull/7", "pull"), None);
+    }
+}

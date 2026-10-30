@@ -11,13 +11,19 @@ pub(super) const REGISTRATION: Registration = Registration {
             crate::issues::Issues::new(shell.client.clone(), Some(workspace.clone()), window, cx)
         })))
     },
+    claim_link: |shell, url, window, cx| {
+        let Some((repo, number)) = github_item(url, "issues") else {
+            return false;
+        };
+        open_issue(shell, &repo, number, window, cx);
+        true
+    },
     ..Registration::new("Issues", "Open issues", |_, _, _, _| {
         Some((Tab::Issues, false))
     })
 };
-/// Opens the Issues tab on one issue: Activity's destination for an issue
-/// row, as classic's onSelectIssue.
-pub(super) fn open_issue(
+/// Opens the Issues tab on one issue, as classic Activity's onSelectIssue.
+fn open_issue(
     shell: &mut Shell,
     repo: &str,
     number: u64,
