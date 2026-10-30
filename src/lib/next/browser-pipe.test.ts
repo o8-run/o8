@@ -49,6 +49,15 @@ describe('Next Browser parent pipe', () => {
     expect(await result).toMatchObject({ ok: false, timedOut: true, automaticReplay: false });
     process.emit('exit');
   });
+  it('rejects an oversized frame before writing to the native lifeline', async () => {
+    const process = child();
+    bindNextBrowserPipe(process as unknown as ChildProcess);
+    let writes = 0;
+    process.stdin.on('data', () => writes++);
+    expect(await requestNextBrowser('type', { selector: '#input', text: 'x'.repeat(1024 * 1024) })).toMatchObject({ ok: false, actionDispatched: false });
+    expect(writes).toBe(0);
+    process.emit('exit');
+  });
   it('keeps unsupported verbs outside the pipe', () => {
     const process = child();
     bindNextBrowserPipe(process as unknown as ChildProcess);

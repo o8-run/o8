@@ -44,13 +44,14 @@ export function requestNextBrowser(verb: string, args: Record<string, unknown>):
   if (!NEXT_BROWSER_VERBS.has(verb)) return null;
   if (bridge.pending.size >= 32) return Promise.resolve({ ok: false, error: 'Browser action queue is full', actionDispatched: false });
   const id = randomUUID();
+  const frame = JSON.stringify({ type: 'browser-agent', id, verb, args, expiresAt: Date.now() + 7000 }) + '\n';
+  if (Buffer.byteLength(frame) > 1024 * 1024) return Promise.resolve({ ok: false, error: 'Browser request exceeds 1 MiB', actionDispatched: false });
   return new Promise(resolve => {
     const timer = setTimeout(() => {
       bridge.pending.delete(id);
       resolve({ ok: false, error: 'o8 next Browser action timed out', timedOut: true, actionDispatched: null, automaticReplay: false });
     }, 8000);
     bridge.pending.set(id, { resolve, timer });
-    const frame = JSON.stringify({ type: 'browser-agent', id, verb, args, expiresAt: Date.now() + 7000 }) + '\n';
     bridge.child.stdin?.write(frame, error => {
       if (!error || !bridge.pending.delete(id)) return;
       clearTimeout(timer);
