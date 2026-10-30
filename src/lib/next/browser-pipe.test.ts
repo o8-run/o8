@@ -49,6 +49,16 @@ describe('Next Browser parent pipe', () => {
     expect(await result).toMatchObject({ ok: false, timedOut: true, automaticReplay: false });
     process.emit('exit');
   });
+  it('contains pipe errors and retains Next targeting until the owned child exits', async () => {
+    const process = child();
+    bindNextBrowserPipe(process as unknown as ChildProcess);
+    const pending = requestNextBrowser('click', { selector: '#link' })!;
+    process.stdin.emit('error', new Error('EPIPE'));
+    expect(await pending).toMatchObject({ ok: false, actionDispatched: null, automaticReplay: false });
+    expect(await requestNextBrowser('read', {})).toMatchObject({ ok: false, actionDispatched: false });
+    process.emit('exit');
+    expect(requestNextBrowser('read', {})).toBeNull();
+  });
   it('rejects an oversized frame before writing to the native lifeline', async () => {
     const process = child();
     bindNextBrowserPipe(process as unknown as ChildProcess);

@@ -4,13 +4,13 @@ import { createInterface } from 'node:readline';
 import type { ChildProcess } from '@/lib/providers/child-process';
 
 type Pending = { resolve: (value: unknown) => void; timer: ReturnType<typeof setTimeout> };
-type Bridge = { child: ChildProcess; pending: Map<string, Pending> };
+type Bridge = { child: ChildProcess; pending: Map<string, Pending>; failed: boolean };
 const runtime = globalThis as typeof globalThis & { __o8NextBrowserPipe?: Bridge };
 const PREFIX = 'o8-next-browser-result:';
 export const NEXT_BROWSER_VERBS = new Set(['read', 'localize', 'rect', 'click', 'type', 'probe', 'grab']);
 
 export function bindNextBrowserPipe(child: ChildProcess): void {
-  const bridge: Bridge = { child, pending: new Map() };
+  const bridge: Bridge = { child, pending: new Map(), failed: false };
   runtime.__o8NextBrowserPipe = bridge;
   const lines = createInterface({ input: child.stdout! });
   lines.on('line', (line) => {
@@ -24,14 +24,19 @@ export function bindNextBrowserPipe(child: ChildProcess): void {
       pending.resolve(reply.result);
     } catch { /* A malformed/unknown receipt never matches a request. */ }
   });
-  const closed = () => {
-    lines.close();
-    if (runtime.__o8NextBrowserPipe === bridge) delete runtime.__o8NextBrowserPipe;
+  const unavailable = () => {
+    bridge.failed = true;
     for (const pending of bridge.pending.values()) {
       clearTimeout(pending.timer);
-      pending.resolve({ ok: false, error: 'o8 next closed before the Browser action was confirmed', actionDispatched: null, automaticReplay: false });
+      pending.resolve({ ok: false, error: 'The o8 next Browser action was not confirmed', actionDispatched: null, automaticReplay: false });
     }
     bridge.pending.clear();
+  };
+  child.stdin?.on('error', unavailable);
+  const closed = () => {
+    unavailable();
+    lines.close();
+    if (runtime.__o8NextBrowserPipe === bridge) delete runtime.__o8NextBrowserPipe;
   };
   child.once('exit', closed);
   child.once('error', closed);
@@ -42,6 +47,7 @@ export function requestNextBrowser(verb: string, args: Record<string, unknown>):
   const bridge = runtime.__o8NextBrowserPipe;
   if (!bridge || bridge.child.exitCode !== null || bridge.child.signalCode !== null) return null;
   if (!NEXT_BROWSER_VERBS.has(verb)) return null;
+  if (bridge.failed) return Promise.resolve({ ok: false, error: 'The o8 next Browser pipe is unavailable', actionDispatched: false });
   if (bridge.pending.size >= 32) return Promise.resolve({ ok: false, error: 'Browser action queue is full', actionDispatched: false });
   const id = randomUUID();
   const frame = JSON.stringify({ type: 'browser-agent', id, verb, args, expiresAt: Date.now() + 7000 }) + '\n';
