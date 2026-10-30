@@ -220,14 +220,19 @@ impl LineLayout {
             .peekable();
 
         while let Some((boundary, ch, x, breakable)) = glyphs.next() {
-            if ch == '\n' {
+            // Separators hang on the preceding line. They must neither trigger
+            // overflow nor become emergency breaks, which would indent the next
+            // soft line (notably after a closing mark). Keep the source glyphs
+            // intact and break at the following word instead.
+            if ch.is_whitespace() {
+                prev_ch = ch;
                 continue;
             }
 
             // Here is very similar to `LineWrapper::wrap_line` to determine text wrapping,
             // but there are some differences, so we have to duplicate the code here.
             if breakable && LineWrapper::is_word_char(ch) {
-                if prev_ch == ' ' && ch != ' ' && first_non_whitespace_ix.is_some() {
+                if prev_ch.is_whitespace() && first_non_whitespace_ix.is_some() {
                     last_candidate_ix = Some(boundary);
                     last_candidate_x = x;
                 }
