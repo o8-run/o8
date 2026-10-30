@@ -1,8 +1,8 @@
 [
   {"kind":"message","id":"tools-1","role":"user","nodes":[{"kind":"p","runs":[{"style":"text","text":"Inspect the files and run the checks."}]}]},
-  {"kind":"activity","id":"tools-2:trace","steps":[{"id":"read-preview","command":"cat src/preview.rs","status":"ok","group":0},{"id":"read-a","command":"cat src/a.rs","status":"ok","group":0},{"id":"read-b","command":"sed -n '1,20p' src/b.rs","status":"ok","group":0},{"id":"tests","command":"cargo test","status":"failed","reason":"Expected a stable order","group":1}]},
+  {"kind":"activity","id":"read-preview","steps":[{"id":"read-preview","command":"cat src/preview.rs","status":"ok","group":0},{"id":"read-a","command":"cat src/a.rs","status":"ok","group":0},{"id":"read-b","command":"sed -n '1,20p' src/b.rs","status":"ok","group":0},{"id":"tests","command":"cargo test","status":"failed","reason":"Expected a stable order","group":1}]},
   {"kind":"message","id":"tools-5","role":"assistant","nodes":[{"kind":"p","runs":[{"style":"text","text":"The test exposed an ordering problem."}]}]},
-  {"kind":"activity","id":"tools-6:trace","steps":[{"id":"retry","command":"cargo test","status":"ok","group":0},{"id":"stop","command":"npm run lint","status":"stopped","reason":"Stopped by operator","group":1}]},
+  {"kind":"activity","id":"retry","steps":[{"id":"retry","command":"cargo test","status":"ok","group":0},{"id":"stop","command":"npm run lint","status":"stopped","reason":"Stopped by operator","group":1}]},
   {"kind":"message","id":"tools-7","role":"assistant","nodes":[{"kind":"h3","runs":[{"style":"text","text":"Result"}]},{"kind":"ul","runs":[{"style":"text","text":"Stable ordering"}]},{"kind":"ul","runs":[{"style":"text","text":"No data migration"}]},{"kind":"break","runs":[]},{"kind":"code-block","runs":[{"style":"code","text":"PASS 2 tests"}],"language":"text"}]},
   {"kind":"message","id":"tools-8","role":"assistant","nodes":[{"kind":"p","runs":[{"style":"text","text":"Validation complete (ok)"}]}]}
 ]
