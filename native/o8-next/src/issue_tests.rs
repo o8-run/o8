@@ -92,8 +92,10 @@ fn issues_worker_receives_linked_context_through_stream(cx: &mut TestAppContext)
     let cx = &mut visual;
     click(cx, "issue-view-7");
     click(cx, "issue-work");
-    wait(cx, "issue-worker");
-    let deadline = Instant::now() + Duration::from_secs(35);
+    // Starting the worker and streaming its first reply take about 34s on a
+    // loaded Linux box, so this test allows 90s for each.
+    wait_with_bound(cx, "issue-worker", Duration::from_secs(90));
+    let deadline = Instant::now() + Duration::from_secs(90);
     while Instant::now() < deadline {
         draw(cx);
         let history = fixture.client.history("thoughts-composer-first").unwrap();
