@@ -581,7 +581,9 @@ fn dictation_mic_fills_the_draft_and_sends_the_final_transcript(cx: &mut TestApp
     send("dictation-text", partial, &mut visual);
     assert!(draft(&mut visual).ends_with("stray words"));
     shell.update_in(&mut visual, |s, window, cx| {
-        s.execute(Command::Session(second.into()), window, cx)
+        s.execute(Command::Session(second.into()), window, cx);
+        // The follow hook runs on the shell tick.
+        s.tick(false, window, cx);
     });
     let cancel = controls(4, &mut visual).last().unwrap().clone();
     assert_eq!(cancel["action"], "dictation-stop");
