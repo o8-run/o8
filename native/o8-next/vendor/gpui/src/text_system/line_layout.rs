@@ -12,7 +12,7 @@ use std::{
 use super::LineWrapper;
 
 /// A laid out and styled line of text
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct LineLayout {
     /// The font size for this line
     pub font_size: Pixels,
@@ -125,7 +125,7 @@ impl LineLayout {
         None
     }
 
-    fn compute_wrap_boundaries(
+    pub(super) fn compute_wrap_boundaries(
         &self,
         text: &str,
         wrap_width: Pixels,

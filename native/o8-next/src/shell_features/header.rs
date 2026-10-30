@@ -23,6 +23,7 @@ fn render(
     // whether the sidebar is open or not. With the sidebar open, search sits
     // at the sidebar's right edge and back/forward start the workspace header;
     // with it closed, toggle, search, back and forward share one row.
+    super::right_panel::sync(s, window, cx);
     record_visit(s);
     super::header_tabs::settle(s, cx);
     let back = adjacent(s, -1);
@@ -73,7 +74,7 @@ fn render(
                 .child(super::header_tools::play(s, window, cx))
                 .child(super::activity_dock::toggle_button(s, cx))
                 .when(!panel_open, |row| {
-                    row.child(super::right_panel::toggle_button(false, cx))
+                    row.child(super::right_panel::toggle_button(s, false, cx))
                 }),
         )
         .when(frame.retry, |view| {
@@ -117,7 +118,9 @@ fn render(
                         .child(search_button(cx)),
                 )
             })
-            .child(workspace)
+            .when(!super::right_panel::maximized(s), |row| {
+                row.child(workspace)
+            })
             .when_some(panel, |row, (full, shown)| {
                 row.child(super::right_panel::header(s, full, shown, cx))
             })

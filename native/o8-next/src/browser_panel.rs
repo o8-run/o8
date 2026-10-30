@@ -79,6 +79,11 @@ impl BrowserPanel {
         }
     }
 
+    /// Read-only adapter for the panel header page label.
+    pub(crate) fn chrome_location(&self, cx: &gpui::App) -> String {
+        self.address.read(cx).text.clone()
+    }
+
     pub fn focus(&self, window: &mut Window) {
         self.address_focus.focus(window);
     }
