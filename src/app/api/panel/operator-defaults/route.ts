@@ -757,20 +757,19 @@ export async function POST(request: Request) {
       if (native) body.settingsToml = await mergeNativeSettingsToml(body.settingsToml, body.settingsTomlRevision);
       assertRoutingTomlCompatibility(body.settingsToml as string, OPERATOR_DEFAULTS_FALLBACK);
       const tomlModel = parseOperatorDefaultsToml(body.settingsToml as string).threecodeWorkerModel;
-      if (tomlModel) {
-        await assertThreecodeWorkerModelAvailable(tomlModel);
-      }
+      if (tomlModel) await assertThreecodeWorkerModelAvailable(tomlModel);
       const [updated, cliAuth] = await Promise.all([
         changeNextWindowPreference(parseOperatorDefaultsToml(body.settingsToml as string).experimentalNext ?? false, () => (
           withStoragePressurePolicyLock(() => applyOperatorDefaultsToml(body.settingsToml as string, body.settingsTomlRevision as string))
         )),
-        getRuntimeAuthSnapshot(),
+        native ? null : getRuntimeAuthSnapshot(),
       ]);
+      if (!cliAuth) return response({ ok: true });
       const [settingsToml, dispatchableRuntimes] = await Promise.all([
         getOperatorDefaultsTomlState(),
         getDispatchableRuntimeAvailability(cliAuth),
       ]);
-      return response(native ? { ok: true } : operatorDefaultsPayload(updated, settingsToml, cliAuth, dispatchableRuntimes));
+      return response(operatorDefaultsPayload(updated, settingsToml, cliAuth, dispatchableRuntimes));
     }
     if (body.workerRuntimes !== undefined && !isWorkerRuntimeList(body.workerRuntimes)) {
       return response({ error: 'workerRuntimes must contain at least one dispatchable runtime.' }, 400);
@@ -785,13 +784,14 @@ export async function POST(request: Request) {
     if (update.threecodeWorkerModel) await assertThreecodeWorkerModelAvailable(update.threecodeWorkerModel);
     const [updated, cliAuth] = await Promise.all([
       changeNextWindowPreference(update.experimentalNext, () => withStoragePressurePolicyLock(() => native ? updateNativeSettings(update, body.settingsTomlRevision) : updateOperatorDefaults(update))),
-      getRuntimeAuthSnapshot(),
+      native ? null : getRuntimeAuthSnapshot(),
     ]);
+    if (!cliAuth) return response({ ok: true });
     const [settingsToml, dispatchableRuntimes] = await Promise.all([
       getOperatorDefaultsTomlState(),
       getDispatchableRuntimeAvailability(cliAuth),
     ]);
-    return response(native ? { ok: true } : operatorDefaultsPayload(updated, settingsToml, cliAuth, dispatchableRuntimes));
+    return response(operatorDefaultsPayload(updated, settingsToml, cliAuth, dispatchableRuntimes));
   } catch (error) {
     const failure = operatorDefaultsUpdateFailure(error, native);
     console.error('[panel-operator-defaults] Failed to update operator defaults:', failure.body.error);

@@ -65,7 +65,7 @@ pub(super) fn entries(shell: &Shell) -> Vec<Entry> {
         .filter(|entry| entry.label(&shell.sessions).to_lowercase().contains(&query))
         .collect()
 }
-fn toggle(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+pub(super) fn toggle(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     if !shell.palette {
         shell.capture(window, cx);
     }
@@ -76,6 +76,18 @@ fn toggle(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     shell.choice = 0;
     shell.palette_scroll.scroll_to_item(1);
     shell.restore_focus(window, cx);
+}
+/// Workspace navigation from the sidebar's project menu, retaining editor focus.
+pub(super) fn open_workspaces(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    shell.capture(window, cx);
+    shell.palette = true;
+    shell.workspace_picker = true;
+    shell.shortcuts = false;
+    shell.query.clear();
+    shell.choice = 0;
+    shell.palette_scroll.scroll_to_item(1);
+    shell.restore_focus(window, cx);
+    cx.notify();
 }
 fn focused_control_owns_keys(shell: &Shell, window: &Window, cx: &App) -> bool {
     if shell.focus.is_focused(window) {

@@ -2,7 +2,7 @@
 pub use crate::shell::Tab;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{Read, Write},
     path::Path,
@@ -29,12 +29,66 @@ impl std::ops::DerefMut for Workspace {
         &mut self.surfaces.session
     }
 }
+/// Classic right-panel preferences; pane contents and credentials stay elsewhere.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PanelState {
+    pub visible: bool,
+    pub primary: String,
+    pub utility_tabs: BTreeMap<String, Vec<String>>,
+    pub split: bool,
+    pub secondary: String,
+    pub ratio: f32,
+    pub tool_widths: BTreeMap<String, f32>,
+}
+impl Default for PanelState {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            primary: "launcher".into(),
+            utility_tabs: BTreeMap::new(),
+            split: false,
+            secondary: "o8-md".into(),
+            ratio: 50.,
+            tool_widths: BTreeMap::new(),
+        }
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 pub struct State {
     pub version: u32,
     pub bounds: [f32; 4],
     pub selected: Option<String>,
     pub workspaces: BTreeMap<String, Workspace>,
+    /// The chat list width the person dragged; absent keeps the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidebar_width: Option<f32>,
+    /// The right panel width the person dragged; absent keeps the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right_panel_width: Option<f32>,
+    #[serde(default)]
+    pub right_panel: PanelState,
+    /// Names the person gave tabs, by tab key.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tab_labels: BTreeMap<String, String>,
+    /// Native Quick docs pins, isolated by the workspace's repository path.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub quick_doc_pins: BTreeMap<String, Vec<String>>,
+    /// Browser page metadata, scoped by the selected workspace. Website data is never stored here.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub browser_pages: BTreeMap<String, crate::browser_panel::Snapshot>,
+    /// The chat list's repository scope, by project id; absent shows every repository.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sidebar_scope: BTreeMap<String, Vec<String>>,
+    /// The chat list's view by project id (chronological, date or repo); absent is By date.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sidebar_view: BTreeMap<String, String>,
+    /// Closed By repo folders, by repository path.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub sidebar_closed_folders: BTreeSet<String>,
+    /// Workspace Notes target history and user-selected annotation ink.
+    #[serde(default)]
+    pub notes: crate::files_panel::NotesPreferences,
     #[serde(skip)]
     pub(crate) retain_file: bool,
     #[serde(skip)]
@@ -47,12 +101,50 @@ impl Default for State {
             bounds: [100., 100., 1200., 816.],
             selected: None,
             workspaces: BTreeMap::new(),
+            sidebar_width: None,
+            right_panel_width: None,
+            right_panel: Default::default(),
+            tab_labels: BTreeMap::new(),
+            quick_doc_pins: BTreeMap::new(),
+            browser_pages: BTreeMap::new(),
+            sidebar_scope: BTreeMap::new(),
+            sidebar_view: BTreeMap::new(),
+            sidebar_closed_folders: BTreeSet::new(),
+            notes: Default::default(),
             retain_file: false,
             backup_file: Arc::default(),
         }
     }
 }
+pub(crate) fn clean_pins(paths: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut pins = Vec::new();
+    for path in paths {
+        let bytes = path.as_bytes();
+        if !path.starts_with('/')
+            && !(bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+            && !path
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
+            && !pins.contains(&path)
+            && pins.len() < 50
+        {
+            pins.push(path);
+        }
+    }
+    pins
+}
 impl State {
+    pub fn pins(&self, repo: &str) -> Vec<String> {
+        self.quick_doc_pins.get(repo).cloned().unwrap_or_default()
+    }
+    pub fn set_pins(&mut self, repo: String, paths: Vec<String>) {
+        let paths = clean_pins(paths);
+        if paths.is_empty() {
+            self.quick_doc_pins.remove(&repo);
+        } else {
+            self.quick_doc_pins.insert(repo, paths);
+        }
+    }
     fn recovered() -> Self {
         Self {
             backup_file: Arc::new(Mutex::new(true)),
@@ -67,7 +159,34 @@ impl State {
             || y.abs() > 100_000.
             || !(600. ..=16_384.).contains(&w)
             || !(400. ..=16_384.).contains(&h)
+            || !self.right_panel.ratio.is_finite()
+            || !(25. ..=75.).contains(&self.right_panel.ratio)
+            || self.right_panel.utility_tabs.len() > 500
+            || self
+                .right_panel
+                .utility_tabs
+                .values()
+                .any(|tabs| tabs.len() > 16)
+            || self
+                .right_panel
+                .tool_widths
+                .values()
+                .any(|w| !w.is_finite() || !(0. ..=1200.).contains(w))
             || self.workspaces.len() > 500
+            || self.quick_doc_pins.len() > 500
+            || self
+                .quick_doc_pins
+                .values()
+                .any(|paths| clean_pins(paths.clone()) != *paths)
+            || self.sidebar_scope.len() > 500
+            || self.sidebar_scope.values().any(|keys| keys.len() > 500)
+            || self.sidebar_view.len() > 500
+            || self.sidebar_closed_folders.len() > 2_000
+            || self.tab_labels.len() > 16_000
+            || self
+                .tab_labels
+                .values()
+                .any(|label| label.chars().count() > 80)
             || self
                 .workspaces
                 .values()

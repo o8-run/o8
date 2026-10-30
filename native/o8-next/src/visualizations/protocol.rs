@@ -17,6 +17,8 @@ pub struct Reference {
     pub height: f64,
     pub created_at: String,
     pub root_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u64>,
 }
 pub fn valid_id(id: &str) -> bool {
     static ID: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -34,7 +36,10 @@ impl Reference {
             && reference.height.is_finite()
             && (MIN_HEIGHT..=MAX_HEIGHT).contains(&reference.height)
             && !reference.created_at.is_empty()
-            && reference.root_id.as_deref().is_none_or(valid_id))
+            && reference.root_id.as_deref().is_none_or(valid_id)
+            && reference
+                .version
+                .is_none_or(|v| (1..=9_007_199_254_740_991).contains(&v)))
         .then_some(reference)
     }
     pub fn state_id(&self) -> &str {

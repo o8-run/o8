@@ -1,5 +1,6 @@
 import { recordForcedRestart } from '@/lib/app-update/forced-restart-receipt';
 import { checkFreshness, ensureFreshUpdateCheck, UPDATE_RETRY } from '@/lib/app-update/fresh-check';
+import { requestNativeApply } from '@/lib/app-update/auto-apply';
 import { inspectCliOperationAdmission } from '@/lib/setup/cli-operation-admission';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
@@ -7,6 +8,7 @@ import { NextResponse } from 'next/server';
 import { getUpdateIdleWindow, type UpdateIdleWindow } from '@/lib/app-update/idle-window';
 import { getAppUpdateState } from '@/lib/app-update/relaunch-state';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import packageJson from '../../../../../../package.json';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -43,7 +45,8 @@ async function readIdleWindow(): Promise<UpdateIdleWindow> {
 export async function GET() {
   const idle = await readIdleWindow();
   // The state carries the last install attempt, so a caller can read a failed apply back (#3588).
-  return response({ ok: true, idle, state: getAppUpdateState() });
+  // currentVersion names the running server, so the o8 next Update pill can show it (#5069).
+  return response({ ok: true, idle, state: getAppUpdateState(), currentVersion: packageJson.version });
 }
 
 export async function POST(request: Request) {
@@ -127,6 +130,19 @@ export async function POST(request: Request) {
     try { recordForcedRestart('update-apply', { admission, idle }); }
     catch { return response({ ok: false, requested: false, error: { code: 'restart_receipt_unavailable',
       message: 'The forced restart receipt could not be recorded.' } }, 503); }
+  }
+  // o8 next is the window of the packaged macOS app (#5069): no webview listens
+  // for the apply mutation, so the shell's native updater installs and restarts.
+  if (process.env.O8_NEXT_MAIN_WINDOW === '1') {
+    requestNativeApply(force);
+    return response({
+      ok: true,
+      requested: true,
+      forced: force,
+      message: `Update${state.version ? ` ${state.version}` : ''} apply request sent to the native updater.`,
+      idle,
+      state,
+    }, 202);
   }
   const now = new Date().toISOString();
   const published = await publishRealtimeMutation({

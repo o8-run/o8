@@ -47,6 +47,14 @@ pub(super) fn apply_for(window: &mut Window, offscreen: bool, reduced: bool) -> 
     false
 }
 
+/// The material for an appearance chosen while the window is open: the old
+/// backdrop leaves first, so Light and Dark get their opaque root back.
+pub(super) fn switch(window: &mut Window, offscreen: bool) -> bool {
+    #[cfg(target_os = "macos")]
+    macos::remove(window);
+    apply(window, offscreen)
+}
+
 pub(super) fn veil() -> gpui::AnyElement {
     // GPUI 0.2.2 has two-stop gradients. Two contiguous pieces preserve the
     // desktop's middle stop exactly, without layers of alpha or a blur shader.

@@ -94,11 +94,14 @@ fn sidebar_selection_leaves_projects_and_settings(cx: &mut TestAppContext) {
             .clone()
             .unwrap()
     });
-    for (button, panel) in [
-        ("shell-settings", "settings-page"),
-        ("shell-projects", "project-new"),
+    // Settings lives in the rail's profile menu, as in the desktop rail.
+    for (buttons, panel) in [
+        (&["shell-profile", "profile-settings"][..], "settings-page"),
+        (&["shell-projects"][..], "project-new"),
     ] {
-        click(cx, button);
+        for button in buttons.iter().copied() {
+            click(cx, button);
+        }
         settle(&shell, cx);
         assert!(cx.debug_bounds(panel).is_some());
         click(cx, "thread-row-2");
@@ -215,11 +218,6 @@ fn settle(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
 }
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
-    if selector == "thread-archive" || selector == "thread-rename" {
-        let sidebar = cx.debug_bounds("thread-list").unwrap();
-        cx.simulate_mouse_move(sidebar.center(), None, gpui::Modifiers::default());
-        draw(cx);
-    }
     let bounds = cx
         .debug_bounds(selector)
         .unwrap_or_else(|| panic!("missing {selector}"));
@@ -574,10 +572,10 @@ fn sidebar_worker_archive_real_path(cx: &mut TestAppContext) {
     click(cx, "thread-row-2");
     ready(&shell, cx);
     // Opening the worker focuses its content. Focus the sidebar through its
-    // real shortcut before clicking the footer control hidden outside it.
+    // real shortcut, which shows the chosen row's Archive.
     cx.simulate_keystrokes("f8");
     settle(&shell, cx);
-    click(cx, "thread-archive");
+    click(cx, "thread-archive-pi-builtin-owned:grid-runtime");
     wait_for(&shell, cx, |s, cx| {
         !s.surfaces
             .sidebar
@@ -717,6 +715,16 @@ mod project_keyboard_tests;
 
 #[path = "project_round2_tests.rs"]
 mod project_round2_tests;
+
+#[path = "scope_tests.rs"]
+mod scope_tests;
+#[path = "folder_tests.rs"]
+mod folder_tests;
+#[path = "settle_tests.rs"]
+mod settle_tests;
+
+#[path = "icon_tests.rs"]
+mod icon_tests;
 
 #[path = "recents_tests.rs"]
 mod recents_tests;

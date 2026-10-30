@@ -15,7 +15,7 @@ use std::process::Command;
 use std::sync::Mutex;
 
 /// o8's own bundle ID — used to exclude ourselves from "current frontmost" checks.
-const O8_BUNDLE_ID: &str = "ai.o8.desktop";
+pub(crate) const O8_BUNDLE_ID: &str = "ai.o8.desktop";
 // Focus settle (only applied when activation actually shifted focus — a cold
 // app switch). A fixed sleep is wrong on both ends of the hardware range: the
 // old 35ms was tuned on Apple Silicon and loses on Intel cold activation (the
@@ -246,7 +246,7 @@ fn dispatch_main_queue() -> *mut std::ffi::c_void {
 }
 
 #[cfg(target_os = "macos")]
-fn run_on_main_thread<F, R>(work: F) -> R
+pub(crate) fn run_on_main_thread<F, R>(work: F) -> R
 where
     F: FnOnce() -> R,
     R: Default,
@@ -343,9 +343,13 @@ fn get_current_frontmost_bundle_id() -> Option<String> {
 /// copy them either.
 #[cfg(target_os = "macos")]
 pub(crate) fn frontmost_is_o8() -> bool {
-    native_frontmost_app_info()
-        .map(|app| app.bundle_id == O8_BUNDLE_ID)
-        .unwrap_or(false)
+    // Compare the process, not the bundle ID: o8 next runs from inside o8.app
+    // and reports the same bundle ID, but its composer is not a webview. Text
+    // for it takes the normal paste path into its focused field.
+    use objc2_app_kit::NSWorkspace;
+    NSWorkspace::sharedWorkspace()
+        .frontmostApplication()
+        .is_some_and(|app| app.processIdentifier() == std::process::id() as i32)
 }
 
 #[cfg(target_os = "linux")]

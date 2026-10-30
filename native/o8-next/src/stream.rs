@@ -2,6 +2,9 @@
 use crate::model::{Entry, History, Row, render_tree_cached};
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static CONTEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Deserialize)]
 pub struct Replay {
@@ -24,8 +27,21 @@ pub struct Transcript {
     shown: Vec<Entry>,
     live_seq: u64,
     live_backend: Option<String>,
+    context_busy: bool,
+    context_epoch: u64,
 }
 impl Transcript {
+    pub(crate) fn shown_entries(&self) -> &[Entry] {
+        &self.shown
+    }
+
+    /// The same visible residency used to render the transcript, including live content.
+    pub(crate) fn context_snapshot(&self) -> (&[Entry], bool) {
+        (&self.shown, self.context_busy)
+    }
+    pub(crate) fn context_epoch(&self) -> u64 {
+        self.context_epoch
+    }
     /// The existing sync cursor excludes its last id, even when that assistant
     /// is still streaming. Refresh the saved tail without dropping backfilled
     /// rows or racing a newer WebSocket checkpoint. HTTP never advances seq.
@@ -103,6 +119,8 @@ impl Transcript {
             shown: vec![],
             live_seq: 0,
             live_backend: None,
+            context_busy: false,
+            context_epoch: CONTEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
         };
         this.merge(history.transcript, true);
         this
@@ -179,9 +197,12 @@ impl Transcript {
         }
         let event = message["event"].as_str().unwrap_or("");
         if data["snapshot"] == true {
+            let changed = self.context_busy != (data["status"] == "busy");
+            self.context_busy = data["status"] == "busy";
             // A subscribe snapshot reporting an idle session settles a stale reply.
-            return matches!(data["status"].as_str(), Some("ready" | "dead"))
+            let settled = matches!(data["status"].as_str(), Some("ready" | "dead"))
                 && self.settle("completed");
+            return settled || changed;
         }
         if let Some(backend) = data["backend"].as_str()
             && self.live_backend.as_deref() != Some(backend)
@@ -194,6 +215,11 @@ impl Transcript {
                 return false;
             }
             self.live_seq = seq;
+        }
+        let was_running = self.context_busy;
+        if matches!(event, "output" | "tool-use") || (event == "status" && data["status"] == "busy")
+        {
+            self.context_busy = true;
         }
         match event {
             "output" => {
@@ -287,10 +313,34 @@ impl Transcript {
                 tool["result"] = data["output"].clone();
             }
             "status" if matches!(data["status"].as_str(), Some("ready" | "dead")) => {
-                return self.settle("completed");
+                self.context_busy = false;
+                // Retain the classic terminal usage fields before history catches up.
+                let mut usage_changed = false;
+                if let Some(usage) =
+                    crate::composer::controls::context::terminal_usage(&data["usage"])
+                {
+                    let id = data["assistantMessageId"].as_str();
+                    for entry in self
+                        .entries
+                        .iter_mut()
+                        .chain(self.live.iter_mut())
+                        .filter(|entry| Some(entry.id.as_str()) == id)
+                    {
+                        entry.extra.insert("tokens".into(), usage.clone());
+                        usage_changed = true;
+                    }
+                }
+                let settled = self.settle("completed");
+                if usage_changed {
+                    self.refresh();
+                }
+                return settled || usage_changed || was_running;
             }
-            "error" => return self.settle("failed"),
-            _ => return false,
+            "error" => {
+                self.context_busy = false;
+                return self.settle("failed") || was_running;
+            }
+            _ => return was_running != self.context_busy,
         }
         self.refresh()
     }
@@ -315,7 +365,13 @@ impl Transcript {
                 extra: [("timestamp".to_owned(), serde_json::json!(now))].into(),
             });
         }
-        self.live.as_mut()
+        let live = self.live.as_mut()?;
+        for key in ["backend", "model"] {
+            if let Some(value) = data.get(key).filter(|v| v.is_string()) {
+                live.extra.insert(key.into(), value.clone());
+            }
+        }
+        Some(live)
     }
     /// The turn ended: stop the marker, close open tools and record the outcome
     /// until saved history arrives.

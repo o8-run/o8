@@ -3,7 +3,7 @@ use crate::theme::current as theme;
 use gpui::{prelude::*, *};
 use std::sync::{Arc, OnceLock};
 
-pub(super) fn identity(name: &str, color: Option<&str>, size: f32, selector: &str) -> Div {
+pub(crate) fn identity(name: &str, color: Option<&str>, size: f32, selector: &str) -> Div {
     let lower = name.to_lowercase();
     let brand = lower == "o8"
         || lower.strip_prefix("o8").is_some_and(|tail| {

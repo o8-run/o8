@@ -10,6 +10,8 @@ export interface AppUpdateAutoApplyState {
   installed: boolean;
   blockers: AppUpdateBlockers;
   error: string | null;
+  /** The native install's step and download bytes, for the Update panel's progress bar. */
+  progress?: { stage: 'downloading' | 'installing' | 'restarting'; receivedBytes: number; totalBytes: number | null } | null;
 }
 
 export interface AppUpdateState {

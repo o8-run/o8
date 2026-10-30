@@ -29,6 +29,37 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
 
 const operatorDefaultsRoute = await import('@/app/api/panel/operator-defaults/route');
 
+it.each(['fields', 'toml'])('acknowledges persisted native %s without waiting for unused runtime inventory', async (kind) => {
+  const { getRuntimeAuthSnapshot, getDispatchableRuntimeAvailability } = await import('@/lib/runtimes/shared/auth-detect');
+  const snapshot = vi.mocked(getRuntimeAuthSnapshot);
+  const originalSnapshot = snapshot.getMockImplementation()!;
+  const inventory = vi.mocked(getDispatchableRuntimeAvailability);
+  const read = async () => (await operatorDefaultsRoute.GET(
+    new Request('http://localhost/api/panel/operator-defaults?include=native'),
+  )).json();
+  const before = await read();
+  const parallelCap = kind === 'fields' ? 3 : 6;
+  snapshot.mockClear();
+  inventory.mockClear();
+  snapshot.mockImplementationOnce(async () => { throw new Error('Runtime inventory unavailable'); });
+  try {
+    const saved = await operatorDefaultsRoute.POST(new Request('http://localhost/api/panel/operator-defaults?include=native', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        settingsTomlRevision: before.settingsToml.revision,
+        ...(kind === 'fields' ? { parallelCap } : { settingsToml: `[operator]\nparallel_cap = ${parallelCap}\n` }),
+      }),
+    }));
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toEqual({ ok: true });
+    expect((await read()).values.parallelCap).toBe(parallelCap);
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(inventory).not.toHaveBeenCalled();
+  } finally {
+    snapshot.mockReset().mockImplementation(originalSnapshot);
+  }
+});
+
 afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });

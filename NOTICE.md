@@ -251,6 +251,15 @@ The upstream repository declares MIT in package metadata and its README but
 does not currently contain a standalone LICENSE file. The local Roughdraft
 notice records that provenance caveat and should remain with distributions.
 
+## Caveat font
+
+- Copyright: Copyright 2014 The Caveat Project Authors
+- License: SIL Open Font License, Version 1.1
+- Upstream: <https://github.com/googlefonts/caveat>
+- Use in o8: the handwritten annotation ink in o8 next's notes review rail,
+  bundled as `native/o8-next/src/files_panel/caveat.ttf`
+- Full license text: `native/o8-next/src/files_panel/caveat-OFL.txt`
+
 ## MIT permission notice for third-party works
 
 The copyright notices above and the following terms apply to the Lisse,
@@ -283,6 +292,51 @@ SOFTWARE.
 - Use in o8: adapted native transcript, SQLite, metadata, and pricing readers
 - License text: [usage readers](src/lib/usage/history-readers/LICENSE.txt)
 
+## o8 next right panel tab strip
+
+- Copyright: Copyright (c) 2026 T3 Tools Inc.
+- License: MIT
+- Upstream: <https://github.com/pingdotgg/t3code> at commit
+  `5b4f2aa1532730d4dd51d2cb48a57ff74a0f54eb`, files
+  `apps/web/src/components/RightPanelTabs.tsx` and
+  `apps/web/src/components/ui/panel-tab-close-button.tsx`
+- Use in o8: the tab strip, add menu, and hover close control in
+  `native/o8-next/src/shell_features/right_panel.rs`
+- License text: [T3 Code](src/lib/usage/history-readers/LICENSE.txt)
+
+## o8 next inbox sidebar
+
+- Copyright: Copyright (c) 2026 T3 Tools Inc.
+- License: MIT
+- Upstream: <https://github.com/pingdotgg/t3code> at commit
+  `f58fad04162165653bf06f0c987bbfb0074a8a4b`, files
+  `apps/web/src/components/Sidebar.tsx`,
+  `apps/web/src/components/Sidebar.logic.ts`,
+  `apps/web/src/components/sidebar/SidebarProjectFolderHeader.tsx`,
+  `apps/web/src/components/sidebar/SidebarThreadRow.tsx`,
+  `apps/web/src/hooks/showThreadUndoNotice.ts` and
+  `apps/web/src/components/threadActionMenu.logic.ts`
+- Use in o8: the repository scope picker and the thread row's Filter by
+  menu in `native/o8-next/src/surfaces/sidebar/scope.rs`; the By repo
+  folders and their attention dot in
+  `native/o8-next/src/surfaces/sidebar/folders.rs`; the Inbox view's
+  Active and Settled sections, Settle and Un-settle, park-and-advance and
+  the Undo notice in `native/o8-next/src/surfaces/sidebar/inbox.rs`
+- License text: [T3 Code](src/lib/usage/history-readers/LICENSE.txt)
+
+## o8 next update control states
+
+- Copyright: Copyright (c) 2026 T3 Tools Inc.
+- License: MIT
+- Upstream: <https://github.com/pingdotgg/t3code> at commit
+  `5b4f2aa1532730d4dd51d2cb48a57ff74a0f54eb`, files
+  `apps/web/src/components/sidebar/DesktopUpdateStatusIcon.tsx` and
+  `apps/web/src/components/ProviderUpdatesAction.tsx`
+- Use in o8: the update button's checking, download progress and restart
+  states, and "Update all" for connected tools, in
+  `native/o8-next/src/shell_features/update.rs`
+- License text: [T3 Code](src/lib/usage/history-readers/LICENSE.txt)
+
 ## T3 Code inbox sidebar
 
 Settlement transitions and queued-turn guards adapted from [T3 Code](https://github.com/pingdotgg/t3code),
@@ -312,3 +366,8 @@ native-consumed server listings. No project settlement scripts are ported.
   discovery, bounded resolver caching, separate file and identity overrides,
   validation, and regression tests. Uses o8's existing SQLite app state and
   rooted file reader; explicit file overrides must remain inside the repository.
+- Native o8 next: `apps/web/src/projectIconOptions.ts`,
+  `apps/web/src/projectIconColors.ts`, `apps/web/src/projectIdentity.ts` and
+  `apps/web/src/components/ProjectFavicon.tsx` adapted in
+  `native/o8-next/src/project_icon.rs`; the picker dialog adapted as an inline
+  card in `native/o8-next/src/projects_icons.rs`.

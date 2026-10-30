@@ -7534,6 +7534,12 @@
       ]
     },
     {
+      "path": "tests/update-next-window-apply-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/update-restart-parked-real-path.test.ts",
       "reasons": [
         "network-listener",
