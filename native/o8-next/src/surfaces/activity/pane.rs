@@ -14,9 +14,11 @@ pub enum ActivityEvent {
     /// A row's GitHub link, for the shell to open in the surface that
     /// claims it (pull requests, issues) or in the browser.
     Open(String),
+    Diff(String),
 }
 #[derive(Clone)]
 pub(super) enum Action {
+    Packet(packet::Command),
     Filter(&'static str),
     Scope(String),
     /// Opens or closes the repository scope menu (O8RepoSelector).
@@ -67,6 +69,7 @@ pub(super) struct Detail {
     pub updated: Option<Instant>,
 }
 pub struct ActivityPane {
+    pub(super) packet: packet::State,
     pub(super) client: Client,
     pub(super) workspace: String,
     pub(super) scope: String,
@@ -81,6 +84,7 @@ pub struct ActivityPane {
     pub(super) details: HashMap<String, Detail>,
     pub(super) pending: bool,
     pub(super) notice: String,
+    pub(super) notice_error: bool,
     generation: u64,
     pub(super) loaded_at: Instant,
     stop_identity: Option<(String, String)>,
@@ -101,6 +105,7 @@ impl EventEmitter<ActivityEvent> for ActivityPane {}
 impl ActivityPane {
     pub fn new(client: Client, workspace: String, cx: &mut Context<Self>) -> Self {
         let mut pane = Self {
+            packet: packet::State::default(),
             client,
             scope: workspace.clone(),
             workspace,
@@ -115,6 +120,7 @@ impl ActivityPane {
             details: HashMap::new(),
             pending: false,
             notice: String::new(),
+            notice_error: false,
             generation: 0,
             loaded_at: Instant::now(),
             stop_identity: None,
@@ -214,6 +220,14 @@ impl ActivityPane {
                 if !this.rows.iter().any(|r| Some(r.key()) == this.expanded) {
                     this.expanded = None;
                 }
+                if let Some(row) = this
+                    .rows
+                    .iter()
+                    .find(|r| r.kind == "packet" && Some(r.key()) == this.expanded)
+                    .cloned()
+                {
+                    this.packet_read(row, false, cx);
+                }
                 this.changed(cx);
             });
         })
@@ -310,6 +324,7 @@ impl ActivityPane {
             return;
         }
         self.pending = true;
+        self.notice_error = false;
         self.notice = "Applying decision…".into();
         let merge = body["verb"] == "merge";
         let client = self.client.clone();
@@ -346,6 +361,7 @@ impl ActivityPane {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.pending = false;
+                this.notice_error = result.is_err();
                 this.notice = match result {
                     Ok(value)
                         if value["result"]["inProgress"] == true
@@ -384,18 +400,26 @@ impl ActivityPane {
         self.changed(cx);
     }
     pub(super) fn act(&mut self, action: Action, cx: &mut Context<Self>) {
+        match &action {
+            Action::Hold(row, _) | Action::Lane(row, _) | Action::Close(row) => {
+                self.packet.action = Some(row.id.clone())
+            }
+            Action::StopMission => self.packet.action = None,
+            _ => {}
+        }
         match action {
+            Action::Packet(command) => self.packet_act(command, cx),
             Action::Filter(filter) => { self.filter = filter; self.expanded = None; }
             Action::ScopeMenu(open) => self.scope_menu = open,
             Action::Scope(scope) => {
                 self.scope_menu = false;
                 self.scope = scope; self.generation += 1; self.loading = false;
-                self.rows.clear(); self.errors.clear(); self.expanded = None; self.details.clear(); self.keyboard = None; self.load(cx);
+                self.packet.reads.clear(); self.packet.editor = None; self.rows.clear(); self.errors.clear(); self.expanded = None; self.details.clear(); self.keyboard = None; self.load(cx);
             }
-            Action::Refresh => self.load(cx),
+            Action::Refresh => { self.packet.reads.clear(); self.load(cx); },
             Action::Expand(row) => {
                 if self.expanded.as_ref() == Some(&row.key()) { self.expanded = None; }
-                else { self.expanded = Some(row.key()); self.detail(row,false,cx); }
+                else { self.expanded = Some(row.key()); if row.kind == "packet" { self.packet_read(row,false,cx); } else { self.detail(row,false,cx); } }
             }
             Action::RetryDetail(row) => self.detail(row,true,cx),
             Action::Link(url) => cx.open_url(&url),
@@ -462,7 +486,7 @@ impl ActivityPane {
     pub(super) fn key_down(
         &mut self,
         event: &KeyDownEvent,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
@@ -491,6 +515,7 @@ impl ActivityPane {
                 {
                     let opening = matches!(action, Action::ScopeMenu(true));
                     self.act(action, cx);
+                    self.packet_focus_editor(window, cx);
                     // As classic, the open menu starts on the checked scope.
                     if opening {
                         self.keyboard = Some(self.checked_scope());
@@ -513,3 +538,6 @@ impl ActivityPane {
 }
 #[path = "view.rs"]
 mod view;
+
+#[path = "packet.rs"]
+mod packet;

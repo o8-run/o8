@@ -37,6 +37,8 @@ pub enum Event {
     View(String, &'static str),
     /// The closed By repo folders, by repository path.
     Folders(Vec<String>),
+    /// The project menu's Switch workspace, with the focus to give back.
+    WorkspacePicker(Option<gpui::FocusHandle>),
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Row {
@@ -66,6 +68,8 @@ pub struct ThreadList {
     workspace: Option<String>,
     header_busy: bool,
     header_menu: Option<bool>,
+    /// Focus before the project menu opened; Switch workspace returns it.
+    header_focus: Option<gpui::FocusHandle>,
     /// Each project's repository scope (T3's projectScopeKeys), by project id.
     scopes: HashMap<String, Vec<String>>,
     scope_menu: Option<project_header::ScopeMenu>,
@@ -154,6 +158,7 @@ impl ThreadList {
             workspace: None,
             header_busy: false,
             header_menu: None,
+            header_focus: None,
             scopes: HashMap::new(),
             scope_menu: None,
             row_menu: None,
@@ -724,6 +729,13 @@ impl ThreadList {
             .iter()
             .find(|session| session.id == id)
             .and_then(|session| session.repo_path.clone());
+        let archive_notice = patch.get("archivedAt").map(|value| {
+            if value.is_null() {
+                "Thread restored."
+            } else {
+                "Thread archived."
+            }
+        });
         let task = cx
             .background_executor()
             .spawn(async move { client.mutate_sidebar(workspace.as_deref(), &id, patch) });
@@ -736,6 +748,15 @@ impl ThreadList {
                     && this.rename == draft_owner;
                 match result {
                     Ok(()) => {
+                        if let Some(message) = archive_notice {
+                            crate::shell::toasts::show(
+                                crate::shell::toasts::Kind::Chat,
+                                message,
+                                vec![],
+                                Some(crate::shell::toasts::CHAT_TIMEOUT),
+                                cx,
+                            );
+                        }
                         if renaming && current_draft {
                             this.edit_generation += 1;
                             if let Some(id) = this.rename.take() {

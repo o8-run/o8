@@ -64,7 +64,7 @@ fn symon(s: &mut Shell, data: &Value, window: &mut Window, cx: &mut Context<Shel
         ),
         "prs" => {
             if !s.open_registered("Pull requests", window, cx) {
-                s.notice = "Pull requests are not in o8 next yet.".into();
+                toasts::info("Pull requests are not in o8 next yet.", cx);
             }
         }
         "orchestrator_draft" => {
@@ -73,11 +73,15 @@ fn symon(s: &mut Shell, data: &Value, window: &mut Window, cx: &mut Context<Shel
             }
         }
         "set" => set(s, data["key"].as_str(), data["value"].as_str(), window, cx),
-        "mobile_qr" => s.notice = "Mobile pairing is not in o8 next yet.".into(),
-        "automations" => s.notice = "Automations are not in o8 next yet.".into(),
+        "mobile_qr" => {
+            toasts::info("Mobile pairing is not in o8 next yet.", cx);
+        }
+        "automations" => {
+            toasts::info("Automations are not in o8 next yet.", cx);
+        }
         _ => {
             if !super::right_panel::open_surface(s, surface, data["url"].as_str(), window, cx) {
-                s.notice = format!("I don't know the o8 surface \"{surface}\".");
+                toasts::info(format!("I don't know the o8 surface \"{surface}\"."), cx);
             }
         }
     }
@@ -98,7 +102,9 @@ fn draft(s: &mut Shell, text: &str, window: &mut Window, cx: &mut Context<Shell>
         });
     match view {
         Some(view) => view.update(cx, |surface, cx| surface.prepend_draft(text, window, cx)),
-        None => s.notice = "Open a conversation for Symon's draft.".into(),
+        None => {
+            toasts::info("Open a conversation for Symon's draft.", cx);
+        }
     }
 }
 
@@ -122,10 +128,13 @@ fn set(
             return;
         }
         _ => {
-            s.notice = format!(
-                "I can't set {} to {}.",
-                key.unwrap_or("?"),
-                value.unwrap_or("?")
+            toasts::info(
+                format!(
+                    "I can't set {} to {}.",
+                    key.unwrap_or("?"),
+                    value.unwrap_or("?")
+                ),
+                cx,
             );
             return;
         }
@@ -145,11 +154,21 @@ fn canvas_mode(s: &mut Shell, on: bool, cx: &mut Context<Shell>) {
     });
     cx.spawn(async move |this, cx| {
         let result = task.await;
-        let _ = this.update(cx, |this, cx| {
-            this.notice = match result {
-                Ok(()) => format!("Canvas mode {}.", if on { "on" } else { "off" }),
-                Err(()) => "Could not change Canvas mode.".into(),
-            };
+        let _ = this.update(cx, |_, cx| {
+            match result {
+                Ok(()) => {
+                    toasts::show(
+                        toasts::Kind::Success,
+                        format!("Canvas mode {}.", if on { "on" } else { "off" }),
+                        vec![],
+                        Some(toasts::NOTICE_TIMEOUT),
+                        cx,
+                    );
+                }
+                Err(()) => {
+                    toasts::error("Could not change Canvas mode.", cx);
+                }
+            }
             cx.notify();
         });
     })

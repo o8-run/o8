@@ -15,6 +15,12 @@ mod quick_docs;
 mod search;
 mod selection;
 mod source;
+mod spec;
+mod spec_document;
+mod spec_rfm;
+pub use spec::Preferences as NotesPreferences;
+pub struct NotesPreferencesChanged(pub NotesPreferences);
+impl gpui::EventEmitter<NotesPreferencesChanged> for FilesPanel {}
 mod syntax;
 mod tree;
 mod viewer;
@@ -107,6 +113,7 @@ pub struct FilesPanel {
     focused_once: std::cell::Cell<bool>,
     show_changes: bool,
     changes: Option<Entity<changes::Changes>>,
+    spec: Option<Entity<spec::Spec>>,
 }
 
 impl FilesPanel {
@@ -186,10 +193,22 @@ impl FilesPanel {
             focused_once: std::cell::Cell::new(false),
             show_changes: false,
             changes: None,
+            spec: None,
         };
         match mode {
             Mode::Files => panel.load_directory(String::new(), cx),
-            Mode::Spec => panel.load_spec(cx),
+            Mode::Spec => {
+                let view =
+                    cx.new(|cx| spec::Spec::new(panel.client.clone(), panel.workspace.clone(), cx));
+                panel._subscriptions.push(cx.subscribe(
+                    &view,
+                    |_, _, prefs: &spec::PreferencesChanged, cx| {
+                        cx.emit(NotesPreferencesChanged(prefs.0.clone()))
+                    },
+                ));
+                panel.focus = view.read(cx).focus.clone();
+                panel.spec = Some(view);
+            }
         }
         panel
     }
@@ -269,15 +288,25 @@ impl FilesPanel {
         cx.notify();
     }
 
+    pub fn set_notes_preferences(&mut self, prefs: NotesPreferences, cx: &mut Context<Self>) {
+        if let Some(spec) = &self.spec {
+            spec.update(cx, |spec, cx| spec.receive_preferences(prefs, cx));
+        }
+    }
+    pub fn set_spec_workspace(&mut self, workspace: &str, cx: &mut Context<Self>) {
+        if let Some(spec) = &self.spec {
+            spec.update(cx, |spec, cx| spec.follow_workspace(workspace, cx));
+        }
+    }
+    pub fn set_spec_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        if let Some(spec) = &self.spec {
+            spec.update(cx, |spec, cx| spec.active(active, cx));
+        }
+    }
     fn load_spec(&mut self, cx: &mut Context<Self>) {
-        self.selected = Some("o8.md".into());
-        self.file = File::Loading;
-        let client = self.client.clone();
-        let workspace = self.workspace.clone();
-        let task = cx.background_executor().spawn(async move {
-            client.get::<Value>("/api/repo-spec", &[("repoPath", workspace.as_str())])
-        });
-        self.finish_file(task, cx);
+        if let Some(spec) = &self.spec {
+            spec.update(cx, |spec, cx| spec.load(false, cx));
+        }
     }
 
     fn finish_file(&mut self, task: gpui::Task<Result<Value, String>>, cx: &mut Context<Self>) {
@@ -483,6 +512,10 @@ fn status(text: String) -> impl IntoElement {
 
 impl Render for FilesPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(spec) = &self.spec {
+            return div().size_full().child(spec.clone());
+        }
+
         if self.mode == Mode::Files && self.show_changes {
             let body = self
                 .changes

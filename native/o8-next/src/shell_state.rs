@@ -86,6 +86,9 @@ pub struct State {
     /// Closed By repo folders, by repository path.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub sidebar_closed_folders: BTreeSet<String>,
+    /// Workspace Notes target history and user-selected annotation ink.
+    #[serde(default)]
+    pub notes: crate::files_panel::NotesPreferences,
     #[serde(skip)]
     pub(crate) retain_file: bool,
     #[serde(skip)]
@@ -107,6 +110,7 @@ impl Default for State {
             sidebar_scope: BTreeMap::new(),
             sidebar_view: BTreeMap::new(),
             sidebar_closed_folders: BTreeSet::new(),
+            notes: Default::default(),
             retain_file: false,
             backup_file: Arc::default(),
         }

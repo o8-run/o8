@@ -91,6 +91,15 @@ pub(super) struct Registration {
     pub command: Option<(usize, fn() -> Command)>,
     pub open: OpenSurface,
     pub create: fn(&mut Shell, Tab, String, &mut Window, &mut Context<Shell>) -> Option<Content>,
+    /// Optional contextual panel view, created and refreshed by its surface.
+    /// Chrome retains only an erased view, so removing a registration removes
+    /// its contextual implementation and request adapter together.
+    pub panel_view: fn(
+        &mut Shell,
+        &serde_json::Value,
+        &mut Window,
+        &mut Context<Shell>,
+    ) -> Option<gpui::AnyView>,
     pub global: bool,
     pub overlay_command: bool,
     pub overlay: fn(&Shell) -> Option<AnyElement>,
@@ -127,6 +136,7 @@ impl Registration {
             open,
             command: None,
             create: |_, _, _, _, _| None,
+            panel_view: |_, _, _, _| None,
             global: false,
             overlay_command: false,
             overlay: |_| None,

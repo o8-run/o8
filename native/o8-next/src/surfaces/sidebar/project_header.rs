@@ -304,6 +304,15 @@ impl ThreadList {
                                     .flex_shrink_0()
                                     .child(glyph(false, 13., theme().text_faint)),
                             )
+                            .capture_any_mouse_down(cx.listener(
+                                |this, event: &gpui::MouseDownEvent, window, cx| {
+                                    if event.button == gpui::MouseButton::Left
+                                        && this.header_menu != Some(true)
+                                    {
+                                        this.header_focus = window.focused(cx);
+                                    }
+                                },
+                            ))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if !this.header_busy {
                                     this.header_menu = if this.header_menu == Some(true) {
@@ -425,6 +434,25 @@ impl ThreadList {
                             })),
                     );
                 }
+                menu = menu.child(
+                    div()
+                        .id("sidebar-workspace-picker")
+                        .debug_selector(|| "sidebar-workspace-picker".into())
+                        .h(px(34.))
+                        .px(px(9.))
+                        .flex()
+                        .items_center()
+                        .rounded(px(9.))
+                        .text_size(px(12.))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(theme().hover))
+                        .child("Switch workspace…")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.header_menu = None;
+                            cx.emit(Event::WorkspacePicker(this.header_focus.take()));
+                            cx.notify();
+                        })),
+                );
             } else {
                 for (index, repo) in repos.iter().enumerate().skip(count) {
                     let id = repo.id.clone();

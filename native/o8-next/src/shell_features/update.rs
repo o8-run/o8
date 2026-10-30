@@ -739,7 +739,7 @@ fn check_now(s: &mut Shell, cx: &mut Context<Shell>) {
     state.status = None;
     // Nothing would answer; say so instead of waiting out the server.
     if state.no_updater {
-        s.notice = "Update checks need the o8 app.".into();
+        toasts::info("Update checks need the o8 app.", cx);
         cx.notify();
         return;
     }
@@ -782,19 +782,33 @@ fn check_now(s: &mut Shell, cx: &mut Context<Shell>) {
                         state.error = Some(error_text(message));
                     }
                     let ready = state.pending.is_some();
-                    this.notice = if headless {
-                        "Update checks need the o8 app.".into()
+                    let message = if headless {
+                        "Update checks need the o8 app."
                     } else if failed {
-                        "The o8 update check could not finish. Try again.".into()
+                        "The o8 update check could not finish. Try again."
                     } else if ready {
-                        "o8 update is ready.".into()
+                        "o8 update is ready."
                     } else {
-                        "o8 is up to date.".into()
+                        "o8 is up to date."
                     };
+                    if this.notice == "Checking o8…" {
+                        this.notice.clear();
+                    }
+                    if failed {
+                        toasts::error(message, cx);
+                    } else {
+                        toasts::info(message, cx);
+                    }
                 }
                 Err(error) => {
                     state.error = Some(error_text(&error));
-                    this.notice = "Update checks could not finish. Try again.".into();
+                    if this.notice == "Checking o8…" {
+                        this.notice.clear();
+                    }
+                    toasts::error(
+                        format!("Update checks could not finish. Try again.\n{error}"),
+                        cx,
+                    );
                 }
             }
             load_notes(this, cx);
@@ -969,7 +983,7 @@ fn update_tool(s: &mut Shell, runtime: String, cx: &mut Context<Shell>) {
             if let Ok(body) = &result
                 && let Some(error) = body["error"].as_str()
             {
-                this.notice = error.to_string();
+                toasts::error(error.to_string(), cx);
             }
             load_tools(this, true, cx);
         });

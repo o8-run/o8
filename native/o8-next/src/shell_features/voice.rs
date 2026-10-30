@@ -115,12 +115,12 @@ impl Shell {
             return;
         }
         let Some(view) = active_view(self) else {
-            self.notice = "Open a chat to talk to it.".into();
+            toasts::info("Open a chat to talk to it.", cx);
             cx.notify();
             return;
         };
         let Some(target) = view.read(cx).voice_binding(cx) else {
-            self.notice = "This chat is not ready for voice yet.".into();
+            toasts::info("This chat is not ready for voice yet.", cx);
             cx.notify();
             return;
         };
@@ -141,7 +141,7 @@ impl Shell {
                 && this.features.get::<Live>().nonce == nonce
             {
                 retire(this, cx);
-                this.notice = error;
+                toasts::error(error, cx);
             }
         });
     }
@@ -163,7 +163,7 @@ fn stop(s: &mut Shell, cx: &mut Context<Shell>) {
             && this.features.get::<Live>().nonce == nonce
         {
             retire(this, cx);
-            this.notice = format!("Voice stop was not confirmed: {error}");
+            toasts::error(format!("Voice stop was not confirmed: {error}"), cx);
         }
     });
 }
@@ -172,6 +172,9 @@ fn stop(s: &mut Shell, cx: &mut Context<Shell>) {
 fn retire(s: &mut Shell, cx: &mut Context<Shell>) {
     show(s, VoiceState::Off, cx);
     *s.features.get::<Live>() = Live::default();
+    if s.notice == "Voice is still closing." {
+        s.notice.clear();
+    }
     cx.notify();
 }
 
@@ -237,13 +240,14 @@ fn session_state(s: &mut Shell, payload: &Value, cx: &mut Context<Shell>) {
         Some("closed" | "idle") => retire(s, cx),
         Some("error") => {
             retire(s, cx);
-            s.notice = match payload["detail"]
+            let message = match payload["detail"]
                 .as_str()
                 .filter(|detail| !detail.is_empty())
             {
                 Some(detail) => format!("Voice stopped: {detail}"),
                 None => "Voice stopped with an error.".into(),
             };
+            toasts::error(message, cx);
         }
         Some("unknown") => {
             retire(s, cx);
@@ -269,12 +273,15 @@ fn interrupt(s: &mut Shell, payload: &Value, cx: &mut Context<Shell>) {
     cx.spawn(async move |this, cx| {
         let result = task.await;
         let _ = this.update(cx, |this, cx| {
-            this.notice = match result {
+            match result {
                 Ok(()) => {
-                    "Voice asked this chat to stop. The chat has not confirmed it yet.".into()
+                    this.notice =
+                        "Voice asked this chat to stop. The chat has not confirmed it yet.".into()
                 }
-                Err(error) => format!("Voice could not stop this chat: {error}"),
-            };
+                Err(error) => {
+                    toasts::error(format!("Voice could not stop this chat: {error}"), cx);
+                }
+            }
             cx.notify();
         });
     })
@@ -300,7 +307,7 @@ pub(super) fn delegate(s: &mut Shell, payload: &Value, cx: &mut Context<Shell>) 
     let task = match view.update(cx, |view, cx| view.send_spoken(text, &nonce, cx)) {
         Ok(task) => task,
         Err(error) => {
-            s.notice = format!("Voice request not sent: {error}");
+            toasts::error(format!("Voice request not sent: {error}"), cx);
             cx.notify();
             return;
         }
@@ -318,7 +325,7 @@ pub(super) fn delegate(s: &mut Shell, payload: &Value, cx: &mut Context<Shell>) 
             }
             Ok(_) => {}
             Err(error) => {
-                this.notice = format!("Voice request not confirmed: {error}");
+                toasts::error(format!("Voice request not confirmed: {error}"), cx);
                 cx.notify();
             }
         });
@@ -373,9 +380,11 @@ fn decide(s: &mut Shell, id: String, allow: bool, cx: &mut Context<Shell>) {
             Ok(()) => drop_gate(this, &id, cx),
             Err(error) if error.contains("409") => {
                 drop_gate(this, &id, cx);
-                this.notice = "That confirmation expired before your answer.".into();
+                toasts::info("That confirmation expired before your answer.", cx);
             }
-            Err(error) => this.notice = format!("Your answer was not delivered: {error}"),
+            Err(error) => {
+                toasts::error(format!("Your answer was not delivered: {error}"), cx);
+            }
         }
         cx.notify();
     });

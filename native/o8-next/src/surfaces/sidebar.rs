@@ -163,6 +163,9 @@ pub(super) const REGISTRATION: Registration = Registration {
             .flex()
             .flex_1()
             .min_h_0()
+            // This row sits inside the panel and resize row; its automatic
+            // minimum width must not widen the workspace past the window.
+            .min_w_0()
             .child(
                 gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
                     gpui::StyleRefinement::default()
@@ -267,6 +270,12 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                         shell.state.selected = None;
                         shell.persist();
                     }
+                }
+                ThreadEvent::WorkspacePicker(previous) => {
+                    if let Some(focus) = previous {
+                        focus.focus(window);
+                    }
+                    super::palette::open_workspaces(shell, window, cx);
                 }
                 ThreadEvent::Selected(id) => shell.open_thread(id.clone(), window, cx),
                 ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),

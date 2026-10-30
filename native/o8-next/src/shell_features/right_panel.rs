@@ -7,6 +7,8 @@ mod chrome;
 mod contextual;
 #[path = "right_panel/layout.rs"]
 mod layout;
+#[path = "../files_panel/spec_shell.rs"]
+mod notes;
 // The desktop's right panel (O8Panel). Its tools open as tabs in the panel's
 // own strip; "+" lists every desktop panel tool (o8-panel/panel-tools.tsx),
 // including the ones o8 next does not have yet, which open a placeholder.
@@ -279,6 +281,9 @@ impl Panel {
 }
 
 fn key(s: &Shell, tool: Tool) -> String {
+    if tool == Tool::Spec {
+        return "panel|notes|Spec".into();
+    }
     format!(
         "panel|{}|{tool:?}",
         s.state.selected.as_deref().unwrap_or("")
@@ -480,7 +485,8 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     if matches!(tool, Tool::Files | Tool::Spec)
         && !s.features.get::<Panel>().files.contains_key(&key)
     {
-        if workspace.is_empty() {
+        // Notes can target settings without a workspace; Files cannot.
+        if workspace.is_empty() && tool == Tool::Files {
             layout::select(s, tool, window, cx);
             return;
         }
@@ -513,7 +519,7 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         s.features.get::<Panel>().browsers.insert(key.clone(), view);
     }
     if tool == Tool::Compare {
-        contextual::ensure_comparison(s, cx);
+        contextual::ensure_comparison(s, window, cx);
     }
     if tool == Tool::Prs {
         contextual::ensure_prs(s, window, cx);
@@ -542,7 +548,9 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
 /// workspace, covered launcher, inactive utility tab or background page.
 pub(super) fn active_browser(s: &Shell) -> Option<Entity<crate::browser_panel::BrowserPanel>> {
     let panel = s.features.read::<Panel>()?;
-    if panel.current() != Tool::Browser || !panel.motion.is_open() { return None; }
+    if panel.current() != Tool::Browser || !panel.motion.is_open() {
+        return None;
+    }
     panel.browsers.get(&key(s, Tool::Browser)).cloned()
 }
 
@@ -631,8 +639,10 @@ fn files_view(
     let view = cx.new(|cx| {
         let mut view = crate::files_panel::FilesPanel::new(client, workspace.clone(), mode, cx);
         view.set_pins(&workspace, pins, cx);
+        view.set_notes_preferences(s.state.notes.clone(), cx);
         view
     });
+    notes::configure(s, &view, cx);
     s.subscriptions.push(cx.subscribe(
         &view,
         |s, _, pins: &crate::files_panel::PinsChanged, cx| {
@@ -704,6 +714,7 @@ pub(super) fn element(
 ) -> Option<(AnyElement, f32, f32)> {
     cover_browsers(s, cx);
     super::devices::sync_visibility(s, window, cx);
+    notes::cover(s, cx);
     let (full, shown) = width(s, window)?;
     let panel = s.features.read::<Panel>()?;
     let (travel, _) = panel.motion.value();

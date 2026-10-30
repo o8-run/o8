@@ -155,12 +155,12 @@ fn key(s: &mut Shell, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<She
 
 fn start(s: &mut Shell, held: bool, cx: &mut Context<Shell>) {
     let Some(view) = active_view(s) else {
-        s.notice = "Open a chat to dictate into it.".into();
+        toasts::info("Open a chat to dictate into it.", cx);
         cx.notify();
         return;
     };
     let Some(mut target) = view.read(cx).voice_binding(cx) else {
-        s.notice = "This chat is not ready for dictation yet.".into();
+        toasts::info("This chat is not ready for dictation yet.", cx);
         cx.notify();
         return;
     };
@@ -187,7 +187,7 @@ fn start(s: &mut Shell, held: bool, cx: &mut Context<Shell>) {
             && this.features.get::<Mic>().request == request
         {
             retire(this, cx);
-            this.notice = error;
+            toasts::error(error, cx);
         }
     });
 }
@@ -206,7 +206,7 @@ fn stop(s: &mut Shell, cx: &mut Context<Shell>) {
         {
             restore(this, cx);
             retire(this, cx);
-            this.notice = format!("Dictation did not finish: {error}");
+            toasts::error(format!("Dictation did not finish: {error}"), cx);
         }
     });
 }
@@ -302,16 +302,19 @@ pub(super) fn frame(s: &mut Shell, kind: &str, payload: &Value, cx: &mut Context
                 restore(s, cx);
                 retire(s, cx);
                 if state == DictationState::Finishing && !sent {
-                    s.notice = "Dictation heard nothing to send.".into();
+                    toasts::info("Dictation heard nothing to send.", cx);
                 }
             }
             Some("error") => {
                 restore(s, cx);
                 retire(s, cx);
-                s.notice = payload["error"]
-                    .as_str()
-                    .unwrap_or("Dictation stopped.")
-                    .to_owned();
+                toasts::error(
+                    payload["error"]
+                        .as_str()
+                        .unwrap_or("Dictation stopped.")
+                        .to_owned(),
+                    cx,
+                );
             }
             _ => {}
         },

@@ -375,7 +375,17 @@ impl ThreadList {
                         this.pending_open = Some(id);
                         this.load(cx);
                     }
-                    Err(error) => this.notice = format!("Could not start a thread: {error}"),
+                    Err(error) => {
+                        crate::shell::toasts::show(
+                            crate::shell::toasts::Kind::SpawnError {
+                                detail: error.into(),
+                            },
+                            "Could not start a thread.",
+                            vec![],
+                            Some(crate::shell::toasts::ERROR_TIMEOUT),
+                            cx,
+                        );
+                    }
                 }
                 cx.notify();
             });

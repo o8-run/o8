@@ -30,11 +30,11 @@ fn create(
     cx: &mut Context<Shell>,
 ) -> Option<Content> {
     let client = shell.client.in_workspace(&workspace);
-    let activity = cx.new(|cx| ActivityPane::new(client, workspace, cx));
+    let activity = cx.new(|cx| ActivityPane::new(client, workspace.clone(), cx));
     shell.subscriptions.push(cx.subscribe_in(
         &activity,
         window,
-        |shell, _, event: &ActivityEvent, window, cx| match event {
+        move |shell, _, event: &ActivityEvent, window, cx| match event {
             ActivityEvent::Worker(key) => {
                 if let Some(session) = shell
                     .workspace_sessions()
@@ -44,9 +44,17 @@ fn create(
                 {
                     shell.execute(Command::Session(session.id), window, cx);
                 } else {
-                    shell.notice = "This worker is not available in the selected workspace. Refresh the session list.".into();
+                    toasts::show(toasts::Kind::Info, "This worker is not available in the selected workspace. Refresh the session list.", vec![], Some(toasts::NOTICE_TIMEOUT), cx);
                     cx.notify();
                 }
+            }
+            ActivityEvent::Diff(id) => {
+                if let Some(state) = shell.state.workspaces.get_mut(&workspace) {
+                    state.surfaces.diff.diff_packet = Some(id.clone());
+                }
+                let key = shell.key(&Tab::Diff);
+                shell.content.remove(&key);
+                shell.execute(Command::Diff, window, cx);
             }
             ActivityEvent::Open(url) => shell.open_link(url, window, cx),
         },
@@ -91,3 +99,7 @@ mod identity_tests;
 #[cfg(test)]
 #[path = "activity/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "activity/packet_tests.rs"]
+mod packet_tests;
