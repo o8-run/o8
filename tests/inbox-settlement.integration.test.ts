@@ -1,0 +1,232 @@
+/**
+ * Adapted from T3 Code (https://github.com/pingdotgg/t3code),
+ * apps/server/src/orchestration-v2/Orchestrator.ts and
+ * packages/client-runtime/src/state/threadSettled.ts, commit
+ * f58fad04162165653bf06f0c987bbfb0074a8a4b.
+ * Copyright (c) 2026 T3 Tools Inc.; MIT; see licenses/t3code-MIT.txt.
+ * Adapted for o8: real route, SQLite, history and runtime subject fixtures.
+ */
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
+import { createEmptyOrchestratorMissionState } from '@/lib/orchestrator/store';
+import { writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import { POST, PATCH, GET, DELETE } from '@/app/api/v2/chat-history/route';
+import { GET as list } from '@/app/api/mobile/orchestrator/threads/route';
+import { GET as inventory } from '@/app/api/runtime/inventory/route';
+import { createLane, setLaneStatus } from '@/lib/lane/registry';
+import { createApproval } from '@/lib/approvals/store';
+import { getSqlite } from '@/lib/db';
+import { enqueueComposerSend } from '@/lib/orchestrator/composer-queue';
+
+// Runtime discovery is an external provider boundary. The lanes, approvals,
+// transcript, mutation, persisted metadata and both listing routes are real.
+const fixture = vi.hoisted(() => {
+  const previousClaudeHome = process.env.CLAUDE_HOME;
+  const claudeHome = `${process.env.CORTEX_IDE_DATA_DIR}/inbox-claude`;
+  process.env.CLAUDE_HOME = claudeHome;
+  return { previousClaudeHome, claudeHome, realTranscript: false, agents: [] as Array<Record<string, unknown>>,
+    transcript: [] as Array<{ id: string; role: 'user'; text: string; timestamp: Date; activityAt?: Date }> };
+});
+vi.mock('@/lib/runtimes', async original => {
+  const actual = await original<typeof import('@/lib/runtimes')>();
+  return { ...actual, getRuntime: (id: Parameters<typeof actual.getRuntime>[0]) => {
+    const runtime = actual.getRuntime(id);
+    return fixture.realTranscript ? runtime : runtime ? { ...runtime, readTranscript: async () => fixture.transcript } : undefined;
+  } };
+});
+vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: async () => ({ agents: fixture.agents }) }));
+const prefix = `thoughts-inbox-${process.pid}`;
+const ids: string[] = [];
+const request = (body: Record<string, unknown>, query = '') => new NextRequest(`http://localhost/api/v2/chat-history${query}`, {
+  method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+});
+const mutate = (tabId: string, inboxAction: string) => PATCH(request({ tabId, inboxAction }));
+async function seed(suffix: string, timestamp = 100) {
+  const tabId = `${prefix}-${suffix}`;
+  ids.push(tabId);
+  expect((await POST(new NextRequest('http://localhost/api/v2/chat-history', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tabId, repoPath: process.cwd(), messages: [
+      { id: 'u', role: 'user', content: 'Hello', timestamp },
+      { id: 'a', role: 'assistant', content: 'Finished', timestamp: timestamp + 1 },
+    ] }),
+  }))).status).toBe(200);
+  return tabId;
+}
+async function listed(tabId: string) {
+  const data = await (await list(new NextRequest('http://localhost/api/mobile/orchestrator/threads?limit=500'))).json();
+  return data.threads.find((thread: { id: string }) => thread.id === tabId);
+}
+afterAll(async () => {
+  if (fixture.previousClaudeHome === undefined) delete process.env.CLAUDE_HOME;
+  else process.env.CLAUDE_HOME = fixture.previousClaudeHome;
+  for (const tabId of ids) await DELETE(new NextRequest(`http://localhost/api/v2/chat-history?tabId=${tabId}`));
+});
+
+describe('inbox settlement through operator mutation and native listings', () => {
+  it('round-trips settle/unsettle and repeat timestamps without archiving or dropping messages', async () => {
+    const tabId = await seed('roundtrip');
+    expect(await listed(tabId)).toMatchObject({ settledOverride: null, settledAt: null, unsettledAt: null });
+    expect((await mutate(tabId, 'settle')).status).toBe(200);
+    const settled = await listed(tabId);
+    expect(settled).toMatchObject({ inboxSubject: { kind: 'conversation', id: tabId }, settledOverride: 'settled', settledAt: expect.any(String), unsettledAt: null });
+    expect((await mutate(tabId, 'settle')).status).toBe(200);
+    expect(await listed(tabId)).toEqual(settled);
+    expect((await mutate(tabId, 'unsettle')).status).toBe(200);
+    const active = await listed(tabId);
+    expect(active).toMatchObject({ settledOverride: 'active', settledAt: null, unsettledAt: expect.any(String) });
+    await mutate(tabId, 'unsettle');
+    expect(await listed(tabId)).toEqual(active);
+    const pending = createApproval({ source: 'test', runtime: 'llm-chat', agent: 'fixture', sessionKey: `llm-chat:${tabId}`,
+      title: 'Chat approval', description: 'Pending', summary: 'Pending', risk: 'low' });
+    expect((await mutate(tabId, 'settle')).status).toBe(409);
+    getSqlite().prepare('DELETE FROM approvals WHERE id = ?').run(pending.id);
+    const saved = await (await GET(new NextRequest(`http://localhost/api/v2/chat-history?tabId=${tabId}`))).json();
+    expect(saved.messages.map((m: { id: string }) => m.id)).toEqual(['u', 'a']);
+    expect(saved.archivedAt).toBeNull();
+  });
+
+  it.each([-1, 1])('rejects queued-turn grace with clock skew direction %s', async direction => {
+    const tabId = await seed(`grace-${direction}`, Date.now() + direction * 60_000);
+    // An unadopted user send, rather than an assistant-completed turn.
+    await POST(new NextRequest('http://localhost/api/v2/chat-history', { method: 'POST', body: JSON.stringify({ tabId, replace: true, messages: [{ id: 'u', role: 'user', content: 'queued', timestamp: Date.now() + direction * 60_000 }] }) }));
+    expect((await mutate(tabId, 'settle')).status).toBe(409);
+  });
+
+  it('rejects an actual durable queued send', async () => {
+    const tabId = await seed('queued');
+    enqueueComposerSend({ id: `${prefix}-queue`, repoPath: process.cwd(), threadId: tabId, intent: 'send-next', payload: {
+      text: 'next', wireMessage: 'next', images: [], routing: { backend: 'codex', model: 'gpt-5', effort: 'high', permissionMode: 'plan', mode: 'single', pickedMode: 'solo', collide: false },
+    } });
+    expect((await mutate(tabId, 'settle')).status).toBe(409);
+  });
+
+  it('persists a standalone runtime subject and rejects running and pending approval', async () => {
+    const sessionKey = `codex:inbox-${process.pid}`;
+    const lane = createLane({ repoPath: process.cwd(), branch: 'fixture', runtime: 'codex', sessionKey, baseCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
+    fixture.agents = [{ sessionKey, workspace: process.cwd(), runtime: 'codex', status: 'idle', approvalStatus: 'none' }];
+    const patch = () => PATCH(request({ sessionKey, inboxAction: 'settle' }));
+    setLaneStatus(lane.id, 'running');
+    expect((await patch()).status).toBe(409);
+    setLaneStatus(lane.id, 'idle');
+    fixture.agents[0].status = 'reviewing';
+    expect((await patch()).status).toBe(200);
+    fixture.agents[0].status = 'idle';
+    const snapshot = await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json();
+    expect(snapshot.agents[0]).toMatchObject({ inboxSubject: { kind: 'runtime', id: sessionKey }, parentInboxSubject: null, settledOverride: 'settled', settledAt: expect.any(String) });
+    createApproval({ source: 'test', runtime: 'codex', agent: 'fixture', sessionKey, title: 'Approval', description: 'Pending', summary: 'Pending', risk: 'low' });
+    expect((await patch()).status).toBe(409);
+    getSqlite().prepare('DELETE FROM approvals WHERE session_key = ?').run(sessionKey);
+    expect((await PATCH(request({ sessionKey, inboxAction: 'unsettle' }))).status).toBe(200);
+    fixture.agents[0].lastActivityAt = Date.now() + 1_000;
+    const read = async () => (await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json()).agents[0];
+    expect((await read()).settledOverride).toBe('active');
+    fixture.transcript = [{ id: 'runtime-run', role: 'user', text: 'Actual new run', timestamp: new Date(Date.now() + 1), activityAt: new Date(Date.now() + 1) }];
+    expect((await read()).settledOverride).toBeNull();
+    expect((await patch()).status).toBe(409); // Recent runtime user message not yet adopted.
+    fixture.transcript = [];
+  });
+
+  it('represents packet workers under the parent and blocks independent settlement', async () => {
+    const tabId = await seed('parent');
+    const sessionKey = `codex:child-${process.pid}`;
+    const packetId = `inbox-child-${process.pid}`;
+    const lane = createLane({ repoPath: process.cwd(), branch: 'fixture-child', runtime: 'codex', sessionKey, packetId, baseCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
+    const packet = { id: packetId, referenceLabel: 'inline-1', title: 'Child', summary: 'Child',
+      workspaceTargetPath: process.cwd(), branchTarget: 'fixture-child', runtime: 'codex',
+      dependencyLabels: [], dependencyPacketIds: [], queueState: 'queued', releaseState: 'pending',
+      status: 'idle', review: null, orchestratorThreadId: tabId } as OrchestratorPacket;
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'inbox-parent', repoPath: process.cwd(), packets: [packet] });
+    fixture.agents = [{ sessionKey, workspace: process.cwd(), runtime: 'codex', status: 'idle', approvalStatus: 'none' }];
+    expect((await PATCH(request({ sessionKey, inboxAction: 'settle' }))).status).toBe(409);
+    setLaneStatus(lane.id, 'running');
+    expect((await mutate(tabId, 'settle')).status).toBe(409);
+    setLaneStatus(lane.id, 'idle');
+    const approval = createApproval({ source: 'test', runtime: 'codex', agent: 'fixture', sessionKey: 'review:synthetic',
+      title: 'Packet approval', description: 'Pending', summary: 'Pending', risk: 'low', metadata: { Packet: packetId, Lane: lane.id } });
+    expect((await mutate(tabId, 'settle')).status).toBe(409);
+    getSqlite().prepare('DELETE FROM approvals WHERE id = ?').run(approval.id);
+    expect((await mutate(tabId, 'settle')).status).toBe(200);
+    const snapshot = await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json();
+    expect(snapshot.agents[0]).toMatchObject({ inboxSubject: { kind: 'conversation', id: tabId },
+      parentInboxSubject: { kind: 'conversation', id: tabId }, settledOverride: 'settled' });
+    expect(readFileSync(join(getDataDir(), 'chat-history', `${tabId}.json`), 'utf8')).toContain('Finished');
+    setLaneStatus(lane.id, 'archived');
+    const standalone = createLane({ repoPath: process.cwd(), branch: 'new-standalone', runtime: 'codex', sessionKey, baseCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
+    const reused = await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json();
+    expect(reused.agents[0]).toMatchObject({ inboxSubject: { kind: 'runtime', id: sessionKey }, parentInboxSubject: null });
+    setLaneStatus(standalone.id, 'running');
+    fixture.agents[0].status = 'running';
+    expect((await mutate(tabId, 'settle')).status).toBe(200);
+  });
+
+  it('waits for a concurrent transcript append and reloads settlement in a fresh process', async () => {
+    const tabId = await seed('race');
+    const marker = join(getDataDir(), `${tabId}-locked`);
+    const child = spawn(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--input-type=module', '--eval', `
+      import { writeFileSync } from 'node:fs';
+      const store = (await import('./src/lib/llm/chat-history-store.ts')).default;
+      store.withCanonicalChatHistoryLock(process.env.B01_TAB_ID, () => {
+        writeFileSync(process.env.B01_MARKER, 'locked');
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 750);
+        const record = store.readPersistedLlmChat(process.env.B01_TAB_ID).history;
+        store.persistCanonicalChatHistoryRecord(process.env.B01_TAB_ID, { ...record,
+          messages: [...record.messages, { id: 'race', role: 'assistant', content: 'Concurrent reply', timestamp: 102 }] });
+      });
+    `], { cwd: process.cwd(), env: { ...process.env, B01_TAB_ID: tabId, B01_MARKER: marker }, stdio: 'pipe' });
+    let childOutput = '';
+    child.stderr?.on('data', chunk => { childOutput += String(chunk); });
+    const exited = once(child, 'exit');
+    const deadline = Date.now() + 45_000;
+    try {
+      while (!existsSync(marker) && child.exitCode === null && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+      expect(existsSync(marker), childOutput).toBe(true);
+      expect((await mutate(tabId, 'settle')).status).toBe(200);
+      expect((await exited)[0]).toBe(0);
+      const saved = await (await GET(new NextRequest(`http://localhost/api/v2/chat-history?tabId=${tabId}`))).json();
+      expect(saved.messages.map((m: { id: string }) => m.id)).toEqual(['u', 'a', 'race']);
+      const reload = spawn(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--input-type=module', '--eval', `
+        const store = (await import('./src/lib/inbox/store.ts')).default;
+        const state = store.inboxProjection(store.inboxSubject('conversation', process.env.B01_TAB_ID, process.cwd()));
+        if (state.settledOverride !== 'settled' || !state.settledAt) process.exitCode = 1;
+      `], { cwd: process.cwd(), env: { ...process.env, B01_TAB_ID: tabId }, stdio: 'pipe' });
+      expect((await once(reload, 'exit'))[0]).toBe(0);
+      expect(await listed(tabId)).toMatchObject({ settledOverride: 'settled', settledAt: expect.any(String) });
+    } finally {
+      if (child.exitCode === null) { child.kill('SIGKILL'); await exited; }
+      rmSync(marker, { force: true });
+    }
+  }, 120_000);
+
+  it('ignores inferred provider timestamps and clears only on authentic runtime activity', async () => {
+    const sessionKey = 'claude-code:inbox-authentic';
+    const project = join(fixture.claudeHome, 'projects', 'inbox-project');
+    mkdirSync(project, { recursive: true });
+    const file = join(project, 'inbox-authentic.jsonl');
+    const historical = { type: 'user', uuid: 'historical', message: { content: 'Historical message' } };
+    writeFileSync(file, JSON.stringify(historical) + '\n');
+    fixture.realTranscript = true;
+    fixture.agents = [{ sessionKey, workspace: process.cwd(), runtime: 'claude-code', status: 'idle', approvalStatus: 'none' }];
+    try {
+      expect((await PATCH(request({ sessionKey, inboxAction: 'unsettle' }))).status).toBe(200);
+      const read = async () => (await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json()).agents[0];
+      expect((await read()).settledOverride).toBe('active');
+      writeFileSync(file, [historical, { type: 'user', uuid: 'new-run', timestamp: new Date(Date.now() + 1).toISOString(), message: { content: 'New run' } }].map(row => JSON.stringify(row)).join('\n') + '\n');
+      expect((await read()).settledOverride).toBeNull();
+    } finally { fixture.realTranscript = false; }
+  });
+
+  it('rejects invalid actions and unknown or wrong-workspace subjects', async () => {
+    const tabId = await seed('validation');
+    expect((await mutate(tabId, 'invalid')).status).toBe(400);
+    expect((await mutate(`${prefix}-missing`, 'settle')).status).toBe(404);
+    expect((await PATCH(request({ tabId, inboxAction: 'settle' }, '?workspace=/different'))).status).toBe(404);
+    expect((await PATCH(request({ sessionKey: 'codex:unknown', inboxAction: 'settle' }))).status).toBe(404);
+  });
+});

@@ -1,3 +1,11 @@
+/**
+ * Settlement adaptation from T3 Code (https://github.com/pingdotgg/t3code),
+ * apps/server/src/orchestration-v2/Orchestrator.ts, commit
+ * f58fad04162165653bf06f0c987bbfb0074a8a4b.
+ * Copyright (c) 2026 T3 Tools Inc.; MIT; see licenses/t3code-MIT.txt.
+ * Adapted for o8: existing operator routes, persistence and native listings.
+ */
+import { recordInboxConversationEvent } from '@/lib/inbox/store';
 import { startProductSession, endProductSession } from '@/lib/analytics/session';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
@@ -1168,6 +1176,7 @@ function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): vo
   try {
     const parsed = JSON.parse(rawMsg);
     if (parsed && parsed.channel === 'orchestrator') {
+      recordInboxConversationEvent(parsed);
       // Single chokepoint for the plan cache — every emitter site (main turn,
       // rebound rehydrate, supervisor auto-queue) funnels through here.
       if (parsed.event === 'plan-update' && parsed.data) {

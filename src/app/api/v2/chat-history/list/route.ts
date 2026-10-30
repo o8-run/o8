@@ -1,3 +1,10 @@
+/**
+ * Settlement adaptation from T3 Code (https://github.com/pingdotgg/t3code),
+ * apps/server/src/orchestration-v2/Orchestrator.ts, commit
+ * f58fad04162165653bf06f0c987bbfb0074a8a4b.
+ * Copyright (c) 2026 T3 Tools Inc.; MIT; see licenses/t3code-MIT.txt.
+ * Adapted for o8: existing operator routes, persistence and native listings.
+ */
 export const dynamic = 'force-dynamic';
 
 /**
@@ -15,6 +22,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { orchestratorDisplayTitle, stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { deleteCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
+import { inboxProjection, inboxSubject } from '@/lib/inbox/store';
 import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
@@ -190,6 +198,7 @@ export async function GET(request: NextRequest) {
 
         conversations.push({
           tabId: basename(file, '.json'),
+          ...inboxProjection(inboxSubject('conversation', tabId, data.repoPath, data.projectId)),
           title,
           preview,
           empty: isEmpty,

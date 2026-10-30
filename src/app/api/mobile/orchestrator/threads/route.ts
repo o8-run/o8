@@ -1,3 +1,10 @@
+/**
+ * Settlement adaptation from T3 Code (https://github.com/pingdotgg/t3code),
+ * apps/server/src/orchestration-v2/Orchestrator.ts, commit
+ * f58fad04162165653bf06f0c987bbfb0074a8a4b.
+ * Copyright (c) 2026 T3 Tools Inc.; MIT; see licenses/t3code-MIT.txt.
+ * Adapted for o8: existing operator routes, persistence and native listings.
+ */
 export const dynamic = 'force-dynamic';
 
 /**
@@ -15,6 +22,7 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { inboxProjection, inboxSubject } from '@/lib/inbox/store';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileOrchestratorBackend } from '@/lib/mobile/types';
 import { OrchestratorThreadProjectError } from '@/lib/mobile/orchestrator-thread-project';
@@ -59,7 +67,9 @@ export async function GET(request: NextRequest) {
 
   try {
     const threads = listMobileOrchestratorThreads({ backend, limit, ...(offset === undefined ? {} : { offset }) });
-    return NextResponse.json({ threads }, { headers: NO_STORE });
+    return NextResponse.json({ threads: threads.map(thread => ({ ...thread,
+      ...inboxProjection(inboxSubject('conversation', thread.id, thread.repoPath, thread.projectId)),
+    })) }, { headers: NO_STORE });
   } catch (error) {
     console.log('[mobile-orchestrator] thread list failed', error);
     return NextResponse.json({ threads: [] }, { headers: NO_STORE });
