@@ -3522,7 +3522,8 @@
     {
       "path": "tests/inbox-preferences.integration.test.ts",
       "reasons": [
-        "child-process"
+        "child-process",
+        "process-signal"
       ]
     },
     {
