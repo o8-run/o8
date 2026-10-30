@@ -2,11 +2,17 @@ use super::super::marks::{self, tint};
 use super::feed::text;
 use super::*;
 use crate::icon;
-use crate::theme::current as theme;
+use crate::theme::{CLEAR, current as theme};
 use gpui::{
     Corner, FontWeight, IntoElement, Render, Rgba, SharedString, anchored, canvas, deferred, div,
     prelude::*, px, relative,
 };
+
+/// `align-self: flex-start`, so a button keeps its own width in a column.
+fn start<E: Styled>(mut element: E) -> E {
+    element.style().align_self = Some(gpui::AlignItems::FlexStart);
+    element
+}
 
 /// A 0.5px border, as classic's `0.5px solid` group outlines.
 fn hairline<E: Styled>(mut element: E) -> E {
@@ -19,13 +25,6 @@ fn hairline<E: Styled>(mut element: E) -> E {
     };
     element
 }
-
-const CLEAR: Rgba = Rgba {
-    r: 0.,
-    g: 0.,
-    b: 0.,
-    a: 0.,
-};
 
 impl ActivityPane {
     /// A click and keyboard stop: its id, selector and action, unstyled.
@@ -57,13 +56,17 @@ impl ActivityPane {
     ) -> gpui::Stateful<gpui::Div> {
         let id = id.into();
         let selected = self.keyboard.as_ref() == Some(&id);
-        self.control(id, action, cx)
+        start(self.control(id, action, cx))
+            .flex()
+            .items_center()
             .min_h(px(26.))
             .px(px(9.))
-            .py(px(4.))
-            .rounded(px(7.))
-            .text_size(px(12.))
-            .font_weight(gpui::FontWeight::LIGHT)
+            .rounded(px(8.))
+            .border_1()
+            .border_color(theme().border)
+            .text_size(px(11.))
+            .font_weight(FontWeight(350.))
+            .text_color(theme().text_secondary)
             .bg(if selected {
                 theme().selection
             } else {
@@ -75,15 +78,18 @@ impl ActivityPane {
     /// A control that is busy: same box, dimmed, with no click or keyboard stop.
     fn inert(id: impl Into<String>, label: impl Into<SharedString>) -> gpui::Stateful<gpui::Div> {
         let id = id.into();
-        div()
-            .id(SharedString::from(id.clone()))
+        start(div().id(SharedString::from(id.clone())))
             .debug_selector(move || id.clone())
+            .flex()
+            .items_center()
             .min_h(px(26.))
             .px(px(9.))
-            .py(px(4.))
-            .rounded(px(7.))
-            .text_size(px(12.))
-            .font_weight(gpui::FontWeight::LIGHT)
+            .rounded(px(8.))
+            .border_1()
+            .border_color(theme().border)
+            .text_size(px(11.))
+            .font_weight(FontWeight(350.))
+            .text_color(theme().text_secondary)
             .bg(theme().surface)
             .opacity(0.6)
             .child(label.into())
@@ -135,40 +141,139 @@ impl ActivityPane {
                 .into_any_element(),
         }
     }
+    /// Classic DETAIL_LABEL_STYLE: a 9px uppercase heading over a group.
+    fn detail_label(label: &str) -> gpui::Div {
+        div()
+            .mb(px(4.))
+            .text_size(px(9.))
+            .font_weight(FontWeight::LIGHT)
+            .text_color(theme().text_faint)
+            .child(label.to_uppercase())
+    }
+    /// Classic DetailPill: 9.5px text on a wash of its own color.
+    fn pill(label: impl Into<SharedString>, color: Rgba, wash: Rgba) -> gpui::Div {
+        div()
+            .flex_shrink_0()
+            .px(px(6.))
+            .py(px(1.))
+            .rounded(px(6.))
+            .text_size(px(9.5))
+            .font_weight(FontWeight::LIGHT)
+            .bg(wash)
+            .text_color(color)
+            .child(label.into())
+    }
+    /// A pill in one of ACTIVITY_COLORS, washed at classic's `#14`.
+    fn tone(label: impl Into<SharedString>, hue: u32) -> gpui::Div {
+        Self::pill(label, tint(hue, 1.), tint(hue, 0.08))
+    }
+    fn pills() -> gpui::Div {
+        div().flex().flex_wrap().items_center().gap(px(6.))
+    }
+    /// A name in classic's 350 weight, as the detail cards set authors.
+    fn author(name: String) -> gpui::Div {
+        div()
+            .font_weight(FontWeight(350.))
+            .text_color(theme().text_secondary)
+            .child(name)
+    }
+    /// renderExpandedDetail: the card under an expanded row.
     fn detail_view(&mut self, row: &Row, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let now = crate::clock::now();
         let mut view = div()
             .flex()
             .flex_col()
             .gap(px(6.))
             .text_size(px(12.))
-            .text_color(theme().text_secondary);
+            .font_weight(FontWeight::LIGHT)
+            .line_height(relative(1.45))
+            .text_color(theme().text_faint);
         match row.kind {
             "commit" => {
+                let date = text(&row.data, "date");
                 view = view
-                    .child(row.id.clone())
-                    .child(row.title.clone())
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.))
+                            .child(Self::detail_label("Commit"))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.))
+                                    .child(
+                                        div()
+                                            .text_color(theme().text_secondary)
+                                            .child(row.id.clone()),
+                                    )
+                                    .child(marks::age(
+                                        if date.is_empty() { &row.date } else { &date },
+                                        now,
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(13.5))
+                                    .text_color(theme().text)
+                                    .child(row.title.clone()),
+                            ),
+                    )
                     .child(self.link("activity-open-commit", "Open commit", row.url(), cx));
             }
             "issue" => {
-                let labels = row.data["labels"]
+                let state = text(&row.data, "state").to_lowercase();
+                let mut pills = Self::pills().child(Self::tone(
+                    state.clone(),
+                    if state == "open" {
+                        marks::SUCCESS
+                    } else {
+                        marks::MERGE
+                    },
+                ));
+                for label in row.data["labels"].as_array().into_iter().flatten().take(4) {
+                    let hue =
+                        u32::from_str_radix(&text(label, "color"), 16).unwrap_or(marks::MERGE);
+                    pills = pills.child(Self::tone(text(label, "name"), hue));
+                }
+                view = view.child(pills);
+                let body = text(&row.data, "body").trim().to_owned();
+                if !body.is_empty() {
+                    let mut short = body.chars().take(200).collect::<String>();
+                    if body.chars().count() > 200 {
+                        short.push_str("...");
+                    }
+                    view = view.child(div().text_size(px(13.5)).child(short));
+                }
+                let author = text(&row.data["author"], "login");
+                let assignees = row.data["assignees"]
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .map(|l| text(l, "name"))
+                    .map(|a| text(a, "login"))
+                    .filter(|a| !a.is_empty())
                     .collect::<Vec<_>>()
-                    .join(" · ");
+                    .join(", ");
+                let comments = row.data["comments"].as_u64().unwrap_or(0);
                 view = view
-                    .child(labels)
                     .child(
-                        text(&row.data, "body")
-                            .chars()
-                            .take(200)
-                            .collect::<String>(),
+                        div()
+                            .flex()
+                            .gap(px(8.))
+                            .child(Self::author(if author.is_empty() {
+                                "unknown".into()
+                            } else {
+                                author
+                            }))
+                            .when(!assignees.is_empty(), |meta| meta.child(assignees))
+                            .when(comments > 0, |meta| {
+                                meta.child(format!(
+                                    "{comments} comment{}",
+                                    if comments == 1 { "" } else { "s" }
+                                ))
+                            }),
                     )
-                    .child(format!(
-                        "{} comments",
-                        row.data["comments"].as_u64().unwrap_or(0)
-                    ))
                     .child(match row.url() {
                         // Classic opens the issue in the shell's issue view.
                         Some(_) => self
@@ -188,6 +293,98 @@ impl ActivityPane {
                 let error = detail.and_then(|d| d.error.clone());
                 let updated = detail.and_then(|d| d.updated);
                 let value = detail.and_then(|d| d.value.clone());
+                let mut actions = div().flex().flex_wrap().gap(px(6.));
+                if row.kind == "ci" {
+                    let outcome = marks::conclusion(&row.data);
+                    view = view.child(
+                        Self::pills()
+                            .child(Self::tone(outcome.clone(), marks::outcome(&outcome)))
+                            .child(format!(
+                                "{} on {}",
+                                text(&row.data, "workflowName"),
+                                text(&row.data, "headBranch")
+                            )),
+                    );
+                } else {
+                    let state = text(&row.data, "state").to_lowercase();
+                    let added = row.data["additions"].as_u64().unwrap_or(0);
+                    let removed = row.data["deletions"].as_u64().unwrap_or(0);
+                    let files = row.data["changedFiles"].as_u64().unwrap_or(0);
+                    let review = text(&row.data, "reviewDecision");
+                    view = view.child(
+                        Self::pills()
+                            .child(Self::tone(
+                                state.clone(),
+                                match state.as_str() {
+                                    "merged" => marks::MERGE,
+                                    "open" => marks::SUCCESS,
+                                    _ => marks::DANGER,
+                                },
+                            ))
+                            .child(Self::tone(
+                                format!("+{added} -{removed}"),
+                                if added > removed {
+                                    marks::ADD
+                                } else {
+                                    marks::DELETE
+                                },
+                            ))
+                            .child(Self::pill(
+                                format!("{files} file{}", if files == 1 { "" } else { "s" }),
+                                theme().text_muted,
+                                theme().surface,
+                            ))
+                            .when(!review.is_empty(), |pills| {
+                                pills.child(Self::tone(
+                                    review.to_lowercase().replacen('_', " ", 1),
+                                    if review == "APPROVED" {
+                                        marks::SUCCESS
+                                    } else {
+                                        marks::ATTENTION
+                                    },
+                                ))
+                            }),
+                    );
+                    let checks = row.data["statusCheckRollup"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
+                    let count = |pick: &dyn Fn(&serde_json::Value) -> bool| {
+                        checks.iter().filter(|c| pick(c)).count()
+                    };
+                    let conclusion = |c: &serde_json::Value| text(c, "conclusion").to_lowercase();
+                    let summary = [
+                        (
+                            count(&|c| conclusion(c) == "success"),
+                            "passed",
+                            marks::SUCCESS,
+                        ),
+                        (
+                            count(&|c| conclusion(c) == "failure"),
+                            "failed",
+                            marks::DANGER,
+                        ),
+                        (
+                            count(&|c| {
+                                conclusion(c).is_empty()
+                                    || !text(c, "status").eq_ignore_ascii_case("completed")
+                            }),
+                            "pending",
+                            marks::ATTENTION,
+                        ),
+                    ];
+                    if !checks.is_empty() {
+                        let mut line = div().flex().gap(px(8.));
+                        for (n, label, hue) in summary.into_iter().filter(|(n, ..)| *n > 0) {
+                            line = line.child(
+                                div()
+                                    .text_color(tint(hue, 1.))
+                                    .child(format!("{n} {label}")),
+                            );
+                        }
+                        view = view.child(line);
+                    }
+                }
                 if loading {
                     view = view.child(
                         div()
@@ -215,7 +412,7 @@ impl ActivityPane {
                 }
                 match value {
                     Some(DetailValue::Ci(detail)) => {
-                        for (i, job) in detail
+                        let failing = detail
                             .run
                             .jobs
                             .iter()
@@ -225,24 +422,37 @@ impl ActivityPane {
                                     .is_some_and(|s| s.eq_ignore_ascii_case("failure"))
                             })
                             .take(3)
-                            .enumerate()
-                        {
-                            let step = job
-                                .steps
-                                .iter()
-                                .find(|s| {
-                                    s.conclusion
-                                        .as_deref()
-                                        .is_some_and(|s| s.eq_ignore_ascii_case("failure"))
-                                })
-                                .map(|s| s.name.as_str())
-                                .unwrap_or("");
-                            view = view.child(
-                                div()
-                                    .debug_selector(move || format!("activity-ci-job-{i}"))
-                                    .text_color(theme().danger)
-                                    .child(format!("{} · {step}", job.name)),
-                            );
+                            .collect::<Vec<_>>();
+                        if !failing.is_empty() {
+                            let mut jobs = div().child(Self::detail_label("Failing jobs"));
+                            for (i, job) in failing.into_iter().enumerate() {
+                                let step = job
+                                    .steps
+                                    .iter()
+                                    .find(|s| {
+                                        s.conclusion
+                                            .as_deref()
+                                            .is_some_and(|s| s.eq_ignore_ascii_case("failure"))
+                                    })
+                                    .map(|s| s.name.clone())
+                                    .unwrap_or_default();
+                                jobs = jobs.child(
+                                    div()
+                                        .debug_selector(move || format!("activity-ci-job-{i}"))
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(6.))
+                                        .child(icon::stroke(
+                                            marks::CROSS,
+                                            tint(marks::DANGER, 1.),
+                                            10.,
+                                            2.,
+                                        ))
+                                        .child(job.name.clone())
+                                        .when(!step.is_empty(), |line| line.child(step)),
+                                );
+                            }
+                            view = view.child(jobs);
                         }
                         if let Some(line) = detail.logs.lines().find(|l| {
                             l.contains("##[error]")
@@ -250,13 +460,18 @@ impl ActivityPane {
                                 || l.to_lowercase().contains("failed")
                         }) {
                             view = view.child(
-                                line.rsplit("##[error]")
-                                    .next()
-                                    .unwrap_or(line)
-                                    .trim()
-                                    .chars()
-                                    .take(200)
-                                    .collect::<String>(),
+                                div()
+                                    .font_weight(FontWeight(350.))
+                                    .text_color(tint(marks::DANGER, 1.))
+                                    .child(
+                                        line.rsplit("##[error]")
+                                            .next()
+                                            .unwrap_or(line)
+                                            .trim()
+                                            .chars()
+                                            .take(200)
+                                            .collect::<String>(),
+                                    ),
                             );
                         }
                         for pr in detail.run.pull_requests.iter().filter(|p| p.number > 0) {
@@ -265,7 +480,7 @@ impl ActivityPane {
                                 .as_ref()
                                 .filter(|r| feed::valid_slug(r))
                                 .map(|r| format!("https://github.com/{r}/pull/{}", pr.number));
-                            view = view.child(self.link(
+                            actions = actions.child(self.link(
                                 &format!("activity-open-ci-pr-{}", pr.number),
                                 &format!("Open PR #{}", pr.number),
                                 url,
@@ -274,39 +489,62 @@ impl ActivityPane {
                         }
                     }
                     Some(DetailValue::Pr(detail)) => {
-                        view = view.child(format!(
-                            "Checks: {} · Review: {}",
-                            text(&detail, "checksStatus"),
-                            text(&detail, "reviewDecision")
-                        ));
-                        for (i, file) in detail["files"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .take(6)
-                            .enumerate()
-                        {
-                            view = view.child(
-                                div()
-                                    .debug_selector(move || format!("activity-pr-file-{i}"))
-                                    .child(format!(
-                                        "{} +{} -{}",
-                                        text(file, "path"),
-                                        file["additions"],
-                                        file["deletions"]
-                                    )),
-                            );
+                        let files = detail["files"].as_array().cloned().unwrap_or_default();
+                        if !files.is_empty() {
+                            let mut list = div().child(Self::detail_label("Changed files"));
+                            for (i, file) in files.iter().enumerate() {
+                                list = list.child(
+                                    div()
+                                        .debug_selector(move || format!("activity-pr-file-{i}"))
+                                        .flex()
+                                        .gap(px(8.))
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .whitespace_normal()
+                                                .line_clamp(1)
+                                                .text_ellipsis()
+                                                .child(text(file, "path")),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_shrink_0()
+                                                .text_color(tint(marks::ADD, 1.))
+                                                .child(format!("+{}", file["additions"])),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_shrink_0()
+                                                .text_color(tint(marks::DELETE, 1.))
+                                                .child(format!("-{}", file["deletions"])),
+                                        ),
+                                );
+                            }
+                            view = view.child(list);
                         }
-                        view = view.child(text(&detail, "body"));
                     }
                     _ => {}
+                }
+                if row.kind == "pr" {
+                    view = view.child(
+                        div()
+                            .flex()
+                            .child(Self::author(text(&row.data["author"], "login")))
+                            .child(" on ")
+                            .child(
+                                div()
+                                    .text_color(theme().text_secondary)
+                                    .child(text(&row.data, "headRefName")),
+                            ),
+                    );
                 }
                 let retry = if row.kind == "ci" {
                     "activity-ci-retry"
                 } else {
                     "activity-pr-retry"
                 };
-                view = view.child(self.button(
+                actions = actions.child(self.button(
                     retry,
                     if row.kind == "ci" {
                         "Retry CI details"
@@ -316,7 +554,7 @@ impl ActivityPane {
                     Action::RetryDetail(row.clone()),
                     cx,
                 ));
-                view = view.child(match (row.kind, row.url()) {
+                actions = actions.child(match (row.kind, row.url()) {
                     ("ci", url) => self.link("activity-open-run", "Open CI run", url, cx),
                     // Classic's "Open PR details" opens the pull request in the app.
                     (_, Some(_)) => self
@@ -329,6 +567,7 @@ impl ActivityPane {
                         .into_any_element(),
                     (_, None) => self.link("activity-open-pr", "Open PR details", None, cx),
                 });
+                view = view.child(actions);
             }
             "packet" => {
                 view = view

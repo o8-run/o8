@@ -21,7 +21,7 @@ pub(super) const COMMIT: &str = "M8 12a4 4 0 1 0 8 0a4 4 0 1 0-8 0M1.05 12H7M17.
 pub(super) const PULL: &str = "M15 18a3 3 0 1 0 6 0a3 3 0 1 0-6 0M3 6a3 3 0 1 0 6 0a3 3 0 1 0-6 0M13 6h3a2 2 0 0 1 2 2v7M6 9v12";
 pub(super) const ALERT: &str = "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0M12 8v4M12 16h.01";
 pub(super) const CHECK: &str = "M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4L12 14.01l-3-3";
-const CROSS: &str = "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0M15 9l-6 6M9 9l6 6";
+pub(super) const CROSS: &str = "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0M15 9l-6 6M9 9l6 6";
 const CLOCK: &str = "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0M12 6v6l4 2";
 pub(super) const FOLDER: &str =
     "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z";
