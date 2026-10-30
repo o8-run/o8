@@ -5,19 +5,27 @@ use crate::shell_state::State;
 mod maintenance;
 // Drive main's retained sidebar lifecycle too: a streamed update can fence an
 // in-flight HTTP load, which is retried by the normal shell tick.
+#[track_caller]
 fn settled(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     // Allow the production GET budget, then time for the shell to apply its result.
     let deadline = Instant::now() + crate::client::LOAD_REQUEST_TIMEOUT + Duration::from_secs(5);
     loop {
-        shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
         cx.run_until_parked();
         draw(cx);
         // A parked executor can return after a second blocked HTTP request.
         // Enforce the existing deadline even when that late result clears loading.
-        assert!(Instant::now() < deadline, "connection load must settle");
+        assert!(
+            Instant::now() < deadline,
+            "connection load must settle: {:?}",
+            shell.read_with(cx, |s, _| (s.loading, s.connected, s.notice.clone()))
+        );
         if !shell.read_with(cx, |s, _| s.loading) {
             return;
         }
+        // Finish an already requested connection load before starting other
+        // maintenance HTTP work on GPUI's serial deterministic test executor.
+        // A fenced catalog still needs the next shell tick to retry.
+        shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
         std::thread::sleep(Duration::from_millis(10));
     }
 }
