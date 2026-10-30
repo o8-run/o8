@@ -385,9 +385,10 @@ impl ActivityPane {
                 );
             }
         }
+        let attempts = p["attemptCount"].as_u64().unwrap_or(0);
         view.child(label(format!(
-            "{} execution attempts",
-            p["attemptCount"].as_u64().unwrap_or(0)
+            "{attempts} execution attempt{}",
+            if attempts == 1 { "" } else { "s" }
         )))
         .when(lane.is_null(), |v| {
             v.child(label("No worker assigned yet."))
