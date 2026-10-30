@@ -372,6 +372,11 @@ impl ThreadList {
         .detach();
         cx.notify();
     }
+    /// A New thread whose POST has returned and whose load has not.
+    #[cfg(test)]
+    pub(crate) fn expect_open(&mut self, id: &str) {
+        self.pending_open = Some(id.to_owned());
+    }
     /// A menu's outside press closed it: remember the press for its trigger.
     pub(super) fn dismissed(&mut self, event: &gpui::MouseDownEvent) {
         self.menu_press = Some(event.position);

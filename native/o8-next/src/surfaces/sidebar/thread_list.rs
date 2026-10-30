@@ -611,6 +611,8 @@ impl ThreadList {
         self.choice = Some(id.clone());
         self.editing = false;
         self.selected = Some(id.clone());
+        // A choice made before the list carries a new thread cancels its open.
+        self.pending_open = None;
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
             s.unread = false;
         }

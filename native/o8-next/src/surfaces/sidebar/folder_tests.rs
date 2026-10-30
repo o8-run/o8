@@ -236,4 +236,21 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
     });
     draw(&mut visual);
     assert!(visual.debug_bounds("sidebar-new-thread-menu").is_none());
+
+    // Choosing another thread before the list carries a new one keeps that
+    // choice when the load lands.
+    let sidebar = shell.read_with(&visual, |s, _| s.surfaces.sidebar.view.clone().unwrap());
+    sidebar.update(&mut visual, |s, cx| {
+        s.expect_open(&created);
+        s.choose(first.into(), cx);
+        s.load(cx);
+    });
+    for _ in 0..3 {
+        visual.run_until_parked();
+        draw(&mut visual);
+    }
+    assert_eq!(
+        sidebar.read_with(&visual, |s, _| s.selected.clone()),
+        Some(first.to_owned())
+    );
 }
