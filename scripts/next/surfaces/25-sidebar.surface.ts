@@ -12,14 +12,9 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
   const enabled = process.argv.includes('--sidebar');
   const auditKeyboard = process.argv.includes('--sidebar-keyboard-audit');
   const archives: Array<{ method: string; path: string; tabId?: string }> = [];
-  // #5110's inbox settlement contract (docs/internals/inbox-settlement.md on
-  // that branch): list projection plus PATCH {tabId, inboxAction}, until it
-  // lands on main. Without --sidebar-inbox the routes stay as main serves them.
-  const inbox = process.argv.includes('--sidebar-inbox')
-    ? new Map<string, { settledOverride: 'settled' | 'active' | null; settledAt: string | null; unsettledAt: string | null }>()
-    : null;
-  const subjects = new Map<string, { kind: string; id: string; workspace: string | null; projectId: string | null }>();
-  const settlement = (id: string) => inbox?.get(id) ?? { settledOverride: null, settledAt: null, unsettledAt: null };
+  // --sidebar-before-inbox serves the thread and runtime listings as a host
+  // from before #5110 did: without inbox subjects or settlement fields.
+  const beforeInbox = process.argv.includes('--sidebar-before-inbox');
   const { GET: historyList } = await import('../../../src/app/api/v2/chat-history/list/route');
   if (!enabled) return { routes: { 'GET /api/v2/chat-history/list': historyList } };
   const fixture = await import('../sidebar-fixture');
@@ -30,6 +25,7 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
   const { GET: history } = await import('../../../src/app/api/mobile/history/route');
   const { GET: context, PATCH: patchHistory, POST: saveHistory } = await import('../../../src/app/api/v2/chat-history/route');
   const runtimeArchive = await import('../../../src/app/api/runtime/archive/route');
+  const { GET: inventory } = await import('../../../src/app/api/runtime/inventory/route');
   let pagingMessageSent = false;
   let socket: ReturnType<typeof import('../sidebar-socket').attachSidebarSocket> | undefined;
   return {
@@ -40,13 +36,11 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
       'POST /api/v2/chat-history': saveHistory, 'GET /api/v2/chat-history/list': historyList,
       'GET /api/runtime/archive': runtimeArchive.GET, 'POST /api/runtime/archive': runtimeArchive.POST,
       ...(auditKeyboard ? { 'GET /api/sidebar-fixture/archives': async () => Response.json({ archives }) } : {}),
+      ...(beforeInbox ? { 'GET /api/runtime/inventory': inventory } : {}),
     },
     admit: ({ route, url, body, method }) => {
-      if (inbox && route === patchHistory && body && Object.hasOwn(JSON.parse(body), 'inboxAction')) {
-        const target = JSON.parse(body);
-        if (Object.keys(target).some(key => key !== 'tabId' && key !== 'inboxAction')
-          || !['settle', 'unsettle'].includes(target.inboxAction)) return 400;
-        return seeds.some(seed => seed.id === target.tabId) ? 200 : 404;
+      if (route === patchHistory && body && Object.hasOwn(JSON.parse(body), 'inboxAction')) {
+        return seeds.some(seed => seed.id === JSON.parse(body).tabId) ? 200 : 404;
       }
       if (auditKeyboard && body && (route === runtimeArchive.POST
         || route === patchHistory && Object.hasOwn(JSON.parse(body), 'archivedAt'))) {
@@ -64,27 +58,14 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
           || route === saveHistory && /^thoughts-next-\d+$/.test(target.tabId) && realpathSync(target.repoPath) === realpathSync(repo)) ? 200 : 400;
     },
     run: async (route, request) => {
-      if (inbox && route === patchHistory) {
-        const target = await request.clone().json();
-        if (Object.hasOwn(target, 'inboxAction')) {
-          const now = new Date().toISOString();
-          const prior = settlement(target.tabId);
-          // transitionSettlement: a repeat keeps its first timestamp.
-          const next = target.inboxAction === 'settle'
-            ? { settledOverride: 'settled' as const, settledAt: prior.settledOverride === 'settled' ? prior.settledAt : now, unsettledAt: null }
-            : { settledOverride: 'active' as const, settledAt: null, unsettledAt: prior.settledOverride === 'active' ? prior.unsettledAt : now };
-          inbox.set(target.tabId, next);
-          return Response.json({ ok: true, inboxSubject: subjects.get(target.tabId) ?? null, parentInboxSubject: null, ...next });
-        }
-      }
-      if (inbox && route === sessions) {
+      if (beforeInbox && (route === sessions || route === inventory)) {
+        const key = route === sessions ? 'threads' : 'agents';
         const response = await route(request);
-        const listed = await response.json() as { threads: Array<{ id: string; repoPath?: string; projectId?: string }> };
-        return Response.json({ ...listed, threads: listed.threads.map(thread => {
-          const subject = { kind: 'conversation', id: thread.id, workspace: thread.repoPath ?? null, projectId: thread.projectId ?? null };
-          subjects.set(thread.id, subject);
-          return { ...thread, inboxSubject: subject, parentInboxSubject: null, ...settlement(thread.id) };
-        }) }, { status: response.status, headers: { 'cache-control': 'no-store' } });
+        const listed = await response.json() as Record<string, Array<Record<string, unknown>>>;
+        const fields = ['inboxSubject', 'parentInboxSubject', 'settledOverride', 'settledAt', 'unsettledAt'];
+        return Response.json({ ...listed, [key]: listed[key]?.map(row =>
+          Object.fromEntries(Object.entries(row).filter(([field]) => !fields.includes(field)))) },
+        { status: response.status, headers: { 'cache-control': 'no-store' } });
       }
       if (route === sessions) {
         if (process.argv.includes('--sidebar-paging-message') && request.nextUrl.searchParams.get('offset') === '500' && !pagingMessageSent) {

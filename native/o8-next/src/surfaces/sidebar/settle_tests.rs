@@ -116,8 +116,7 @@ fn start(
 
 #[gpui::test]
 fn sidebar_inbox_settles_advances_and_undoes(cx: &mut TestAppContext) {
-    let (fixture, shell, mut visual, project) =
-        start("--shell --composer --sidebar --sidebar-inbox", cx);
+    let (fixture, shell, mut visual, project) = start("--shell --composer --sidebar", cx);
     click(&mut visual, "sidebar-view");
     click(&mut visual, "sidebar-view-inbox");
     wait_for(&shell, &mut visual, |s, _| {
@@ -266,8 +265,7 @@ fn sidebar_inbox_settles_advances_and_undoes(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn sidebar_view_menu_takes_the_press_over_inbox_rows(cx: &mut TestAppContext) {
-    let (fixture, shell, mut visual, project) =
-        start("--shell --composer --sidebar --sidebar-inbox", cx);
+    let (fixture, shell, mut visual, project) = start("--shell --composer --sidebar", cx);
     click(&mut visual, "sidebar-view");
     click(&mut visual, "sidebar-view-inbox");
     wait_for(&shell, &mut visual, |s, _| {
@@ -338,7 +336,8 @@ fn sidebar_view_menu_takes_the_press_over_inbox_rows(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn sidebar_without_inbox_settlement_is_unchanged(cx: &mut TestAppContext) {
-    let (_fixture, shell, mut visual, project) = start("--shell --composer --sidebar", cx);
+    let (_fixture, shell, mut visual, project) =
+        start("--shell --composer --sidebar --sidebar-before-inbox", cx);
     // A saved Inbox choice falls back to the default view on this host.
     shell.update(&mut visual, |s, cx| {
         let sidebar = s.surfaces.sidebar.view.clone().unwrap();
