@@ -142,6 +142,9 @@ impl ThreadList {
             session.settled_override = state["settledOverride"].as_str().map(str::to_owned);
             session.settled_at = state["settledAt"].as_str().map(str::to_owned);
         }
+        // A listing already in flight predates this answer; fence it, as
+        // archive and rename do, so it cannot put the row back.
+        self.generation += 1;
         self.rebuild();
         if action == "settle" {
             // settleAndAdvance: only a thread that is still current moves on.
