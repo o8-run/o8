@@ -15,9 +15,13 @@ use std::{
 };
 mod address;
 mod agent;
+mod controls;
 mod favicon;
 pub(crate) mod header;
 mod model;
+mod pip;
+pub(crate) use pip::fit as fit_preview;
+mod remote;
 mod state;
 mod view;
 mod web;
@@ -105,6 +109,13 @@ pub struct BrowserPanel {
     window: Option<gpui::AnyWindowHandle>,
     seeded: bool,
     previews: Vec<u16>,
+    menu: bool,
+    address_requested: bool,
+    menu_requested: bool,
+    client: Option<crate::client::Client>,
+    remote: Option<Entity<remote::RemotePreview>>,
+    preview: Option<u64>,
+    preview_viewport: f32,
     last_saved: (Vec<Tab>, Option<u64>),
     favicons: HashMap<String, Option<std::sync::Arc<gpui::Image>>>,
     favicon_loading: usize,
@@ -156,6 +167,13 @@ impl BrowserPanel {
             window: None,
             seeded: false,
             previews: vec![],
+            menu: false,
+            address_requested: false,
+            menu_requested: false,
+            client: None,
+            remote: None,
+            preview: None,
+            preview_viewport: 0.,
             last_saved: (vec![], None),
             favicons: HashMap::new(),
             favicon_loading: 0,
@@ -169,6 +187,7 @@ impl BrowserPanel {
         cx: &mut Context<Self>,
     ) {
         self.in_header = true;
+        self.client = Some(client.clone());
         if let Some(saved) = saved {
             self.restore(saved, cx);
         }
@@ -303,6 +322,12 @@ impl BrowserPanel {
             self.hide_pages();
         }
     }
+    pub fn cover_with_context(&mut self, covered: bool, cx: &mut Context<Self>) {
+        self.cover(covered);
+        if let Some(remote) = &self.remote {
+            remote.update(cx, |remote, _| remote.cover(covered));
+        }
+    }
     fn hide_pages(&self) {
         for page in self.pages.values() {
             if let Some(web) = page.web.borrow().as_ref() {
@@ -407,6 +432,7 @@ impl BrowserPanel {
     fn follow(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
         let mut popups = vec![];
+        let mut commands = vec![];
         for tab in &mut self.tabs {
             let Some(page) = self.pages.get_mut(&tab.id) else {
                 continue;
@@ -429,9 +455,32 @@ impl BrowserPanel {
                 web.hide();
             }
             popups.extend(web.take_popups());
+            commands.extend(web.take_commands());
         }
         for url in popups {
-            self.navigate(&url, cx);
+            // A new-window request is a new page, even when its URL is open.
+            let url = normalize(&url);
+            if !url.is_empty() {
+                self.add(url, cx);
+            }
+            changed = true;
+        }
+        for command in commands {
+            match command.as_str() {
+                "focus" => {
+                    self.focus_chrome();
+                    self.address_requested = true;
+                }
+                "reload" => self.reload(cx),
+                "back" => self.act(web::Web::back, cx),
+                "forward" => self.act(web::Web::forward, cx),
+                "menu" => {
+                    self.menu_requested = true;
+                    self.menu = true;
+                    self.hide_pages();
+                }
+                _ => {}
+            }
             changed = true;
         }
         let native_focus = self
