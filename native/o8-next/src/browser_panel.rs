@@ -1,67 +1,136 @@
-//! The right panel's Browser tool (O8BrowserPane). A plain WKWebView with its
-//! own non-persistent website data and no script bridge into o8, laid over the
-//! panel body each frame. Other platforms show a notice.
-use crate::composer::{Composer, Submit};
+//! Browser page lifecycle, ported from classic O8BrowserPane.
+use crate::composer::Submit;
 use crate::theme::current as theme;
+use address::Address;
 use gpui::{
-    Bounds, Context, Entity, FocusHandle, IntoElement, ParentElement, Pixels, Render, Styled,
-    Subscription, Window, canvas, div, prelude::*, px,
+    AnyElement, Bounds, ClipboardItem, Context, Div, Entity, EventEmitter, FocusHandle, FontWeight,
+    IntoElement, ParentElement, Pixels, Render, SharedString, Stateful, Styled, Subscription,
+    Window, canvas, div, prelude::*, px,
 };
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    rc::Rc,
+    time::{Duration, Instant},
+};
+mod address;
+mod favicon;
+pub(crate) mod header;
+mod model;
+mod state;
+mod view;
+mod web;
+pub use state::{Snapshot, save_pages};
+pub struct PagesChanged(pub Snapshot);
+impl EventEmitter<PagesChanged> for BrowserPanel {}
+use model::Tab;
+pub use model::normalize;
 
-/// normalizeBrowserUrl in src/lib/browser/url.ts. Only web addresses load.
-pub fn normalize(raw: &str) -> String {
-    let value = raw.trim();
-    if value.is_empty() {
-        return String::new();
-    }
-    let lower = value.to_ascii_lowercase();
-    if lower.starts_with("http://") || lower.starts_with("https://") {
-        return value.into();
-    }
-    let dotted = value.split('.').take(4).filter(|part| !part.is_empty()).count() == 4
-        && value.chars().next().is_some_and(|c| c.is_ascii_digit());
-    if value.starts_with("localhost") || dotted {
-        format!("http://{value}")
-    } else {
-        format!("https://{value}")
+struct Page {
+    web: Rc<RefCell<Option<web::Web>>>,
+    pending: Rc<RefCell<Option<String>>>,
+    loading: bool,
+    document: bool,
+    error: Option<String>,
+    back: bool,
+    forward: bool,
+    creation_failed: Rc<std::cell::Cell<bool>>,
+}
+impl Default for Page {
+    fn default() -> Self {
+        Self {
+            web: Rc::default(),
+            pending: Rc::default(),
+            loading: false,
+            document: false,
+            error: None,
+            back: false,
+            forward: false,
+            creation_failed: Rc::default(),
+        }
     }
 }
-
+impl Page {
+    fn observe_status(&mut self, tab: &mut Tab, status: web::Status) -> bool {
+        let mut changed = false;
+        if self.document != status.document
+            || self.loading != status.loading
+            || self.back != status.back
+            || self.forward != status.forward
+            || self.error != status.error
+        {
+            self.loading = status.loading;
+            self.document = status.document;
+            self.back = status.back;
+            self.forward = status.forward;
+            self.error = status.error;
+            changed = true;
+        }
+        if let Some(url) = status.url
+            && !status.loading
+            && self.error.is_none()
+            && url != tab.url
+        {
+            tab.url = url;
+            changed = true;
+        }
+        if let Some(title) = status.title
+            && !status.loading
+            && self.error.is_none()
+            && !title.is_empty()
+            && title != tab.title
+        {
+            tab.title = title;
+            changed = true;
+        }
+        changed
+    }
+}
 pub struct BrowserPanel {
-    address: Entity<Composer>,
+    address: Entity<Address>,
     address_focus: FocusHandle,
-    #[cfg(target_os = "macos")]
-    web: Rc<RefCell<Option<web::Web>>>,
-    #[cfg(not(target_os = "macos"))]
-    web: Rc<RefCell<Option<()>>>,
-    /// An address asked for before the native page exists.
-    pending: Rc<RefCell<Option<String>>>,
-    /// Hidden while the panel moves, or a menu or the palette sits over it.
+    tabs: Vec<Tab>,
+    active: Option<u64>,
+    next_id: u64,
+    pages: HashMap<u64, Page>,
     covered: bool,
     focus: FocusHandle,
+    copied: Option<Instant>,
+    agent_glow: Option<Instant>,
+    editing: bool,
+    blur_address: bool,
+    in_header: bool,
+    focus_observed: bool,
+    window: Option<gpui::AnyWindowHandle>,
+    seeded: bool,
+    previews: Vec<u16>,
+    last_saved: (Vec<Tab>, Option<u64>),
+    favicons: HashMap<String, Option<std::sync::Arc<gpui::Image>>>,
+    favicon_loading: usize,
     _subscriptions: Vec<Subscription>,
 }
-
 impl BrowserPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let address = cx.new(|cx| {
-            let mut field = Composer::new(cx);
-            field.placeholder = "Search or enter address".into();
+            let mut field = Address::new(cx);
+            field.placeholder = "Enter URL or search...".into();
             field
         });
         let submit = cx.subscribe(&address, |this, address, _: &Submit, cx| {
             let url = normalize(&address.read(cx).text);
             if !url.is_empty() {
-                address.update(cx, |field, cx| field.set_text(&url, cx));
-                this.load(&url);
+                this.load_current(&url, cx);
             }
+            // Submit is emitted in the address key handler. Blur after dispatch,
+            // just as classic's Enter handler does, without stealing page focus.
+            this.blur_address = true;
             cx.notify();
         });
-        // The page navigates on its own; keep the address field following it.
         cx.spawn(async move |this, cx| {
             loop {
-                cx.background_executor().timer(Duration::from_millis(500)).await;
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
                 if this.update(cx, |this, cx| this.follow(cx)).is_err() {
                     break;
                 }
@@ -71,345 +140,373 @@ impl BrowserPanel {
         Self {
             address_focus: address.read(cx).focus.clone(),
             address,
-            web: Rc::default(),
-            pending: Rc::default(),
+            tabs: vec![],
+            active: None,
+            next_id: 1,
+            pages: HashMap::new(),
             covered: false,
             focus: cx.focus_handle(),
+            copied: None,
+            agent_glow: None,
+            editing: false,
+            blur_address: false,
+            in_header: false,
+            focus_observed: false,
+            window: None,
+            seeded: false,
+            previews: vec![],
+            last_saved: (vec![], None),
+            favicons: HashMap::new(),
+            favicon_loading: 0,
             _subscriptions: vec![submit],
         }
     }
-
+    pub fn configure(
+        &mut self,
+        saved: Option<Snapshot>,
+        client: crate::client::Client,
+        cx: &mut Context<Self>,
+    ) {
+        self.in_header = true;
+        if let Some(saved) = saved {
+            self.restore(saved, cx);
+        }
+        cx.spawn(async move |this, cx| {
+            loop {
+                let client = client.clone();
+                let result = cx
+                    .background_executor()
+                    .spawn(async move { client.get::<serde_json::Value>("/api/panel/ports", &[]) })
+                    .await;
+                if this
+                    .update(cx, |this, cx| {
+                        if let Ok(body) = result {
+                            let previews: Vec<u16> = body["ports"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter(|port| port["kind"] == "page")
+                                .filter_map(|port| u16::try_from(port["port"].as_u64()?).ok())
+                                .filter(|port| *port != 0)
+                                .collect();
+                            this.set_previews(previews, cx);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+                cx.background_executor().timer(Duration::from_secs(5)).await;
+            }
+        })
+        .detach();
+    }
+    fn restore(&mut self, saved: Snapshot, cx: &mut Context<Self>) {
+        let saved = saved.restored();
+        self.seeded = true;
+        self.tabs = saved.tabs;
+        self.active = saved.active;
+        self.next_id = self
+            .tabs
+            .iter()
+            .map(|t| t.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        for tab in &self.tabs {
+            let page = Page::default();
+            if !tab.url.is_empty() {
+                *page.pending.borrow_mut() = Some(tab.url.clone());
+            }
+            self.pages.insert(tab.id, page);
+        }
+        self.last_saved = (self.tabs.clone(), self.active);
+        self.sync_address(cx);
+        self.publish(cx);
+        cx.notify();
+    }
+    fn set_previews(&mut self, previews: Vec<u16>, cx: &mut Context<Self>) {
+        if !self.seeded && !previews.is_empty() {
+            for port in &previews {
+                self.add(format!("http://localhost:{port}"), cx);
+            }
+            if let Some(id) = self.tabs.first().map(|t| t.id) {
+                self.select(id, cx);
+            }
+        }
+        if self.previews != previews {
+            self.previews = previews;
+            cx.notify();
+        }
+    }
+    fn publish(&mut self, cx: &mut Context<Self>) {
+        let current = (self.tabs.clone(), self.active);
+        if self.seeded && current != self.last_saved {
+            self.last_saved = current;
+            cx.emit(PagesChanged(Snapshot::durable(&self.tabs, self.active)));
+        }
+    }
+    fn request_favicons(&mut self, cx: &mut Context<Self>) {
+        let hosts: std::collections::BTreeSet<_> = self
+            .tabs
+            .iter()
+            .filter_map(|tab| favicon::host(&tab.url))
+            .collect();
+        self.favicons.retain(|host, _| hosts.contains(host));
+        for host in hosts.into_iter().take(64) {
+            if self.favicon_loading >= 4 {
+                break;
+            }
+            if self.favicons.contains_key(&host) {
+                continue;
+            }
+            self.favicons.insert(host.clone(), None);
+            self.favicon_loading += 1;
+            cx.spawn(async move |this, cx| {
+                let requested = host.clone();
+                let image = cx
+                    .background_executor()
+                    .spawn(async move { favicon::fetch(requested) })
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    this.favicon_loading = this.favicon_loading.saturating_sub(1);
+                    if let Some(slot) = this.favicons.get_mut(&host) {
+                        *slot = image.map(std::sync::Arc::new);
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+    }
+    fn focus_chrome(&self) {
+        for page in self.pages.values() {
+            if let Some(web) = page.web.borrow().as_ref() {
+                web.focus_chrome();
+                break;
+            }
+        }
+    }
     pub fn focus(&self, window: &mut Window) {
+        self.focus_chrome();
         self.address_focus.focus(window);
     }
-
-    /// Hides the native page (it draws above everything the window paints).
     pub fn cover(&mut self, covered: bool) {
         self.covered = covered;
         if covered {
-            #[cfg(target_os = "macos")]
-            if let Some(web) = self.web.borrow().as_ref() {
+            self.hide_pages();
+        }
+    }
+    fn hide_pages(&self) {
+        for page in self.pages.values() {
+            if let Some(web) = page.web.borrow().as_ref() {
                 web.hide();
             }
         }
     }
-
-    /// Opens a page and shows its address.
-    pub fn navigate(&mut self, url: &str, cx: &mut Context<Self>) {
+    fn current(&self) -> Option<&Tab> {
+        self.tabs.iter().find(|tab| Some(tab.id) == self.active)
+    }
+    fn sync_address(&self, cx: &mut Context<Self>) {
+        let url = self.current().map_or("", |tab| tab.url.as_str());
         self.address.update(cx, |field, cx| field.set_text(url, cx));
-        self.load(url);
+    }
+    fn add(&mut self, url: String, cx: &mut Context<Self>) {
+        self.seeded = true;
+        self.hide_pages();
+        let id = self.next_id;
+        self.next_id += 1;
+        self.tabs.push(Tab {
+            id,
+            title: model::title(&url),
+            url: String::new(),
+            redacted: false,
+        });
+        self.pages.insert(id, Page::default());
+        self.active = Some(id);
+        if !url.is_empty() {
+            self.load_current(&url, cx);
+        }
+        self.sync_address(cx);
+        self.publish(cx);
         cx.notify();
     }
-
-    fn load(&self, url: &str) {
-        #[cfg(target_os = "macos")]
-        match self.web.borrow().as_ref() {
-            Some(web) => web.load(url),
-            None => *self.pending.borrow_mut() = Some(url.into()),
-        }
-        #[cfg(not(target_os = "macos"))]
-        let _ = url;
+    pub fn new_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.add(String::new(), cx);
+        self.focus(window);
     }
-
-    fn follow(&mut self, cx: &mut Context<Self>) {
-        #[cfg(target_os = "macos")]
+    fn select(&mut self, id: u64, cx: &mut Context<Self>) {
+        if !self.tabs.iter().any(|tab| tab.id == id) {
+            return;
+        }
+        self.hide_pages();
+        self.active = Some(id);
+        self.sync_address(cx);
+        self.publish(cx);
+        cx.notify();
+    }
+    fn close(&mut self, id: u64, cx: &mut Context<Self>) {
+        self.hide_pages();
+        self.pages.remove(&id);
+        model::close(&mut self.tabs, &mut self.active, id);
+        self.sync_address(cx);
+        self.publish(cx);
+        cx.notify();
+    }
+    /// External navigation focuses an existing URL or opens a new page, as classic does.
+    pub fn navigate(&mut self, raw: &str, cx: &mut Context<Self>) {
+        let url = normalize(raw);
+        if url.is_empty() {
+            return;
+        }
+        if let Some(id) = self
+            .tabs
+            .iter()
+            .find(|tab| tab.url == url)
+            .map(|tab| tab.id)
         {
-            let current = self.web.borrow().as_ref().and_then(|web| web.url());
-            let field = self.address.read(cx);
-            if let Some(current) = current
-                && field.text != current
-                && !field.composing()
-            {
-                self.address.update(cx, |field, cx| field.set_text(&current, cx));
-            }
+            self.select(id, cx);
+        } else {
+            self.add(url, cx);
         }
-        #[cfg(not(target_os = "macos"))]
-        let _ = cx;
     }
-
-    fn act(&self, action: fn(&web::Web)) {
-        #[cfg(target_os = "macos")]
-        if let Some(web) = self.web.borrow().as_ref() {
-            action(web);
-        }
-        #[cfg(not(target_os = "macos"))]
-        let _ = action;
+    pub fn agent_navigate(&mut self, raw: &str, cx: &mut Context<Self>) {
+        self.navigate(raw, cx);
+        self.agent_glow = Some(Instant::now());
+        cx.notify();
     }
-}
-
-impl Render for BrowserPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let button = |id: &'static str, path: &'static str, tip: &'static str| {
-            div()
-                .id(id)
-                .debug_selector(move || id.into())
-                .size(px(26.))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(7.))
-                .cursor_pointer()
-                .hover(|button| button.bg(theme().hover))
-                .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
-                .child(crate::icon::stroke(path, theme().text_secondary, 15., 1.7))
+    fn load_current(&mut self, url: &str, cx: &mut Context<Self>) {
+        let Some(id) = self.active else {
+            return;
         };
-        let web = self.web.clone();
-        let pending = self.pending.clone();
-        let covered = self.covered;
-        div()
-            .track_focus(&self.focus)
-            .size_full()
-            .flex()
-            .flex_col()
-            .min_h_0()
-            .child(
-                div()
-                    .min_h(px(44.))
-                    .py(px(4.))
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .gap(px(2.))
-                    .px(px(8.))
-                    .border_b_1()
-                    .border_color(theme().border)
-                    .child(button("browser-back", BACK, "Back").on_click(cx.listener(|this, _, _, _| this.act(web::Web::back))))
-                    .child(button("browser-forward", FORWARD, "Forward").on_click(cx.listener(|this, _, _, _| this.act(web::Web::forward))))
-                    .child(button("browser-reload", RELOAD, "Reload").on_click(cx.listener(|this, _, _, _| this.act(web::Web::reload))))
-                    .child(
-                        // A column so the framed field stretches across the bar.
-                        div()
-                            .ml(px(4.))
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .text_size(px(12.))
-                            .child(self.address.clone()),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .relative()
-                    .child(
-                        div()
-                            .p(px(16.))
-                            .text_size(px(12.))
-                            .text_color(theme().text_muted)
-                            .child(if cfg!(target_os = "macos") {
-                                "Type a web address or a localhost port above."
-                            } else {
-                                "The Browser needs macOS for now."
-                            }),
-                    )
-                    .child(
-                        canvas(
-                            |bounds, _, _| bounds,
-                            move |bounds: Bounds<Pixels>, _, window, _| {
-                                #[cfg(target_os = "macos")]
-                                {
-                                    let mut slot = web.borrow_mut();
-                                    if slot.is_none() {
-                                        *slot = web::Web::new(window);
-                                        if let (Some(page), Some(url)) = (slot.as_ref(), pending.borrow_mut().take()) {
-                                            page.load(&url);
-                                        }
-                                    }
-                                    // Blank until an address loads, so no white page shows.
-                                    if let Some(page) = slot.as_ref() {
-                                        if covered || page.url().is_none() {
-                                            page.hide();
-                                        } else {
-                                            page.position(bounds, window);
-                                        }
-                                    }
-                                }
-                                #[cfg(not(target_os = "macos"))]
-                                let _ = (bounds, window, &web, &pending, covered);
-                            },
-                        )
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .size_full(),
-                    ),
-            )
-    }
-}
-
-const BACK: &str = "M19 12H5m6-6-6 6 6 6";
-const FORWARD: &str = "M5 12h14m-6-6 6 6-6 6";
-const RELOAD: &str = "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16 M8 16H3v5";
-
-#[cfg(not(target_os = "macos"))]
-mod web {
-    pub struct Web;
-    impl Web {
-        pub fn back(&self) {}
-        pub fn forward(&self) {}
-        pub fn reload(&self) {}
-    }
-}
-
-#[cfg(target_os = "macos")]
-#[allow(unexpected_cfgs)]
-mod web {
-    use cocoa::{
-        appkit::NSView,
-        base::{BOOL, NO, YES, id, nil},
-        foundation::{NSPoint, NSRect, NSSize, NSString},
-    };
-    use objc::{class, declare::ClassDecl, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use std::{ffi::CStr, sync::OnceLock};
-
-    fn ns(value: &str) -> id {
-        unsafe {
-            let string = NSString::alloc(nil).init_str(value);
-            msg_send![string, autorelease]
+        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
+            tab.url = url.into();
+            tab.title = model::title(url);
+            tab.redacted = false;
         }
-    }
-
-    /// Links that ask for a new window open in this page instead.
-    fn delegate_class() -> &'static Class {
-        static CLASS: OnceLock<&'static Class> = OnceLock::new();
-        CLASS.get_or_init(|| {
-            extern "C" fn new_window(_: &Object, _: Sel, web: id, _: id, action: id, _: id) -> id {
-                unsafe {
-                    let request: id = msg_send![action, request];
-                    let _: id = msg_send![web, loadRequest: request];
-                }
-                nil
+        if let Some(page) = self.pages.get_mut(&id) {
+            page.error = None;
+            page.creation_failed.set(false);
+            page.loading = cfg!(target_os = "macos");
+            match page.web.borrow().as_ref() {
+                Some(web) => web.load(url),
+                None => *page.pending.borrow_mut() = Some(url.into()),
             }
-            let mut decl = ClassDecl::new("O8BrowserDelegate", class!(NSObject)).unwrap();
-            unsafe {
-                decl.add_method(
-                    sel!(webView:createWebViewWithConfiguration:forNavigationAction:windowFeatures:),
-                    new_window as extern "C" fn(&Object, Sel, id, id, id, id) -> id,
-                );
-            }
-            decl.register()
-        })
+        }
+        self.copied = None;
+        self.sync_address(cx);
+        self.publish(cx);
+        cx.notify();
     }
-
-    pub struct Web {
-        view: id,
-        delegate: id,
-    }
-
-    impl Web {
-        pub fn new(window: &gpui::Window) -> Option<Self> {
-            let handle = HasWindowHandle::window_handle(window).ok()?;
-            let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
-                return None;
+    fn follow(&mut self, cx: &mut Context<Self>) {
+        let mut changed = false;
+        let mut popups = vec![];
+        for tab in &mut self.tabs {
+            let Some(page) = self.pages.get_mut(&tab.id) else {
+                continue;
             };
-            unsafe {
-                let parent = handle.ns_view.as_ptr() as id;
-                let configuration: id = msg_send![class!(WKWebViewConfiguration), new];
-                // Its own cookies and storage, gone when the app quits.
-                let store: id = msg_send![class!(WKWebsiteDataStore), nonPersistentDataStore];
-                let _: () = msg_send![configuration, setWebsiteDataStore: store];
-                let preferences: id = msg_send![configuration, preferences];
-                let _: () = msg_send![preferences, setJavaScriptCanOpenWindowsAutomatically: NO];
-                let rect = NSRect::new(NSPoint::new(0., 0.), NSSize::new(1., 1.));
-                let view: id = msg_send![class!(WKWebView), alloc];
-                let view: id = msg_send![view, initWithFrame: rect configuration: configuration];
-                let _: () = msg_send![configuration, release];
-                if view == nil {
-                    return None;
-                }
-                let delegate: id = msg_send![delegate_class(), new];
-                let _: () = msg_send![view, setUIDelegate: delegate];
-                let _: () = msg_send![view, setAllowsBackForwardNavigationGestures: YES];
-                let _: () = msg_send![view, setHidden: YES];
-                NSView::addSubview_(parent, view);
-                Some(Self { view, delegate })
+            if page.creation_failed.get() && page.error.is_none() {
+                page.error = Some("Could not create a browser view. Reload to try again, or open this page in your browser.".into());
+                page.loading = false;
+                changed = true;
             }
+            let owned = page.web.clone();
+            let slot = owned.borrow();
+            let Some(web) = slot.as_ref() else {
+                continue;
+            };
+            let status = web.status();
+            if page.observe_status(tab, status) {
+                changed = true;
+            }
+            if page.error.is_some() {
+                web.hide();
+            }
+            popups.extend(web.take_popups());
         }
-
-        pub fn load(&self, url: &str) {
-            unsafe {
-                let url: id = msg_send![class!(NSURL), URLWithString: ns(url)];
-                if url == nil {
-                    return;
-                }
-                let request: id = msg_send![class!(NSURLRequest), requestWithURL: url];
-                let _: id = msg_send![self.view, loadRequest: request];
-            }
+        for url in popups {
+            self.navigate(&url, cx);
+            changed = true;
         }
-
-        pub fn back(&self) {
-            unsafe {
-                let _: id = msg_send![self.view, goBack];
+        let native_focus = self
+            .active
+            .and_then(|id| self.pages.get(&id))
+            .is_some_and(|page| page.web.borrow().as_ref().is_some_and(web::Web::is_focused));
+        if native_focus && self.editing {
+            self.editing = false;
+            if let Some(window) = self.window {
+                let focus = self.focus.clone();
+                cx.defer(move |cx| {
+                    let _ = window.update(cx, |_, window, _| focus.focus(window));
+                });
             }
+            changed = true;
         }
-
-        pub fn forward(&self) {
-            unsafe {
-                let _: id = msg_send![self.view, goForward];
-            }
+        // Never replace an unsubmitted draft. IME-only suppression loses ordinary typing.
+        let focused = self.editing;
+        if !focused
+            && !self.address.read(cx).text.chars().eq(self
+                .current()
+                .map_or("", |tab| tab.url.as_str())
+                .chars()
+                .filter(|ch| !matches!(ch, '\r' | '\n')))
+        {
+            self.sync_address(cx);
         }
-
-        pub fn reload(&self) {
-            unsafe {
-                let _: id = msg_send![self.view, reload];
-            }
+        if self
+            .copied
+            .is_some_and(|at| at.elapsed() >= Duration::from_millis(1200))
+        {
+            self.copied = None;
+            changed = true;
         }
-
-        pub fn url(&self) -> Option<String> {
-            unsafe {
-                let url: id = msg_send![self.view, URL];
-                if url == nil {
-                    return None;
-                }
-                let text: id = msg_send![url, absoluteString];
-                if text == nil {
-                    return None;
-                }
-                let bytes: *const std::os::raw::c_char = msg_send![text, UTF8String];
-                Some(CStr::from_ptr(bytes).to_string_lossy().into_owned())
-            }
+        if self
+            .agent_glow
+            .is_some_and(|at| at.elapsed() >= Duration::from_millis(1300))
+        {
+            self.agent_glow = None;
+            changed = true;
         }
-
-        pub fn position(&self, bounds: gpui::Bounds<gpui::Pixels>, window: &gpui::Window) {
-            unsafe {
-                let parent: id = msg_send![self.view, superview];
-                let flipped: BOOL = msg_send![parent, isFlipped];
-                let height = f64::from(f32::from(window.viewport_size().height));
-                let x = |v: gpui::Pixels| f64::from(f32::from(v));
-                let top = if flipped == YES {
-                    x(bounds.top())
-                } else {
-                    height - x(bounds.bottom())
-                };
-                let frame = NSRect::new(
-                    NSPoint::new(x(bounds.left()), top),
-                    NSSize::new(x(bounds.size.width), x(bounds.size.height)),
-                );
-                let _: () = msg_send![self.view, setFrame: frame];
-                let _: () = msg_send![self.view, setHidden: NO];
-            }
-        }
-
-        pub fn hide(&self) {
-            unsafe {
-                let _: () = msg_send![self.view, setHidden: YES];
-            }
+        if changed {
+            self.publish(cx);
+            cx.notify();
         }
     }
-
-    impl Drop for Web {
-        fn drop(&mut self) {
-            unsafe {
-                let _: () = msg_send![self.view, stopLoading];
-                let _: () = msg_send![self.view, setUIDelegate: nil];
-                NSView::removeFromSuperview(self.view);
-                let _: () = msg_send![self.view, release];
-                let _: () = msg_send![self.delegate, release];
+    fn act(&mut self, action: fn(&web::Web), cx: &mut Context<Self>) {
+        if let Some(page) = self.active.and_then(|id| self.pages.get_mut(&id)) {
+            page.error = None;
+            page.creation_failed.set(false);
+            if let Some(web) = page.web.borrow().as_ref() {
+                action(web);
             }
+        }
+        cx.notify();
+    }
+    fn reload(&mut self, cx: &mut Context<Self>) {
+        if self
+            .active
+            .and_then(|id| self.pages.get(&id))
+            .is_some_and(|page| page.error.is_some())
+        {
+            if let Some(url) = self.current().map(|tab| tab.url.clone()) {
+                self.load_current(&url, cx);
+            }
+        } else {
+            self.act(web::Web::reload, cx);
+        }
+    }
+    fn copy_url(&mut self, cx: &mut Context<Self>) {
+        if let Some(tab) = self.current().filter(|tab| !tab.url.is_empty()) {
+            cx.write_to_clipboard(ClipboardItem::new_string(tab.url.clone()));
+            self.copied = Some(Instant::now());
+            cx.notify();
+        }
+    }
+    fn external(&self, cx: &mut Context<Self>) {
+        if let Some(tab) = self.current().filter(|tab| !tab.url.is_empty()) {
+            cx.open_url(&tab.url);
         }
     }
 }
+#[cfg(test)]
+mod tests;

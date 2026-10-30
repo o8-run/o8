@@ -1,4 +1,5 @@
 use super::*;
+use crate::browser_panel::header as browser_header;
 use crate::motion::Transition;
 use gpui::SharedString;
 // The desktop's right panel (O8Panel). Its tools open as tabs in the panel's
@@ -467,7 +468,22 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         s.features.get::<Panel>().files.insert(key.clone(), view);
     }
     if tool == Tool::Browser && !s.features.get::<Panel>().browsers.contains_key(&key) {
-        let view = cx.new(crate::browser_panel::BrowserPanel::new);
+        let saved = s.state.browser_pages.get(&workspace).cloned();
+        let client = s.client.in_workspace(&workspace);
+        let view = cx.new(|cx| {
+            let mut view = crate::browser_panel::BrowserPanel::new(cx);
+            view.configure(saved, client, cx);
+            view
+        });
+        s.subscriptions
+            .push(cx.observe(&view, |_, _, cx| cx.notify()));
+        s.subscriptions.push(cx.subscribe(
+            &view,
+            move |s, _, event: &crate::browser_panel::PagesChanged, _| {
+                crate::browser_panel::save_pages(&mut s.state, &workspace, event.0.clone());
+                s.persist();
+            },
+        ));
         s.features.get::<Panel>().browsers.insert(key.clone(), view);
     }
     let panel = s.features.get::<Panel>();
@@ -534,7 +550,7 @@ pub(super) fn open_surface(
             .and_then(|panel| panel.browsers.get(&key(s, Tool::Browser)))
             .cloned()
     {
-        view.update(cx, |browser, cx| browser.navigate(url, cx));
+        view.update(cx, |browser, cx| browser.agent_navigate(url, cx));
     }
     true
 }
@@ -1043,7 +1059,11 @@ fn tab_pill(
 
 /// The "+" menu: every desktop panel tool in its group; picking one adds it
 /// as a tab (or focuses it when it is open already).
-fn add_menu(appear: f32, cx: &mut Context<Shell>) -> impl IntoElement {
+fn add_menu(
+    appear: f32,
+    browser: Option<Entity<crate::browser_panel::BrowserPanel>>,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement {
     let rows = Tool::GROUPS
         .iter()
         .enumerate()
@@ -1135,6 +1155,13 @@ fn add_menu(appear: f32, cx: &mut Context<Shell>) -> impl IntoElement {
                             .border_1()
                             .border_color(theme().border)
                             .shadow_lg()
+                            .children(browser.map(|browser| {
+                                browser_header::new_page_item(
+                                    browser,
+                                    |s, _| s.features.get::<Panel>().menu = None,
+                                    cx,
+                                )
+                            }))
                             .children(rows),
                     ),
             )
@@ -1158,8 +1185,51 @@ pub(super) fn header(
     let selected = panel.map(|panel| format!("{:?}", panel.current()));
     let mut pills = vec![];
     for (index, tool) in tabs.iter().enumerate() {
-        pills.push(tab_pill(index, *tool, index == active, &scroll, cx).into_any_element());
+        // Classic excludes Browser from the utility strip; pages belong only to its active state.
+        if (*tool == Tool::Browser && index != active)
+            || (tabs.get(active) == Some(&Tool::Browser) && *tool != Tool::Browser)
+        {
+            continue;
+        }
+        if *tool == Tool::Browser
+            && let Some(view) = panel.and_then(|panel| panel.browsers.get(&key(s, Tool::Browser)))
+        {
+            let pages = view.update(cx, |browser, cx| browser.page_strip(cx));
+            pills.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .min_w_0()
+                    .child(pages)
+                    .child(browser_header::launcher(
+                        |s, window, cx| {
+                            let panel = s.features.get::<Panel>();
+                            panel.active = panel.tabs.len();
+                            show(s, Tool::Launcher, window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|s, _, window, cx| show(s, Tool::Browser, window, cx)),
+                    )
+                    .into_any_element(),
+            );
+        } else {
+            pills.push(tab_pill(index, *tool, index == active, &scroll, cx).into_any_element());
+        }
     }
+    let browser = panel
+        .filter(|p| p.current() == Tool::Browser)
+        .and_then(|p| p.browsers.get(&key(s, Tool::Browser)))
+        .cloned();
+    let (opener_icon, opener_size, opener_weight, opener_label) = if browser.is_some() {
+        (browser_header::MORE, 16., 3., "More panel views")
+    } else {
+        (PLUS, 14., 2., "Add panel tool")
+    };
     let menu = panel
         .and_then(|panel| panel.menu)
         .map(|at| crate::motion::ease_out((at.elapsed().as_secs_f32() / 0.14).min(1.)));
@@ -1213,13 +1283,16 @@ pub(super) fn header(
                                 .child(
                                     super::header::icon_button(
                                         "panel-new-tab",
-                                        PLUS,
-                                        14.,
-                                        2.,
+                                        opener_icon,
+                                        opener_size,
+                                        opener_weight,
                                         // The tooltip would sit over the open menu.
-                                        if menu.is_some() { "" } else { "Add panel tool" },
+                                        if menu.is_some() { "" } else { opener_label },
                                         true,
                                     )
+                                    .when(browser.is_some(), |button| {
+                                        browser_header::more(button, cx)
+                                    })
                                     .when(menu.is_some(), |button| button.bg(theme().hover))
                                     .on_click(cx.listener(
                                         |this, _, window, cx| {
@@ -1234,7 +1307,7 @@ pub(super) fn header(
                                         },
                                     )),
                                 )
-                                .children(menu.map(|appear| add_menu(appear, cx))),
+                                .children(menu.map(|appear| add_menu(appear, browser.clone(), cx))),
                         ),
                     scroll,
                     selected,
