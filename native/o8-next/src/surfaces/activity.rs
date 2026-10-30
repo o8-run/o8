@@ -11,7 +11,9 @@ mod pane;
 #[path = "activity/transport.rs"]
 mod transport;
 
-pub(super) type Slice = EmptyState;
+pub(super) type Slice = pane::preferences::Slice;
+#[path = "activity/draft.rs"]
+mod draft;
 pub(super) type Runtime = ();
 pub(super) type View = ActivityPane;
 pub(super) const REGISTRATION: Registration = Registration {
@@ -30,11 +32,41 @@ fn create(
     cx: &mut Context<Shell>,
 ) -> Option<Content> {
     let client = shell.client.in_workspace(&workspace);
-    let activity = cx.new(|cx| ActivityPane::new(client, workspace.clone(), cx));
+    let saved = shell
+        .state
+        .workspaces
+        .get(&workspace)
+        .map(|w| w.surfaces.activity.activity_preferences.clone())
+        .unwrap_or_default();
+    let open = shell
+        .state
+        .workspaces
+        .values()
+        .find_map(|w| w.surfaces.activity.activity_preferences.proposals_open)
+        .unwrap_or(false);
+    let mut seen = Vec::new();
+    for w in shell.state.workspaces.values() {
+        for id in &w.surfaces.activity.activity_preferences.seen {
+            if !seen.contains(id) {
+                seen.push(id.clone());
+            }
+        }
+    }
+    if seen.len() > 200 {
+        seen.drain(..seen.len() - 200);
+    }
+    let activity = cx.new(|cx| ActivityPane::new(client, workspace.clone(), saved, open, seen, cx));
+    let created_for = workspace.clone();
     shell.subscriptions.push(cx.subscribe_in(
         &activity,
         window,
         move |shell, _, event: &ActivityEvent, window, cx| match event {
+            ActivityEvent::Draft(repo,text) => draft::open(shell,repo,text,window,cx),
+            ActivityEvent::Preferences(saved) => {
+                shell.state.workspaces.entry(created_for.clone()).or_default().surfaces.activity.activity_preferences=saved.clone();
+                for w in shell.state.workspaces.values_mut(){w.surfaces.activity.activity_preferences.proposals_open=saved.proposals_open;w.surfaces.activity.activity_preferences.seen=saved.seen.clone();}
+                shell.persist();
+            }
             ActivityEvent::Worker(key) => {
                 if let Some(session) = shell
                     .workspace_sessions()
@@ -64,7 +96,11 @@ fn create(
 
 impl ShellView for ActivityPane {
     fn focus(view: &Entity<Self>, _: bool, window: &mut Window, cx: &mut Context<Shell>) {
-        view.read(cx).focus(window);
+        view.update(cx, |pane, cx| {
+            pane.focus(window);
+            pane.load_dossiers(cx);
+            pane.load_proposals(cx);
+        });
     }
 
     fn tick(view: &Entity<Self>, refresh: bool, cx: &mut Context<Shell>) {
@@ -85,6 +121,7 @@ impl ShellView for ActivityPane {
                         activity.tick(cx);
                         if refresh {
                             activity.load_dossiers(cx);
+                            activity.load_proposals(cx);
                         }
                     });
                 }
