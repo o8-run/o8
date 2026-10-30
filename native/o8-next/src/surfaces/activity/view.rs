@@ -259,6 +259,63 @@ impl ActivityPane {
                         cx,
                     ));
                 }
+                // PacketCard's lifecycle buttons and review section.
+                let status = text(&row.data, "status");
+                let lane = !text(&row.data["lane"], "laneId").is_empty();
+                let mut lifecycle = div().flex().flex_wrap().gap(px(6.));
+                let mut any = false;
+                if lane
+                    && !self.pending
+                    && row.data["operatorStopped"] != true
+                    && matches!(status.as_str(), "running" | "launching" | "recovering")
+                {
+                    lifecycle = lifecycle.child(self.button(
+                        "activity-lane-stop",
+                        "Stop",
+                        Action::Lane(row.clone(), "stop"),
+                        cx,
+                    ));
+                    any = true;
+                }
+                if lane
+                    && !self.pending
+                    && matches!(status.as_str(), "idle" | "awaiting_review" | "recovering")
+                {
+                    lifecycle = lifecycle.child(self.button(
+                        "activity-lane-resume",
+                        "Resume",
+                        Action::Lane(row.clone(), "resume"),
+                        cx,
+                    ));
+                    any = true;
+                }
+                if lane
+                    && !self.pending
+                    && (status == "awaiting_review"
+                        || (status == "blocked"
+                            && row.data["blockedReason"] == "Awaiting operator input"))
+                {
+                    lifecycle = lifecycle
+                        .child(self.button(
+                            "activity-lane-create-pr",
+                            "Create PR",
+                            Action::Lane(row.clone(), "create_pr"),
+                            cx,
+                        ))
+                        .child(self.button(
+                            "activity-lane-merge",
+                            "Merge",
+                            Action::Lane(row.clone(), "merge"),
+                            cx,
+                        ));
+                    any = true;
+                }
+                if any {
+                    view = view.child(lifecycle);
+                }
+                if status == "awaiting_review" && !self.pending {
+                    view = view.child(self.close_unmerged(row, cx));
+                }
                 if !self.pending && (row.data["queueState"] == "held" || row.data["lane"].is_null())
                 {
                     let held = row.data["queueState"] == "held";
@@ -277,6 +334,69 @@ impl ActivityPane {
             _ => {}
         }
         view.into_any_element()
+    }
+}
+impl ActivityPane {
+    /// PacketCloseUnmergedActions: one button, then a reason and a confirm.
+    fn close_unmerged(&mut self, row: &Row, cx: &mut Context<Self>) -> gpui::AnyElement {
+        if self.closing.as_deref() != Some(row.id.as_str()) {
+            return div()
+                .flex()
+                .justify_end()
+                .child(self.button(
+                    "activity-close-unmerged",
+                    "Close unmerged…",
+                    Action::CloseAsk(Some(row.id.clone())),
+                    cx,
+                ))
+                .into_any_element();
+        }
+        let mut reasons = div().flex().flex_wrap().gap(px(6.));
+        for (reason, label) in super::CLOSE_REASONS {
+            let chosen = self.close_reason == reason;
+            reasons = reasons.child(
+                self.button(
+                    format!("activity-close-reason-{reason}"),
+                    label,
+                    Action::CloseReason(reason),
+                    cx,
+                )
+                .when(chosen, |button| {
+                    button.border_1().border_color(theme().accent)
+                }),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme().text_secondary)
+                    .child(
+                        "Close this packet without merging. Its branch is preserved when possible.",
+                    ),
+            )
+            .child(reasons)
+            .child(
+                div()
+                    .flex()
+                    .gap(px(6.))
+                    .child(self.button(
+                        "activity-close-confirm",
+                        "Confirm close",
+                        Action::Close(row.clone()),
+                        cx,
+                    ))
+                    .child(self.button(
+                        "activity-close-cancel",
+                        "Cancel",
+                        Action::CloseAsk(None),
+                        cx,
+                    )),
+            )
+            .into_any_element()
     }
 }
 impl Render for ActivityPane {

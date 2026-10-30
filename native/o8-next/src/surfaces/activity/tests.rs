@@ -617,3 +617,101 @@ fn activity_in_the_right_panel_refreshes_on_its_own(cx: &mut TestAppContext) {
         "a five-minute-old feed in the panel loads again without a click"
     );
 }
+
+#[gpui::test]
+fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let view = activity_view(&shell, cx);
+    let settle = |cx: &mut VisualTestContext| {
+        for _ in 0..200 {
+            cx.run_until_parked();
+            draw(cx);
+            if view.read_with(cx, |v, _| !v.pending && !v.loading) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("the decision never settled");
+    };
+    let lane_commands = || {
+        let state = fixture
+            .client
+            .get::<Value>("/api/activity-fixture", &[])
+            .unwrap();
+        let commands = state["mutations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|body| serde_json::from_str::<Value>(body.as_str()?).ok())
+            .filter(|body| body["verb"].is_string())
+            .collect::<Vec<_>>();
+        (commands, state["laneId"].clone())
+    };
+    activity_click(cx, "activity-filter-packet");
+    activity_click(cx, "activity-row-packet-local-activity-packet");
+    // The fixture's packet waits for review behind an operator hold.
+    activity_click(cx, "activity-release");
+    settle(cx);
+    // An awaiting-review packet with a lane: Resume, the review section and
+    // Close unmerged, but no Stop, since it is not running.
+    for control in [
+        "activity-lane-resume",
+        "activity-lane-create-pr",
+        "activity-lane-merge",
+        "activity-close-unmerged",
+    ] {
+        assert!(cx.debug_bounds(control).is_some(), "{control}");
+    }
+    assert!(cx.debug_bounds("activity-lane-stop").is_none());
+
+    activity_click(cx, "activity-lane-create-pr");
+    settle(cx);
+    let (commands, lane) = lane_commands();
+    assert_eq!(
+        commands.last().unwrap(),
+        &serde_json::json!({"verb": "create_pr", "laneId": lane,
+            "commitMessage": "Auto-commit from lane"})
+    );
+    assert!(
+        view.read_with(cx, |v, _| v
+            .notice
+            .contains("https://github.com/example/activity/pull/8")),
+        "the created PR's note shows"
+    );
+
+    activity_click(cx, "activity-lane-merge");
+    settle(cx);
+    let (commands, _) = lane_commands();
+    assert_eq!(commands.last().unwrap()["verb"], "merge");
+    assert_eq!(
+        commands.last().unwrap()["commitMessage"],
+        "Merge lane: Fixture packet"
+    );
+    let notice = view.read_with(cx, |v, _| v.notice.clone());
+    assert!(
+        notice.contains("Merge conflict in fixture.ts.")
+            && notice.ends_with("Try \"Create PR\" instead."),
+        "{notice}"
+    );
+
+    activity_click(cx, "activity-close-unmerged");
+    activity_click(cx, "activity-close-reason-superseded");
+    activity_click(cx, "activity-close-confirm");
+    settle(cx);
+    let state: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
+    let packet = state["mission"]["packets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|packet| packet["id"] == "activity-packet")
+        .cloned();
+    let notice = view.read_with(cx, |v, _| v.notice.clone());
+    assert!(
+        packet
+            .as_ref()
+            .is_none_or(|packet| packet["status"] == "archived"),
+        "Close unmerged archives the packet: {packet:?}; notice: {notice}"
+    );
+}

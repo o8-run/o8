@@ -102,11 +102,21 @@ export async function installActivityFixture(repo: string) {
   const repos = await import('../../../src/app/api/panel/repos/route');
   const state = await import('../../../src/app/api/orchestrator/state/route');
   const stop = await import('../../../src/app/api/orchestrator/stop-mission/route');
+  const discard = await import('../../../src/app/api/orchestrator/discard-packet/route');
   const routes: Record<string, (request: NextRequest) => Promise<Response>> = {
     'GET /api/panel/commits': commits.GET, 'GET /api/panel/prs': prs.GET, 'GET /api/panel/issues': issues.GET,
     'GET /api/panel/ci': ci.GET, 'GET /api/panel/pr': pr.GET, 'GET /api/panel/repos': repos.GET,
     'GET /api/panel/ci/91': request => detail.GET(request, { params: Promise.resolve({ id: '91' }) }),
     'PATCH /api/orchestrator/state': state.PATCH, 'POST /api/orchestrator/stop-mission': stop.POST,
+    'POST /api/orchestrator/discard-packet': discard.POST,
+    // Real lane verbs drive git and worker processes; the fixture records the
+    // packet card's command and answers like the lanes route does.
+    'POST /api/lanes': async request => {
+      const body = await request.json() as { verb?: string };
+      mutations.push(JSON.stringify(body));
+      if (body.verb === 'merge') return Response.json({ ok: false, note: 'Merge conflict in fixture.ts.' }, { status: 422 });
+      return Response.json({ ok: true, note: body.verb === 'create_pr' ? 'Opened https://github.com/example/activity/pull/8.' : `Lane ${body.verb} sent.` });
+    },
     'GET /api/activity-fixture': async request => {
       mode = request.nextUrl.searchParams.get('mode') ?? mode;
       if (mode === 'drop-stop' || mode === 'stop-ready') updateLane(laneId, { sessionKey: null });

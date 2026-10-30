@@ -23,7 +23,22 @@ pub(super) enum Action {
     RetryDetail(Row),
     Hold(Row, bool),
     StopMission,
+    /// A worker lane command from the packet card (O8ActivityPacketRow):
+    /// resume, stop, create_pr or merge.
+    Lane(Row, &'static str),
+    /// Opens or cancels the close-unmerged confirmation for a packet.
+    CloseAsk(Option<String>),
+    CloseReason(&'static str),
+    Close(Row),
 }
+
+/// close-unmerged-shared.ts: each disposition and its label.
+pub(super) const CLOSE_REASONS: [(&str, &str); 4] = [
+    ("adopted_elsewhere", "Adopted elsewhere"),
+    ("superseded", "Superseded"),
+    ("spec_changed", "Spec changed"),
+    ("wontfix", "Won't fix"),
+];
 #[derive(Clone)]
 pub(super) enum DetailValue {
     Ci(CiDetail),
@@ -55,6 +70,9 @@ pub struct ActivityPane {
     generation: u64,
     pub(super) loaded_at: Instant,
     stop_identity: Option<(String, String)>,
+    /// The packet whose close-unmerged confirmation is open, and its reason.
+    pub(super) closing: Option<String>,
+    pub(super) close_reason: &'static str,
     pub(super) focus: FocusHandle,
     pub(super) controls: Vec<(String, Action)>,
     pub(super) keyboard: Option<String>,
@@ -82,6 +100,8 @@ impl ActivityPane {
             generation: 0,
             loaded_at: Instant::now(),
             stop_identity: None,
+            closing: None,
+            close_reason: CLOSE_REASONS[0].0,
             focus: cx.focus_handle(),
             controls: vec![],
             keyboard: None,
@@ -269,6 +289,7 @@ impl ActivityPane {
         }
         self.pending = true;
         self.notice = "Applying decision…".into();
+        let merge = body["verb"] == "merge";
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let deadline = Instant::now() + Duration::from_secs(300);
@@ -311,15 +332,24 @@ impl ActivityPane {
                         this.pending = true;
                         "Decision is unsettled. Refresh before another action.".into()
                     }
-                    Ok(_) => {
+                    Ok(value) => {
                         this.stop_identity = None;
-                        "Decision applied.".into()
+                        this.closing = None;
+                        // A created PR's note carries its URL.
+                        value["note"]
+                            .as_str()
+                            .filter(|note| !note.is_empty())
+                            .map_or_else(|| "Decision applied.".into(), String::from)
                     }
                     Err(error) => {
                         if error.status.is_some() {
                             this.stop_identity = None;
                         }
-                        error.message
+                        if merge && error.message.to_lowercase().contains("conflict") {
+                            format!("{} Try \"Create PR\" instead.", error.message)
+                        } else {
+                            error.message
+                        }
                     }
                 };
                 this.load(cx);
@@ -352,6 +382,24 @@ impl ActivityPane {
                 let (_,identity) = self.stop_identity.get_or_insert_with(|| (mission.clone(),format!("next-stop-{}-{}",std::process::id(),SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos())));
                 let identity = identity.clone();
                 self.mutate("POST","/api/orchestrator/stop-mission",json!({"missionId":mission,"idempotencyKey":identity}),cx);
+            }
+            Action::Lane(row, verb) => {
+                let lane = feed::text(&row.data["lane"], "laneId");
+                if lane.is_empty() { return; }
+                let mut body = json!({"verb": verb, "laneId": lane});
+                match verb {
+                    "resume" => { body["message"] = json!("Continue the previous task."); body["actor"] = json!("user"); }
+                    "stop" => body["actor"] = json!("user"),
+                    "create_pr" => body["commitMessage"] = json!("Auto-commit from lane"),
+                    _ => body["commitMessage"] = json!(format!("Merge lane: {}", feed::text(&row.data, "title"))),
+                }
+                self.mutate("POST", "/api/lanes", body, cx);
+            }
+            Action::CloseAsk(packet) => { self.closing = packet; self.close_reason = CLOSE_REASONS[0].0; }
+            Action::CloseReason(reason) => self.close_reason = reason,
+            Action::Close(row) => {
+                let mutation = format!("next-close-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos());
+                self.mutate("POST", "/api/orchestrator/discard-packet", json!({"packetId": row.id, "disposition": self.close_reason, "clientMutationId": mutation}), cx);
             }
         }
         self.changed(cx);
