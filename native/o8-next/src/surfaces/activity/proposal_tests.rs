@@ -28,6 +28,17 @@ fn activity_proposals_sources_details_and_frozen_new_badges(cx: &mut TestAppCont
     let f = Fixture::start_mode(false, "--activity --activity-dossiers");
     let (_, mut v) = start(&f, cx);
     let data = snapshot(&f, &[]);
+    let card = v
+        .debug_bounds("activity-proposal-card-auto:auto-fixture")
+        .unwrap();
+    let accept = v
+        .debug_bounds(selector("auto", "auto-fixture", "-accept"))
+        .unwrap();
+    let badge = v
+        .debug_bounds("activity-proposal-badge-auto:auto-fixture")
+        .unwrap();
+    assert!((accept.center().y - card.center().y).abs() <= px(1.));
+    assert!(badge.size.height < card.size.height * 0.65);
     for (source, id) in [
         ("auto", "auto-fixture"),
         ("cross-repo", "cross-fixture"),

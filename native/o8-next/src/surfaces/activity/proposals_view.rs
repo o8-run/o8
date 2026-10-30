@@ -114,8 +114,13 @@ impl ActivityPane {
             .gap(px(8.))
             .child(
                 div()
+                    .debug_selector({
+                        let key = key.clone();
+                        move || format!("activity-proposal-badge-{key}")
+                    })
                     .w(px(42.))
                     .flex_shrink_0()
+                    .whitespace_nowrap()
                     .text_size(px(10.))
                     .font_family(theme().font_mono)
                     .text_color(theme().text_muted)
@@ -157,11 +162,12 @@ impl ActivityPane {
                 "activity-proposal-{key}-{}",
                 if accept { "accept" } else { "dismiss" }
             );
-            let button = if pending.is_some() {
+            let mut button = if pending.is_some() {
                 Self::inert(id, label)
             } else {
                 self.button(id, label, Action::ProposalDecision(key.clone(), accept), cx)
             };
+            button.style().align_self = Some(gpui::AlignItems::Center);
             header = header.child(
                 button
                     .min_h(px(22.))
