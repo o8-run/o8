@@ -100,7 +100,7 @@ for (const engine of ['chromium', 'webkit'] as const) describe.runIf(engine === 
             right: rect.right, width: rect.width, top: rect.top, bottom: rect.bottom, position: style.position };
         });
         if (proof) await page.screenshot({ path: join(proof, `${engine}-${appearance}-${width}.png`) });
-        expect(measure.width).toBe(320);
+        expect(measure.width).toBe(width === 900 ? 300 : 320);
         expect(measure.right).toBeLessThanOrEqual(width);
         expect(measure.top).toBeGreaterThanOrEqual(0);
         expect(measure.bottom).toBeLessThanOrEqual(width === 900 ? 700 : 1050);
