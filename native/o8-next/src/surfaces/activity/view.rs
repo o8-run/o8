@@ -4,7 +4,8 @@ use super::*;
 use crate::icon;
 use crate::theme::current as theme;
 use gpui::{
-    FontWeight, IntoElement, Render, Rgba, SharedString, canvas, div, prelude::*, px, relative,
+    Corner, FontWeight, IntoElement, Render, Rgba, SharedString, anchored, canvas, deferred, div,
+    prelude::*, px, relative,
 };
 
 /// A 0.5px border, as classic's `0.5px solid` group outlines.
@@ -454,6 +455,191 @@ impl ActivityPane {
             .into_any_element()
     }
 }
+/// A repository's label and owner, as O8RepoSelector's repoMeta.
+fn repo_meta(repo: &feed::Repo) -> (String, String) {
+    match repo.slug() {
+        Some(slug) => match slug.split_once('/') {
+            Some((owner, name)) => (name.to_owned(), owner.to_owned()),
+            None => (slug, String::new()),
+        },
+        None => (repo.name.clone(), String::new()),
+    }
+}
+
+/// O8RepoSelector: one chip, and a menu of All repos and each repository.
+impl ActivityPane {
+    fn scope_selector(&mut self, cx: &mut Context<Self>) -> gpui::Div {
+        let open = self.scope_menu;
+        let accent = tint(marks::ACCENT, 1.);
+        let label = if self.scope == "*" {
+            "All repos".to_owned()
+        } else {
+            self.repos
+                .iter()
+                .find(|repo| repo.local_path == self.scope)
+                .map(|repo| repo_meta(repo).0)
+                .or_else(|| {
+                    self.scope
+                        .rsplit(['/', '\\'])
+                        .find(|s| !s.is_empty())
+                        .map(String::from)
+                })
+                .unwrap_or_else(|| "No repo".into())
+        };
+        let selected = self.keyboard.as_deref() == Some("activity-scope");
+        let chip = hairline(
+            self.control("activity-scope", Action::ScopeMenu(!open), cx)
+                .flex()
+                .items_center()
+                .gap(px(5.))
+                .w_full()
+                .min_h(px(28.))
+                .pl(px(8.))
+                .pr(px(10.))
+                .rounded(px(8.))
+                .border_color(theme().border)
+                .bg(if open || selected {
+                    theme().hover
+                } else {
+                    theme().surface
+                })
+                .hover(|v| v.bg(theme().hover))
+                .text_size(px(13.5))
+                .font_weight(FontWeight::LIGHT)
+                .line_height(relative(1.25))
+                .text_color(theme().text),
+        )
+        .child(
+            div()
+                .size(px(18.))
+                .flex_shrink_0()
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(tint(marks::ACCENT, 0.08))
+                .child(icon::stroke(marks::FOLDER, accent, 11., 2.)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .whitespace_normal()
+                .line_clamp(1)
+                .text_ellipsis()
+                .child(label),
+        )
+        .child(icon::stroke(
+            marks::CHEVRON_DOWN,
+            theme().text_muted,
+            10.,
+            2.,
+        ));
+        let mut wrapper = div().relative().flex_1().min_w_0().child(chip);
+        if !open {
+            return wrapper;
+        }
+        let row =
+            |this: &mut Self, id: String, action: Action, checked: bool, cx: &mut Context<Self>| {
+                let selected = this.keyboard.as_ref() == Some(&id);
+                this.control(id, action, cx)
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .w_full()
+                    .px(px(12.))
+                    .py(px(7.))
+                    .text_size(px(13.5))
+                    .font_weight(FontWeight::LIGHT)
+                    .text_color(if checked { accent } else { theme().text })
+                    .bg(if checked {
+                        tint(marks::ACCENT, 0.08)
+                    } else if selected {
+                        theme().selection
+                    } else {
+                        CLEAR
+                    })
+                    .when(!checked, |row| row.hover(|v| v.bg(theme().hover)))
+            };
+        let mut menu = div()
+            .id("activity-scope-menu")
+            .debug_selector(|| "activity-scope-menu".into())
+            .occlude()
+            .w(px(280.))
+            .max_h(px(240.))
+            .overflow_y_scroll()
+            .rounded(px(12.))
+            .bg(crate::theme::popover_background())
+            .border_1()
+            .border_color(theme().border)
+            .shadow_lg()
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                this.scope_menu = false;
+                this.changed(cx);
+            }))
+            .child(
+                row(
+                    self,
+                    "activity-scope-all".into(),
+                    Action::Scope("*".into()),
+                    self.scope == "*",
+                    cx,
+                )
+                .border_b_1()
+                .border_color(theme().border)
+                .child("All repos"),
+            );
+        for (i, repo) in self.repos.clone().iter().enumerate() {
+            let (label, owner) = repo_meta(repo);
+            let checked = self.scope != "*" && repo.local_path == self.scope;
+            menu = menu.child(
+                row(
+                    self,
+                    format!("activity-scope-{i}"),
+                    Action::Scope(repo.local_path.clone()),
+                    checked,
+                    cx,
+                )
+                .child(icon::stroke(
+                    marks::FOLDER,
+                    if checked { accent } else { theme().text_muted },
+                    12.,
+                    2.,
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .whitespace_normal()
+                        .line_clamp(1)
+                        .text_ellipsis()
+                        .child(label),
+                )
+                .when(!owner.is_empty(), |row| {
+                    row.child(
+                        div()
+                            .flex_shrink_0()
+                            .pl(px(8.))
+                            .text_size(px(9.5))
+                            .font_weight(FontWeight(260.))
+                            .text_color(theme().text_faint)
+                            .child(owner),
+                    )
+                }),
+            );
+        }
+        wrapper = wrapper.child(
+            div().absolute().top(px(32.)).left_0().child(deferred(
+                anchored()
+                    .anchor(Corner::TopLeft)
+                    .snap_to_window_with_margin(px(12.))
+                    .child(menu),
+            )),
+        );
+        wrapper
+    }
+}
+
 /// Classic feed-row parts: the status dot, subline and trailing badge.
 impl ActivityPane {
     fn dot(row: &Row) -> gpui::Div {
@@ -660,32 +846,10 @@ impl Render for ActivityPane {
         let painted = self.painted.clone();
         let now = crate::clock::now();
         // Repository scope and the mission controls share the first header row.
-        let mut scope = div().flex_1().min_w_0().flex().flex_wrap().gap(px(4.));
-        scope = scope.child(self.button(
-            "activity-scope-all",
-            "All repositories",
-            Action::Scope("*".into()),
-            cx,
-        ));
-        for (i, repo) in self.repos.clone().iter().enumerate() {
-            scope = scope.child(self.button(
-                format!("activity-scope-{i}"),
-                format!(
-                    "{}{}",
-                    if self.scope == repo.local_path {
-                        "• "
-                    } else {
-                        ""
-                    },
-                    repo.name
-                ),
-                Action::Scope(repo.local_path.clone()),
-                cx,
-            ));
-        }
+        let scope = self.scope_selector(cx);
         let mut top = div()
             .flex()
-            .items_start()
+            .items_center()
             .gap(px(8.))
             .child(scope)
             .child(self.button("activity-refresh", "Refresh", Action::Refresh, cx));

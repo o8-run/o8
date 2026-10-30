@@ -29,6 +29,9 @@ pub(super) const ALERT: &str = "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0M12 8v4M1
 pub(super) const CHECK: &str = "M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4L12 14.01l-3-3";
 const CROSS: &str = "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0M15 9l-6 6M9 9l6 6";
 const CLOCK: &str = "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0M12 6v6l4 2";
+pub(super) const FOLDER: &str =
+    "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z";
+pub(super) const CHEVRON_DOWN: &str = "M6 9l6 6 6-6";
 /// The 7px expand triangle, closed and open (classic rotates it 90°).
 pub(super) const CHEVRON: &str = "M5.14 1.71L18.86 12L5.14 22.29Z";
 pub(super) const CHEVRON_OPEN: &str = "M22.29 5.14L12 18.86L1.71 5.14Z";

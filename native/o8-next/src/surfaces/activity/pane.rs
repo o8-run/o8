@@ -16,6 +16,8 @@ pub enum ActivityEvent {
 pub(super) enum Action {
     Filter(&'static str),
     Scope(String),
+    /// Opens or closes the repository scope menu (O8RepoSelector).
+    ScopeMenu(bool),
     Refresh,
     Expand(Row),
     Link(String),
@@ -81,6 +83,7 @@ pub struct ActivityPane {
     pub(super) close_reason: &'static str,
     /// PacketCloseUnmergedActions' busy label while the close receipt settles.
     pub(super) close_stage: Option<&'static str>,
+    pub(super) scope_menu: bool,
     pub(super) focus: FocusHandle,
     pub(super) controls: Vec<(String, Action)>,
     pub(super) keyboard: Option<String>,
@@ -111,6 +114,7 @@ impl ActivityPane {
             closing: None,
             close_reason: CLOSE_REASONS[0].0,
             close_stage: None,
+            scope_menu: false,
             focus: cx.focus_handle(),
             controls: vec![],
             keyboard: None,
@@ -373,7 +377,9 @@ impl ActivityPane {
     pub(super) fn act(&mut self, action: Action, cx: &mut Context<Self>) {
         match action {
             Action::Filter(filter) => { self.filter = filter; self.expanded = None; }
+            Action::ScopeMenu(open) => self.scope_menu = open,
             Action::Scope(scope) => {
+                self.scope_menu = false;
                 self.scope = scope; self.generation += 1; self.loading = false;
                 self.rows.clear(); self.errors.clear(); self.expanded = None; self.details.clear(); self.keyboard = None; self.load(cx);
             }
@@ -429,6 +435,16 @@ impl ActivityPane {
         }
         self.changed(cx);
     }
+    /// The scope menu row for the current scope.
+    pub(super) fn checked_scope(&self) -> String {
+        self.repos
+            .iter()
+            .position(|repo| self.scope != "*" && repo.local_path == self.scope)
+            .map_or_else(
+                || "activity-scope-all".into(),
+                |i| format!("activity-scope-{i}"),
+            )
+    }
     pub(super) fn key_down(
         &mut self,
         event: &KeyDownEvent,
@@ -459,8 +475,17 @@ impl ActivityPane {
                     .and_then(|id| self.controls.iter().find(|(control, _)| control == id))
                     .cloned()
                 {
+                    let opening = matches!(action, Action::ScopeMenu(true));
                     self.act(action, cx);
+                    // As classic, the open menu starts on the checked scope.
+                    if opening {
+                        self.keyboard = Some(self.checked_scope());
+                    }
                 }
+            }
+            "escape" if self.scope_menu => {
+                self.scope_menu = false;
+                self.keyboard = Some("activity-scope".into());
             }
             "escape" => {
                 self.expanded = None;

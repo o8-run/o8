@@ -67,6 +67,11 @@ pub(super) fn activity_open(
     let content_frame = started.elapsed().as_secs_f64() * 1000.;
     (shell, visual, (first_frame, content_frame))
 }
+/// Opens the repository scope menu and picks one of its rows.
+pub(super) fn activity_scope(cx: &mut VisualTestContext, selector: &'static str) -> f64 {
+    activity_click(cx, "activity-scope");
+    activity_click(cx, selector)
+}
 pub(super) fn activity_click(cx: &mut VisualTestContext, selector: &'static str) -> f64 {
     draw(cx);
     let bounds = cx
@@ -85,8 +90,8 @@ fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
     let (shell, mut visual, opened) = activity_open(&fixture, cx);
     let cx = &mut visual;
     let mut interactions = vec![
-        activity_click(cx, "activity-scope-all"),
-        activity_click(cx, "activity-scope-0"),
+        activity_scope(cx, "activity-scope-all"),
+        activity_scope(cx, "activity-scope-0"),
     ];
     for selector in [
         "activity-filter-commit",
@@ -433,7 +438,7 @@ fn activity_fork_commits_keep_their_own_ci_badges(cx: &mut TestAppContext) {
         .client
         .get("/api/activity-fixture", &[("mode", "forks")])
         .unwrap();
-    activity_click(cx, "activity-scope-all");
+    activity_scope(cx, "activity-scope-all");
     activity_click(cx, "activity-filter-ci");
     let view = activity_view(&shell, cx);
     let badges = view.read_with(cx, |v, _| {
@@ -468,7 +473,7 @@ fn activity_open_fork_commits(
 ) -> (Fixture, Entity<Shell>, VisualTestContext, Vec<feed::Row>) {
     let fixture = Fixture::start_mode(false, "--activity --activity-forks");
     let (shell, mut visual, _) = activity_open(&fixture, cx);
-    activity_click(&mut visual, "activity-scope-all");
+    activity_scope(&mut visual, "activity-scope-all");
     activity_click(&mut visual, "activity-filter-commit");
     let view = activity_view(&shell, &mut visual);
     let rows = view.read_with(&visual, |view, _| {
@@ -761,5 +766,34 @@ fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
             .as_ref()
             .is_none_or(|packet| packet["status"] == "archived"),
         "Close unmerged archives the packet: {packet:?}; notice: {notice}"
+    );
+}
+
+#[gpui::test]
+fn activity_scope_menu_picks_and_closes(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let view = activity_view(&shell, cx);
+    activity_click(cx, "activity-scope");
+    assert!(view.read_with(cx, |v, _| v.scope_menu
+        && v.controls.iter().any(|(id, _)| id == "activity-scope-0")));
+    activity_click(cx, "activity-scope-0");
+    let (open, scope, first) = view.read_with(cx, |v, _| {
+        (v.scope_menu, v.scope.clone(), v.repos[0].local_path.clone())
+    });
+    assert!(!open, "picking a scope closes the menu");
+    assert_eq!(scope, first);
+    // Enter on the chip opens on the checked row; Escape returns to the chip.
+    view.update(cx, |v, _| v.keyboard = Some("activity-scope".into()));
+    cx.simulate_keystrokes("enter");
+    assert_eq!(
+        view.read_with(cx, |v, _| (v.scope_menu, v.keyboard.clone())),
+        (true, Some("activity-scope-0".into()))
+    );
+    cx.simulate_keystrokes("escape");
+    assert_eq!(
+        view.read_with(cx, |v, _| (v.scope_menu, v.keyboard.clone())),
+        (false, Some("activity-scope".into()))
     );
 }
