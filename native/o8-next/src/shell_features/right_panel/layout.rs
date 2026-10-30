@@ -422,10 +422,11 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
     if tool == Tool::Launcher {
         return launcher(s, cx);
     }
+    // o8.md can target settings without a repository; these tools cannot.
     if s.state.selected.is_none()
         && matches!(
             tool,
-            Tool::Files | Tool::Spec | Tool::Review | Tool::Activity | Tool::Prs | Tool::Terminal
+            Tool::Files | Tool::Review | Tool::Activity | Tool::Prs | Tool::Terminal
         )
     {
         return div()
