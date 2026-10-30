@@ -163,8 +163,26 @@ fn settle_shell(shell: &Entity<Shell>, cx: &mut gpui::VisualTestContext) {
     }
     panic!("shell never connected: {}", inbox_state(cx));
 }
+/// The right panel slides in over 260 ms of wall-clock time (motion.rs), so a
+/// fast runner can click a control while it is still moving. Wait until the
+/// control keeps the same bounds across a frame.
+fn settle_bounds(cx: &mut gpui::VisualTestContext, selector: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut last = bounds(cx, selector);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        cx.run_until_parked();
+        draw(cx);
+        let now = bounds(cx, selector);
+        if now.is_some() && now == last {
+            return;
+        }
+        last = now;
+    }
+}
 fn click(cx: &mut gpui::VisualTestContext, selector: &str) {
     draw(cx);
+    settle_bounds(cx, selector);
     if selector.starts_with("inbox-approve-")
         || selector.starts_with("inbox-reject-")
         || selector.starts_with("inbox-open-")
