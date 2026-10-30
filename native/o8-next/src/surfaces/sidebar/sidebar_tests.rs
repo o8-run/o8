@@ -725,6 +725,8 @@ mod project_round2_tests;
 mod scope_tests;
 #[path = "folder_tests.rs"]
 mod folder_tests;
+#[path = "settle_tests.rs"]
+mod settle_tests;
 
 #[path = "recents_tests.rs"]
 mod recents_tests;
