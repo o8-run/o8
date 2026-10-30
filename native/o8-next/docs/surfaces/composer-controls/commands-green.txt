@@ -1,0 +1,10 @@
+running 6 tests
+test ui::conversation::card_tests::prompt_tests::native_composer_controls_orchestrate_routes_one_fleet_turn_without_changing_the_mode ... ok
+test ui::conversation::card_tests::prompt_tests::native_composer_controls_refused_command_retains_the_draft ... ok
+test ui::conversation::card_tests::prompt_tests::native_composer_controls_rule_send_button_and_manager_use_persisted_routes ... ok
+test ui::conversation::card_tests::prompt_tests::native_composer_controls_runtime_prefix_opens_a_confirmed_unsent_draft ... ok
+test ui::conversation::card_tests::prompt_tests::native_composer_controls_save_prompt_and_create_branch_persist_without_send ... ok
+test ui::conversation::card_tests::prompt_tests::native_composer_controls_unregistered_destinations_preserve_the_draft ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 574 filtered out; finished in 71.38s
+

@@ -1,0 +1,46 @@
+running 5 tests
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_intent_chips_apply_without_sending ... FAILED
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_mode_arrows_change_the_next_real_send ... FAILED
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_quick_action_and_prompt_insert_without_send ... FAILED
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_escape_waits_for_an_edit ... FAILED
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_opens_arrows_and_enter_apply ... FAILED
+
+failures:
+
+---- ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_intent_chips_apply_without_sending stdout ----
+
+thread 'ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_intent_chips_apply_without_sending' (167470162) panicked at src/composer/card_tests.rs:93:44:
+composer-intent-repo
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_mode_arrows_change_the_next_real_send stdout ----
+
+thread 'ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_mode_arrows_change_the_next_real_send' (167477977) panicked at src/composer/prompt_acceptance_tests.rs:19:5:
+composer control never became ready
+
+---- ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_quick_action_and_prompt_insert_without_send stdout ----
+
+thread 'ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_quick_action_and_prompt_insert_without_send' (167485729) panicked at src/composer/card_tests.rs:93:44:
+composer-quick
+
+---- ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_escape_waits_for_an_edit stdout ----
+
+thread 'ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_escape_waits_for_an_edit' (167490817) panicked at src/composer/prompt_acceptance_tests.rs:68:5:
+assertion failed: cx.debug_bounds("composer-slash-menu").is_some()
+
+---- ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_opens_arrows_and_enter_apply stdout ----
+
+thread 'ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_opens_arrows_and_enter_apply' (167495603) panicked at src/composer/prompt_acceptance_tests.rs:39:5:
+assertion failed: cx.debug_bounds("composer-slash-menu").is_some()
+
+
+failures:
+    ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_intent_chips_apply_without_sending
+    ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_mode_arrows_change_the_next_real_send
+    ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_quick_action_and_prompt_insert_without_send
+    ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_escape_waits_for_an_edit
+    ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_opens_arrows_and_enter_apply
+
+test result: FAILED. 0 passed; 5 failed; 0 ignored; 0 measured; 566 filtered out; finished in 69.89s
+
+error: test failed, to rerun pass `--bin o8-next`

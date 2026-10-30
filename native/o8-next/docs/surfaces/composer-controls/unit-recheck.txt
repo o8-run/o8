@@ -1,0 +1,32 @@
+Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL   hermetic-unit  src/lib/acp/output-redaction.generated.test.ts > maps repeated base64 matches once in 4 MiB output
+AssertionError: expected 4750.273997999999 to be less than 4000
+ ❯ src/lib/acp/output-redaction.generated.test.ts:110:37
+    108|   expect(output === '[redacted]!\n'.repeat(count)).toBe(true);
+    109|   console.log(`[acp-redaction] ACP_4MIB_REPEATED_MS=${(performance.now…
+    110|   expect(performance.now() - start).toBeLessThan(4000);
+       |                                     ^
+    111| });
+    112|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL   hermetic-unit  src/lib/acp/output-redaction.generated.test.ts > retains different literal escape depths locally and bounds benign mixed chains
+AssertionError: expected 4412.598 to be less than 4000
+ ❯ src/lib/acp/output-redaction.generated.test.ts:139:44
+    137|   const used = process.cpuUsage(start);
+    138|   console.log(`[acp-redaction] ACP_BENIGN_CHAIN_CPU_MS=${((used.user +…
+    139|   expect((used.user + used.system) / 1000).toBeLessThan(4000);
+       |                                            ^
+    140| });
+    141|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 274 passed (276)
+   Start at  06:38:30
+   Duration  19.83s (transform 958ms, setup 250ms, import 2.61s, tests 31.14s, environment 4.00s)
+

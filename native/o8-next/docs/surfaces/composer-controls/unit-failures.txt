@@ -1,0 +1,37 @@
+Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL   hermetic-unit  src/components/desktop/O8ActivityPane.retention.test.ts > O8 Activity retained remote streams through the mounted pane > ci: retains known rows on network failure and accepts other streams and Retry
+AssertionError: expected 'WidgetsAllCommits1PRs1Issues1CI1Packe…' to contain 'Commit Example/Widgets v2'
+
+Expected: "Commit Example/Widgets v2"
+Received: "WidgetsAllCommits1PRs1Issues1CI1PacketsOct 20Commit Example/Widgets v1 · a000001a000001·10d ago#7 Pull Example/Widgets v1+0-0··10d agoopen#8 Issue Example/Widgets v1·10d agoopenCheck Example/Widgets v1··success"
+
+ ❯ expectRevision src/components/desktop/O8ActivityPane.retention.test.ts:69:81
+     67| }
+     68| function expectRevision(repo: string, rev: number, except?: Stream) {
+     69|   for (const stream of streams) if (stream !== except) expect(host.tex…
+       |                                                                                 ^
+     70| }
+     71|
+ ❯ src/components/desktop/O8ActivityPane.retention.test.ts:125:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL   hermetic-unit  src/lib/acp/output-redaction.generated.test.ts > maps repeated base64 matches once in 4 MiB output
+AssertionError: expected 5181.935910999999 to be less than 4000
+ ❯ src/lib/acp/output-redaction.generated.test.ts:110:37
+    108|   expect(output === '[redacted]!\n'.repeat(count)).toBe(true);
+    109|   console.log(`[acp-redaction] ACP_4MIB_REPEATED_MS=${(performance.now…
+    110|   expect(performance.now() - start).toBeLessThan(4000);
+       |                                     ^
+    111| });
+    112|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 1291 passed | 3 skipped (1296)
+      Tests  2 failed | 9911 passed | 5 skipped (9918)
+   Start at  06:08:28
+   Duration  1828.25s (transform 317.65s, setup 162.61s, import 2402.93s, tests 2117.98s, environment 1660.46s)
+

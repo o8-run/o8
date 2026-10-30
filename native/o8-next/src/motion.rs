@@ -11,6 +11,7 @@ use std::{
 pub const TOAST_ENTER_MS: u64 = 200;
 pub const TOAST_EXIT_MS: u64 = 160;
 pub const TOAST_SLIDE_PX: f32 = 24.;
+pub const COMPOSER_MENU_ENTER_MS: u64 = 120;
 
 thread_local! {
     /// Hover fills in flight, by element id; GPUI's hover style switches instantly.

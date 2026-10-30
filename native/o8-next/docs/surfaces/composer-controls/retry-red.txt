@@ -1,0 +1,20 @@
+running 1 test
+test ui::conversation::card_tests::prompt_persistence_tests::native_composer_retry_consumes_only_context_frozen_in_its_queue_item ... FAILED
+
+failures:
+
+---- ui::conversation::card_tests::prompt_persistence_tests::native_composer_retry_consumes_only_context_frozen_in_its_queue_item stdout ----
+
+thread 'ui::conversation::card_tests::prompt_persistence_tests::native_composer_retry_consumes_only_context_frozen_in_its_queue_item' (168446411) panicked at src/composer/prompt_persistence_tests.rs:49:9:
+assertion `left == right` failed: a retry must retain context queued after the original frozen request
+  left: ""
+ right: "Archived recall for \"Fixture\"\n\nSource 1 · Saved thread\nASSISTANT: Fixture ready\n\nSource 2 · Saved thread\nASSISTANT: Fixture ready\n\nSource 3 · Saved thread\nASSISTANT: Fixture ready\n\nUse this only when it materially helps the next operator request."
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    ui::conversation::card_tests::prompt_persistence_tests::native_composer_retry_consumes_only_context_frozen_in_its_queue_item
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 578 filtered out; finished in 13.91s
+
+error: test failed, to rerun pass `--bin o8-next`

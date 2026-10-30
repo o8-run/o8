@@ -2,6 +2,12 @@ use super::*;
 #[path = "context_card_tests.rs"]
 mod context_tests;
 mod image_tests;
+#[path = "prompt_acceptance_tests.rs"]
+mod prompt_acceptance_tests;
+#[path = "prompt_persistence_tests.rs"]
+mod prompt_persistence_tests;
+#[path = "prompt_tests.rs"]
+mod prompt_tests;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use std::{
     io::{BufRead, BufReader},
@@ -27,6 +33,7 @@ impl Fixture {
                 "scripts/next/dev-server.ts",
                 "--composer",
                 "--settings",
+                "--composer-controls",
             ])
             .args(if loaded {
                 vec!["--composer-loaded"]

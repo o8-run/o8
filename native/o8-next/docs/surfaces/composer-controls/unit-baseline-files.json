@@ -1,0 +1,10 @@
+{
+  "src/components/desktop/O8ActivityPane.retention.test.ts": {
+    "unchangedFromRailBase": true,
+    "sha256": "a9ad39ae966d4e5ee097934e4421f8cf26b19f821b2cfc1ee5df6cda7df7a75d"
+  },
+  "src/lib/acp/output-redaction.generated.test.ts": {
+    "unchangedFromRailBase": true,
+    "sha256": "7f5cb33f8858be8b8627df85e91ebc578224fdbee5bafdd9f19a6a5d70f6379e"
+  }
+}

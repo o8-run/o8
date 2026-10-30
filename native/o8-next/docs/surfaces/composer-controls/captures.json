@@ -1,0 +1,56 @@
+{
+  "scope": "owned standalone native fixture; production composer; full redraw requested before visual capture; not installed-shell or latency acceptance",
+  "binarySha256": "8e208f95b0ffd9f7e6ce64edcc8a64379de84e20b619d5356bbb4e1214e90f96",
+  "images": [
+    {
+      "file": "light-slash.png",
+      "appearance": "light",
+      "open": "slash",
+      "width": 2536,
+      "height": 1832,
+      "sha256": "019d4268ec3d8fa2d7e77b99a17a8b9f7c1ea9d4c2e497cacef97731b91851fe"
+    },
+    {
+      "file": "light-mode.png",
+      "appearance": "light",
+      "open": "mode",
+      "width": 2536,
+      "height": 1832,
+      "sha256": "b352040d33238340bc8f21ce336f10b48af062c17062fd066275519faa982f95"
+    },
+    {
+      "file": "dark-slash.png",
+      "appearance": "dark",
+      "open": "slash",
+      "width": 2536,
+      "height": 1832,
+      "sha256": "1ce52163d3bb0751995e243053a3239af8e7470e723cc60658ac366d2092d39c"
+    },
+    {
+      "file": "dark-mode.png",
+      "appearance": "dark",
+      "open": "mode",
+      "width": 2536,
+      "height": 1832,
+      "sha256": "d9b345b87a95a620ec2e055b5a26c09f240b9b190276df7ec973c550f5d5a00a"
+    },
+    {
+      "file": "glass-slash.png",
+      "appearance": "glass",
+      "open": "slash",
+      "width": 2536,
+      "height": 1832,
+      "sha256": "4704689e52d3fb4d1a8fe2cae18a1382f63169e4b4874d79985fafb7f93490ed"
+    },
+    {
+      "file": "glass-mode.png",
+      "appearance": "glass",
+      "open": "mode",
+      "width": 2536,
+      "height": 1832,
+      "sha256": "c33d4d842a8dd06595564e3f9ec268850dd0df50836632aed39a0f48f7607008"
+    }
+  ],
+  "nativeInput": "GPUI EntityInputHandler for /; actual mode button Enter dispatch",
+  "result": "six captures inspected, both menus visible in every appearance"
+}

@@ -1,0 +1,6 @@
+{
+  "base": "b483c22a0c0286053367411b49156ba9931446e5",
+  "exitCode": 101,
+  "testFile": "native/o8-next/src/composer/prompt_acceptance_tests.rs",
+  "method": "Unmodified base production sources with the same five real-composer acceptance tests and the owned fixture flag."
+}

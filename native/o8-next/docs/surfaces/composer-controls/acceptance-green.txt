@@ -1,0 +1,9 @@
+running 5 tests
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_intent_chips_apply_without_sending ... ok
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_mode_arrows_change_the_next_real_send ... ok
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_quick_action_and_prompt_insert_without_send ... ok
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_escape_waits_for_an_edit ... ok
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_opens_arrows_and_enter_apply ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 575 filtered out; finished in 56.32s
+

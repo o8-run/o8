@@ -1,0 +1,8 @@
+npm warn Unknown project config "min-release-age". This will stop working in the next major version of npm.
+
+> o8@0.1.814 rule-check
+> tsx scripts/rule-check.ts --base=origin/ui/next-rail-parity
+
+[rule-check] OK — scanned 1 file(s), zero violations vs origin/ui/next-rail-parity
+
+Exit status: 0

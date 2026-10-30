@@ -25,7 +25,6 @@ impl Surface {
     ) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
         let picked = routing["pickedMode"].as_str().unwrap_or("solo");
-        let mode = mode_label(picked);
         let plan = routing["permissionMode"] == "plan";
         let access = if plan { "Plan only" } else { "Full access" };
         let enabled = self.queue_ready
@@ -38,18 +37,7 @@ impl Surface {
             .items_center()
             .gap(px(6.))
             // The desktop footer's icon-only mode, permission and attach controls.
-            .child(icon_only(
-                self.composer_button("composer-mode", "", enabled, cx, |s, w, cx| {
-                    s.open_composer_picker("mode", w, cx)
-                }),
-                match picked {
-                    "multitask" => "M6 6v12m0-9h8a4 4 0 0 0 4-4 M6 2a2 2 0 1 0 0 4 2 2 0 1 0 0-4Z M6 18a2 2 0 1 0 0 4 2 2 0 1 0 0-4Z M18 1a2 2 0 1 0 0 4 2 2 0 1 0 0-4Z",
-                    "fast" => "M6 5h12a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z M8 10v4m-2-2h4m5 0h3",
-                    _ => "M6 5h12a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z M8 12h8",
-                },
-                theme().text_secondary,
-                format!("Mode: {}", if picked == "solo" { "Delegation off" } else { mode }),
-            ))
+            .child(self.mode_chip(picked, enabled, cx))
             .child(icon_only(
                 self.composer_button("composer-access", "", enabled, cx, |s, w, cx| {
                     s.open_composer_picker("access", w, cx)
@@ -333,7 +321,7 @@ impl Surface {
                 }
             }))
     }
-    fn close_composer_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_composer_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.composer.update(cx, |i, cx| {
             i.controls.open = None;
             i.controls.model = None;
@@ -356,7 +344,7 @@ impl Surface {
             focus.focus(window);
         }
     }
-    fn open_composer_picker(
+    pub(super) fn open_composer_picker(
         &mut self,
         picker: &'static str,
         window: &mut Window,
@@ -378,6 +366,7 @@ impl Surface {
                 return;
             }
             i.controls.open = Some(picker);
+            i.controls.prompt.opened = Some(cx.background_executor().now());
             i.controls.error.clear();
             if picker == "model" {
                 i.controls.model = Some(cx.new(|cx| {
@@ -409,6 +398,16 @@ impl Surface {
                         json!(if value == "solo" { "single" } else { "fleet" });
                 }
             });
+            if field == "pickedMode" {
+                let error = crate::composer::mode_store::save(
+                    self.composer.read(cx).controls.prompt.store.as_deref(),
+                    value,
+                )
+                .err();
+                if let Some(error) = error {
+                    self.composer.update(cx, |i, _| i.controls.error = error);
+                }
+            }
             self.close_composer_picker(window, cx);
             return;
         }
@@ -539,6 +538,9 @@ impl Surface {
             .rounded(px(crate::theme::GEOMETRY.composer_radius))
             .bg(theme().surface_raised)
             .capture_key_down(cx.listener(|s, event: &KeyDownEvent, window, cx| {
+                if s.prompt_picker_key(event, window, cx) {
+                    return;
+                }
                 match event.keystroke.key.as_str() {
                     "tab" => {
                         if s.composer.read(cx).focus.is_focused(window)
@@ -556,6 +558,13 @@ impl Surface {
                                         .focus
                                         .get("composer-file-remove-0")
                                         .filter(|_| !input.controls.files.is_empty())
+                                })
+                                .or_else(|| {
+                                    input.controls.focus.get(if input.text.trim().is_empty() {
+                                        "composer-quick"
+                                    } else {
+                                        "composer-intent-repo"
+                                    })
                                 })
                             {
                                 focus.focus(window);
@@ -581,6 +590,7 @@ impl Surface {
                     .update(cx, |i, cx| i.attach_paths(paths.paths().to_vec(), cx));
             }))
             .child(self.composer.clone())
+            .child(self.composer_control_view(cx))
             .child(self.composer.update(cx, |i, cx| i.image_chips(cx)))
             .child(footer);
         let owner = cx.entity().downgrade();
@@ -600,7 +610,7 @@ impl Surface {
         if let Some(open) = open {
             card = card
                 .relative()
-                .child(self.composer_popover(open, busy, model, &routing, cx));
+                .child(self.composer_popover(open, busy, model, &routing, window, cx));
         } else if let Some(help) = self.context_focus_help(window, cx) {
             card = card.relative().child(help);
         }

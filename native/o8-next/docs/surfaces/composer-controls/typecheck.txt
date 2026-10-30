@@ -1,0 +1,9 @@
+npm warn Unknown project config "min-release-age". This will stop working in the next major version of npm.
+
+> o8@0.1.814 typecheck:fast
+> node scripts/typecheck-fast.mjs --noEmit
+
+tsrs has no darwin-x64 build; using tsc 5.8.2
+[typecheck] heap limit: 8192 MiB
+
+Exit status: 0

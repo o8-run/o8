@@ -1,0 +1,15 @@
+running 11 tests
+test composer::native_tests::native_copy_cut_paste_megabyte_and_empty_copy ... ok
+test composer::native_tests::native_focus_change_ends_mouse_drag ... ok
+test composer::native_tests::native_ime_utf16_replacement_is_one_undo_and_never_submits ... ok
+test composer::native_tests::native_key_to_cpu_paint_measurement ... ok
+test composer::native_tests::native_mouse_drag_double_word_triple_line_and_keyboard_selection ... ok
+test composer::native_tests::native_nonempty_input_range_exposes_selection_bounds ... ok
+test composer::native_tests::native_review_word_dispatch_survives_focus_and_unicode ... ok
+test composer::native_tests::native_rtl_mixed_text_selection_clipboard_and_utf16_hit_testing ... ok
+test composer::native_tests::native_single_line_megabyte_selection_copy_and_undo ... ok
+test composer::native_tests::native_undo_redo_restores_reversed_selection ... ok
+test composer::native_tests::native_word_and_line_moves_select_and_delete ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 567 filtered out; finished in 7.56s
+

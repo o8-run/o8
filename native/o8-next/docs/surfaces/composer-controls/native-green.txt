@@ -1,0 +1,39 @@
+running 34 tests
+test shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark ... LOADED_SHELL_CPU_SCENE platform=macos profile=debug messages=200 inputs=100 images=2 p50_ms=12.345761 p95_ms=15.959669
+ok
+test shell::session::loaded_shell_tests::native_composer_loaded_shell_typing_benchmark ... ok
+test ui::conversation::card_tests::native_composer_card_controls_fit_compact_and_wide_windows ... ok
+test ui::conversation::card_tests::native_composer_card_controls_persist_and_send_the_selected_routing ... ok
+test ui::conversation::card_tests::native_composer_card_rejected_model_retains_route_and_draft ... ok
+test ui::conversation::card_tests::native_composer_card_restores_focus_and_keeps_each_session_choice ... ok
+test ui::conversation::card_tests::native_composer_card_send_preserves_images_added_after_the_request ... ok
+test ui::conversation::card_tests::native_composer_idle_card_avoids_viewport_path_targets ... ok
+test ui::conversation::card_tests::native_composer_lead_picker_moves_a_thread_with_history_to_a_fresh_conversation ... ok
+test ui::conversation::card_tests::native_composer_lead_picker_same_runtime_only_changes_the_model ... ok
+test ui::conversation::card_tests::native_composer_lead_picker_switches_an_empty_thread_in_place ... ok
+test ui::conversation::card_tests::native_composer_lead_picker_uses_saved_history_without_retained_rows ... ok
+test ui::conversation::card_tests::native_composer_loaded_focus_and_pending_switch_keep_current_scene ... ok
+test ui::conversation::card_tests::native_composer_loaded_resize_reshapes_rows_then_resumes_isolation ... ok
+test ui::conversation::card_tests::native_composer_loaded_typing_benchmark ... ok
+test ui::conversation::card_tests::native_composer_loaded_typing_invalidates_only_editor ... ok
+test ui::conversation::card_tests::native_composer_loaded_wrapping_keeps_transcript_geometry ... ok
+test ui::conversation::card_tests::native_composer_review_canonical_receipt_accepts_temp_directory_alias ... ok
+test ui::conversation::card_tests::native_composer_review_escape_restores_chip_focus ... ok
+test ui::conversation::card_tests::native_composer_review_image_only_send_persists_through_real_route ... ok
+test ui::conversation::card_tests::native_composer_review_inflight_model_save_cannot_change_another_draft_or_focus ... ok
+test ui::conversation::card_tests::native_composer_review_send_button_returns_focus_to_editor ... ok
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_intent_chips_apply_without_sending ... ok
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_mode_arrows_change_the_next_real_send ... ok
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_quick_action_and_prompt_insert_without_send ... ok
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_escape_waits_for_an_edit ... ok
+test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_opens_arrows_and_enter_apply ... ok
+test ui::conversation::card_tests::prompt_persistence_tests::native_composer_mode_survives_reopen_through_the_picker ... ok
+test ui::conversation::card_tests::prompt_persistence_tests::native_composer_recall_survives_reopen_and_is_consumed_by_a_confirmed_send ... ok
+test ui::conversation::card_tests::prompt_tests::native_composer_controls_refused_command_retains_the_draft ... ok
+test ui::conversation::card_tests::prompt_tests::native_composer_controls_rule_send_button_and_manager_use_persisted_routes ... ok
+test ui::conversation::card_tests::prompt_tests::native_composer_controls_runtime_prefix_opens_a_confirmed_unsent_draft ... ok
+test ui::conversation::card_tests::prompt_tests::native_composer_controls_save_prompt_and_create_branch_persist_without_send ... ok
+test ui::conversation::card_tests::prompt_tests::native_composer_controls_unregistered_destinations_preserve_the_draft ... ok
+
+test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 544 filtered out; finished in 431.12s
+
