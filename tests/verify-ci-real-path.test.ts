@@ -170,9 +170,9 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   writeFileSync(path.join(directory, 'scripts/check-server-bundle-size.mjs'), 'process.exit(0);\n');
   writeFileSync(path.join(directory, 'scripts/ci/check-hermetic-shards.mjs'), `
     import { appendFileSync } from 'node:fs';
-    const started = Date.now();
+    const started = performance.now();
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${discoveryMs});
-    appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({ tool: 'discovery', args: [], elapsedMs: Date.now() - started }) + '\\n');
+    appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({ tool: 'discovery', args: [], elapsedMs: performance.now() - started }) + '\\n');
   `);
   mkdirSync(path.join(directory, 'tests'));
   const browserFile = selectedFile;
