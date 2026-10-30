@@ -112,14 +112,26 @@ export function mutateInboxSettlement(subject: InboxSubject, action: 'settle' | 
   }).immediate();
 }
 type InboxProjection = InboxSettlement & { inboxSubject: InboxSubject; parentInboxSubject: InboxSubject | null };
-export function inboxProjection<T extends object>(subject: InboxSubject, parent: InboxSubject | null,
-  context: InboxReadContext | undefined, base: T): T & InboxProjection;
-export function inboxProjection(subject: InboxSubject, parent?: InboxSubject | null, context?: InboxReadContext): InboxProjection;
-export function inboxProjection(subject: InboxSubject, parentInboxSubject: InboxSubject | null = null, context?: InboxReadContext, base?: object) {
+export interface InboxListingProjection {
+  inboxSubject: InboxSubject;
+  parentInboxSubject?: InboxSubject;
+  settledOverride?: NonNullable<InboxSettlement['settledOverride']>;
+  settledAt?: string;
+  unsettledAt?: string;
+}
+/** Listing rows omit null fields on the wire; inboxSubject is always the capability flag. */
+export function inboxListingProjection<T extends object>(subject: InboxSubject, parent: InboxSubject | null,
+  context: InboxReadContext | undefined, base: T): T & InboxListingProjection {
   const state = context ? inboxListingState(subject, context) : readInboxState(subject);
-  const projection = { inboxSubject: subject, parentInboxSubject, settledOverride: state?.settledOverride ?? null,
+  return Object.assign({}, base, { inboxSubject: subject, parentInboxSubject: parent ?? undefined,
+    settledOverride: state?.settledOverride ?? undefined, settledAt: state?.settledAt ?? undefined,
+    unsettledAt: state?.unsettledAt ?? undefined });
+}
+/** Mutation and mobile responses retain the full nullable shape. */
+export function inboxProjection(subject: InboxSubject, parentInboxSubject: InboxSubject | null = null, context?: InboxReadContext): InboxProjection {
+  const state = context ? inboxListingState(subject, context) : readInboxState(subject);
+  return { inboxSubject: subject, parentInboxSubject, settledOverride: state?.settledOverride ?? null,
     settledAt: state?.settledAt ?? null, unsettledAt: state?.unsettledAt ?? null };
-  return base ? Object.assign({}, base, projection) : projection;
 }
 
 /** Called by the WS broadcast chokepoint, never by a client history save. */

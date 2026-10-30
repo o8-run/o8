@@ -15,7 +15,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { orchestratorDisplayTitle, stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { deleteCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
-import { createInboxReadContext, inboxListingState, type inboxProjection, inboxSubject } from '@/lib/inbox/store';
+import { createInboxReadContext, inboxListingState, type InboxListingProjection, inboxSubject } from '@/lib/inbox/store';
 import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
@@ -26,7 +26,7 @@ const EMPTY_FILE_GC_MS = 60 * 60 * 1000; // 1 hour
 
 const HISTORY_DIR = join(getDataDir(), 'chat-history');
 
-interface ChatHistoryEntry extends ReturnType<typeof inboxProjection> {
+interface ChatHistoryEntry extends InboxListingProjection {
   tabId: string;
   title: string;
   preview: string;
@@ -214,10 +214,10 @@ export async function GET(request: NextRequest) {
           agent: typeof data.agent === 'string' && data.agent.trim() ? data.agent.trim() : null,
           archivedAt,
           inboxSubject: subject,
-          parentInboxSubject: null,
-          settledOverride: settlement?.settledOverride ?? null,
-          settledAt: settlement?.settledAt ?? null,
-          unsettledAt: settlement?.unsettledAt ?? null,
+          parentInboxSubject: undefined,
+          settledOverride: settlement?.settledOverride ?? undefined,
+          settledAt: settlement?.settledAt ?? undefined,
+          unsettledAt: settlement?.unsettledAt ?? undefined,
         });
       } catch { /* skip bad files */ }
     }

@@ -14,7 +14,7 @@ Malformed requests return 400, missing or out-of-workspace targets 404, and
 running/request/queued blockers or child-worker targets 409. Unknown targets
 never create chat history. Success returns `ok: true` plus the projection below.
 
-These listings expose the same flat fields:
+These listings expose the same logical flat fields:
 
 - `/api/mobile/orchestrator/threads`: each `threads[]` row.
 - `/api/runtime/inventory`: each `agents[]` row.
@@ -34,6 +34,15 @@ These listings expose the same flat fields:
   "unsettledAt": null
 }
 ```
+
+The example above is the full PATCH response shape (with `ok: true` on success)
+and the mobile-thread listing shape. `/api/runtime/inventory` and
+`/api/v2/chat-history/list` omit `parentInboxSubject`, `settledOverride`,
+`settledAt` and `unsettledAt` when their value is null. An absent field means
+null. Non-null values remain present. `inboxSubject` is always present on every
+row: its presence is the native sidebar's inbox capability flag and settle guard.
+Nested subject fields retain their existing nullable shape. PATCH responses keep
+all four nullable fields explicitly, including null values.
 
 A conversation owns its worker packets. A child worker projects the parent's
 `inboxSubject`, settlement fields, and a non-null `parentInboxSubject` equal to
@@ -71,7 +80,9 @@ Listings read inbox metadata with one indexed `app_state` key-prefix query.
 Canonical workspace paths share a module-level cache across reads and mutations,
 bounded to 256 entries with a 30-second TTL; a request-local map avoids repeated
 lookups within a listing. Subject keys are built once per subject object. History
-rows use fixed-shape literals and look up state without temporary projection objects.
+rows build their added fields once without per-row spreads or temporary projection
+objects; null inbox fields are omitted during JSON encoding. No row-projection or
+serialized-fragment cache is used.
 
 An unchanged runtime observation opens no write transaction and writes no
 `app_state` rows. A newer observation rechecks persisted state inside the write
@@ -88,3 +99,9 @@ The timer covers handler execution through response creation; status, row-count
 validation and client JSON decoding occur afterward. This measures server handler
 latency, excluding HTTP transport and provider discovery. Each percentile must be
 within the baseline plus the larger of 10 percent or 5 ms.
+
+Before each benchmark, `uptime` is recorded. The harness waits until the 1-minute
+load is below 20 before warming and before taking each endpoint's measured
+samples. It records load immediately before and after each measured cohort;
+waiting for load is outside the handler timer. Acceptance requires both
+percentiles of both endpoints to stay within budget in both complete runs.

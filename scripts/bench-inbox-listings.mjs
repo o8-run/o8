@@ -1,7 +1,7 @@
 import { build } from 'esbuild';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -10,6 +10,11 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const base = process.argv[2] ?? 'origin/main';
 const git = (...args) => execFileSync('git', ['-c', 'core.bare=false', ...args], { cwd: root, encoding: 'utf8' });
 const baseSha = git('rev-parse', base).trim();
+const startupUptime = execFileSync('uptime', { encoding: 'utf8' }).trim();
+while (loadavg()[0] >= 20) {
+  console.error('[inbox-benchmark] waiting for 1-minute load below 20; current=' + loadavg()[0]);
+  await new Promise(resolve => setTimeout(resolve, 5_000));
+}
 const temporary = mkdtempSync(join(root, '.inbox-listings-benchmark-'));
 const data = mkdtempSync(join(tmpdir(), 'o8-inbox-benchmark-'));
 try {
@@ -45,6 +50,8 @@ try {
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { loadavg } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { NextRequest } from 'next/server';
 import { createLane } from '@/lib/lane/registry';
 import { closeDb } from '@/lib/db';
@@ -86,6 +93,10 @@ for (const agent of agents) {
   observeInboxRuntimeRun(inboxSubject('runtime', agent.sessionKey, agent.workspace),
     agent.runtimeSurface.lifecycle.lastRunStartedAt);
 }
+async function waitForLowLoad() {
+  while (loadavg()[0] >= 20) await new Promise(resolve => setTimeout(resolve, 5_000));
+  return { load: loadavg(), uptime: execFileSync('uptime', { encoding: 'utf8' }).trim() };
+}
 (async () => {
   const results = [];
   for (const [name, main, branch, url, field, count] of [
@@ -93,8 +104,11 @@ for (const agent of agents) {
     ['history', mainHistory, branchHistory,
       'http://localhost/api/v2/chat-history/list?include=orchestrator&limit=500', 'conversations', 500],
   ]) {
+    await waitForLowLoad();
     const samples = [[], []];
+    let measurement;
     for (let i = 0; i < 220; i++) {
+      if (i === 20) measurement = await waitForLowLoad();
       for (const n of (i % 2 ? [1, 0] : [0, 1])) {
         const request = new NextRequest(url);
         const start = performance.now();
@@ -111,7 +125,7 @@ for (const agent of agents) {
     });
     const allowed = Object.fromEntries(['p50', 'p95'].map(percentile => [percentile,
       stats[0][percentile] + Math.max(stats[0][percentile] * 0.1, 5)]));
-    results.push({ name, requests: 200, warmup: 20, main: stats[0], branch: stats[1], allowed,
+    results.push({ name, requests: 200, warmup: 20, loadBefore: measurement.load, uptimeBefore: measurement.uptime, loadAfter: loadavg(), main: stats[0], branch: stats[1], allowed,
       withinBudget: Object.fromEntries(['p50', 'p95'].map(percentile => [percentile, stats[1][percentile] <= allowed[percentile]])) });
   }
   writeFileSync('${temporary}/measurements.json', JSON.stringify(results));
@@ -131,12 +145,12 @@ for (const agent of agents) {
   const env = { ...process.env, NODE_ENV: 'test', CORTEX_IDE_DATA_DIR: data };
   for (const key of ['O8_DATA_DIR', 'O8_API_TOKEN', 'O8_WORKER_TOKEN', 'O8_SPECTATOR_TOKEN']) delete env[key];
   const result = spawnSync(process.execPath, [join(temporary, 'benchmark.cjs')], {
-    cwd: root, env, encoding: 'utf8', timeout: 300_000,
+    cwd: root, env, encoding: 'utf8', // Load-gate waiting is not measurement time.
   });
   if (result.status !== 0) throw new Error(result.stderr || result.error?.message || 'Benchmark child failed');
   console.log(JSON.stringify({
-    baseSha,
-    methodology: 'Independent baseline source graph at baseSha; bundled Node 22 GET handler wall time; 20 warmups and 200 request-by-request interleaved samples per version; alternating pair order; response validation outside the timer; fixed discovery snapshot and real SQLite/history files',
+    baseSha, startupUptime,
+    methodology: 'Independent baseline source graph at baseSha; bundled Node 22 GET handler wall time; 20 warmups and 200 request-by-request interleaved samples per version; wait for 1-minute load below 20 before warmup and measurement; alternating pair order; response validation outside the timer; fixed discovery snapshot and real SQLite/history files',
     results: JSON.parse(readFileSync(join(temporary, 'measurements.json'), 'utf8')),
   }, null, 2));
 } finally {

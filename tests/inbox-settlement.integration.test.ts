@@ -89,6 +89,46 @@ describe('inbox settlement through operator mutation and native listings', () =>
     expect(saved.archivedAt).toBeNull();
   });
 
+  it('omits null inbox fields from GET rows while preserving capability and the full PATCH shape', async () => {
+    const tabId = await seed('compact-get');
+    const readHistory = async () => {
+      const body = await (await historyList(new NextRequest('http://localhost/api/v2/chat-history/list?include=orchestrator'))).json();
+      return body.conversations.find((row: { tabId: string }) => row.tabId === tabId);
+    };
+    const empty = await readHistory();
+    expect(empty.inboxSubject).toMatchObject({ kind: 'conversation', id: tabId });
+    for (const field of ['settledOverride', 'settledAt', 'unsettledAt', 'parentInboxSubject']) {
+      expect(empty).not.toHaveProperty(field);
+    }
+    const settled = await (await mutate(tabId, 'settle')).json();
+    expect(settled).toMatchObject({ ok: true, parentInboxSubject: null, settledOverride: 'settled',
+      settledAt: expect.any(String), unsettledAt: null });
+    const settledRow = await readHistory();
+    expect(settledRow).toMatchObject({ inboxSubject: empty.inboxSubject, settledOverride: 'settled', settledAt: settled.settledAt });
+    expect(settledRow).not.toHaveProperty('unsettledAt');
+    expect(settledRow).not.toHaveProperty('parentInboxSubject');
+    const active = await (await mutate(tabId, 'unsettle')).json();
+    expect(active).toMatchObject({ ok: true, parentInboxSubject: null, settledOverride: 'active',
+      settledAt: null, unsettledAt: expect.any(String) });
+    const activeRow = await readHistory();
+    expect(activeRow).toMatchObject({ settledOverride: 'active', unsettledAt: active.unsettledAt });
+    expect(activeRow).not.toHaveProperty('settledAt');
+
+    const previousAgents = fixture.agents;
+    fixture.agents = [{ sessionKey: `codex:compact-${process.pid}`, workspace: process.cwd(), runtime: 'codex', status: 'idle',
+      runtimeSurface: { lifecycle: { lastRunStartedAt: '2026-01-01T00:00:00.000Z' } } }];
+    try {
+      const body = await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json();
+      expect(body.agents[0].inboxSubject).toMatchObject({ kind: 'runtime', id: fixture.agents[0].sessionKey });
+      for (const field of ['settledOverride', 'settledAt', 'unsettledAt', 'parentInboxSubject']) {
+        expect(body.agents[0]).not.toHaveProperty(field);
+      }
+      const patch = await (await PATCH(request({ sessionKey: fixture.agents[0].sessionKey, inboxAction: 'unsettle' }))).json();
+      expect(patch).toMatchObject({ ok: true, parentInboxSubject: null, settledOverride: 'active', settledAt: null,
+        unsettledAt: expect.any(String) });
+    } finally { fixture.agents = previousAgents; }
+  });
+
   it.each([-1, 1])('rejects queued-turn grace with clock skew direction %s', async direction => {
     const tabId = await seed(`grace-${direction}`, Date.now() + direction * 60_000);
     // An unadopted user send, rather than an assistant-completed turn.
@@ -116,7 +156,8 @@ describe('inbox settlement through operator mutation and native listings', () =>
     expect((await patch()).status).toBe(200);
     fixture.agents[0].status = 'idle';
     const snapshot = await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json();
-    expect(snapshot.agents[0]).toMatchObject({ inboxSubject: { kind: 'runtime', id: sessionKey }, parentInboxSubject: null, settledOverride: 'settled', settledAt: expect.any(String) });
+    expect(snapshot.agents[0]).toMatchObject({ inboxSubject: { kind: 'runtime', id: sessionKey }, settledOverride: 'settled', settledAt: expect.any(String) });
+    expect(snapshot.agents[0]).not.toHaveProperty('parentInboxSubject');
     createApproval({ source: 'test', runtime: 'codex', agent: 'fixture', sessionKey, title: 'Approval', description: 'Pending', summary: 'Pending', risk: 'low' });
     expect((await patch()).status).toBe(409);
     getSqlite().prepare('DELETE FROM approvals WHERE session_key = ?').run(sessionKey);
@@ -125,7 +166,7 @@ describe('inbox settlement through operator mutation and native listings', () =>
     const read = async () => (await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json()).agents[0];
     expect((await read()).settledOverride).toBe('active');
     fixture.transcript = [{ id: 'runtime-run', role: 'user', text: 'Actual new run', timestamp: new Date(Date.now() + 1), activityAt: new Date(Date.now() + 1) }];
-    expect((await read()).settledOverride).toBeNull();
+    expect(await read()).not.toHaveProperty('settledOverride');
     expect((await patch()).status).toBe(409); // Recent runtime user message not yet adopted.
     fixture.transcript = [];
   });
@@ -166,7 +207,7 @@ describe('inbox settlement through operator mutation and native listings', () =>
       expect(laneReads).toBe(1); // First poll refreshes after PATCH; subsequent revision checks reuse it.
       fixture.agents[0].runtimeSurface = { lifecycle: { lastRunStartedAt: new Date(Date.now() + 1_000).toISOString() } };
       const advanced = await (await poll()).json();
-      expect(advanced.agents[0].settledOverride).toBeNull();
+      expect(advanced.agents[0]).not.toHaveProperty('settledOverride');
       expect(transaction).toHaveBeenCalledTimes(1);
       expect(stateWrites).toBe(1);
     } finally {
@@ -204,7 +245,9 @@ describe('inbox settlement through operator mutation and native listings', () =>
       expect(await read()).toMatchObject({ inboxSubject: { workspace: first }, settledOverride: 'active' });
       expect(native.mock.calls.filter(([path]) => path === link)).toHaveLength(1);
       clock.mockReturnValue(now + 30_001);
-      expect(await read()).toMatchObject({ inboxSubject: { workspace: second }, settledOverride: null });
+      const moved = await read();
+      expect(moved).toMatchObject({ inboxSubject: { workspace: second } });
+      expect(moved).not.toHaveProperty('settledOverride');
       expect((await mutate(tabId, 'unsettle')).status).toBe(200);
       expect(await read()).toMatchObject({ inboxSubject: { workspace: second }, settledOverride: 'active' });
       expect(native.mock.calls.filter(([path]) => path === link)).toHaveLength(2);
@@ -268,7 +311,8 @@ describe('inbox settlement through operator mutation and native listings', () =>
     setLaneStatus(lane.id, 'archived');
     const standalone = createLane({ repoPath: process.cwd(), branch: 'new-standalone', runtime: 'codex', sessionKey, baseCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
     const reused = await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json();
-    expect(reused.agents[0]).toMatchObject({ inboxSubject: { kind: 'runtime', id: sessionKey }, parentInboxSubject: null });
+    expect(reused.agents[0]).toMatchObject({ inboxSubject: { kind: 'runtime', id: sessionKey } });
+    expect(reused.agents[0]).not.toHaveProperty('parentInboxSubject');
     setLaneStatus(standalone.id, 'running');
     fixture.agents[0].status = 'running';
     expect((await mutate(tabId, 'settle')).status).toBe(200);
@@ -326,7 +370,7 @@ describe('inbox settlement through operator mutation and native listings', () =>
       const read = async () => (await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json()).agents[0];
       expect((await read()).settledOverride).toBe('active');
       writeFileSync(file, [historical, { type: 'user', uuid: 'new-run', timestamp: new Date(Date.now() + 1).toISOString(), message: { content: 'New run' } }].map(row => JSON.stringify(row)).join('\n') + '\n');
-      expect((await read()).settledOverride).toBeNull();
+      expect(await read()).not.toHaveProperty('settledOverride');
     } finally { fixture.realTranscript = false; }
   });
 
