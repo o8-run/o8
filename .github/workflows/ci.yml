@@ -536,7 +536,9 @@ jobs:
     name: o8 next Native Tests (Linux)
     if: github.event.schedule != '41 13 * * 1'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # A cold o8 next build takes about 14 minutes, so 20 left no room for the
+    # timed terminal probes after the regular shard.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
