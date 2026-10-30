@@ -1,4 +1,5 @@
 /** Sidebar-owned fixture records, production routes and live event peer. */
+import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 
@@ -7,10 +8,13 @@ export async function prepare({ dataDir }: SurfaceContext): Promise<SurfaceRoute
   process.env.O8_OWNED_PI_BUILTIN_ROOT = join(dataDir, 'owned-pi-builtin');
   return {};
 }
-export default async function register({ dataDir, root, seeds, fixtureToken, transcriptFixtures }: SurfaceContext): Promise<SurfaceRoutes> {
+export default async function register({ dataDir, root, repo, seeds, fixtureToken, transcriptFixtures }: SurfaceContext): Promise<SurfaceRoutes> {
   const enabled = process.argv.includes('--sidebar');
   const auditKeyboard = process.argv.includes('--sidebar-keyboard-audit');
   const archives: Array<{ method: string; path: string; tabId?: string }> = [];
+  // --sidebar-before-inbox serves the thread and runtime listings as a host
+  // from before #5110 did: without inbox subjects or settlement fields.
+  const beforeInbox = process.argv.includes('--sidebar-before-inbox');
   const { GET: historyList } = await import('../../../src/app/api/v2/chat-history/list/route');
   if (!enabled) return { routes: { 'GET /api/v2/chat-history/list': historyList } };
   const fixture = await import('../sidebar-fixture');
@@ -21,6 +25,7 @@ export default async function register({ dataDir, root, seeds, fixtureToken, tra
   const { GET: history } = await import('../../../src/app/api/mobile/history/route');
   const { GET: context, PATCH: patchHistory, POST: saveHistory } = await import('../../../src/app/api/v2/chat-history/route');
   const runtimeArchive = await import('../../../src/app/api/runtime/archive/route');
+  const { GET: inventory } = await import('../../../src/app/api/runtime/inventory/route');
   let pagingMessageSent = false;
   let socket: ReturnType<typeof import('../sidebar-socket').attachSidebarSocket> | undefined;
   return {
@@ -31,8 +36,12 @@ export default async function register({ dataDir, root, seeds, fixtureToken, tra
       'POST /api/v2/chat-history': saveHistory, 'GET /api/v2/chat-history/list': historyList,
       'GET /api/runtime/archive': runtimeArchive.GET, 'POST /api/runtime/archive': runtimeArchive.POST,
       ...(auditKeyboard ? { 'GET /api/sidebar-fixture/archives': async () => Response.json({ archives }) } : {}),
+      ...(beforeInbox ? { 'GET /api/runtime/inventory': inventory } : {}),
     },
     admit: ({ route, url, body, method }) => {
+      if (route === patchHistory && body && Object.hasOwn(JSON.parse(body), 'inboxAction')) {
+        return seeds.some(seed => seed.id === JSON.parse(body).tabId) ? 200 : 404;
+      }
       if (auditKeyboard && body && (route === runtimeArchive.POST
         || route === patchHistory && Object.hasOwn(JSON.parse(body), 'archivedAt'))) {
         archives.push({ method, path: url.pathname, tabId: JSON.parse(body).tabId });
@@ -44,9 +53,20 @@ export default async function register({ dataDir, root, seeds, fixtureToken, tra
       if (!body) return 200;
       const target = JSON.parse(body);
       return (route === runtimeArchive.POST ? target.sessionKey === 'pi-builtin-owned:grid-runtime'
-        : (route === patchHistory || route === saveHistory) && seeds.some(seed => seed.id === target.tabId)) ? 200 : 400;
+        : (route === patchHistory || route === saveHistory) && seeds.some(seed => seed.id === target.tabId)
+          // New thread creates a conversation in the owned fixture repository.
+          || route === saveHistory && /^thoughts-next-\d+$/.test(target.tabId) && realpathSync(target.repoPath) === realpathSync(repo)) ? 200 : 400;
     },
     run: async (route, request) => {
+      if (beforeInbox && (route === sessions || route === inventory)) {
+        const key = route === sessions ? 'threads' : 'agents';
+        const response = await route(request);
+        const listed = await response.json() as Record<string, Array<Record<string, unknown>>>;
+        const fields = ['inboxSubject', 'parentInboxSubject', 'settledOverride', 'settledAt', 'unsettledAt'];
+        return Response.json({ ...listed, [key]: listed[key]?.map(row =>
+          Object.fromEntries(Object.entries(row).filter(([field]) => !fields.includes(field)))) },
+        { status: response.status, headers: { 'cache-control': 'no-store' } });
+      }
       if (route === sessions) {
         if (process.argv.includes('--sidebar-paging-message') && request.nextUrl.searchParams.get('offset') === '500' && !pagingMessageSent) {
           pagingMessageSent = true;
@@ -63,7 +83,11 @@ export default async function register({ dataDir, root, seeds, fixtureToken, tra
       return route(request);
     },
     after: async ({ route, body }, response) => {
-      if ((route === patchHistory || route === saveHistory) && response.ok) await socket?.changed(JSON.parse(body).tabId);
+      if ((route === patchHistory || route === saveHistory) && response.ok) {
+        const target = JSON.parse(body);
+        if (!seeds.some(seed => seed.id === target.tabId)) seeds.push({ id: target.tabId, title: target.title, messages: target.messages });
+        await socket?.changed(target.tabId);
+      }
       return false;
     },
     socket: async (server, token, requests) => {

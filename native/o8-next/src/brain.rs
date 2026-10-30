@@ -130,6 +130,11 @@ impl Brain {
         self.selected_source = None;
         self.rebuild(false, cx);
     }
+    pub(crate) fn ask_from_composer(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.composer.update(cx, |i, cx| i.set_text(text, cx));
+        self.expanded = true;
+        self.ask(cx);
+    }
     fn ask(&mut self, cx: &mut Context<Self>) {
         let question = self.composer.read(cx).text.trim().to_owned();
         if self.busy

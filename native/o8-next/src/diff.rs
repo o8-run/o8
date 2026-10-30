@@ -468,6 +468,27 @@ fn highlight(file: &mut File) {
     }
 }
 
+/// Syntax spans for a complete source file, using the diff viewer's grammar and
+/// semantic palette. Call off the UI thread; unsupported languages stay plain.
+pub fn highlight_source(
+    path: &str,
+    source: &str,
+) -> Result<Option<Vec<(Range<usize>, gpui::Rgba)>>, String> {
+    let Some(language) = language(path) else {
+        return Ok(None);
+    };
+    let mut parser = Parser::new();
+    parser
+        .set_language(&language)
+        .map_err(|_| "Syntax colors are unavailable.")?;
+    let tree = parser
+        .parse(source, None)
+        .ok_or("Syntax colors are unavailable.")?;
+    let mut spans = vec![];
+    visit(tree.root_node(), source, &mut spans);
+    Ok(Some(spans))
+}
+
 pub fn decision(packet: &str, head: &str, approved: bool) -> Value {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

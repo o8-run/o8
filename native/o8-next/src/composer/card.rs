@@ -2,6 +2,9 @@ use super::*;
 use crate::composer::controls::{mode_label, model_label};
 use gpui::{AnyElement, Div, KeyDownEvent, SharedString, Stateful};
 
+#[path = "context_view.rs"]
+mod context_view;
+
 /// An icon-only footer control: a 28px target with the label as its tooltip.
 fn icon_only(button: Stateful<Div>, path: &str, color: gpui::Rgba, label: String) -> Stateful<Div> {
     let label = SharedString::from(label);
@@ -15,10 +18,13 @@ fn icon_only(button: Stateful<Div>, path: &str, color: gpui::Rgba, label: String
 }
 
 impl Surface {
-    pub(crate) fn composer_footer(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn composer_footer(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
         let picked = routing["pickedMode"].as_str().unwrap_or("solo");
-        let mode = mode_label(picked);
         let plan = routing["permissionMode"] == "plan";
         let access = if plan { "Plan only" } else { "Full access" };
         let enabled = self.queue_ready
@@ -31,18 +37,7 @@ impl Surface {
             .items_center()
             .gap(px(6.))
             // The desktop footer's icon-only mode, permission and attach controls.
-            .child(icon_only(
-                self.composer_button("composer-mode", "", enabled, cx, |s, w, cx| {
-                    s.open_composer_picker("mode", w, cx)
-                }),
-                match picked {
-                    "multitask" => "M6 6v12m0-9h8a4 4 0 0 0 4-4 M6 2a2 2 0 1 0 0 4 2 2 0 1 0 0-4Z M6 18a2 2 0 1 0 0 4 2 2 0 1 0 0-4Z M18 1a2 2 0 1 0 0 4 2 2 0 1 0 0-4Z",
-                    "fast" => "M6 5h12a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z M8 10v4m-2-2h4m5 0h3",
-                    _ => "M6 5h12a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z M8 12h8",
-                },
-                theme().text_secondary,
-                format!("Mode: {}", if picked == "solo" { "Delegation off" } else { mode }),
-            ))
+            .child(self.mode_chip(picked, enabled, cx))
             .child(icon_only(
                 self.composer_button("composer-access", "", enabled, cx, |s, w, cx| {
                     s.open_composer_picker("access", w, cx)
@@ -83,6 +78,12 @@ impl Surface {
                     },
                 ))
             });
+        // MicButton's colors: recording and errors red, transcribing accent.
+        let color = match self.dictation {
+            super::DictationState::Listening => theme().danger,
+            super::DictationState::Finishing => theme().accent,
+            _ => theme().text_secondary,
+        };
         let trailing = div()
             .flex()
             .items_center()
@@ -108,12 +109,11 @@ impl Surface {
                 |s, w, cx| s.open_composer_picker("effort", w, cx),
             ))
             .child(
-                self.composer_button("composer-microphone", "", false, cx, |_, _, _| {})
-                    .w(px(26.))
+                self.mic_button(enabled, cx)
                     .child(
                         canvas(
                             |_, _, _| (),
-                            |bounds, _, window, _| {
+                            move |bounds, _, window, _| {
                                 // A stroked path activates viewport-sized GPU/MSAA
                                 // targets. This small icon fits the existing quad pass.
                                 let rect = |x, y, w, h| {
@@ -122,7 +122,6 @@ impl Surface {
                                         size(px(w), px(h)),
                                     )
                                 };
-                                let color = theme().text_secondary;
                                 let stroke = px(1.3);
                                 window.paint_quad(
                                     gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
@@ -152,6 +151,7 @@ impl Surface {
                         .h(px(20.)),
                     ),
             )
+            .child(self.voice_button(cx))
             .child(
                 self.composer_button(
                     "send",
@@ -185,11 +185,73 @@ impl Surface {
             .px(px(8.))
             .pb(px(8.))
             .child(leading)
-            .child(div().flex_1().min_w(px(0.)))
+            .child(self.context_meter(window, cx))
             .child(trailing)
             .into_any_element()
     }
 
+    /// Dictation for this chat (MicButton, toggle mode): a tap starts it, the
+    /// next tap stops it and sends what was said. Ctrl+Z held dictates too.
+    fn mic_button(&self, enabled: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+        let state = self.dictation;
+        let tip = match state {
+            super::DictationState::Off => {
+                "Click to dictate, click again to finish (Ctrl+Z hold also works)"
+            }
+            super::DictationState::Starting => "Waiting for the microphone… click to cancel",
+            super::DictationState::Listening => "Click to finish dictation",
+            super::DictationState::Finishing => "Transcribing…",
+        };
+        // A recording can always be stopped; transcribing finishes uninterrupted.
+        let enabled = match state {
+            super::DictationState::Off => enabled,
+            super::DictationState::Finishing => false,
+            _ => true,
+        };
+        self.composer_button("composer-microphone", "", enabled, cx, |_, window, cx| {
+            window.dispatch_action(Box::new(super::ToggleDictation), cx);
+        })
+        .w(px(26.))
+        .when(state == super::DictationState::Listening, |button| {
+            button.bg(theme().danger_surface)
+        })
+        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
+    }
+    /// GPT Live for this chat (ManagedLiveButton), beside the dictation mic
+    /// as in the desktop footer: a waveform that turns accent while voice
+    /// connects or is live. The shell owns the session; Caps Lock toggles it.
+    fn voice_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let active = matches!(
+            self.voice,
+            super::VoiceState::Connecting | super::VoiceState::Live
+        );
+        let tip = match self.voice {
+            super::VoiceState::Off => "GPT Live for this chat · Caps Lock starts or stops voice.",
+            super::VoiceState::Closing => "Closing voice…",
+            _ => {
+                "Live with your OpenAI key · voice usage is billed to your key. Caps Lock stops voice."
+            }
+        };
+        // Closing admits no new start until the host confirms closure.
+        let enabled = self.voice != super::VoiceState::Closing;
+        self.composer_button("composer-voice", "", enabled, cx, |_, window, cx| {
+            window.dispatch_action(Box::new(super::ToggleVoice), cx);
+        })
+        .w(px(26.))
+        .px(px(0.))
+        .justify_center()
+        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
+        .child(crate::icon::stroke(
+            WAVEFORM,
+            if active {
+                theme().accent
+            } else {
+                theme().text_muted
+            },
+            17.,
+            1.7,
+        ))
+    }
     pub(super) fn composer_routing(&self, cx: &App) -> Option<Value> {
         let mut routing = self.routing.clone()?;
         for (key, value) in self.composer.read(cx).controls.overrides.as_object()? {
@@ -259,7 +321,7 @@ impl Surface {
                 }
             }))
     }
-    fn close_composer_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_composer_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.composer.update(cx, |i, cx| {
             i.controls.open = None;
             i.controls.model = None;
@@ -282,7 +344,7 @@ impl Surface {
             focus.focus(window);
         }
     }
-    fn open_composer_picker(
+    pub(super) fn open_composer_picker(
         &mut self,
         picker: &'static str,
         window: &mut Window,
@@ -304,6 +366,7 @@ impl Surface {
                 return;
             }
             i.controls.open = Some(picker);
+            i.controls.prompt.opened = Some(cx.background_executor().now());
             i.controls.error.clear();
             if picker == "model" {
                 i.controls.model = Some(cx.new(|cx| {
@@ -335,6 +398,16 @@ impl Surface {
                         json!(if value == "solo" { "single" } else { "fleet" });
                 }
             });
+            if field == "pickedMode" {
+                let error = crate::composer::mode_store::save(
+                    self.composer.read(cx).controls.prompt.store.as_deref(),
+                    value,
+                )
+                .err();
+                if let Some(error) = error {
+                    self.composer.update(cx, |i, _| i.controls.error = error);
+                }
+            }
             self.close_composer_picker(window, cx);
             return;
         }
@@ -428,6 +501,7 @@ impl Surface {
     ) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
         let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("solo"));
+        self.sync_context_meter(&routing, cx);
         let (open, busy, error, model) = self.composer.update(cx, |i, cx| {
             i.controls.attachment_target = true;
             i.controls.images_enabled = self.queue_ready
@@ -458,11 +532,15 @@ impl Surface {
         let mut card = div()
             .id("composer-card")
             .debug_selector(|| "composer-card".into())
+            .relative()
             .border_1()
             .border_color(theme().border)
             .rounded(px(crate::theme::GEOMETRY.composer_radius))
             .bg(theme().surface_raised)
             .capture_key_down(cx.listener(|s, event: &KeyDownEvent, window, cx| {
+                if s.prompt_picker_key(event, window, cx) {
+                    return;
+                }
                 match event.keystroke.key.as_str() {
                     "tab" => {
                         if s.composer.read(cx).focus.is_focused(window)
@@ -480,6 +558,13 @@ impl Surface {
                                         .focus
                                         .get("composer-file-remove-0")
                                         .filter(|_| !input.controls.files.is_empty())
+                                })
+                                .or_else(|| {
+                                    input.controls.focus.get(if input.text.trim().is_empty() {
+                                        "composer-quick"
+                                    } else {
+                                        "composer-intent-repo"
+                                    })
                                 })
                             {
                                 focus.focus(window);
@@ -505,12 +590,29 @@ impl Surface {
                     .update(cx, |i, cx| i.attach_paths(paths.paths().to_vec(), cx));
             }))
             .child(self.composer.clone())
+            .child(self.composer_control_view(cx))
             .child(self.composer.update(cx, |i, cx| i.image_chips(cx)))
             .child(footer);
+        let owner = cx.entity().downgrade();
+        card = card.child(
+            canvas(
+                |_, _, _| (),
+                move |bounds, _, _, cx| {
+                    let _ = owner.update(cx, |s, cx| {
+                        s.composer
+                            .update(cx, |i, _| i.controls.context.card_bounds = Some(bounds));
+                    });
+                },
+            )
+            .absolute()
+            .inset_0(),
+        );
         if let Some(open) = open {
             card = card
                 .relative()
-                .child(self.composer_popover(open, busy, model, &routing, cx));
+                .child(self.composer_popover(open, busy, model, &routing, window, cx));
+        } else if let Some(help) = self.context_focus_help(window, cx) {
+            card = card.relative().child(help);
         }
         card.when(!error.is_empty(), |d| {
             d.child(
@@ -523,3 +625,6 @@ impl Surface {
         .into_any_element()
     }
 }
+
+/// Lucide audio-lines, as the desktop Live button draws it.
+const WAVEFORM: &str = "M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4";

@@ -185,6 +185,27 @@ fn workers_workspace_isolation_preserves_peer_draft_during_lane_refresh(cx: &mut
     );
 }
 
+// A cold route process can outlive the native client's five-second request.
+// Its unconfirmed UI result is not the authoritative server receipt. Wait for
+// that real receipt without retrying or changing the production client timeout.
+fn restart_receipt(
+    visual: &mut VisualTestContext,
+    fixture: &Fixture,
+    responses: usize,
+) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        visual.run_until_parked();
+        draw(visual);
+        let value = receipt(fixture);
+        if value["responses"].as_array().unwrap().len() >= responses {
+            return value;
+        }
+        assert!(Instant::now() < deadline, "restarted route did not respond: {value}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[gpui::test]
 fn workers_restart_outcome_unknown_retry_keeps_one_steer(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--workers");
@@ -198,13 +219,16 @@ fn workers_restart_outcome_unknown_retry_keeps_one_steer(cx: &mut TestAppContext
     settle(&mut visual, &fixture, |v| {
         card.read_with(v, |c, _| !c.action_busy())
     });
-    let first = receipt(&fixture);
+    assert_eq!(card.read_with(&visual, |c, _| c.pending.clone()), Some(frozen.clone()),
+        "an unconfirmed request must retain its durable idempotency key");
+    let first = restart_receipt(&mut visual, &fixture, 1);
     assert_eq!(
         first["restarts"], 1,
         "the route owner must actually exit mid-steer"
     );
     assert_ne!(first["routePids"][0], first["routePids"][1]);
-    assert_eq!(first["responses"][0]["status"], 409);
+    assert_eq!(first["responses"][0]["status"], 409,
+        "authoritative receipt={first}");
     assert_eq!(first["responses"][0]["code"], "outcome_unknown");
     assert!(
         first["responses"][0]["outcome"].is_null(),
@@ -214,7 +238,7 @@ fn workers_restart_outcome_unknown_retry_keeps_one_steer(cx: &mut TestAppContext
     settle(&mut visual, &fixture, |v| {
         card.read_with(v, |c, _| !c.action_busy())
     });
-    let retried = receipt(&fixture);
+    let retried = restart_receipt(&mut visual, &fixture, 2);
     assert_eq!(
         retried["deliveries"].as_array().unwrap().len(),
         1,

@@ -48,11 +48,14 @@ function authenticated(entries) {
     if (result.status !== 0) return [];
     const [name, version, arch] = result.stdout.trim().split('\t');
     if (!/^[a-z0-9][a-z0-9+.-]*$/.test(name ?? '') || !/^[a-zA-Z0-9.+:~_-]+$/.test(version ?? '') || !/^[a-z0-9-]+$/.test(arch ?? '')) return [];
+    // The name suffix is the architecture or, on variant-enabled images, an
+    // Architecture-Variant such as amd64v3; the signed record must declare it.
     const parts = entry.file.split('_');
+    const variant = parts[2]?.slice(0, -'.deb'.length);
     try {
-      if (parts.length !== 3 || parts[0] !== name || decodeURIComponent(parts[1]) !== version || parts[2] !== `${arch}.deb`) return [];
+      if (parts.length !== 3 || parts[0] !== name || decodeURIComponent(parts[1]) !== version || !/^[a-z0-9-]+$/.test(variant)) return [];
     } catch { return []; }
-    return [{ ...entry, name, version, arch }];
+    return [{ ...entry, name, version, arch, variant }];
   });
   if (!described.length) return [];
   // Only records with an archive Filename and SHA256 come from repository
@@ -66,13 +69,13 @@ function authenticated(entries) {
       const match = /^([A-Za-z0-9-]+): (.*)$/.exec(line); return match ? [[match[1], match[2]]] : [];
     }));
     if (!fields.Filename || !/^[a-f0-9]{64}$/i.test(fields.SHA256 ?? '')) continue;
-    const key = `${fields.Package}\0${fields.Version}\0${fields.Architecture}`;
+    const key = `${fields.Package}\0${fields.Version}\0${fields.Architecture}\0${fields['Architecture-Variant'] ?? fields.Architecture}`;
     if (!hashes.has(key)) hashes.set(key, new Set());
     hashes.get(key).add(fields.SHA256.toLowerCase());
   }
   return described.flatMap(entry => {
     const sha256 = digest(readFileSync(entry.full));
-    return hashes.get(`${entry.name}\0${entry.version}\0${entry.arch}`)?.has(sha256) ? [{ ...entry, sha256 }] : [];
+    return hashes.get(`${entry.name}\0${entry.version}\0${entry.arch}\0${entry.variant}`)?.has(sha256) ? [{ ...entry, sha256 }] : [];
   });
 }
 try {

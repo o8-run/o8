@@ -2,6 +2,9 @@
 use crate::model::{Entry, History, Row, render_tree_cached};
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static CONTEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Deserialize)]
 pub struct Replay {
@@ -24,8 +27,21 @@ pub struct Transcript {
     shown: Vec<Entry>,
     live_seq: u64,
     live_backend: Option<String>,
+    context_busy: bool,
+    context_epoch: u64,
 }
 impl Transcript {
+    pub(crate) fn shown_entries(&self) -> &[Entry] {
+        &self.shown
+    }
+
+    /// The same visible residency used to render the transcript, including live content.
+    pub(crate) fn context_snapshot(&self) -> (&[Entry], bool) {
+        (&self.shown, self.context_busy)
+    }
+    pub(crate) fn context_epoch(&self) -> u64 {
+        self.context_epoch
+    }
     /// The existing sync cursor excludes its last id, even when that assistant
     /// is still streaming. Refresh the saved tail without dropping backfilled
     /// rows or racing a newer WebSocket checkpoint. HTTP never advances seq.
@@ -103,6 +119,8 @@ impl Transcript {
             shown: vec![],
             live_seq: 0,
             live_backend: None,
+            context_busy: false,
+            context_epoch: CONTEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
         };
         this.merge(history.transcript, true);
         this
@@ -179,9 +197,12 @@ impl Transcript {
         }
         let event = message["event"].as_str().unwrap_or("");
         if data["snapshot"] == true {
+            let changed = self.context_busy != (data["status"] == "busy");
+            self.context_busy = data["status"] == "busy";
             // A subscribe snapshot reporting an idle session settles a stale reply.
-            return matches!(data["status"].as_str(), Some("ready" | "dead"))
+            let settled = matches!(data["status"].as_str(), Some("ready" | "dead"))
                 && self.settle("completed");
+            return settled || changed;
         }
         if let Some(backend) = data["backend"].as_str()
             && self.live_backend.as_deref() != Some(backend)
@@ -194,6 +215,11 @@ impl Transcript {
                 return false;
             }
             self.live_seq = seq;
+        }
+        let was_running = self.context_busy;
+        if matches!(event, "output" | "tool-use") || (event == "status" && data["status"] == "busy")
+        {
+            self.context_busy = true;
         }
         match event {
             "output" => {
@@ -287,10 +313,34 @@ impl Transcript {
                 tool["result"] = data["output"].clone();
             }
             "status" if matches!(data["status"].as_str(), Some("ready" | "dead")) => {
-                return self.settle("completed");
+                self.context_busy = false;
+                // Retain the classic terminal usage fields before history catches up.
+                let mut usage_changed = false;
+                if let Some(usage) =
+                    crate::composer::controls::context::terminal_usage(&data["usage"])
+                {
+                    let id = data["assistantMessageId"].as_str();
+                    for entry in self
+                        .entries
+                        .iter_mut()
+                        .chain(self.live.iter_mut())
+                        .filter(|entry| Some(entry.id.as_str()) == id)
+                    {
+                        entry.extra.insert("tokens".into(), usage.clone());
+                        usage_changed = true;
+                    }
+                }
+                let settled = self.settle("completed");
+                if usage_changed {
+                    self.refresh();
+                }
+                return settled || usage_changed || was_running;
             }
-            "error" => return self.settle("failed"),
-            _ => return false,
+            "error" => {
+                self.context_busy = false;
+                return self.settle("failed") || was_running;
+            }
+            _ => return was_running != self.context_busy,
         }
         self.refresh()
     }
@@ -315,7 +365,13 @@ impl Transcript {
                 extra: [("timestamp".to_owned(), serde_json::json!(now))].into(),
             });
         }
-        self.live.as_mut()
+        let live = self.live.as_mut()?;
+        for key in ["backend", "model"] {
+            if let Some(value) = data.get(key).filter(|v| v.is_string()) {
+                live.extra.insert(key.into(), value.clone());
+            }
+        }
+        Some(live)
     }
     /// The turn ended: stop the marker, close open tools and record the outcome
     /// until saved history arrives.
@@ -512,6 +568,16 @@ mod tests {
                 _ => None,
             })
         };
+        let activity_id = |transcript: &Transcript| {
+            transcript
+                .rows
+                .iter()
+                .find_map(|row| match row {
+                    Row::Activity { id, .. } => Some(id.clone()),
+                    _ => None,
+                })
+                .unwrap()
+        };
         assert!(
             trace(&transcript).is_none(),
             "an empty placeholder has no trace"
@@ -523,6 +589,7 @@ mod tests {
         )));
         let (steps, live) = trace(&transcript).expect("the thinking marker opens a trace");
         assert!(steps.is_empty() && live.live && live.thinking);
+        assert_eq!(activity_id(&transcript), "reply:trace");
         assert!(transcript.apply(&event(
             2,
             "tool-use",
@@ -533,6 +600,7 @@ mod tests {
         assert_eq!((steps.len(), steps[0].status.as_str()), (1, "running"));
         assert_eq!(steps[0].subject.as_deref(), Some("src/a.rs"));
         assert!(live.live);
+        assert_eq!(activity_id(&transcript), "reply:trace");
         assert!(
             !transcript.apply(&event(
                 2,
@@ -547,6 +615,7 @@ mod tests {
             serde_json::json!({"toolUseId":"t1","output":"ok"})
         )));
         assert_eq!(trace(&transcript).unwrap().0[0].status, "ok");
+        assert_eq!(activity_id(&transcript), "reply:trace");
         let other = serde_json::json!({"channel":"orchestrator","event":"tool-use","seq":4,
             "data":{"threadId":"thoughts-other","assistantMessageId":"x","toolUseId":"t9","name":"Bash"}});
         assert!(
@@ -572,6 +641,7 @@ mod tests {
             !trace(&transcript).unwrap().1.live,
             "ready settles the trace"
         );
+        assert_eq!(activity_id(&transcript), "reply:trace");
         // Saved history with the reply's work replaces the live copy.
         assert!(transcript.history(&serde_json::json!({"sessionKey":"llm-chat:thoughts-live","entries":[
             {"id":"reply","role":"assistant","text":"Done.","timestamp":now,
@@ -581,6 +651,59 @@ mod tests {
         ]})));
         assert!(transcript.live.is_none());
         assert_eq!(trace(&transcript).unwrap().0.len(), 2);
+        assert_eq!(activity_id(&transcript), "reply:trace");
+    }
+    #[test]
+    fn a_tool_first_trace_keeps_its_first_step_id_until_history_carries_the_turn() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            .to_string();
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:thoughts-live","transcript":[
+                    {"id":"ask","role":"user","text":"Look around","timestamp":now},
+                    {"id":"reply","role":"assistant","text":"","timestamp":now}
+                ]}),
+            )
+            .unwrap(),
+        );
+        let event = |seq: u64, event: &str, data: Value| {
+            let mut data = data;
+            data["threadId"] = "thoughts-live".into();
+            data["assistantMessageId"] = "reply".into();
+            serde_json::json!({"channel":"orchestrator","event":event,"seq":seq,"data":data})
+        };
+        let activity_id = |transcript: &Transcript| {
+            transcript.rows.iter().find_map(|row| match row {
+                Row::Activity { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+        };
+        // No thinking marker: the block takes the web renderer's first-step id
+        // and keeps it through the result, ready and the saved history.
+        assert!(transcript.apply(&event(
+            1,
+            "tool-use",
+            serde_json::json!({"toolUseId":"t1","name":"Read","args":{"file_path":"src/a.rs"}})
+        )));
+        assert_eq!(activity_id(&transcript).as_deref(), Some("t1"));
+        assert!(transcript.apply(&event(
+            2,
+            "tool-result",
+            serde_json::json!({"toolUseId":"t1","output":"ok"})
+        )));
+        assert_eq!(activity_id(&transcript).as_deref(), Some("t1"));
+        assert!(transcript.apply(&event(3, "status", serde_json::json!({"status":"ready"}))));
+        assert_eq!(activity_id(&transcript).as_deref(), Some("t1"));
+        assert!(transcript.history(&serde_json::json!({"sessionKey":"llm-chat:thoughts-live","entries":[
+            {"id":"reply","role":"assistant","text":"Done.","timestamp":now,
+             "toolCalls":[{"id":"t1","name":"Read","args":{"file_path":"src/a.rs"},"status":"done"}],
+             "receipt":{"terminal":{"outcome":"completed"}}}
+        ]})));
+        assert!(transcript.live.is_none());
+        assert_eq!(activity_id(&transcript).as_deref(), Some("t1"));
     }
 
     #[test]

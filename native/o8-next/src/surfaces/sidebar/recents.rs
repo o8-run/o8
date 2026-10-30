@@ -50,15 +50,13 @@ pub(super) fn group(s: &Session, now: u64) -> &'static str {
         "Older"
     }
 }
-pub(super) fn rows(
-    sessions: &[Session],
+/// Sessions the query matches, newest message first.
+pub(super) fn visible<'a>(
+    sessions: &'a [Session],
     query: &str,
     matches: &HashSet<String>,
-    expanded: &HashSet<String>,
-    branches: &HashSet<String>,
-) -> Vec<Row> {
+) -> Vec<&'a Session> {
     let query = query.trim().to_lowercase();
-    let now = now();
     let mut visible: Vec<_> = sessions
         .iter()
         .filter(|s| {
@@ -79,7 +77,11 @@ pub(super) fn rows(
             .cmp(&timestamp_millis(&a.last_message_at))
             .then_with(|| a.id.cmp(&b.id))
     });
-    let header = |kind: &str, title: &str, status: &str| Row {
+    visible
+}
+/// A heading, disclosure or other row that is not a thread.
+pub(super) fn header(kind: &str, title: &str, status: &str) -> Row {
+    Row {
         kind: kind.into(),
         workspace: String::new(),
         id: None,
@@ -90,7 +92,62 @@ pub(super) fn rows(
         age: String::new(),
         branch: false,
         attention: false,
-    };
+        folder: None,
+    }
+}
+pub(super) fn thread_row(s: &Session, now: u64, branches: &HashSet<String>) -> Row {
+    Row {
+        kind: "thread".into(),
+        workspace: s.repo_path.clone().unwrap_or_else(|| "Unassigned".into()),
+        id: Some(s.id.clone()),
+        title: s.title.clone(),
+        status: s.status.clone(),
+        unread: s.unread,
+        running: sidebar::working(s),
+        age: age(timestamp(&s.last_message_at), now),
+        branch: branches.contains(&s.id)
+            || s.packet_header
+                .as_ref()
+                .and_then(|h| h["branch"].as_str())
+                .is_some_and(|b| !b.is_empty()),
+        attention: sidebar::rank(s) > 0 || s.unread,
+        folder: None,
+    }
+}
+/// A titled group of threads, at most `cap` until disclosed or searched.
+pub(super) fn group_rows(
+    rows: &mut Vec<Row>,
+    name: &str,
+    group: &[&Session],
+    cap: usize,
+    open: bool,
+    now: u64,
+    branches: &HashSet<String>,
+) {
+    if group.is_empty() {
+        return;
+    }
+    rows.push(header("section", name, ""));
+    let count = if open { group.len() } else { group.len().min(cap) };
+    rows.extend(group.iter().take(count).map(|s| thread_row(s, now, branches)));
+    if count < group.len() {
+        rows.push(header(
+            "more",
+            &format!("Show {} more", group.len() - count),
+            name,
+        ));
+    }
+}
+pub(super) fn rows(
+    sessions: &[Session],
+    query: &str,
+    matches: &HashSet<String>,
+    expanded: &HashSet<String>,
+    branches: &HashSet<String>,
+) -> Vec<Row> {
+    let searching = !query.trim().is_empty();
+    let now = now();
+    let visible = visible(sessions, query, matches);
     let mut rows = vec![header("section", "Recents", "")];
     for name in [
         "Today",
@@ -104,43 +161,18 @@ pub(super) fn rows(
             .copied()
             .filter(|s| group(s, now) == name)
             .collect();
-        if group.is_empty() {
-            continue;
-        }
-        rows.push(header("section", name, ""));
-        let count = if !query.is_empty() || expanded.contains(name) {
-            group.len()
-        } else {
-            group.len().min(12)
-        };
-        for s in group.iter().take(count) {
-            rows.push(Row {
-                kind: "thread".into(),
-                workspace: s.repo_path.clone().unwrap_or_else(|| "Unassigned".into()),
-                id: Some(s.id.clone()),
-                title: s.title.clone(),
-                status: s.status.clone(),
-                unread: s.unread,
-                running: sidebar::working(s),
-                age: age(timestamp(&s.last_message_at), now),
-                branch: branches.contains(&s.id)
-                    || s.packet_header
-                        .as_ref()
-                        .and_then(|h| h["branch"].as_str())
-                        .is_some_and(|b| !b.is_empty()),
-                attention: sidebar::rank(s) > 0 || s.unread,
-            });
-        }
-        if count < group.len() {
-            rows.push(header(
-                "more",
-                &format!("Show {} more", group.len() - count),
-                name,
-            ));
-        }
+        group_rows(
+            &mut rows,
+            name,
+            &group,
+            12,
+            searching || expanded.contains(name),
+            now,
+            branches,
+        );
     }
     rows
 }
 
 #[path = "calendar.rs"]
-mod calendar;
+pub(crate) mod calendar;

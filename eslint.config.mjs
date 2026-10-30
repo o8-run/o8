@@ -27,6 +27,8 @@ const config = [
       '.o8-next-cargo/**',
       // Native Cargo dependencies retain upstream tooling, not app TypeScript.
       'src-tauri/vendor/**',
+      // Generated from src/lib/browser/native-agent-source.ts by scripts/next/browser-agent-source.ts.
+      'native/o8-next/src/browser_panel/agent.js',
       'test-results/**',
       'tmp/**',
       'next-env.d.ts',

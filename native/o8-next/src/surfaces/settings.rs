@@ -32,16 +32,6 @@ pub(super) const REGISTRATION: Registration = Registration {
         s.surfaces.settings.view = None;
         s.surfaces.settings.subscription = None;
     },
-    nav: |_, position, cx| {
-        if position != NavPosition::AfterWorkspaces {
-            return vec![];
-        }
-        vec![
-            super::rail::button("shell-settings", super::rail::Icon::Account, "Account and settings", false)
-                .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)))
-                .into_any_element(),
-        ]
-    },
     key_down: |s, event, window, cx| {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;

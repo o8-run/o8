@@ -393,6 +393,10 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   const body = await request.json().catch(() => null);
+  if (body?.inboxAction !== undefined || body?.sessionKey !== undefined) {
+    const { patchInboxSettlement } = await import('@/lib/inbox/mutation');
+    return patchInboxSettlement(request, body);
+  }
   if (!body?.tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
 
   // Full read-modify-write: hold the history lock like POST does, or a PATCH

@@ -11,8 +11,15 @@ use std::{
 
 use super::LineWrapper;
 
+fn is_no_break_space(ch: char) -> bool {
+    matches!(ch, '\u{00a0}' | '\u{2007}' | '\u{202f}')
+}
+fn is_breakable_whitespace(ch: char) -> bool {
+    ch.is_whitespace() && !is_no_break_space(ch)
+}
+
 /// A laid out and styled line of text
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct LineLayout {
     /// The font size for this line
     pub font_size: Pixels,
@@ -125,7 +132,7 @@ impl LineLayout {
         None
     }
 
-    fn compute_wrap_boundaries(
+    pub(super) fn compute_wrap_boundaries(
         &self,
         text: &str,
         wrap_width: Pixels,
@@ -135,6 +142,73 @@ impl LineLayout {
         let mut first_non_whitespace_ix = None;
         let mut last_candidate_ix = None;
         let mut last_candidate_x = px(0.);
+        let mut last_emergency = None;
+        // Closing marks belong to their preceding text. Include any whitespace
+        // before them so a line cannot begin with spaces followed by an orphan.
+        // One reverse pass avoids rescanning a long whitespace run per glyph.
+        let mut prohibited = Vec::new();
+        let mut closing = false;
+        for (index, ch) in text.char_indices().rev() {
+            if !ch.is_whitespace() {
+                let opening_quote = matches!(ch, '\'' | '"')
+                    && text[index + ch.len_utf8()..]
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_alphanumeric())
+                    && text[..index]
+                        .chars()
+                        .next_back()
+                        .is_none_or(|c| c.is_whitespace() || matches!(c, '(' | '[' | '{'));
+                closing = !opening_quote
+                    && matches!(
+                        ch,
+                        ';' | ':'
+                            | ','
+                            | '.'
+                            | '!'
+                            | '?'
+                            | ')'
+                            | ']'
+                            | '}'
+                            | '\''
+                            | '"'
+                            | '’'
+                            | '”'
+                            | '»'
+                            | '›'
+                            | '〉'
+                            | '》'
+                            | '」'
+                            | '』'
+                            | '】'
+                            | '〕'
+                            | '〗'
+                            | '〙'
+                            | '〛'
+                            | '）'
+                            | '］'
+                            | '｝'
+                            | '，'
+                            | '。'
+                            | '；'
+                            | '：'
+                            | '！'
+                            | '？'
+                            | '、'
+                    );
+            }
+            if closing {
+                prohibited.push(index);
+            }
+        }
+        // Glue spaces keep both adjoining glyphs together, including during
+        // emergency wrapping. Their advance still participates in line width.
+        for (index, ch) in text.char_indices().filter(|(_, ch)| is_no_break_space(*ch)) {
+            prohibited.extend([index, index + ch.len_utf8()]);
+        }
+        prohibited.sort_unstable();
+        prohibited.dedup();
+        let prohibited_indices = &prohibited;
         let mut last_boundary = WrapBoundary {
             run_ix: 0,
             glyph_ix: 0,
@@ -152,24 +226,30 @@ impl LineLayout {
                         WrapBoundary { run_ix, glyph_ix },
                         character,
                         glyph.position.x,
+                        prohibited_indices.binary_search(&glyph.index).is_err(),
                     )
                 })
             })
             .peekable();
 
-        while let Some((boundary, ch, x)) = glyphs.next() {
-            if ch == '\n' {
+        while let Some((boundary, ch, x, breakable)) = glyphs.next() {
+            // Separators hang on the preceding line. They must neither trigger
+            // overflow nor become emergency breaks, which would indent the next
+            // soft line (notably after a closing mark). Keep the source glyphs
+            // intact and break at the following word instead.
+            if is_breakable_whitespace(ch) {
+                prev_ch = ch;
                 continue;
             }
 
             // Here is very similar to `LineWrapper::wrap_line` to determine text wrapping,
             // but there are some differences, so we have to duplicate the code here.
-            if LineWrapper::is_word_char(ch) {
-                if prev_ch == ' ' && ch != ' ' && first_non_whitespace_ix.is_some() {
+            if breakable && LineWrapper::is_word_char(ch) {
+                if is_breakable_whitespace(prev_ch) && first_non_whitespace_ix.is_some() {
                     last_candidate_ix = Some(boundary);
                     last_candidate_x = x;
                 }
-            } else {
+            } else if breakable {
                 if ch != ' ' && first_non_whitespace_ix.is_some() {
                     last_candidate_ix = Some(boundary);
                     last_candidate_x = x;
@@ -180,7 +260,10 @@ impl LineLayout {
                 first_non_whitespace_ix = Some(boundary);
             }
 
-            let next_x = glyphs.peek().map_or(self.width, |(_, _, x)| *x);
+            if breakable && boundary > last_boundary {
+                last_emergency = Some((boundary, x));
+            }
+            let next_x = glyphs.peek().map_or(self.width, |(_, _, x, _)| *x);
             let width = next_x - last_boundary_x;
 
             if width > wrap_width && boundary > last_boundary {
@@ -191,12 +274,21 @@ impl LineLayout {
                     break;
                 }
 
-                if let Some(last_candidate_ix) = last_candidate_ix.take() {
+                if let Some(last_candidate_ix) =
+                    last_candidate_ix.take().filter(|b| *b > last_boundary)
+                {
                     last_boundary = last_candidate_ix;
                     last_boundary_x = last_candidate_x;
-                } else {
+                } else if let Some((boundary, x)) =
+                    last_emergency.filter(|(b, _)| *b > last_boundary)
+                {
                     last_boundary = boundary;
                     last_boundary_x = x;
+                } else {
+                    // A glyph with its closing marks may exceed a very narrow
+                    // line. Keep the cluster together instead of orphaning marks.
+                    prev_ch = ch;
+                    continue;
                 }
                 boundaries.push(last_boundary);
             }

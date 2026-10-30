@@ -53,6 +53,10 @@ export async function installActivityFixture(repo: string) {
   }
   let dropped = false;
   const mutations: string[] = [];
+  const closes: string[] = [];
+  const packetReads: string[] = [];
+  const reviews: string[] = [];
+  let slowed = false;
   const calls: string[] = [];
   const date = '2026-10-24T12:00:00Z';
   const pull = { id: 71, number: 7, title: 'Fixture pull request', state: 'open', user: { login: 'fixture' },
@@ -102,11 +106,41 @@ export async function installActivityFixture(repo: string) {
   const repos = await import('../../../src/app/api/panel/repos/route');
   const state = await import('../../../src/app/api/orchestrator/state/route');
   const stop = await import('../../../src/app/api/orchestrator/stop-mission/route');
+  const discard = await import('../../../src/app/api/orchestrator/discard-packet/route');
   const routes: Record<string, (request: NextRequest) => Promise<Response>> = {
+    [`GET /api/lanes/${laneId}`]: async () => { packetReads.push('lane'); return Response.json({ lane: { worktreePath: repo, repoPath: repo } }); },
+    [`GET /api/lanes/${laneId}/diff`]: async () => {
+      packetReads.push('diff'); if (mode === 'packet-refused') return Response.json({ error: 'Fixture branch read refused' }, { status: 403 });
+      if (mode === 'packet-slow') await new Promise(resolve => setTimeout(resolve, 700));
+      return Response.json({ ok: true, laneId, headSha: 'a'.repeat(40), base: 'main', branch: 'fixture', stat: '6 files changed, 6 insertions(+)',
+        diff: Array.from({ length: 6 }, (_, i) => `diff --git a/src/file-${i}.ts b/src/file-${i}.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/file-${i}.ts\n@@ -0,0 +1 @@\n+export const value${i} = ${i};\n`).join('') });
+    },
+    'GET /api/cortex/directives': async () => Response.json({ directives: [{ id: 'fixture-scope', title: 'Packet scope', body: 'Keep the change within the packet scope.', scope: 'repo', repoName: 'fixture-repo', priority: null, projects: [], recentMerges: [], file: null }] }),
     'GET /api/panel/commits': commits.GET, 'GET /api/panel/prs': prs.GET, 'GET /api/panel/issues': issues.GET,
     'GET /api/panel/ci': ci.GET, 'GET /api/panel/pr': pr.GET, 'GET /api/panel/repos': repos.GET,
     'GET /api/panel/ci/91': request => detail.GET(request, { params: Promise.resolve({ id: '91' }) }),
-    'PATCH /api/orchestrator/state': state.PATCH, 'POST /api/orchestrator/stop-mission': stop.POST,
+     'PATCH /api/orchestrator/state': async request => {
+      if (mode === 'packet-hold-slow') await new Promise(resolve => setTimeout(resolve, 500));
+      if (mode === 'packet-hold-refused') return Response.json({ error: 'Fixture packet hold refused' }, { status: 403 });
+      return state.PATCH(request);
+    }, 'POST /api/orchestrator/stop-mission': stop.POST,
+    // `slow-close` answers the first close as still running after the real
+    // route applied it, so the client must replay the same receipt.
+    'POST /api/orchestrator/discard-packet': async request => {
+      closes.push(await request.clone().text());
+      const response = await discard.POST(request);
+      if (mode !== 'slow-close' || slowed) return response;
+      slowed = true;
+      return Response.json({ ok: true, result: { inProgress: true, status: 'in_progress' } }, { status: 202 });
+    },
+    // Real lane verbs drive git and worker processes; the fixture records the
+    // packet card's command and answers like the lanes route does.
+    'POST /api/lanes': async request => {
+      const body = await request.json() as { verb?: string };
+      mutations.push(JSON.stringify(body));
+      if (body.verb === 'merge') return Response.json({ ok: false, note: 'Merge conflict in fixture.ts.' }, { status: 422 });
+      return Response.json({ ok: true, note: body.verb === 'create_pr' ? 'Opened https://github.com/example/activity/pull/8.' : `Lane ${body.verb} sent.` });
+    },
     'GET /api/activity-fixture': async request => {
       mode = request.nextUrl.searchParams.get('mode') ?? mode;
       if (mode === 'drop-stop' || mode === 'stop-ready') updateLane(laneId, { sessionKey: null });
@@ -115,7 +149,7 @@ export async function installActivityFixture(repo: string) {
         const { invalidateGitHubSync } = await import('../../../src/lib/github-broker/store');
         invalidateGitHubSync('example/activity', 'issues'); invalidateGitHubSync('example/activity', 'pull_requests');
       }
-      return Response.json({ mode, calls, repo, laneId, mutations, identityRepos: identityRepos.map(entry => ({
+      return Response.json({ mode, calls, repo, laneId, mutations, closes, packetReads, reviews, identityRepos: identityRepos.map(entry => ({
         id: entry.id, localPath: entry.localPath, remoteUrl: entry.remoteUrl,
         sha: execFileSync('git', ['-C', entry.localPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
         commonDir: execFileSync('git', ['-C', entry.localPath, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' }).trim(),
