@@ -191,3 +191,26 @@ pub(super) fn open_workspace_picker(shell: &Entity<Shell>, cx: &mut VisualTestCo
     draw(cx);
     assert!(shell.read_with(cx, |s, _| s.palette && s.workspace_picker));
 }
+
+/// Inbox is a right panel tool: the panel's front view, beside the main surface.
+pub(super) fn inbox_panel(
+    shell: &Entity<Shell>,
+    cx: &VisualTestContext,
+) -> Entity<crate::inbox::Inbox> {
+    shell.read_with(cx, |s, _| {
+        let key = s.panel_front_key().expect("Inbox panel must be open");
+        assert!(
+            key.ends_with("|Inbox"),
+            "Inbox must be the front panel tool: {key}"
+        );
+        assert_ne!(
+            s.active(),
+            Some(Tab::Inbox),
+            "Inbox belongs beside the main surface"
+        );
+        match s.content.get(&key) {
+            Some(Content::Inbox(view)) => view.clone(),
+            _ => panic!("the front tool must own the real Inbox view"),
+        }
+    })
+}
