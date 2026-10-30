@@ -3236,6 +3236,13 @@
       ]
     },
     {
+      "path": "tests/flag-test-deletions.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/fleet-status-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -1,0 +1,56 @@
+name: Test deletion review
+
+# Agent PRs can turn a red suite green by deleting tests or their assertions.
+# This check fails a pull request that deletes a test file or removes more
+# assertions than it adds, so it cannot merge until a human reviews the removed
+# coverage and applies the `tests-removed-ok` label. Labeling re-runs the check.
+#
+# Like o8 next surface boundary, the policy runs under pull_request_target and
+# is loaded from the base commit: the PR being judged cannot edit the checker,
+# and no PR-owned code is executed (only `git show` of PR objects).
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-deletion-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test-deletions:
+    name: Test deletion review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      CHECKER_PATH: scripts/ci/flag-test-deletions.mjs
+      POLICY_PATH: ${{ github.workspace }}/.git/flag-test-deletions.mjs
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Load trusted policy and PR objects without checking out PR code
+        id: policy
+        run: |
+          git cat-file -e "$HEAD_SHA^{commit}" || git fetch --no-tags origin "$HEAD_SHA"
+          if git cat-file -e "$BASE_SHA:$CHECKER_PATH"; then
+            git show "$BASE_SHA:$CHECKER_PATH" > "$POLICY_PATH"
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            # Only the PR that introduces the checker reaches this branch.
+            echo "::notice::$CHECKER_PATH is not on the base commit yet; skipping."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Flag deleted tests and removed assertions
+        if: steps.policy.outputs.present == 'true'
+        run: node "$POLICY_PATH" "$BASE_SHA" "$HEAD_SHA"
