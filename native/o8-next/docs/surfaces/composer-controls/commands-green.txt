@@ -7,4 +7,3 @@ test ui::conversation::card_tests::prompt_tests::native_composer_controls_save_p
 test ui::conversation::card_tests::prompt_tests::native_composer_controls_unregistered_destinations_preserve_the_draft ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 574 filtered out; finished in 71.38s
-

@@ -4,4 +4,3 @@ test ui::conversation::card_tests::prompt_persistence_tests::native_composer_rec
 test ui::conversation::card_tests::prompt_persistence_tests::native_composer_retry_consumes_only_context_frozen_in_its_queue_item ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 576 filtered out; finished in 35.08s
-

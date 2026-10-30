@@ -6,4 +6,3 @@ test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_cont
 test ui::conversation::card_tests::prompt_acceptance_tests::native_composer_controls_slash_opens_arrows_and_enter_apply ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 575 filtered out; finished in 56.32s
-

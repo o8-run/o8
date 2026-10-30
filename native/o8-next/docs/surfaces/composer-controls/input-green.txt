@@ -12,4 +12,3 @@ test composer::native_tests::native_undo_redo_restores_reversed_selection ... ok
 test composer::native_tests::native_word_and_line_moves_select_and_delete ... ok
 
 test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 567 filtered out; finished in 7.56s
-

@@ -34,4 +34,3 @@ AssertionError: expected 5181.935910999999 to be less than 4000
       Tests  2 failed | 9911 passed | 5 skipped (9918)
    Start at  06:08:28
    Duration  1828.25s (transform 317.65s, setup 162.61s, import 2402.93s, tests 2117.98s, environment 1660.46s)
-
