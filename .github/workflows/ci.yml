@@ -228,6 +228,9 @@ jobs:
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - if: steps.select.outputs.count != '0'
         run: npm ci --prefer-offline
+      - name: Prepare immutable integration policy
+        if: steps.select.outputs.count != '0'
+        run: node scripts/ci/prepare-integration-policy.mjs
       - name: Install resource-test prerequisites
         if: steps.select.outputs.count != '0'
         uses: ./.github/actions/linux-package-prerequisites
@@ -273,6 +276,8 @@ jobs:
           cache: npm
       - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - run: npm ci --prefer-offline
+      - name: Prepare immutable integration policy
+        run: node scripts/ci/prepare-integration-policy.mjs
       - name: Install resource-test prerequisites
         uses: ./.github/actions/linux-package-prerequisites
         with:

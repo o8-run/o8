@@ -114,13 +114,16 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   { fail = '', parallel = false, discoveryMs = 0, nativeChange = '', nativeState = 'untracked', setupChange = '',
     nativeDeadlineMinutes = 0, nativeDelayMs = 0, main = false, mainFailure = false, detachedMain = false,
     contend = false, lintDependency = '',
-    browser = false, indirectBrowser = '', staleBrowser = false, packageChange = '' } = {}) {
+    browser = false, indirectBrowser = '', staleBrowser = false, packageChange = '',
+    policyMissing = false, noIntegration = false } = {}) {
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
     '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs',
     'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'scripts/lib/test-classification.mjs',
-    'scripts/lib/browser-prerequisites.mjs', '.github/actions/linux-package-prerequisites/action.yml'];
+    'scripts/lib/browser-prerequisites.mjs', '.github/actions/linux-package-prerequisites/action.yml',
+    'scripts/ci/prepare-integration-policy.mjs', '.github/workflows/next-surface-boundary.yml',
+    'scripts/next/check-surface-boundary.mjs'];
   for (const file of files) {
     mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     copyFileSync(path.join(repo, file), path.join(directory, file));
@@ -199,6 +202,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   const git = (...args: string[]) => {
     const result = spawnSync('git', args, { cwd: directory, encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
+    return result.stdout.trim();
   };
   git('init', '-q', '-b', 'main');
   git('config', 'user.name', 'CI Fixture');
@@ -210,10 +214,18 @@ function executeFixture(selectedFile: string, nestedDependency = false,
     git('add', nativeChange);
   }
   git('commit', '-qm', 'fixture base');
+  if (!policyMissing) {
+    const policyFile = path.join(directory, '.github/workflows/next-surface-boundary.yml');
+    const policy = parse(readFileSync(policyFile, 'utf8'));
+    policy.jobs.boundary.env.POLICY_BOOTSTRAP_REF = git('rev-parse', 'HEAD');
+    writeFileSync(policyFile, stringify(policy));
+    git('add', '.github/workflows/next-surface-boundary.yml');
+    git('commit', '-qm', 'fixture policy reference');
+  }
   git('update-ref', 'refs/remotes/origin/main', 'HEAD');
   if (detachedMain) git('checkout', '--detach', '-q');
   else if (!main) git('checkout', '-qb', 'fixture-branch');
-  if (!main) writeFileSync(path.join(directory, browserFile), 'changed\n');
+  if (!main && !noIntegration) writeFileSync(path.join(directory, browserFile), 'changed\n');
   if (browser) writeFileSync(path.join(directory, browserFile), "import { chromium } from 'playwright-core';\n// changed\n");
   if (indirectBrowser) {
     writeFileSync(path.join(directory, browserFile), "import { launch } from './browser-helper.mjs'; launch();\n");
@@ -313,10 +325,32 @@ describe('local CI verification through its command entry point', () => {
     expect(integration.map(call => call.integrationShard)).toEqual(['1/6', '2/6', '3/6', '4/6', '5/6', '6/6']);
     expect(integration.every(call => !call.args.some((arg: string) => arg.endsWith('.test.mjs')))).toBe(true);
     expect(result.stderr).not.toContain('[resource-owning-changed]');
+    expect(result.stdout).toContain('[integration-policy] ready ');
     expect(readFileSync(path.join(result.directory, 'executed.jsonl'), 'utf8').trim().split('\n')).toEqual(['0', '1', '2', '3', '4', '5']);
     expect(spawnSync('git', ['diff', '--exit-code', 'HEAD', '--', 'tests'], { cwd: result.directory }).status).toBe(0);
     if (options.mainFailure) expect(result.stdout).toContain('FAIL tests/unchanged-integration-0.test.mjs');
   }, 60_000);
+
+  it.each([[false, false], [false, true], [true, false]])('requires the immutable object for integration (main=%s, empty=%s)', (main, noIntegration) => {
+    const result = executeFixture('tests/fixture.test.ts', false, { policyMissing: true, noIntegration, main });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr + result.stdout).toBe(noIntegration ? 0 : 1);
+    expect(result.calls.filter(call => call.args.includes('test:integration'))).toHaveLength(0);
+    if (noIntegration) expect(result.stdout).not.toContain('[integration-policy] fetching ');
+    else {
+      expect(result.stdout).toContain('[integration-policy] fetching ');
+      expect(result.stdout).toContain(main ? 'FAIL Weekly Integration Tests' : 'FAIL Integration Tests (changed files)');
+    }
+  }, 60_000);
+
+  it.each(['integration-changed', 'integration-weekly'])('rejects an omitted immutable policy prerequisite in %s', jobId => {
+    const workflow = parse(readFileSync(workflowPath, 'utf8'));
+    const job = workflow.jobs[jobId];
+    job.steps = job.steps.filter((step: { run?: string }) => step.run !== 'node scripts/ci/prepare-integration-policy.mjs');
+    const result = coverage(workflow);
+    expect(result.status, result.stdout).toBe(1);
+    expect(result.stderr).toContain('immutable policy prerequisite');
+  });
 
   it.each(['main trigger', 'missing shard', 'filtered command', 'missing browser', 'tolerated failure', 'uncovered action', 'package group'])(
     'rejects a hidden main integration coverage change: %s', change => {
