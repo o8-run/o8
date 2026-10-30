@@ -144,7 +144,18 @@ fn sidebar_scope_picker_and_row_filter_scope_the_list(cx: &mut TestAppContext) {
     draw(&mut visual);
     assert_eq!(listed(&shell, &visual), vec![first.to_owned()]);
     assert!(visual.debug_bounds("sidebar-scope-menu").is_none());
-    assert!(visual.debug_bounds("sidebar-scope-identity").is_some());
+    let monogram: String = names[0]
+        .split(|c: char| c.is_whitespace() || c == '_' || c == '-')
+        .filter_map(|word| word.chars().next())
+        .take(2)
+        .flat_map(char::to_uppercase)
+        .collect();
+    let mark = format!("sidebar-scope-identity:{monogram}");
+    assert!(
+        visual
+            .debug_bounds(Box::leak(mark.into_boxed_str()))
+            .is_some()
+    );
 
     // Shift adds a repository and keeps the picker open.
     click(&mut visual, "sidebar-scope");
