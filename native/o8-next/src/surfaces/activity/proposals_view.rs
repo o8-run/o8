@@ -140,9 +140,11 @@ impl ActivityPane {
             .gap(px(8.))
             .child(
                 div()
-                    .debug_selector({
-                        let key = key.clone();
-                        move || format!("activity-proposal-new-{key}")
+                    .when(fresh, |d| {
+                        d.debug_selector({
+                            let key = key.clone();
+                            move || format!("activity-proposal-new-{key}")
+                        })
                     })
                     .size(px(6.))
                     .flex_shrink_0()

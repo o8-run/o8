@@ -55,7 +55,9 @@ fn create(
     if seen.len() > 200 {
         seen.drain(..seen.len() - 200);
     }
-    let activity = cx.new(|cx| ActivityPane::new(client, workspace.clone(), saved, open, seen, cx));
+    let activity = cx.new(|cx| {
+        ActivityPane::new_with_preferences(client, workspace.clone(), saved, open, seen, cx)
+    });
     let created_for = workspace.clone();
     shell.subscriptions.push(cx.subscribe_in(
         &activity,
@@ -141,6 +143,9 @@ mod dossier_tests;
 #[cfg(test)]
 #[path = "activity/identity_tests.rs"]
 mod identity_tests;
+#[cfg(test)]
+#[path = "activity/proposal_tests.rs"]
+mod proposal_tests;
 #[cfg(test)]
 #[path = "activity/tests.rs"]
 mod tests;
