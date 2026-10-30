@@ -126,6 +126,14 @@ fn click(cx: &mut gpui::VisualTestContext, selector: &str) {
         || selector.starts_with("inbox-reject-")
         || selector.starts_with("inbox-open-")
     {
+        // The cards come from the fixture server; under CI load they can land
+        // a few frames after the Inbox opens.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while bounds(cx, selector).is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            cx.run_until_parked();
+            draw(cx);
+        }
         for _ in 0..5 {
             let target = bounds(cx, selector).expect("card action");
             let viewport = bounds(cx, "inbox-cards").expect("scroll viewport");
