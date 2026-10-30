@@ -43,6 +43,21 @@ fn spec_review_markup_rail_and_mixed_typography(cx: &mut TestAppContext) {
     let comment = cx.debug_bounds("note-c1").unwrap();
     let suggestion = cx.debug_bounds("note-s1").unwrap();
     assert!(comment.right() <= prose.right() && comment.size.width == px(134.));
+    let lines = cx.update(|_, cx| cx.global::<ProseLines>().0.clone());
+    for (needle, card) in [
+        ("{==draft line.==}", comment),
+        ("{~~Old wording", suggestion),
+    ] {
+        let at = source.find(needle).unwrap();
+        let (_, _, origin) = lines
+            .iter()
+            .find(|(start, len, _)| *start <= at && at <= start + len)
+            .unwrap();
+        assert!(
+            (card.top() - (origin.y - px(3.))).abs() <= px(1.),
+            "margin cards align with the actual painted anchor row"
+        );
+    }
     assert!(
         suggestion.top() >= comment.bottom(),
         "collision spacers keep the rail clear"

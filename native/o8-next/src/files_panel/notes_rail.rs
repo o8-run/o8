@@ -133,7 +133,6 @@ impl Editor {
                     .top(top - px(3.))
                     .right_0()
                     .w(px(134.))
-                    .relative()
                     .pt(px(3.))
                     .pb(px(4.))
                     .pl(px(14.))

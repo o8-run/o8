@@ -98,7 +98,6 @@ impl Editor {
                                                     focus,
                                                     color,
                                                     heights,
-                                                    previews,
                                                 ) = {
                                                     let i = input.read(cx);
                                                     (
@@ -109,7 +108,6 @@ impl Editor {
                                                         i.focus.clone(),
                                                         i.note_color,
                                                         i.rail.heights.clone(),
-                                                        i.assets.previews.clone(),
                                                     )
                                                 };
                                                 window.handle_input(
@@ -133,6 +131,8 @@ impl Editor {
                                                 let mut layout = vec![];
                                                 #[cfg(test)]
                                                 let mut painted = vec![];
+                                                #[cfg(test)]
+                                                let mut prose_lines = vec![];
                                                 for row in rows {
                                                     let attached = review
                                                         .notes
@@ -167,30 +167,21 @@ impl Editor {
                                                         .iter()
                                                         .find(|(at, _)| *at == row.start);
                                                     if let Some((_, path)) = image {
+                                                        // spec-image-widget's stable 120px thumbnails.
                                                         let ratio = assets::ratio(
                                                             &text[row.start..row.start + row.len],
                                                         )
-                                                        .or_else(|| {
-                                                            previews
-                                                                .get(path)
-                                                                .and_then(Option::as_ref)
-                                                                .and_then(|p| p.as_ref().ok())
-                                                                .map(|p| {
-                                                                    let s = p.size(0);
-                                                                    s.width.0 as f32
-                                                                        / s.height.0.max(1) as f32
-                                                                })
-                                                        })
                                                         .unwrap_or(1.5);
-                                                        let image_height = (bounds.size.width
-                                                            / ratio)
-                                                            .clamp(px(80.), px(420.));
+                                                        let image_width =
+                                                            px((120. * ratio).clamp(60., 280.))
+                                                                .min(bounds.size.width);
                                                         image_positions.push((
                                                             path.clone(),
-                                                            y - bounds.top(),
-                                                            image_height,
+                                                            y - bounds.top() + px(6.),
+                                                            image_width,
+                                                            px(120.),
                                                         ));
-                                                        shaped.height = image_height + px(12.);
+                                                        shaped.height = px(132.);
                                                     } else {
                                                         shaped.paint(
                                                             point(bounds.left(), y),
@@ -221,6 +212,12 @@ impl Editor {
                                                             }),
                                                         );
                                                     }
+                                                    #[cfg(test)]
+                                                    prose_lines.push((
+                                                        row.start,
+                                                        row.len,
+                                                        point(bounds.left(), y),
+                                                    ));
                                                     let h = shaped.height;
                                                     let mapped = EditorLine {
                                                         start: row.start,
@@ -256,6 +253,12 @@ impl Editor {
                                                 cx.set_global(
                                                     super::super::tests::spec_tests::Painted(
                                                         painted,
+                                                    ),
+                                                );
+                                                #[cfg(test)]
+                                                cx.set_global(
+                                                    super::super::tests::spec_tests::ProseLines(
+                                                        prose_lines,
                                                     ),
                                                 );
                                                 input.update(cx, |i, cx| {

@@ -7,6 +7,9 @@ impl gpui::Global for Painted {}
 pub(in crate::files_panel) struct ReviewIndex(pub Vec<(String, String)>);
 impl gpui::Global for ReviewIndex {}
 #[derive(Default)]
+pub(in crate::files_panel) struct ProseLines(pub Vec<(usize, usize, gpui::Point<gpui::Pixels>)>);
+impl gpui::Global for ProseLines {}
+#[derive(Default)]
 pub(in crate::files_panel) struct Status {
     pub text: String,
     pub content: String,

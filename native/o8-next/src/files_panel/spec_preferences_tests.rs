@@ -1,6 +1,10 @@
 //! Shell entry point, no-repo target selection, persistence and visibility.
 use super::*;
-fn shell<'a>(f: &Fixture, state: Value, cx: &'a mut TestAppContext) -> VisualTestContext {
+pub(super) fn shell<'a>(
+    f: &Fixture,
+    state: Value,
+    cx: &'a mut TestAppContext,
+) -> VisualTestContext {
     let state = serde_json::from_value(state).unwrap();
     let client = f.client.clone();
     let file = f.root.join("shell.json");
@@ -17,7 +21,7 @@ fn shell<'a>(f: &Fixture, state: Value, cx: &'a mut TestAppContext) -> VisualTes
     wait(&mut visual, "spec-target");
     visual
 }
-fn empty_state() -> Value {
+pub(super) fn empty_state() -> Value {
     serde_json::json!({"version":1,"bounds":[100,100,1400,900],"selected":null,"workspaces":{},"right_panel_width":650})
 }
 fn menu_click(cx: &mut VisualTestContext, selector: &'static str) {

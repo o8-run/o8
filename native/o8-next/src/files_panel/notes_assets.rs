@@ -16,7 +16,7 @@ pub(in crate::files_panel) struct Assets {
     pub target: Option<(Client, String)>,
     pub generation: u64,
     pub previews: HashMap<String, Option<media::Preview>>,
-    pub positions: Vec<(String, Pixels, Pixels)>,
+    pub positions: Vec<(String, Pixels, Pixels, Pixels)>,
     pub error: Option<String>,
     pub pending: usize,
 }
@@ -165,16 +165,14 @@ impl Editor {
             });
             let work = cx.background_executor().spawn(async move {
                 if let Some((path, decoder)) = svg {
-                    let image = media::read_image(&client, &repo, &requested)?;
+                    let image = media::read_notes_image(&client, &repo, &requested)?;
                     let source =
                         std::str::from_utf8(&image.bytes).map_err(|_| "Invalid SVG image.")?;
                     media::decode_svg(path, source, decoder).await
                 } else {
-                    media::read(&client, &repo, &requested, |image| {
-                        image
-                            .to_image_data(renderer)
-                            .map_err(|_| "Unable to preview this image.".into())
-                    })
+                    media::read_notes_image(&client, &repo, &requested)?
+                        .to_image_data(renderer)
+                        .map_err(|_| "Unable to preview this image.".into())
                 }
             });
             cx.spawn(async move |this, cx| {
@@ -195,52 +193,57 @@ impl Editor {
             .left(px(4.))
             .right(px(158.))
             .top(px(22.))
-            .children(self.assets.positions.iter().map(|(path, top, height)| {
-                div()
-                    .debug_selector(|| "spec-inline-image".into())
-                    .absolute()
-                    .top(*top)
-                    .w_full()
-                    .h(*height)
-                    .overflow_hidden()
-                    .rounded(px(10.))
-                    .border_1()
-                    .border_color(theme().border)
-                    .child(
-                        match self.assets.previews.get(path).and_then(Option::as_ref) {
-                            Some(Ok(image)) => div()
-                                .debug_selector({
-                                    let svg = media::is_svg(path);
-                                    move || {
-                                        if svg {
-                                            "spec-inline-svg-loaded".into()
-                                        } else {
-                                            "spec-inline-image-loaded".into()
-                                        }
-                                    }
-                                })
-                                .size_full()
-                                .child(
-                                    gpui::img(image.clone())
+            .children(
+                self.assets
+                    .positions
+                    .iter()
+                    .map(|(path, top, width, height)| {
+                        div()
+                            .debug_selector(|| "spec-inline-image".into())
+                            .absolute()
+                            .top(*top)
+                            .w(*width)
+                            .h(*height)
+                            .overflow_hidden()
+                            .rounded(px(10.))
+                            .border_1()
+                            .border_color(theme().border)
+                            .child(
+                                match self.assets.previews.get(path).and_then(Option::as_ref) {
+                                    Some(Ok(image)) => div()
+                                        .debug_selector({
+                                            let svg = media::is_svg(path);
+                                            move || {
+                                                if svg {
+                                                    "spec-inline-svg-loaded".into()
+                                                } else {
+                                                    "spec-inline-image-loaded".into()
+                                                }
+                                            }
+                                        })
                                         .size_full()
-                                        .object_fit(ObjectFit::Contain),
-                                )
-                                .into_any_element(),
-                            Some(Err(error)) => div()
-                                .text_size(px(10.5))
-                                .p(px(8.))
-                                .text_color(theme().danger)
-                                .child(error.clone())
-                                .into_any_element(),
-                            None => div()
-                                .p(px(8.))
-                                .text_size(px(11.))
-                                .text_color(theme().text_muted)
-                                .child("Loading image…")
-                                .into_any_element(),
-                        },
-                    )
-            }))
+                                        .child(
+                                            gpui::img(image.clone())
+                                                .size_full()
+                                                .object_fit(ObjectFit::Cover),
+                                        )
+                                        .into_any_element(),
+                                    Some(Err(error)) => div()
+                                        .text_size(px(10.5))
+                                        .p(px(8.))
+                                        .text_color(theme().danger)
+                                        .child(error.clone())
+                                        .into_any_element(),
+                                    None => div()
+                                        .p(px(8.))
+                                        .text_size(px(11.))
+                                        .text_color(theme().text_muted)
+                                        .child("Loading image…")
+                                        .into_any_element(),
+                                },
+                            )
+                    }),
+            )
             .into_any_element()
     }
 }

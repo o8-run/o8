@@ -44,6 +44,9 @@ fn spec_image_clipboard_upload_preview_and_autosave(cx: &mut TestAppContext) {
         "upload completion preserves the typing caret"
     );
     wait(cx, "spec-inline-image-loaded");
+    let thumb = cx.debug_bounds("spec-inline-image").unwrap();
+    assert_eq!(thumb.size.height, px(120.));
+    assert!(thumb.size.width <= px(280.));
     advance(cx, 810);
     until(cx, |cx| !cx.update(|_, cx| cx.global::<Status>().pending));
     assert_eq!(fs::read_to_string(path(&f)).unwrap(), content(cx));
@@ -161,4 +164,34 @@ fn spec_text_context_menu_and_atomic_markup_keyboard(cx: &mut TestAppContext) {
         "deletion crosses hidden metadata atomically"
     );
     assert!(!updated.contains("id=\"s1\" b"));
+}
+
+#[gpui::test]
+fn spec_unregistered_target_image_preview_keeps_projects_unchanged(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    let folder = f.root.join("home/unregistered-notes");
+    fs::create_dir_all(folder.join("o8-assets")).unwrap();
+    fs::write(folder.join("o8-assets/image.png"), png()).unwrap();
+    fs::write(
+        folder.join("o8.md"),
+        "# Unregistered notes\n\n![Image](o8-assets/image.png \"80x48\")\n",
+    )
+    .unwrap();
+    let mut state = super::preferences::empty_state();
+    state["notes"] = serde_json::json!({"target_override":folder});
+    let mut cx = super::preferences::shell(&f, state, cx);
+    wait(&mut cx, "spec-inline-image-loaded");
+    assert!(
+        f.requests()
+            .iter()
+            .any(|r| r.starts_with("GET /api/panel/serve-image?path="))
+    );
+    assert!(
+        !f.requests()
+            .iter()
+            .any(|r| r.starts_with("POST /api/panel/repos"))
+    );
+    let registry: Value =
+        serde_json::from_str(&fs::read_to_string(f.root.join("data/repos.json")).unwrap()).unwrap();
+    assert_eq!(registry["repos"].as_array().unwrap().len(), 1);
 }
