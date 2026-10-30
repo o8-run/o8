@@ -17,7 +17,7 @@ pub(super) const REGISTRATION: Registration = Registration {
 };
 /// Opens the Issues tab on one issue: Activity's destination for an issue
 /// row, as classic's onSelectIssue.
-pub(super) fn open(
+pub(super) fn open_issue(
     shell: &mut Shell,
     repo: &str,
     number: u64,

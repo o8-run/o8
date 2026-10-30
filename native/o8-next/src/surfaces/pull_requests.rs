@@ -51,7 +51,7 @@ pub(super) const REGISTRATION: Registration = Registration {
 };
 /// Opens the Pull requests tab on one pull request: Activity's destination
 /// for a pull request row, as classic opens PrPanel.
-pub(super) fn open(
+pub(super) fn open_pull_request(
     shell: &mut Shell,
     repo: &str,
     number: u64,

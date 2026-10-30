@@ -49,8 +49,8 @@ fn create(
                 }
             }
             ActivityEvent::Open(kind, repo, number) => match *kind {
-                "pr" => crate::shell::pull_requests::open(shell, repo, *number, window, cx),
-                _ => crate::shell::issues::open(shell, repo, *number, window, cx),
+                "pr" => crate::shell::pull_requests::open_pull_request(shell, repo, *number, window, cx),
+                _ => crate::shell::issues::open_issue(shell, repo, *number, window, cx),
             },
         },
     ));
