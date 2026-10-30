@@ -26,6 +26,20 @@ pub(in crate::shell) trait Port: 'static {
     #[cfg(test)]
     fn ready(view: &Entity<Self::View>, cx: &App) -> bool;
 }
+
+enum OwnTarget {
+    Unrequested,
+    Pending,
+    Unavailable,
+    Ready(String),
+    Failed(String),
+}
+
+// Creation and inventory are independent jobs. A labelled creation task also
+// lets GPUI tests hold it while exercising real inventory and input callbacks.
+static OWN_REQUEST: std::sync::LazyLock<gpui::TaskLabel> =
+    std::sync::LazyLock::new(gpui::TaskLabel::new);
+
 pub(in crate::shell) struct Picker<P: Port> {
     client: Client,
     workspace: String,
@@ -39,11 +53,11 @@ pub(in crate::shell) struct Picker<P: Port> {
     loading: bool,
     failed: bool,
     requested: Option<String>,
-    // The surface's own target opens once; reopening the picker (Ctrl+Alt+O) lists.
-    offered_own: bool,
-    /// Why the own target could not be created; F5 and Retry try again.
-    own_error: Option<String>,
-    /// Each load's number; a reply from an older load is dropped.
+    own: OwnTarget,
+    /// Initial restoration and explicit creation retries may adopt. Listing or
+    /// manually selecting a target cancels that intent, without losing the reply.
+    open_own: bool,
+    /// Inventory generations never invalidate an in-flight creation result.
     generation: u64,
 }
 impl<P: Port> Picker<P> {
@@ -66,48 +80,61 @@ impl<P: Port> Picker<P> {
             loading: false,
             failed: false,
             requested: selected,
-            offered_own: false,
-            own_error: None,
+            own: OwnTarget::Unrequested,
+            open_own: true,
             generation: 0,
         };
         view.load(cx);
         view
     }
     fn load(&mut self, cx: &mut Context<Self>) {
-        // A newer load (Ctrl+Alt+O, F5) supersedes one in flight.
+        if matches!(self.own, OwnTarget::Unrequested | OwnTarget::Failed(_)) {
+            self.own = OwnTarget::Pending;
+            self.open_own = true;
+            let client = self.client.clone();
+            let workspace = self.workspace.clone();
+            let task = cx
+                .background_executor()
+                .spawn_labeled(*OWN_REQUEST, async move { P::own(&client, &workspace) });
+            cx.spawn(async move |this, cx| {
+                let result = task.await;
+                let _ = this.update(cx, |s, cx| {
+                    // One creation at a time: refreshes coalesce while pending.
+                    // Even a later list request must retain this result/error.
+                    s.own = match result {
+                        Some(Ok(id)) => OwnTarget::Ready(id),
+                        Some(Err(error)) => OwnTarget::Failed(error),
+                        None => OwnTarget::Unavailable,
+                    };
+                    s.merge_own();
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+        self.load_choices(cx);
+    }
+    fn load_choices(&mut self, cx: &mut Context<Self>) {
         self.generation += 1;
         let generation = self.generation;
         self.loading = true;
         self.failed = false;
-        self.own_error = None;
         let client = self.client.clone();
         let workspace = self.workspace.clone();
-        // The first load always adopts the surface's own target (a terminal's owner
-        // key returns the same shell every time), so a second view of the surface or
-        // a saved choice the server no longer lists still opens it.
-        let open = !self.offered_own;
-        self.offered_own = true;
-        let task = cx.background_executor().spawn(async move {
-            let own = open.then(|| P::own(&client, &workspace)).flatten();
-            (P::choices(&client, &workspace), own)
-        });
+        let task = cx
+            .background_executor()
+            .spawn(async move { P::choices(&client, &workspace) });
         cx.spawn(async move |this, cx| {
-            let (result, own) = task.await;
+            let result = task.await;
             let _ = this.update(cx, |s, cx| {
                 if generation != s.generation {
                     return;
                 }
                 s.loading = false;
-                if let Some(Err(error)) = &own {
-                    s.own_error = Some(error.clone());
-                    s.offered_own = false;
-                }
                 match result {
-                    Ok(mut choices) => {
-                        adopt(&mut choices, &mut s.requested, own);
-                        choices.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.id.cmp(&b.id)));
-                        choices.dedup_by(|a, b| a.id == b.id);
+                    Ok(choices) => {
                         s.choices = choices;
+                        s.merge_own();
                     }
                     Err(_) => s.failed = true,
                 }
@@ -116,6 +143,28 @@ impl<P: Port> Picker<P> {
         })
         .detach();
         cx.notify();
+    }
+    fn is_loading(&self) -> bool {
+        self.loading || (self.open_own && matches!(self.own, OwnTarget::Pending))
+    }
+    fn own_error(&self) -> Option<&str> {
+        match &self.own {
+            OwnTarget::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+    fn merge_own(&mut self) {
+        if let OwnTarget::Ready(id) = &self.own
+            && !self.choices.iter().any(|choice| &choice.id == id)
+        {
+            self.choices.push(Choice {
+                id: id.clone(),
+                label: id.clone(),
+            });
+        }
+        self.choices
+            .sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.id.cmp(&b.id)));
+        self.choices.dedup_by(|a, b| a.id == b.id);
     }
     fn filtered(&self) -> Vec<usize> {
         let query = self.query.to_lowercase();
@@ -133,6 +182,8 @@ impl<P: Port> Picker<P> {
             self.selected = None;
             return;
         }
+        self.open_own = false;
+        self.requested = None;
         let client = self.client.clone();
         self.child = Some(cx.new(|cx| P::create(client, id.clone(), window, cx)));
         self.child_focus = window.focused(cx);
@@ -144,13 +195,14 @@ impl<P: Port> Picker<P> {
         let modifiers = event.keystroke.modifiers;
         if (modifiers.control || modifiers.platform) && modifiers.alt && key == "o" {
             self.child = None;
+            self.open_own = false;
             self.requested = None;
             self.child_focus = None;
             self.selected = None;
             self.query.clear();
             self.choice = 0;
             self.focus.focus(window);
-            self.load(cx);
+            self.load_choices(cx);
         } else if self.child.is_some() {
             return;
         } else if key == "f5" {
@@ -169,7 +221,7 @@ impl<P: Port> Picker<P> {
                     self.query.clear();
                     self.choice = 0;
                 }
-                "enter" if !self.loading && !self.failed => {
+                "enter" if !self.is_loading() && !self.failed => {
                     if let Some(&index) = self.filtered().get(self.choice) {
                         self.attach(self.choices[index].id.clone(), window, cx);
                     }
@@ -190,11 +242,17 @@ impl<P: Port> Picker<P> {
 }
 impl<P: Port> Render for Picker<P> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if !self.loading
-            && !self.failed
-            && let Some(id) = self.requested.take()
-        {
-            self.attach(id, window, cx);
+        let loading = self.is_loading();
+        if !loading && !self.failed && self.open_own {
+            self.open_own = false;
+            let own = match &self.own {
+                OwnTarget::Ready(id) => Some(Ok(id.clone())),
+                _ => None,
+            };
+            adopt(&mut self.choices, &mut self.requested, own);
+            if let Some(id) = self.requested.take() {
+                self.attach(id, window, cx);
+            }
         }
         let choices = self.filtered();
         div()
@@ -222,8 +280,8 @@ impl<P: Port> Render for Picker<P> {
                         } else {
                             self.query.clone()
                         })
-                        .when(self.loading, |view| view.child("Loading…"))
-                        .when_some(self.own_error.clone(), |view, error| {
+                        .when(loading, |view| view.child("Loading…"))
+                        .when_some(self.own_error().map(str::to_owned), |view, error| {
                             view.child(
                                 div()
                                     .debug_selector(|| "target-own-error".into())
@@ -231,6 +289,7 @@ impl<P: Port> Render for Picker<P> {
                                     .child(
                                         div()
                                             .id("target-own-retry")
+                                            .debug_selector(|| "target-own-retry".into())
                                             .cursor_pointer()
                                             .p(px(8.))
                                             .child("Retry (F5)")
@@ -243,6 +302,7 @@ impl<P: Port> Render for Picker<P> {
                                 div().child("Targets unavailable").child(
                                     div()
                                         .id("target-retry")
+                                        .debug_selector(|| "target-retry".into())
                                         .cursor_pointer()
                                         .p(px(8.))
                                         .child("Retry")
@@ -250,10 +310,9 @@ impl<P: Port> Render for Picker<P> {
                                 ),
                             )
                         })
-                        .when(
-                            !self.loading && !self.failed && choices.is_empty(),
-                            |view| view.child(P::EMPTY),
-                        )
+                        .when(!loading && !self.failed && choices.is_empty(), |view| {
+                            view.child(P::EMPTY)
+                        })
                         .children(choices.into_iter().enumerate().map(|(row, index)| {
                             let id = self.choices[index].id.clone();
                             div()
@@ -291,7 +350,7 @@ impl<P: Port> ShellView for Picker<P> {
     #[cfg(test)]
     fn ready(view: &Entity<Self>, cx: &App) -> bool {
         let view = view.read(cx);
-        !view.loading && view.child.as_ref().is_none_or(|child| P::ready(child, cx))
+        !view.is_loading() && view.child.as_ref().is_none_or(|child| P::ready(child, cx))
     }
 }
 
@@ -320,321 +379,5 @@ fn adopt(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::shell::palette::tests::{run, settled};
-
-    fn choice(id: &str) -> Choice {
-        Choice {
-            id: id.into(),
-            label: id.into(),
-        }
-    }
-
-    #[test]
-    fn own_target_opens_when_the_saved_choice_is_not_listed() {
-        // A server that leaves the owned shell out of its inventory, with the
-        // shell saved by an earlier view of the same surface.
-        let mut choices = vec![];
-        let mut requested = Some("owned".to_string());
-        adopt(&mut choices, &mut requested, Some(Ok("owned".into())));
-        assert_eq!(choices.len(), 1);
-        assert_eq!(requested.as_deref(), Some("owned"));
-
-        let mut choices = vec![choice("other")];
-        let mut requested = Some("gone".to_string());
-        adopt(&mut choices, &mut requested, Some(Ok("owned".into())));
-        assert_eq!(requested.as_deref(), Some("owned"));
-        assert_eq!(choices.len(), 2);
-    }
-
-    #[test]
-    fn a_listed_saved_choice_stays_and_failures_change_nothing() {
-        let mut choices = vec![choice("saved")];
-        let mut requested = Some("saved".to_string());
-        adopt(&mut choices, &mut requested, Some(Ok("owned".into())));
-        assert_eq!(requested.as_deref(), Some("saved"));
-        assert!(choices.iter().any(|c| c.id == "owned"));
-
-        let mut choices = vec![choice("saved")];
-        let mut requested = None;
-        adopt(&mut choices, &mut requested, Some(Err("down".into())));
-        adopt(&mut choices, &mut requested, None);
-        assert_eq!(requested, None);
-        assert_eq!(choices.len(), 1);
-    }
-
-    /// A port whose own-target replies are queued per workspace, so a test
-    /// controls what creation returns and when the picker sees it.
-    struct Owned;
-    struct Opened(String);
-    impl Render for Opened {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().child(self.0.clone())
-        }
-    }
-    static REPLIES: std::sync::Mutex<
-        Vec<(
-            &'static str,
-            std::collections::VecDeque<Result<String, String>>,
-        )>,
-    > = std::sync::Mutex::new(Vec::new());
-    fn queue(workspace: &'static str, replies: Vec<Result<String, String>>) {
-        REPLIES.lock().unwrap().push((workspace, replies.into()));
-    }
-    impl Port for Owned {
-        type View = Opened;
-        const TITLE: &'static str = "Owned";
-        const EMPTY: &'static str = "None";
-        fn choices(_: &Client, _: &str) -> Result<Vec<Choice>, String> {
-            Ok(vec![])
-        }
-        fn create(_: Client, id: String, _: &mut Window, _: &mut Context<Opened>) -> Opened {
-            Opened(id)
-        }
-        fn own(_: &Client, workspace: &str) -> Option<Result<String, String>> {
-            let mut replies = REPLIES.lock().unwrap();
-            let (_, queued) = replies.iter_mut().find(|(w, _)| *w == workspace)?;
-            queued.pop_front()
-        }
-        fn ready(_: &Entity<Opened>, _: &App) -> bool {
-            true
-        }
-    }
-    fn press(
-        picker: &mut Picker<Owned>,
-        key: &str,
-        window: &mut Window,
-        cx: &mut Context<Picker<Owned>>,
-    ) {
-        let event = KeyDownEvent {
-            keystroke: gpui::Keystroke::parse(key).unwrap(),
-            is_held: false,
-        };
-        picker.key(&event, window, cx);
-    }
-    fn paint(cx: &mut gpui::VisualTestContext) {
-        cx.run_until_parked();
-        cx.update(|window, cx| {
-            window.refresh();
-            window.draw(cx).clear();
-        });
-    }
-
-    #[gpui::test]
-    fn reopening_while_the_own_target_is_created_lists_instead_of_reopening(
-        cx: &mut TestAppContext,
-    ) {
-        queue("reopen-pending", vec![Ok("own-shell".into())]);
-        let client = Client::new("http://127.0.0.1:9").unwrap();
-        // Ctrl+Alt+O lands before the creation reply, as a person reopening the list does.
-        let (picker, cx) = cx.add_window_view(|window, cx| {
-            let mut picker = Picker::<Owned>::new(client, "reopen-pending".into(), None, cx);
-            press(&mut picker, "ctrl-alt-o", window, cx);
-            picker
-        });
-        paint(cx);
-        picker.read_with(cx, |picker, _| {
-            assert!(
-                picker.child.is_none() && picker.selected.is_none(),
-                "the list stays open"
-            );
-            assert!(!picker.loading);
-        });
-    }
-
-    #[gpui::test]
-    fn an_own_target_creation_error_shows_and_f5_retries(cx: &mut TestAppContext) {
-        queue(
-            "create-fails",
-            vec![
-                Err("terminal service refused".into()),
-                Ok("own-shell".into()),
-            ],
-        );
-        let client = Client::new("http://127.0.0.1:9").unwrap();
-        let (picker, cx) = cx
-            .add_window_view(|_, cx| Picker::<Owned>::new(client, "create-fails".into(), None, cx));
-        paint(cx);
-        assert!(
-            cx.debug_bounds("target-own-error").is_some(),
-            "the error is shown"
-        );
-        picker.read_with(cx, |picker, _| assert!(picker.child.is_none()));
-        picker.update_in(cx, |picker, window, cx| press(picker, "f5", window, cx));
-        paint(cx);
-        picker.read_with(cx, |picker, _| {
-            assert_eq!(
-                picker.selected.as_deref(),
-                Some("own-shell"),
-                "F5 created and opened it"
-            );
-            assert!(picker.child.is_some());
-        });
-    }
-
-    use crate::shell::test_support::*;
-
-    #[gpui::test]
-    fn target_click_keeps_identity_when_inventory_reorders(cx: &mut TestAppContext) {
-        let fixture = Fixture::start_mode(false, "--review");
-        for redraw in [false, true] {
-            let (shell, mut visual) = open(
-                fixture.client.clone(),
-                fixture.root.join(format!("row-race-{redraw}.json")),
-                State::default(),
-                cx,
-            );
-            let cx = &mut visual;
-            ready(&shell, cx);
-            run(cx, "d i f f");
-            settled(&shell, cx);
-            let view = shell.read_with(cx, |s, _| match &s.content[&s.key(&Tab::Diff)] {
-                Content::Diff(v) => v.clone(),
-                _ => panic!("diff"),
-            });
-            let expected = view.read_with(cx, |v, _| v.choices[0].id.clone());
-            let bounds = cx.debug_bounds("target-0").unwrap();
-            cx.simulate_mouse_down(
-                bounds.center(),
-                gpui::MouseButton::Left,
-                gpui::Modifiers::default(),
-            );
-            view.update(cx, |v, _| v.choices.reverse());
-            if redraw {
-                draw(cx);
-            }
-            cx.simulate_mouse_up(
-                bounds.center(),
-                gpui::MouseButton::Left,
-                gpui::Modifiers::default(),
-            );
-            settled(&shell, cx);
-            let selected = view.read_with(cx, |v, _| v.selected.clone());
-            assert!(
-                selected == Some(expected) || (redraw && selected.is_none()),
-                "a repainted row must cancel the click or retain its original target"
-            );
-        }
-    }
-
-    #[gpui::test]
-    fn target_reopen_cancels_pending_restore(cx: &mut TestAppContext) {
-        let fixture = Fixture::start_mode(false, "--review");
-        let (shell, mut visual) = open(
-            fixture.client.clone(),
-            fixture.root.join("restore-race.json"),
-            State::default(),
-            cx,
-        );
-        let cx = &mut visual;
-        ready(&shell, cx);
-        shell.update_in(cx, |s, window, cx| {
-            s.state
-                .workspaces
-                .get_mut(s.state.selected.as_deref().unwrap())
-                .unwrap()
-                .surfaces
-                .diff
-                .diff_packet = Some("next-review-approve".into());
-            s.execute(Command::Diff, window, cx);
-            let view = match &s.content[&s.key(&Tab::Diff)] {
-                Content::Diff(v) => v.clone(),
-                _ => panic!("diff"),
-            };
-            // Dispatch the production key listener before the background response
-            // can update the view; the shell and HTTP entry point are unchanged.
-            view.update(cx, |view, cx| {
-                view.key(
-                    &KeyDownEvent {
-                        keystroke: gpui::Keystroke::parse("ctrl-alt-o").unwrap(),
-                        is_held: false,
-                    },
-                    window,
-                    cx,
-                )
-            });
-        });
-        settled(&shell, cx);
-        assert!(
-            shell.read_with(cx, |s, cx| match &s.content[&s.key(&Tab::Diff)] {
-                Content::Diff(v) => v.read(cx).selected.is_none() && v.read(cx).child.is_none(),
-                _ => false,
-            })
-        );
-    }
-
-    #[gpui::test]
-    fn target_choices_compare_canonical_workspace_paths(cx: &mut TestAppContext) {
-        let fixture = Fixture::start_mode(false, "--review --terminal");
-        let (shell, mut visual) = open(
-            fixture.client.clone(),
-            fixture.root.join("alias.json"),
-            State::default(),
-            cx,
-        );
-        let cx = &mut visual;
-        ready(&shell, cx);
-        let alias = shell.read_with(cx, |s, _| {
-            format!("{}/.", s.state.selected.as_deref().unwrap())
-        });
-        shell.update_in(cx, |s, window, cx| {
-            s.workspaces.push(alias.clone());
-            s.switch(alias, window, cx);
-        });
-        run(cx, "d i f f");
-        settled(&shell, cx);
-        assert_eq!(
-            shell.read_with(cx, |s, cx| match &s.content[&s.key(&Tab::Diff)] {
-                Content::Diff(v) => v.read(cx).choices.len(),
-                _ => 0,
-            }),
-            2
-        );
-        run(cx, "t e r m i n a l");
-        settled(&shell, cx);
-        assert_eq!(
-            shell.read_with(cx, |s, cx| match &s.content[&s.key(&Tab::Terminal)] {
-                Content::Terminal(v) => v.read(cx).choices.len(),
-                _ => 0,
-            }),
-            1
-        );
-    }
-
-    #[gpui::test]
-    fn target_load_finishing_after_workspace_switch_keeps_composer_focus(cx: &mut TestAppContext) {
-        let fixture = Fixture::start_mode(false, "--review");
-        let (shell, mut visual) = open(
-            fixture.client.clone(),
-            fixture.root.join("load-race.json"),
-            State::default(),
-            cx,
-        );
-        let cx = &mut visual;
-        ready(&shell, cx);
-        let other = shell.read_with(cx, |s, _| {
-            s.workspaces
-                .iter()
-                .find(|w| Some(*w) != s.state.selected.as_ref())
-                .unwrap()
-                .clone()
-        });
-        shell.update_in(cx, |s, window, cx| {
-            s.execute(Command::Diff, window, cx);
-            s.switch(other.clone(), window, cx);
-            let session = s.workspace_sessions()[0].id.clone();
-            s.execute(Command::Message(session), window, cx);
-        });
-        settled(&shell, cx);
-        assert_eq!(
-            shell.read_with(cx, |s, _| s.state.selected.clone()),
-            Some(other)
-        );
-        let view = shell.read_with(cx, |s, _| match &s.content[&s.key(&s.active().unwrap())] {
-            Content::Session(view) => view.clone(),
-            _ => panic!("session"),
-        });
-        cx.update(|window, cx| assert!(view.read(cx).shell_selection(window, cx).1));
-    }
-}
+#[path = "palette_target_tests.rs"]
+mod tests;
