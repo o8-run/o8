@@ -47,11 +47,11 @@ struct Tabs {
     rename: Option<Rename>,
     /// Where a dragged tab would land: before, or after, this tab.
     insertion: Option<(usize, bool)>,
-    scroll: gpui::ScrollHandle,
+    scroll: super::tab_scroll::Strip,
 }
 
 /// The pill strip's scroll position, once the feature state exists.
-pub(super) fn scroll(s: &Shell) -> Option<gpui::ScrollHandle> {
+pub(super) fn scroll(s: &Shell) -> Option<super::tab_scroll::Strip> {
     s.features.read::<Tabs>().map(|tabs| tabs.scroll.clone())
 }
 

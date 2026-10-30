@@ -360,36 +360,21 @@ pub(super) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &m
 /// are quiet labels that fill on hover. Each pill leads with its kind's glyph,
 /// which turns into a close mark while the pill is hovered.
 fn tabs(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
-    // The strip scrolls; an 18px fade at its right edge reveals more pills
-    // behind it instead of cutting one off (HeaderPillStrip's edge mask).
-    // Only while pills overflow: over glass the fade can only darken, so on a
-    // strip that fits it drew a dark box beside the header buttons.
     let fade = if s.system_glass {
         crate::theme::veil_color(crate::theme::GLASS_VEIL[0].1)
     } else {
         theme().background
     };
-    let scroll = super::header_tabs::scroll(s);
-    let overflows = scroll
-        .as_ref()
-        .is_some_and(|handle| handle.max_offset().width > px(0.));
-    div()
-        .relative()
-        .flex()
-        .flex_1()
-        .min_w_0()
-        .h_full()
-        .items_center()
-        .child(strip(s, scroll, cx))
-        .when(overflows, |tabs| {
-            tabs.child(div().absolute().top_0().bottom_0().right_0().w(px(18.)).bg(
-                gpui::linear_gradient(
-                    90.,
-                    gpui::linear_color_stop(gpui::Rgba { a: 0., ..fade }, 0.),
-                    gpui::linear_color_stop(fade, 1.),
-                ),
-            ))
-        })
+    let scroll = super::header_tabs::scroll(s).unwrap_or_default();
+    let active = s.active().map(|tab| s.key(&tab));
+    super::tab_scroll::wrap(
+        strip(s, &scroll, cx),
+        scroll,
+        active,
+        "surface-tabs",
+        fade,
+        cx,
+    )
 }
 
 /// A tab's pill label: its rename, the chat's title, or the surface name.
@@ -461,9 +446,9 @@ fn ghost(ghost: &pills::Ghost, height: f32, radius: f32) -> gpui::Div {
 
 fn strip(
     s: &Shell,
-    scroll: Option<gpui::ScrollHandle>,
+    scroll: &super::tab_scroll::Strip,
     cx: &mut Context<Shell>,
-) -> impl IntoElement {
+) -> gpui::Stateful<gpui::Div> {
     let active = s.active();
     let geometry = crate::theme::GEOMETRY;
     let motion = s.features.read::<pills::Pills>();
@@ -478,8 +463,7 @@ fn strip(
         .id("surface-tabs")
         // Space between and after the pills still moves the window.
         .window_control_area(gpui::WindowControlArea::Drag)
-        .overflow_x_scroll()
-        .when_some(scroll, |strip, handle| strip.track_scroll(&handle))
+        .debug_selector(|| "surface-tabs".into())
         .on_drag_move(cx.listener(
             |this, _: &gpui::DragMoveEvent<super::header_tabs::Dragged>, _, cx| {
                 super::header_tabs::leave(this, cx);
@@ -540,6 +524,7 @@ fn strip(
                         })
                         .map(|pill| crate::motion::fade_hover(pill, group.clone(), 120))
                         .children(motion.and_then(|m| m.probe(&key)))
+                        .when(selected, |pill| pill.child(scroll.probe()))
                         .child(
                             div()
                                 .relative()
