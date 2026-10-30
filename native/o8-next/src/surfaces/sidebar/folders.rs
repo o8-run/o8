@@ -241,9 +241,11 @@ impl ThreadList {
             .cursor_pointer()
             .when(open, |v| v.bg(theme().hover))
             .hover(|v| v.bg(theme().hover))
-            .tooltip(|_, cx| {
-                cx.new(|_| crate::icon::Tip("Change chat view".into()))
-                    .into()
+            .when(!open, |v| {
+                v.tooltip(|_, cx| {
+                    cx.new(|_| crate::icon::Tip("Change chat view".into()))
+                        .into()
+                })
             })
             .child(crate::icon::stroke(DOTS, theme().text_muted, 12., 3.))
             .on_click(cx.listener(|this, event: &gpui::ClickEvent, window, cx| {
@@ -483,13 +485,15 @@ impl ThreadList {
                     .cursor_pointer()
                     .hover(|style| style.bg(theme().hover))
                     .when(self.new_menu, |v| v.bg(theme().hover))
-                    .tooltip(|_, cx| {
-                        cx.new(|_| {
-                            crate::icon::Tip(
-                                "New thread · Shift-click for the current repository".into(),
-                            )
+                    .when(!self.new_menu, |v| {
+                        v.tooltip(|_, cx| {
+                            cx.new(|_| {
+                                crate::icon::Tip(
+                                    "New thread · Shift-click for the current repository".into(),
+                                )
+                            })
+                            .into()
                         })
-                        .into()
                     })
                     .child(crate::icon::stroke(
                         NEW_THREAD,

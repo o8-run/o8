@@ -120,6 +120,7 @@ impl Render for ThreadList {
                                     return this.folder_row(&row, folder, cx);
                                 }
                                 let thread = row.id.is_some();
+                                let by_repo = this.view() == folders::View::Repo;
                                 let title =
                                     gpui::StyledText::new(crate::text::sanitize(&row.title));
                                 #[cfg(test)]
@@ -184,16 +185,19 @@ impl Render for ThreadList {
                                                 view.child(this.view_picker(cx))
                                             })
                                             .when(thread, |view| {
-                                                view.child(
-                                                    div()
-                                                        .max_w(px(65.))
-                                                        .min_w_0()
-                                                        .text_ellipsis()
-                                                        .font_weight(gpui::FontWeight(260.))
-                                                        .text_size(px(11.5))
-                                                        .text_color(theme().text_faint)
-                                                        .child(label(&row.workspace)),
-                                                )
+                                                // A folder already names its threads' repository.
+                                                view.when(!by_repo, |view| {
+                                                    view.child(
+                                                        div()
+                                                            .max_w(px(65.))
+                                                            .min_w_0()
+                                                            .text_ellipsis()
+                                                            .font_weight(gpui::FontWeight(260.))
+                                                            .text_size(px(11.5))
+                                                            .text_color(theme().text_faint)
+                                                            .child(label(&row.workspace)),
+                                                    )
+                                                })
                                                 .child(
                                                     div()
                                                         .flex_shrink_0()
