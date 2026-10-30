@@ -7,6 +7,7 @@ import { browserAgentEval, nativeReturnEval } from '@/lib/mcp/o8-webview-tools';
 import { getBrowserEngine } from '@/lib/browser-engine/engine';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import { requestNextBrowser } from '@/lib/next/browser-pipe';
 import { requestBrowserOpen } from '@/lib/mcp/o8-browser-open';
 
 type EmbeddedVerb = 'read' | 'localize' | 'rect' | 'click' | 'type' | 'probe' | 'grab';
@@ -207,6 +208,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
   const scope = packetId ?? 'operator';
+
+  // The owned Next child precedes classic's native/iframe panel path. Explicit
+  // canvas and engine targeting retain their existing routing. A lost receipt
+  // must never send a click/type a second time through a different renderer.
+  if (args.surface !== 'canvas' && args.surface !== 'engine') {
+    const next = requestNextBrowser(verb, args);
+    if (next) {
+      const result = await next as Record<string, unknown>;
+      if (packetId && verb !== 'probe') recordAction(packetId, verb, args, result?.ok === true, typeof result?.url === 'string' ? result.url : undefined, 'native');
+      return NextResponse.json(result);
+    }
+  }
+
 
   // Native-only Design Mode click-to-grab (Stage 4b) — handled before engine
   // routing (it drives the native browser-view agent, never the engine tier).
