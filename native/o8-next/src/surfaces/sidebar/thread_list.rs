@@ -33,6 +33,10 @@ pub enum Event {
     UiCommand(serde_json::Value),
     /// A project's repository scope changed; empty shows every repository.
     Scope(String, Vec<String>),
+    /// A project's view changed (folders::View::key).
+    View(String, &'static str),
+    /// The closed By repo folders, by repository path.
+    Folders(Vec<String>),
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Row {
@@ -46,6 +50,8 @@ pub struct Row {
     pub age: String,
     pub branch: bool,
     pub attention: bool,
+    /// Set on a By repo folder row.
+    pub folder: Option<folders::Folder>,
 }
 fn label(path: &str) -> String {
     path.rsplit('/')
@@ -64,6 +70,12 @@ pub struct ThreadList {
     scopes: HashMap<String, Vec<String>>,
     scope_menu: Option<project_header::ScopeMenu>,
     row_menu: Option<project_header::RowMenu>,
+    /// Each project's view, by project id; By date when absent.
+    views: HashMap<String, folders::View>,
+    view_menu: bool,
+    new_menu: bool,
+    /// Closed By repo folders, by repository path.
+    closed: HashSet<String>,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
@@ -136,6 +148,10 @@ impl ThreadList {
             scopes: HashMap::new(),
             scope_menu: None,
             row_menu: None,
+            views: HashMap::new(),
+            view_menu: false,
+            new_menu: false,
+            closed: HashSet::new(),
             sessions: vec![],
             rows: Rc::new(vec![]),
             selected: None,
@@ -189,17 +205,10 @@ impl ThreadList {
             .iter()
             .find(|s| self.selected.as_ref() == Some(&s.id))
         {
-            self.expanded
-                .insert(recents::group(session, recents::now()).into());
+            self.expanded.insert(self.group_key(session).into());
         }
         let sessions = self.scoped_sessions();
-        let mut rows = recents::rows(
-            &sessions,
-            &self.query,
-            &self.search_matches,
-            &self.expanded,
-            &self.branch_ids,
-        );
+        let mut rows = self.view_rows(&sessions);
         // An incoming message can push the keyboard choice past Show more.
         // Disclosure must follow that thread's identity before choosing a fallback.
         if self.query.trim().is_empty()
@@ -209,15 +218,8 @@ impl ThreadList {
                 .iter()
                 .find(|s| self.choice.as_ref() == Some(&s.id))
         {
-            self.expanded
-                .insert(recents::group(session, recents::now()).into());
-            rows = recents::rows(
-                &sessions,
-                &self.query,
-                &self.search_matches,
-                &self.expanded,
-                &self.branch_ids,
-            );
+            self.expanded.insert(self.group_key(session).into());
+            rows = self.view_rows(&sessions);
         }
         if !self.archived_open
             && self.query.trim().is_empty()
@@ -249,6 +251,43 @@ impl ThreadList {
             && previous_choice.is_some_and(|previous| previous != index)
         {
             self.scroll.scroll_to_item(index, ScrollStrategy::Top);
+        }
+    }
+    /// The disclosure group a thread belongs to in the current view.
+    fn group_key(&self, session: &Session) -> &'static str {
+        match self.view() {
+            _ if session.status == "archived" => "Archived",
+            folders::View::Date => recents::group(session, recents::now()),
+            folders::View::Chronological => "Chronological",
+            folders::View::Repo => "",
+        }
+    }
+    fn view_rows(&self, sessions: &[Session]) -> Vec<Row> {
+        let (query, matches) = (&self.query, &self.search_matches);
+        let (expanded, branches) = (&self.expanded, &self.branch_ids);
+        match self.view() {
+            folders::View::Date => recents::rows(sessions, query, matches, expanded, branches),
+            folders::View::Chronological => {
+                folders::chronological(sessions, query, matches, expanded, branches)
+            }
+            folders::View::Repo => {
+                let keys = self.scope_keys();
+                let repos: Vec<_> = self
+                    .scope_repos()
+                    .into_iter()
+                    .filter(|(path, _)| keys.is_empty() || keys.contains(path))
+                    .collect();
+                folders::by_repo(
+                    sessions,
+                    query,
+                    matches,
+                    expanded,
+                    branches,
+                    &repos,
+                    &self.closed,
+                    !keys.is_empty(),
+                )
+            }
         }
     }
     pub fn catalog_changed(&mut self) {
@@ -695,6 +734,9 @@ impl ThreadList {
         match key {
             "escape" => {
                 self.header_menu = None;
+                self.view_menu = false;
+                self.new_menu = false;
+                self.row_menu = None;
                 self.edit_generation += 1;
                 if let Some(id) = self.rename.take() {
                     self.rename_drafts.remove(&id);
@@ -710,6 +752,7 @@ impl ThreadList {
                 if key == "end" {
                     self.expanded.extend(
                         [
+                            "Chronological",
                             "Today",
                             "Previous 7 days",
                             "Previous 30 days",
@@ -790,6 +833,9 @@ mod project_header;
 
 #[path = "recents.rs"]
 pub(crate) mod recents;
+
+#[path = "folders.rs"]
+pub(crate) mod folders;
 
 #[path = "archive_controls.rs"]
 mod archive_controls;

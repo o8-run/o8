@@ -2,7 +2,7 @@
 pub use crate::shell::Tab;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{Read, Write},
     path::Path,
@@ -80,6 +80,12 @@ pub struct State {
     /// The chat list's repository scope, by project id; absent shows every repository.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sidebar_scope: BTreeMap<String, Vec<String>>,
+    /// The chat list's view by project id (chronological, date or repo); absent is By date.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sidebar_view: BTreeMap<String, String>,
+    /// Closed By repo folders, by repository path.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub sidebar_closed_folders: BTreeSet<String>,
     #[serde(skip)]
     pub(crate) retain_file: bool,
     #[serde(skip)]
@@ -99,6 +105,8 @@ impl Default for State {
             quick_doc_pins: BTreeMap::new(),
             browser_pages: BTreeMap::new(),
             sidebar_scope: BTreeMap::new(),
+            sidebar_view: BTreeMap::new(),
+            sidebar_closed_folders: BTreeSet::new(),
             retain_file: false,
             backup_file: Arc::default(),
         }
@@ -168,6 +176,8 @@ impl State {
                 .any(|paths| clean_pins(paths.clone()) != *paths)
             || self.sidebar_scope.len() > 500
             || self.sidebar_scope.values().any(|keys| keys.len() > 500)
+            || self.sidebar_view.len() > 500
+            || self.sidebar_closed_folders.len() > 2_000
             || self.tab_labels.len() > 16_000
             || self
                 .tab_labels

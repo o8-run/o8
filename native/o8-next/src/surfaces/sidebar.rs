@@ -234,7 +234,14 @@ pub(super) const REGISTRATION: Registration = Registration {
 fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     let sidebar = cx.new(|cx| ThreadList::new(shell.client.clone(), cx));
     let scopes = shell.state.sidebar_scope.clone();
-    sidebar.update(cx, |sidebar, _| sidebar.restore_scopes(scopes));
+    let (views, closed) = (
+        shell.state.sidebar_view.clone(),
+        shell.state.sidebar_closed_folders.clone(),
+    );
+    sidebar.update(cx, |sidebar, _| {
+        sidebar.restore_scopes(scopes);
+        sidebar.restore_views(&views, &closed);
+    });
     shell.subscriptions.push(
         cx.subscribe_in(&sidebar, window, |shell, _, event, window, cx| {
             match event {
@@ -267,6 +274,14 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     } else {
                         shell.state.sidebar_scope.insert(project.clone(), keys.clone());
                     }
+                    shell.persist();
+                }
+                ThreadEvent::View(project, view) => {
+                    shell.state.sidebar_view.insert(project.clone(), (*view).into());
+                    shell.persist();
+                }
+                ThreadEvent::Folders(closed) => {
+                    shell.state.sidebar_closed_folders = closed.iter().cloned().collect();
                     shell.persist();
                 }
                 ThreadEvent::Error(error) => {

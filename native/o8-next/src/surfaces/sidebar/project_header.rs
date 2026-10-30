@@ -10,7 +10,8 @@ mod identity;
 #[path = "scope.rs"]
 mod scope;
 pub(super) use scope::{Menu as ScopeMenu, RowMenu};
-use identity::{glyph, identity};
+use identity::glyph;
+pub(super) use identity::identity;
 
 impl ThreadList {
     /// An open header menu owns input before shell or row shortcut dispatch.

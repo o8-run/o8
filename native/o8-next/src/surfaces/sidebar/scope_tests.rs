@@ -1,7 +1,7 @@
 //! Real scope picker and row menu input -> the chat list and the saved shell state.
 use super::*;
 
-fn project(fixture: &Fixture, paths: &[String]) -> String {
+pub(super) fn project(fixture: &Fixture, paths: &[String]) -> String {
     let created = fixture
         .client
         .project_request(
@@ -39,7 +39,7 @@ fn project(fixture: &Fixture, paths: &[String]) -> String {
         .unwrap();
     id
 }
-fn repo_name(fixture: &Fixture, path: &str) -> String {
+pub(super) fn repo_name(fixture: &Fixture, path: &str) -> String {
     let repos: Value = fixture.client.get("/api/panel/repos", &[]).unwrap();
     repos["repos"]
         .as_array()
@@ -50,7 +50,7 @@ fn repo_name(fixture: &Fixture, path: &str) -> String {
         .unwrap()
         .to_owned()
 }
-fn listed(shell: &Entity<Shell>, cx: &VisualTestContext) -> Vec<String> {
+pub(super) fn listed(shell: &Entity<Shell>, cx: &VisualTestContext) -> Vec<String> {
     shell.read_with(cx, |s, cx| {
         s.surfaces
             .sidebar

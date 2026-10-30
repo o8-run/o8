@@ -1,4 +1,5 @@
 /** Sidebar-owned fixture records, production routes and live event peer. */
+import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 
@@ -7,7 +8,7 @@ export async function prepare({ dataDir }: SurfaceContext): Promise<SurfaceRoute
   process.env.O8_OWNED_PI_BUILTIN_ROOT = join(dataDir, 'owned-pi-builtin');
   return {};
 }
-export default async function register({ dataDir, root, seeds, fixtureToken, transcriptFixtures }: SurfaceContext): Promise<SurfaceRoutes> {
+export default async function register({ dataDir, root, repo, seeds, fixtureToken, transcriptFixtures }: SurfaceContext): Promise<SurfaceRoutes> {
   const enabled = process.argv.includes('--sidebar');
   const auditKeyboard = process.argv.includes('--sidebar-keyboard-audit');
   const archives: Array<{ method: string; path: string; tabId?: string }> = [];
@@ -44,7 +45,9 @@ export default async function register({ dataDir, root, seeds, fixtureToken, tra
       if (!body) return 200;
       const target = JSON.parse(body);
       return (route === runtimeArchive.POST ? target.sessionKey === 'pi-builtin-owned:grid-runtime'
-        : (route === patchHistory || route === saveHistory) && seeds.some(seed => seed.id === target.tabId)) ? 200 : 400;
+        : (route === patchHistory || route === saveHistory) && seeds.some(seed => seed.id === target.tabId)
+          // New thread creates a conversation in the owned fixture repository.
+          || route === saveHistory && /^thoughts-next-\d+$/.test(target.tabId) && realpathSync(target.repoPath) === realpathSync(repo)) ? 200 : 400;
     },
     run: async (route, request) => {
       if (route === sessions) {
@@ -63,7 +66,11 @@ export default async function register({ dataDir, root, seeds, fixtureToken, tra
       return route(request);
     },
     after: async ({ route, body }, response) => {
-      if ((route === patchHistory || route === saveHistory) && response.ok) await socket?.changed(JSON.parse(body).tabId);
+      if ((route === patchHistory || route === saveHistory) && response.ok) {
+        const target = JSON.parse(body);
+        if (!seeds.some(seed => seed.id === target.tabId)) seeds.push({ id: target.tabId, title: target.title, messages: target.messages });
+        await socket?.changed(target.tabId);
+      }
       return false;
     },
     socket: async (server, token, requests) => {

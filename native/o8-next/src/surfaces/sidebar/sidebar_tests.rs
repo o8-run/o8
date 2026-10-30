@@ -723,6 +723,8 @@ mod project_round2_tests;
 
 #[path = "scope_tests.rs"]
 mod scope_tests;
+#[path = "folder_tests.rs"]
+mod folder_tests;
 
 #[path = "recents_tests.rs"]
 mod recents_tests;

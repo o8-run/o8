@@ -86,6 +86,7 @@ impl Render for ThreadList {
                     )
                     .when(!self.scope_repos().is_empty(), |row| {
                         row.child(self.scope_trigger(cx))
+                            .child(self.new_thread_button(cx))
                     }),
             )
             .children(self.scope_picker(cx))
@@ -111,6 +112,9 @@ impl Render for ThreadList {
                         range
                             .map(|i| {
                                 let row = this.rows[i].clone();
+                                if let Some(folder) = &row.folder {
+                                    return this.folder_row(&row, folder, cx);
+                                }
                                 let thread = row.id.is_some();
                                 let title =
                                     gpui::StyledText::new(crate::text::sanitize(&row.title));
@@ -172,6 +176,9 @@ impl Render for ThreadList {
                                                     })
                                                     .child(title),
                                             )
+                                            .when(!thread && i == 0, |view| {
+                                                view.child(this.view_picker(cx))
+                                            })
                                             .when(thread, |view| {
                                                 view.child(
                                                     div()
