@@ -1,6 +1,6 @@
 //! The Inbox view through the real view menu, row control, Mod+Shift+S and
-//! Undo, against the fixture's copy of the inbox settlement contract; and the
-//! unchanged sidebar on a host without it.
+//! the Undo toast, against the fixture's copy of the inbox settlement
+//! contract; and the unchanged sidebar on a host without it.
 use super::scope_tests::project;
 use super::*;
 
@@ -66,6 +66,14 @@ fn stored(fixture: &Fixture, id: &str) -> Value {
         assert_eq!(page.len(), 500, "{id} is listed");
     }
     unreachable!()
+}
+/// Whether the shell shows the Settled toast.
+fn settled_toast(shell: &Entity<Shell>, cx: &VisualTestContext) -> bool {
+    shell.read_with(cx, |_, cx| {
+        crate::shell::toasts::texts(cx)
+            .iter()
+            .any(|text| text == "Settled 1 thread")
+    })
 }
 /// The thread whose row lies under a point of the window.
 fn under(
@@ -196,18 +204,17 @@ fn sidebar_inbox_settles_advances_and_undoes(cx: &mut TestAppContext) {
         assert!(shell.read_with(&visual, |s, cx| in_section(s, cx, FIRST, "Settled")));
         std::thread::sleep(Duration::from_millis(25));
     }
-    draw(&mut visual);
-    assert!(
-        visual.debug_bounds("sidebar-undo").is_some(),
-        "Settled 1 thread, with Undo"
+    let toast = list(&shell, &visual, |l| l.undo_toast()).expect("Settled 1 thread, with Undo");
+    assert!(settled_toast(&shell, &visual));
+    click(
+        &mut visual,
+        Box::leak(format!("toast-{toast}-action-0").into_boxed_str()),
     );
-    click(&mut visual, "sidebar-undo-action");
     wait_for(&shell, &mut visual, |s, cx| {
         in_section(s, cx, FIRST, "Active")
     });
     assert_eq!(stored(&fixture, FIRST), "active");
-    draw(&mut visual);
-    assert!(visual.debug_bounds("sidebar-undo").is_none());
+    assert!(!settled_toast(&shell, &visual));
 
     // Mod+Shift+S settles the current thread; on a settled one it un-settles.
     let target = row(&shell, &mut visual, SECOND);
@@ -326,7 +333,7 @@ fn sidebar_view_menu_takes_the_press_over_inbox_rows(cx: &mut TestAppContext) {
         "the row beneath the menu was not opened"
     );
     assert_eq!(stored(&fixture, &id), before, "nor settled");
-    assert!(visual.debug_bounds("sidebar-undo").is_none());
+    assert!(!settled_toast(&shell, &visual));
 }
 
 #[gpui::test]

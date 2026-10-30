@@ -304,7 +304,6 @@ impl Render for ThreadList {
                 .flex_1()
                 .min_h_0(),
             )
-            .children(self.undo_notice(cx))
             .when(
                 self.query.is_empty()
                     && (!self.archived_open

@@ -1,6 +1,6 @@
 //! The Inbox view: Active and Settled sections over the server's inbox
 //! settlement (docs/internals/inbox-settlement.md), with Settle and Un-settle
-//! on the row and on Mod+Shift+S, park-and-advance and an Undo notice.
+//! on the row and on Mod+Shift+S, park-and-advance and an Undo toast.
 //!
 //! Adapted from T3 Code (https://github.com/pingdotgg/t3code),
 //! apps/web/src/components/Sidebar.tsx (settleAndAdvance, the Settled shelf),
@@ -11,16 +11,15 @@
 //! Adaptations: Rust and GPUI, o8 words; Pinned, Working and Later arrive with
 //! their server slices.
 use super::*;
+use crate::shell::toasts;
 use crate::theme::current as theme;
 use gpui::{AnyElement, div, px};
 
-/// How long the Settled notice offers Undo, as in T3.
-const UNDO: Duration = Duration::from_secs(5);
-
-/// The last Settle, offered for Undo until a newer one or the timeout.
+/// The last Settle and its toast, which offers Undo until a newer Settle or
+/// its timeout.
 pub(super) struct Undo {
     id: String,
-    serial: u64,
+    toast: toasts::ToastId,
 }
 
 /// Active, then Settled newest first, then Archived. A child worker stays
@@ -151,21 +150,29 @@ impl ThreadList {
             {
                 self.choose(next, cx);
             }
-            self.undo_serial += 1;
-            let serial = self.undo_serial;
-            self.undo = Some(Undo { id, serial });
-            cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(UNDO).await;
-                let _ = this.update(cx, |this, cx| {
-                    if this.undo.as_ref().is_some_and(|undo| undo.serial == serial) {
-                        this.undo = None;
-                        cx.notify();
-                    }
+            if let Some(undo) = self.undo.take() {
+                toasts::dismiss(undo.toast, cx);
+            }
+            let list = cx.entity().downgrade();
+            let target = id.clone();
+            let undo = toasts::Action::new("Undo", move |_, cx| {
+                let _ = list.update(cx, |this, cx| {
+                    this.undo = None;
+                    this.settle_id(target, cx);
                 });
-            })
-            .detach();
-        } else if self.undo.as_ref().is_some_and(|undo| undo.id == id) {
-            self.undo = None;
+            });
+            let toast = toasts::show(
+                toasts::Kind::Info,
+                "Settled 1 thread",
+                vec![undo],
+                Some(toasts::NOTICE_TIMEOUT),
+                cx,
+            );
+            self.undo = Some(Undo { id, toast });
+        } else if self.undo.as_ref().is_some_and(|undo| undo.id == id)
+            && let Some(undo) = self.undo.take()
+        {
+            toasts::dismiss(undo.toast, cx);
         }
         self.load(cx);
     }
@@ -238,43 +245,9 @@ impl ThreadList {
                 .into_any_element(),
         )
     }
-    /// "Settled 1 thread" with Undo, which returns the thread to Active.
-    /// A stand-in until the shell's toasts land (row 20): then this becomes
-    /// show(kind, "Settled 1 thread", [Undo -> settle_id], UNDO) and goes.
-    pub(super) fn undo_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.undo.as_ref()?;
-        Some(
-            div()
-                .debug_selector(|| "sidebar-undo".into())
-                .mx(px(6.))
-                .h(px(28.))
-                .px(px(10.))
-                .flex()
-                .items_center()
-                .justify_between()
-                .rounded(px(8.))
-                .bg(theme().surface_raised)
-                .text_size(px(11.5))
-                .text_color(theme().text_muted)
-                .child("Settled 1 thread")
-                .child(
-                    div()
-                        .id("sidebar-undo-action")
-                        .debug_selector(|| "sidebar-undo-action".into())
-                        .px(px(6.))
-                        .rounded(px(4.))
-                        .text_color(theme().text)
-                        .cursor_pointer()
-                        .hover(|v| v.bg(theme().hover))
-                        .child("Undo")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(undo) = this.undo.take() {
-                                this.settle_id(undo.id, cx);
-                            }
-                            cx.notify();
-                        })),
-                )
-                .into_any_element(),
-        )
+    /// The Settled toast still offering Undo.
+    #[cfg(test)]
+    pub(crate) fn undo_toast(&self) -> Option<toasts::ToastId> {
+        self.undo.as_ref().map(|undo| undo.toast)
     }
 }

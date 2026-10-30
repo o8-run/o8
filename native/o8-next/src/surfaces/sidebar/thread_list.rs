@@ -88,7 +88,6 @@ pub struct ThreadList {
     /// A Settle or Un-settle awaiting the server.
     settling: Option<String>,
     undo: Option<inbox::Undo>,
-    undo_serial: u64,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
@@ -169,7 +168,6 @@ impl ThreadList {
             pending_open: None,
             settling: None,
             undo: None,
-            undo_serial: 0,
             closed: HashSet::new(),
             sessions: vec![],
             rows: Rc::new(vec![]),
