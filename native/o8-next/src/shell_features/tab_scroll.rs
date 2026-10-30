@@ -15,6 +15,9 @@ pub(super) struct Strip {
 }
 
 impl Strip {
+    pub(super) fn request_reveal(&self) {
+        *self.revealed.borrow_mut() = None;
+    }
     /// Measure the selected pill itself, including its close control. Measuring
     /// the pill avoids counting the workspace strip's animated leaving tabs.
     pub(super) fn probe(&self) -> impl IntoElement + use<> {

@@ -131,7 +131,7 @@ fn setup(cx: &mut TestAppContext, overflow: bool) -> (Fixture, Entity<Shell>, Vi
                 pixels(-10000., 0.),
                 Modifiers::default(),
             );
-            click(&mut visual, "panel-new-tab");
+            click(&mut visual, "panel-more-views");
             settle(&mut visual);
             click(&mut visual, &format!("panel-add-{tool}"));
         }
@@ -269,9 +269,10 @@ fn tab_wheel_activating_offscreen_tabs_reveals_with_classic_inset(cx: &mut TestA
     settle(&mut visual);
     let tab = bounds(&mut visual, "surface-tab-1");
     let gap = f32::from(viewport.right() - tab.right());
+    let inset = (f32::from(viewport.size.width - tab.size.width) / 2.).clamp(0., 22.);
     assert!(
-        (gap - 22.).abs() < 0.3,
-        "new active workspace tab needs the 22px inset, got {gap}"
+        (gap - inset).abs() < 0.3,
+        "new active workspace tab needs the classic adaptive inset {inset}, got {gap}"
     );
 
     // The picker activates an existing tab even while that tab is off screen.
@@ -281,15 +282,16 @@ fn tab_wheel_activating_offscreen_tabs_reveals_with_classic_inset(cx: &mut TestA
         pixels(-10000., 0.),
         Modifiers::default(),
     );
-    click(&mut visual, "panel-new-tab");
+    click(&mut visual, "panel-more-views");
     settle(&mut visual);
     click(&mut visual, "panel-add-threads");
     settle(&mut visual);
     let viewport = bounds(&mut visual, "panel-tabs");
     let tab = bounds(&mut visual, "panel-tab");
     let gap = f32::from(tab.left() - viewport.left());
+    let inset = (f32::from(viewport.size.width - tab.size.width) / 2.).clamp(0., 22.);
     assert!(
-        (gap - 22.).abs() < 0.3,
-        "new active panel tab needs the 22px inset, got {gap}"
+        (gap - inset).abs() < 0.3,
+        "new active panel tab needs the classic adaptive inset {inset}, got {gap}"
     );
 }

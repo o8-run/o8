@@ -1,7 +1,12 @@
 use super::*;
-use crate::browser_panel::header as browser_header;
 use crate::motion::Transition;
 use gpui::SharedString;
+#[path = "right_panel/chrome.rs"]
+mod chrome;
+#[path = "right_panel/context.rs"]
+mod contextual;
+#[path = "right_panel/layout.rs"]
+mod layout;
 // The desktop's right panel (O8Panel). Its tools open as tabs in the panel's
 // own strip; "+" lists every desktop panel tool (o8-panel/panel-tools.tsx),
 // including the ones o8 next does not have yet, which open a placeholder.
@@ -18,20 +23,17 @@ impl ShellFeature for RightPanel {
     fn ticks(&self) -> &'static [TickHook] {
         &[TickHook {
             order: 50,
-            run: |s, _, window, cx| move_inbox_tabs(s, window, cx),
+            run: |s, _, window, cx| {
+                layout::sync(s, window, cx);
+                move_inbox_tabs(s, window, cx)
+            },
         }]
     }
     fn keys(&self) -> &'static [KeyContext] {
         &[KeyContext {
             order: 90,
             dispatch: |s, event, window, cx| {
-                if event.keystroke.key == "escape"
-                    && s.features
-                        .read::<Panel>()
-                        .is_some_and(|panel| panel.menu.is_some())
-                {
-                    s.features.get::<Panel>().menu = None;
-                    cx.notify();
+                if layout::key(s, event, window, cx) {
                     return KeyResult::Handled;
                 }
                 let modifiers = event.keystroke.modifiers;
@@ -50,7 +52,7 @@ impl ShellFeature for RightPanel {
                     let viewport = f32::from(window.viewport_size().width);
                     let (min, max) = width_bounds(s, viewport);
                     let width = full_width(s, viewport);
-                    s.state.right_panel_width = Some((width + step).clamp(min, max));
+                    layout::set_width(s, (width + step).clamp(min, max));
                     s.persist();
                     cx.notify();
                     return KeyResult::Handled;
@@ -98,6 +100,8 @@ enum Tool {
     SideChat,
     Resources,
     Targeting,
+    Prs,
+    Compare,
 }
 
 impl Tool {
@@ -124,6 +128,7 @@ impl Tool {
             Tool::Terminal => Some(Tab::Terminal),
             Tool::Review => Some(Tab::Diff),
             Tool::Activity => Some(Tab::Activity),
+
             _ => None,
         }
     }
@@ -149,6 +154,8 @@ impl Tool {
             Tool::SideChat => "Side chat",
             Tool::Resources => "Resources",
             Tool::Targeting => "Targeting",
+            Tool::Prs => "Pull requests",
+            Tool::Compare => "Compare",
         }
     }
     fn description(self) -> &'static str {
@@ -166,6 +173,8 @@ impl Tool {
             Tool::SideChat => "A separate conversation with its own messages",
             Tool::Resources => "Live session CPU and memory",
             Tool::Targeting => "Find code to direct your agents toward",
+            Tool::Prs => "Review a pull request",
+            Tool::Compare => "Compare candidates",
         }
     }
     fn icon(self) -> &'static str {
@@ -183,6 +192,8 @@ impl Tool {
             Tool::SideChat => SIDE_CHAT,
             Tool::Resources => RESOURCES,
             Tool::Targeting => TARGETS,
+            Tool::Prs => REVIEW,
+            Tool::Compare => COLUMNS,
         }
     }
     fn slug(self) -> String {
@@ -190,46 +201,29 @@ impl Tool {
     }
 }
 
-/// A panel tab being dragged along the strip.
-#[derive(Clone)]
-struct Dragged {
-    index: usize,
-    tool: Tool,
-}
-impl Render for Dragged {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .h(px(24.))
-            .pl(px(6.))
-            .pr(px(8.))
-            .flex()
-            .items_center()
-            .gap(px(4.))
-            .rounded(px(6.))
-            .bg(crate::theme::popover_background())
-            .border_1()
-            .border_color(theme().border)
-            .shadow_md()
-            .text_size(px(12.))
-            .text_color(theme().text)
-            .child(crate::icon::stroke(
-                self.tool.icon(),
-                theme().text,
-                12.,
-                1.8,
-            ))
-            .child(self.tool.label())
-    }
-}
-
 struct Panel {
     /// The column's width and fade: 260ms, as the desktop column animates.
     motion: Transition,
+    morph: Transition,
     /// The tool's own fade and 12px slide: 200ms.
     content: Transition,
     /// Open tabs in strip order; the empty strip shows the tool list.
     tabs: Vec<Tool>,
     active: usize,
+    selected: Tool,
+    viewport: f32,
+    scope: Option<String>,
+    lower: Option<Tool>,
+    maximized: bool,
+    more: bool,
+    menu_lower: bool,
+    menu_index: usize,
+    focus: std::collections::HashMap<String, gpui::FocusHandle>,
+    launcher_height: std::rc::Rc<std::cell::Cell<f32>>,
+    launcher_scroll: gpui::ScrollHandle,
+    split_drag: bool,
+    split_bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
+    contexts: contextual::Contexts,
     scroll: super::tab_scroll::Strip,
     /// The "+" menu, and when it opened (its 140ms fade and drop).
     menu: Option<std::time::Instant>,
@@ -249,9 +243,24 @@ impl Default for Panel {
     fn default() -> Self {
         Self {
             motion: Transition::new(260),
+            morph: Transition::new(200),
             content: Transition::new(200),
             tabs: vec![],
             active: 0,
+            selected: Tool::Launcher,
+            viewport: 1200.,
+            scope: None,
+            lower: None,
+            maximized: false,
+            more: false,
+            menu_lower: false,
+            menu_index: 0,
+            focus: Default::default(),
+            launcher_height: Default::default(),
+            launcher_scroll: Default::default(),
+            split_drag: false,
+            split_bounds: Default::default(),
+            contexts: Default::default(),
             scroll: Default::default(),
             menu: None,
             files: Default::default(),
@@ -265,10 +274,7 @@ impl Default for Panel {
 
 impl Panel {
     fn current(&self) -> Tool {
-        self.tabs
-            .get(self.active)
-            .copied()
-            .unwrap_or(Tool::Launcher)
+        self.selected
     }
 }
 
@@ -282,10 +288,20 @@ fn key(s: &Shell, tool: Tool) -> String {
 impl Shell {
     /// The content key of the open panel's front tool, so a surface knows it
     /// is on screen there as well as in the main area.
+    pub(crate) fn panel_shows(&self, probe: impl Fn(&str) -> bool) -> bool {
+        self.features.read::<Panel>().is_some_and(|p| {
+            p.motion.is_open()
+                && (probe(&key(self, p.current())) || p.lower.is_some_and(|t| probe(&key(self, t))))
+        })
+    }
     pub(crate) fn panel_front_key(&self) -> Option<String> {
         let panel = self.features.read::<Panel>()?;
         panel.motion.is_open().then(|| key(self, panel.current()))
     }
+}
+
+pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    layout::sync(s, window, cx);
 }
 
 pub(super) fn is_open(s: &Shell) -> bool {
@@ -302,7 +318,7 @@ pub(super) fn width(s: &Shell, window: &Window) -> Option<(f32, f32)> {
     let menu_moving = panel
         .menu
         .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(140));
-    if moving || panel.content.value().1 || menu_moving {
+    if moving || panel.morph.value().1 || panel.content.value().1 || menu_moving {
         window.request_animation_frame();
     }
     if travel <= 0. && !moving {
@@ -330,20 +346,32 @@ fn width_bounds(s: &Shell, viewport: f32) -> (f32, f32) {
         super::super::sidebar::width(s)
     };
     let available = viewport - super::super::rail::WIDTH - sidebar;
-    let max = MAX_WIDTH.min((available - WORKSPACE_RESERVE - COLUMN_CHROME).max(0.));
+    let max = MAX_WIDTH.min(
+        (available - WORKSPACE_RESERVE - if s.system_glass { COLUMN_CHROME } else { 1. }).max(0.),
+    );
     (MIN_WIDTH.min(max), max)
 }
 
 /// The column's full width: the dragged one within this window's bounds,
 /// else the default.
 fn full_width(s: &Shell, viewport: f32) -> f32 {
-    match s.state.right_panel_width.filter(|width| width.is_finite()) {
-        Some(width) => {
-            let (min, max) = width_bounds(s, viewport);
-            width.clamp(min, max)
-        }
-        None => crate::theme::right_panel_width(viewport),
+    let available = viewport
+        - super::super::rail::WIDTH
+        - if s.surfaces.sidebar.hidden {
+            0.
+        } else {
+            super::super::sidebar::width(s)
+        };
+    if maximized(s) {
+        return available.max(0.);
     }
+    let (min, max) = width_bounds(s, viewport);
+    layout::preferred_width(s).clamp(min, max)
+}
+pub(super) fn maximized(s: &Shell) -> bool {
+    s.features
+        .read::<Panel>()
+        .is_some_and(|p| p.maximized && p.motion.is_open())
 }
 
 /// A drag of the panel's left edge.
@@ -361,7 +389,7 @@ pub(super) fn resize(s: &mut Shell, event: &gpui::DragMoveEvent<Resize>, window:
     };
     let width = start + from - f32::from(event.event.position.x);
     let (min, max) = width_bounds(s, f32::from(window.viewport_size().width));
-    s.state.right_panel_width = Some(width.clamp(min, max));
+    layout::set_width(s, width.clamp(min, max));
     s.features.get::<Panel>().resizing = true;
 }
 
@@ -417,8 +445,8 @@ pub(super) fn edge(
         .child(
             div()
                 .absolute()
-                .top(px(22.))
-                .bottom(px(22.))
+                .top(px(if s.system_glass { 22. } else { 0. }))
+                .bottom(px(if s.system_glass { 22. } else { 0. }))
                 .left(px(EDGE_SLOP))
                 .w(px(1.))
                 .bg(accent)
@@ -442,8 +470,7 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     {
         // Workspace-scoped tools read their saved slice; Inbox also works before one exists.
         if tab != Tab::Inbox && !s.state.workspaces.contains_key(&workspace) {
-            s.notice = "Open a workspace before using this tool.".into();
-            cx.notify();
+            layout::select(s, tool, window, cx);
             return;
         }
         if let Some(content) = (tab.registration().create)(s, tab, workspace.clone(), window, cx) {
@@ -454,8 +481,7 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         && !s.features.get::<Panel>().files.contains_key(&key)
     {
         if workspace.is_empty() {
-            s.notice = "Open a workspace before using this tool.".into();
-            cx.notify();
+            layout::select(s, tool, window, cx);
             return;
         }
         let mode = if tool == Tool::Files {
@@ -486,23 +512,13 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         ));
         s.features.get::<Panel>().browsers.insert(key.clone(), view);
     }
-    let panel = s.features.get::<Panel>();
-    if panel.current() != tool || !panel.motion.is_open() {
-        panel.content = Transition::new(200);
-        panel.content.set(true);
+    if tool == Tool::Compare {
+        contextual::ensure_comparison(s, cx);
     }
-    // A tool already open is focused; any other is added as a new tab.
-    if tool != Tool::Launcher {
-        match panel.tabs.iter().position(|open| *open == tool) {
-            Some(index) => panel.active = index,
-            None => {
-                panel.tabs.push(tool);
-                panel.active = panel.tabs.len() - 1;
-            }
-        }
+    if tool == Tool::Prs {
+        contextual::ensure_prs(s, window, cx);
     }
-    panel.menu = None;
-    panel.motion.set(true);
+    layout::select(s, tool, window, cx);
     if let Some(content) = s.content.get(&key) {
         content.focus(false, window, cx);
     } else if let Some(view) = s
@@ -540,6 +556,8 @@ pub(super) fn open_surface(
         "terminal" => Tool::Terminal,
         "browser" => Tool::Browser,
         "devices" => Tool::Devices,
+        "prs" => Tool::Prs,
+        "compare" => Tool::Compare,
         _ => return false,
     };
     show(s, tool, window, cx);
@@ -553,6 +571,16 @@ pub(super) fn open_surface(
         view.update(cx, |browser, cx| browser.agent_navigate(url, cx));
     }
     true
+}
+
+pub(super) fn open_pr(
+    s: &mut Shell,
+    repo: String,
+    number: u64,
+    w: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    contextual::open_pr(s, repo, number, w, cx)
 }
 
 pub(super) fn open(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
@@ -642,9 +670,16 @@ pub(super) fn open_browser(
 pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     if is_open(s) {
         s.features.get::<Panel>().motion.set(false);
+        s.features.get::<Panel>().morph.set(false);
+        s.features.get::<Panel>().maximized = false;
+        s.state.right_panel.visible = false;
+        s.persist();
         s.restore_focus(window, cx);
         cx.notify();
     } else {
+        if f32::from(window.viewport_size().width) < 1180. {
+            return;
+        }
         let tool = s
             .features
             .read::<Panel>()
@@ -665,31 +700,11 @@ pub(super) fn element(
     let panel = s.features.read::<Panel>()?;
     let (travel, _) = panel.motion.value();
     let (arrive, _) = panel.content.value();
-    let body = match panel.current() {
-        Tool::Devices => super::devices::element(s, cx),
-        Tool::Launcher => launcher(cx).into_any_element(),
-        tool if !tool.ready() => placeholder(tool).into_any_element(),
-        tool => s
-            .content
-            .get(&key(s, tool))
-            .map(Content::element)
-            .or_else(|| {
-                panel
-                    .files
-                    .get(&key(s, tool))
-                    .map(|view| view.clone().into_any_element())
-            })
-            .or_else(|| {
-                panel
-                    .browsers
-                    .get(&key(s, tool))
-                    .map(|view| view.clone().into_any_element())
-            })
-            .unwrap_or_else(|| launcher(cx).into_any_element()),
-    };
+    let body = layout::body(s, cx);
     // A fixed-width inner column, clipped by the travelling outer width, so the
     // tool never reflows while the panel opens or closes.
     let element = div()
+        .debug_selector(|| "panel-content".into())
         .w(px(full))
         .h_full()
         .flex()
@@ -708,15 +723,15 @@ fn cover_browsers(s: &Shell, cx: &mut Context<Shell>) {
     let Some(panel) = s.features.read::<Panel>() else {
         return;
     };
-    let showing = (panel.current() == Tool::Browser
+    let visible = (panel.current() == Tool::Browser || panel.lower == Some(Tool::Browser))
         && panel.motion.is_open()
         && !panel.motion.value().1
         && !s.palette
         && panel.menu.is_none()
-        && !super::header_tools::any_open(s))
-    .then(|| key(s, Tool::Browser));
-    for (key, view) in panel.browsers.clone() {
-        let covered = showing.as_deref() != Some(key.as_str());
+        && !super::header_tools::any_open(s);
+    let current = panel.browsers.get(&key(s, Tool::Browser));
+    for view in panel.browsers.values() {
+        let covered = !visible || current != Some(view);
         view.update(cx, |browser, _| browser.cover(covered));
     }
 }
@@ -724,7 +739,7 @@ fn cover_browsers(s: &Shell, cx: &mut Context<Shell>) {
 /// Devices follows the same settled, uncovered native-view rule as Browser.
 pub(super) fn devices_visible(s: &Shell) -> bool {
     s.features.read::<Panel>().is_some_and(|panel| {
-        panel.current() == Tool::Devices
+        (panel.current() == Tool::Devices || panel.lower == Some(Tool::Devices))
             && panel.motion.is_open()
             && !panel.motion.value().1
             && !s.palette
@@ -739,7 +754,7 @@ fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<
     if index >= panel.tabs.len() {
         return;
     }
-    let was_active = index == panel.active;
+    let was_active = panel.tabs.get(index) == Some(&panel.selected);
     panel.tabs.remove(index);
     if index < panel.active || (was_active && panel.active == panel.tabs.len()) {
         panel.active = panel.active.saturating_sub(1);
@@ -747,12 +762,18 @@ fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<
     if was_active {
         panel.content = Transition::new(200);
         panel.content.set(true);
-        let tool = panel.current();
+        let tool = panel
+            .tabs
+            .get(panel.active)
+            .copied()
+            .unwrap_or(Tool::Launcher);
+        panel.selected = tool;
         if tool != Tool::Launcher {
             show(s, tool, window, cx);
             return;
         }
     }
+    layout::save(s);
     cx.notify();
 }
 
@@ -803,88 +824,8 @@ fn placeholder(tool: Tool) -> impl IntoElement {
         )
 }
 
-/// The empty strip's tool list: every desktop panel tool, in its groups.
-fn launcher(cx: &mut Context<Shell>) -> impl IntoElement {
-    div()
-        .id("panel-launcher")
-        .size_full()
-        .overflow_y_scroll()
-        .flex()
-        .flex_col()
-        .justify_center()
-        .px(px(28.))
-        .py(px(16.))
-        .gap(px(6.))
-        .children(
-            Tool::GROUPS
-                .iter()
-                .flat_map(|(_, tools)| tools.iter().copied())
-                .map(|tool| {
-                    div()
-                        .id(("panel-tool", tool as usize))
-                        .debug_selector(move || {
-                            format!("panel-tool-{}", tool.label().to_lowercase())
-                        })
-                        .flex()
-                        .items_center()
-                        .gap(px(12.))
-                        .px(px(12.))
-                        .py(px(10.))
-                        .rounded(px(12.))
-                        .border_1()
-                        .border_color(theme().border)
-                        .cursor_pointer()
-                        .hover(|card| card.bg(theme().hover))
-                        .child(
-                            div()
-                                .size(px(30.))
-                                .flex_shrink_0()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(8.))
-                                .border_1()
-                                .border_color(theme().border)
-                                .bg(theme().hover)
-                                .child(crate::icon::stroke(
-                                    tool.icon(),
-                                    theme().text_secondary,
-                                    15.,
-                                    1.6,
-                                )),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .flex_1()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(6.))
-                                        .text_size(px(13.))
-                                        .text_color(theme().text)
-                                        .child(tool.label())
-                                        .when(!tool.ready(), |row| row.child(soon())),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(11.))
-                                        .text_color(theme().text_muted)
-                                        .overflow_hidden()
-                                        .whitespace_nowrap()
-                                        .text_ellipsis()
-                                        .child(tool.description()),
-                                ),
-                        )
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.capture(window, cx);
-                            show(this, tool, window, cx);
-                        }))
-                }),
-        )
+fn launcher(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
+    chrome::launcher(s, cx)
 }
 
 /// Inbox tabs saved before the panel existed move into the panel.
@@ -909,418 +850,15 @@ fn move_inbox_tabs(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
     }
 }
 
-/// RightPanelMorphButton: 30px wide; the panel glyph while closed, columns while open.
-pub(super) fn toggle_button(open: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
-    super::header::pill(
-        "header-right-panel",
-        if open {
-            "Close panel  ⌘⌥B"
-        } else {
-            "Open O8 panel  ⌘⌥B"
-        },
-        true,
-    )
-    .w(px(30.))
-    .child(crate::icon::stroke(
-        if open { COLUMNS } else { PANEL },
-        theme().text_secondary,
-        16.,
-        1.8,
-    ))
-    .on_click(cx.listener(|this, _, window, cx| {
-        this.capture(window, cx);
-        toggle(this, window, cx);
-    }))
-}
-
-/// "Soon" beside a tool o8 next has not built yet.
-fn soon() -> impl IntoElement {
-    div()
-        .px(px(5.))
-        .rounded(px(4.))
-        .bg(theme().hover)
-        .text_size(px(10.))
-        .text_color(theme().text_muted)
-        .child("Soon")
-}
-
-/// One tab in the panel strip (RightPanelTab): 24px, at most 144px wide, its
-/// glyph turning into a close mark while the tab is hovered.
-fn tab_pill(
-    index: usize,
-    tool: Tool,
-    active: bool,
-    scroll: &super::tab_scroll::Strip,
-    cx: &mut Context<Shell>,
-) -> impl IntoElement {
-    let group = SharedString::from(format!("panel-tab-{index}"));
-    let label = tool.label();
-    div()
-        .id(("panel-tab", index))
-        .relative()
-        .when(active, |pill| pill.child(scroll.probe()))
-        .debug_selector(move || {
-            if active {
-                "panel-tab".to_string()
-            } else {
-                format!("panel-tab-{}", tool.slug())
-            }
-        })
-        .group(group.clone())
-        .mt(px(1.3))
-        .h(px(24.))
-        .max_w(px(144.))
-        .flex_shrink_0()
-        .pl(px(6.))
-        .pr(px(8.))
-        .flex()
-        .items_center()
-        .gap(px(2.))
-        .rounded(px(6.))
-        .text_size(px(12.))
-        .cursor_pointer()
-        .when(active, |pill| {
-            pill.bg(theme().selection).text_color(theme().text)
-        })
-        .when(!active, |pill| {
-            pill.text_color(theme().text_muted)
-                .hover(|pill| pill.bg(theme().hover).text_color(theme().text))
-        })
-        .child(
-            div()
-                .id(("panel-tab-close", index))
-                .debug_selector(move || format!("panel-tab-close-{}", tool.slug()))
-                .relative()
-                .size(px(16.))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(4.))
-                .hover(|close| close.bg(theme().hover))
-                .child(
-                    div()
-                        .absolute()
-                        .group_hover(group.clone(), |icon| icon.opacity(0.))
-                        .child(crate::icon::stroke(
-                            tool.icon(),
-                            if active {
-                                theme().text
-                            } else {
-                                theme().text_muted
-                            },
-                            12.,
-                            1.8,
-                        )),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .opacity(0.)
-                        .group_hover(group, |mark| mark.opacity(1.))
-                        .child(crate::icon::stroke(CLOSE, theme().text, 12., 2.)),
-                )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    cx.stop_propagation();
-                    close_tab(this, index, window, cx);
-                })),
-        )
-        .child(
-            div()
-                .min_w_0()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(label),
-        )
-        .on_click(cx.listener(move |this, _, window, cx| {
-            this.capture(window, cx);
-            show(this, tool, window, cx);
-        }))
-        .on_drag(Dragged { index, tool }, |dragged, _, _, cx| {
-            cx.new(|_| dragged.clone())
-        })
-        .drag_over::<Dragged>(|pill, _, _, _| pill.bg(theme().hover))
-        .on_drop(cx.listener(move |this, dragged: &Dragged, _, cx| {
-            let panel = this.features.get::<Panel>();
-            if dragged.index < panel.tabs.len() && dragged.index != index {
-                let active = panel.current();
-                let moved = panel.tabs.remove(dragged.index);
-                panel.tabs.insert(index.min(panel.tabs.len()), moved);
-                panel.active = panel
-                    .tabs
-                    .iter()
-                    .position(|open| *open == active)
-                    .unwrap_or(0);
-                cx.notify();
-            }
-        }))
-}
-
-/// The "+" menu: every desktop panel tool in its group; picking one adds it
-/// as a tab (or focuses it when it is open already).
-fn add_menu(
-    appear: f32,
-    browser: Option<Entity<crate::browser_panel::BrowserPanel>>,
-    cx: &mut Context<Shell>,
-) -> impl IntoElement {
-    let rows = Tool::GROUPS
-        .iter()
-        .enumerate()
-        .map(|(group_index, (name, tools))| {
-            div()
-                .flex()
-                .flex_col()
-                .when(group_index > 0, |group| {
-                    group.child(div().my(px(4.)).h(px(1.)).bg(theme().border))
-                })
-                .child(
-                    div()
-                        .px(px(8.))
-                        .pt(px(4.))
-                        .pb(px(2.))
-                        .text_size(px(11.))
-                        .text_color(theme().text_muted)
-                        .child(*name),
-                )
-                .children(tools.iter().copied().map(|tool| {
-                    div()
-                        .id(SharedString::from(format!("panel-add-{}", tool.slug())))
-                        .debug_selector(move || format!("panel-add-{}", tool.slug()))
-                        .h(px(30.))
-                        .px(px(8.))
-                        .flex()
-                        .items_center()
-                        .gap(px(10.))
-                        .rounded(px(6.))
-                        .text_size(px(13.))
-                        .text_color(theme().text)
-                        .cursor_pointer()
-                        .hover(|row| row.bg(theme().hover))
-                        .child(crate::icon::stroke(
-                            tool.icon(),
-                            theme().text_secondary,
-                            14.,
-                            1.6,
-                        ))
-                        .child(div().flex_1().child(tool.label()))
-                        .when(!tool.ready(), |row| row.child(soon()))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.capture(window, cx);
-                            show(this, tool, window, cx);
-                        }))
-                }))
-        });
-    div()
-        .absolute()
-        .top(px(28.))
-        .left(px(0.))
-        .child(
-            gpui::deferred(
-                gpui::anchored()
-                    .position(gpui::point(px(0.), px(0.)))
-                    .child(
-                        div()
-                            .id("panel-add-backdrop")
-                            .w(px(100_000.))
-                            .h(px(100_000.))
-                            .on_mouse_down(
-                                gpui::MouseButton::Left,
-                                cx.listener(|this, _, _, cx| {
-                                    this.features.get::<Panel>().menu = None;
-                                    cx.notify();
-                                }),
-                            ),
-                    ),
-            )
-            .with_priority(1),
-        )
-        .child(
-            gpui::deferred(
-                gpui::anchored()
-                    .anchor(gpui::Corner::TopLeft)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
-                        div()
-                            .id("panel-add-menu")
-                            .debug_selector(|| "panel-add-menu".into())
-                            .occlude()
-                            .w(px(232.))
-                            .p(px(4.))
-                            .opacity(appear)
-                            .relative()
-                            .top(px(-4. * (1. - appear)))
-                            .rounded(px(10.))
-                            .bg(crate::theme::popover_background())
-                            .border_1()
-                            .border_color(theme().border)
-                            .shadow_lg()
-                            .children(browser.map(|browser| {
-                                browser_header::new_page_item(
-                                    browser,
-                                    |s, _| s.features.get::<Panel>().menu = None,
-                                    cx,
-                                )
-                            }))
-                            .children(rows),
-                    ),
-            )
-            .with_priority(2),
-        )
-}
-
-/// The panel column's own header strip: its tabs and the "+" opener, then
-/// the close toggle at the far right. Clipped to the column's travelling width.
-pub(super) fn header(
+pub(super) fn toggle_button(
     s: &Shell,
-    full: f32,
-    shown: f32,
+    open: bool,
     cx: &mut Context<Shell>,
-) -> impl IntoElement {
-    let panel = s.features.read::<Panel>();
-    let tabs = panel.map(|panel| panel.tabs.clone()).unwrap_or_default();
-    let active = panel.map_or(0, |panel| panel.active);
-    let travel = panel.map_or(0., |panel| panel.motion.value().0);
-    let scroll = panel.map(|panel| panel.scroll.clone()).unwrap_or_default();
-    let selected = panel.map(|panel| format!("{:?}", panel.current()));
-    let mut pills = vec![];
-    for (index, tool) in tabs.iter().enumerate() {
-        // Classic excludes Browser from the utility strip; pages belong only to its active state.
-        if (*tool == Tool::Browser && index != active)
-            || (tabs.get(active) == Some(&Tool::Browser) && *tool != Tool::Browser)
-        {
-            continue;
-        }
-        if *tool == Tool::Browser
-            && let Some(view) = panel.and_then(|panel| panel.browsers.get(&key(s, Tool::Browser)))
-        {
-            let pages = view.update(cx, |browser, cx| browser.page_strip(cx));
-            pills.push(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .min_w_0()
-                    .child(pages)
-                    .child(browser_header::launcher(
-                        |s, window, cx| {
-                            let panel = s.features.get::<Panel>();
-                            panel.active = panel.tabs.len();
-                            show(s, Tool::Launcher, window, cx);
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    ))
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(|s, _, window, cx| show(s, Tool::Browser, window, cx)),
-                    )
-                    .into_any_element(),
-            );
-        } else {
-            pills.push(tab_pill(index, *tool, index == active, &scroll, cx).into_any_element());
-        }
-    }
-    let browser = panel
-        .filter(|p| p.current() == Tool::Browser)
-        .and_then(|p| p.browsers.get(&key(s, Tool::Browser)))
-        .cloned();
-    let (opener_icon, opener_size, opener_weight, opener_label) = if browser.is_some() {
-        (browser_header::MORE, 16., 3., "More panel views")
-    } else {
-        (PLUS, 14., 2., "Add panel tool")
-    };
-    let menu = panel
-        .and_then(|panel| panel.menu)
-        .map(|at| crate::motion::ease_out((at.elapsed().as_secs_f32() / 0.14).min(1.)));
-    div()
-        .w(px(shown))
-        .h_full()
-        .flex_shrink_0()
-        .overflow_hidden()
-        .child(
-            div()
-                .w(px(full))
-                .h_full()
-                .flex()
-                .items_center()
-                .gap(px(4.))
-                .pl(px(8.))
-                .pr(px(8.))
-                .opacity(travel)
-                .child(super::tab_scroll::wrap(
-                    div()
-                        .id("panel-tabs")
-                        .debug_selector(|| "panel-tabs".into())
-                        .w_full()
-                        .min_w_0()
-                        .h_full()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .when(tabs.is_empty(), |strip| {
-                            strip.child(
-                                div()
-                                    .id("panel-tab")
-                                    .debug_selector(|| "panel-tab".into())
-                                    .mt(px(1.3))
-                                    .h(px(24.))
-                                    .px(px(8.))
-                                    .flex()
-                                    .items_center()
-                                    .rounded(px(6.))
-                                    .bg(theme().selection)
-                                    .text_size(px(12.))
-                                    .text_color(theme().text)
-                                    .child(Tool::Launcher.label()),
-                            )
-                        })
-                        .children(pills)
-                        .child(
-                            div()
-                                .relative()
-                                .mt(px(1.3))
-                                .child(
-                                    super::header::icon_button(
-                                        "panel-new-tab",
-                                        opener_icon,
-                                        opener_size,
-                                        opener_weight,
-                                        // The tooltip would sit over the open menu.
-                                        if menu.is_some() { "" } else { opener_label },
-                                        true,
-                                    )
-                                    .when(browser.is_some(), |button| {
-                                        browser_header::more(button, cx)
-                                    })
-                                    .when(menu.is_some(), |button| button.bg(theme().hover))
-                                    .on_click(cx.listener(
-                                        |this, _, window, cx| {
-                                            this.capture(window, cx);
-                                            let panel = this.features.get::<Panel>();
-                                            panel.menu = match panel.menu {
-                                                Some(_) => None,
-                                                None => Some(std::time::Instant::now()),
-                                            };
-                                            window.refresh();
-                                            cx.notify();
-                                        },
-                                    )),
-                                )
-                                .children(menu.map(|appear| add_menu(appear, browser.clone(), cx))),
-                        ),
-                    scroll,
-                    selected,
-                    "panel-tabs",
-                    if s.system_glass {
-                        crate::theme::veil_color(crate::theme::GLASS_VEIL[0].1)
-                    } else {
-                        theme().background
-                    },
-                    cx,
-                ))
-                .child(div().mt(px(1.3)).child(toggle_button(true, cx))),
-        )
+) -> gpui::Stateful<gpui::Div> {
+    chrome::toggle(s, open, cx)
+}
+pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) -> AnyElement {
+    chrome::header(s, full, shown, cx)
 }
 
 const PANEL: &str = "M6 4h12a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z M16 4v16 M10 9l3 3-3 3";

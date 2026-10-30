@@ -52,6 +52,13 @@ fn symon(s: &mut Shell, data: &Value, window: &mut Window, cx: &mut Context<Shel
     let surface = data["surface"].as_str().unwrap_or("");
     match surface {
         "settings" => s.execute(Command::Settings, window, cx),
+        "prs" if data["number"].as_u64().is_some() => super::right_panel::open_pr(
+            s,
+            data["repo"].as_str().unwrap_or("").to_owned(),
+            data["number"].as_u64().unwrap(),
+            window,
+            cx,
+        ),
         "prs" => {
             if !s.open_registered("Pull requests", window, cx) {
                 s.notice = "Pull requests are not in o8 next yet.".into();

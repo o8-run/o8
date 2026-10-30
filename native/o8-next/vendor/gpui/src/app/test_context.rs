@@ -815,6 +815,11 @@ impl VisualTestContext {
         self.update(|window, _| window.rendered_frame.scene.paths.len())
     }
 
+    /// Effective opacity from the last paint, including the element's ancestors.
+    pub fn debug_opacity(&mut self, selector: &str) -> Option<f32> {
+        self.update(|window, _| window.rendered_frame.debug_opacities.get(selector).copied())
+    }
+
     /// Draw an element to the window. Useful for simulating events or actions
     pub fn draw<E>(
         &mut self,

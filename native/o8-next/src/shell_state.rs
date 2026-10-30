@@ -29,6 +29,31 @@ impl std::ops::DerefMut for Workspace {
         &mut self.surfaces.session
     }
 }
+/// Classic right-panel preferences; pane contents and credentials stay elsewhere.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PanelState {
+    pub visible: bool,
+    pub primary: String,
+    pub utility_tabs: BTreeMap<String, Vec<String>>,
+    pub split: bool,
+    pub secondary: String,
+    pub ratio: f32,
+    pub tool_widths: BTreeMap<String, f32>,
+}
+impl Default for PanelState {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            primary: "launcher".into(),
+            utility_tabs: BTreeMap::new(),
+            split: false,
+            secondary: "o8-md".into(),
+            ratio: 50.,
+            tool_widths: BTreeMap::new(),
+        }
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 pub struct State {
     pub version: u32,
@@ -41,6 +66,8 @@ pub struct State {
     /// The right panel width the person dragged; absent keeps the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub right_panel_width: Option<f32>,
+    #[serde(default)]
+    pub right_panel: PanelState,
     /// Names the person gave tabs, by tab key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tab_labels: BTreeMap<String, String>,
@@ -67,6 +94,7 @@ impl Default for State {
             workspaces: BTreeMap::new(),
             sidebar_width: None,
             right_panel_width: None,
+            right_panel: Default::default(),
             tab_labels: BTreeMap::new(),
             quick_doc_pins: BTreeMap::new(),
             browser_pages: BTreeMap::new(),
@@ -119,6 +147,19 @@ impl State {
             || y.abs() > 100_000.
             || !(600. ..=16_384.).contains(&w)
             || !(400. ..=16_384.).contains(&h)
+            || !self.right_panel.ratio.is_finite()
+            || !(25. ..=75.).contains(&self.right_panel.ratio)
+            || self.right_panel.utility_tabs.len() > 500
+            || self
+                .right_panel
+                .utility_tabs
+                .values()
+                .any(|tabs| tabs.len() > 16)
+            || self
+                .right_panel
+                .tool_widths
+                .values()
+                .any(|w| !w.is_finite() || !(0. ..=1200.).contains(w))
             || self.workspaces.len() > 500
             || self.quick_doc_pins.len() > 500
             || self
