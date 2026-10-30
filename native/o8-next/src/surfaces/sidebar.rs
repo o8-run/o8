@@ -163,6 +163,9 @@ pub(super) const REGISTRATION: Registration = Registration {
             .flex()
             .flex_1()
             .min_h_0()
+            // This row sits inside the panel and resize row; its automatic
+            // minimum width must not widen the workspace past the window.
+            .min_w_0()
             .child(
                 gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
                     gpui::StyleRefinement::default()
