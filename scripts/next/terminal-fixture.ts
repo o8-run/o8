@@ -30,7 +30,9 @@ export async function startTerminalFixture(dataDir: string, repo: string, apiPor
     await exited; clearTimeout(timer);
   };
   try {
-    const deadline = Date.now() + 20_000;
+    // This budget covers a cold production WS import on a loaded test host,
+    // before a native client or any PTY/input latency measurement starts.
+    const deadline = Date.now() + 60_000;
     while (true) {
       try { if ((await fetch(`http://127.0.0.1:${port}/health`)).ok) break; } catch { /* starting */ }
       if (Date.now() > deadline || child.exitCode !== null) throw new Error('Terminal fixture did not start');
