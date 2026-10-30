@@ -215,14 +215,13 @@ impl PullRequests {
                             s.open(&repo, number, cx);
                         }
                     }
-                    Ok(_) => {
-                        s.pending = None;
-                        s.error = "Pull requests could not be loaded. Try again.".into();
-                    }
-                    Err(error) => {
-                        s.pending = None;
-                        s.error = error;
-                    }
+                    Ok(_) => s.error = "Pull requests could not be loaded. Try again.".into(),
+                    Err(error) => s.error = error,
+                }
+                // Without a list, still show the requested pull request by its
+                // own repository, as classic PrPanel opens by repo and number.
+                if let Some((repo, number)) = s.pending.take() {
+                    s.select_in(number, repo, cx);
                 }
                 s.changed(cx);
             });
@@ -232,10 +231,13 @@ impl PullRequests {
     }
     /// Activity's "Open PR details": select a pull request of this list's
     /// repository, after the first page loads. Another repository's pull
-    /// request opens on GitHub, since this list reads one repository.
+    /// request opens on GitHub, since this list reads one repository. With
+    /// no list, it opens by its own repository.
     pub fn open(&mut self, repo: &str, number: u64, cx: &mut Context<Self>) {
-        if self.page.is_null() {
+        if self.page.is_null() && self.loading {
             self.pending = Some((repo.to_owned(), number));
+        } else if self.page.is_null() {
+            self.select_in(number, repo.to_owned(), cx);
         } else if string(&self.page, "repo").eq_ignore_ascii_case(repo) {
             self.select(number, cx);
         } else {
@@ -243,6 +245,10 @@ impl PullRequests {
         }
     }
     pub fn select(&mut self, number: u64, cx: &mut Context<Self>) {
+        let repo = string(&self.page, "repo").to_owned();
+        self.select_in(number, repo, cx);
+    }
+    fn select_in(&mut self, number: u64, repo: String, cx: &mut Context<Self>) {
         if self.selected != Some(number) {
             self.detail = Value::Null;
             self.review_head.clear();
@@ -259,7 +265,6 @@ impl PullRequests {
         self.detail_epoch += 1;
         let epoch = self.detail_epoch;
         let client = self.client.clone();
-        let repo = string(&self.page, "repo").to_owned();
         let task = cx.background_executor().spawn(async move {
             client.get::<Value>(&format!("/api/panel/prs/{number}"), &[("repo", &repo)])
         });

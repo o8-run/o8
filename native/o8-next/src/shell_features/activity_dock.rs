@@ -1382,7 +1382,7 @@ fn branch(data: &Data, cx: &mut Context<Shell>) -> impl IntoElement {
                         }))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.capture(window, cx);
-                            this.execute(Command::PullRequests, window, cx);
+                            this.open_registered("Pull requests", window, cx);
                         })),
                 )
                 .child(

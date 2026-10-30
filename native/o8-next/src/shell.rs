@@ -323,6 +323,24 @@ impl Shell {
             })
             .collect()
     }
+    /// Opens a registered surface by its tab label, for callers that must keep
+    /// compiling when that registration is removed. False when it is absent.
+    pub(super) fn open_registered(
+        &mut self,
+        tab_label: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let command = registrations()
+            .iter()
+            .find(|registration| registration.tab_label == tab_label)
+            .and_then(|registration| registration.command)
+            .map(|(_, command)| command());
+        command.is_some_and(|command| {
+            self.execute(command, window, cx);
+            true
+        })
+    }
     /// Opens a GitHub link in the surface that claims it, else in the browser.
     pub(super) fn open_link(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
         if !registrations()

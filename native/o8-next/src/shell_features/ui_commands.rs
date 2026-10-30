@@ -52,7 +52,11 @@ fn symon(s: &mut Shell, data: &Value, window: &mut Window, cx: &mut Context<Shel
     let surface = data["surface"].as_str().unwrap_or("");
     match surface {
         "settings" => s.execute(Command::Settings, window, cx),
-        "prs" => s.execute(Command::PullRequests, window, cx),
+        "prs" => {
+            if !s.open_registered("Pull requests", window, cx) {
+                s.notice = "Pull requests are not in o8 next yet.".into();
+            }
+        }
         "orchestrator_draft" => {
             if let Some(text) = data["text"].as_str() {
                 draft(s, text, window, cx);
