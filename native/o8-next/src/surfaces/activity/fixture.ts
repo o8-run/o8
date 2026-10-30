@@ -6,7 +6,8 @@ import { getSqlite } from '../../../../../src/lib/db';
 import { listProblemDossiers } from '../../../../../src/lib/problems/dossiers';
 
 
-export async function install({ repo }: SurfaceContext): Promise<SurfaceRoutes> {
+export async function install(context: SurfaceContext): Promise<SurfaceRoutes> {
+  const { repo } = context;
   const { listRecordedInboxItems } = await import('../../../../../src/lib/supervisor/inbox');
   listRecordedInboxItems();
   listProblemDossiers({ includeSuppressed: true });
@@ -36,7 +37,9 @@ export async function install({ repo }: SurfaceContext): Promise<SurfaceRoutes> 
   let mode = 'ready';
   let slowed = false;
   const bodies: unknown[] = [];
+  const proposalFixture = await (await import('./proposal_fixture')).installProposals(context);
   return { priority: -1, admit: () => 200, routes: {
+    ...proposalFixture.routes,
     'GET /api/panel/problem-dossiers': async request => mode === 'error'
       ? Response.json({ error: 'Owned dossier read unavailable' }, { status: 503 }) : route.GET(request),
     'POST /api/panel/problem-dossiers': async request => {

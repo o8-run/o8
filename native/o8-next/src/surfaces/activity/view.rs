@@ -1144,11 +1144,13 @@ impl Render for ActivityPane {
             .id("activity-list")
             .w_full()
             .min_w(px(0.))
-            .debug_selector(||"activity-list".into())
+            .debug_selector(|| "activity-list".into())
             .track_scroll(&self.scroll)
-            .on_scroll_wheel(cx.listener(|_,_,_,cx| {
-                let view=cx.weak_entity();
-                cx.defer(move|cx| {let _=view.update(cx,|s,cx|s.remember_view(cx));});
+            .on_scroll_wheel(cx.listener(|_, _, _, cx| {
+                let view = cx.weak_entity();
+                cx.defer(move |cx| {
+                    let _ = view.update(cx, |s, cx| s.remember_view(cx));
+                });
             }))
             .flex_1()
             .min_h_0()
@@ -1158,7 +1160,9 @@ impl Render for ActivityPane {
         if let Some(dossiers) = self.dossiers(cx) {
             list = list.child(dossiers);
         }
-        if let Some(proposals)=self.proposal_drawer(cx){list=list.child(proposals);}
+        if let Some(proposals) = self.proposal_drawer(cx) {
+            list = list.child(proposals);
+        }
         let status = || {
             div()
                 .flex()
@@ -1401,10 +1405,10 @@ impl Render for ActivityPane {
 #[path = "packet_view.rs"]
 mod packet_view;
 
-#[path = "packet_controls.rs"]
-mod packet_controls;
 #[path = "dossiers_view.rs"]
 mod dossiers;
+#[path = "packet_controls.rs"]
+mod packet_controls;
 
-#[path="proposals_view.rs"]
+#[path = "proposals_view.rs"]
 mod proposals;

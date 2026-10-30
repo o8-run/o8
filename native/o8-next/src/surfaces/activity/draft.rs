@@ -8,10 +8,12 @@ pub(super) fn open(
     cx: &mut Context<Shell>,
 ) {
     let sessions = s
-        .workspace_sessions()
-        .into_iter()
+        .sessions
+        .iter()
         .filter(|session| {
             !session.packet_state
+                && session.packet_header.is_none()
+                && session.backend.is_some()
                 && session.tmux_session.is_none()
                 && session.repo_path.as_deref() == Some(repo)
         })

@@ -118,7 +118,10 @@ pub struct ActivityPane {
 }
 impl EventEmitter<ActivityEvent> for ActivityPane {}
 impl ActivityPane {
-    pub fn new(
+    pub fn new(client: Client, workspace: String, cx: &mut Context<Self>) -> Self {
+        Self::new_with_preferences(client, workspace, Default::default(), false, vec![], cx)
+    }
+    pub(crate) fn new_with_preferences(
         client: Client,
         workspace: String,
         saved: preferences::Saved,
@@ -258,10 +261,14 @@ impl ActivityPane {
                 if let Some(row) = this
                     .rows
                     .iter()
-                    .find(|r| r.kind == "packet" && Some(r.key()) == this.expanded)
+                    .find(|r| Some(r.key()) == this.expanded)
                     .cloned()
                 {
-                    this.packet_read(row, false, cx);
+                    if row.kind == "packet" {
+                        this.packet_read(row, false, cx);
+                    } else {
+                        this.detail(row, false, cx);
+                    }
                 }
                 this.changed(cx);
             });
@@ -458,7 +465,7 @@ impl ActivityPane {
                 if let Some(y)=self.restore_y {self.scroll.set_offset(gpui::point(gpui::px(0.),gpui::px(y)));} self.generation += 1; self.loading = false;
                 self.packet.reads.clear(); self.packet.editor = None; self.rows.clear(); self.errors.clear(); self.details.clear(); self.keyboard = None; self.load(cx);
             }
-            Action::Refresh => { self.packet.reads.clear(); self.load(cx); self.load_dossiers(cx); },
+            Action::Refresh => { self.packet.reads.clear(); self.load(cx); self.load_dossiers(cx); self.load_proposals(cx); },
             Action::Dossiers => self.decisions.open = !self.decisions.open,
             Action::DossierHistory(id) => self.decisions.expanded = if self.decisions.expanded.as_ref() == Some(&id) { None } else { Some(id) },
             Action::DossierDecision(id, action) => self.dossier_decision(id, action, cx),
