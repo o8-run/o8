@@ -87,12 +87,10 @@ impl Spec {
                             .overflow_hidden()
                             .flex()
                             .children((0..=60).map(|h| {
-                                div().h_full().flex_1().bg(gpui::hsla(
-                                    h as f32 / 60.,
-                                    0.8,
-                                    0.55,
-                                    1.,
-                                ))
+                                div()
+                                    .h_full()
+                                    .flex_1()
+                                    .bg(crate::theme::accent_hue(h as f32 / 60.))
                             })),
                     )
                     .when_some(hue, |d, h| {

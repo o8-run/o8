@@ -153,7 +153,7 @@ impl Editor {
                     )
                     .child(
                         div()
-                            .font_family("Caveat")
+                            .font_family(theme().font_annotation)
                             .text_size(px(18.))
                             .line_height(px(20.7))
                             .text_color(ink)
@@ -168,7 +168,7 @@ impl Editor {
                         div()
                             .pl(px(12.))
                             .mt(px(3.))
-                            .font_family("Caveat")
+                            .font_family(theme().font_annotation)
                             .text_size(px(16.))
                             .line_height(px(18.4))
                             .text_color(if author == "AI" {

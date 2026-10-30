@@ -85,7 +85,7 @@ fn parse_color(color: &str) -> Option<Rgba> {
     if h > 360 {
         return None;
     }
-    Some(gpui::hsla(h as f32 / 360., 0.8, 0.55, 1.).into())
+    Some(crate::theme::accent_hue(h as f32 / 360.).into())
 }
 #[derive(Clone)]
 pub struct Changed(pub Preferences);

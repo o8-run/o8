@@ -37,6 +37,8 @@ pub struct Theme {
     pub terminal_ansi: [u32; 16],
     pub font_ui: &'static str,
     pub font_mono: &'static str,
+    /// The handwriting of review notes, as in classic's notes rail.
+    pub font_annotation: &'static str,
 }
 
 // This is the only appearance selection. A future system-appearance hook can
@@ -162,6 +164,11 @@ pub fn popover_background() -> Rgba {
 // --t-brand-orange in src/lib/theme/registry.ts.
 pub fn brand_orange() -> Rgba {
     rgb(0xff5a1f)
+}
+/// A hue at the saturation and lightness of the Files accent setting,
+/// hsl(h, 80%, 55%); `turn` runs from 0 to 1 around the wheel.
+pub fn accent_hue(turn: f32) -> gpui::Hsla {
+    gpui::hsla(turn, 0.8, 0.55, 1.)
 }
 /// The mark drawn on an accent fill, such as the trace's completed check.
 pub fn on_accent() -> Rgba {
@@ -321,6 +328,8 @@ const UI_FONT: &str = if cfg!(target_os = "macos") {
 } else {
     "system-ui"
 };
+// Self-hosted from public/fonts by files_panel/spec.rs.
+const ANNOTATION_FONT: &str = "Caveat";
 const MONO_FONT: &str = if cfg!(target_os = "macos") {
     "Menlo"
 } else if cfg!(target_os = "windows") {
@@ -393,6 +402,7 @@ impl Theme {
                 terminal_ansi: TERMINAL_ANSI,
                 font_ui: UI_FONT,
                 font_mono: MONO_FONT,
+                font_annotation: ANNOTATION_FONT,
             },
             Appearance::Light => Self {
                 background: rgb(0xf5f7fb),
@@ -420,6 +430,7 @@ impl Theme {
                 terminal_ansi: TERMINAL_ANSI,
                 font_ui: UI_FONT,
                 font_mono: MONO_FONT,
+                font_annotation: ANNOTATION_FONT,
             },
         }
     }

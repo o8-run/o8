@@ -311,7 +311,10 @@ fn every_theme_token_resolves_for_both_appearances_and_matches_desktop_css() {
             terminal_ansi,
             font_ui,
             font_mono,
+            font_annotation,
         } = Theme::for_appearance(appearance);
+        // Review notes use the desktop's self-hosted handwriting face.
+        assert!(css.contains(&format!("font-family: '{font_annotation}';")));
         let (selector, hover_selector) = match appearance {
             Appearance::Dark => (
                 ":root.dark-mode, .dark-mode {",
