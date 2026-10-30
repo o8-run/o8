@@ -7,6 +7,7 @@ mod media;
 mod quick_docs;
 mod search;
 mod source;
+mod syntax;
 mod viewer;
 use quick_docs::QuickDocs;
 #[cfg(test)]
@@ -462,9 +463,14 @@ impl FilesPanel {
                 cx.set_global(tests::RenderedMarkdown(markdown.clone()));
                 markdown_view::view(markdown.clone(), self.file_generation, window, cx)
             }
-            File::Loaded { lines, source, .. } => {
-                source.view(lines, self.wrap_lines, self.file_generation, window)
-            }
+            File::Loaded { lines, source, .. } => source.view(
+                lines,
+                &title,
+                self.wrap_lines,
+                self.file_generation,
+                window,
+                cx,
+            ),
             File::Failed(error) => self.file_error(error, cx),
             _ => status("Loading…".into()).into_any_element(),
         };

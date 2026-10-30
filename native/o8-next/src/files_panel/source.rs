@@ -6,22 +6,32 @@ use std::cell::Cell;
 pub(super) struct Source {
     list: ListState,
     width: Cell<Option<Pixels>>,
+    colors: super::syntax::Colors,
 }
 impl Source {
     pub(super) fn new(count: usize) -> Self {
         Self {
             list: ListState::new(count, ListAlignment::Top, px(300.)),
             width: Cell::new(None),
+            colors: super::syntax::Colors::default(),
         }
     }
     pub(super) fn view(
         &self,
         lines: &[SharedString],
+        path: &str,
         wrap: bool,
         generation: u64,
         window: &mut Window,
+        cx: &mut Context<FilesPanel>,
     ) -> gpui::AnyElement {
-        let gutter = (lines.len().max(1).to_string().len() as f32) * 7.5 + 16.;
+        let gutter = ((lines.len().max(1).to_string().len() as f32) * 7.5 + 16.).max(36.);
+        let colors = self.colors.rows(path, lines, cx);
+        #[cfg(test)]
+        cx.set_global(super::tests::source_tests::Painted(
+            vec![],
+            self.colors.failed(),
+        ));
         let width = if wrap {
             px(0.)
         } else {
@@ -63,8 +73,28 @@ impl Source {
             .flex()
             .flex_col()
             .overflow_x_scroll()
+            .when(self.colors.failed(), |view| {
+                view.child(self.colors.notice(cx))
+            })
             .child(
-                list(self.list.clone(), move |i, _, _| {
+                list(self.list.clone(), move |i, _, cx| {
+                    let spans = colors.get(i).cloned().unwrap_or_default();
+                    #[cfg(test)]
+                    cx.global_mut::<super::tests::source_tests::Painted>()
+                        .0
+                        .push((lines[i].to_string(), spans.clone()));
+                    let _ = cx;
+                    let text = gpui::StyledText::new(lines[i].clone()).with_highlights(
+                        spans.into_iter().map(|(range, color)| {
+                            (
+                                range,
+                                gpui::HighlightStyle {
+                                    color: Some(color.into()),
+                                    ..Default::default()
+                                },
+                            )
+                        }),
+                    );
                     div()
                         .w_full()
                         .min_w_0()
@@ -77,9 +107,12 @@ impl Source {
                         .line_height(px(19.))
                         .child(
                             div()
+                                .debug_selector(move || {
+                                    format!("files-source-number-{generation}-{i}")
+                                })
                                 .w(px(gutter))
                                 .flex_shrink_0()
-                                .pr(px(10.))
+                                .pr(px(12.))
                                 .text_align(gpui::TextAlign::Right)
                                 .text_color(theme().text_faint)
                                 .child((i + 1).to_string()),
@@ -88,10 +121,14 @@ impl Source {
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .pr(px(16.))
+                                .ml(px(12.))
+                                .pr(px(12.))
+                                .debug_selector(move || {
+                                    format!("files-source-code-{generation}-{i}")
+                                })
                                 .text_color(theme().text)
                                 .when(!wrap, |text| text.whitespace_nowrap())
-                                .child(lines[i].clone()),
+                                .child(text),
                         )
                         .into_any_element()
                 })
@@ -99,7 +136,7 @@ impl Source {
                 .w_full()
                 .min_w(width)
                 .min_h_0()
-                .py(px(6.)),
+                .py(px(8.)),
             )
             .into_any_element()
     }
