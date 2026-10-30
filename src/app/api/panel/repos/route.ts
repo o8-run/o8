@@ -40,6 +40,8 @@ import type {
   RepoRegistryPostBody,
 } from '@/lib/repos/types';
 import { withRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
+import { projectIconProjection, updateProjectIconSettings } from '@/lib/repos/project-icon-settings';
+import { ProjectIconInputError, type ProjectIconProjection } from '@/lib/repos/project-icon-types';
 
 const execFileAsync = promisify(execFile);
 
@@ -52,8 +54,9 @@ async function pathExists(localPath: string) {
   }
 }
 
-async function appendExistence<T extends { localPath: string }>(repo: T): Promise<T & { exists: boolean }> {
-  return { ...repo, exists: await pathExists(repo.localPath) };
+async function appendExistence<T extends { id: string; localPath: string }>(repo: T): Promise<T & { exists: boolean; icon: ProjectIconProjection }> {
+  const [exists, icon] = await Promise.all([pathExists(repo.localPath), projectIconProjection(repo)]);
+  return { ...repo, exists, icon };
 }
 
 function isWithinRealRoot(root: string, candidate: string) {
@@ -258,6 +261,14 @@ async function handlePOST(request: Request) {
     const action = body.action ?? 'add';
 
     switch (action) {
+      case 'update-icon': {
+        if (body.action !== 'update-icon' || typeof body.id !== 'string' || !body.id) return NextResponse.json({ error: 'id is required.' }, { status: 400 });
+        const id = body.id;
+        const repo = (await listRepos()).find(candidate => candidate.id === id);
+        if (!repo) return NextResponse.json({ error: 'Registered repository not found.' }, { status: 404 });
+        await updateProjectIconSettings(repo, body);
+        return NextResponse.json({ repo: await appendExistence(repo) });
+      }
       case 'validate': {
         if (!('localPath' in body) || !body.localPath?.trim()) {
           return NextResponse.json({ error: 'localPath is required.' }, { status: 400 });
@@ -363,7 +374,7 @@ async function handlePOST(request: Request) {
     }
   } catch (error) {
     console.error('[api] panel/repos failed:', error);
-    if (error instanceof RepoFolderError) {
+    if (error instanceof RepoFolderError || error instanceof ProjectIconInputError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     if (error instanceof KnowledgeSourceWriteError) {

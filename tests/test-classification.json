@@ -912,6 +912,12 @@
       ]
     },
     {
+      "path": "src/lib/repos/project-icon-resolver.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/runtime/actions-owned-surface.test.ts",
       "reasons": [
         "process-signal"
@@ -5792,6 +5798,16 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/project-icons-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path"
       ]
     },
     {
