@@ -22,10 +22,6 @@ async function main() {
       let response: Response;
       if (url.pathname === '/api/panel/repos') {
         response = incoming.method === 'POST' ? await repos.POST(request) : await repos.GET(request);
-      } else if (url.pathname === '/api/panel/repo-icon') {
-        // Lazy import keeps the same fixture runnable against the unmodified base.
-        const route = await import('../../src/app/api/panel/repo-icon/route');
-        response = await route.GET(request);
       } else response = new Response('Not found', { status: 404 });
       outgoing.writeHead(response.status, Object.fromEntries(response.headers));
       outgoing.end(Buffer.from(await response.arrayBuffer()));

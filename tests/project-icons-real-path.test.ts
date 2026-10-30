@@ -6,13 +6,13 @@
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { createFixtureChildLifetime } from './fixtures/fixture-child-lifetime.fixture';
 
-type Icon = { resourceUrl: string | null; faviconPath: string | null; projectIcon: unknown };
+type Icon = { kind: 'image'; path: string; mtimeMs: number } | { kind: 'monogram'; text: string; color: string } | { kind: 'emoji'; emoji: string } | { kind: 'glyph'; name: string; color: string } | null;
 const token = 'project-icon-test-token';
 const lifetime = createFixtureChildLifetime();
 let root: string, data: string, repo: string, origin: string, child: ChildProcess;
@@ -53,11 +53,9 @@ async function icon(): Promise<Icon> {
 async function update(patch: object) {
   return request('/api/panel/repos', { action: 'update-icon', id: fixtureId, ...patch });
 }
-async function image(expected: string) {
-  const projected = await icon(); expect(projected.resourceUrl).toBeTruthy();
-  const response = await request(projected.resourceUrl!); expect(response.status).toBe(200);
-  expect(response.headers.get('content-type')).toContain('image/svg+xml');
-  expect(await response.text()).toContain(`<title>${expected}</title>`);
+async function image(path: string) {
+  const projected = await icon();
+  expect(projected).toEqual({ kind: 'image', path, mtimeMs: statSync(join(repo, path)).mtimeMs });
   return projected;
 }
 
@@ -78,30 +76,30 @@ beforeEach(async () => {
 }, 90_000);
 afterEach(async () => { await lifetime.close(); rmSync(root, { recursive: true, force: true }); });
 
-it('projects explicit, config, ordered well-known and HTML icons through the real routes', async () => {
+it('projects explicit, config, ordered well-known and HTML icons as data through the listing', async () => {
   file('brand/explicit.svg', svg('explicit')); file('brand/config.svg', svg('config'));
   file('t3.json', JSON.stringify({ iconPath: 'brand/config.svg' }));
   file('favicon.svg', svg('well-known')); file('public/favicon.svg', svg('public'));
   file('public/custom.svg', svg('metadata'));
   file('index.html', '<link href="/custom.svg?v=1" rel="icon">');
-  await image('config');
+  await image('brand/config.svg');
   expect((await update({ faviconPath: 'brand/explicit.svg' })).status).toBe(200);
-  await image('explicit');
-  rmSync(join(repo, 'brand/explicit.svg')); await image('config');
-  rmSync(join(repo, 'brand/config.svg')); await image('well-known');
-  rmSync(join(repo, 'favicon.svg')); await image('public');
-  rmSync(join(repo, 'public/favicon.svg')); await image('metadata');
-  rmSync(join(repo, 'public/custom.svg')); expect((await icon()).resourceUrl).toBeNull();
+  await image('brand/explicit.svg');
+  rmSync(join(repo, 'brand/explicit.svg')); await image('brand/config.svg');
+  rmSync(join(repo, 'brand/config.svg')); await image('favicon.svg');
+  rmSync(join(repo, 'favicon.svg')); await image('public/favicon.svg');
+  rmSync(join(repo, 'public/favicon.svg')); await image('public/custom.svg');
+  rmSync(join(repo, 'public/custom.svg')); expect(await icon()).toBeNull();
 });
 
 it('discovers router metadata after the ordered HTML sources', async () => {
   file('src/routes/__root.tsx', "const meta = { rel: 'icon', href: '/brand.svg' };");
-  file('public/brand.svg', svg('router')); await image('router');
+  file('public/brand.svg', svg('router')); await image('public/brand.svg');
 });
 
 it('reads icon links from source documents larger than the image byte cap', async () => {
   file('index.html', `${' '.repeat(1024 * 1024 + 256)}<link rel="icon" href="/brand.svg">`);
-  file('public/brand.svg', svg('large source')); await image('large source');
+  file('public/brand.svg', svg('large source')); await image('public/brand.svg');
 });
 
 it.each([
@@ -109,7 +107,7 @@ it.each([
   ['comments and trailing comma', '{ /* project icon */ "iconPath": "brand/config.svg", // preferred over favicon\n }'],
 ])('accepts T3 configuration with %s before well-known icons', async (_label, config) => {
   file('brand/config.svg', svg('config')); file('favicon.svg', svg('fallback'));
-  file('t3.json', config); await image('config');
+  file('t3.json', config); await image('brand/config.svg');
 });
 
 it('persists separate file and normalized identity overrides across a server restart', async () => {
@@ -117,13 +115,17 @@ it('persists separate file and normalized identity overrides across a server res
   expect((await update({ faviconPath: 'chosen.svg' })).status).toBe(200);
   expect((await update({ projectIcon: { kind: 'monogram', text: ' ａｂ ', color: 'blue' } })).status).toBe(200);
   await stop(); await start();
-  expect(await image('chosen')).toEqual(expect.objectContaining({ faviconPath: 'chosen.svg', projectIcon: { kind: 'monogram', text: 'AB', color: 'blue' } }));
+  expect(await icon()).toEqual({ kind: 'monogram', text: 'AB', color: 'blue' });
   expect((await update({ projectIcon: { kind: 'emoji', emoji: '🌱' } })).status).toBe(200);
-  expect((await icon()).faviconPath).toBe('chosen.svg');
+  expect(await icon()).toEqual({ kind: 'emoji', emoji: '🌱' });
   expect((await update({ projectIcon: { kind: 'lucide', name: 'folder-code', color: 'violet' } })).status).toBe(200);
-  expect((await icon()).projectIcon).toEqual({ kind: 'lucide', name: 'folder-code', color: 'violet' });
+  expect(await icon()).toEqual({ kind: 'glyph', name: 'folder-code', color: 'violet' });
+  await stop(); await start();
+  expect(await icon()).toEqual({ kind: 'glyph', name: 'folder-code', color: 'violet' });
   expect((await update({ projectIcon: null })).status).toBe(200);
-  expect((await icon()).projectIcon).toBeNull();
+  await image('chosen.svg');
+  await stop(); await start();
+  await image('chosen.svg');
   expect(readFileSync(join(data, 'cortex-ide.db')).length).toBeGreaterThan(0);
 });
 
@@ -134,13 +136,13 @@ it('rejects outside override paths and symlinks without changing the saved icon'
   symlinkSync(outside, join(repo, 'escape.svg'));
   for (const faviconPath of [outside, '../outside.svg', 'escape.svg']) {
     expect((await update({ faviconPath })).status).toBe(400);
-    expect((await icon()).faviconPath).toBe('chosen.svg');
+    await image('chosen.svg');
   }
   // Discovery uses the same realpath boundary, including configured candidates.
   expect((await update({ faviconPath: null })).status).toBe(200);
   file('t3.json', JSON.stringify({ iconPath: 'escape.svg' }));
   symlinkSync(outside, join(repo, 'favicon.svg'));
-  expect((await icon()).resourceUrl).toBeNull();
+  expect(await icon()).toBeNull();
 });
 
 it('refuses non-images and files larger than 1 MiB, and validates identity input', async () => {
@@ -149,13 +151,20 @@ it('refuses non-images and files larger than 1 MiB, and validates identity input
   for (const projectIcon of [{ kind: 'monogram', text: 'ABC', color: 'blue' }, { kind: 'lucide', name: '../bad', color: 'blue' }, { kind: 'emoji', emoji: '' }]) {
     expect((await update({ projectIcon })).status).toBe(400);
   }
-  expect((await icon()).resourceUrl).toBeNull();
+  expect(await icon()).toBeNull();
 });
 
-it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('recovers from an image read failure without retaining the failure', async () => {
-  const selected = file('favicon.svg', svg('recovered')); const selectedIcon = await image('recovered');
-  chmodSync(selected, 0);
-  try { expect((await request(selectedIcon.resourceUrl!)).status).toBeGreaterThanOrEqual(400); }
-  finally { chmodSync(selected, 0o600); }
-  await image('recovered');
+it('projects a canonical repo-relative image path and fresh mtime without a resource URL', async () => {
+  const selected = file('brand/chosen.svg', svg('chosen'));
+  symlinkSync(selected, join(repo, 'alias.svg'));
+  utimesSync(selected, 1000, 1000);
+  expect((await update({ faviconPath: join(repo, 'alias.svg') })).status).toBe(200);
+  expect(await image('brand/chosen.svg')).toEqual({ kind: 'image', path: 'brand/chosen.svg', mtimeMs: 1_000_000 });
+  utimesSync(selected, 2000, 2000);
+  expect(await image('brand/chosen.svg')).toEqual({ kind: 'image', path: 'brand/chosen.svg', mtimeMs: 2_000_000 });
+});
+
+it('projects null for an empty repository without advertising an image endpoint', async () => {
+  expect(await icon()).toBeNull();
+  expect((await request(`/api/panel/repo-icon?id=${fixtureId}`)).status).toBe(404);
 });

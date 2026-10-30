@@ -51,8 +51,12 @@ export async function updateProjectIconSettings(repo: RepoRegistryEntry, patch: 
 }
 export async function projectIconProjection(repo: { id: string; localPath: string }): Promise<ProjectIconProjection> {
   const settings = getProjectIconSettings(repo.id);
+  if (settings.projectIcon) {
+    const icon = settings.projectIcon;
+    return icon.kind === 'lucide' ? { ...icon, kind: 'glyph' } : icon;
+  }
   // Resolution failures are not negative cache entries. Keep the sidebar usable
   // and retry on the next listing, with the existing monogram as the fallback.
   const resource = await projectIconResource(repo.localPath, settings.faviconPath).catch(() => null);
-  return { ...settings, resourceUrl: resource ? `/api/panel/repo-icon?id=${encodeURIComponent(repo.id)}&v=${encodeURIComponent(resource.version)}` : null };
+  return resource ? { kind: 'image', ...resource } : null;
 }

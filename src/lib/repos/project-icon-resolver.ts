@@ -165,7 +165,7 @@ export async function projectIconResource(cwd: string, faviconPath: string | nul
   if (!selected) return null;
   const root = await realpath(cwd);
   const candidate = await iconFile(root, selected);
-  return candidate ? { path: selected, version: `${candidate.info.mtimeMs}-${candidate.info.size}` } : null;
+  return candidate ? { path: relative(root, candidate.canonical).split(sep).join('/'), mtimeMs: candidate.info.mtimeMs } : null;
 }
 export async function readProjectIcon(cwd: string, faviconPath: string | null) {
   const selected = await projectIconResolver.resolvePath(cwd, faviconPath);

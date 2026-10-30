@@ -18,10 +18,12 @@ export interface ProjectIconSettings {
   faviconPath: string | null;
   projectIcon: ProjectIconOverride | null;
 }
-/** Identity overrides take display precedence; clearing one retains the file choice. */
-export interface ProjectIconProjection extends ProjectIconSettings {
-  resourceUrl: string | null;
-}
+/** Listing data only. Identity overrides take display precedence over images. */
+export type ProjectIconProjection =
+  | Exclude<ProjectIconOverride, { kind: 'lucide' }>
+  | { kind: 'glyph'; name: string; color: ProjectIconColor }
+  | { kind: 'image'; path: string; mtimeMs: number }
+  | null;
 export class ProjectIconInputError extends Error {}
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
