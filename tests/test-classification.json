@@ -3520,6 +3520,13 @@
       ]
     },
     {
+      "path": "tests/inbox-settlement.integration.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/independent-review-workspace-real-path.test.ts",
       "reasons": [
         "child-process",
