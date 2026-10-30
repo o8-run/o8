@@ -149,9 +149,8 @@ fn correction_fifteenth_workspace_scrolls_into_view(cx: &mut TestAppContext) {
     for (width, height) in [(1200., 816.), (900., 700.)] {
         cx.simulate_resize(size(px(width), px(height)));
         draw(cx);
-        let switcher = cx.debug_bounds("workspace-switcher").unwrap();
-        cx.simulate_click(switcher.center(), gpui::Modifiers::default());
-        draw(cx);
+        workspace_search(cx);
+        assert_eq!(shell.read_with(cx, |s, _| s.commands().len()), 15);
         for _ in 0..14 {
             cx.simulate_keystrokes("down");
             draw(cx);
@@ -225,7 +224,7 @@ fn correction_palette_brain_resumes_the_session_draft(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
+fn shell_chrome_fifteen_workspaces_share_header_search(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--shell-many");
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -237,8 +236,12 @@ fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
     ready(&shell, cx);
     assert_eq!(shell.read_with(cx, |s, _| s.workspaces.len()), 15);
     assert!(
-        cx.debug_bounds("workspace-switcher").is_some(),
-        "15 workspaces must share one switcher"
+        cx.debug_bounds("workspace-switcher").is_none(),
+        "the removed workspace switcher must not return"
+    );
+    assert!(
+        cx.debug_bounds("header-search").is_some(),
+        "workspace choices stay reachable through header search"
     );
     assert!(
         cx.debug_bounds("workspace-0").is_none(),
@@ -256,26 +259,26 @@ fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
     for (width, height) in [(900., 700.), (1680., 1050.)] {
         cx.simulate_resize(size(px(width), px(height)));
         draw(cx);
-        let bounds = cx.debug_bounds("workspace-switcher").unwrap();
+        let bounds = cx.debug_bounds("header-search").unwrap();
         assert!(bounds.right() <= px(width));
         assert!(bounds.size.height <= px(40.));
-        layouts.push(json!({"viewport":[width,height], "switcher":[f32::from(bounds.origin.x),f32::from(bounds.origin.y),f32::from(bounds.size.width),f32::from(bounds.size.height)]}));
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
-        draw(cx);
+        layouts.push(json!({"viewport":[width,height], "search":[f32::from(bounds.origin.x),f32::from(bounds.origin.y),f32::from(bounds.size.width),f32::from(bounds.size.height)]}));
+        workspace_search(cx);
         assert!(cx.debug_bounds("command-14").is_some());
-        assert!(
-            cx.debug_bounds("command-15").is_none(),
-            "the workspace switcher renders only its fifteen workspace rows"
+        assert_eq!(
+            shell.read_with(cx, |s, _| s.commands().len()),
+            15,
+            "workspace search renders only its fifteen workspace rows"
         );
         cx.simulate_keystrokes("escape");
     }
     if let Ok(file) = std::env::var("O8_NEXT_CHROME_EVIDENCE") {
-        fs::write(file, serde_json::to_vec_pretty(&json!({"endpoint":"headless GPUI layout; no raster or compositor capture", "workspaces":15,"permanentWorkspaceControls":1,"layouts":layouts})).unwrap()).unwrap();
+        fs::write(file, serde_json::to_vec_pretty(&json!({"endpoint":"headless GPUI layout; no raster or compositor capture", "workspaces":15,"permanentWorkspaceControls":0,"headerSearchControls":1,"layouts":layouts})).unwrap()).unwrap();
     }
 }
 
 #[gpui::test]
-fn chrome_switcher_cancel_restores_composer_with_platform_shortcut(cx: &mut TestAppContext) {
+fn chrome_search_cancel_restores_composer_with_platform_shortcut(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -290,9 +293,7 @@ fn chrome_switcher_cancel_restores_composer_with_platform_shortcut(cx: &mut Test
     ready(&shell, cx);
     draw(cx);
     cx.simulate_input("Draft");
-    let switcher = cx.debug_bounds("workspace-switcher").unwrap();
-    cx.simulate_click(switcher.center(), gpui::Modifiers::default());
-    draw(cx);
+    workspace_search(cx);
     cx.simulate_keystrokes("escape");
     draw(cx);
     cx.simulate_input(" retained");

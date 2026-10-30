@@ -147,7 +147,9 @@ fn parity_capture_real_shell(cx: &mut TestAppContext) {
             "provenance": "GPUI TestAppContext bounds; test text system, separate from pixel capture",
         })).unwrap()).unwrap();
     } else {
-        assert!(visual.debug_bounds("workspace-switcher").is_some());
+        assert!(visual.debug_bounds("header-search").is_some());
+        assert!(visual.debug_bounds("header-back").is_some());
+        assert!(visual.debug_bounds("workspace-switcher").is_none());
     }
 }
 
