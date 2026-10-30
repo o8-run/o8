@@ -49,6 +49,20 @@ pub(super) const REGISTRATION: Registration = Registration {
         Some((Tab::PullRequests, false))
     })
 };
+/// Opens the Pull requests tab on one pull request: Activity's destination
+/// for a pull request row, as classic opens PrPanel.
+pub(super) fn open(
+    shell: &mut Shell,
+    repo: &str,
+    number: u64,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    shell.execute(Command::PullRequests, window, cx);
+    if let Some(Content::PullRequests(view)) = shell.content.get(&shell.key(&Tab::PullRequests)) {
+        view.update(cx, |view, cx| view.open(repo, number, cx));
+    }
+}
 impl ShellView for View {
     fn focus(view: &Entity<Self>, _: bool, window: &mut Window, cx: &mut Context<Shell>) {
         view.read(cx).focus.focus(window);

@@ -76,6 +76,8 @@ pub struct PullRequests {
     pub packet: Option<String>,
     pub preview: Value,
     pub governance_error: String,
+    /// A pull request to select once the first page names its repository.
+    pub pending: Option<(String, u64)>,
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     pub painted_at: Rc<Cell<Option<Instant>>>,
@@ -131,6 +133,7 @@ impl PullRequests {
             packet: None,
             preview: Value::Null,
             governance_error: String::new(),
+            pending: None,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_at: Rc::new(Cell::new(None)),
@@ -208,15 +211,36 @@ impl PullRequests {
                             }
                         }
                         s.page = page;
+                        if let Some((repo, number)) = s.pending.take() {
+                            s.open(&repo, number, cx);
+                        }
                     }
-                    Ok(_) => s.error = "Pull requests could not be loaded. Try again.".into(),
-                    Err(error) => s.error = error,
+                    Ok(_) => {
+                        s.pending = None;
+                        s.error = "Pull requests could not be loaded. Try again.".into();
+                    }
+                    Err(error) => {
+                        s.pending = None;
+                        s.error = error;
+                    }
                 }
                 s.changed(cx);
             });
         })
         .detach();
         self.changed(cx);
+    }
+    /// Activity's "Open PR details": select a pull request of this list's
+    /// repository, after the first page loads. Another repository's pull
+    /// request opens on GitHub, since this list reads one repository.
+    pub fn open(&mut self, repo: &str, number: u64, cx: &mut Context<Self>) {
+        if self.page.is_null() {
+            self.pending = Some((repo.to_owned(), number));
+        } else if string(&self.page, "repo").eq_ignore_ascii_case(repo) {
+            self.select(number, cx);
+        } else {
+            cx.open_url(&format!("https://github.com/{repo}/pull/{number}"));
+        }
     }
     pub fn select(&mut self, number: u64, cx: &mut Context<Self>) {
         if self.selected != Some(number) {

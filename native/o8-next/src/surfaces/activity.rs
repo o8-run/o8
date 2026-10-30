@@ -48,6 +48,10 @@ fn create(
                     cx.notify();
                 }
             }
+            ActivityEvent::Open(kind, repo, number) => match *kind {
+                "pr" => crate::shell::pull_requests::open(shell, repo, *number, window, cx),
+                _ => crate::shell::issues::open(shell, repo, *number, window, cx),
+            },
         },
     ));
     Some(Content::Activity(activity))

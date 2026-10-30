@@ -169,7 +169,18 @@ impl ActivityPane {
                         "{} comments",
                         row.data["comments"].as_u64().unwrap_or(0)
                     ))
-                    .child(self.link("activity-open-issue", "Open issue", row.url(), cx));
+                    .child(match row.url() {
+                        // Classic opens the issue in the shell's issue view.
+                        Some(_) => self
+                            .button(
+                                "activity-open-issue",
+                                "Open issue",
+                                Action::Open(row.clone()),
+                                cx,
+                            )
+                            .into_any_element(),
+                        None => self.link("activity-open-issue", "Open issue", None, cx),
+                    });
             }
             "ci" | "pr" => {
                 let detail = self.details.get(&row.key());
@@ -305,20 +316,19 @@ impl ActivityPane {
                     Action::RetryDetail(row.clone()),
                     cx,
                 ));
-                view = view.child(self.link(
-                    if row.kind == "ci" {
-                        "activity-open-run"
-                    } else {
-                        "activity-open-pr"
-                    },
-                    if row.kind == "ci" {
-                        "Open CI run"
-                    } else {
-                        "Open PR details"
-                    },
-                    row.url(),
-                    cx,
-                ));
+                view = view.child(match (row.kind, row.url()) {
+                    ("ci", url) => self.link("activity-open-run", "Open CI run", url, cx),
+                    // Classic's "Open PR details" opens the pull request in the app.
+                    (_, Some(_)) => self
+                        .button(
+                            "activity-open-pr",
+                            "Open PR details",
+                            Action::Open(row.clone()),
+                            cx,
+                        )
+                        .into_any_element(),
+                    (_, None) => self.link("activity-open-pr", "Open PR details", None, cx),
+                });
             }
             "packet" => {
                 view = view
@@ -1122,8 +1132,15 @@ impl Render for ActivityPane {
                 }
                 _ => title,
             };
+            let destination = row.clone();
             let summary = self
                 .control(row.selector(), Action::Expand(row.clone()), cx)
+                // A double click also takes the row to its destination.
+                .on_click(cx.listener(move |this, event: &gpui::ClickEvent, _, cx| {
+                    if event.click_count() >= 2 {
+                        this.act(Action::Open(destination.clone()), cx);
+                    }
+                }))
                 .flex()
                 .items_start()
                 .gap(px(8.))

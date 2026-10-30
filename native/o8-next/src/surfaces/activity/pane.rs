@@ -11,6 +11,9 @@ use std::{
 #[derive(Clone)]
 pub enum ActivityEvent {
     Worker(String),
+    /// A pull request or issue row's in-app destination: kind, repository
+    /// and number.
+    Open(&'static str, String, u64),
 }
 #[derive(Clone)]
 pub(super) enum Action {
@@ -20,6 +23,9 @@ pub(super) enum Action {
     ScopeMenu(bool),
     Refresh,
     Expand(Row),
+    /// A row's destination, as classic's double-click: pull requests and
+    /// issues open in the app, commits and CI runs on GitHub.
+    Open(Row),
     Link(String),
     Worker(String),
     RetryDetail(Row),
@@ -393,6 +399,19 @@ impl ActivityPane {
             }
             Action::RetryDetail(row) => self.detail(row,true,cx),
             Action::Link(url) => cx.open_url(&url),
+            Action::Open(row) => {
+                let repo = row.repo.clone().filter(|r| feed::valid_slug(r));
+                match (row.kind, repo, row.id.parse::<u64>()) {
+                    ("pr" | "issue", Some(repo), Ok(number)) => {
+                        cx.emit(ActivityEvent::Open(row.kind, repo, number))
+                    }
+                    _ => {
+                        if let Some(url) = row.url() {
+                            cx.open_url(&url);
+                        }
+                    }
+                }
+            }
             Action::Worker(key) => cx.emit(ActivityEvent::Worker(key)),
             Action::Hold(row,held) => self.mutate("PATCH","/api/orchestrator/state", json!({"packetId":row.id,"updates":{"queueState":if held {"held"}else{"queued"},"blockedReason":if held {Some("Held by operator")}else{None}}}),cx),
             Action::StopMission => {

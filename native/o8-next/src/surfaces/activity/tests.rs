@@ -129,18 +129,62 @@ fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
     activity_click(cx, "activity-filter-pr");
     activity_click(cx, "activity-row-pr-example/activity-7");
     assert!(cx.debug_bounds("activity-pr-file-0").is_some());
+    // Classic opens pull requests and issues in the app, not on GitHub.
     activity_click(cx, "activity-open-pr");
     assert_eq!(
-        cx.opened_url().as_deref(),
-        Some("https://github.com/example/activity/pull/7")
+        shell.read_with(cx, |s, _| s.active()),
+        Some(Tab::PullRequests)
     );
+    let pr = shell.read_with(cx, |s, cx| {
+        match s.content.get(&s.key(&Tab::PullRequests)) {
+            Some(Content::PullRequests(view)) => view.read(cx).selected,
+            _ => None,
+        }
+    });
+    assert_eq!(
+        pr,
+        Some(7),
+        "the pull request is selected in the Pull requests tab"
+    );
+    let back = |cx: &mut VisualTestContext| {
+        shell.update_in(cx, |s, window, cx| s.execute(Command::Activity, window, cx));
+        cx.run_until_parked();
+        draw(cx);
+    };
+    back(cx);
     activity_click(cx, "activity-filter-issue");
     activity_click(cx, "activity-row-issue-example/activity-8");
     activity_click(cx, "activity-open-issue");
-    assert_eq!(
-        cx.opened_url().as_deref(),
-        Some("https://github.com/example/activity/issues/8")
-    );
+    let issue = |cx: &mut VisualTestContext| {
+        shell.read_with(cx, |s, cx| match s.content.get(&s.key(&Tab::Issues)) {
+            Some(Content::Issues(view)) => view.read(cx).snapshot(),
+            _ => Value::Null,
+        })
+    };
+    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Issues));
+    assert_eq!(issue(cx)["detail"], 8, "{}", issue(cx));
+    // A double click on the row takes it to the same destination.
+    back(cx);
+    let row = cx
+        .debug_bounds("activity-row-issue-example/activity-8")
+        .unwrap()
+        .center();
+    let (button, modifiers) = (gpui::MouseButton::Left, gpui::Modifiers::default());
+    cx.simulate_event(gpui::MouseDownEvent {
+        button,
+        position: row,
+        modifiers,
+        click_count: 2,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui::MouseUpEvent {
+        button,
+        position: row,
+        modifiers,
+        click_count: 2,
+    });
+    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Issues));
+    back(cx);
     activity_click(cx, "activity-filter-commit");
     activity_click(cx, "activity-row-commit-example/activity-ddddddd");
     activity_click(cx, "activity-open-commit");

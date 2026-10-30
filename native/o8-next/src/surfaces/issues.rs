@@ -15,6 +15,20 @@ pub(super) const REGISTRATION: Registration = Registration {
         Some((Tab::Issues, false))
     })
 };
+/// Opens the Issues tab on one issue: Activity's destination for an issue
+/// row, as classic's onSelectIssue.
+pub(super) fn open(
+    shell: &mut Shell,
+    repo: &str,
+    number: u64,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    shell.execute(Command::Issues, window, cx);
+    if let Some(Content::Issues(view)) = shell.content.get(&shell.key(&Tab::Issues)) {
+        view.update(cx, |view, cx| view.open(repo, number, cx));
+    }
+}
 impl ShellView for View {
     fn focus(view: &Entity<Self>, _: bool, window: &mut Window, cx: &mut Context<Shell>) {
         view.read(cx).focus(window, cx);
