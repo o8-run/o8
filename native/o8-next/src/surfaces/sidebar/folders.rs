@@ -308,6 +308,10 @@ impl ThreadList {
                             .border_1()
                             .border_color(theme().border)
                             .shadow_lg()
+                            // The press stays in the menu, off the rows beneath it.
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation()
+                            })
                             .on_mouse_down_out(cx.listener(
                                 |this, event: &gpui::MouseDownEvent, _, cx| {
                                     this.view_menu = false;

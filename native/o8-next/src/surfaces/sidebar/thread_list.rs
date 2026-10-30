@@ -204,6 +204,7 @@ impl ThreadList {
             materialized: Rc::new(Cell::new(0)),
         }
     }
+    #[cfg(test)]
     fn choice_row(&self) -> Option<&Row> {
         self.choice
             .as_ref()
