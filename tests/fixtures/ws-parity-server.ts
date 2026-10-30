@@ -23,7 +23,7 @@ async function freePort(): Promise<number> {
 
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
 export async function startParityReference(options: {
-  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string;
+  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number;
 } = {}) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-ws-parity-')));
   const token = 'ws-parity-fixture-credential';
@@ -101,7 +101,7 @@ export async function startParityReference(options: {
   child.stdout?.resume();
   child.stderr?.resume();
   try {
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + (options.startupTimeoutMs ?? 30_000);
     while (Date.now() < deadline) {
       if (child.exitCode !== null) throw new Error('reference WS process exited');
       try {

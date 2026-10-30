@@ -15,7 +15,8 @@ let heartbeat: ReturnType<typeof setInterval>;
 const frames: Array<{ kind?: string; payload?: Record<string, unknown> }> = [];
 const target = { binding: 'bound-chat', nonce: 'voice-one', threadId: 'thoughts-voice-thread', repoPath: '' };
 beforeAll(async () => {
-  reference = await startParityReference({ nativeHttp: true, preload: resolve('tests/fixtures/voice-host-runtime.cjs') });
+  // Cold production imports can exceed 30s; request/503 deadlines stay unchanged.
+  reference = await startParityReference({ nativeHttp: true, preload: resolve('tests/fixtures/voice-host-runtime.cjs'), startupTimeoutMs: 60_000 });
   target.repoPath = reference.directory;
   vi.stubEnv('CORTEX_REALTIME_INTERNAL_ORIGIN', reference.url.replace('ws:', 'http:').replace('/ws', ''));
   vi.stubEnv('WS_TOKEN', reference.token);

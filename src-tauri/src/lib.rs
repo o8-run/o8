@@ -9194,7 +9194,7 @@ pub fn run() {
                             if event.state != ShortcutState::Pressed {
                                 return;
                             }
-                            if let Some(win) = h.get_webview_window("main") {
+                            if let Some(win) = voice_host::classic_window(&h) {
                                 let _ = win.show();
                                 let _ = win.set_focus();
                             }

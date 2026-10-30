@@ -122,6 +122,40 @@ pub(crate) fn check_lease(
     false
 }
 
+#[derive(Default)]
+struct LeaseChecks {
+    transport_failures: u8,
+}
+
+impl LeaseChecks {
+    fn check(
+        &mut self,
+        session: u64,
+        binding: &Binding,
+        state: Result<&serde_json::Value, &String>,
+    ) -> bool {
+        match state {
+            Ok(state) => {
+                self.transport_failures = 0;
+                check_lease(session, binding, Some(state))
+            }
+            Err(_) => {
+                self.transport_failures = self.transport_failures.saturating_add(1);
+                self.transport_failures < 3 || check_lease(session, binding, None)
+            }
+        }
+    }
+}
+
+async fn read_lease_response(response: reqwest::Response) -> Result<serde_json::Value, String> {
+    // A missing host is authoritative even if its response body is absent or
+    // unreadable. Only transport/body failures receive the retry grace.
+    if response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+        return Ok(serde_json::json!({"available": false}));
+    }
+    response.json().await.map_err(|error| error.to_string())
+}
+
 // Symon's loopback client is macOS-only on the rail branch. Never strand a
 // claim if another platform invokes the headless-only command directly.
 #[cfg(target_os = "linux")]
@@ -138,8 +172,13 @@ pub(crate) fn watch(session: u64, binding: Binding) {
         return;
     };
     tauri::async_runtime::spawn(async move {
+        let mut checks = LeaseChecks::default();
+        // A slow two-second probe consumes the interval rather than adding
+        // another second of sleep to every failed attempt.
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            interval.tick().await;
             if token.load(Ordering::SeqCst) {
                 return;
             }
@@ -151,11 +190,16 @@ pub(crate) fn watch(session: u64, binding: Binding) {
             }
             // The existing shell client owns token and port resolution. Never
             // hold a recognizer or ownership lock across the HTTP request.
-            let state = crate::agent::o8_http::get_json_timeout("/api/next/voice-host", 2).await;
+            let state = match crate::agent::o8_http::get_response_timeout("/api/next/voice-host", 2)
+                .await
+            {
+                Ok(response) => read_lease_response(response).await,
+                Err(error) => Err(error),
+            };
             if token.load(Ordering::SeqCst) {
                 return;
             }
-            if !check_lease(session, &binding, state.as_ref().ok()) {
+            if !checks.check(session, &binding, state.as_ref()) {
                 return;
             }
         }
@@ -165,6 +209,120 @@ pub(crate) fn watch(session: u64, binding: Binding) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn live_lease() -> (Binding, serde_json::Value) {
+        let binding: Binding = serde_json::from_value(serde_json::json!({
+            "hostId":"host", "requestId":"start", "binding":"composer",
+            "nonce":"nonce", "threadId":"chat", "repoPath":"/repo"
+        }))
+        .unwrap();
+        let state = serde_json::json!({"available":true, "hostId":"host", "dictation": {
+            "requestId":"start", "binding":"composer", "nonce":"nonce",
+            "threadId":"chat", "repoPath":"/repo", "state":"listening"
+        }});
+        (binding, state)
+    }
+
+    #[test]
+    fn two_transient_failures_then_good_lease_keep_session_and_reset_budget() {
+        let _claims = crate::voice_input::TEST_CLAIMS.lock().unwrap();
+        let sid = 9_000_021;
+        register(sid).unwrap();
+        let (binding, state) = live_lease();
+        let mut checks = LeaseChecks::default();
+        for _ in 0..2 {
+            for error in ["timed out", "connection refused"] {
+                assert!(checks.check(sid, &binding, Err(&error.to_string())));
+                assert!(!cancelled(sid));
+            }
+            assert!(checks.check(sid, &binding, Ok(&state)));
+            assert!(!cancelled(sid));
+        }
+        finish(sid);
+    }
+
+    #[test]
+    fn three_consecutive_transient_failures_cancel_session() {
+        let _claims = crate::voice_input::TEST_CLAIMS.lock().unwrap();
+        let sid = 9_000_022;
+        register(sid).unwrap();
+        let (binding, _) = live_lease();
+        let mut checks = LeaseChecks::default();
+        for error in ["timed out", "connection refused"] {
+            assert!(checks.check(sid, &binding, Err(&error.to_string())));
+            assert!(!cancelled(sid));
+        }
+        assert!(!checks.check(sid, &binding, Err(&"bad JSON".to_string())));
+        assert!(cancelled(sid));
+        finish(sid);
+    }
+
+    #[test]
+    fn one_explicit_lease_mismatch_cancels_without_transport_grace() {
+        let _claims = crate::voice_input::TEST_CLAIMS.lock().unwrap();
+        let (binding, state) = live_lease();
+        let mut mismatches = Vec::new();
+        let mut unavailable = state.clone();
+        unavailable["available"] = false.into();
+        mismatches.push(unavailable);
+        let mut replaced = state.clone();
+        replaced["hostId"] = "replacement".into();
+        mismatches.push(replaced);
+        for key in ["requestId", "binding", "nonce", "threadId", "repoPath"] {
+            let mut replaced = state.clone();
+            replaced["dictation"][key] = "replacement".into();
+            mismatches.push(replaced);
+        }
+        for status in ["idle", "error", "stopping"] {
+            let mut ended = state.clone();
+            ended["dictation"]["state"] = status.into();
+            mismatches.push(ended);
+        }
+        for (index, mismatch) in mismatches.iter().enumerate() {
+            let sid = 9_000_030 + index as u64;
+            register(sid).unwrap();
+            assert!(!LeaseChecks::default().check(sid, &binding, Ok(mismatch)));
+            assert!(cancelled(sid));
+            finish(sid);
+        }
+    }
+
+    #[test]
+    fn http_503_is_authoritative_even_without_json_but_bad_json_is_transient() {
+        use std::io::{Read, Write};
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            for (status, body, authoritative) in [
+                (503, "", true),
+                (503, "unavailable", true),
+                (503, r#"{"code":"VOICE_HOST_UNAVAILABLE"}"#, true),
+                (200, "not JSON", false),
+            ] {
+                let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+                let address = listener.local_addr().unwrap();
+                let server = std::thread::spawn(move || {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+                    let _ = stream.read(&mut [0; 4096]).unwrap();
+                    write!(stream, "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                });
+                let response = reqwest::Client::new()
+                    .get(format!("http://{address}/api/next/voice-host"))
+                    .timeout(std::time::Duration::from_secs(2))
+                    .send().await.unwrap();
+                let result = read_lease_response(response).await;
+                assert_eq!(result.is_ok(), authoritative);
+                if authoritative {
+                    assert_eq!(result.unwrap()["available"], false);
+                }
+                server.join().unwrap();
+            }
+        });
+    }
+
     #[test]
     fn cancelled_finalization_and_late_helper_frames_remain_discarded_after_complete() {
         let sid = 9_000_015;

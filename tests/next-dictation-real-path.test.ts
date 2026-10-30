@@ -35,7 +35,7 @@ const post = (body: unknown) => realFetch(`${origin}/api/next/voice-host`, { met
   headers: { authorization: `Bearer ${hardware.token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
 beforeAll(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  reference = await startParityReference({ nativeHttp: true });
+  reference = await startParityReference({ nativeHttp: true, startupTimeoutMs: 60_000 });
   origin = reference.url.replace('ws:', 'http:').replace('/ws', '');
   target.repoPath = reference.directory; hardware.token = reference.token;
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {

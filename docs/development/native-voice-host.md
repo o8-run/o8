@@ -217,7 +217,7 @@ o8 next or import the draft's window/updater integration. Without the switch,
 the classic dashboard keeps its existing hosts and behavior.
 
 Host publications use `POST /api/next/voice-host` with
-`{action:"publish",kind:"voice-host-state"|"voice-delegate",payload:{...}}`.
+`{action:"publish",kind:"voice-host-state"|"voice-delegate"|"dictation-text"|"dictation-state",payload:{...}}`.
 The broker validates the lease and correlation before broadcasting its existing
 `ui-command` frame. The generic `/api/next/ui-command` and `/internal/ui-command`
 routes are not part of this port. The internal voice route reuses the unchanged
