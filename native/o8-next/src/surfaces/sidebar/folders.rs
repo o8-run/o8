@@ -357,10 +357,12 @@ impl ThreadList {
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(()) => {
+                        // The shell opens threads from the list it was sent,
+                        // so the new thread opens after the next load.
                         this.selected = Some(id.clone());
                         this.follow_selection = true;
+                        this.pending_open = Some(id);
                         this.load(cx);
-                        cx.emit(Event::Selected(id));
                     }
                     Err(error) => this.notice = format!("Could not start a thread: {error}"),
                 }

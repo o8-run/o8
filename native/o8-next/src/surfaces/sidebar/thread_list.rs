@@ -77,6 +77,8 @@ pub struct ThreadList {
     /// The press that last closed a menu from outside it; when that press
     /// lands on the menu's trigger, its click must not reopen the menu.
     menu_press: Option<gpui::Point<gpui::Pixels>>,
+    /// A thread New thread created; the shell opens it once the list has it.
+    pending_open: Option<String>,
     /// Closed By repo folders, by repository path.
     closed: HashSet<String>,
     pub sessions: Vec<Session>,
@@ -155,6 +157,7 @@ impl ThreadList {
             view_menu: false,
             new_menu: false,
             menu_press: None,
+            pending_open: None,
             closed: HashSet::new(),
             sessions: vec![],
             rows: Rc::new(vec![]),
@@ -357,6 +360,12 @@ impl ThreadList {
                         this.rebuild();
                         this.notice.clear();
                         cx.emit(Event::Refreshed(this.sessions.clone(), ledger));
+                        if let Some(id) = this
+                            .pending_open
+                            .take_if(|id| this.sessions.iter().any(|s| &s.id == id))
+                        {
+                            cx.emit(Event::Selected(id));
+                        }
                     }
                     Err(error) => {
                         this.notice = error.clone();

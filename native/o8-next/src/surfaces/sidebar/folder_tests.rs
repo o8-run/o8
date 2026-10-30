@@ -25,6 +25,19 @@ fn conversations(fixture: &Fixture) -> Vec<Value> {
         .cloned()
         .unwrap_or_default()
 }
+/// The thread New thread opened: selected in a list that carries it. Empty
+/// conversations stay out of the chat-history list until they have content.
+fn started(shell: &Shell, cx: &App, except: Option<&str>) -> Option<String> {
+    let list = shell.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+    let id = list.selected.clone()?;
+    (id.starts_with("thoughts-next-")
+        && Some(id.as_str()) != except
+        && list
+            .rows
+            .iter()
+            .any(|r| r.id.as_deref() == Some(id.as_str())))
+    .then_some(id)
+}
 fn hover_click(cx: &mut VisualTestContext, row: &str, selector: &str) {
     draw(cx);
     let at = cx
@@ -159,36 +172,29 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
     });
 
     // A folder's New thread starts a conversation in that repository.
-    let before = conversations(&fixture).len();
     hover_click(
         &mut visual,
         &format!("sidebar-folder-{}", names[0]),
         &format!("sidebar-folder-new-{}", names[0]),
     );
-    wait_for(&shell, &mut visual, |_, _| {
-        conversations(&fixture).len() > before
-    });
-    let created = conversations(&fixture)
-        .into_iter()
-        .find(|c| {
-            c["tabId"]
-                .as_str()
-                .is_some_and(|t| t.starts_with("thoughts-next-"))
-        })
+    wait_for(&shell, &mut visual, |s, cx| started(s, cx, None).is_some());
+    let created = shell
+        .read_with(&visual, |s, cx| started(s, cx, None))
         .unwrap();
-    assert_eq!(created["repoPath"], paths[0]);
-    let created = created["tabId"].as_str().unwrap().to_owned();
-    wait_for(&shell, &mut visual, |s, cx| {
-        s.surfaces
-            .sidebar
-            .view
-            .as_ref()
-            .unwrap()
-            .read(cx)
-            .selected
-            .as_deref()
-            == Some(created.as_str())
-    });
+    let record: Value = fixture
+        .client
+        .get("/api/v2/chat-history", &[("tabId", &created)])
+        .unwrap();
+    assert_eq!(record["repoPath"], paths[0]);
+    // The shell opened it rather than putting the previous thread back.
+    for _ in 0..3 {
+        draw(&mut visual);
+        visual.run_until_parked();
+    }
+    assert_eq!(
+        shell.read_with(&visual, |s, cx| started(s, cx, None)),
+        Some(created.clone())
+    );
 
     // Chronological: one list, no date headings.
     click(&mut visual, "sidebar-view");
@@ -221,13 +227,12 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
     click(&mut visual, "sidebar-new-thread");
     draw(&mut visual);
     assert!(visual.debug_bounds("sidebar-new-thread-menu").is_some());
-    let before = conversations(&fixture).len();
     click(
         &mut visual,
         Box::leak(format!("sidebar-new-thread-in-{}", names[0]).into_boxed_str()),
     );
-    wait_for(&shell, &mut visual, |_, _| {
-        conversations(&fixture).len() > before
+    wait_for(&shell, &mut visual, |s, cx| {
+        started(s, cx, Some(&created)).is_some()
     });
     draw(&mut visual);
     assert!(visual.debug_bounds("sidebar-new-thread-menu").is_none());
