@@ -5,7 +5,7 @@
  * packages/shared/src/schemaJson.ts, packages/contracts/src/t3ProjectFile.ts,
  * commit f58fad04162165653bf06f0c987bbfb0074a8a4b.
  * Copyright (c) 2026 T3 Tools Inc. MIT; see licenses/t3code-MIT.txt.
- * Adaptation: Node promises, rooted o8 file handles, bounded image/source reads.
+ * Adaptation: Node promises, rooted o8 file handles and bounded image reads.
  */
 import 'server-only';
 import { realpath, stat, type FileHandle } from 'node:fs/promises';
@@ -91,11 +91,9 @@ async function readBounded(handle: FileHandle): Promise<Buffer> {
 async function readRooted(root: string, file: string) {
   const candidate = await rootedFile(root, file);
   if (!candidate) return null;
-  if (candidate.info.size > PROJECT_ICON_MAX_BYTES) throw new Error('Project icon source exceeds 1 MiB.');
   const opened = await openWorkspaceFile(root, relative(root, candidate.canonical), 'read');
   try {
-    if (opened.stat.size > PROJECT_ICON_MAX_BYTES) throw new Error('Project icon exceeds 1 MiB.');
-    return { bytes: await readBounded(opened.handle), canonical: opened.realPath, info: opened.stat };
+    return { bytes: await opened.handle.readFile(), canonical: opened.realPath, info: opened.stat };
   } finally { await opened.handle.close(); }
 }
 // Start probes together, but consume in precedence order. Later failures cannot
@@ -175,6 +173,10 @@ export async function readProjectIcon(cwd: string, faviconPath: string | null) {
   const root = await realpath(cwd);
   const image = await iconFile(root, selected);
   if (!image) return null;
-  const result = await readRooted(root, image.canonical);
-  return result ? { bytes: result.bytes, mime: MIME[extname(result.canonical).toLowerCase()] } : null;
+  const opened = await openWorkspaceFile(root, relative(root, image.canonical), 'read');
+  try {
+    if (opened.stat.size > PROJECT_ICON_MAX_BYTES) throw new Error('Project icon exceeds 1 MiB.');
+    const mime = MIME[extname(opened.realPath).toLowerCase()];
+    return mime ? { bytes: await readBounded(opened.handle), mime } : null;
+  } finally { await opened.handle.close(); }
 }

@@ -97,6 +97,11 @@ it('discovers router metadata after the ordered HTML sources', async () => {
   file('public/brand.svg', svg('router')); await image('router');
 });
 
+it('reads icon links from source documents larger than the image byte cap', async () => {
+  file('index.html', `${' '.repeat(1024 * 1024 + 256)}<link rel="icon" href="/brand.svg">`);
+  file('public/brand.svg', svg('large source')); await image('large source');
+});
+
 it.each([
   ['trimmed path', '{ "iconPath": "  brand/config.svg  " }'],
   ['comments and trailing comma', '{ /* project icon */ "iconPath": "brand/config.svg", // preferred over favicon\n }'],
