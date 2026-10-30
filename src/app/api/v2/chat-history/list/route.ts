@@ -15,6 +15,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { orchestratorDisplayTitle, stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { deleteCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
+import { createInboxReadContext, inboxListingState, type InboxListingProjection, inboxSubject } from '@/lib/inbox/store';
 import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
@@ -25,7 +26,7 @@ const EMPTY_FILE_GC_MS = 60 * 60 * 1000; // 1 hour
 
 const HISTORY_DIR = join(getDataDir(), 'chat-history');
 
-interface ChatHistoryEntry {
+interface ChatHistoryEntry extends InboxListingProjection {
   tabId: string;
   title: string;
   preview: string;
@@ -95,6 +96,7 @@ export async function GET(request: NextRequest) {
   try {
     const files = readdirSync(HISTORY_DIR).filter(f => f.endsWith('.json'));
     const conversations: ChatHistoryEntry[] = [];
+    const inbox = createInboxReadContext('conversation');
     // Empty files older than EMPTY_FILE_GC_MS get deleted at the end —
     // can't unlink mid-loop without surprising readdirSync.
     const filesToDelete: string[] = [];
@@ -188,8 +190,10 @@ export async function GET(request: NextRequest) {
           }
         }
 
+        const subject = inboxSubject('conversation', tabId, data.repoPath, data.projectId, inbox.workspaces);
+        const settlement = inboxListingState(subject, inbox);
         conversations.push({
-          tabId: basename(file, '.json'),
+          tabId,
           title,
           preview,
           empty: isEmpty,
@@ -209,6 +213,11 @@ export async function GET(request: NextRequest) {
           backend: isOrchestratorBackendId(data.backend) ? data.backend : null,
           agent: typeof data.agent === 'string' && data.agent.trim() ? data.agent.trim() : null,
           archivedAt,
+          inboxSubject: subject,
+          parentInboxSubject: undefined,
+          settledOverride: settlement?.settledOverride ?? undefined,
+          settledAt: settlement?.settledAt ?? undefined,
+          unsettledAt: settlement?.unsettledAt ?? undefined,
         });
       } catch { /* skip bad files */ }
     }

@@ -333,6 +333,17 @@ SOFTWARE.
   `native/o8-next/src/shell_features/update.rs`
 - License text: [T3 Code](src/lib/usage/history-readers/LICENSE.txt)
 
+## T3 Code inbox sidebar
+
+Settlement transitions and queued-turn guards adapted from [T3 Code](https://github.com/pingdotgg/t3code),
+commit `f58fad04162165653bf06f0c987bbfb0074a8a4b`,
+`apps/server/src/orchestration-v2/Orchestrator.ts` and
+`packages/client-runtime/src/state/threadSettled.ts`.
+Copyright (c) 2026 T3 Tools Inc. Licensed under the MIT License;
+see [the full license](licenses/t3code-MIT.txt). Adaptations use o8's existing
+operator mutation routes, SQLite persistence, conversation/worker lineage and
+native-consumed server listings. No project settlement scripts are ported.
+
 ## T3 Code project icons
 
 - Upstream: [T3 Code](https://github.com/pingdotgg/t3code)

@@ -54,6 +54,19 @@ describe('server size check CLI', () => {
     expect(committed.totalBytes + 1_000_000).toBeLessThanOrEqual(14_077_919);
   }, 120_000);
 
+  it('retains upstream copyright and permission notices in exported sidecars', () => {
+    const { root } = fixture();
+    mkdirSync(join(root, 'licenses'));
+    const notice = readFileSync('NOTICE.md', 'utf8');
+    const license = readFileSync('licenses/t3code-MIT.txt', 'utf8');
+    writeFileSync(join(root, 'NOTICE.md'), notice);
+    writeFileSync(join(root, 'licenses/t3code-MIT.txt'), license);
+    const outDir = join(root, 'exported');
+    bundleServers({ root, outDir });
+    expect(readFileSync(join(outDir, 'NOTICE.md'), 'utf8')).toBe(notice);
+    expect(readFileSync(join(outDir, 'licenses/t3code-MIT.txt'), 'utf8')).toBe(license);
+  });
+
   it('rejects an oversized export against the unchanged committed total gate', () => {
     const { root } = fixture();
     const committedBudget = join(process.cwd(), 'scripts/server-bundle-budget.json');
