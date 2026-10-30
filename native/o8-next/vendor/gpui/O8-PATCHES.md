@@ -35,6 +35,12 @@ Local changes:
   slice of length 0", #5111). Missing slots are now empty entries, and `draw`
   skips an empty slot, so the platform keeps the handler it gets back.
 
+- `src/text_system/line_layout.rs`: keep closing punctuation with its preceding
+  text when computing soft-wrap boundaries, including emergency breaks inside
+  long words. Spaces before a closing mark cannot orphan it on the next line.
+  This matches classic WebKit wrapping in transcripts and file previews while
+  retaining source text and glyph indices for selection and copying.
+
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit
 probe live in the parent crate.
