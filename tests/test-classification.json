@@ -912,6 +912,12 @@
       ]
     },
     {
+      "path": "src/lib/repos/project-icon-resolver.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/runtime/actions-owned-surface.test.ts",
       "reasons": [
         "process-signal"
@@ -1369,6 +1375,16 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/default-isolation-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path",
         "worktree-api"
       ]
     },
@@ -5782,6 +5798,15 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/project-icons-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path"
       ]
     },
     {

@@ -30,7 +30,7 @@ export function WorkerPaneHeader({ title, branch, issueNumber, runtime, model, s
   }}>
     <span title={statusLabel} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, fontSize: 11, color: 'var(--t-text-muted)' }}>
       <AgentStatusDot state={agentStatusToDotState(status)} label={statusLabel} />
-      {outcome ? null : statusLabel}
+      {outcome || compact ? null : statusLabel}
     </span>
     {issueNumber ? <span style={{ color: 'var(--t-text-faint)', fontSize: 12, flexShrink: 0 }}>#{issueNumber}</span> : null}
     <span data-worker-title title={branch || title} style={{ ...ellipsis, color: 'var(--t-text)', fontSize: 13 }}>{title}</span>

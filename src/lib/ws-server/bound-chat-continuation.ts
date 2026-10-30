@@ -6,6 +6,7 @@ import type { OrchestratorTurnOptions } from '@/lib/lane/orchestrator-backends/t
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { appendMobileOrchestratorUserMessage, upsertMobileOrchestratorAssistantMessage, writeOrchestratorBackendSessionId } from '@/lib/mobile/orchestrator-thread-history';
 import type { MobileTurnReceipt } from '@/lib/mobile/types';
+import { terminalReceipt } from '@/lib/mobile/turn-receipt';
 import type { ReviewChatOrigin } from '@/lib/orchestrator/review-continuation-origin';
 import { withSessionRules } from '@/lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from '@/lib/orchestrator/turn-receipt-context';
@@ -91,8 +92,8 @@ export async function runBoundChatContinuation(
         case 'plan': hooks.publish(session.sessionName, 'plan-update', { ...data, turnId: assistantMessageId, explanation: event.explanation, steps: event.steps }); break;
         case 'done':
           completed = true;
-          receipt = { ...receipt, terminal: { userMessageId: `review-user-${assistantMessageId}`,
-            outcome: controller.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed' } };
+          receipt = { ...receipt, terminal: terminalReceipt(`review-user-${assistantMessageId}`,
+            controller.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed') };
           if (event.sessionId && (backend.id === 'codex' || backend.id === 'claude')) writeOrchestratorBackendSessionId(expected.threadId, backend.id, event.sessionId);
           persist(event.sessionId, event);
           hooks.publish(session.sessionName, 'status', { ...data, status: controller.signal.aborted ? 'stopped' : 'ready', receipt,

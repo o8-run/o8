@@ -33,7 +33,9 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".next/.o8-release-build/types/**/*.ts",
+    ".next/.o8-release-build/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

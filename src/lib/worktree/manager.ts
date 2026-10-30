@@ -306,7 +306,9 @@ function sanitizeBranchName(name: string) {
 
 function resolveIsolationPreference(opts: CreateWorktreeOptions): WorkspaceIsolationPreference {
   if (opts.isolationPreference) return opts.isolationPreference;
-  return process.env[APFS_COW_ENV_FLAG] === '1' ? 'auto' : 'git-worktree';
+  // An unsaved repo setup means Auto, as the repo settings show it: an APFS clone
+  // where the volume supports one, otherwise a git worktree. '0' opts out (#5079).
+  return process.env[APFS_COW_ENV_FLAG] === '0' ? 'git-worktree' : 'auto';
 }
 
 export class WorktreeManager {

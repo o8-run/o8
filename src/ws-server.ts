@@ -3,6 +3,7 @@ import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
 import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
+import { orchestratorErrorMessage, orchestratorErrorText } from '@/lib/transcripts/orchestrator-error';
 /**
  * Unified WebSocket server for o8 mobile.
  *
@@ -168,6 +169,7 @@ import { isOrchestratorServiceTier, serviceTierForTurn } from './lib/orchestrato
 import { normalizeObservedOrchestratorTurnModel, normalizeOrchestratorTurnModel } from './lib/orchestrator/turn-model-selection';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
+import { terminalReceipt } from './lib/mobile/turn-receipt';
 import { resolveOrchestratorExecutionMode } from './lib/lane/orchestrator-backends/orchestration-mode';
 import {
   backendSwitchRequiresExplicitHandoff,
@@ -5781,8 +5783,8 @@ async function handleOrchestratorSendMsgOnce(
         if (threadId && event.sessionId && (turnBackend.id === 'claude' || turnBackend.id === 'codex')) {
           writeOrchestratorBackendSessionId(threadId, turnBackend.id, event.sessionId);
         }
-        if (activeAssistantReceipt) activeAssistantReceipt = { ...activeAssistantReceipt, terminal: { userMessageId,
-          outcome: turnController?.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed' } };
+        if (activeAssistantReceipt) activeAssistantReceipt = { ...activeAssistantReceipt, terminal: terminalReceipt(userMessageId,
+          turnController?.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed') };
         persistAssistantText(event.sessionId ?? null, turnBackend.id, event, effectiveTurnModel);
         if (sessionName) {
           broadcastToOrchestratorSession(sessionName, JSON.stringify({
@@ -6014,11 +6016,13 @@ async function handleOrchestratorSendMsgOnce(
             emitDone(event);
             break;
 
-          case 'error':
+          case 'error': {
             if (suppressQuotaError && isRuntimeQuotaLimitError(event)) {
               quotaFallbackError = event.error;
               break;
             }
+            const error = orchestratorErrorMessage(event.error);
+            if (error !== event.error) console.error('[ws-server][orchestrator] turn failed:', event.error);
             sawTerminal = true;
             persistAssistantText(null, turnBackend.id, undefined, effectiveTurnModel);
             try {
@@ -6026,7 +6030,7 @@ async function handleOrchestratorSendMsgOnce(
                 tabId: threadId,
                 assistantMessageId,
                 repoPath,
-                error: event.error,
+                error,
                 backend: turnBackend.id,
                 agent: turnAgentTag,
               });
@@ -6043,9 +6047,10 @@ async function handleOrchestratorSendMsgOnce(
             wsMsg = JSON.stringify({
               channel: 'orchestrator',
               event: 'error',
-              data: { error: event.error, repoPath, threadId, backend: turnBackend.id, agent: turnAgentTag },
+              data: { error, repoPath, threadId, backend: turnBackend.id, agent: turnAgentTag },
             });
             break;
+          }
         }
 
         if (wsMsg && sessionName) broadcastToOrchestratorSession(sessionName, wsMsg);
@@ -6234,6 +6239,10 @@ async function handleOrchestratorSendMsgOnce(
     void drainOrchestratorAutoQueue();
   } catch (err) {
     const projectError = err instanceof OrchestratorThreadProjectError ? err : null;
+    console.error('[ws-server][orchestrator] send failed:', err);
+    const error = err instanceof Error
+      ? orchestratorErrorText(err.message, 'Failed to send message').replace(/\s+/g, ' ')
+      : 'Failed to send message';
     const turnWasUndone = undoneOrchestratorUserMessageIds.has(userMessageId);
     activeOrchestratorRoutes.release(activeRouteHandle);
     if (turnController) {
@@ -6252,7 +6261,7 @@ async function handleOrchestratorSendMsgOnce(
           tabId: threadId,
           assistantMessageId,
           repoPath,
-          error: err instanceof Error ? err.message : 'Failed to send message',
+          error,
           backend: activeBackend.id,
           agent: activeAgentTag,
         });
@@ -6284,7 +6293,7 @@ async function handleOrchestratorSendMsgOnce(
       channel: 'orchestrator' as const,
       event: 'error' as const,
       data: {
-        error: err instanceof Error ? err.message : 'Failed to send message',
+        error,
         voiceTerminal: { userMessageId, outcome: commandAccepted ? 'unconfirmed' : 'failed', text: commandAccepted ? '' : 'The backend did not accept this request.' },
         ...(projectError?.toPayload() ?? {}),
         repoPath,

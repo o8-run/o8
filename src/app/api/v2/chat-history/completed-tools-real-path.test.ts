@@ -190,6 +190,45 @@ describe('completed tool history through production save/load routes', () => {
     // A malformed client entry is stored as before rather than failing the save.
     await post({ tabId: `${tabId}-malformed`, repoPath, messages: [{ id: 'a', role: 'assistant', content: 'x', timestamp: 1, toolCalls: [null] }] });
   });
+  it('saves when each call started and finished, and when the turn ended, so a reload can show overlap and duration', async () => {
+    const tabId = 'thoughts-tools-timed';
+    const { terminalReceipt } = await import('@/lib/mobile/turn-receipt');
+    await post({ tabId, repoPath, messages: [{ id: 'user', role: 'user', content: 'Search two ways, then read.', timestamp: 1 }] });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const at = (ms: number) => vi.setSystemTime(ms);
+      const backend: OrchestratorBackend = { id: 'claude', label: 'Fixture', peekSession: () => null,
+        ensureSession: () => ({ sessionName: tabId, status: 'ready' }),
+        sendTurn: async (_repo, _message, emit) => {
+          // Two calls start together and finish apart; the third starts after both.
+          at(2_000); emit({ type: 'tool_use', id: 'web', name: 'WebSearch', input: { query: 'gpui' } });
+          at(2_010); emit({ type: 'tool_use', id: 'grep', name: 'Grep', input: { pattern: 'shape_line' } });
+          at(3_000); emit({ type: 'tool_result', id: 'grep', name: 'Grep', output: 'src/a.rs' });
+          at(5_000); emit({ type: 'tool_result', id: 'web', name: 'WebSearch', output: 'Links: []' });
+          at(6_000); emit({ type: 'tool_use', id: 'read', name: 'Read', input: { file_path: 'src/a.rs' } });
+          at(6_500); emit({ type: 'tool_result', id: 'read', name: 'Read', output: 'fn a() {}' });
+          emit({ type: 'text', text: 'Done.' });
+          at(32_000); emit({ type: 'done', sessionId: null, cost: null });
+        },
+      };
+      await sendOrchestratorBackendTurn(backend, repoPath, 'Search two ways, then read.', event => {
+        if (event.type === 'done') upsertMobileOrchestratorAssistantMessage({
+          tabId, repoPath, messageId: 'assistant', content: 'Done.', backend: 'claude', timestampMs: 1_001,
+          receipt: { leadModel: 'claude-opus-5-5', effort: 'medium', mode: 'solo', terminal: terminalReceipt('user', 'completed') },
+        });
+      }, { threadId: tabId, transcriptMessageId: 'assistant' }, 'fleet');
+    } finally {
+      vi.useRealTimers();
+    }
+    const assistant = (await load(tabId)).messages.find((message: { id: string }) => message.id === 'assistant');
+    expect(assistant.toolCalls.map((tool: { id: string; startedAt?: number; finishedAt?: number }) =>
+      [tool.id, tool.startedAt, tool.finishedAt])).toEqual([['web', 2_000, 5_000], ['grep', 2_010, 3_000], ['read', 6_000, 6_500]]);
+    expect(assistant.receipt.terminal).toEqual({ userMessageId: 'user', outcome: 'completed', completedAt: 32_000 });
+    // A later receipt for the same turn keeps the first recorded outcome time.
+    const { mergeMobileTurnReceipts } = await import('@/lib/mobile/turn-receipt');
+    expect(mergeMobileTurnReceipts(assistant.receipt, { ...assistant.receipt, terminal: terminalReceipt('user', 'completed', 99_000) })
+      ?.terminal?.completedAt).toBe(32_000);
+  });
   it('discards rejected-attempt tools rather than persisting them with the retry', async () => {
     const record = await runTurn('thoughts-tools-retry', undefined, [
       { type: 'turn_retry', attempt: 2, reason: 'retry', notice: 'Trying again' },

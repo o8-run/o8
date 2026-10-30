@@ -33,7 +33,11 @@ export interface ReportRecord {
   category: 'bug' | 'request';
   /** One-line summary — the headline of the eventual fix receipt. */
   title: string;
-  /** GitHub login when the operator has connected GitHub; null when anonymous. */
+  /**
+   * Always null. The feedback pipeline no longer records who filed a report
+   * (data minimization — the `#fixed` credit loop is retired). Field retained
+   * for ledger-shape stability with older on-disk entries.
+   */
   reporter: string | null;
   /** App version the report was filed against. */
   version: string;

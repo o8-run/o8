@@ -332,3 +332,22 @@ SOFTWARE.
   states, and "Update all" for connected tools, in
   `native/o8-next/src/shell_features/update.rs`
 - License text: [T3 Code](src/lib/usage/history-readers/LICENSE.txt)
+
+## T3 Code project icons
+
+- Upstream: [T3 Code](https://github.com/pingdotgg/t3code)
+- Commit: `f58fad04162165653bf06f0c987bbfb0074a8a4b`
+- Copyright: Copyright (c) 2026 T3 Tools Inc.
+- License: MIT; full text in [licenses/t3code-MIT.txt](licenses/t3code-MIT.txt)
+- Upstream paths: `apps/server/src/project/ProjectFaviconResolver.ts`,
+  `apps/server/src/project/T3ProjectFileLoader.ts`,
+  `apps/server/src/orchestration-v2/ProjectStore.ts`,
+  `apps/server/src/orchestration-v2/ProjectCommands.ts`,
+  `packages/contracts/src/project.ts`,
+  `packages/contracts/src/t3ProjectFile.ts`, `packages/shared/src/schemaJson.ts`,
+  `apps/web/src/components/settings/ProjectIconPickerDialog.tsx`, and
+  `apps/server/src/project/ProjectFaviconResolver.test.ts`.
+- Adapted for o8: repository icon precedence, ordered local asset and metadata
+  discovery, bounded resolver caching, separate file and identity overrides,
+  validation, and regression tests. Uses o8's existing SQLite app state and
+  rooted file reader; explicit file overrides must remain inside the repository.
