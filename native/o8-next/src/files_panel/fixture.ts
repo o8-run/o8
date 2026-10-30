@@ -4,10 +4,18 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { registerHooks } from 'node:module';
 import { NextRequest } from 'next/server';
 
 async function main() {
 const root = process.env.O8_FILES_FIXTURE_ROOT!;
+registerHooks({ resolve(specifier, context, nextResolve) {
+  const provider = /(?:claude-code\/(?:warm-repl-pool|one-shot-repl)|cortex\/qa\/llm\/codex-adapter)(?:\.[cm]?[jt]s)?$/;
+  const stub = { url: new URL('./spec_provider_fixture.ts', import.meta.url).href, shortCircuit: true };
+  if (provider.test(specifier)) return stub;
+  const resolved = nextResolve(specifier, context);
+  return provider.test(resolved.url) ? stub : resolved;
+} });
 const repo = join(root, 'repo');
 const home = join(root, 'home');
 const data = join(root, 'data');
@@ -21,6 +29,8 @@ for (const [path, content] of [
   [join(repo, '.gitignore'), 'PARITY-BOARD.local.md\n'], [join(repo, 'PARITY-BOARD.local.md'), 'ignored but visible'],
 ]) writeFileSync(path, content);
 execFileSync('git', ['init', '-q', repo]);
+const provider = await import('../../../../src/lib/claude-code/one-shot-repl');
+if (provider.defaultClaudeBin() !== 'owned-fixture-provider') throw new Error('Provider boundary was not isolated');
 const files = await import('../../../../src/app/api/panel/files/route');
 const docs = await import('../../../../src/app/api/v2/files/quick-docs/route');
 const preview = await import('../../../../src/app/api/v2/files/route');
@@ -37,7 +47,7 @@ const server = createServer(async (req, res) => {
     renameSync(join(root, 'requests-next.json'), join(root, 'requests.json'));
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
-    const request = new NextRequest(url, { method: req.method, headers: { 'content-type': 'application/json', ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}) }, ...(['POST', 'PUT'].includes(req.method!) ? { body: Buffer.concat(chunks) } : {}) });
+    const request = new NextRequest(url, { method: req.method, headers: { 'content-type': req.headers['content-type'] ?? 'application/json', ...(req.headers['x-filename'] ? { 'x-filename': req.headers['x-filename'] } : {}), ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}) }, ...(['POST', 'PUT'].includes(req.method!) ? { body: Buffer.concat(chunks) } : {}) });
     const route = url.pathname;
     if (chunks.length) writeFileSync(join(root, 'last-body.json'), Buffer.concat(chunks));
     // Simulate an older server's incomplete fallback, enabled only by
@@ -49,7 +59,10 @@ const server = createServer(async (req, res) => {
     const delayPath = join(root, 'save-delay-ms');
     if (['POST', 'PUT'].includes(req.method!) && existsSync(delayPath)) await new Promise(resolve => setTimeout(resolve, Number(readFileSync(delayPath, 'utf8'))));
     const fault = route === '/api/review/workspace' ? 'changes-error' : route === '/api/panel/file-diff' ? 'diff-error' : '';
-    let response = route === '/api/repo-spec' ? await (await import('../../../../src/app/api/repo-spec/route'))[req.method as 'GET' | 'PUT' | 'POST'](request) : fault && existsSync(join(root, fault)) ? Response.json({ error: 'Owned fixture unavailable' }, { status: 503 }) : route === '/api/review/workspace' ? await (await import('../../../../src/app/api/review/workspace/route')).GET(request) : route === '/api/panel/file-diff' ? await (await import('../../../../src/app/api/panel/file-diff/route')).GET(request) : fallback ? Response.json(fallback) : route === '/api/v2/files/quick-docs' ? await docs.GET(request)
+    const picked = route === '/api/panel/file-io' && req.method === 'POST' || route === '/api/panel/browse-folder' && req.method === 'POST';
+    // Only the OS dialog is replaced in this host. Its caller still uses the
+    // classic endpoint and validates the returned target before loading it.
+    let response = picked ? Response.json({ path: route === '/api/panel/file-io' ? join(repo, 'o8.md') : repo }) : route === '/api/runtime/inventory' ? Response.json({agents:[]}) : route === '/api/v2/chat-history/list' ? Response.json({conversations:[]}) : route === '/api/projects' ? Response.json({projects:[]}) : route === '/api/mobile/orchestrator/threads' ? Response.json({ threads: [] }) : route === '/api/orchestrator/state' ? Response.json({}) : route === '/api/panel/projects' ? Response.json({ activeProjectId: 'fixture', projects: existsSync(join(root, 'active-workspace')) ? [{ id: 'fixture', name: 'Fixture', repoPaths: [repo] }] : [] }) : route === '/api/panel/repos' ? Response.json({ repos: [{ id: 'files-fixture', name: 'Fixture', localPath: repo, exists: true }] }) : route === '/api/health' ? Response.json({ ok: true }) : route === '/api/workspaces' ? Response.json({ workspaces: [] }) : route === '/api/sessions' ? Response.json({ sessions: [] }) : route === '/api/repo-spec/asset' ? await (await import('../../../../src/app/api/repo-spec/asset/route')).POST(request) : route === '/api/orchestrator/delegate' ? Response.json({ ok: true, status: 'pending_approval', approvalId: 'fixture-approval' }) : route === '/api/repo-spec' ? await (await import('../../../../src/app/api/repo-spec/route'))[req.method as 'GET' | 'PUT' | 'POST'](request) : fault && existsSync(join(root, fault)) ? Response.json({ error: 'Owned fixture unavailable' }, { status: 503 }) : route === '/api/review/workspace' ? await (await import('../../../../src/app/api/review/workspace/route')).GET(request) : route === '/api/panel/file-diff' ? await (await import('../../../../src/app/api/panel/file-diff/route')).GET(request) : fallback ? Response.json(fallback) : route === '/api/v2/files/quick-docs' ? await docs.GET(request)
         : route === '/api/v2/files' ? req.method === 'POST' ? await preview.POST(request) : await preview.GET(request) : route === '/api/panel/file-io' ? req.method === 'PUT' ? await fileIo.PUT(request) : await fileIo.GET(request) : route === '/api/panel/file-asset' ? await asset.GET(request) : await files.GET(request);
     if (req.method === 'GET' && route === '/api/v2/files' && existsSync(join(root, 'omit-content-hash'))) {
       const status = response.status; const body = await response.json(); delete body.contentHash;

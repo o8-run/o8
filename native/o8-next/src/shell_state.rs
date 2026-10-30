@@ -47,6 +47,9 @@ pub struct State {
     /// Native Quick docs pins, isolated by the workspace's repository path.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub quick_doc_pins: BTreeMap<String, Vec<String>>,
+    /// Workspace Notes target history and user-selected annotation ink.
+    #[serde(default)]
+    pub notes: crate::files_panel::NotesPreferences,
     #[serde(skip)]
     pub(crate) retain_file: bool,
     #[serde(skip)]
@@ -63,6 +66,7 @@ impl Default for State {
             right_panel_width: None,
             tab_labels: BTreeMap::new(),
             quick_doc_pins: BTreeMap::new(),
+            notes: Default::default(),
             retain_file: false,
             backup_file: Arc::default(),
         }

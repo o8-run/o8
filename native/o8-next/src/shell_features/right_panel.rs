@@ -1,6 +1,8 @@
 use super::*;
 use crate::motion::Transition;
 use gpui::SharedString;
+#[path = "../files_panel/spec_shell.rs"]
+mod notes;
 // The desktop's right panel (O8Panel). Its tools open as tabs in the panel's
 // own strip; "+" lists every desktop panel tool (o8-panel/panel-tools.tsx),
 // including the ones o8 next does not have yet, which open a placeholder.
@@ -270,6 +272,9 @@ impl Panel {
 }
 
 fn key(s: &Shell, tool: Tool) -> String {
+    if tool == Tool::Spec {
+        return "panel|notes|Spec".into();
+    }
     format!(
         "panel|{}|{tool:?}",
         s.state.selected.as_deref().unwrap_or("")
@@ -441,7 +446,7 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     if matches!(tool, Tool::Files | Tool::Spec)
         && !s.features.get::<Panel>().files.contains_key(&key)
     {
-        if workspace.is_empty() {
+        if workspace.is_empty() && tool == Tool::Files {
             s.notice = "Open a workspace before using this tool.".into();
             cx.notify();
             return;
@@ -567,8 +572,10 @@ fn files_view(
     let view = cx.new(|cx| {
         let mut view = crate::files_panel::FilesPanel::new(client, workspace.clone(), mode, cx);
         view.set_pins(&workspace, pins, cx);
+        view.set_notes_preferences(s.state.notes.clone(), cx);
         view
     });
+    notes::configure(s, &view, cx);
     s.subscriptions.push(cx.subscribe(
         &view,
         |s, _, pins: &crate::files_panel::PinsChanged, cx| {
@@ -632,6 +639,7 @@ pub(super) fn element(
     cx: &mut Context<Shell>,
 ) -> Option<(AnyElement, f32, f32)> {
     cover_browsers(s, cx);
+    notes::cover(s, cx);
     let (full, shown) = width(s, window)?;
     let panel = s.features.read::<Panel>()?;
     let (travel, _) = panel.motion.value();

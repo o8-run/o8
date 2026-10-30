@@ -17,6 +17,9 @@ mod selection;
 mod source;
 mod spec;
 mod spec_document;
+pub use spec::Preferences as NotesPreferences;
+pub struct NotesPreferencesChanged(pub NotesPreferences);
+impl gpui::EventEmitter<NotesPreferencesChanged> for FilesPanel {}
 mod syntax;
 mod tree;
 mod viewer;
@@ -196,6 +199,12 @@ impl FilesPanel {
             Mode::Spec => {
                 let view =
                     cx.new(|cx| spec::Spec::new(panel.client.clone(), panel.workspace.clone(), cx));
+                panel._subscriptions.push(cx.subscribe(
+                    &view,
+                    |_, _, prefs: &spec::PreferencesChanged, cx| {
+                        cx.emit(NotesPreferencesChanged(prefs.0.clone()))
+                    },
+                ));
                 panel.focus = view.read(cx).focus.clone();
                 panel.spec = Some(view);
             }
@@ -278,6 +287,16 @@ impl FilesPanel {
         cx.notify();
     }
 
+    pub fn set_notes_preferences(&mut self, prefs: NotesPreferences, cx: &mut Context<Self>) {
+        if let Some(spec) = &self.spec {
+            spec.update(cx, |spec, cx| spec.receive_preferences(prefs, cx));
+        }
+    }
+    pub fn set_spec_workspace(&mut self, workspace: &str, cx: &mut Context<Self>) {
+        if let Some(spec) = &self.spec {
+            spec.update(cx, |spec, cx| spec.follow_workspace(workspace, cx));
+        }
+    }
     pub fn set_spec_active(&mut self, active: bool, cx: &mut Context<Self>) {
         if let Some(spec) = &self.spec {
             spec.update(cx, |spec, cx| spec.active(active, cx));

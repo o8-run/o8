@@ -4,8 +4,19 @@ use crate::{client::Client, theme::current as theme};
 use gpui::{prelude::*, *};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
+#[path = "spec_controls.rs"]
+mod controls;
+#[path = "spec_preferences.rs"]
+mod preferences;
+#[path = "spec_settings.rs"]
+mod settings;
+#[path = "spec_target.rs"]
+mod target;
 #[path = "spec_view.rs"]
 mod view;
+pub(super) use preferences::Changed as PreferencesChanged;
+pub use preferences::Preferences;
+impl EventEmitter<PreferencesChanged> for Spec {}
 struct Conflict {
     content: String,
     hash: Option<String>,
@@ -15,6 +26,12 @@ pub(super) struct Spec {
     pub(super) editor: Entity<Editor>,
     pub(super) focus: FocusHandle,
     workspace: String,
+    default_workspace: String,
+    preferences: Preferences,
+    target: target::Target,
+    settings: bool,
+    settings_focus: FocusHandle,
+    hue_bounds: Bounds<Pixels>,
     content: String,
     loaded: String,
     server: String,
@@ -40,10 +57,17 @@ impl Spec {
             e.context = "NotesEditor";
             e
         });
-        let focus = editor.read(cx).focus.clone();
+        let focus = cx.focus_handle();
         let observed = cx.observe(&editor, |this, _, cx| this.changed(cx));
+        let target = target::Target::new(cx);
         Self {
             client,
+            default_workspace: workspace.clone(),
+            preferences: Preferences::default(),
+            target,
+            settings: false,
+            settings_focus: cx.focus_handle(),
+            hue_bounds: Bounds::default(),
             editor,
             focus,
             workspace,
@@ -196,6 +220,7 @@ impl Spec {
     fn persist(&mut self, force: bool, cx: &mut Context<Self>) {
         if self.workspace.is_empty()
             || self.loading
+            || !self.loaded_once
             || self.saving
             || self.conflict.is_some() && !force
         {
@@ -268,6 +293,16 @@ impl Spec {
                     }
                     Err(error) => this.error = Some(error),
                 }
+                if !this.pending && this.error.is_none() && this.conflict.is_none() {
+                    let target = this
+                        .preferences
+                        .target_override
+                        .as_deref()
+                        .unwrap_or(&this.default_workspace);
+                    if this.workspace != target {
+                        this.change_target(cx);
+                    }
+                }
                 cx.notify();
             });
         })
@@ -287,6 +322,19 @@ impl Spec {
             cx.notify();
         }
     }
+    pub(super) fn follow_workspace(&mut self, workspace: &str, cx: &mut Context<Self>) {
+        if self.default_workspace == workspace {
+            return;
+        }
+        self.default_workspace = workspace.into();
+        if self.preferences.target_override.is_none()
+            && !self.pending
+            && !self.saving
+            && self.content == self.server
+        {
+            self.change_target(cx);
+        }
+    }
     pub(super) fn active(&mut self, active: bool, cx: &mut Context<Self>) {
         if self.active != active {
             self.active = active;
@@ -300,6 +348,14 @@ impl Spec {
             return;
         }
         self.started = true;
+        self.target._submit = Some(cx.subscribe_in(
+            &self.target.input,
+            window,
+            |this, _, _: &crate::composer::Submit, window, cx| {
+                let path = this.target.input.read(cx).text.clone();
+                this.select_target(path, window, cx);
+            },
+        ));
         self.load(false, cx);
         let handle = window.window_handle();
         cx.spawn(async move |this, cx| {

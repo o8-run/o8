@@ -65,6 +65,17 @@ pub(super) fn autosave(cx: &mut TestAppContext) {
     let (_, cx) = panel(&f, cx);
     wait(cx, "spec-editor");
     assert_eq!(cx.debug_bounds("spec-header").unwrap().size.height, px(58.));
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-z"
+    } else {
+        "ctrl-z"
+    });
+    draw(cx);
+    assert_eq!(
+        content(cx),
+        "# Fixture notes\n\nOld text.\n",
+        "initial load has no undo entry"
+    );
     replace(cx, "# Fixture notes\n\nFirst draft.\n");
     advance(cx, 650);
     assert_eq!(puts(&f), 0);
@@ -168,3 +179,6 @@ pub(super) fn missing(cx: &mut TestAppContext) {
     until(cx, |cx| !cx.update(|_, cx| cx.global::<Status>().pending));
     assert_eq!(fs::read_to_string(path(&f)).unwrap(), "# Started notes\n");
 }
+
+#[path = "spec_preferences_tests.rs"]
+mod preferences;

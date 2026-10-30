@@ -404,3 +404,14 @@ mod feature_tests;
 #[cfg(test)]
 #[path = "startup_tests.rs"]
 mod startup_tests;
+
+// UI tests use the production shell without exposing its private view type.
+#[cfg(test)]
+pub(crate) fn notes_test_window(
+    client: Client,
+    file: PathBuf,
+    state: State,
+    cx: &mut gpui::App,
+) -> gpui::AnyWindowHandle {
+    view::open_window(client, file, state, true, cx).into()
+}
