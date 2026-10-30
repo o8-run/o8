@@ -87,12 +87,7 @@ fn control(
                 action.run(this, cx);
             }
         }))
-        .on_key_down(cx.listener(move |this, event: &gpui::KeyDownEvent, _, cx| {
-            if enabled && matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                action.run(this, cx);
-                cx.stop_propagation();
-            }
-        }))
+        .when(enabled, |button| header::keyboard_button(button, cx))
 }
 #[derive(Clone)]
 struct DraggedPage {

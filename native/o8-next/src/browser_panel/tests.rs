@@ -150,7 +150,17 @@ fn browser_navigation_toolbar_enter_blurs_and_preserves_address_draft(cx: &mut T
         .map(|id| cx.debug_bounds(id).expect(id).left())
         .collect();
     assert!(lefts.windows(2).all(|w| w[0] < w[1]));
-    cx.simulate_keystrokes("shift-tab shift-tab space");
+    cx.simulate_keystrokes("shift-tab shift-tab");
+    draw(cx);
+    cx.simulate_keystrokes("space");
+    assert!(
+        panel.read_with(cx, |p, _| p.copied.is_none()),
+        "key down must not also activate the toolbar"
+    );
+    cx.simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("space").unwrap(),
+    });
+    draw(cx);
     assert!(
         panel.read_with(cx, |p, _| p.copied.is_some()),
         "Copy URL must be reachable and operable from the keyboard"
@@ -353,10 +363,10 @@ impl Render for HeaderControls {
                     div()
                         .id("browser-more-test")
                         .debug_selector(|| "browser-more-test".into()),
-                    |h, _, _| h.menus += 1,
                     cx,
                 )
-                .track_focus(&self.more),
+                .track_focus(&self.more)
+                .on_click(cx.listener(|h, _, _, _| h.menus += 1)),
             )
             .child(header::new_page_item(
                 self.browser.clone(),
@@ -389,7 +399,12 @@ fn browser_header_controls_open_launcher_and_new_page(cx: &mut TestAppContext) {
         28.
     );
     cx.update(|window, cx| header.read(cx).launcher.focus(window));
+    draw(cx);
     cx.simulate_keystrokes("enter");
+    assert_eq!(header.read_with(cx, |h, _| h.launches), 0);
+    cx.simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+    });
     draw(cx);
     assert_eq!(header.read_with(cx, |h, _| h.launches), 1);
     assert_eq!(
@@ -397,7 +412,12 @@ fn browser_header_controls_open_launcher_and_new_page(cx: &mut TestAppContext) {
         1
     );
     cx.update(|window, cx| header.read(cx).more.focus(window));
+    draw(cx);
     cx.simulate_keystrokes("space");
+    assert_eq!(header.read_with(cx, |h, _| h.menus), 0);
+    cx.simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("space").unwrap(),
+    });
     draw(cx);
     assert_eq!(header.read_with(cx, |h, _| h.menus), 1);
     click(cx, "browser-menu-new-page");

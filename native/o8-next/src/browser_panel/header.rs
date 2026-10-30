@@ -3,15 +3,17 @@ use super::*;
 
 pub(crate) const MORE: &str = "M5 12h.001 M12 12h.001 M19 12h.001";
 
-fn key_activation<V: 'static>(
+pub(crate) fn keyboard_button<V: 'static>(
     element: Stateful<Div>,
-    action: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
     cx: &Context<V>,
 ) -> Stateful<Div> {
     element.focusable().tab_stop(true).on_key_down(cx.listener(
-        move |this, event: &gpui::KeyDownEvent, window, cx| {
-            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                action(this, window, cx);
+        move |_, event: &gpui::KeyDownEvent, window, cx| {
+            if !event.keystroke.modifiers.modified()
+                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+            {
+                // GPUI emits the click on key release. Only consume text input here.
+                window.prevent_default();
                 cx.stop_propagation();
             }
         },
@@ -45,16 +47,12 @@ pub(crate) fn launcher<V: 'static>(
             14.,
             2.,
         ));
-    key_activation(button, action, cx)
+    keyboard_button(button, cx)
         .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx)))
 }
 
-pub(crate) fn more<V: 'static>(
-    button: Stateful<Div>,
-    action: fn(&mut V, &mut Window, &mut Context<V>),
-    cx: &Context<V>,
-) -> Stateful<Div> {
-    key_activation(button.size(px(28.)).px_0(), action, cx)
+pub(crate) fn more<V: 'static>(button: Stateful<Div>, cx: &Context<V>) -> Stateful<Div> {
+    keyboard_button(button.size(px(28.)).px_0(), cx)
 }
 
 pub(crate) fn new_page_item<V: 'static>(
@@ -88,7 +86,7 @@ pub(crate) fn new_page_item<V: 'static>(
             1.6,
         ))
         .child("New browser page");
-    key_activation(row, action, cx)
+    keyboard_button(row, cx)
         .on_click(cx.listener(move |this, _, window, cx| click(this, window, cx)))
         .into_any_element()
 }

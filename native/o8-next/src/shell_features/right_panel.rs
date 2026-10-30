@@ -1255,20 +1255,7 @@ pub(super) fn header(
                                         true,
                                     )
                                     .when(browser.is_some(), |button| {
-                                        browser_header::more(
-                                            button,
-                                            |s, window, cx| {
-                                                s.capture(window, cx);
-                                                let panel = s.features.get::<Panel>();
-                                                panel.menu = if panel.menu.is_some() {
-                                                    None
-                                                } else {
-                                                    Some(std::time::Instant::now())
-                                                };
-                                                cx.notify();
-                                            },
-                                            cx,
-                                        )
+                                        browser_header::more(button, cx)
                                     })
                                     .when(menu.is_some(), |button| button.bg(theme().hover))
                                     .on_click(cx.listener(
