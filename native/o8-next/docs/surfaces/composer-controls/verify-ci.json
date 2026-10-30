@@ -1,0 +1,32 @@
+{
+  "sourceCommit": "1a03c30ea8604163996c7dd62c9889687d0f8a54",
+  "exitCode": 130,
+  "decision": "interrupted after failed gates; draft held",
+  "checks": {
+    "Lint": "failed deadline",
+    "o8 next Native Tests (Linux)": "failed input selection; native suite not run",
+    "Security Audit": "passed",
+    "Type Check": "interrupted; earlier standalone typecheck:fast passed",
+    "Test Classification": "interrupted",
+    "Integration Tests (changed files)": "interrupted",
+    "Server Bundle Size": "interrupted",
+    "Hermetic Unit Tests": "not reached in verifier; separate full npm test completed",
+    "Governance Smoke": "not reached"
+  },
+  "isolatedNativeSelector": {
+    "exitCode": 0,
+    "stdout": "changed=true",
+    "wallSeconds": 12.25,
+    "satisfiesNativeGate": false
+  },
+  "findings": [
+    4981,
+    4989,
+    5137,
+    5138
+  ],
+  "missingDestinations": [
+    "chat",
+    "gemini"
+  ]
+}

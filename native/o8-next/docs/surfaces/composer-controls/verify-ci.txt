@@ -1,0 +1,43 @@
+npm run verify:ci; Node 22; npm 11.21.1; nice -n 19
+Exit 130: interrupted after recorded lint deadline and native-input selection failures.
+Subsequent FAIL lines for in-flight checks are interruption results, not established test defects.
+Hermetic shards and Governance Smoke did not execute. Security Audit completed successfully.
+
+[verify:ci] RUN Lint
+[verify:ci] npm run lint -- --cache --cache-strategy content --cache-location .cache/eslint
+[verify:ci] check command exceeded its CI timeout
+[verify:ci] FAIL Lint
+[verify:ci] RUN Type Check
+[verify:ci] node scripts/ci/check-verify-ci.mjs
+[verify:ci] FAIL o8 next Native Tests (Linux): cannot select native inputs
+[verify:ci] RUN Test Classification
+[verify:ci] npm run test:classification:check
+[verify:ci] RUN Server Bundle Size
+[verify:ci] node scripts/check-server-bundle-size.mjs
+[verify:ci] RUN Integration Tests (changed files)
+[verify:ci] npx --no-install playwright-core install --with-deps chromium
+[verify:ci] RUN Security Audit
+[verify:ci] npm audit --audit-level=high
+[verify:ci] npm run test:integration --
+[verify:ci] node scripts/ci/review-dependency-changes.mjs "$BASE_REF" "$HEAD_REF"
+[verify:ci] cargo-audit audit --file 'src-tauri/Cargo.lock' --ignore 'RUSTSEC-2026-0195' --ignore 'RUSTSEC-2026-0194' --ignore 'RUSTSEC-2026-0104' --ignore 'RUSTSEC-2026-0098' --ignore 'RUSTSEC-2026-0099' --ignore 'RUSTSEC-2026-0049' --ignore 'RUSTSEC-2026-0235'
+[verify:ci] npx vitest run tests/server-bundle-size-real-path.test.ts
+[verify:ci] PASS Security Audit
+[verify:ci] coverage complete: 9 local checks; hosted lanes explicitly classified
+[verify:ci] npm run protocol:check
+[verify:ci] npm run typecheck:fast
+[verify:ci] npm run typecheck
+[verify:ci] FAIL Test Classification
+[verify:ci] FAIL Integration Tests (changed files)
+[verify:ci] FAIL Server Bundle Size
+[verify:ci] FAIL Type Check
+[verify:ci] Hosted check publication remains on the runner.
+[verify:ci] Linux package archive caching and privileged system installation remain hosted setup; install the documented resource-test prerequisites locally.
+[verify:ci] HOSTED typecheck-parity: weekly comparison
+[verify:ci] HOSTED integration-weekly: main and scheduled full integration matrix
+[verify:ci] HOSTED integration-weekly-report: hosted reporting
+[verify:ci] HOSTED integration-weekly-watch: hosted scheduling
+[verify:ci] HOSTED build: manual build
+[verify:ci] HOSTED rust-check-windows: native target runner
+[verify:ci] HOSTED rust-check-linux: native target runner
+[verify:ci] HOSTED roadmap-check: authenticated issue inventory

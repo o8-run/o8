@@ -95,9 +95,11 @@ recorded in [the preservation receipt](composer-controls/mic-preserved.json).
 | Node 22, packageManager npm, `npm run typecheck:fast` | Passed | [Typecheck](composer-controls/typecheck.txt) |
 | Scoped ESLint and `rule-check` against the rail base | Passed | [ESLint](composer-controls/eslint.txt), [rule check](composer-controls/rule-check.txt) |
 | Full `npm test` | 9,911 passed; 2 failed; 5 skipped | [Full failure tail](composer-controls/unit-failures.txt); existing [#4981](https://github.com/o8-run/o8/issues/4981), [#4989](https://github.com/o8-run/o8/issues/4989) |
-| `npm run verify:ci` | Failed lint deadline and native selection; remaining checks running | Final broad-check receipt pending; selector diagnostic finding [#5137](https://github.com/o8-run/o8/issues/5137) |
+| `npm run verify:ci` | Lint deadline and native selection failed; remaining run interrupted (exit 130); Security Audit passed | [Check transcript](composer-controls/verify-ci.txt), [summary](composer-controls/verify-ci.json); diagnostic finding [#5137](https://github.com/o8-run/o8/issues/5137) |
 
 The Linux verification overlay [matches all 23 changed source files](composer-controls/ci-source-match.json) in source commit `1a03c30ea`. The isolated native selector returned `changed=true` in 12.25 seconds after the full verifier rejected selection. That separate result does not satisfy the skipped native gate.
+
+The full verifier was stopped after its failed gates, before repeating the hermetic shards. In-flight type checking, classification, bundle and integration checks were interrupted; Governance Smoke was not reached. Their interruption results are not separate established defects. This run does not provide full CI or Linux native acceptance.
 
 The two broad unit failures are in [unchanged baseline test files](composer-controls/unit-baseline-files.json). A [focused recheck](composer-controls/unit-recheck.txt) passed the Activity file and reproduced two redaction timing caps. This does not establish a new root cause for either existing issue.
 
@@ -162,5 +164,5 @@ and Brain generation were not exercised against an operator runtime. Rules,
 prompt use/save, branch creation, queue sends and registered runtime draft
 creation were exercised through production handlers in disposable fixtures.
 
-Hold for review, missing destination surfaces, the rendering finding and the remaining broad-check receipts. No merge, release,
+Draft [PR #5139](https://github.com/o8-run/o8/pull/5139) is held for review, missing destination surfaces, the rendering finding and a clean broad verification run. No merge, release,
 installation or full destination-parity acceptance is implied.
