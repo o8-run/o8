@@ -1,11 +1,4 @@
 /**
- * Settlement adaptation from T3 Code (https://github.com/pingdotgg/t3code),
- * apps/server/src/orchestration-v2/Orchestrator.ts, commit
- * f58fad04162165653bf06f0c987bbfb0074a8a4b.
- * Copyright (c) 2026 T3 Tools Inc.; MIT; see licenses/t3code-MIT.txt.
- * Adapted for o8: existing operator routes, persistence and native listings.
- */
-/**
  * #3665: a chat view that stays open across a ws-server restart must keep
  * receiving its turns. The desktop client keeps its replay cursor (the highest
  * `seq` it applied) and reconnects with `since: <cursor>`; its de-dup drops any

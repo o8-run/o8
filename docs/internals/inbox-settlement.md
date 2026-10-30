@@ -60,3 +60,22 @@ T3 Code provenance is recorded in the adapted sources, NOTICE.md and
 licenses/t3code-MIT.txt. Exported server sidecars include the notice and license.
 Native rendering, automatic settlement and later inbox state fields are separate
 slices.
+
+## Polling cost
+
+Inventory reads lane identities once and indexes the newest lane per session
+for the request. Listings read inbox metadata with one indexed
+`app_state` key-prefix query and cache canonical workspace paths for that request.
+An unchanged runtime observation never opens a write transaction. A newer
+observation rechecks persisted state inside the write transaction before updating
+it. Request snapshots are discarded after the response. Prepared read statements are
+reused per SQLite connection; query results are always read again.
+
+`node scripts/bench-inbox-listings.mjs origin/main` compares bundled Node 22 GET
+handlers against the selected baseline route sources. The provider-discovery
+boundary returns the same fixed 40-agent snapshot to both versions; 200 lanes,
+500 saved conversations and inbox metadata use real temporary SQLite/filesystem
+storage. Each version receives five warmups and 50 measured requests, alternating
+which version goes first. The timer covers handler execution through response
+creation; status, row-count validation and client JSON decoding occur afterward.
+This measures server handler latency, excluding HTTP transport and provider discovery.

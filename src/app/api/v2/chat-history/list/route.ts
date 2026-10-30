@@ -1,10 +1,3 @@
-/**
- * Settlement adaptation from T3 Code (https://github.com/pingdotgg/t3code),
- * apps/server/src/orchestration-v2/Orchestrator.ts, commit
- * f58fad04162165653bf06f0c987bbfb0074a8a4b.
- * Copyright (c) 2026 T3 Tools Inc.; MIT; see licenses/t3code-MIT.txt.
- * Adapted for o8: existing operator routes, persistence and native listings.
- */
 export const dynamic = 'force-dynamic';
 
 /**
@@ -22,7 +15,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { orchestratorDisplayTitle, stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { deleteCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
-import { inboxProjection, inboxSubject } from '@/lib/inbox/store';
+import { createInboxReadContext, inboxProjection, inboxSubject } from '@/lib/inbox/store';
 import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
@@ -33,7 +26,7 @@ const EMPTY_FILE_GC_MS = 60 * 60 * 1000; // 1 hour
 
 const HISTORY_DIR = join(getDataDir(), 'chat-history');
 
-interface ChatHistoryEntry {
+interface ChatHistoryEntry extends ReturnType<typeof inboxProjection> {
   tabId: string;
   title: string;
   preview: string;
@@ -103,6 +96,7 @@ export async function GET(request: NextRequest) {
   try {
     const files = readdirSync(HISTORY_DIR).filter(f => f.endsWith('.json'));
     const conversations: ChatHistoryEntry[] = [];
+    const inbox = createInboxReadContext('conversation');
     // Empty files older than EMPTY_FILE_GC_MS get deleted at the end —
     // can't unlink mid-loop without surprising readdirSync.
     const filesToDelete: string[] = [];
@@ -196,9 +190,10 @@ export async function GET(request: NextRequest) {
           }
         }
 
+        const settlement = inboxProjection(inboxSubject('conversation', tabId, data.repoPath,
+          data.projectId, inbox.workspaces), null, inbox);
         conversations.push({
           tabId: basename(file, '.json'),
-          ...inboxProjection(inboxSubject('conversation', tabId, data.repoPath, data.projectId)),
           title,
           preview,
           empty: isEmpty,
@@ -218,6 +213,11 @@ export async function GET(request: NextRequest) {
           backend: isOrchestratorBackendId(data.backend) ? data.backend : null,
           agent: typeof data.agent === 'string' && data.agent.trim() ? data.agent.trim() : null,
           archivedAt,
+          inboxSubject: settlement.inboxSubject,
+          parentInboxSubject: settlement.parentInboxSubject,
+          settledOverride: settlement.settledOverride,
+          settledAt: settlement.settledAt,
+          unsettledAt: settlement.unsettledAt,
         });
       } catch { /* skip bad files */ }
     }

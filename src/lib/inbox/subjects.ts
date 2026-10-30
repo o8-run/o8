@@ -7,10 +7,11 @@
  * Adapted for o8: conversation subjects, packet lineage and standalone runtime
  * identities, with existing approval, queue, lane and run evidence.
  */
+import type { Lane } from '@/lib/lane/types';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getRuntime } from '@/lib/runtimes';
-import type { RuntimeId } from '@/lib/runtimes/types';
+import type { AgentRuntime, RuntimeId } from '@/lib/runtimes/types';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { PROCESS_TIMEOUT_MS } from '@/lib/lane/orchestrator-session-core';
 import { listLanes } from '@/lib/lane/registry';
@@ -21,7 +22,7 @@ import { listRecordedApprovals } from '@/lib/approvals/store';
 import { listQueuedComposerSends } from '@/lib/orchestrator/composer-queue';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
-import { inboxProjection, inboxSubject, observeInboxRuntimeRun, readInboxState } from './store';
+import { inboxProjection, inboxReadStatement, inboxSubject, observeInboxRuntimeRun, readInboxState, type InboxReadContext } from './store';
 import { hasQueuedTurnStart, type InboxSubject } from './settlement';
 
 export class InboxMutationError extends Error {
@@ -32,8 +33,20 @@ export function inboxPackets() {
   const others = listMissionRegistryEntries({ includeArchived: true, strict: true }).flatMap(entry => entry.mission.packets);
   return [...new Map([...others, ...current].map(packet => [packet.id, packet])).values()];
 }
-export function runtimeInboxIdentity(agent: Pick<AgentSummary, 'sessionKey' | 'workspace'>, packets = inboxPackets()) {
-  const lane = listLanes().filter(candidate => candidate.sessionKey === agent.sessionKey).reverse()
+type InboxLane = Pick<Lane, 'sessionKey' | 'packetId' | 'repoPath' | 'projectId'>;
+/** Polling needs identity fields, not full ORM decoding of every lane column. */
+export function readInboxLanes(): Map<string, InboxLane> {
+  const rows = inboxReadStatement(`SELECT session_key, packet_id, repo_path, project_id FROM lanes
+    WHERE session_key IS NOT NULL ORDER BY created_at DESC, updated_at DESC, rowid DESC`, true)
+    .all() as Array<[string, string | null, string, string | null]>;
+  const newest = new Map<string, InboxLane>();
+  for (const row of rows) if (!newest.has(row[0])) newest.set(row[0], {
+    sessionKey: row[0], packetId: row[1], repoPath: row[2], projectId: row[3],
+  });
+  return newest;
+}
+export function runtimeInboxIdentity(agent: Pick<AgentSummary, 'sessionKey' | 'workspace'>, packets = inboxPackets(), lanes: Lane[] | Map<string, InboxLane> = listLanes(), context?: InboxReadContext) {
+  const lane = lanes instanceof Map ? lanes.get(agent.sessionKey) : lanes.filter(candidate => candidate.sessionKey === agent.sessionKey).reverse()
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.updatedAt.localeCompare(a.updatedAt))[0];
   const workspace = agent.workspace.startsWith('~/') ? join(homedir(), agent.workspace.slice(2)) : agent.workspace;
   const packet = packets.find(candidate => lane ? candidate.id === lane.packetId : candidate.lane?.sessionKey === agent.sessionKey);
@@ -41,14 +54,24 @@ export function runtimeInboxIdentity(agent: Pick<AgentSummary, 'sessionKey' | 'w
   const parentHistory = parentId ? readPersistedLlmChat(parentId)?.history : null;
   const parentInboxSubject = parentId
     ? inboxSubject('conversation', parentId, parentHistory?.repoPath ?? packet?.workspaceTargetPath ?? workspace,
-      (parentHistory as { projectId?: string } | null)?.projectId ?? packet?.projectId)
+      (parentHistory as { projectId?: string } | null)?.projectId ?? packet?.projectId, context?.workspaces)
     : null;
-  return { inboxSubject: parentInboxSubject ?? inboxSubject('runtime', agent.sessionKey, lane?.repoPath ?? workspace, lane?.projectId), parentInboxSubject };
+  return { inboxSubject: parentInboxSubject ?? inboxSubject('runtime', agent.sessionKey, lane?.repoPath ?? workspace, lane?.projectId, context?.workspaces), parentInboxSubject };
 }
-export async function projectRuntimeInbox(agent: AgentSummary, packets = inboxPackets()) {
-  const identity = runtimeInboxIdentity(agent, packets);
-  await observeAgentInboxRun(agent, identity.inboxSubject);
-  return { ...agent, ...inboxProjection(identity.inboxSubject, identity.parentInboxSubject) };
+function agentRunStartedAt(agent: AgentSummary): string | undefined {
+  return agent.runtimeSurface?.lifecycle?.lastRunStartedAt
+    ?? agent.statusEvidence?.evidence.find(item => item.source === 'codex-rollout.started-at')?.value;
+}
+export function projectRuntimeInbox(agent: AgentSummary, packets = inboxPackets(), lanes: Lane[] | Map<string, InboxLane> = listLanes(), context?: InboxReadContext) {
+  const identity = runtimeInboxIdentity(agent, packets, lanes, context);
+  const project = () => inboxProjection(identity.inboxSubject, identity.parentInboxSubject, context, agent);
+  const startedAt = agentRunStartedAt(agent);
+  if (startedAt) {
+    observeInboxRuntimeRun(identity.inboxSubject, startedAt, context);
+    return project();
+  }
+  const observed = observeAgentInboxRun(agent, identity.inboxSubject, false, context);
+  return observed instanceof Promise ? observed.then(project) : project();
 }
 
 /** Providers without lifecycle markers still expose timestamped run messages.
@@ -60,17 +83,24 @@ export interface RuntimeInboxActivity {
   latestRunAt?: number;
   failed?: boolean;
 }
-export async function observeAgentInboxRun(agent: AgentSummary, subject: InboxSubject, forMutation = false): Promise<RuntimeInboxActivity> {
-  const startedAt = agent.runtimeSurface?.lifecycle?.lastRunStartedAt
-    ?? agent.statusEvidence?.evidence.find(item => item.source === 'codex-rollout.started-at')?.value;
+export function observeAgentInboxRun(agent: AgentSummary, subject: InboxSubject, forMutation = false, context?: InboxReadContext): RuntimeInboxActivity | Promise<RuntimeInboxActivity> {
+  const startedAt = agentRunStartedAt(agent);
   const finishedAt = agent.runtimeSurface?.lifecycle?.lastRunFinishedAt;
   const runTimes = [startedAt, finishedAt].flatMap(value => value && Number.isFinite(Date.parse(value)) ? [Date.parse(value)] : []);
   const activity: RuntimeInboxActivity = { latestRunAt: runTimes.length ? Math.max(...runTimes) : undefined, failed: agent.status === 'failed' };
-  if (startedAt) observeInboxRuntimeRun(subject, startedAt);
-  const prior = readInboxState(subject);
-  if (!forMutation && (startedAt || prior.settledOverride === null)) return activity;
+  if (startedAt) {
+    observeInboxRuntimeRun(subject, startedAt, context);
+    if (!forMutation) return activity;
+  }
+  const prior = readInboxState(subject, context);
+  if (!forMutation && prior.settledOverride === null) return activity;
   const runtime = getRuntime(agent.runtime as RuntimeId);
   if (!runtime?.capabilities.readTranscript) return activity;
+  return observeAgentInboxTranscript(runtime, agent, subject, activity, context);
+}
+
+async function observeAgentInboxTranscript(runtime: AgentRuntime, agent: AgentSummary, subject: InboxSubject,
+  activity: RuntimeInboxActivity, context?: InboxReadContext): Promise<RuntimeInboxActivity> {
   let transcript;
   try { transcript = await runtime.readTranscript(agent.sessionKey, undefined, 50); }
   catch { return activity; } // Missing evidence retains the explicit override.
@@ -83,7 +113,7 @@ export async function observeAgentInboxRun(agent: AgentSummary, subject: InboxSu
     if (entry.role === 'user') activity.latestUserMessageAt = Math.max(activity.latestUserMessageAt ?? -Infinity, time);
     else activity.latestRunAt = Math.max(activity.latestRunAt ?? -Infinity, time);
   }
-  if (latestActivity > 0) observeInboxRuntimeRun(subject, new Date(latestActivity).toISOString());
+  if (latestActivity > 0) observeInboxRuntimeRun(subject, new Date(latestActivity).toISOString(), context);
   return activity;
 }
 
@@ -97,7 +127,7 @@ export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary
     ? lane.sessionKey === subject.id : childIds.has(lane.packetId ?? ''));
   const sessionKeys = new Set(relevantLanes.flatMap(lane => {
     if (!lane.sessionKey) return [];
-    const current = runtimeInboxIdentity({ sessionKey: lane.sessionKey, workspace: lane.repoPath }, packets);
+    const current = runtimeInboxIdentity({ sessionKey: lane.sessionKey, workspace: lane.repoPath }, packets, lanes);
     return current.inboxSubject.kind === subject.kind && current.inboxSubject.id === subject.id
       ? [lane.sessionKey] : [];
   }));

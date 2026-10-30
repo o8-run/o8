@@ -1,11 +1,3 @@
-/**
- * Adapted from T3 Code (https://github.com/pingdotgg/t3code),
- * apps/server/src/orchestration-v2/Orchestrator.ts and
- * packages/client-runtime/src/state/threadSettled.ts, commit
- * f58fad04162165653bf06f0c987bbfb0074a8a4b.
- * Copyright (c) 2026 T3 Tools Inc.; MIT; see licenses/t3code-MIT.txt.
- * Adapted for o8: real route, SQLite, history and runtime subject fixtures.
- */
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -18,6 +10,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { POST, PATCH, GET, DELETE } from '@/app/api/v2/chat-history/route';
 import { GET as list } from '@/app/api/mobile/orchestrator/threads/route';
+import { GET as historyList } from '@/app/api/v2/chat-history/list/route';
 import { GET as inventory } from '@/app/api/runtime/inventory/route';
 import { createLane, setLaneStatus } from '@/lib/lane/registry';
 import { createApproval } from '@/lib/approvals/store';
@@ -75,6 +68,8 @@ describe('inbox settlement through operator mutation and native listings', () =>
     expect(await listed(tabId)).toMatchObject({ settledOverride: null, settledAt: null, unsettledAt: null });
     expect((await mutate(tabId, 'settle')).status).toBe(200);
     const settled = await listed(tabId);
+    const archiveRows = await (await historyList(new NextRequest('http://localhost/api/v2/chat-history/list?include=orchestrator'))).json();
+    expect(archiveRows.conversations.find((row: { tabId: string }) => row.tabId === tabId)).toMatchObject({ settledOverride: 'settled', settledAt: settled.settledAt });
     expect(settled).toMatchObject({ inboxSubject: { kind: 'conversation', id: tabId }, settledOverride: 'settled', settledAt: expect.any(String), unsettledAt: null });
     expect((await mutate(tabId, 'settle')).status).toBe(200);
     expect(await listed(tabId)).toEqual(settled);
@@ -131,6 +126,41 @@ describe('inbox settlement through operator mutation and native listings', () =>
     expect((await read()).settledOverride).toBeNull();
     expect((await patch()).status).toBe(409); // Recent runtime user message not yet adopted.
     fixture.transcript = [];
+  });
+
+  it('reads lanes once and takes no write transaction when inventory activity is unchanged', async () => {
+    fixture.agents = Array.from({ length: 4 }, (_, index) => ({
+      sessionKey: `codex:poll-${process.pid}-${index}`, workspace: process.cwd(), runtime: 'codex', status: 'idle',
+      runtimeSurface: { lifecycle: { lastRunStartedAt: '2026-01-01T00:00:00.000Z' } },
+    }));
+    const poll = () => inventory(new NextRequest('http://localhost/api/runtime/inventory'));
+    expect((await poll()).status).toBe(200); // Adopt the initial observations.
+    expect((await PATCH(request({ sessionKey: fixture.agents[0].sessionKey, inboxAction: 'unsettle' }))).status).toBe(200);
+    const statementPrototype = Object.getPrototypeOf(getSqlite().prepare('SELECT 1')) as {
+      all: (...parameters: unknown[]) => unknown[];
+    };
+    const all = statementPrototype.all;
+    let laneReads = 0;
+    const trace = vi.spyOn(statementPrototype, 'all').mockImplementation(function(this: { source: string }, ...parameters: unknown[]) {
+      if (/\bFROM\s+["`]?lanes\b/i.test(this.source)) laneReads += 1;
+      return all.apply(this, parameters);
+    });
+    const transaction = vi.spyOn(getSqlite(), 'transaction');
+    try {
+      const snapshot = await (await poll()).json();
+      expect(snapshot.agents).toHaveLength(4);
+      expect(snapshot.agents[0].settledOverride).toBe('active');
+      expect(transaction).not.toHaveBeenCalled();
+      expect(laneReads).toBe(1);
+      fixture.agents[0].runtimeSurface = { lifecycle: { lastRunStartedAt: new Date(Date.now() + 1_000).toISOString() } };
+      const advanced = await (await poll()).json();
+      expect(advanced.agents[0].settledOverride).toBeNull();
+      expect(transaction).toHaveBeenCalledTimes(1);
+    } finally {
+      trace.mockRestore();
+      transaction.mockRestore();
+      fixture.agents = [];
+    }
   });
 
   it('represents packet workers under the parent and blocks independent settlement', async () => {

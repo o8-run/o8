@@ -6,6 +6,7 @@
  * Adapted for o8: atomic metadata in the existing SQLite app_state store,
  * separate from transcripts; shared WS/API activity and native read projection.
  */
+import type Database from 'better-sqlite3';
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getSqlite } from '@/lib/db';
@@ -18,9 +19,44 @@ interface StoredInboxState extends InboxSettlement {
   observedRunAt?: string;
   overrideAt?: string;
 }
-export function inboxSubject(kind: InboxSubject['kind'], id: string, workspace: unknown, projectId?: unknown): InboxSubject {
-  let path = typeof workspace === 'string' && workspace ? resolve(workspace) : null;
-  if (path) { try { path = realpathSync.native(path); } catch { /* Offline checkout retains its recorded path. */ } }
+type InboxReadStatement = Database.Statement<unknown[]>;
+const readStatements = new WeakMap<ReturnType<typeof getSqlite>, Map<string, InboxReadStatement>>();
+/** Cache compilation, never results; a reopened database gets its own statements. */
+export function inboxReadStatement(sql: string, raw = false): InboxReadStatement {
+  const db = getSqlite();
+  let statements = readStatements.get(db);
+  if (!statements) { statements = new Map(); readStatements.set(db, statements); }
+  const cacheKey = `${raw ? 'raw:' : 'object:'}${sql}`;
+  let statement = statements.get(cacheKey);
+  if (!statement) {
+    statement = db.prepare(sql).raw(raw);
+    statements.set(cacheKey, statement);
+  }
+  return statement;
+}
+export interface InboxReadContext {
+  states: Map<string, StoredInboxState>;
+  workspaces: Map<string, string | null>;
+}
+/** One indexed prefix read per listing; never retained across requests. */
+export function createInboxReadContext(kind?: InboxSubject['kind']): InboxReadContext {
+  const prefix = kind ? `inbox:subject:["${kind}",` : 'inbox:subject:';
+  const upper = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+  const rows = inboxReadStatement('SELECT key, value FROM app_state WHERE key >= ? AND key < ?')
+    .all(prefix, upper) as Array<{ key: string; value: string }>;
+  return { states: new Map(rows.map(row => [row.key, JSON.parse(row.value) as StoredInboxState])), workspaces: new Map() };
+}
+export function inboxSubject(kind: InboxSubject['kind'], id: string, workspace: unknown, projectId?: unknown, workspaces?: InboxReadContext['workspaces']): InboxSubject {
+  let path = typeof workspace === 'string' && workspace ? workspace : null;
+  if (path) {
+    const recorded = path;
+    if (workspaces?.has(recorded)) path = workspaces.get(recorded) ?? null;
+    else {
+      path = resolve(path);
+      try { path = realpathSync.native(path); } catch { /* Offline checkout retains its recorded path. */ }
+      workspaces?.set(recorded, path);
+    }
+  }
   return { kind, id, workspace: path, projectId: typeof projectId === 'string' && projectId.trim() ? projectId.trim() : null };
 }
 function key(subject: InboxSubject): string {
@@ -28,8 +64,9 @@ function key(subject: InboxSubject): string {
   // qualified identity remain stable when the operator changes project scope.
   return `inbox:subject:${JSON.stringify([subject.kind, subject.workspace, subject.id])}`;
 }
-export function readInboxState(subject: InboxSubject): StoredInboxState {
-  const row = getSqlite().prepare('SELECT value FROM app_state WHERE key = ?').get(key(subject)) as { value: string } | undefined;
+export function readInboxState(subject: InboxSubject, context?: InboxReadContext): StoredInboxState {
+  if (context) return context.states.get(key(subject)) ?? emptySettlement();
+  const row = inboxReadStatement('SELECT value FROM app_state WHERE key = ?').get(key(subject)) as { value: string } | undefined;
   return row ? JSON.parse(row.value) as StoredInboxState : emptySettlement();
 }
 function write(subject: InboxSubject, state: StoredInboxState): void {
@@ -51,9 +88,14 @@ export function mutateInboxSettlement(subject: InboxSubject, action: 'settle' | 
     return next;
   }).immediate();
 }
-export function inboxProjection(subject: InboxSubject, parentInboxSubject: InboxSubject | null = null) {
-  const state = readInboxState(subject);
-  return { inboxSubject: subject, parentInboxSubject, settledOverride: state.settledOverride, settledAt: state.settledAt, unsettledAt: state.unsettledAt };
+type InboxProjection = InboxSettlement & { inboxSubject: InboxSubject; parentInboxSubject: InboxSubject | null };
+export function inboxProjection<T extends object>(subject: InboxSubject, parent: InboxSubject | null,
+  context: InboxReadContext | undefined, base: T): T & InboxProjection;
+export function inboxProjection(subject: InboxSubject, parent?: InboxSubject | null, context?: InboxReadContext): InboxProjection;
+export function inboxProjection(subject: InboxSubject, parentInboxSubject: InboxSubject | null = null, context?: InboxReadContext, base?: object) {
+  const state = context ? (context.states.size ? context.states.get(key(subject)) : undefined) : readInboxState(subject);
+  return { ...base, inboxSubject: subject, parentInboxSubject, settledOverride: state?.settledOverride ?? null,
+    settledAt: state?.settledAt ?? null, unsettledAt: state?.unsettledAt ?? null };
 }
 
 /** Called by the WS broadcast chokepoint, never by a client history save. */
@@ -73,13 +115,20 @@ export function recordInboxConversationEvent(event: { event?: string; data?: { t
 }
 
 /** A lifecycle run-start is evidence; lastActivityAt also includes metadata. */
-export function observeInboxRuntimeRun(subject: InboxSubject, startedAt: string | undefined): void {
-  if (!startedAt || !Number.isFinite(Date.parse(startedAt))) return;
-  getSqlite().transaction(() => {
+export function observeInboxRuntimeRun(subject: InboxSubject, startedAt: string | undefined, context?: InboxReadContext): void {
+  if (!startedAt) return;
+  const observed = readInboxState(subject, context).observedRunAt;
+  if (observed === startedAt) return;
+  const startedMs = Date.parse(startedAt);
+  if (!Number.isFinite(startedMs) || (observed && Date.parse(observed) >= startedMs)) return;
+  const updated = getSqlite().transaction(() => {
     const prior = readInboxState(subject);
-    if (prior.observedRunAt && Date.parse(prior.observedRunAt) >= Date.parse(startedAt)) return;
-    const next = prior.overrideAt && Date.parse(startedAt) > Date.parse(prior.overrideAt) && prior.settledOverride !== null
+    if (prior.observedRunAt && Date.parse(prior.observedRunAt) >= startedMs) return prior;
+    const next = prior.overrideAt && startedMs > Date.parse(prior.overrideAt) && prior.settledOverride !== null
       ? transitionSettlement(prior, 'run', startedAt) : {};
-    write(subject, { ...prior, ...next, observedRunAt: startedAt });
+    const updated = { ...prior, ...next, observedRunAt: startedAt };
+    write(subject, updated);
+    return updated;
   }).immediate();
+  context?.states.set(key(subject), updated);
 }
