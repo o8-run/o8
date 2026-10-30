@@ -854,6 +854,13 @@ impl VisualTestContext {
         self.background_executor.run_until_parked();
     }
 
+    /// Dispatch an input event without draining background work, so tests can
+    /// inspect the pending scene before a blocking request has completed.
+    pub fn simulate_event_without_wait<E: InputEvent>(&mut self, event: E) {
+        self.test_window(self.window)
+            .simulate_input(event.to_platform_input());
+    }
+
     /// Simulates the user blurring the window.
     pub fn deactivate_window(&mut self) {
         if Some(self.window) == self.test_platform.active_window() {
