@@ -137,7 +137,8 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                 trace.ended = Some(trace.ended.map_or(ended, |e| e.max(ended)));
             }
             rows.push(Row::Activity {
-                // Named for the block's first entry, so the id holds while steps arrive.
+                // Thinking-first rows retain their entry identity as steps arrive.
+                // Fresh tool-only blocks use the web renderer's first-step id.
                 id: if trace_id.is_empty() {
                     steps[pending[0]].id.clone()
                 } else {
@@ -160,7 +161,14 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
         let tools = entry.tools.as_deref().is_some_and(|t| !t.is_empty());
         if thought || marker || tools {
             if !trace.thinking && pending.is_empty() {
-                trace_id = entry.id.clone();
+                let existing_trace = cached
+                    .get(format!("{}:trace", entry.id).as_str())
+                    .is_some_and(|row| matches!(row, Row::Activity { .. }));
+                trace_id = if thought || marker || existing_trace {
+                    entry.id.clone()
+                } else {
+                    String::new()
+                };
             }
             trace.thinking |= thought || marker;
             trace.include(stamp(entry));

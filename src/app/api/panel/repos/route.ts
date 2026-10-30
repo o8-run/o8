@@ -10,6 +10,7 @@ import { performance } from 'node:perf_hooks';
 import {
   addRepo,
   listRepos,
+  listReposFresh,
   touchRepo,
   updateRepo,
   validateRepo,
@@ -176,7 +177,8 @@ export async function GET(request: Request) {
 
   try {
     const registryStartedAt = performance.now();
-    const registeredRepos = await listRepos();
+    const registeredRepos = params.get('restoreValidationOnly') === '1'
+      ? await listReposFresh() : await listRepos();
     const registryDurationMs = performance.now() - registryStartedAt;
     const requestedRestorePaths = params.getAll('restorePath');
     if (params.get('restoreValidationOnly') === '1') {

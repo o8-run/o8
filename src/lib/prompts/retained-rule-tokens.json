@@ -17,7 +17,7 @@
   },
   {
     "file": "src/lib/lane/orchestrator-backends/openclaw.ts",
-    "tokensSha256": "4fd0b5fc554eb315f52c56a4e334e12d19e73875962647ecd97b49d297f1dd24"
+    "tokensSha256": "e5131fa215bf23f107a8004e2f32afa3746160fef4ceb7c27fa9fe1d94d8ecde"
   },
   {
     "file": "src/lib/dictation/polish-prompt.ts",
