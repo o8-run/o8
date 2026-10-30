@@ -1,8 +1,13 @@
 //! The right panel's Files and o8.md tools (WorkspaceFilesPane, O8SpecPane).
 //! Files lists the workspace a directory at a time through /api/panel/files
 //! and previews a file through /api/v2/files; o8.md reads /api/repo-spec.
+mod markdown;
+mod markdown_view;
+mod media;
 mod quick_docs;
 mod search;
+mod source;
+mod viewer;
 use quick_docs::QuickDocs;
 #[cfg(test)]
 mod tests;
@@ -37,7 +42,11 @@ enum File {
     Loaded {
         lines: Vec<SharedString>,
         truncated: bool,
+        markdown: std::rc::Rc<std::cell::RefCell<crate::retained::RowState>>,
+        source: source::Source,
+        image: Option<media::Preview>,
     },
+    Image(std::sync::Arc<gpui::RenderImage>),
     Failed(String),
 }
 
@@ -67,6 +76,8 @@ pub struct FilesPanel {
     quick_docs: Option<Entity<QuickDocs>>,
     _subscriptions: Vec<Subscription>,
     file_generation: u64,
+    view_modes: HashMap<String, viewer::ViewMode>,
+    wrap_lines: bool,
 }
 
 impl FilesPanel {
@@ -113,6 +124,8 @@ impl FilesPanel {
                 .chain(pins_changed)
                 .collect(),
             file_generation: 0,
+            view_modes: HashMap::new(),
+            wrap_lines: true,
         };
         match mode {
             Mode::Files => panel.load_directory(String::new(), cx),
@@ -191,6 +204,16 @@ impl FilesPanel {
         }
         self.selected = Some(path.clone());
         self.file = File::Loading;
+        if media::is_image(&path) {
+            self.open_image(path, cx);
+            return;
+        }
+        if let Some(kind) = media::unsupported(&path) {
+            self.file_generation += 1;
+            self.file = File::Failed(format!("{kind} preview is not available yet."));
+            cx.notify();
+            return;
+        }
         let client = self.client.clone();
         let workspace = self.workspace.clone();
         let task = cx.background_executor().spawn(async move {
@@ -221,6 +244,29 @@ impl FilesPanel {
     fn finish_file(&mut self, task: gpui::Task<Result<Value, String>>, cx: &mut Context<Self>) {
         self.file_generation += 1;
         let generation = self.file_generation;
+        let svg = self
+            .selected
+            .as_deref()
+            .is_some_and(media::is_svg)
+            .then(|| {
+                let path = media::svg_path();
+                let decoder = <gpui::ImageAssetLoader as gpui::Asset>::load(
+                    gpui::Resource::Path(path.clone().into()),
+                    cx,
+                );
+                (path, decoder)
+            });
+        let task = cx.background_executor().spawn(async move {
+            let body = task.await?;
+            let image = match svg {
+                Some((path, decoder)) if body["error"].is_null() => Some(
+                    media::decode_svg(path, body["content"].as_str().unwrap_or_default(), decoder)
+                        .await,
+                ),
+                _ => None,
+            };
+            Ok::<_, String>((body, image))
+        });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -228,17 +274,30 @@ impl FilesPanel {
                     return;
                 }
                 this.file = match result {
-                    Ok(body) if body["error"].is_null() => File::Loaded {
-                        lines: body["content"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .lines()
-                            // File text shows as written; tabs become four spaces.
-                            .map(|line| SharedString::from(line.replace('\t', "    ")))
-                            .collect(),
-                        truncated: body["truncated"] == true,
-                    },
-                    Ok(body) => {
+                    Ok((body, image)) if body["error"].is_null() => {
+                        let content = body["content"].as_str().unwrap_or_default();
+                        if content.contains('\0') {
+                            File::Failed("This binary file has no text preview.".into())
+                        } else {
+                            File::Loaded {
+                                image,
+                                source: source::Source::new(content.split('\n').count()),
+                                lines: content
+                                    .split('\n')
+                                    .map(|line| SharedString::from(line.replace('\t', "  ")))
+                                    .collect(),
+                                truncated: body["truncated"] == true,
+                                markdown: viewer::markdown(
+                                    if this.selected.as_deref().is_some_and(viewer::is_markdown) {
+                                        content
+                                    } else {
+                                        ""
+                                    },
+                                ),
+                            }
+                        }
+                    }
+                    Ok((body, _)) => {
                         File::Failed(body["error"].as_str().unwrap_or("File unavailable").into())
                     }
                     Err(error) => File::Failed(error),
@@ -382,80 +441,31 @@ impl FilesPanel {
         .py(px(4.))
     }
 
-    fn viewer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn viewer(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let title = self.selected.clone().unwrap_or_default();
+        let previewable = viewer::is_markdown(&title) || media::is_svg(&title);
+        let preview = self.view_mode() == viewer::ViewMode::Preview;
         let body = match &self.file {
-            // o8.md is a notes document: wrapped body text, not numbered code.
-            File::Loaded { lines, .. } if self.mode == Mode::Spec => div()
-                .id("spec-body")
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .px(px(16.))
-                .py(px(12.))
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .text_size(px(13.))
-                .line_height(px(20.))
-                .text_color(theme().text)
-                .children(
-                    lines
-                        .iter()
-                        .map(|line| div().min_h(px(20.)).child(line.clone())),
-                )
-                .into_any_element(),
-            File::Loaded { lines, truncated } => {
-                let lines = lines.clone();
-                let gutter = (lines.len().max(1).to_string().len() as f32) * 7.5 + 16.;
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .child(
-                        uniform_list("files-lines", lines.len(), move |range, _, _| {
-                            range
-                                .map(|i| {
-                                    div()
-                                        .h(px(19.))
-                                        .flex()
-                                        .font_family(theme().font_mono)
-                                        .text_size(px(12.))
-                                        .line_height(px(19.))
-                                        .whitespace_nowrap()
-                                        .child(
-                                            div()
-                                                .w(px(gutter))
-                                                .flex_shrink_0()
-                                                .pr(px(10.))
-                                                .flex()
-                                                .justify_end()
-                                                .text_color(theme().text_faint)
-                                                .child((i + 1).to_string()),
-                                        )
-                                        .child(
-                                            div().text_color(theme().text).child(lines[i].clone()),
-                                        )
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                        .flex_1()
-                        .py(px(6.)),
-                    )
-                    .when(*truncated, |view| {
-                        view.child(
-                            div()
-                                .px(px(12.))
-                                .py(px(6.))
-                                .text_size(px(11.))
-                                .text_color(theme().text_muted)
-                                .child("Showing the first 1 MB."),
-                        )
-                    })
-                    .into_any_element()
+            File::Image(image) => media::view(image.clone(), self.file_generation, false),
+            File::Loaded {
+                image: Some(image), ..
+            } if media::is_svg(&title) && preview => match image {
+                Ok(image) => {
+                    #[cfg(test)]
+                    cx.set_global(tests::RenderedMedia(image.clone()));
+                    media::view(image.clone(), self.file_generation, true)
+                }
+                Err(error) => self.file_error(error, cx),
+            },
+            File::Loaded { markdown, .. } if previewable && preview => {
+                #[cfg(test)]
+                cx.set_global(tests::RenderedMarkdown(markdown.clone()));
+                markdown_view::view(markdown.clone(), self.file_generation, window, cx)
             }
-            File::Failed(error) => status(error.clone()).into_any_element(),
+            File::Loaded { lines, source, .. } => {
+                source.view(lines, self.wrap_lines, self.file_generation, window)
+            }
+            File::Failed(error) => self.file_error(error, cx),
             _ => status("Loading…".into()).into_any_element(),
         };
         div()
@@ -467,26 +477,20 @@ impl FilesPanel {
             .overflow_hidden()
             .child(
                 div()
-                    .h(px(34.))
+                    .min_h(px(34.))
+                    .py(px(5.))
                     .flex_shrink_0()
                     .flex()
                     .items_center()
                     .gap(px(6.))
                     .pl(px(12.))
-                    .pr(px(4.))
+                    .pr(px(8.))
                     .border_b_1()
                     .border_color(theme().border)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .text_size(px(12.))
-                            .text_color(theme().text_secondary)
-                            .child(title),
-                    )
+                    .child(crate::icon::stroke(file_icon(&title), file_color(&title), 14., 1.6))
+                    .child(viewer::file_heading(&title, cx))
+                    .when(previewable, |bar| bar.child(self.preview_toggle(cx)))
+                    .when(!preview && matches!(self.file, File::Loaded { .. }), |bar| bar.child(self.wrap_toggle(cx)))
                     .when(self.mode == Mode::Files, |bar| {
                         let label = if self.tree_visible {
                             "Hide file tree"
@@ -528,6 +532,11 @@ impl FilesPanel {
                         )
                     }),
             )
+            .when(matches!(self.file, File::Loaded { truncated: true, .. }), |view| {
+                view.child(div().px(px(12.)).py(px(6.)).text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child("Read-only preview · first 1 MB. Use an editor to change the full file."))
+            })
             .child(body)
     }
 }
@@ -552,7 +561,7 @@ impl Render for FilesPanel {
             .size_full()
             .flex()
             .min_h_0()
-            .when(viewing, |pane| pane.child(self.viewer(cx)))
+            .when(viewing, |pane| pane.child(self.viewer(window, cx)))
             .when(
                 self.mode == Mode::Files && (self.tree_visible || !viewing),
                 |pane| {
