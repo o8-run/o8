@@ -51,9 +51,13 @@ if (new Set(names).size !== names.length) {
   console.error('[native-tests] duplicate harness test names');
   process.exit(2);
 }
+// Frame-budget typing has the same isolation requirement as fixed-rate PTY
+// probes: sibling scene tests must not consume its measured CPU time.
+const timed = name => name.startsWith('terminal::tests::production_pty_')
+  || name === 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark';
 const selected = names.filter(name =>
   createHash('sha256').update(name).digest().readUInt32BE(0) % count === index - 1
-  && (name.startsWith('terminal::tests::production_pty_') ? 'timed' : 'regular') === phase);
+  && (timed(name) ? 'timed' : 'regular') === phase);
 console.log(`[native-tests] shard=${index}/${count} phase=${phase} selected=${selected.length} total=${names.length}`);
 // An empty filter runs everything in libtest; do not launch an empty shard.
 if (selected.length) {

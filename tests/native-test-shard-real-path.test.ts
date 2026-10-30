@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, expect, it } from 'vitest';
@@ -14,24 +14,38 @@ writeFileSync(path.join(crate, 'Cargo.toml'), '[package]\nname="shard-fixture"\n
 writeFileSync(path.join(crate, 'Cargo.lock'), 'version=4\n[[package]]\nname="shard-fixture"\nversion="0.0.0"\n');
 const names = ['prefix', 'prefix_longer', ...Array.from({ length: 14 }, (_, i) => `case_${i}`)];
 const timed = 'terminal::tests::production_pty_fixture';
+const images = 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark';
 const source = `fn record(name: &str) {
   use std::io::Write;
-  let expected = if name.starts_with("terminal::tests::production_pty_") { "timed" } else { "regular" };
+  let expected = if name.starts_with("terminal::tests::production_pty_") || name == "${images}" { "timed" } else { "regular" };
   assert_eq!(std::env::var("O8_NATIVE_TEST_PHASE").unwrap_or_default(), expected);
   let mut file = std::fs::OpenOptions::new().create(true).append(true).open(${JSON.stringify(receipt)}).unwrap();
   file.write_all(format!("{name}\\n").as_bytes()).unwrap();
   assert_ne!(std::env::var("SHARD_FIXTURE_FAIL").unwrap_or_default(), name);
 }\n` + names.map(name => `#[test] fn ${name}() { record("${name}"); }`).join('\n') + `
 mod terminal { mod tests { #[test] fn production_pty_fixture() { crate::record("${timed}"); } } }
+mod shell { mod session { mod image_loaded_shell_tests {
+  #[test] fn native_composer_loaded_shell_images_typing_benchmark() { crate::record("${images}"); }
+} } }
 #[test] #[ignore] fn ignored_case() { panic!("must stay ignored"); }\n`;
 writeFileSync(path.join(crate, 'src/lib.rs'), source);
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
+const cargoPhases = new Set<string>();
 function run(shard: string, fail = '', phase = 'regular') {
-  return spawnSync(process.execPath, [runner, '--cargo', `--phase=${phase}`], {
+  // Exercise Cargo's runner wiring once per phase, then reuse that real
+  // compiled harness for the partition/failure matrix instead of rebuilding.
+  const throughCargo = !cargoPhases.has(phase);
+  cargoPhases.add(phase);
+  const args = throughCargo ? ['--cargo', `--phase=${phase}`] : [
+    path.join(root, 'target/debug/deps', readdirSync(path.join(root, 'target/debug/deps'))
+      .find(name => /^shard_fixture-[a-f0-9]+$/.test(name))!),
+    `--test-threads=${phase === 'timed' ? 1 : 4}`,
+  ];
+  return spawnSync(process.execPath, [runner, ...args], {
     cwd: root, encoding: 'utf8', timeout: 30_000,
     env: { ...process.env, CARGO_NET_OFFLINE: 'true', CARGO_TARGET_DIR: path.join(root, 'target'),
-      O8_NATIVE_TEST_SHARD: shard, SHARD_FIXTURE_FAIL: fail },
+      O8_NATIVE_TEST_SHARD: shard, O8_NATIVE_TEST_PHASE: phase, SHARD_FIXTURE_FAIL: fail },
   });
 }
 
@@ -45,9 +59,9 @@ it.skipIf(process.platform !== 'linux' || process.arch !== 'x64')('runs every re
       output += result.stdout;
     }
   }
-  expect(readFileSync(receipt, 'utf8').trim().split('\n').sort()).toEqual([...names, timed].sort());
+  expect(readFileSync(receipt, 'utf8').trim().split('\n').sort()).toEqual([...names, timed, images].sort());
   expect(output.match(/ignored_case \.\.\. ignored/g)).toHaveLength(1);
-  for (const fault of ['prefix', timed]) {
+  for (const fault of ['prefix', timed, images]) {
     let failures = 0;
     for (let index = 1; index <= 4; index++) {
       for (const phase of ['regular', 'timed']) {
