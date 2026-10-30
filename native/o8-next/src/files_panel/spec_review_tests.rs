@@ -4,10 +4,29 @@ const NOTES: &str = "# Fixture notes\n\nThe {==draft line.==}{>>Check the accept
 #[gpui::test]
 fn spec_review_markup_rail_and_mixed_typography(cx: &mut TestAppContext) {
     let f = Fixture::new();
-    fs::write(path(&f), NOTES).unwrap();
+    let extra = "\n```md\n{>>code example<<}{id=\"code1\"}\n~~~\n{>>still code<<}{id=\"code2\"}\n```\n\n{==shared anchor==}{>>first<<}{id=\"c3\"}{>>reply<<}{id=\"c4\" re=\"c3\"}{>>second<<}{id=\"c5\"}\n";
+    let source = format!("# Café\né {{>>Bare comment<<}}{{by=\"AI\"}}\n\n{NOTES}{extra}");
+    fs::write(path(&f), &source).unwrap();
     let (_, cx) = panel(&f, cx);
     wait(cx, "note-c1");
     wait(cx, "note-s1");
+    wait(cx, "note-comment-9");
+    assert!(
+        cx.debug_bounds("note-code1").is_none() && cx.debug_bounds("note-code2").is_none(),
+        "fenced code examples are not actionable annotations"
+    );
+    let index = super::super::super::spec_rfm::parse(&source);
+    assert!(
+        !index
+            .notes
+            .iter()
+            .any(|n| matches!(n.id.as_str(), "code1" | "code2"))
+    );
+    assert_eq!(
+        index.notes.iter().find(|n| n.id == "c5").unwrap().anchor,
+        "shared anchor",
+        "replies retain the common anchor for following comments"
+    );
     let painted = cx.update(|_, cx| cx.global::<Painted>().0.clone());
     assert!(
         !painted
@@ -36,6 +55,13 @@ fn spec_review_markup_rail_and_mixed_typography(cx: &mut TestAppContext) {
     assert!(
         cx.debug_bounds("note-s1-reply").unwrap().left()
             < cx.debug_bounds("note-s1-dismiss").unwrap().left()
+    );
+    click(cx, "note-comment-9-resolve");
+    until(cx, |cx| content(cx).contains("status=\"resolved\""));
+    assert_eq!(
+        fs::read_to_string(path(&f)).unwrap(),
+        content(cx),
+        "Unicode fallback IDs match the production parser"
     );
 }
 #[gpui::test]

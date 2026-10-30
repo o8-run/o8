@@ -38,22 +38,26 @@ fn attrs(s: &str) -> HashMap<String, String> {
 }
 pub(super) fn parse(source: &str) -> Review {
     static ITEMS: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"(?s)\{==.*?==\}|\{>>.*?<<\}(?:\{[^}]*\})?|\{\+\+.*?\+\+\}(?:\{[^}]*\})?|\{--.*?--\}(?:\{[^}]*\})?|\{~~.*?~>.*?~~\}(?:\{[^}]*\})?"#).unwrap()
+        Regex::new(r#"(?s)\{==.*?==\}|\{>>.*?<<\}(?:\{(?:[^"{}]|"(?:\\.|[^"\\])*")*\})?|\{\+\+.*?\+\+\}(?:\{(?:[^"{}]|"(?:\\.|[^"\\])*")*\})?|\{--.*?--\}(?:\{(?:[^"{}]|"(?:\\.|[^"\\])*")*\})?|\{~~.*?~>.*?~~\}(?:\{(?:[^"{}]|"(?:\\.|[^"\\])*")*\})?"#).unwrap()
     });
     static META: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"\{(?:id|by|at|re|status|resolved)="(?:\\.|[^"\\])*"(?:\s+[A-Za-z_]+="(?:\\.|[^"\\])*")*\}"#).unwrap()
     });
+    let code = code_ranges(source);
     let mut out = Review::default();
     let mut replies = vec![];
     let mut previous_anchor: Option<(Range<usize>, String)> = None;
     for m in ITEMS.find_iter(source) {
         let item = m.as_str();
         let from = m.start();
+        let in_code = code.iter().any(|r| r.contains(&from));
         if item.starts_with("{==") {
             let end = m.end() - 3;
             out.hidden.extend([from..from + 3, end..m.end()]);
             out.anchors.push(from + 3..end);
-            previous_anchor = Some((from..m.end(), source[from + 3..end].into()));
+            if !in_code {
+                previous_anchor = Some((from..m.end(), source[from + 3..end].into()));
+            }
             continue;
         }
         let close = if item.starts_with("{>>") {
@@ -106,35 +110,28 @@ pub(super) fn parse(source: &str) -> Review {
         }
         // The canonical index ignores fenced and inline code, while buildAll's
         // display projection intentionally follows classic's regex decoration.
-        let prefix = &source[..from];
-        let fenced = prefix
-            .lines()
-            .filter(|l| l.trim_start().starts_with("```") || l.trim_start().starts_with("~~~"))
-            .count()
-            % 2
-            == 1;
-        let inline = prefix
-            .rsplit('\n')
-            .next()
-            .unwrap_or("")
-            .chars()
-            .filter(|c| *c == '`')
-            .count()
-            % 2
-            == 1;
-        if fenced || inline {
-            continue;
-        }
         if comment && !metadata.contains_key("re") {
             out.dots.push(from);
+        }
+        if in_code {
+            continue;
         }
         let author = metadata.get("by").cloned().unwrap_or_default();
         if let Some(parent) = metadata.get("re") {
             replies.push((parent.clone(), author, text));
+            if let Some((range, _)) = previous_anchor.as_mut() {
+                if range.end <= from && source[range.end..from].trim().is_empty() {
+                    range.end = m.end();
+                }
+            }
             continue;
         }
         let id = metadata.get("id").cloned().unwrap_or_else(|| {
-            format!("{}-{from}", if comment { "comment" } else { "suggestion" })
+            format!(
+                "{}-{}",
+                if comment { "comment" } else { "suggestion" },
+                source[..from].encode_utf16().count()
+            )
         });
         let offset = if comment {
             previous_anchor
@@ -173,4 +170,67 @@ pub(super) fn parse(source: &str) -> Review {
         }
     }
     out
+}
+
+// Port of rfm.ts matchFence/matchInlineCodeSpan. Display decorations still
+// follow buildAll; only the actionable review index excludes code examples.
+fn code_ranges(source: &str) -> Vec<Range<usize>> {
+    let mut ranges = vec![];
+    let mut fence: Option<(u8, usize, usize)> = None;
+    let mut offset = 0;
+    while offset < source.len() {
+        if offset == 0 || source.as_bytes()[offset - 1] == b'\n' {
+            let end = source[offset..]
+                .find('\n')
+                .map(|n| offset + n + 1)
+                .unwrap_or(source.len());
+            let line = &source.as_bytes()[offset..end];
+            let indent = line
+                .iter()
+                .take_while(|b| matches!(b, b' ' | b'\t'))
+                .count();
+            if indent <= 3 {
+                if let Some(&marker) = line.get(indent).filter(|b| matches!(b, b'`' | b'~')) {
+                    let count = line[indent..].iter().take_while(|b| **b == marker).count();
+                    if count >= 3 {
+                        match fence {
+                            None => {
+                                fence = Some((marker, count, offset));
+                                offset = end;
+                                continue;
+                            }
+                            Some((kind, length, start)) if kind == marker && count >= length => {
+                                ranges.push(start..end);
+                                fence = None;
+                                offset = end;
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            if fence.is_some() {
+                offset = end;
+                continue;
+            }
+        }
+        if source.as_bytes()[offset] == b'`' {
+            let count = source.as_bytes()[offset..]
+                .iter()
+                .take_while(|b| **b == b'`')
+                .count();
+            if let Some(end) = source[offset + count..].find(&"`".repeat(count)) {
+                let end = offset + count + end + count;
+                ranges.push(offset..end);
+                offset = end;
+                continue;
+            }
+        }
+        offset += source[offset..].chars().next().unwrap().len_utf8();
+    }
+    if let Some((_, _, start)) = fence {
+        ranges.push(start..source.len());
+    }
+    ranges
 }
