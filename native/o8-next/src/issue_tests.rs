@@ -54,7 +54,7 @@ impl Fixture {
         if worker {
             command.arg("--worker");
         }
-        command.args(flags);
+        command.args(flags).arg("--owned-stdio");
         let mut server = command
             .env("O8_NEXT_API_TOKEN", "fixture-next-issues-operator")
             .stdin(Stdio::piped())
@@ -62,14 +62,16 @@ impl Fixture {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        let origin = BufReader::new(server.stdout.take().unwrap())
-            .lines()
+        let mut output = BufReader::new(server.stdout.take().unwrap()).lines();
+        let origin = output.by_ref()
             .find_map(|line| {
                 serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
                     .as_str()
                     .map(str::to_owned)
             })
             .expect("fixture origin");
+        // Keep late production logs from writing into a closed readiness pipe.
+        std::thread::spawn(move || for _ in output {});
         Self {
             server,
             root,
