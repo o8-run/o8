@@ -5,6 +5,9 @@ use std::collections::BTreeMap;
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Slice {
+    /// Absent until the operator changes Activity's view, so other
+    /// workspaces keep their saved JSON shape.
+    #[serde(skip_serializing_if = "Saved::is_empty")]
     pub activity_preferences: Saved,
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -14,6 +17,14 @@ pub struct Saved {
     pub views: BTreeMap<String, ViewState>,
     pub proposals_open: Option<bool>,
     pub seen: Vec<String>,
+}
+impl Saved {
+    fn is_empty(&self) -> bool {
+        self.scope.is_none()
+            && self.views.is_empty()
+            && self.proposals_open.is_none()
+            && self.seen.is_empty()
+    }
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
