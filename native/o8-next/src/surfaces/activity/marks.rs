@@ -4,13 +4,7 @@ use super::feed::{Row, text};
 use crate::clock::timestamp;
 use gpui::{Rgba, rgb};
 
-pub(super) const ACCENT: u32 = 0x8d9fbd;
-pub(super) const SUCCESS: u32 = 0x70b57f;
-pub(super) const DANGER: u32 = 0xc97878;
-pub(super) const MERGE: u32 = 0xaaa0c7;
-pub(super) const ATTENTION: u32 = 0xcf9d60;
-pub(super) const ADD: u32 = 0x91c99d;
-pub(super) const DELETE: u32 = 0xd99a9a;
+pub(super) use crate::theme::activity::{ACCENT, ADD, ATTENTION, DANGER, DELETE, MERGE, SUCCESS};
 
 /// A tint at `alpha`; classic washes are 0.08.
 pub(super) fn tint(hex: u32, alpha: f32) -> Rgba {
@@ -72,18 +66,7 @@ pub(super) fn feed_icon(row: &Row) -> (&'static str, u32) {
 
 /// orchestratorStatusTone: a packet status's label, color and dot wash.
 pub(super) fn packet_tone(status: &str) -> (&'static str, Rgba, Rgba) {
-    let (label, color, wash, alpha) = match status {
-        "queued" => ("Queued", 0x1d4ed8, 0x2563eb, 0.1),
-        "launching" => ("Launching", 0x2563eb, 0x2563eb, 0.12),
-        "running" => ("Running", 0x16a34a, 0x16a34a, 0.12),
-        "awaiting_review" => ("Reviewing", 0xb45309, 0xf59e0b, 0.12),
-        "blocked" => ("Blocked", 0xdc2626, 0xef4444, 0.1),
-        "recovering" => ("Recovering", 0x7c3aed, 0x7c3aed, 0.12),
-        "failed" => ("Failed", 0x991b1b, 0x991b1b, 0.12),
-        "released" => ("Completed", 0x0f766e, 0x14b8a6, 0.12),
-        "archived" => ("Archived", 0x6b7280, 0x6b7280, 0.12),
-        _ => ("Waiting", 0x64748b, 0x94a3b8, 0.12),
-    };
+    let (label, color, wash, alpha) = crate::theme::activity::packet_tone(status);
     (label, rgb(color), tint(wash, alpha))
 }
 

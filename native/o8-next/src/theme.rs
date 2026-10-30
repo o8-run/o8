@@ -198,6 +198,34 @@ pub fn menu_fill() -> Rgba {
         current().surface_raised
     }
 }
+/// Activity's fixed tints, the same on every appearance: classic
+/// ACTIVITY_COLORS (o8-activity-helpers.tsx) and orchestratorStatusTone
+/// (src/lib/orchestrator/display.ts).
+pub mod activity {
+    pub const ACCENT: u32 = 0x8d9fbd;
+    pub const SUCCESS: u32 = 0x70b57f;
+    pub const DANGER: u32 = 0xc97878;
+    pub const MERGE: u32 = 0xaaa0c7;
+    pub const ATTENTION: u32 = 0xcf9d60;
+    pub const ADD: u32 = 0x91c99d;
+    pub const DELETE: u32 = 0xd99a9a;
+
+    /// A packet status's label, text color, and dot wash with its alpha.
+    pub fn packet_tone(status: &str) -> (&'static str, u32, u32, f32) {
+        match status {
+            "queued" => ("Queued", 0x1d4ed8, 0x2563eb, 0.1),
+            "launching" => ("Launching", 0x2563eb, 0x2563eb, 0.12),
+            "running" => ("Running", 0x16a34a, 0x16a34a, 0.12),
+            "awaiting_review" => ("Reviewing", 0xb45309, 0xf59e0b, 0.12),
+            "blocked" => ("Blocked", 0xdc2626, 0xef4444, 0.1),
+            "recovering" => ("Recovering", 0x7c3aed, 0x7c3aed, 0.12),
+            "failed" => ("Failed", 0x991b1b, 0x991b1b, 0.12),
+            "released" => ("Completed", 0x0f766e, 0x14b8a6, 0.12),
+            "archived" => ("Archived", 0x6b7280, 0x6b7280, 0.12),
+            _ => ("Waiting", 0x64748b, 0x94a3b8, 0.12),
+        }
+    }
+}
 /// The rail Update control's ready fill, RailUpdateControl's #3b82f6.
 pub fn update_ready() -> Rgba {
     rgb(0x3b82f6)
