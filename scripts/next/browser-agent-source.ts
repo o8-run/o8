@@ -11,9 +11,9 @@ export function browserAgentSource(): string {
     bundle: true, write: false, platform: 'node', format: 'cjs', keepNames: false,
     tsconfig: fileURLToPath(new URL('../../tsconfig.json', import.meta.url)),
   });
-  const module = { exports: {} as { NATIVE_BROWSER_AGENT_SOURCE?: string } };
-  runInNewContext(bundle.outputFiles[0].text, { module, exports: module.exports });
-  return module.exports.NATIVE_BROWSER_AGENT_SOURCE! + '\n';
+  const compiled = { exports: {} as { NATIVE_BROWSER_AGENT_SOURCE?: string } };
+  runInNewContext(bundle.outputFiles[0].text, { module: compiled, exports: compiled.exports });
+  return compiled.exports.NATIVE_BROWSER_AGENT_SOURCE! + '\n';
 }
 if (process.argv[1]?.endsWith('/browser-agent-source.ts')) {
   const path = new URL('../../native/o8-next/src/browser_panel/agent.js', import.meta.url);
