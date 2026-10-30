@@ -11,6 +11,13 @@ use std::{
 
 use super::LineWrapper;
 
+fn is_no_break_space(ch: char) -> bool {
+    matches!(ch, '\u{00a0}' | '\u{2007}' | '\u{202f}')
+}
+fn is_breakable_whitespace(ch: char) -> bool {
+    ch.is_whitespace() && !is_no_break_space(ch)
+}
+
 /// A laid out and styled line of text
 #[derive(Default, Debug, Clone)]
 pub struct LineLayout {
@@ -194,7 +201,13 @@ impl LineLayout {
                 prohibited.push(index);
             }
         }
-        prohibited.reverse();
+        // Glue spaces keep both adjoining glyphs together, including during
+        // emergency wrapping. Their advance still participates in line width.
+        for (index, ch) in text.char_indices().filter(|(_, ch)| is_no_break_space(*ch)) {
+            prohibited.extend([index, index + ch.len_utf8()]);
+        }
+        prohibited.sort_unstable();
+        prohibited.dedup();
         let prohibited_indices = &prohibited;
         let mut last_boundary = WrapBoundary {
             run_ix: 0,
@@ -224,7 +237,7 @@ impl LineLayout {
             // overflow nor become emergency breaks, which would indent the next
             // soft line (notably after a closing mark). Keep the source glyphs
             // intact and break at the following word instead.
-            if ch.is_whitespace() {
+            if is_breakable_whitespace(ch) {
                 prev_ch = ch;
                 continue;
             }
@@ -232,7 +245,7 @@ impl LineLayout {
             // Here is very similar to `LineWrapper::wrap_line` to determine text wrapping,
             // but there are some differences, so we have to duplicate the code here.
             if breakable && LineWrapper::is_word_char(ch) {
-                if prev_ch.is_whitespace() && first_non_whitespace_ix.is_some() {
+                if is_breakable_whitespace(prev_ch) && first_non_whitespace_ix.is_some() {
                     last_candidate_ix = Some(boundary);
                     last_candidate_x = x;
                 }

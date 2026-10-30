@@ -29,6 +29,13 @@ Local changes:
   boundary could fall inside a multibyte character, panicking in
   `layout_line` ("end byte index 13 is not a char boundary; it is inside '·'").
 
+- `src/text_system/line_layout.rs`: keep closing punctuation with its preceding
+  text during ordinary and emergency soft wrapping (9dafeae88). Hang breakable
+  separator whitespace on the preceding line (7141929cc), without drawing an
+  indent on the next line. No-break spaces U+00A0, U+2007 and U+202F retain
+  their advance and glue both adjoining glyphs, including at emergency widths.
+  This matches classic WebKit wrapping while preserving source text and indices.
+
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit
 probe live in the parent crate.
