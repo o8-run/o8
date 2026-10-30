@@ -61,6 +61,8 @@ async function image(expected: string) {
   return projected;
 }
 
+// Cold tsx imports initialize the production route graph before any request is
+// measured. Allow shared runners to finish startup; request budgets remain 20s.
 beforeEach(async () => {
   lifetime.begin(); root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-project-icons-')));
   data = join(root, 'data'); repo = join(root, 'repo');
@@ -73,7 +75,7 @@ beforeEach(async () => {
       buildCommand: null, runBuildOnCreateWorkspace: false, devCommand: null, defaultPort: null, workspaceIsolationPreference: 'auto' },
   }] }));
   await start();
-});
+}, 90_000);
 afterEach(async () => { await lifetime.close(); rmSync(root, { recursive: true, force: true }); });
 
 it('projects explicit, config, ordered well-known and HTML icons through the real routes', async () => {
