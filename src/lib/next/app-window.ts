@@ -5,6 +5,7 @@ import { createInterface } from 'node:readline';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { getApiBase } from '@/lib/panel/api-port';
+import { bindNextBrowserPipe } from './browser-pipe';
 
 const UNAVAILABLE = 'o8 next is unavailable. Reinstall the app and try again.';
 // Only spawn-to-first-paint is parent-owned; server loads stay in the window.
@@ -78,6 +79,7 @@ async function start(): Promise<void> {
       env: childEnvironment({ inherit: false, inject: false, env: { ...display, O8_NEXT_API_TOKEN: getOrCreateWsToken(), O8_NEXT_PARENT_PIPE: '1' } }),
     });
     state.child = child;
+    bindNextBrowserPipe(child);
     // Errors have fixed public messages; never forward child output or spawn diagnostics.
     child.on('error', () => {});
     child.once('exit', () => { if (state.child === child) state.child = undefined; });

@@ -14,6 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 mod address;
+mod agent;
 mod favicon;
 pub(crate) mod header;
 mod model;

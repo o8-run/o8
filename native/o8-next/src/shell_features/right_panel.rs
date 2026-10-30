@@ -538,6 +538,14 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     cx.notify();
 }
 
+/// The currently visible Browser only. Agent commands never act on a hidden
+/// workspace, covered launcher, inactive utility tab or background page.
+pub(super) fn active_browser(s: &Shell) -> Option<Entity<crate::browser_panel::BrowserPanel>> {
+    let panel = s.features.read::<Panel>()?;
+    if panel.current() != Tool::Browser || !panel.motion.is_open() { return None; }
+    panel.browsers.get(&key(s, Tool::Browser)).cloned()
+}
+
 /// Opens the panel on a desktop O8 panel tab as Symon names it
 /// (O8_TAB_SURFACES), loading `url` into the Browser; false for any other name.
 pub(super) fn open_surface(
