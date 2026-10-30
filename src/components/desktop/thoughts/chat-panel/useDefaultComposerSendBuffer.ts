@@ -153,7 +153,7 @@ export function useDefaultComposerSendBuffer({
             if (threadId && !consumeRecoveredComposerDraft(threadId, text, images)) throw new Error('The message is queued, but its draft could not be cleared. Retry to check the same send.');
             setInput(''); latestInputRef.current = ''; clearAttachments();
           }
-          confirm();
+          await confirm();
           return;
         }
 
