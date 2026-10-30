@@ -513,7 +513,7 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         s.features.get::<Panel>().browsers.insert(key.clone(), view);
     }
     if tool == Tool::Compare {
-        contextual::ensure_comparison(s, cx);
+        contextual::ensure_comparison(s, window, cx);
     }
     if tool == Tool::Prs {
         contextual::ensure_prs(s, window, cx);
@@ -542,7 +542,9 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
 /// workspace, covered launcher, inactive utility tab or background page.
 pub(super) fn active_browser(s: &Shell) -> Option<Entity<crate::browser_panel::BrowserPanel>> {
     let panel = s.features.read::<Panel>()?;
-    if panel.current() != Tool::Browser || !panel.motion.is_open() { return None; }
+    if panel.current() != Tool::Browser || !panel.motion.is_open() {
+        return None;
+    }
     panel.browsers.get(&key(s, Tool::Browser)).cloned()
 }
 

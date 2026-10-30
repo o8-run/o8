@@ -73,7 +73,7 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         if finish_drag {
             s.persist();
         }
-        contextual::refresh(s, cx);
+        contextual::refresh(s, window, cx);
         return;
     }
     let saved = s.state.right_panel.clone();
@@ -118,7 +118,7 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         }
         save(s);
     }
-    contextual::refresh(s, cx);
+    contextual::refresh(s, window, cx);
 }
 
 pub(super) fn save(s: &mut Shell) {
