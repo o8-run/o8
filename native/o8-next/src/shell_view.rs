@@ -24,7 +24,7 @@ impl Render for Shell {
             cx,
         );
         let slots = features::render_content(self, &frame, chrome.into_any_element(), window, cx);
-        let rail = self.render_rail(cx);
+        let rail = self.render_rail(window, cx);
         div()
             .size_full()
             .flex()
@@ -42,7 +42,24 @@ impl Render for Shell {
             .line_height(gpui::relative(crate::theme::TYPE.chrome_line))
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
+            .capture_key_up(cx.listener(|this, event: &gpui::KeyUpEvent, _, cx| {
+                this.dictation_key_up(event, cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::ui::ToggleVoice, _, cx| this.toggle_voice(cx)))
+            .on_action(cx.listener(|this, _: &crate::ui::ToggleDictation, _, cx| {
+                this.toggle_dictation(cx)
+            }))
             .children(slots)
+            // The traffic-light corner above the rail moves the window too.
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .w(px(rail::WIDTH))
+                    .h(px(crate::theme::GEOMETRY.header))
+                    .window_control_area(gpui::WindowControlArea::Drag),
+            )
             // Painted after the veil so the rail sits on the same glass as the content.
             .child(rail)
     }
@@ -186,12 +203,15 @@ pub(super) fn open_window(
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(600.), px(400.))),
             // On macOS the traffic lights sit in the header band above the rail, as in
-            // the desktop shell. Elsewhere a transparent title bar needs a compositor,
-            // and bare X servers would show nothing.
+            // the desktop shell: first light centred at x=20, all three on y=20 (the
+            // position is the close button's frame origin, measured from a capture).
+            // Elsewhere a transparent title bar needs a compositor, and bare X servers
+            // would show nothing.
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("o8 next".into()),
                 appears_transparent: cfg!(target_os = "macos"),
-                traffic_light_position: cfg!(target_os = "macos").then(|| point(px(16.), px(14.))),
+                traffic_light_position: cfg!(target_os = "macos")
+                    .then(|| point(px(13.25), px(12.25))),
             }),
             ..Default::default()
         },
@@ -201,6 +221,7 @@ pub(super) fn open_window(
             cx.new(|cx| {
                 let mut shell = Shell::new(client, file, state, window, cx);
                 shell.system_glass = system_glass;
+                shell.offscreen = offscreen;
                 shell
             })
         },

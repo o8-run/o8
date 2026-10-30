@@ -53,6 +53,7 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
         "tsx",
         "scripts/next/dev-server.ts",
         "--composer",
+        "--owned-stdio",
     ]);
     if worker {
         command.arg("--worker");
@@ -91,6 +92,7 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
             Some(receipt)
         })
         .unwrap_or_else(|| panic!("fixture origin missing\n{}", server.diagnostics()));
+    std::thread::spawn(move || for _ in lines {});
     let origin = receipt["origin"].as_str().unwrap().to_owned();
     server.2 = receipt["runtimeLog"].as_str().map(std::path::PathBuf::from);
     let anonymous = Client::authenticated(&origin, None).unwrap();

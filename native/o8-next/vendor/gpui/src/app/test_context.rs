@@ -815,6 +815,11 @@ impl VisualTestContext {
         self.update(|window, _| window.rendered_frame.scene.paths.len())
     }
 
+    /// Effective opacity from the last paint, including the element's ancestors.
+    pub fn debug_opacity(&mut self, selector: &str) -> Option<f32> {
+        self.update(|window, _| window.rendered_frame.debug_opacities.get(selector).copied())
+    }
+
     /// Draw an element to the window. Useful for simulating events or actions
     pub fn draw<E>(
         &mut self,
@@ -847,6 +852,13 @@ impl VisualTestContext {
         self.test_window(self.window)
             .simulate_input(event.to_platform_input());
         self.background_executor.run_until_parked();
+    }
+
+    /// Dispatch an input event without draining background work, so tests can
+    /// inspect the pending scene before a blocking request has completed.
+    pub fn simulate_event_without_wait<E: InputEvent>(&mut self, event: E) {
+        self.test_window(self.window)
+            .simulate_input(event.to_platform_input());
     }
 
     /// Simulates the user blurring the window.

@@ -1,11 +1,10 @@
-- o8 uses far less CPU in the background. The check for merged lanes no longer re-runs git for every commit on main every 30 seconds, fetches each repository once per check, and never runs two checks at once.
-- Workers that a chat launches into its own checkout keep running. o8 no longer stops them after 10 minutes as orphans.
-- A browser you close from a chat goes to picture-in-picture and stays with that chat. It no longer floats over Pull requests, terminals or other pages.
-- Sidebar chat rows keep the repo name whole, so a long title shortens instead of cutting "o8-relay" down to "o…".
-- A stopped worker's pane says Interrupted instead of Idle and offers Resume and Retire. If the worker can't be resumed, the pane says it can't take new messages instead of silently hiding the composer.
-- Inbox tabs fit on one row, and cards in the mixed Inbox say "item" and "Dismiss" instead of "incident".
-- Previews of pages with no head tag keep standards mode, so they render the same as in a browser.
-- Chat and transcript search find what you meant despite one misspelled word. Those results rank below exact matches and are marked "Approximate match".
-- Spatial ink draws smooth, tapered strokes.
-- After you report a bug, o8 says it will tell you in the app when the fix ships. The public #fixed Discord posts are retired.
-- Experimental: o8 next adds a navigation rail, a transparent title bar and header tabs, pull request rows grouped by author, inline visualization cards, and images you send shown in the conversation.
+- o8 next is now o8's window on Mac. The classic window no longer opens. The Dock icon, the menu bar icon and Cmd+Shift+Space all bring o8 next forward, or open it if you closed it.
+- Fn dictation types into o8 next's focused field.
+- The Update button in o8 next installs the update itself, shows download progress, and restarts into o8 next.
+- Inbox: settle a thread to clear it, and o8 moves on to the next one. Undo is in the toast. Settled threads stay settled after a restart.
+- Sidebar: Chronological and By repo views, a repository filter, and New thread. Projects can have their own icon, emoji or monogram, chosen on the Projects page.
+- Composer: slash commands with completion, quick actions, saved prompts, and a mode for each thread that it remembers.
+- Right panel: Files with search, Quick docs, file editing and diffs; Browser pages and tabs; Devices; Activity; and workspace notes (o8.md) with inline images. Panel tabs scroll with the mouse wheel and the layout is saved.
+- Activity: packet cards, mission controls, recurring problems you can accept, stop or suppress, and proposals you can review.
+- The conversation shows a live thinking trace, saved branches and how long each turn worked, inline charts, and older turns as you scroll up.
+- Switch between Light, Dark and All Glass while o8 next is running.

@@ -11,44 +11,32 @@ pub(super) struct Runtime {
     subscription: Option<gpui::Subscription>,
     inputs: input::Inputs,
 }
-pub(super) const REGISTRATION: Registration =
-    Registration {
-        overlay_command: true,
-        overlay: |s| {
-            s.surfaces
-                .shortcuts
-                .view
-                .as_ref()
-                .map(|v| v.clone().into_any_element())
-        },
-        overlay_open: |s| s.surfaces.shortcuts.view.is_some(),
-        // Creating a recovered session focuses it. Defer hidden content until
-        // dismissal so the active dialog keeps its current control.
-        block_ensure: |s| s.surfaces.shortcuts.view.is_some(),
-        key_down: keys,
-        nav: |s, position, cx| {
-            s.surfaces.shortcuts.inputs.watch(cx);
-            if position != NavPosition::AfterWorkspaces {
-                return vec![];
-            }
-            vec![
-                super::rail::button(
-                    "shortcuts-open",
-                    super::rail::Icon::Keyboard,
-                    "Keyboard shortcuts",
-                    s.surfaces.shortcuts.view.is_some(),
-                )
-                .on_click(cx.listener(|s, _, window, cx| {
-                        s.execute(Command::ShortcutReference, window, cx)
-                    }))
-                    .into_any_element(),
-            ]
-        },
-        ..Registration::new("", "Open keyboard shortcuts", |s, _, window, cx| {
-            s.set_help(true, window, cx);
-            None
-        })
-    };
+pub(super) const REGISTRATION: Registration = Registration {
+    overlay_command: true,
+    overlay: |s| {
+        s.surfaces
+            .shortcuts
+            .view
+            .as_ref()
+            .map(|v| v.clone().into_any_element())
+    },
+    overlay_open: |s| s.surfaces.shortcuts.view.is_some(),
+    // Creating a recovered session focuses it. Defer hidden content until
+    // dismissal so the active dialog keeps its current control.
+    block_ensure: |s| s.surfaces.shortcuts.view.is_some(),
+    key_down: keys,
+    nav: |s, position, cx| {
+        // Keyboard shortcuts open from the profile menu's Get help, as in
+        // the desktop rail; the rail itself has no shortcuts button.
+        let _ = position;
+        s.surfaces.shortcuts.inputs.watch(cx);
+        vec![]
+    },
+    ..Registration::new("", "Open keyboard shortcuts", |s, _, window, cx| {
+        s.set_help(true, window, cx);
+        None
+    })
+};
 impl Shell {
     fn set_help(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
         if open == self.surfaces.shortcuts.view.is_some() {

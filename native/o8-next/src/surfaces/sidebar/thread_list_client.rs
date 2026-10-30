@@ -130,6 +130,14 @@ impl Client {
                 unread: false,
                 packet_header,
                 packet_state: false,
+                inbox_subject: Some(&agent["inboxSubject"])
+                    .filter(|v| v.is_object())
+                    .cloned(),
+                parent_inbox_subject: Some(&agent["parentInboxSubject"])
+                    .filter(|v| v.is_object())
+                    .cloned(),
+                settled_override: agent["settledOverride"].as_str().map(str::to_owned),
+                settled_at: agent["settledAt"].as_str().map(str::to_owned),
             });
         }
         if let Some(workspace) = self.workspace() {

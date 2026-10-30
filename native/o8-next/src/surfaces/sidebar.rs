@@ -3,6 +3,14 @@ use super::*;
 use crate::projects_model::Ledger;
 #[path = "sidebar/thread_list.rs"]
 mod thread_list;
+/// Local weekday, hour and minute, for the rail usage card's reset times.
+pub(crate) use thread_list::recents::calendar::clock as calendar_clock;
+/// Local day boundaries, for Activity's Today / Yesterday / "Oct 24" headings.
+pub(crate) use thread_list::recents::calendar::{
+    date as calendar_date, midnight as calendar_midnight,
+};
+/// A repository's icon override or monogram, for the Projects page.
+pub(crate) use thread_list::repo_identity;
 #[path = "sidebar/thread_list_client.rs"]
 mod thread_list_client;
 #[path = "sidebar/thread_mutations_client.rs"]
@@ -12,8 +20,89 @@ pub(super) type Slice = EmptyState;
 #[derive(Default)]
 pub(super) struct Runtime {
     pub view: Option<Entity<ThreadList>>,
+    /// The header's sidebar toggle (Cmd+B) hides the column.
+    pub hidden: bool,
+    /// The column's edge is being dragged; the width saves on release.
+    pub resizing: bool,
+    /// Where the press on the edge began and the width then (useColumnResize's
+    /// startX and startWidth), so the drag threshold never shifts the edge.
+    pub press: std::rc::Rc<std::cell::Cell<Option<(f32, f32)>>>,
     workspace_ledger: Option<Ledger>,
     bootstrapped: bool,
+}
+/// The sidebar column; the header lays its toggle and search over it.
+pub(super) const WIDTH: f32 = 280.;
+const MIN_WIDTH: f32 = 160.;
+const MAX_WIDTH: f32 = 500.;
+/// The edge's grab target reaches this far either side of the boundary.
+const EDGE_SLOP: f32 = 8.;
+
+/// The column's width: the dragged one, else the default.
+pub(super) fn width(shell: &Shell) -> f32 {
+    shell
+        .state
+        .sidebar_width
+        .filter(|width| width.is_finite())
+        .map_or(WIDTH, |width| width.clamp(MIN_WIDTH, MAX_WIDTH))
+}
+
+/// A drag of the column's edge.
+pub(super) struct Resize;
+impl Render for Resize {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
+
+/// Moves the edge with the pointer from where the press began.
+pub(super) fn resize(shell: &mut Shell, event: &gpui::DragMoveEvent<Resize>) {
+    let Some((from, start)) = shell.surfaces.sidebar.press.get() else {
+        return;
+    };
+    let width = start + f32::from(event.event.position.x) - from;
+    shell.state.sidebar_width = Some(width.clamp(MIN_WIDTH, MAX_WIDTH));
+    shell.surfaces.sidebar.resizing = true;
+}
+
+/// A wide grab target over the boundary with a quiet line that glows on hover.
+fn edge(
+    width: f32,
+    resizing: bool,
+    glass: bool,
+    press: std::rc::Rc<std::cell::Cell<Option<(f32, f32)>>>,
+) -> impl IntoElement {
+    let accent = crate::theme::current().accent;
+    div()
+        .id("sidebar-resize")
+        .debug_selector(|| "sidebar-resize".into())
+        .group("sidebar-resize")
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left(px(width - EDGE_SLOP - 0.5))
+        .w(px(EDGE_SLOP * 2. + 1.))
+        .cursor(gpui::CursorStyle::ResizeLeftRight)
+        .on_mouse_down(gpui::MouseButton::Left, move |event, _, _| {
+            press.set(Some((f32::from(event.position.x), width)));
+        })
+        .on_drag(Resize, |_, _, _, cx| cx.new(|_| Resize))
+        .child(
+            div()
+                .absolute()
+                .top(px(18.))
+                .bottom(px(if glass { 0. } else { 18. }))
+                .left(px(EDGE_SLOP))
+                .w(px(1.))
+                .bg(accent)
+                .shadow(vec![gpui::BoxShadow {
+                    color: accent.into(),
+                    offset: gpui::point(px(0.), px(0.)),
+                    blur_radius: px(8.),
+                    spread_radius: px(0.),
+                }])
+                .opacity(if resizing { 0.85 } else { 0. })
+                .group_hover("sidebar-resize", |style| style.opacity(0.85)),
+        )
 }
 pub(super) const REGISTRATION: Registration = Registration {
     initialize,
@@ -60,24 +149,47 @@ pub(super) const REGISTRATION: Registration = Registration {
             });
     },
     decorate: |shell, content| {
+        if shell.surfaces.sidebar.hidden {
+            return div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .child(content)
+                .into_any_element();
+        }
+        let width = width(shell);
         div()
+            .relative()
             .flex()
             .flex_1()
             .min_h_0()
+            // This row sits inside the panel and resize row; its automatic
+            // minimum width must not widen the workspace past the window.
+            .min_w_0()
             .child(
                 gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
                     gpui::StyleRefinement::default()
-                        .w(px(280.))
+                        .w(px(width))
                         .h_full()
                         .flex_shrink_0(),
                 ),
             )
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
+            .child(edge(
+                width,
+                shell.surfaces.sidebar.resizing,
+                shell.system_glass,
+                shell.surfaces.sidebar.press.clone(),
+            ))
             .into_any_element()
     },
     key_down: |shell, event, window, cx| {
         if shell.surfaces.sidebar.view.as_ref().is_some_and(|view| {
-            view.update(cx, |sidebar, cx| sidebar.header_key(event, window, cx))
+            view.update(cx, |sidebar, cx| {
+                sidebar.header_key(event, window, cx) || sidebar.settle_key(event, cx)
+            })
         }) {
             return true;
         }
@@ -128,6 +240,15 @@ pub(super) const REGISTRATION: Registration = Registration {
 };
 fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     let sidebar = cx.new(|cx| ThreadList::new(shell.client.clone(), cx));
+    let scopes = shell.state.sidebar_scope.clone();
+    let (views, closed) = (
+        shell.state.sidebar_view.clone(),
+        shell.state.sidebar_closed_folders.clone(),
+    );
+    sidebar.update(cx, |sidebar, _| {
+        sidebar.restore_scopes(scopes);
+        sidebar.restore_views(&views, &closed);
+    });
     shell.subscriptions.push(
         cx.subscribe_in(&sidebar, window, |shell, _, event, window, cx| {
             match event {
@@ -152,7 +273,30 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                         shell.persist();
                     }
                 }
+                ThreadEvent::WorkspacePicker(previous) => {
+                    if let Some(focus) = previous {
+                        focus.focus(window);
+                    }
+                    super::palette::open_workspaces(shell, window, cx);
+                }
                 ThreadEvent::Selected(id) => shell.open_thread(id.clone(), window, cx),
+                ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),
+                ThreadEvent::Scope(project, keys) => {
+                    if keys.is_empty() {
+                        shell.state.sidebar_scope.remove(project);
+                    } else {
+                        shell.state.sidebar_scope.insert(project.clone(), keys.clone());
+                    }
+                    shell.persist();
+                }
+                ThreadEvent::View(project, view) => {
+                    shell.state.sidebar_view.insert(project.clone(), (*view).into());
+                    shell.persist();
+                }
+                ThreadEvent::Folders(closed) => {
+                    shell.state.sidebar_closed_folders = closed.iter().cloned().collect();
+                    shell.persist();
+                }
                 ThreadEvent::Error(error) => {
                     shell.loading = false;
                     shell.connected = false;

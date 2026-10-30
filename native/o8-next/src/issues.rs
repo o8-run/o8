@@ -152,6 +152,8 @@ pub struct Issues {
     label: Entity<Composer>,
     drafts: HashMap<String, Draft>,
     pending_creation: Option<Value>,
+    /// An issue to show once its repository's list has loaded.
+    opening: Option<(String, u64)>,
     search: Entity<Composer>,
     labels: Vec<String>,
     preview: bool,
@@ -178,7 +180,7 @@ impl Issues {
     }
     #[cfg(test)]
     pub(crate) fn snapshot(&self) -> Value {
-        json!({"repo": self.slug(), "issues": self.issues.iter().map(|i| i.number).collect::<Vec<_>>(), "busy": self.busy, "error": self.error, "controls": *self.painted_controls.borrow()})
+        json!({"repo": self.slug(), "issues": self.issues.iter().map(|i| i.number).collect::<Vec<_>>(), "busy": self.busy, "error": self.error, "controls": *self.painted_controls.borrow(), "detail": self.detail_number, "opening": self.opening.as_ref().map(|(_, number)| number)})
     }
     pub fn new(
         client: Client,
@@ -207,6 +209,7 @@ impl Issues {
             label: label.clone(),
             drafts: HashMap::new(),
             pending_creation: None,
+            opening: None,
             search: search.clone(),
             labels: vec![],
             preview: false,
@@ -254,6 +257,31 @@ impl Issues {
     fn slug(&self) -> Option<String> {
         self.repos.get(self.selected)?.slug()
     }
+    /// Activity's issue destination: one issue of a registered repository,
+    /// shown after that repository's list loads. An unregistered repository's
+    /// issue opens on GitHub.
+    pub fn open(&mut self, slug: &str, number: u64, cx: &mut Context<Self>) {
+        self.opening = Some((slug.to_owned(), number));
+        if self.repos.is_empty() && self.busy {
+            return;
+        }
+        let Some(index) = self.repo_index(slug) else {
+            self.opening = None;
+            cx.open_url(&format!("https://github.com/{slug}/issues/{number}"));
+            return;
+        };
+        if index != self.selected {
+            self.select_repo(index, cx);
+        } else if !self.busy {
+            self.opening = None;
+            self.request(Action::Detail(number), cx);
+        }
+    }
+    fn repo_index(&self, slug: &str) -> Option<usize> {
+        self.repos
+            .iter()
+            .position(|r| r.slug().is_some_and(|s| s.eq_ignore_ascii_case(slug)))
+    }
     fn load_repos(&mut self, cx: &mut Context<Self>) {
         if self.busy {
             return;
@@ -280,10 +308,18 @@ impl Issues {
                     Ok((repos, sessions)) => {
                         this.repos = repos.into_iter().filter(|r| r.slug().is_some()).collect();
                         this.sessions = sessions;
-                        this.selected = this
-                            .preferred
+                        let opening = this
+                            .opening
                             .as_ref()
-                            .and_then(|path| {
+                            .map(|(slug, number)| (this.repo_index(slug), slug.clone(), *number));
+                        if let Some((None, slug, number)) = &opening {
+                            this.opening = None;
+                            cx.open_url(&format!("https://github.com/{slug}/issues/{number}"));
+                        }
+                        this.selected = opening
+                            .and_then(|(index, _, _)| index)
+                            .or_else(|| {
+                                let path = this.preferred.as_ref()?;
                                 this.repos
                                     .iter()
                                     .position(|r| same_workspace(&r.local_path, path))
@@ -454,6 +490,12 @@ impl Issues {
                         this.pending_creation = None;
                     }
                     this.fail(error);
+                }
+                // An issue opened from Activity follows its repository's list.
+                if let Some((slug, number)) = this.opening.take()
+                    && this.slug().is_some_and(|s| s.eq_ignore_ascii_case(&slug))
+                {
+                    this.request(Action::Detail(number), cx);
                 }
                 this.changed(cx);
             });

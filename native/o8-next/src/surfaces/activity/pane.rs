@@ -10,20 +10,61 @@ use std::{
 
 #[derive(Clone)]
 pub enum ActivityEvent {
+    Draft(String, String),
+    Preferences(preferences::Saved),
     Worker(String),
+    /// A row's GitHub link, for the shell to open in the surface that
+    /// claims it (pull requests, issues) or in the browser.
+    Open(String),
+    Diff(String),
 }
 #[derive(Clone)]
 pub(super) enum Action {
+    Packet(packet::Command),
+    Proposals,
+    ProposalDetail(String),
+    ProposalDecision(String, bool),
+    RetryProposals,
+    Dossiers,
+    DossierHistory(String),
+    DossierDecision(String, &'static str),
+    RetryDossiers,
     Filter(&'static str),
     Scope(String),
+    /// Opens or closes the repository scope menu (O8RepoSelector).
+    ScopeMenu(bool),
     Refresh,
     Expand(Row),
+    /// A row's destination, as classic's double-click: pull requests and
+    /// issues open in the app, commits and CI runs on GitHub.
+    Open(Row),
     Link(String),
     Worker(String),
     RetryDetail(Row),
     Hold(Row, bool),
     StopMission,
+    /// A worker lane command from the packet card (O8ActivityPacketRow):
+    /// resume, stop, create_pr or merge.
+    Lane(Row, &'static str),
+    /// Opens or cancels the close-unmerged confirmation for a packet.
+    CloseAsk(Option<String>),
+    CloseReason(&'static str),
+    Close(Row),
 }
+
+/// Routes whose persisted receipt is replayed with the same body until terminal
+/// (classic fetchCorrelatedActionReceipt).
+const RECEIPTS: [&str; 2] = [
+    "/api/orchestrator/stop-mission",
+    "/api/orchestrator/discard-packet",
+];
+/// close-unmerged-shared.ts: each disposition and its label.
+pub(super) const CLOSE_REASONS: [(&str, &str); 4] = [
+    ("adopted_elsewhere", "Adopted elsewhere"),
+    ("superseded", "Superseded"),
+    ("spec_changed", "Spec changed"),
+    ("wontfix", "Won't fix"),
+];
 #[derive(Clone)]
 pub(super) enum DetailValue {
     Ci(CiDetail),
@@ -38,6 +79,12 @@ pub(super) struct Detail {
     pub updated: Option<Instant>,
 }
 pub struct ActivityPane {
+    pub(super) packet: packet::State,
+    pub(super) proposals: proposals::Proposals,
+    pub(super) saved: preferences::Saved,
+    pub(super) scroll: gpui::ScrollHandle,
+    pub(super) restore_y: Option<f32>,
+    pub(super) decisions: decisions::Decisions,
     pub(super) client: Client,
     pub(super) workspace: String,
     pub(super) scope: String,
@@ -52,9 +99,17 @@ pub struct ActivityPane {
     pub(super) details: HashMap<String, Detail>,
     pub(super) pending: bool,
     pub(super) notice: String,
+    pub(super) notice_error: bool,
     generation: u64,
-    loaded_at: Instant,
+    pub(super) loaded_at: Instant,
     stop_identity: Option<(String, String)>,
+    /// The packet whose close-unmerged confirmation is open, and its reason.
+    pub(super) closing: Option<String>,
+    pub(super) close_reason: &'static str,
+    /// PacketCloseUnmergedActions' busy label while the close receipt settles.
+    pub(super) close_stage: Option<&'static str>,
+    pub(super) scope_menu: bool,
+    pub(super) remote_updated: Option<u64>,
     pub(super) focus: FocusHandle,
     pub(super) controls: Vec<(String, Action)>,
     pub(super) keyboard: Option<String>,
@@ -64,7 +119,23 @@ pub struct ActivityPane {
 impl EventEmitter<ActivityEvent> for ActivityPane {}
 impl ActivityPane {
     pub fn new(client: Client, workspace: String, cx: &mut Context<Self>) -> Self {
+        Self::new_with_preferences(client, workspace, Default::default(), false, vec![], cx)
+    }
+    pub(crate) fn new_with_preferences(
+        client: Client,
+        workspace: String,
+        saved: preferences::Saved,
+        open: bool,
+        seen: Vec<String>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut pane = Self {
+            packet: packet::State::default(),
+            proposals: Default::default(),
+            saved: Default::default(),
+            scroll: gpui::ScrollHandle::new(),
+            restore_y: None,
+            decisions: Default::default(),
             client,
             scope: workspace.clone(),
             workspace,
@@ -79,16 +150,25 @@ impl ActivityPane {
             details: HashMap::new(),
             pending: false,
             notice: String::new(),
+            notice_error: false,
             generation: 0,
             loaded_at: Instant::now(),
             stop_identity: None,
+            closing: None,
+            close_reason: CLOSE_REASONS[0].0,
+            close_stage: None,
+            scope_menu: false,
+            remote_updated: None,
             focus: cx.focus_handle(),
             controls: vec![],
             keyboard: None,
             revision: 0,
             painted: std::rc::Rc::new(std::cell::Cell::new(u64::MAX)),
         };
+        pane.hydrate(saved, open, seen);
         pane.load(cx);
+        pane.load_dossiers(cx);
+        pane.load_proposals(cx);
         pane
     }
     pub fn focus(&self, window: &mut Window) {
@@ -96,11 +176,16 @@ impl ActivityPane {
     }
     #[cfg(test)]
     pub fn ready(&self) -> bool {
-        !self.loading && self.painted.get() == self.revision
+        !self.loading
+            && !self.decisions.loading
+            && !self.proposals.loading
+            && self.painted.get() == self.revision
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
         if self.loaded_at.elapsed() >= Duration::from_secs(300) && !self.loading && !self.pending {
             self.load(cx);
+            self.load_dossiers(cx);
+            self.load_proposals(cx);
         }
         let retry = self.expanded.as_ref().and_then(|key| {
             let detail = self.details.get(key)?;
@@ -169,8 +254,21 @@ impl ActivityPane {
                 this.errors = snapshot.errors;
                 this.cache = snapshot.cache;
                 this.mission = snapshot.mission;
+                this.remote_updated = snapshot.remote_updated;
                 if !this.rows.iter().any(|r| Some(r.key()) == this.expanded) {
                     this.expanded = None;
+                }
+                if let Some(row) = this
+                    .rows
+                    .iter()
+                    .find(|r| Some(r.key()) == this.expanded)
+                    .cloned()
+                {
+                    if row.kind == "packet" {
+                        this.packet_read(row, false, cx);
+                    } else {
+                        this.detail(row, false, cx);
+                    }
                 }
                 this.changed(cx);
             });
@@ -268,13 +366,15 @@ impl ActivityPane {
             return;
         }
         self.pending = true;
+        self.notice_error = false;
         self.notice = "Applying decision…".into();
+        let merge = body["verb"] == "merge";
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let deadline = Instant::now() + Duration::from_secs(300);
             loop {
                 let result = client.activity_request(method, path, &[], Some(&body));
-                if path != "/api/orchestrator/stop-mission" {
+                if !RECEIPTS.contains(&path) {
                     break result;
                 }
                 match &result {
@@ -295,7 +395,7 @@ impl ActivityPane {
                     break Ok(json!({"outcomeUnknown":true}));
                 }
                 // The same exact body polls the persisted receipt; it cannot
-                // create another stop while the first result is uncertain.
+                // create another stop or close while the first is uncertain.
                 std::thread::sleep(Duration::from_millis(750));
             }
         });
@@ -303,6 +403,7 @@ impl ActivityPane {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.pending = false;
+                this.notice_error = result.is_err();
                 this.notice = match result {
                     Ok(value)
                         if value["result"]["inProgress"] == true
@@ -311,15 +412,26 @@ impl ActivityPane {
                         this.pending = true;
                         "Decision is unsettled. Refresh before another action.".into()
                     }
-                    Ok(_) => {
+                    Ok(value) => {
                         this.stop_identity = None;
-                        "Decision applied.".into()
+                        this.closing = None;
+                        this.close_stage = None;
+                        // A created PR's note carries its URL.
+                        value["note"]
+                            .as_str()
+                            .filter(|note| !note.is_empty())
+                            .map_or_else(|| "Decision applied.".into(), String::from)
                     }
                     Err(error) => {
                         if error.status.is_some() {
                             this.stop_identity = None;
                         }
-                        error.message
+                        this.close_stage = None;
+                        if merge && error.message.to_lowercase().contains("conflict") {
+                            format!("{} Try \"Create PR\" instead.", error.message)
+                        } else {
+                            error.message
+                        }
                     }
                 };
                 this.load(cx);
@@ -330,19 +442,45 @@ impl ActivityPane {
         self.changed(cx);
     }
     pub(super) fn act(&mut self, action: Action, cx: &mut Context<Self>) {
-        match action {
-            Action::Filter(filter) => { self.filter = filter; self.expanded = None; }
-            Action::Scope(scope) => {
-                self.scope = scope; self.generation += 1; self.loading = false;
-                self.rows.clear(); self.errors.clear(); self.expanded = None; self.details.clear(); self.keyboard = None; self.load(cx);
+        match &action {
+            Action::Hold(row, _) | Action::Lane(row, _) | Action::Close(row) => {
+                self.packet.action = Some(row.id.clone())
             }
-            Action::Refresh => self.load(cx),
+            Action::StopMission => self.packet.action = None,
+            _ => {}
+        }
+        match action {
+            Action::Packet(command) => self.packet_act(command, cx),
+            Action::Proposals => {self.proposals.open = !self.proposals.open; self.saved.proposals_open=Some(self.proposals.open); self.mark_proposals_seen(cx); self.remember_view(cx);},
+            Action::ProposalDetail(id) => {if !self.proposals.expanded.remove(&id){self.proposals.expanded.insert(id);}},
+            Action::ProposalDecision(id,accept) => self.proposal_action(id,accept,cx),
+            Action::RetryProposals => self.load_proposals(cx),
+            Action::Filter(filter) => { self.filter = filter; self.expanded = None; }
+            Action::ScopeMenu(open) => self.scope_menu = open,
+            Action::Scope(scope) => {
+                self.remember_view(cx);
+                self.scope_menu = false;
+                self.scope = scope;
+                self.restore_view();
+                if let Some(y)=self.restore_y {self.scroll.set_offset(gpui::point(gpui::px(0.),gpui::px(y)));} self.generation += 1; self.loading = false;
+                self.packet.reads.clear(); self.packet.editor = None; self.rows.clear(); self.errors.clear(); self.details.clear(); self.keyboard = None; self.load(cx);
+            }
+            Action::Refresh => { self.packet.reads.clear(); self.load(cx); self.load_dossiers(cx); self.load_proposals(cx); },
+            Action::Dossiers => self.decisions.open = !self.decisions.open,
+            Action::DossierHistory(id) => self.decisions.expanded = if self.decisions.expanded.as_ref() == Some(&id) { None } else { Some(id) },
+            Action::DossierDecision(id, action) => self.dossier_decision(id, action, cx),
+            Action::RetryDossiers => self.load_dossiers(cx),
             Action::Expand(row) => {
                 if self.expanded.as_ref() == Some(&row.key()) { self.expanded = None; }
-                else { self.expanded = Some(row.key()); self.detail(row,false,cx); }
+                else { self.expanded = Some(row.key()); if row.kind == "packet" { self.packet_read(row,false,cx); } else { self.detail(row,false,cx); } }
             }
             Action::RetryDetail(row) => self.detail(row,true,cx),
             Action::Link(url) => cx.open_url(&url),
+            Action::Open(row) => {
+                if let Some(url) = row.url() {
+                    cx.emit(ActivityEvent::Open(url));
+                }
+            }
             Action::Worker(key) => cx.emit(ActivityEvent::Worker(key)),
             Action::Hold(row,held) => self.mutate("PATCH","/api/orchestrator/state", json!({"packetId":row.id,"updates":{"queueState":if held {"held"}else{"queued"},"blockedReason":if held {Some("Held by operator")}else{None}}}),cx),
             Action::StopMission => {
@@ -353,13 +491,56 @@ impl ActivityPane {
                 let identity = identity.clone();
                 self.mutate("POST","/api/orchestrator/stop-mission",json!({"missionId":mission,"idempotencyKey":identity}),cx);
             }
+            Action::Lane(row, verb) => {
+                let lane = feed::text(&row.data["lane"], "laneId");
+                if lane.is_empty() { return; }
+                let mut body = json!({"verb": verb, "laneId": lane});
+                match verb {
+                    "resume" => { body["message"] = json!("Continue the previous task."); body["actor"] = json!("user"); }
+                    "stop" => body["actor"] = json!("user"),
+                    "create_pr" => body["commitMessage"] = json!("Auto-commit from lane"),
+                    _ => body["commitMessage"] = json!(format!("Merge lane: {}", feed::text(&row.data, "title"))),
+                }
+                self.mutate("POST", "/api/lanes", body, cx);
+            }
+            Action::CloseAsk(packet) => { self.closing = packet; self.close_reason = CLOSE_REASONS[0].0; }
+            Action::CloseReason(reason) => self.close_reason = reason,
+            Action::Close(row) => {
+                if self.pending { return; }
+                let mutation = format!("next-close-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos());
+                self.mutate("POST", "/api/orchestrator/discard-packet", json!({"packetId": row.id, "disposition": self.close_reason, "clientMutationId": mutation}), cx);
+                // The stage shows on the confirm itself, as in classic.
+                self.notice.clear();
+                self.close_stage = Some("Closing packet…");
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(Duration::from_secs(3)).await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.close_stage.is_some() && this.closing.as_deref() == Some(row.id.as_str()) {
+                            this.close_stage = Some("Preserving work and archiving…");
+                            this.changed(cx);
+                        }
+                    });
+                })
+                .detach();
+            }
         }
+        self.remember_view(cx);
         self.changed(cx);
+    }
+    /// The scope menu row for the current scope.
+    pub(super) fn checked_scope(&self) -> String {
+        self.repos
+            .iter()
+            .position(|repo| self.scope != "*" && repo.local_path == self.scope)
+            .map_or_else(
+                || "activity-scope-all".into(),
+                |i| format!("activity-scope-{i}"),
+            )
     }
     pub(super) fn key_down(
         &mut self,
         event: &KeyDownEvent,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
@@ -386,8 +567,18 @@ impl ActivityPane {
                     .and_then(|id| self.controls.iter().find(|(control, _)| control == id))
                     .cloned()
                 {
+                    let opening = matches!(action, Action::ScopeMenu(true));
                     self.act(action, cx);
+                    self.packet_focus_editor(window, cx);
+                    // As classic, the open menu starts on the checked scope.
+                    if opening {
+                        self.keyboard = Some(self.checked_scope());
+                    }
                 }
+            }
+            "escape" if self.scope_menu => {
+                self.scope_menu = false;
+                self.keyboard = Some("activity-scope".into());
             }
             "escape" => {
                 self.expanded = None;
@@ -399,5 +590,14 @@ impl ActivityPane {
         cx.stop_propagation();
     }
 }
+#[path = "decisions.rs"]
+mod decisions;
 #[path = "view.rs"]
 mod view;
+
+#[path = "packet.rs"]
+mod packet;
+#[path = "preferences.rs"]
+pub(super) mod preferences;
+#[path = "proposals.rs"]
+mod proposals;

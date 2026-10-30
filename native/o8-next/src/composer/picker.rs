@@ -54,8 +54,25 @@ impl Surface {
         busy: bool,
         model: Option<Entity<Composer>>,
         routing: &Value,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if matches!(
+            open,
+            "quick"
+                | "prompts"
+                | "repo"
+                | "branch"
+                | "branch-create"
+                | "save-prompt"
+                | "rules"
+                | "result"
+        ) {
+            return self.prompt_popover(open, window, cx);
+        }
+        if open == "context" {
+            return self.context_popover(cx);
+        }
         let mut menu = div()
             .id("composer-picker")
             .debug_selector(|| "composer-picker".into())
@@ -207,7 +224,12 @@ impl Surface {
             }
             _ => {}
         }
-        menu.into_any_element()
+        menu.when(open == "mode", |v| {
+            v.on_mouse_down_out(cx.listener(|s, event: &gpui::MouseDownEvent, _, cx| {
+                s.dismiss_prompt_outside(event, cx)
+            }))
+        })
+        .into_any_element()
     }
 
     /// One menu item: label, muted detail underneath, and a check when selected.

@@ -1,3 +1,6 @@
+#[cfg(all(target_os = "macos", feature = "macos-diagnostics"))]
+#[path = "composer/capture.rs"]
+mod composer_capture;
 use crate::theme::current as theme;
 #[path = "brain_dock.rs"]
 mod brain_dock;
@@ -18,6 +21,8 @@ mod shell_session;
 #[cfg(test)]
 #[path = "speed_receipt.rs"]
 mod speed_receipt;
+#[path = "transcript_visualizations.rs"]
+mod transcript_visualizations;
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
@@ -42,6 +47,50 @@ use std::{
     time::Instant,
 };
 
+gpui::actions!(
+    o8_next,
+    [
+        /// The composer waveform: start or stop chat Live voice, which the shell owns.
+        ToggleVoice,
+        /// The composer mic: start dictation, or stop it and send what was said.
+        ToggleDictation
+    ]
+);
+
+/// Composer dictation as this chat's mic shows it; the shell sets it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum DictationState {
+    #[default]
+    Off,
+    /// Asked for the microphone; the host has not confirmed it.
+    Starting,
+    Listening,
+    /// Stopped to send; the polished transcript has not arrived yet.
+    Finishing,
+}
+
+/// Chat Live voice as this chat's mic shows it; the shell sets it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum VoiceState {
+    #[default]
+    Off,
+    Connecting,
+    Live,
+    /// Stop was asked; the mic is off but cannot start again until the host
+    /// confirms closure.
+    Closing,
+}
+
+/// The chat a Live session binds to: the broker's binding, thread and
+/// repository, plus the runtime its stop path addresses.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct VoiceTarget {
+    pub binding: String,
+    pub thread: String,
+    pub repo: String,
+    pub backend: Option<String>,
+}
+
 pub(crate) struct Surface {
     client: Client,
     embedded: bool,
@@ -65,6 +114,7 @@ pub(crate) struct Surface {
     rows: Rc<Vec<Rc<RefCell<RowState>>>>,
     images: images::Cache,
     transcript: Option<Transcript>,
+    saved_visualizations: transcript_visualizations::Saved,
     subscription: Option<Subscription>,
     list: ListState,
     focus: FocusHandle,
@@ -73,9 +123,12 @@ pub(crate) struct Surface {
     reconcile_revision: u64,
     list_generation: u64,
     history_loading: bool,
+    history_error: Option<String>,
     key_revision: u64,
     painted: Rc<Cell<u64>>,
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
+    voice: VoiceState,
+    dictation: DictationState,
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -102,6 +155,7 @@ impl Surface {
             rows: Rc::new(vec![]),
             images: Default::default(),
             transcript: None,
+            saved_visualizations: Default::default(),
             subscription: None,
             list: ListState::new(0, ListAlignment::Top, px(400.)),
             focus,
@@ -110,9 +164,12 @@ impl Surface {
             reconcile_revision: 0,
             list_generation: 0,
             history_loading: false,
+            history_error: None,
             key_revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
+            voice: VoiceState::Off,
+            dictation: DictationState::Off,
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
@@ -125,7 +182,67 @@ impl Surface {
             }
         }
         if !self.drafts.contains_key(&id) {
-            let editor = cx.new(Composer::new);
+            let store = crate::composer::mode_store::path(
+                self.client
+                    .url("/")
+                    .map(|u| u.to_string())
+                    .unwrap_or_default()
+                    .as_str(),
+                &id,
+                cx,
+            );
+            let mode = crate::composer::mode_store::load(store.as_deref());
+            let prelude = crate::composer::mode_store::load_prelude(store.as_deref());
+            let editor = cx.new(|cx| {
+                let mut editor = Composer::new(cx);
+                editor.controls.slash.enabled = true;
+                editor.controls.prompt.store = store;
+                editor.controls.prompt.prelude = prelude;
+                if let Some(mode) = mode {
+                    editor.controls.overrides["mode"] =
+                        json!(if mode == "solo" { "single" } else { "fleet" });
+                    editor.controls.overrides["pickedMode"] = json!(mode);
+                }
+                editor
+            });
+            self.subscriptions.push(cx.subscribe(
+                &editor,
+                |s, editor, event: &crate::composer::commands::Changed, cx| {
+                    if s.composer == editor {
+                        if event.0 {
+                            cx.notify();
+                        } else {
+                            let view = editor
+                                .read(cx)
+                                .controls
+                                .prompt
+                                .view
+                                .as_ref()
+                                .map(|view| view.entity_id());
+                            if let Some(view) = view {
+                                App::notify(cx, view);
+                            }
+                        }
+                    }
+                },
+            ));
+            self.subscriptions.push(cx.subscribe(
+                &editor,
+                |s, editor, event: &crate::composer::commands::Execute, cx| {
+                    if s.composer == editor {
+                        let entity = cx.entity().downgrade();
+                        let handle = event.1;
+                        let text = event.0.clone();
+                        cx.defer(move |cx| {
+                            let _ = handle.update(cx, |_, window, cx| {
+                                let _ = entity.update(cx, |s, cx| {
+                                    s.execute_composer_command(text, window, cx)
+                                });
+                            });
+                        });
+                    }
+                },
+            ));
             self.subscriptions
                 .push(cx.subscribe(&editor, |this, _, event: &Submit, cx| {
                     if event.0 {
@@ -156,6 +273,7 @@ impl Surface {
         let generation = self.generation;
         self.subscription = None;
         self.history_loading = false;
+        self.history_error = None;
         self.transcript = None;
         self.selected = Some(id.clone());
         self.rows = Rc::new(vec![]);
@@ -165,6 +283,17 @@ impl Surface {
         cx.notify();
         let client = self.client.clone();
         let session = self.sessions.iter().find(|s| s.id == id).cloned();
+        self.saved_visualizations
+            .select(session.as_ref().and_then(|session| {
+                transcript_visualizations::Scope::new(
+                    session.repo_path.as_deref(),
+                    &session.id,
+                    session
+                        .packet_header
+                        .as_ref()
+                        .and_then(|h| h["packetId"].as_str()),
+                )
+            }));
         // Runtime workers are read-only history; conversations also stream their live turn.
         let repo = session
             .as_ref()
@@ -195,8 +324,9 @@ impl Surface {
                     Ok((history, queue, routing)) => {
                         let key = history.session_key.clone();
                         let transcript = Transcript::new(history);
-                        this.install_rows(transcript.rows.clone(), cx);
+                        let rows = transcript.rows.clone();
                         this.transcript = Some(transcript);
+                        this.install_rows(rows, cx);
                         let backend = routing
                             .as_ref()
                             .ok()
@@ -228,7 +358,11 @@ impl Surface {
         })
         .detach();
     }
-    fn install_rows(&mut self, next: Vec<Row>, cx: &mut Context<Self>) {
+    fn install_rows(&mut self, mut next: Vec<Row>, cx: &mut Context<Self>) {
+        if let Some(transcript) = &self.transcript {
+            self.saved_visualizations
+                .attach(&mut next, transcript.shown_entries());
+        }
         let old = &self.rows;
         let initial = old.is_empty();
         let prefix = old
@@ -309,6 +443,7 @@ impl Surface {
         }
     }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
+        self.poll_saved_visualizations(cx);
         let mut visualizations_changed = false;
         for (index, row) in self.rows.iter().enumerate() {
             if row.borrow_mut().poll_visualizations() {
@@ -412,6 +547,7 @@ impl Surface {
                             this.subscription = None;
                             this.transcript = None;
                             this.selected = None;
+                            this.saved_visualizations.select(None);
                             this.rows = Rc::new(vec![]);
                             this.images.borrow_mut().clear();
                             this.list = ListState::new(0, ListAlignment::Top, px(400.));
@@ -431,6 +567,7 @@ impl Surface {
                 item_ix: if end { self.rows.len() - 1 } else { 0 },
                 offset_in_item: px(0.),
             });
+            self.on_transcript_scroll(cx);
         }
         self.key_revision += 1;
         cx.notify();
@@ -477,7 +614,18 @@ impl Render for Surface {
             .text_size(px(typography.body))
             .line_height(gpui::relative(typography.chrome_line))
             .track_focus(&self.focus)
-            .capture_key_down(cx.listener(Self::brain_key))
+            .capture_key_down(cx.listener(|s, event: &KeyDownEvent, w, cx| {
+                let key = &event.keystroke;
+                if key.key == "k"
+                    && key.modifiers.shift
+                    && (key.modifiers.platform || key.modifiers.control)
+                    && s.quick_action_shortcut(w, cx)
+                {
+                    cx.stop_propagation();
+                    return;
+                }
+                Self::brain_key(s, event, w, cx);
+            }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 match event.keystroke.key.as_str() {
                     "tab" => {
@@ -592,6 +740,9 @@ impl Render for Surface {
                     )
                     .child(self.brain_panel(px(right_width), cx)),
             )
+            .child(transcript_visualizations::Visible(
+                self.saved_visualizations.visible.clone(),
+            ))
             .child(
                 canvas(
                     |_, _, _| (),
@@ -681,6 +832,10 @@ pub fn launch(
                 surface.load_sessions(cx);
                 surface
             })).expect("GPUI window");
+        #[cfg(all(target_os = "macos", feature = "macos-diagnostics"))]
+        if let Some(directory) = std::env::var_os("O8_NEXT_COMPOSER_CAPTURE_DIR") {
+            composer_capture::start(handle, std::path::PathBuf::from(directory), cx);
+        }
         if let Some(path) = composer_benchmark {
             composer_bench::start(handle, path, started, cx);
         }

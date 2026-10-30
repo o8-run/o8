@@ -191,7 +191,7 @@ impl Surface {
                     cx.notify();
                 }
             },
-            Self::load_images,
+            Self::on_transcript_scroll,
         );
     }
 }

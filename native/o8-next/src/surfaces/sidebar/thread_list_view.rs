@@ -10,10 +10,6 @@ impl Render for ThreadList {
             self.focus.focus(window);
         }
         let _keep_subscriptions = &self.subscriptions;
-        let saved_chat = self
-            .choice_row()
-            .and_then(|r| r.id.as_ref())
-            .is_some_and(|id| !id.contains(':'));
         let status = if self.saving {
             "Saving…".to_string()
         } else if self.loading && self.rows.is_empty() {
@@ -35,8 +31,7 @@ impl Render for ThreadList {
         div()
             .id("thread-sidebar")
             .debug_selector(|| "thread-sidebar".into())
-            .group("thread-sidebar")
-            .w(px(RAIL_WIDTH))
+            .w_full()
             .h_full()
             .flex_shrink_0()
             .min_h_0()
@@ -49,33 +44,50 @@ impl Render for ThreadList {
             .capture_key_down(cx.listener(Self::key))
             .child(self.project_header(window, cx))
             .child(
-                // A desktop-style nav row: search glyph and muted label, filled on hover.
                 div()
-                    .id("thread-search")
-                    .debug_selector(|| "thread-search".into())
-                    .cursor_pointer()
                     .mx(px(6.))
-                    .h(px(28.))
-                    .px(px(6.))
                     .flex()
                     .items_center()
-                    .gap(px(8.))
-                    .rounded(px(8.))
-                    .hover(|style| style.bg(theme().hover))
-                    .text_size(px(12.5))
-                    .text_color(theme().text_secondary)
-                    .child(crate::icon::stroke(
-                        "M11 4a7 7 0 1 0 0 14 7 7 0 1 0 0-14Z M20 20l-3.5-3.5",
-                        theme().text_muted,
-                        15.,
-                        1.7,
-                    ))
-                    .child(if self.rename.is_some() {
-                        "Rename thread"
-                    } else {
-                        "Search"
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| this.search(window, cx))),
+                    .gap(px(2.))
+                    .child(
+                        // A desktop-style nav row: search glyph and muted label, filled on hover.
+                        div()
+                            .id("thread-search")
+                            .debug_selector(|| "thread-search".into())
+                            .cursor_pointer()
+                            .flex_1()
+                            .min_w_0()
+                            .h(px(28.))
+                            .px(px(6.))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .rounded(px(8.))
+                            .hover(|style| style.bg(theme().hover))
+                            .text_size(px(12.5))
+                            .text_color(theme().text_secondary)
+                            .child(crate::icon::stroke(
+                                "M11 4a7 7 0 1 0 0 14 7 7 0 1 0 0-14Z M20 20l-3.5-3.5",
+                                theme().text_muted,
+                                15.,
+                                1.7,
+                            ))
+                            .child(if self.rename.is_some() {
+                                "Rename thread"
+                            } else {
+                                "Search"
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| this.search(window, cx))),
+                    )
+                    .when(!self.scope_repos().is_empty(), |row| {
+                        row.child(
+                            div()
+                                .relative()
+                                .child(self.scope_trigger(cx))
+                                .children(self.scope_picker(cx)),
+                        )
+                        .child(self.new_thread_button(cx))
+                    }),
             )
             .when(self.editing || !self.query.is_empty(), |view| {
                 view.child(self.editor.clone())
@@ -99,7 +111,11 @@ impl Render for ThreadList {
                         range
                             .map(|i| {
                                 let row = this.rows[i].clone();
+                                if let Some(folder) = &row.folder {
+                                    return this.folder_row(&row, folder, cx);
+                                }
                                 let thread = row.id.is_some();
+                                let by_repo = this.view() == folders::View::Repo;
                                 let title =
                                     gpui::StyledText::new(crate::text::sanitize(&row.title));
                                 #[cfg(test)]
@@ -120,7 +136,7 @@ impl Render for ThreadList {
                                     .id(gpui::ElementId::Name(identity.into()))
                                     .debug_selector(move || format!("thread-row-{i}"))
                                     .group("thread-row")
-                                    .w(px(RAIL_WIDTH))
+                                    .w_full()
                                     .min_w_0()
                                     .h(px(28.))
                                     .flex()
@@ -160,17 +176,23 @@ impl Render for ThreadList {
                                                     })
                                                     .child(title),
                                             )
+                                            .when(!thread && i == 0, |view| {
+                                                view.child(this.view_picker(cx))
+                                            })
                                             .when(thread, |view| {
-                                                view.child(
-                                                    div()
-                                                        .max_w(px(65.))
-                                                        .min_w_0()
-                                                        .text_ellipsis()
-                                                        .font_weight(gpui::FontWeight(260.))
-                                                        .text_size(px(11.5))
-                                                        .text_color(theme().text_faint)
-                                                        .child(label(&row.workspace)),
-                                                )
+                                                // A folder already names its threads' repository.
+                                                view.when(!by_repo, |view| {
+                                                    view.child(
+                                                        div()
+                                                            .max_w(px(65.))
+                                                            .min_w_0()
+                                                            .text_ellipsis()
+                                                            .font_weight(gpui::FontWeight(260.))
+                                                            .text_size(px(11.5))
+                                                            .text_color(theme().text_faint)
+                                                            .child(label(&row.workspace)),
+                                                    )
+                                                })
                                                 .child(
                                                     div()
                                                         .flex_shrink_0()
@@ -194,6 +216,9 @@ impl Render for ThreadList {
                                                                     }),
                                                             )
                                                         }),
+                                                )
+                                                .children(
+                                                    this.row_settle_control(&row, keyboard, cx),
                                                 )
                                                 .child(this.row_archive_control(&row, keyboard, cx))
                                             }),
@@ -224,6 +249,18 @@ impl Render for ThreadList {
                                                 cx.notify();
                                             },
                                         ))
+                                    })
+                                    .when(thread, |view| {
+                                        let id = row.id.clone().unwrap_or_default();
+                                        view.on_mouse_down(
+                                            gpui::MouseButton::Right,
+                                            cx.listener(
+                                                move |this, event: &gpui::MouseDownEvent, _, cx| {
+                                                    this.open_row_menu(&id, event.position, cx);
+                                                    cx.stop_propagation();
+                                                },
+                                            ),
+                                        )
                                     })
                                     .when(thread, |view| {
                                         view.on_click(cx.listener(move |this, _, window, cx| {
@@ -267,44 +304,6 @@ impl Render for ThreadList {
                 .flex_1()
                 .min_h_0(),
             )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(12.))
-                    .px(px(12.))
-                    .py(px(6.))
-                    .text_size(px(10.))
-                    .when(!self.focus.is_focused(window), |view| {
-                        view.invisible()
-                            .group_hover("thread-sidebar", |style| style.visible())
-                    })
-                    .when(saved_chat, |view| {
-                        view.child(
-                            div()
-                                .id("thread-rename")
-                                .debug_selector(|| "thread-rename".into())
-                                .cursor_pointer()
-                                .child("Rename")
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| {
-                                        this.start_rename(window, cx)
-                                    }),
-                                ),
-                        )
-                    })
-                    .child(
-                        div()
-                            .id("thread-archive")
-                            .debug_selector(|| "thread-archive".into())
-                            .cursor_pointer()
-                            .child(if this_archived(self) {
-                                "Restore"
-                            } else {
-                                "Archive"
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| this.archive(cx))),
-                    ),
-            )
             .when(
                 self.query.is_empty()
                     && (!self.archived_open
@@ -314,9 +313,6 @@ impl Render for ThreadList {
                             .any(|r| r.kind == "section" && r.title == "Archived")),
                 |view| view.child(self.archived_control(cx)),
             )
+            .children(self.row_menu(cx))
     }
-}
-
-fn this_archived(this: &ThreadList) -> bool {
-    this.choice_row().is_some_and(|r| r.status == "archived")
 }
