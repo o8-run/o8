@@ -52,8 +52,8 @@ impl Surface {
                 .prompt
                 .command_wire
                 .as_ref()
-                .is_some_and(|(text, _)| text == &raw);
-            if !expanded && crate::composer::commands::recognized(&raw) {
+                .is_some_and(|(text, _)| *text == raw);
+            if !expanded && crate::composer::commands::recognized(raw.as_str()) {
                 if self.saving || input.controls.busy || input.controls.slash.scheduled {
                     return;
                 }

@@ -182,7 +182,7 @@ impl Surface {
                 )
             };
             self.composer.update(cx, |i, cx| {
-                i.set_text(&raw, cx);
+                i.set_text(raw.as_str(), cx);
                 i.controls.prompt.command_wire = Some((raw.clone(), prompt));
             });
             self.send(None, cx);
