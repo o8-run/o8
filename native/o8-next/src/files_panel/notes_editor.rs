@@ -6,6 +6,14 @@ impl Editor {
         let input = cx.entity();
         let height = self.height;
         let review = super::super::spec_rfm::parse(&self.text);
+        #[cfg(test)]
+        cx.set_global(super::super::tests::spec_tests::ReviewIndex(
+            review
+                .notes
+                .iter()
+                .map(|note| (note.id.clone(), note.anchor.clone()))
+                .collect(),
+        ));
         let rail = self.note_rail(review.notes.clone(), cx);
         let images = self.inline_images();
         self.base(cx)

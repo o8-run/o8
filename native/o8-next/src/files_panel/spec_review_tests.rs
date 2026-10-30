@@ -15,15 +15,14 @@ fn spec_review_markup_rail_and_mixed_typography(cx: &mut TestAppContext) {
         cx.debug_bounds("note-code1").is_none() && cx.debug_bounds("note-code2").is_none(),
         "fenced code examples are not actionable annotations"
     );
-    let index = super::super::super::spec_rfm::parse(&source);
+    let index = cx.update(|_, cx| cx.global::<ReviewIndex>().0.clone());
     assert!(
         !index
-            .notes
             .iter()
-            .any(|n| matches!(n.id.as_str(), "code1" | "code2"))
+            .any(|(id, _)| matches!(id.as_str(), "code1" | "code2"))
     );
     assert_eq!(
-        index.notes.iter().find(|n| n.id == "c5").unwrap().anchor,
+        index.iter().find(|(id, _)| id == "c5").unwrap().1,
         "shared anchor",
         "replies retain the common anchor for following comments"
     );

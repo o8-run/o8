@@ -4,6 +4,9 @@ use super::*;
 pub(in crate::files_panel) struct Painted(pub Vec<(String, f32, f32)>);
 impl gpui::Global for Painted {}
 #[derive(Default)]
+pub(in crate::files_panel) struct ReviewIndex(pub Vec<(String, String)>);
+impl gpui::Global for ReviewIndex {}
+#[derive(Default)]
 pub(in crate::files_panel) struct Status {
     pub text: String,
     pub content: String,
