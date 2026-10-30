@@ -80,7 +80,11 @@ fn sources(directory: &Path, violations: &mut Vec<String>) {
                 .set_language(&tree_sitter_rust::LANGUAGE.into())
                 .unwrap();
             let tree = parser.parse(&source, None).unwrap();
-            assert!(!tree.root_node().has_error(), "valid Rust source");
+            assert!(
+                !tree.root_node().has_error(),
+                "valid Rust source: {}",
+                path.display()
+            );
             if font_literal(tree.root_node(), source.as_bytes()) {
                 violations.push(format!(
                     "{}: font family literal",
