@@ -251,6 +251,15 @@ The upstream repository declares MIT in package metadata and its README but
 does not currently contain a standalone LICENSE file. The local Roughdraft
 notice records that provenance caveat and should remain with distributions.
 
+## Caveat font
+
+- Copyright: Copyright 2014 The Caveat Project Authors
+- License: SIL Open Font License, Version 1.1
+- Upstream: <https://github.com/googlefonts/caveat>
+- Use in o8: the handwritten annotation ink in o8 next's notes review rail,
+  bundled as `native/o8-next/src/files_panel/caveat.ttf`
+- Full license text: `native/o8-next/src/files_panel/caveat-OFL.txt`
+
 ## MIT permission notice for third-party works
 
 The copyright notices above and the following terms apply to the Lisse,
