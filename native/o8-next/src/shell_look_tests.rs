@@ -149,8 +149,7 @@ fn correction_fifteenth_workspace_scrolls_into_view(cx: &mut TestAppContext) {
     for (width, height) in [(1200., 816.), (900., 700.)] {
         cx.simulate_resize(size(px(width), px(height)));
         draw(cx);
-        let switcher = cx.debug_bounds("workspace-switcher").unwrap();
-        cx.simulate_click(switcher.center(), gpui::Modifiers::default());
+        open_workspace_picker(&shell, cx);
         draw(cx);
         for _ in 0..14 {
             cx.simulate_keystrokes("down");
@@ -237,7 +236,7 @@ fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
     ready(&shell, cx);
     assert_eq!(shell.read_with(cx, |s, _| s.workspaces.len()), 15);
     assert!(
-        cx.debug_bounds("workspace-switcher").is_some(),
+        cx.debug_bounds("sidebar-project-switcher").is_some(),
         "15 workspaces must share one switcher"
     );
     assert!(
@@ -256,11 +255,11 @@ fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
     for (width, height) in [(900., 700.), (1680., 1050.)] {
         cx.simulate_resize(size(px(width), px(height)));
         draw(cx);
-        let bounds = cx.debug_bounds("workspace-switcher").unwrap();
+        let bounds = cx.debug_bounds("sidebar-project-switcher").unwrap();
         assert!(bounds.right() <= px(width));
         assert!(bounds.size.height <= px(40.));
         layouts.push(json!({"viewport":[width,height], "switcher":[f32::from(bounds.origin.x),f32::from(bounds.origin.y),f32::from(bounds.size.width),f32::from(bounds.size.height)]}));
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        open_workspace_picker(&shell, cx);
         draw(cx);
         assert!(cx.debug_bounds("command-14").is_some());
         assert!(
@@ -290,8 +289,7 @@ fn chrome_switcher_cancel_restores_composer_with_platform_shortcut(cx: &mut Test
     ready(&shell, cx);
     draw(cx);
     cx.simulate_input("Draft");
-    let switcher = cx.debug_bounds("workspace-switcher").unwrap();
-    cx.simulate_click(switcher.center(), gpui::Modifiers::default());
+    open_workspace_picker(&shell, cx);
     draw(cx);
     cx.simulate_keystrokes("escape");
     draw(cx);

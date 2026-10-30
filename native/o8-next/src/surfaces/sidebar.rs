@@ -266,6 +266,12 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                         shell.persist();
                     }
                 }
+                ThreadEvent::WorkspacePicker(previous) => {
+                    if let Some(focus) = previous {
+                        focus.focus(window);
+                    }
+                    super::palette::open_workspaces(shell, window, cx);
+                }
                 ThreadEvent::Selected(id) => shell.open_thread(id.clone(), window, cx),
                 ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),
                 ThreadEvent::Scope(project, keys) => {

@@ -37,6 +37,8 @@ pub enum Event {
     View(String, &'static str),
     /// The closed By repo folders, by repository path.
     Folders(Vec<String>),
+    /// The project menu's Switch workspace, with the focus to give back.
+    WorkspacePicker(Option<gpui::FocusHandle>),
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Row {
@@ -66,6 +68,8 @@ pub struct ThreadList {
     workspace: Option<String>,
     header_busy: bool,
     header_menu: Option<bool>,
+    /// Focus before the project menu opened; Switch workspace returns it.
+    header_focus: Option<gpui::FocusHandle>,
     /// Each project's repository scope (T3's projectScopeKeys), by project id.
     scopes: HashMap<String, Vec<String>>,
     scope_menu: Option<project_header::ScopeMenu>,
@@ -150,6 +154,7 @@ impl ThreadList {
             workspace: None,
             header_busy: false,
             header_menu: None,
+            header_focus: None,
             scopes: HashMap::new(),
             scope_menu: None,
             row_menu: None,
