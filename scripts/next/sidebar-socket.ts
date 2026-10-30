@@ -30,6 +30,9 @@ export function attachSidebarSocket(server: Server, token: string, requests: str
   });
   return {
     changed: async (id: string) => {
+      // Setup mutations run before the native window subscribes. Do not hold
+      // their HTTP acknowledgements behind a 2,000-record broadcast to nobody.
+      if (wss.clients.size === 0) return;
       const { listMobileOrchestratorThreads } = await import('../../src/lib/mobile/orchestrator-thread-history');
       const thread = listMobileOrchestratorThreads({ limit: 3000 }).find(row => row.id === id);
       for (const ws of wss.clients) ws.send(JSON.stringify(thread
