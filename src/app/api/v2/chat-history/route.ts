@@ -398,6 +398,8 @@ export async function PATCH(request: NextRequest) {
     return patchInboxSettlement(request, body);
   }
   if (!body?.tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
+  if (body.pinned !== undefined && typeof body.pinned !== 'boolean') return NextResponse.json({ error: 'pinned must be boolean' }, { status: 400 });
+  const recordPin = body.pinned === undefined ? null : (await import('@/lib/inbox/mutation')).recordLegacyInboxPin;
 
   // Full read-modify-write: hold the history lock like POST does, or a PATCH
   // racing a turn-receipt write would put the pre-race snapshot back on disk.
@@ -442,7 +444,9 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    persistCanonicalChatHistoryRecord(body.tabId, data as { messages: unknown[]; [key: string]: unknown });
+    const persist = () => persistCanonicalChatHistoryRecord(body.tabId, data as { messages: unknown[]; [key: string]: unknown });
+    if (recordPin) recordPin(body.tabId, saved?.history ?? {}, body.pinned, persist);
+    else persist();
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'chat update failed';

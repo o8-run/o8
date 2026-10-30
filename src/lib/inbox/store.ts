@@ -10,9 +10,10 @@ import type Database from 'better-sqlite3';
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getSqlite } from '@/lib/db';
+import { type InboxPreferences, type InboxPreferenceCommand, transitionInboxPreferences } from './preferences';
 import { emptySettlement, transitionSettlement, type InboxSettlement, type InboxSubject } from './settlement';
 
-interface StoredInboxState extends InboxSettlement {
+interface StoredInboxState extends InboxSettlement, InboxPreferences {
   runStatus?: 'running' | 'idle';
   runAt?: string;
   ownerPid?: number;
@@ -93,6 +94,7 @@ export function readInboxState(subject: InboxSubject, context?: InboxReadContext
   return row ? JSON.parse(row.value) as StoredInboxState : emptySettlement();
 }
 function write(subject: InboxSubject, state: StoredInboxState): void {
+  state.inboxRevision = (state.inboxRevision ?? 0) + 1;
   getSqlite().prepare(`INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
     .run(key(subject), JSON.stringify(state), Date.now());
@@ -102,36 +104,72 @@ export function mutateInboxSettlement(subject: InboxSubject, action: 'settle' | 
     guard();
     const state = readInboxState(subject);
     const now = new Date().toISOString();
-    const transitioned = transitionSettlement(state, action, now);
-    if (action === 'settle' && wasPinned) transitioned.settledAt = now;
+    const transitioned = { ...transitionSettlement(state, action, now), ...(action === 'settle'
+      ? { pinnedAt: null, pinOrderKey: null, activeOrderKey: null } : {}) };
+    const pinned = state.pinnedAt === undefined ? wasPinned : state.pinnedAt !== null;
+    if (action === 'settle' && pinned) transitioned.settledAt = now;
     if (transitioned.settledOverride === state.settledOverride && transitioned.settledAt === state.settledAt
-      && transitioned.unsettledAt === state.unsettledAt) return state;
+      && transitioned.unsettledAt === state.unsettledAt && !(action === 'settle'
+        && (state.pinnedAt || state.pinOrderKey || state.activeOrderKey))) return state;
     const next = { ...state, ...transitioned, overrideAt: now };
     write(subject, next);
     return next;
   }).immediate();
 }
-type InboxProjection = InboxSettlement & { inboxSubject: InboxSubject; parentInboxSubject: InboxSubject | null };
-export interface InboxListingProjection {
+/** The caller validates revision and eligibility under the same SQLite write lock. */
+export function mutateInboxPreferences(subject: InboxSubject, command: InboxPreferenceCommand,
+  guard: (state: StoredInboxState) => void, legacyPin: string | null = null): void {
+  getSqlite().transaction(() => {
+    const prior = readInboxState(subject);
+    const state = { ...prior, pinnedAt: prior.pinnedAt === undefined ? legacyPin : prior.pinnedAt };
+    guard(state);
+    const now = new Date().toISOString();
+    const patch = transitionInboxPreferences(state, command, now);
+    const changed = Object.entries(patch).some(([field, value]) => (state[field as keyof StoredInboxState] ?? null) !== value);
+    if (!changed && prior.pinnedAt !== undefined) return;
+    write(subject, { ...state, ...patch, ...(state.settledOverride === 'settled' && command.action === 'pin' ? { overrideAt: now } : {}) });
+  }).immediate();
+}
+type InboxProjection = InboxSettlement & InboxPreferences & { inboxSubject: InboxSubject; parentInboxSubject: InboxSubject | null };
+export interface InboxListingProjection extends InboxPreferences {
   inboxSubject: InboxSubject;
   parentInboxSubject?: InboxSubject;
   settledOverride?: NonNullable<InboxSettlement['settledOverride']>;
   settledAt?: string;
   unsettledAt?: string;
 }
+/** Add only present preferences to a fresh row; default rows retain the B01 shape. */
+export function appendInboxPreferences<T extends object>(row: T, state: InboxPreferences | undefined,
+  legacyPin: string | null = null): T & InboxPreferences {
+  const result = row as T & InboxPreferences;
+  const pinnedAt = state?.pinnedAt === undefined ? legacyPin : state.pinnedAt;
+  if (pinnedAt != null) result.pinnedAt = pinnedAt;
+  else delete result.pinnedAt;
+  if (state?.pinOrderKey != null) result.pinOrderKey = state.pinOrderKey;
+  else delete result.pinOrderKey;
+  if (state?.activeOrderKey != null) result.activeOrderKey = state.activeOrderKey;
+  else delete result.activeOrderKey;
+  if (state?.autoSettleDisabledAt != null) result.autoSettleDisabledAt = state.autoSettleDisabledAt;
+  else delete result.autoSettleDisabledAt;
+  if (state?.inboxRevision !== undefined) result.inboxRevision = state.inboxRevision;
+  else delete result.inboxRevision;
+  return result;
+}
 /** Listing rows omit null fields on the wire; inboxSubject is always the capability flag. */
 export function inboxListingProjection<T extends object>(subject: InboxSubject, parent: InboxSubject | null,
-  context: InboxReadContext | undefined, base: T): T & InboxListingProjection {
+  context: InboxReadContext | undefined, base: T, legacyPin: string | null = null): T & InboxListingProjection {
   const state = context ? inboxListingState(subject, context) : readInboxState(subject);
-  return Object.assign({}, base, { inboxSubject: subject, parentInboxSubject: parent ?? undefined,
+  return appendInboxPreferences(Object.assign({}, base, { inboxSubject: subject, parentInboxSubject: parent ?? undefined,
     settledOverride: state?.settledOverride ?? undefined, settledAt: state?.settledAt ?? undefined,
-    unsettledAt: state?.unsettledAt ?? undefined });
+    unsettledAt: state?.unsettledAt ?? undefined }), state, legacyPin);
 }
 /** Mutation and mobile responses retain the full nullable shape. */
-export function inboxProjection(subject: InboxSubject, parentInboxSubject: InboxSubject | null = null, context?: InboxReadContext): InboxProjection {
+export function inboxProjection(subject: InboxSubject, parentInboxSubject: InboxSubject | null = null, context?: InboxReadContext, legacyPin: string | null = null): InboxProjection {
   const state = context ? inboxListingState(subject, context) : readInboxState(subject);
   return { inboxSubject: subject, parentInboxSubject, settledOverride: state?.settledOverride ?? null,
-    settledAt: state?.settledAt ?? null, unsettledAt: state?.unsettledAt ?? null };
+    settledAt: state?.settledAt ?? null, unsettledAt: state?.unsettledAt ?? null, pinnedAt: state?.pinnedAt === undefined ? legacyPin : state.pinnedAt,
+    pinOrderKey: state?.pinOrderKey ?? null, activeOrderKey: state?.activeOrderKey ?? null,
+    autoSettleDisabledAt: state?.autoSettleDisabledAt ?? null, inboxRevision: state?.inboxRevision ?? 0 };
 }
 
 /** Called by the WS broadcast chokepoint, never by a client history save. */

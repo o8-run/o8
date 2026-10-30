@@ -3520,6 +3520,12 @@
       ]
     },
     {
+      "path": "tests/inbox-preferences.integration.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/inbox-settlement.integration.test.ts",
       "reasons": [
         "child-process",

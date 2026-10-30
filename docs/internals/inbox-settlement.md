@@ -81,7 +81,9 @@ Canonical workspace paths share a module-level cache across reads and mutations,
 bounded to 256 entries with a 30-second TTL; a request-local map avoids repeated
 lookups within a listing. Subject keys are built once per subject object. History
 rows build their added fields once without per-row spreads or temporary projection
-objects; null inbox fields are omitted during JSON encoding. No row-projection or
+objects. Preference fields are materialized only when non-null, so default
+rows avoid unused property slots and JSON traversal; null inbox fields are omitted
+during JSON encoding. No row-projection or
 serialized-fragment cache is used.
 
 An unchanged runtime observation opens no write transaction and writes no
@@ -105,3 +107,47 @@ load is below 20 before warming and before taking each endpoint's measured
 samples. It records load immediately before and after each measured cohort;
 waiting for load is outside the handler timer. Acceptance requires both
 percentiles of both endpoints to stay within budget in both complete runs.
+
+## Pins, manual order and per-thread auto-settle preference (B02)
+
+The same PATCH route accepts `pin`, `unpin`, `pin-reorder`, `active-reorder`
+and `auto-settle`. These actions require `inboxRevision`, a nonnegative integer
+from the latest listing (an absent revision means zero). Revision checks and
+eligibility checks run inside the SQLite write transaction. A stale revision is
+409, including a reorder raced by unpin, settlement or a newly observed run.
+Existing settle/unsettle callers retain their B01 request shape.
+
+```json
+{ "tabId": "thoughts-example", "inboxAction": "pin", "inboxRevision": 0, "orderKey": "n" }
+```
+
+Pin accepts an optional `orderKey`; both reorder actions require it. A key is
+null (clear manual order) or 1 to 256 lowercase ASCII letters with no trailing
+`a`, using the upstream fractional-key alphabet. Keys compare lexically. Clients
+construct keys between neighbors and apply section sorting; listing transport
+order remains the existing server order. Reordering never changes transcript
+`savedAt`, message timestamps or the activity anchor. Auto-settle preference uses
+`{ "inboxAction": "auto-settle", "inboxRevision": 1, "enabled": false }` with
+one target; false records `autoSettleDisabledAt`, true clears it. This is durable
+preference storage, not an automatic settlement worker.
+
+All three listings add `pinnedAt`, `pinOrderKey`, `activeOrderKey`,
+`autoSettleDisabledAt` and `inboxRevision`. The two compact GET listings omit null
+preference fields along with the B01 null fields. PATCH and mobile projections
+return explicit null preference fields. An absent revision is zero; every actual
+inbox write advances it. Repeated pin/disable preserves the original timestamp
+and revision. Pinning a settled row promotes it to explicit active and clears
+`settledAt`; unpin clears the pin order. Settle clears pin, pin order and active
+order. Pin reorder requires a pin; active reorder rejects pinned or settled rows.
+Archived histories reject these new preference actions. Snooze transitions are
+not introduced by B02; conflicting snooze clearing belongs with B04's state.
+
+Existing boolean pins without an inbox pin record project a fixed epoch
+`pinnedAt` (`1970-01-01T00:00:00.000Z`). Their true pin time is unknown. This
+migration is deterministic across restarts and transcript saves and performs no
+listing writes. The next preference mutation persists it; new pins use the
+server event time. Existing boolean pin PATCH callers also update inbox metadata.
+An explicit inbox pin or unpin takes precedence over a stale transcript boolean.
+Conversation child rows project their parent's preference fields and cannot be
+independently pinned or reordered. Runtime observation and authentic WS activity
+preserve pins, manual order and the per-thread opt-out.
