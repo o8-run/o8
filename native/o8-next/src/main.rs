@@ -17,6 +17,8 @@ mod files_panel;
 mod grid_sessions;
 mod icon;
 mod inbox;
+#[cfg(test)]
+mod input_reuse_tests;
 mod issues;
 mod merge;
 mod model;
