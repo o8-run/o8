@@ -53,6 +53,8 @@ export async function installActivityFixture(repo: string) {
   }
   let dropped = false;
   const mutations: string[] = [];
+  const closes: string[] = [];
+  let slowed = false;
   const calls: string[] = [];
   const date = '2026-10-24T12:00:00Z';
   const pull = { id: 71, number: 7, title: 'Fixture pull request', state: 'open', user: { login: 'fixture' },
@@ -108,7 +110,15 @@ export async function installActivityFixture(repo: string) {
     'GET /api/panel/ci': ci.GET, 'GET /api/panel/pr': pr.GET, 'GET /api/panel/repos': repos.GET,
     'GET /api/panel/ci/91': request => detail.GET(request, { params: Promise.resolve({ id: '91' }) }),
     'PATCH /api/orchestrator/state': state.PATCH, 'POST /api/orchestrator/stop-mission': stop.POST,
-    'POST /api/orchestrator/discard-packet': discard.POST,
+    // `slow-close` answers the first close as still running after the real
+    // route applied it, so the client must replay the same receipt.
+    'POST /api/orchestrator/discard-packet': async request => {
+      closes.push(await request.clone().text());
+      const response = await discard.POST(request);
+      if (mode !== 'slow-close' || slowed) return response;
+      slowed = true;
+      return Response.json({ ok: true, result: { inProgress: true, status: 'in_progress' } }, { status: 202 });
+    },
     // Real lane verbs drive git and worker processes; the fixture records the
     // packet card's command and answers like the lanes route does.
     'POST /api/lanes': async request => {
@@ -125,7 +135,7 @@ export async function installActivityFixture(repo: string) {
         const { invalidateGitHubSync } = await import('../../../src/lib/github-broker/store');
         invalidateGitHubSync('example/activity', 'issues'); invalidateGitHubSync('example/activity', 'pull_requests');
       }
-      return Response.json({ mode, calls, repo, laneId, mutations, identityRepos: identityRepos.map(entry => ({
+      return Response.json({ mode, calls, repo, laneId, mutations, closes, identityRepos: identityRepos.map(entry => ({
         id: entry.id, localPath: entry.localPath, remoteUrl: entry.remoteUrl,
         sha: execFileSync('git', ['-C', entry.localPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
         commonDir: execFileSync('git', ['-C', entry.localPath, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' }).trim(),

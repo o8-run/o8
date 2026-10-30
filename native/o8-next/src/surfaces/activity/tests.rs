@@ -696,10 +696,57 @@ fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
         "{notice}"
     );
 
+    // The first close answer is still running: the same body replays until its
+    // receipt settles, and the busy confirm cannot send a second close.
+    let _: Value = fixture
+        .client
+        .get("/api/activity-fixture", &[("mode", "slow-close")])
+        .unwrap();
     activity_click(cx, "activity-close-unmerged");
     activity_click(cx, "activity-close-reason-superseded");
-    activity_click(cx, "activity-close-confirm");
+    // Send the confirm's own action twice before the first close settles.
+    let confirm = view.read_with(cx, |v, _| {
+        v.controls
+            .iter()
+            .find(|(id, _)| id == "activity-close-confirm")
+            .map(|(_, action)| action.clone())
+            .expect("the confirm is a control")
+    });
+    view.update(cx, |v, cx| {
+        v.act(confirm.clone(), cx);
+        v.act(confirm, cx);
+    });
+    draw(cx);
+    assert_eq!(
+        view.read_with(cx, |v, _| v.close_stage),
+        Some("Closing packet…")
+    );
+    assert!(
+        cx.debug_bounds("activity-close-confirm").is_some()
+            && view.read_with(cx, |v, _| v
+                .controls
+                .iter()
+                .all(|(id, _)| !id.starts_with("activity-close-"))),
+        "the busy confirm stays in place with no click or keyboard stop"
+    );
     settle(cx);
+    let closes = fixture
+        .client
+        .get::<Value>("/api/activity-fixture", &[])
+        .unwrap()["closes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|body| serde_json::from_str::<Value>(body.as_str()?).ok())
+        .collect::<Vec<_>>();
+    assert!(
+        closes.len() >= 2,
+        "the in-progress answer replays the receipt: {closes:?}"
+    );
+    assert!(
+        closes.iter().all(|body| body == &closes[0]) && closes[0]["disposition"] == "superseded",
+        "every replay sends the same body and mutation id: {closes:?}"
+    );
     let state: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
     let packet = state["mission"]["packets"]
         .as_array()

@@ -32,6 +32,12 @@ pub(super) enum Action {
     Close(Row),
 }
 
+/// Routes whose persisted receipt is replayed with the same body until terminal
+/// (classic fetchCorrelatedActionReceipt).
+const RECEIPTS: [&str; 2] = [
+    "/api/orchestrator/stop-mission",
+    "/api/orchestrator/discard-packet",
+];
 /// close-unmerged-shared.ts: each disposition and its label.
 pub(super) const CLOSE_REASONS: [(&str, &str); 4] = [
     ("adopted_elsewhere", "Adopted elsewhere"),
@@ -73,6 +79,8 @@ pub struct ActivityPane {
     /// The packet whose close-unmerged confirmation is open, and its reason.
     pub(super) closing: Option<String>,
     pub(super) close_reason: &'static str,
+    /// PacketCloseUnmergedActions' busy label while the close receipt settles.
+    pub(super) close_stage: Option<&'static str>,
     pub(super) focus: FocusHandle,
     pub(super) controls: Vec<(String, Action)>,
     pub(super) keyboard: Option<String>,
@@ -102,6 +110,7 @@ impl ActivityPane {
             stop_identity: None,
             closing: None,
             close_reason: CLOSE_REASONS[0].0,
+            close_stage: None,
             focus: cx.focus_handle(),
             controls: vec![],
             keyboard: None,
@@ -295,7 +304,7 @@ impl ActivityPane {
             let deadline = Instant::now() + Duration::from_secs(300);
             loop {
                 let result = client.activity_request(method, path, &[], Some(&body));
-                if path != "/api/orchestrator/stop-mission" {
+                if !RECEIPTS.contains(&path) {
                     break result;
                 }
                 match &result {
@@ -316,7 +325,7 @@ impl ActivityPane {
                     break Ok(json!({"outcomeUnknown":true}));
                 }
                 // The same exact body polls the persisted receipt; it cannot
-                // create another stop while the first result is uncertain.
+                // create another stop or close while the first is uncertain.
                 std::thread::sleep(Duration::from_millis(750));
             }
         });
@@ -335,6 +344,7 @@ impl ActivityPane {
                     Ok(value) => {
                         this.stop_identity = None;
                         this.closing = None;
+                        this.close_stage = None;
                         // A created PR's note carries its URL.
                         value["note"]
                             .as_str()
@@ -345,6 +355,7 @@ impl ActivityPane {
                         if error.status.is_some() {
                             this.stop_identity = None;
                         }
+                        this.close_stage = None;
                         if merge && error.message.to_lowercase().contains("conflict") {
                             format!("{} Try \"Create PR\" instead.", error.message)
                         } else {
@@ -398,8 +409,22 @@ impl ActivityPane {
             Action::CloseAsk(packet) => { self.closing = packet; self.close_reason = CLOSE_REASONS[0].0; }
             Action::CloseReason(reason) => self.close_reason = reason,
             Action::Close(row) => {
+                if self.pending { return; }
                 let mutation = format!("next-close-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos());
                 self.mutate("POST", "/api/orchestrator/discard-packet", json!({"packetId": row.id, "disposition": self.close_reason, "clientMutationId": mutation}), cx);
+                // The stage shows on the confirm itself, as in classic.
+                self.notice.clear();
+                self.close_stage = Some("Closing packet…");
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(Duration::from_secs(3)).await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.close_stage.is_some() && this.closing.as_deref() == Some(row.id.as_str()) {
+                            this.close_stage = Some("Preserving work and archiving…");
+                            this.changed(cx);
+                        }
+                    });
+                })
+                .detach();
             }
         }
         self.changed(cx);

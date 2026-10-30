@@ -38,6 +38,22 @@ impl ActivityPane {
                 this.act(action.clone(), cx);
             }))
     }
+    /// A control that is busy: same box, dimmed, with no click or keyboard stop.
+    fn inert(id: impl Into<String>, label: impl Into<SharedString>) -> gpui::Stateful<gpui::Div> {
+        let id = id.into();
+        div()
+            .id(SharedString::from(id.clone()))
+            .debug_selector(move || id.clone())
+            .min_h(px(26.))
+            .px(px(9.))
+            .py(px(4.))
+            .rounded(px(7.))
+            .text_size(px(12.))
+            .font_weight(gpui::FontWeight::LIGHT)
+            .bg(theme().surface)
+            .opacity(0.6)
+            .child(label.into())
+    }
     fn link(
         &mut self,
         id: &str,
@@ -313,7 +329,9 @@ impl ActivityPane {
                 if any {
                     view = view.child(lifecycle);
                 }
-                if status == "awaiting_review" && !self.pending {
+                if status == "awaiting_review"
+                    && (!self.pending || self.closing.as_deref() == Some(row.id.as_str()))
+                {
                     view = view.child(self.close_unmerged(row, cx));
                 }
                 if !self.pending && (row.data["queueState"] == "held" || row.data["lane"].is_null())
@@ -351,16 +369,17 @@ impl ActivityPane {
                 ))
                 .into_any_element();
         }
+        let stage = self.close_stage;
         let mut reasons = div().flex().flex_wrap().gap(px(6.));
         for (reason, label) in super::CLOSE_REASONS {
             let chosen = self.close_reason == reason;
+            let id = format!("activity-close-reason-{reason}");
             reasons = reasons.child(
-                self.button(
-                    format!("activity-close-reason-{reason}"),
-                    label,
-                    Action::CloseReason(reason),
-                    cx,
-                )
+                if stage.is_some() {
+                    Self::inert(id, label)
+                } else {
+                    self.button(id, label, Action::CloseReason(reason), cx)
+                }
                 .when(chosen, |button| {
                     button.border_1().border_color(theme().accent)
                 }),
@@ -383,18 +402,24 @@ impl ActivityPane {
                 div()
                     .flex()
                     .gap(px(6.))
-                    .child(self.button(
-                        "activity-close-confirm",
-                        "Confirm close",
-                        Action::Close(row.clone()),
-                        cx,
-                    ))
-                    .child(self.button(
-                        "activity-close-cancel",
-                        "Cancel",
-                        Action::CloseAsk(None),
-                        cx,
-                    )),
+                    .child(match stage {
+                        Some(stage) => Self::inert("activity-close-confirm", stage),
+                        None => self.button(
+                            "activity-close-confirm",
+                            "Confirm close",
+                            Action::Close(row.clone()),
+                            cx,
+                        ),
+                    })
+                    .child(match stage {
+                        Some(_) => Self::inert("activity-close-cancel", "Cancel"),
+                        None => self.button(
+                            "activity-close-cancel",
+                            "Cancel",
+                            Action::CloseAsk(None),
+                            cx,
+                        ),
+                    }),
             )
             .into_any_element()
     }
