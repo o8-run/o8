@@ -8,6 +8,8 @@ mod brain_dock;
 mod composer_bench;
 #[path = "composer/regions.rs"]
 mod composer_regions;
+#[path = "browser_panel/composer_geometry.rs"]
+mod browser_preview_geometry;
 #[path = "conversation.rs"]
 mod conversation;
 #[path = "history.rs"]

@@ -45,6 +45,10 @@ pub struct Composer {
     pub(crate) controls: controls::State,
 }
 impl Composer {
+    /// Read-only input viewport for floating previews; layout and input stay here.
+    pub(crate) fn preview_obstacle(&self) -> Bounds<Pixels> {
+        self.scroll.bounds()
+    }
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus: cx.focus_handle(),
