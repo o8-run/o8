@@ -349,9 +349,6 @@ fn settings_fixture_validation_locks_loading_errors_and_empty(cx: &mut TestAppCo
         "/__fixture/settings",
         json!({"delayMs":150}),
     );
-    // simulate_click drains background work before returning. Observe the
-    // notified pending state during the real click, rather than checking it
-    // after the fixture response has already arrived.
     let pending = std::rc::Rc::new(std::cell::Cell::new(false));
     let observed = pending.clone();
     let settings = shell.read_with(cx, |s, _| {
@@ -364,14 +361,32 @@ fn settings_fixture_validation_locks_loading_errors_and_empty(cx: &mut TestAppCo
             }
         })
     });
-    click(cx, "settings-refresh");
+    // Dispatch the real mouse events without simulate_click's executor drain,
+    // so the pending scene is inspected before the HTTP response is consumed.
     draw(cx);
+    let position = cx.debug_bounds("settings-refresh").unwrap().center();
+    cx.simulate_event_without_wait(gpui::MouseDownEvent {
+        position,
+        button: gpui::MouseButton::Left,
+        click_count: 1,
+        ..Default::default()
+    });
+    cx.simulate_event_without_wait(gpui::MouseUpEvent {
+        position,
+        button: gpui::MouseButton::Left,
+        click_count: 1,
+        ..Default::default()
+    });
+    draw(cx);
+    assert!(shell.read_with(cx, |s, cx| {
+        s.surfaces.settings.view.as_ref().unwrap().read(cx).busy
+    }));
     assert!(
         pending.get(),
         "the pending read must notify a loading state"
     );
-    drop(subscription);
     assert!(cx.debug_bounds("settings-loading").is_some());
+    drop(subscription);
     settle(cx);
     request(
         &fixture,
