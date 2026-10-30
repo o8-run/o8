@@ -287,15 +287,18 @@ fn wait(shell: &gpui::Entity<Shell>, cx: &mut VisualTestContext, selector: &'sta
     }
 }
 fn click(shell: &gpui::Entity<Shell>, cx: &mut VisualTestContext, selector: &'static str) {
-    wait(shell, cx, selector);
     // Loading controls already have bounds but reject input. Wait for the
     // enabled paint (disabled is 0.6, including any parent animation opacity).
     let deadline = Instant::now() + Duration::from_secs(10);
-    while cx
-        .debug_opacity(selector)
-        .is_none_or(|opacity| opacity <= 0.6)
-    {
+    loop {
         pump(shell, cx);
+        if cx.debug_bounds(selector).is_some()
+            && cx
+                .debug_opacity(selector)
+                .is_some_and(|opacity| opacity > 0.6)
+        {
+            break;
+        }
         assert!(Instant::now() < deadline, "disabled {selector}");
     }
     let p = cx.debug_bounds(selector).unwrap().center();
