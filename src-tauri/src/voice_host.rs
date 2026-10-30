@@ -8,7 +8,7 @@ struct VoiceHost;
 /// The rail branch retains its window launcher. A native-main shell explicitly
 /// selects this host; bundled binary presence must not change rail startup.
 pub(crate) fn enabled() -> bool {
-    mode_enabled(std::env::var("O8_NEXT_MAIN_WINDOW").ok().as_deref())
+    cfg!(target_os = "macos") && mode_enabled(std::env::var("O8_NEXT_MAIN_WINDOW").ok().as_deref())
 }
 fn mode_enabled(value: Option<&str>) -> bool {
     value == Some("1")
@@ -68,10 +68,17 @@ fn build<R: Runtime>(app: &AppHandle<R>, port: u16) -> tauri::Result<WebviewWind
     let tauri::WebviewUrl::External(expected) = config.url.clone() else {
         unreachable!()
     };
-    tauri::WebviewWindowBuilder::from_config(app, &config)?
+    let window = tauri::WebviewWindowBuilder::from_config(app, &config)?
         .initialization_script(STAMP)
         .on_navigation(move |url| permits_navigation(&expected, url))
-        .build()
+        .build()?;
+    window.on_window_event(|event| {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            crate::stt_engine::cancel_headless_all("Voice host closed.");
+        }
+    });
+    Ok(window)
 }
 
 pub(crate) fn start(app: AppHandle, port: u16, boot_id: String) {

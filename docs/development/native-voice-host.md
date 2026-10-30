@@ -140,6 +140,17 @@ Disconnect/unmount stops the owned capture, including a late startup reply;
 stale publication failures cannot stop a replacement binding. The host has no
 textarea, pill, focus listener or keyboard shortcut.
 
+Every Fn mode takes priority over composer dictation. Native admission reserves
+Fn atomically, cancels the headless session and discards its pending final text.
+The binding receives `dictation-state` with `state:"idle"` and
+`error:"Stopped by Fn"`. Composer dictation still refuses an existing Fn or Live
+owner. Native cancellation is session-fenced and remains effective during polish.
+Reload/close and page disconnect cancel capture. While a headless session exists,
+the shell checks the existing authenticated voice-host state once per second
+with a two-second HTTP timeout. Expired host leases, retired bindings and native
+terminal/error events release the claim; the page also enforces its 15-second
+ready lease. These checks run only for composer dictation.
+
 ## Symon and microphone ownership
 
 Keeping label `main` preserves the existing microphone claim/release, Tauri
@@ -200,7 +211,7 @@ memory measurement.
 ## Rail branch activation and transport
 
 This port preserves the rail branch's default shell startup. Start the Tauri
-shell with `O8_NEXT_MAIN_WINDOW=1` to select the hidden `main` voice host while
+shell on macOS with `O8_NEXT_MAIN_WINDOW=1` to select the hidden `main` voice host while
 the existing rail launcher owns the o8 next window. This switch does not launch
 o8 next or import the draft's window/updater integration. Without the switch,
 the classic dashboard keeps its existing hosts and behavior.
