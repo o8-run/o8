@@ -210,20 +210,31 @@ fn sidebar_scope_picker_and_row_filter_scope_the_list(cx: &mut TestAppContext) {
     drop(shell);
     let saved = State::load(&file).unwrap();
     let (shell, mut visual) = open(fixture.client.clone(), file, saved, cx);
+    // The socket's initial rows precede the HTTP project metadata that makes
+    // the saved scope meaningful. Wait for that read before asserting the list.
     wait_for(&shell, &mut visual, |s, cx| {
-        let listed = s
+        let sidebar = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+        let state = sidebar.diagnostic();
+        s.connected
+            && state["project"] == id
+            && state["loading"] == false
+            && sidebar.rows.iter().any(|r| r.id.as_deref() == Some(first))
+    });
+    draw(&mut visual);
+    assert_eq!(
+        listed(&shell, &visual),
+        vec![first.to_owned()],
+        "restored sidebar={} saved scopes={:?}",
+        shell.read_with(&visual, |s, cx| s
             .surfaces
             .sidebar
             .view
             .as_ref()
             .unwrap()
             .read(cx)
-            .rows
-            .clone();
-        listed.iter().any(|r| r.id.as_deref() == Some(first))
-    });
-    draw(&mut visual);
-    assert_eq!(listed(&shell, &visual), vec![first.to_owned()]);
+            .diagnostic()),
+        shell.read_with(&visual, |s, _| s.state.sidebar_scope.clone())
+    );
 
     // Opening a thread the scope hides widens it to every repository.
     let sidebar = shell.read_with(&visual, |s, _| s.surfaces.sidebar.view.clone().unwrap());
