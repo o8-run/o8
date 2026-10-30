@@ -721,6 +721,9 @@ mod project_keyboard_tests;
 #[path = "project_round2_tests.rs"]
 mod project_round2_tests;
 
+#[path = "scope_tests.rs"]
+mod scope_tests;
+
 #[path = "recents_tests.rs"]
 mod recents_tests;
 

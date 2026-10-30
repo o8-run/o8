@@ -49,34 +49,46 @@ impl Render for ThreadList {
             .capture_key_down(cx.listener(Self::key))
             .child(self.project_header(window, cx))
             .child(
-                // A desktop-style nav row: search glyph and muted label, filled on hover.
                 div()
-                    .id("thread-search")
-                    .debug_selector(|| "thread-search".into())
-                    .cursor_pointer()
                     .mx(px(6.))
-                    .h(px(28.))
-                    .px(px(6.))
                     .flex()
                     .items_center()
-                    .gap(px(8.))
-                    .rounded(px(8.))
-                    .hover(|style| style.bg(theme().hover))
-                    .text_size(px(12.5))
-                    .text_color(theme().text_secondary)
-                    .child(crate::icon::stroke(
-                        "M11 4a7 7 0 1 0 0 14 7 7 0 1 0 0-14Z M20 20l-3.5-3.5",
-                        theme().text_muted,
-                        15.,
-                        1.7,
-                    ))
-                    .child(if self.rename.is_some() {
-                        "Rename thread"
-                    } else {
-                        "Search"
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| this.search(window, cx))),
+                    .gap(px(2.))
+                    .child(
+                        // A desktop-style nav row: search glyph and muted label, filled on hover.
+                        div()
+                            .id("thread-search")
+                            .debug_selector(|| "thread-search".into())
+                            .cursor_pointer()
+                            .flex_1()
+                            .min_w_0()
+                            .h(px(28.))
+                            .px(px(6.))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .rounded(px(8.))
+                            .hover(|style| style.bg(theme().hover))
+                            .text_size(px(12.5))
+                            .text_color(theme().text_secondary)
+                            .child(crate::icon::stroke(
+                                "M11 4a7 7 0 1 0 0 14 7 7 0 1 0 0-14Z M20 20l-3.5-3.5",
+                                theme().text_muted,
+                                15.,
+                                1.7,
+                            ))
+                            .child(if self.rename.is_some() {
+                                "Rename thread"
+                            } else {
+                                "Search"
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| this.search(window, cx))),
+                    )
+                    .when(!self.scope_repos().is_empty(), |row| {
+                        row.child(self.scope_trigger(cx))
+                    }),
             )
+            .children(self.scope_picker(cx))
             .when(self.editing || !self.query.is_empty(), |view| {
                 view.child(self.editor.clone())
             })
@@ -226,6 +238,18 @@ impl Render for ThreadList {
                                         ))
                                     })
                                     .when(thread, |view| {
+                                        let id = row.id.clone().unwrap_or_default();
+                                        view.on_mouse_down(
+                                            gpui::MouseButton::Right,
+                                            cx.listener(
+                                                move |this, event: &gpui::MouseDownEvent, _, cx| {
+                                                    this.open_row_menu(&id, event.position, cx);
+                                                    cx.stop_propagation();
+                                                },
+                                            ),
+                                        )
+                                    })
+                                    .when(thread, |view| {
                                         view.on_click(cx.listener(move |this, _, window, cx| {
                                             let id = row.id.clone().unwrap();
                                             if this.rows.iter().any(|r| r.id.as_ref() == Some(&id))
@@ -314,6 +338,7 @@ impl Render for ThreadList {
                             .any(|r| r.kind == "section" && r.title == "Archived")),
                 |view| view.child(self.archived_control(cx)),
             )
+            .children(self.row_menu(cx))
     }
 }
 

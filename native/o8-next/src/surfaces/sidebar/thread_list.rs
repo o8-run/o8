@@ -31,6 +31,8 @@ pub enum Event {
     /// A `ui-command` frame for the main window. Every socket receives the
     /// broadcast; only this global one hands it on.
     UiCommand(serde_json::Value),
+    /// A project's repository scope changed; empty shows every repository.
+    Scope(String, Vec<String>),
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Row {
@@ -58,6 +60,10 @@ pub struct ThreadList {
     workspace: Option<String>,
     header_busy: bool,
     header_menu: Option<bool>,
+    /// Each project's repository scope (T3's projectScopeKeys), by project id.
+    scopes: HashMap<String, Vec<String>>,
+    scope_menu: Option<project_header::ScopeMenu>,
+    row_menu: Option<project_header::RowMenu>,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
@@ -127,6 +133,9 @@ impl ThreadList {
             workspace: None,
             header_busy: false,
             header_menu: None,
+            scopes: HashMap::new(),
+            scope_menu: None,
+            row_menu: None,
             sessions: vec![],
             rows: Rc::new(vec![]),
             selected: None,
@@ -183,8 +192,9 @@ impl ThreadList {
             self.expanded
                 .insert(recents::group(session, recents::now()).into());
         }
+        let sessions = self.scoped_sessions();
         let mut rows = recents::rows(
-            &self.sessions,
+            &sessions,
             &self.query,
             &self.search_matches,
             &self.expanded,
@@ -202,7 +212,7 @@ impl ThreadList {
             self.expanded
                 .insert(recents::group(session, recents::now()).into());
             rows = recents::rows(
-                &self.sessions,
+                &sessions,
                 &self.query,
                 &self.search_matches,
                 &self.expanded,
@@ -524,6 +534,7 @@ impl ThreadList {
         if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
             session.unread = false;
         }
+        self.reveal(&id, cx);
         self.rebuild();
         if self.rows.iter().any(|r| r.id.as_deref() == Some(&id)) {
             self.choice = Some(id);
@@ -671,6 +682,9 @@ impl ThreadList {
         .detach();
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.scope_key(event, cx) {
+            return;
+        }
         if self.header_key(event, window, cx) {
             return;
         }

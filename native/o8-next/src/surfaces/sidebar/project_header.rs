@@ -7,6 +7,9 @@ mod data;
 pub(super) use data::HeaderSnapshot;
 #[path = "project_identity.rs"]
 mod identity;
+#[path = "scope.rs"]
+mod scope;
+pub(super) use scope::{Menu as ScopeMenu, RowMenu};
 use identity::{glyph, identity};
 
 impl ThreadList {

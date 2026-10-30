@@ -50,6 +50,9 @@ pub struct State {
     /// Browser page metadata, scoped by the selected workspace. Website data is never stored here.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub browser_pages: BTreeMap<String, crate::browser_panel::Snapshot>,
+    /// The chat list's repository scope, by project id; absent shows every repository.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sidebar_scope: BTreeMap<String, Vec<String>>,
     #[serde(skip)]
     pub(crate) retain_file: bool,
     #[serde(skip)]
@@ -67,6 +70,7 @@ impl Default for State {
             tab_labels: BTreeMap::new(),
             quick_doc_pins: BTreeMap::new(),
             browser_pages: BTreeMap::new(),
+            sidebar_scope: BTreeMap::new(),
             retain_file: false,
             backup_file: Arc::default(),
         }
@@ -121,6 +125,8 @@ impl State {
                 .quick_doc_pins
                 .values()
                 .any(|paths| clean_pins(paths.clone()) != *paths)
+            || self.sidebar_scope.len() > 500
+            || self.sidebar_scope.values().any(|keys| keys.len() > 500)
             || self.tab_labels.len() > 16_000
             || self
                 .tab_labels

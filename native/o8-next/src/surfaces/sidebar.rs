@@ -233,6 +233,8 @@ pub(super) const REGISTRATION: Registration = Registration {
 };
 fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     let sidebar = cx.new(|cx| ThreadList::new(shell.client.clone(), cx));
+    let scopes = shell.state.sidebar_scope.clone();
+    sidebar.update(cx, |sidebar, _| sidebar.restore_scopes(scopes));
     shell.subscriptions.push(
         cx.subscribe_in(&sidebar, window, |shell, _, event, window, cx| {
             match event {
@@ -259,6 +261,14 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                 }
                 ThreadEvent::Selected(id) => shell.open_thread(id.clone(), window, cx),
                 ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),
+                ThreadEvent::Scope(project, keys) => {
+                    if keys.is_empty() {
+                        shell.state.sidebar_scope.remove(project);
+                    } else {
+                        shell.state.sidebar_scope.insert(project.clone(), keys.clone());
+                    }
+                    shell.persist();
+                }
                 ThreadEvent::Error(error) => {
                     shell.loading = false;
                     shell.connected = false;
