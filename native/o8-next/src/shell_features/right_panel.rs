@@ -130,7 +130,7 @@ impl Tool {
     fn ready(self) -> bool {
         !matches!(
             self,
-            Tool::Devices | Tool::Threads | Tool::SideChat | Tool::Resources | Tool::Targeting
+            Tool::Threads | Tool::SideChat | Tool::Resources | Tool::Targeting
         )
     }
     fn label(self) -> &'static str {
@@ -521,6 +521,7 @@ pub(super) fn open_surface(
         "workspace" | "files" => Tool::Files,
         "terminal" => Tool::Terminal,
         "browser" => Tool::Browser,
+        "devices" => Tool::Devices,
         _ => return false,
     };
     show(s, tool, window, cx);
@@ -641,11 +642,13 @@ pub(super) fn element(
     cx: &mut Context<Shell>,
 ) -> Option<(AnyElement, f32, f32)> {
     cover_browsers(s, cx);
+    super::devices::sync_visibility(s, window, cx);
     let (full, shown) = width(s, window)?;
     let panel = s.features.read::<Panel>()?;
     let (travel, _) = panel.motion.value();
     let (arrive, _) = panel.content.value();
     let body = match panel.current() {
+        Tool::Devices => super::devices::element(s, cx),
         Tool::Launcher => launcher(cx).into_any_element(),
         tool if !tool.ready() => placeholder(tool).into_any_element(),
         tool => s
@@ -698,6 +701,18 @@ fn cover_browsers(s: &Shell, cx: &mut Context<Shell>) {
         let covered = showing.as_deref() != Some(key.as_str());
         view.update(cx, |browser, _| browser.cover(covered));
     }
+}
+
+/// Devices follows the same settled, uncovered native-view rule as Browser.
+pub(super) fn devices_visible(s: &Shell) -> bool {
+    s.features.read::<Panel>().is_some_and(|panel| {
+        panel.current() == Tool::Devices
+            && panel.motion.is_open()
+            && !panel.motion.value().1
+            && !s.palette
+            && panel.menu.is_none()
+            && !super::header_tools::any_open(s)
+    })
 }
 
 /// Closes one tab and focuses its neighbour, as a browser strip does.
