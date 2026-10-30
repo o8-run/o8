@@ -67,6 +67,20 @@ fn stored(fixture: &Fixture, id: &str) -> Value {
     }
     unreachable!()
 }
+/// The thread whose row lies under a point of the window.
+fn under(
+    shell: &Entity<Shell>,
+    cx: &mut VisualTestContext,
+    at: gpui::Point<gpui::Pixels>,
+) -> Option<String> {
+    let rows = list(shell, cx, |l| l.rows.len());
+    (0..rows).find_map(|i| {
+        let selector = Box::leak(format!("thread-row-{i}").into_boxed_str());
+        cx.debug_bounds(selector)
+            .filter(|b| b.contains(&at))
+            .and_then(|_| list(shell, cx, |l| l.rows[i].id.clone()))
+    })
+}
 fn start(
     args: &str,
     cx: &mut TestAppContext,
@@ -241,6 +255,78 @@ fn sidebar_inbox_settles_advances_and_undoes(cx: &mut TestAppContext) {
         list(&shell, &visual, |l| l.selected.clone()).as_deref(),
         Some(SECOND)
     );
+}
+
+#[gpui::test]
+fn sidebar_view_menu_takes_the_press_over_inbox_rows(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, project) =
+        start("--shell --composer --sidebar --sidebar-inbox", cx);
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-inbox");
+    wait_for(&shell, &mut visual, |s, _| {
+        s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
+    });
+    let target = row(&shell, &mut visual, SECOND);
+    click(&mut visual, target);
+    wait_for(&shell, &mut visual, |s, cx| {
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .selected
+            .as_deref()
+            == Some(SECOND)
+    });
+    shell.update(&mut visual, |s, cx| {
+        let sidebar = s.surfaces.sidebar.view.clone().unwrap();
+        sidebar.update(cx, |l, cx| {
+            l.scroll.scroll_to_item(0, ScrollStrategy::Top);
+            cx.notify();
+        });
+    });
+    click(&mut visual, "sidebar-view");
+    draw(&mut visual);
+
+    // An item with another Active thread's row beneath it, pressed where
+    // that row's Settle sits when the item spans it.
+    let mut pick = None;
+    for key in ["chronological", "repo", "date"] {
+        let selector = Box::leak(format!("sidebar-view-{key}").into_boxed_str());
+        let Some(bounds) = visual.debug_bounds(selector) else {
+            continue;
+        };
+        if let Some(id) = under(&shell, &mut visual, bounds.center()).filter(|id| id != SECOND) {
+            pick = Some((bounds, id));
+            break;
+        }
+    }
+    let (item, id) = pick.expect("the open menu covers another Active row");
+    let check = Box::leak(format!("thread-settle-{id}").into_boxed_str());
+    let mut at = item.center();
+    if let Some(check) = visual.debug_bounds(check)
+        && item.left() < check.center().x
+        && check.center().x < item.right()
+    {
+        at.x = check.center().x;
+    }
+    let before = stored(&fixture, &id);
+    visual.simulate_mouse_move(at, None, gpui::Modifiers::default());
+    draw(&mut visual);
+    visual.simulate_click(at, gpui::Modifiers::default());
+    wait_for(&shell, &mut visual, |s, _| {
+        s.state.sidebar_view.get(&project).map(String::as_str) != Some("inbox")
+    });
+    draw(&mut visual);
+    assert!(visual.debug_bounds("sidebar-view-menu").is_none());
+    assert_eq!(
+        list(&shell, &visual, |l| l.selected.clone()).as_deref(),
+        Some(SECOND),
+        "the row beneath the menu was not opened"
+    );
+    assert_eq!(stored(&fixture, &id), before, "nor settled");
+    assert!(visual.debug_bounds("sidebar-undo").is_none());
 }
 
 #[gpui::test]
