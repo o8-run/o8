@@ -19,6 +19,10 @@ pub enum ActivityEvent {
 #[derive(Clone)]
 pub(super) enum Action {
     Packet(packet::Command),
+    Dossiers,
+    DossierHistory(String),
+    DossierDecision(String, &'static str),
+    RetryDossiers,
     Filter(&'static str),
     Scope(String),
     /// Opens or closes the repository scope menu (O8RepoSelector).
@@ -70,6 +74,7 @@ pub(super) struct Detail {
 }
 pub struct ActivityPane {
     pub(super) packet: packet::State,
+    pub(super) decisions: decisions::Decisions,
     pub(super) client: Client,
     pub(super) workspace: String,
     pub(super) scope: String,
@@ -106,6 +111,7 @@ impl ActivityPane {
     pub fn new(client: Client, workspace: String, cx: &mut Context<Self>) -> Self {
         let mut pane = Self {
             packet: packet::State::default(),
+            decisions: Default::default(),
             client,
             scope: workspace.clone(),
             workspace,
@@ -136,6 +142,7 @@ impl ActivityPane {
             painted: std::rc::Rc::new(std::cell::Cell::new(u64::MAX)),
         };
         pane.load(cx);
+        pane.load_dossiers(cx);
         pane
     }
     pub fn focus(&self, window: &mut Window) {
@@ -143,11 +150,12 @@ impl ActivityPane {
     }
     #[cfg(test)]
     pub fn ready(&self) -> bool {
-        !self.loading && self.painted.get() == self.revision
+        !self.loading && !self.decisions.loading && self.painted.get() == self.revision
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
         if self.loaded_at.elapsed() >= Duration::from_secs(300) && !self.loading && !self.pending {
             self.load(cx);
+            self.load_dossiers(cx);
         }
         let retry = self.expanded.as_ref().and_then(|key| {
             let detail = self.details.get(key)?;
@@ -416,7 +424,11 @@ impl ActivityPane {
                 self.scope = scope; self.generation += 1; self.loading = false;
                 self.packet.reads.clear(); self.packet.editor = None; self.rows.clear(); self.errors.clear(); self.expanded = None; self.details.clear(); self.keyboard = None; self.load(cx);
             }
-            Action::Refresh => { self.packet.reads.clear(); self.load(cx); },
+            Action::Refresh => { self.packet.reads.clear(); self.load(cx); self.load_dossiers(cx); },
+            Action::Dossiers => self.decisions.open = !self.decisions.open,
+            Action::DossierHistory(id) => self.decisions.expanded = if self.decisions.expanded.as_ref() == Some(&id) { None } else { Some(id) },
+            Action::DossierDecision(id, action) => self.dossier_decision(id, action, cx),
+            Action::RetryDossiers => self.load_dossiers(cx),
             Action::Expand(row) => {
                 if self.expanded.as_ref() == Some(&row.key()) { self.expanded = None; }
                 else { self.expanded = Some(row.key()); if row.kind == "packet" { self.packet_read(row,false,cx); } else { self.detail(row,false,cx); } }
@@ -536,6 +548,8 @@ impl ActivityPane {
         cx.stop_propagation();
     }
 }
+#[path = "decisions.rs"]
+mod decisions;
 #[path = "view.rs"]
 mod view;
 
