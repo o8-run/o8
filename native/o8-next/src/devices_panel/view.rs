@@ -15,12 +15,15 @@ fn button(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
     disabled: bool,
+    primary: bool,
     cx: &mut Context<DevicesPanel>,
     action: impl Fn(&mut DevicesPanel, &mut Window, &mut Context<DevicesPanel>) + 'static,
 ) -> Stateful<Div> {
     let id = id.into();
     let action = std::rc::Rc::new(action);
     let key_action = action.clone();
+    let background = if primary { theme().accent } else { theme().hover };
+    let feedback = if primary { theme().accent } else { theme().selection };
     div()
         .id(id.clone())
         .debug_selector(move || id.to_string())
@@ -32,14 +35,14 @@ fn button(
         .rounded(px(8.))
         .border_1()
         .border_color(theme().border)
-        .bg(theme().hover)
+        .bg(background)
         .text_size(px(11.5))
         .font_weight(FontWeight::LIGHT)
         .text_color(theme().text)
         .opacity(if disabled { 0.6 } else { 1. })
         .when(!disabled, |b| {
-            b.hover(|s| s.bg(theme().selection))
-                .active(|s| s.bg(theme().selection))
+            b.hover(|s| s.bg(feedback).opacity(if primary { 0.9 } else { 1. }))
+                .active(|s| s.bg(feedback).opacity(if primary { 0.75 } else { 1. }))
         })
         .focus(|s| s.border_color(theme().accent))
         .on_click(cx.listener(move |this, _, window, cx| {
@@ -62,7 +65,7 @@ fn small_button(
     cx: &mut Context<DevicesPanel>,
     action: impl Fn(&mut DevicesPanel, &mut Window, &mut Context<DevicesPanel>) + 'static,
 ) -> Stateful<Div> {
-    button(id, label, disabled, cx, action)
+    button(id, label, disabled, false, cx, action)
         .px(px(10.))
         .py(px(6.))
 }
@@ -292,6 +295,7 @@ impl Render for DevicesPanel {
                 "devices-refresh",
                 "Refresh",
                 busy,
+                false,
                 cx,
                 |this, _, cx| this.action("refresh", cx),
             ));
@@ -301,6 +305,7 @@ impl Render for DevicesPanel {
                     "devices-stop",
                     "Stop viewer",
                     busy,
+                    false,
                     cx,
                     |this, window, cx| {
                         this.focus.focus(window);
@@ -486,6 +491,7 @@ impl Render for DevicesPanel {
                                         format!("devices-guide-{key}"),
                                         "Setup guide",
                                         false,
+                                        false,
                                         cx,
                                         move |_, _, cx| cx.open_url(guide),
                                     )
@@ -513,7 +519,7 @@ impl Render for DevicesPanel {
                             .items_start()
                             .gap(px(10.))
                             .child(
-                                button("devices-open", label, busy, cx, move |this, window, cx| {
+                                button("devices-open", label, busy, true, cx, move |this, window, cx| {
                                     if installed {
                                         this.focus.focus(window);
                                     }
@@ -526,9 +532,6 @@ impl Render for DevicesPanel {
                                         cx,
                                     )
                                 })
-                                .bg(theme().accent)
-                                .hover(|s| s.bg(theme().accent).opacity(0.9))
-                                .active(|s| s.bg(theme().accent).opacity(0.75))
                                 .text_color(theme().background),
                             )
                             .child(
