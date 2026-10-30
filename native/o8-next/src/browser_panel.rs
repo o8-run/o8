@@ -14,6 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 mod address;
+mod agent;
 mod favicon;
 pub(crate) mod header;
 mod model;
@@ -286,6 +287,11 @@ impl BrowserPanel {
                 break;
             }
         }
+    }
+
+    /// Read-only adapter for the panel header page label.
+    pub(crate) fn chrome_location(&self, cx: &gpui::App) -> String {
+        self.address.read(cx).text.clone()
     }
     pub fn focus(&self, window: &mut Window) {
         self.focus_chrome();

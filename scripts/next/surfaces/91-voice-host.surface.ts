@@ -20,11 +20,32 @@ export default async function register(): Promise<SurfaceRoutes> {
   const rejected: Body[] = [];
   const receipts = new Map<string, string>();
   let active: (Body & { state: string }) | null = null;
+  // Composer dictation: one microphone, frames fenced to the start request.
+  let dictation: (Body & { state: string; submit: boolean }) | null = null;
+  const dictate = (body: Body): Response => {
+    if (!id(body.requestId) || (body.action === 'dictation-stop' && typeof body.submit !== 'boolean')) return invalid();
+    const prior = receipts.get(body.requestId);
+    if (prior) return prior === JSON.stringify(body) ? reply(202, { ok: true }) : conflict();
+    if (body.action === 'dictation-start') {
+      if (dictation && !['idle', 'error'].includes(dictation.state)) {
+        return reply(409, { ok: false, code: 'VOICE_INPUT_BUSY', state: 'error' });
+      }
+      dictation = { binding: body.binding, nonce: body.nonce, threadId: body.threadId, repoPath: body.repoPath,
+        requestId: body.requestId, state: 'starting', submit: false };
+    } else {
+      if (!dictation || !same(dictation, body) || ['idle', 'error'].includes(dictation.state)) return conflict();
+      dictation.state = 'stopping';
+      dictation.submit = body.submit as boolean;
+    }
+    receipts.set(body.requestId, JSON.stringify(body));
+    return reply(202, { ok: true, requestId: body.requestId, state: dictation.state });
+  };
   const admit = (body: Body): Response => {
     if (body.action === 'decision') {
       return id(body.confirmationId) && typeof body.allow === 'boolean' ? reply(202, { ok: true }) : invalid();
     }
     if (!bound(body)) return invalid();
+    if (body.action === 'dictation-start' || body.action === 'dictation-stop') return dictate(body);
     if (body.action === 'start' || body.action === 'stop') {
       if (!id(body.requestId) || (body.action === 'start' && body.source !== 'byok')) return invalid();
       const prior = receipts.get(body.requestId);
@@ -57,7 +78,13 @@ export default async function register(): Promise<SurfaceRoutes> {
         (response.ok ? controls : rejected).push(body);
         return response;
       },
-      'GET /api/next/voice-host': async () => reply(200, { ok: true, available: true, active, confirmations: [], controls, rejected }),
+      'GET /api/next/voice-host': async () => reply(200, { ok: true, available: true, active, dictation, confirmations: [], controls, rejected }),
+      // The test plays the host: settle the recording the way its frames do.
+      'POST /api/next/voice-host/dictation-fixture': async request => {
+        const { state } = await request.json() as { state: string };
+        if (dictation) dictation.state = state;
+        return reply(200, { ok: true });
+      },
     },
     admit: () => 200,
   };

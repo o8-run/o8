@@ -31,6 +31,14 @@ pub enum Event {
     /// A `ui-command` frame for the main window. Every socket receives the
     /// broadcast; only this global one hands it on.
     UiCommand(serde_json::Value),
+    /// A project's repository scope changed; empty shows every repository.
+    Scope(String, Vec<String>),
+    /// A project's view changed (folders::View::key).
+    View(String, &'static str),
+    /// The closed By repo folders, by repository path.
+    Folders(Vec<String>),
+    /// The project menu's Switch workspace, with the focus to give back.
+    WorkspacePicker(Option<gpui::FocusHandle>),
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Row {
@@ -44,6 +52,8 @@ pub struct Row {
     pub age: String,
     pub branch: bool,
     pub attention: bool,
+    /// Set on a By repo folder row.
+    pub folder: Option<folders::Folder>,
 }
 fn label(path: &str) -> String {
     path.rsplit('/')
@@ -58,6 +68,23 @@ pub struct ThreadList {
     workspace: Option<String>,
     header_busy: bool,
     header_menu: Option<bool>,
+    /// Focus before the project menu opened; Switch workspace returns it.
+    header_focus: Option<gpui::FocusHandle>,
+    /// Each project's repository scope (T3's projectScopeKeys), by project id.
+    scopes: HashMap<String, Vec<String>>,
+    scope_menu: Option<project_header::ScopeMenu>,
+    row_menu: Option<project_header::RowMenu>,
+    /// Each project's view, by project id; By date when absent.
+    views: HashMap<String, folders::View>,
+    view_menu: bool,
+    new_menu: bool,
+    /// The press that last closed a menu from outside it; when that press
+    /// lands on the menu's trigger, its click must not reopen the menu.
+    menu_press: Option<gpui::Point<gpui::Pixels>>,
+    /// A thread New thread created; the shell opens it once the list has it.
+    pending_open: Option<String>,
+    /// Closed By repo folders, by repository path.
+    closed: HashSet<String>,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
@@ -127,6 +154,16 @@ impl ThreadList {
             workspace: None,
             header_busy: false,
             header_menu: None,
+            header_focus: None,
+            scopes: HashMap::new(),
+            scope_menu: None,
+            row_menu: None,
+            views: HashMap::new(),
+            view_menu: false,
+            new_menu: false,
+            menu_press: None,
+            pending_open: None,
+            closed: HashSet::new(),
             sessions: vec![],
             rows: Rc::new(vec![]),
             selected: None,
@@ -180,16 +217,10 @@ impl ThreadList {
             .iter()
             .find(|s| self.selected.as_ref() == Some(&s.id))
         {
-            self.expanded
-                .insert(recents::group(session, recents::now()).into());
+            self.expanded.insert(self.group_key(session).into());
         }
-        let mut rows = recents::rows(
-            &self.sessions,
-            &self.query,
-            &self.search_matches,
-            &self.expanded,
-            &self.branch_ids,
-        );
+        let sessions = self.scoped_sessions();
+        let mut rows = self.view_rows(&sessions);
         // An incoming message can push the keyboard choice past Show more.
         // Disclosure must follow that thread's identity before choosing a fallback.
         if self.query.trim().is_empty()
@@ -199,15 +230,8 @@ impl ThreadList {
                 .iter()
                 .find(|s| self.choice.as_ref() == Some(&s.id))
         {
-            self.expanded
-                .insert(recents::group(session, recents::now()).into());
-            rows = recents::rows(
-                &self.sessions,
-                &self.query,
-                &self.search_matches,
-                &self.expanded,
-                &self.branch_ids,
-            );
+            self.expanded.insert(self.group_key(session).into());
+            rows = self.view_rows(&sessions);
         }
         if !self.archived_open
             && self.query.trim().is_empty()
@@ -239,6 +263,43 @@ impl ThreadList {
             && previous_choice.is_some_and(|previous| previous != index)
         {
             self.scroll.scroll_to_item(index, ScrollStrategy::Top);
+        }
+    }
+    /// The disclosure group a thread belongs to in the current view.
+    fn group_key(&self, session: &Session) -> &'static str {
+        match self.view() {
+            _ if session.status == "archived" => "Archived",
+            folders::View::Date => recents::group(session, recents::now()),
+            folders::View::Chronological => "Chronological",
+            folders::View::Repo => "",
+        }
+    }
+    fn view_rows(&self, sessions: &[Session]) -> Vec<Row> {
+        let (query, matches) = (&self.query, &self.search_matches);
+        let (expanded, branches) = (&self.expanded, &self.branch_ids);
+        match self.view() {
+            folders::View::Date => recents::rows(sessions, query, matches, expanded, branches),
+            folders::View::Chronological => {
+                folders::chronological(sessions, query, matches, expanded, branches)
+            }
+            folders::View::Repo => {
+                let keys = self.scope_keys();
+                let repos: Vec<_> = self
+                    .scope_repos()
+                    .into_iter()
+                    .filter(|(path, _)| keys.is_empty() || keys.contains(path))
+                    .collect();
+                folders::by_repo(
+                    sessions,
+                    query,
+                    matches,
+                    expanded,
+                    branches,
+                    &repos,
+                    &self.closed,
+                    !keys.is_empty(),
+                )
+            }
         }
     }
     pub fn catalog_changed(&mut self) {
@@ -304,6 +365,12 @@ impl ThreadList {
                         this.rebuild();
                         this.notice.clear();
                         cx.emit(Event::Refreshed(this.sessions.clone(), ledger));
+                        if let Some(id) = this
+                            .pending_open
+                            .take_if(|id| this.sessions.iter().any(|s| &s.id == id))
+                        {
+                            cx.emit(Event::Selected(id));
+                        }
                     }
                     Err(error) => {
                         this.notice = error.clone();
@@ -524,6 +591,7 @@ impl ThreadList {
         if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
             session.unread = false;
         }
+        self.reveal(&id, cx);
         self.rebuild();
         if self.rows.iter().any(|r| r.id.as_deref() == Some(&id)) {
             self.choice = Some(id);
@@ -548,6 +616,8 @@ impl ThreadList {
         self.choice = Some(id.clone());
         self.editing = false;
         self.selected = Some(id.clone());
+        // A choice made before the list carries a new thread cancels its open.
+        self.pending_open = None;
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
             s.unread = false;
         }
@@ -671,6 +741,9 @@ impl ThreadList {
         .detach();
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.scope_key(event, cx) {
+            return;
+        }
         if self.header_key(event, window, cx) {
             return;
         }
@@ -681,6 +754,9 @@ impl ThreadList {
         match key {
             "escape" => {
                 self.header_menu = None;
+                self.view_menu = false;
+                self.new_menu = false;
+                self.row_menu = None;
                 self.edit_generation += 1;
                 if let Some(id) = self.rename.take() {
                     self.rename_drafts.remove(&id);
@@ -696,6 +772,7 @@ impl ThreadList {
                 if key == "end" {
                     self.expanded.extend(
                         [
+                            "Chronological",
                             "Today",
                             "Previous 7 days",
                             "Previous 30 days",
@@ -776,6 +853,9 @@ mod project_header;
 
 #[path = "recents.rs"]
 pub(crate) mod recents;
+
+#[path = "folders.rs"]
+pub(crate) mod folders;
 
 #[path = "archive_controls.rs"]
 mod archive_controls;

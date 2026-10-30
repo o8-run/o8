@@ -187,6 +187,23 @@ mod macos {
             }
         }
 
+        pub fn evaluate(&self, js: &str, done: impl Fn(serde_json::Value) + 'static) {
+            let completion = block::ConcreteBlock::new(move |value: id, error: id| {
+                let result = unsafe {
+                    if error != nil {
+                        serde_json::json!({"ok":false,"error":"Browser page evaluation failed"})
+                    } else {
+                        string(value).and_then(|text| serde_json::from_str(&text).ok())
+                            .unwrap_or(serde_json::json!({"ok":false,"error":"Browser page returned an invalid result"}))
+                    }
+                };
+                done(result);
+            }).copy();
+            unsafe {
+                let _: () = msg_send![self.view, evaluateJavaScript: ns(js) completionHandler: &*completion];
+            }
+        }
+
         pub fn load(&self, url: &str) {
             self.events.borrow_mut().error = None;
             self.events.borrow_mut().navigating = true;
@@ -331,6 +348,9 @@ pub(super) struct Web;
 impl Web {
     pub fn new(_: &gpui::Window) -> Option<Self> {
         None
+    }
+    pub fn evaluate(&self, _: &str, done: impl Fn(serde_json::Value) + 'static) {
+        done(serde_json::json!({"ok":false,"error":"The Browser needs macOS for now"}));
     }
     pub fn load(&self, _: &str) {}
     pub fn back(&self) {}

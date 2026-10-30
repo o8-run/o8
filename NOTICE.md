@@ -295,6 +295,22 @@ SOFTWARE.
   `native/o8-next/src/shell_features/right_panel.rs`
 - License text: [T3 Code](src/lib/usage/history-readers/LICENSE.txt)
 
+## o8 next inbox sidebar
+
+- Copyright: Copyright (c) 2026 T3 Tools Inc.
+- License: MIT
+- Upstream: <https://github.com/pingdotgg/t3code> at commit
+  `f58fad04162165653bf06f0c987bbfb0074a8a4b`, files
+  `apps/web/src/components/Sidebar.tsx`,
+  `apps/web/src/components/Sidebar.logic.ts`,
+  `apps/web/src/components/sidebar/SidebarProjectFolderHeader.tsx` and
+  `apps/web/src/components/threadActionMenu.logic.ts`
+- Use in o8: the repository scope picker and the thread row's Filter by
+  menu in `native/o8-next/src/surfaces/sidebar/scope.rs`; the By repo
+  folders and their attention dot in
+  `native/o8-next/src/surfaces/sidebar/folders.rs`
+- License text: [T3 Code](src/lib/usage/history-readers/LICENSE.txt)
+
 ## o8 next update control states
 
 - Copyright: Copyright (c) 2026 T3 Tools Inc.

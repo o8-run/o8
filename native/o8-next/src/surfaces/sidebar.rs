@@ -163,6 +163,9 @@ pub(super) const REGISTRATION: Registration = Registration {
             .flex()
             .flex_1()
             .min_h_0()
+            // This row sits inside the panel and resize row; its automatic
+            // minimum width must not widen the workspace past the window.
+            .min_w_0()
             .child(
                 gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
                     gpui::StyleRefinement::default()
@@ -233,6 +236,15 @@ pub(super) const REGISTRATION: Registration = Registration {
 };
 fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     let sidebar = cx.new(|cx| ThreadList::new(shell.client.clone(), cx));
+    let scopes = shell.state.sidebar_scope.clone();
+    let (views, closed) = (
+        shell.state.sidebar_view.clone(),
+        shell.state.sidebar_closed_folders.clone(),
+    );
+    sidebar.update(cx, |sidebar, _| {
+        sidebar.restore_scopes(scopes);
+        sidebar.restore_views(&views, &closed);
+    });
     shell.subscriptions.push(
         cx.subscribe_in(&sidebar, window, |shell, _, event, window, cx| {
             match event {
@@ -257,8 +269,30 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                         shell.persist();
                     }
                 }
+                ThreadEvent::WorkspacePicker(previous) => {
+                    if let Some(focus) = previous {
+                        focus.focus(window);
+                    }
+                    super::palette::open_workspaces(shell, window, cx);
+                }
                 ThreadEvent::Selected(id) => shell.open_thread(id.clone(), window, cx),
                 ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),
+                ThreadEvent::Scope(project, keys) => {
+                    if keys.is_empty() {
+                        shell.state.sidebar_scope.remove(project);
+                    } else {
+                        shell.state.sidebar_scope.insert(project.clone(), keys.clone());
+                    }
+                    shell.persist();
+                }
+                ThreadEvent::View(project, view) => {
+                    shell.state.sidebar_view.insert(project.clone(), (*view).into());
+                    shell.persist();
+                }
+                ThreadEvent::Folders(closed) => {
+                    shell.state.sidebar_closed_folders = closed.iter().cloned().collect();
+                    shell.persist();
+                }
                 ThreadEvent::Error(error) => {
                     shell.loading = false;
                     shell.connected = false;

@@ -4,14 +4,6 @@ use gpui::TestAppContext;
 use serde_json::json;
 use std::time::Instant;
 
-fn workspace_search(cx: &mut gpui::VisualTestContext) {
-    draw(cx);
-    let search = cx.debug_bounds("header-search").expect("header search");
-    cx.simulate_click(search.center(), gpui::Modifiers::default());
-    cx.simulate_input("Switch workspace:");
-    draw(cx);
-}
-
 #[test]
 fn glass_and_plain_open_through_the_production_shell() {
     for mode in ["glass", "plain"] {
@@ -80,8 +72,8 @@ fn glass_shell_probe(cx: &mut TestAppContext) {
             cx.notify();
         });
         draw(cx);
-        workspace_search(cx);
-        assert_eq!(shell.read_with(cx, |s, _| s.commands().len()), 2);
+        open_workspace_picker(&shell, cx);
+        draw(cx);
         let workspace = cx.debug_bounds("command-1").unwrap();
         cx.simulate_click(workspace.center(), gpui::Modifiers::default());
         ready(&shell, cx);
@@ -248,8 +240,8 @@ fn correction_fifteenth_workspace_scrolls_into_view(cx: &mut TestAppContext) {
     for (width, height) in [(1200., 816.), (900., 700.)] {
         cx.simulate_resize(size(px(width), px(height)));
         draw(cx);
-        workspace_search(cx);
-        assert_eq!(shell.read_with(cx, |s, _| s.commands().len()), 15);
+        open_workspace_picker(&shell, cx);
+        draw(cx);
         for _ in 0..14 {
             cx.simulate_keystrokes("down");
             draw(cx);
@@ -338,7 +330,7 @@ fn correction_palette_brain_resumes_the_session_draft(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn shell_chrome_fifteen_workspaces_share_header_search(cx: &mut TestAppContext) {
+fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--shell-many");
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -350,12 +342,8 @@ fn shell_chrome_fifteen_workspaces_share_header_search(cx: &mut TestAppContext) 
     ready(&shell, cx);
     assert_eq!(shell.read_with(cx, |s, _| s.workspaces.len()), 15);
     assert!(
-        cx.debug_bounds("workspace-switcher").is_none(),
-        "the removed workspace switcher must stay out of the desktop header"
-    );
-    assert!(
-        cx.debug_bounds("header-search").is_some(),
-        "15 workspaces remain reachable through header search"
+        cx.debug_bounds("sidebar-project-switcher").is_some(),
+        "15 workspaces must share one switcher"
     );
     assert!(
         cx.debug_bounds("workspace-0").is_none(),
@@ -373,21 +361,22 @@ fn shell_chrome_fifteen_workspaces_share_header_search(cx: &mut TestAppContext) 
     for (width, height) in [(900., 700.), (1680., 1050.)] {
         cx.simulate_resize(size(px(width), px(height)));
         draw(cx);
-        let bounds = cx.debug_bounds("header-search").unwrap();
+        let bounds = cx.debug_bounds("sidebar-project-switcher").unwrap();
         assert!(bounds.right() <= px(width));
         assert!(bounds.size.height <= px(40.));
-        layouts.push(json!({"viewport":[width,height], "search":[f32::from(bounds.origin.x),f32::from(bounds.origin.y),f32::from(bounds.size.width),f32::from(bounds.size.height)]}));
-        workspace_search(cx);
+        layouts.push(json!({"viewport":[width,height], "switcher":[f32::from(bounds.origin.x),f32::from(bounds.origin.y),f32::from(bounds.size.width),f32::from(bounds.size.height)]}));
+        open_workspace_picker(&shell, cx);
+        draw(cx);
         assert_eq!(shell.read_with(cx, |s, _| s.commands().len()), 15);
         cx.simulate_keystrokes("escape");
     }
     if let Ok(file) = std::env::var("O8_NEXT_CHROME_EVIDENCE") {
-        fs::write(file, serde_json::to_vec_pretty(&json!({"endpoint":"headless GPUI layout; no raster or compositor capture", "workspaces":15,"permanentWorkspaceControls":0,"headerSearchControls":1,"layouts":layouts})).unwrap()).unwrap();
+        fs::write(file, serde_json::to_vec_pretty(&json!({"endpoint":"headless GPUI layout; no raster or compositor capture", "workspaces":15,"permanentWorkspaceControls":1,"layouts":layouts})).unwrap()).unwrap();
     }
 }
 
 #[gpui::test]
-fn chrome_search_cancel_restores_composer_with_platform_shortcut(cx: &mut TestAppContext) {
+fn chrome_switcher_cancel_restores_composer_with_platform_shortcut(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -407,7 +396,8 @@ fn chrome_search_cancel_restores_composer_with_platform_shortcut(cx: &mut TestAp
     ready(&shell, cx);
     draw(cx);
     cx.simulate_input("Draft");
-    workspace_search(cx);
+    open_workspace_picker(&shell, cx);
+    draw(cx);
     cx.simulate_keystrokes("escape");
     draw(cx);
     cx.simulate_input(" retained");
@@ -527,7 +517,9 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
         let index = shell.read_with(cx, |s, _| {
             s.workspaces.iter().position(|w| w == &target).unwrap()
         });
-        workspace_search(cx);
+        draw(cx);
+        open_workspace_picker(&shell, cx);
+        draw(cx);
         let bounds = cx
             .debug_bounds(if index == 0 { "command-0" } else { "command-1" })
             .unwrap();

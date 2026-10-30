@@ -17,6 +17,14 @@ fn string_value(node: tree_sitter::Node) -> bool {
     node.named_children(&mut node.walk()).any(string_value)
 }
 
+/// Where the parser first failed, so a refusal names the line to fix.
+fn first_error(node: tree_sitter::Node) -> Option<tree_sitter::Point> {
+    if node.is_error() || node.is_missing() {
+        return Some(node.start_position());
+    }
+    node.children(&mut node.walk()).find_map(first_error)
+}
+
 fn font_literal(node: tree_sitter::Node, source: &[u8]) -> bool {
     if node.kind() == "call_expression" {
         let function = node
@@ -80,7 +88,14 @@ fn sources(directory: &Path, violations: &mut Vec<String>) {
                 .set_language(&tree_sitter_rust::LANGUAGE.into())
                 .unwrap();
             let tree = parser.parse(&source, None).unwrap();
-            assert!(!tree.root_node().has_error(), "valid Rust source");
+            if let Some(at) = first_error(tree.root_node()) {
+                panic!(
+                    "valid Rust source: {}:{}:{}",
+                    path.display(),
+                    at.row + 1,
+                    at.column + 1
+                );
+            }
             if font_literal(tree.root_node(), source.as_bytes()) {
                 violations.push(format!(
                     "{}: font family literal",

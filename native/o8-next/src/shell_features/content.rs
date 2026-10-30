@@ -50,19 +50,31 @@ fn render(
                     cx.notify();
                 },
             ))
-            .child(div().flex().flex_col().flex_1().min_w_0().child(content))
+            .when(!super::right_panel::maximized(s), |row| {
+                row.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .child(content),
+                )
+            })
             .child(
                 div()
                     .w(px(shown))
                     .h_full()
                     .flex_shrink_0()
                     .overflow_hidden()
-                    .border_l_1()
-                    .border_color(theme().border)
+                    .rounded_br(px(14.))
+                    .when(s.system_glass || super::right_panel::maximized(s), |v| {
+                        v.rounded_bl(px(14.))
+                    })
                     .child(panel),
             )
             // The edge only once the column has finished opening.
-            .when(shown >= full, |row| {
+            .when(shown >= full && !super::right_panel::maximized(s), |row| {
                 row.child(super::right_panel::edge(s, shown, window, cx))
             })
             .into_any_element(),

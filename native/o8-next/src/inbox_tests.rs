@@ -67,7 +67,8 @@ impl Fixture {
             .spawn()
             .unwrap();
         let mut output = BufReader::new(server.stdout.take().unwrap()).lines();
-        let origin = output.by_ref()
+        let origin = output
+            .by_ref()
             .find_map(|line| {
                 serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
                     .as_str()
@@ -160,7 +161,11 @@ fn tab_to_action(shell: &Entity<Shell>, cx: &mut gpui::VisualTestContext, id: &s
         cx.simulate_keystrokes("tab");
         draw(cx);
         let focused = shell.update_in(cx, |shell, window, cx| {
-            match shell.content.get(&shell.panel_front_key().unwrap()).unwrap() {
+            match shell
+                .content
+                .get(&shell.panel_front_key().unwrap())
+                .unwrap()
+            {
                 Content::Inbox(inbox) => {
                     inbox.read(cx).action_focus[id][usize::from(approve)].is_focused(window)
                 }
@@ -235,7 +240,8 @@ fn inbox_keyboard_buttons_activate_enter_space_and_skip_disabled(cx: &mut TestAp
     );
     inbox_panel(&shell, cx);
     assert_eq!(
-        shell.read_with(cx, |s, _| s.active()), main,
+        shell.read_with(cx, |s, _| s.active()),
+        main,
         "decisions must retain the main session"
     );
     tab_to_action(&shell, cx, &id("Native reject"), false);
@@ -267,7 +273,8 @@ fn inbox_keyboard_buttons_activate_enter_space_and_skip_disabled(cx: &mut TestAp
     draw(cx);
     inbox_panel(&shell, cx);
     assert_eq!(
-        shell.read_with(cx, |s, _| s.active()), main,
+        shell.read_with(cx, |s, _| s.active()),
+        main,
         "decisions must retain the main session"
     );
 }
@@ -400,7 +407,8 @@ fn inbox_plan_session_header_preserves_desktop_authority_and_continuation(cx: &m
     assert_eq!(fs::read_to_string(&file).unwrap(), "bounded test edit");
     inbox_panel(&shell, cx);
     assert_eq!(
-        shell.read_with(cx, |s, _| s.active()), main,
+        shell.read_with(cx, |s, _| s.active()),
+        main,
         "approval must retain the main session"
     );
 }
@@ -625,16 +633,42 @@ fn inbox_opens_related_session_and_pull_request_and_restores(cx: &mut TestAppCon
     draw(cx);
     inbox_panel(&shell, cx);
     assert_eq!(
-        shell.read_with(cx, |s, _| s.content.keys()
-            .filter(|key| key.starts_with("panel|") && key.ends_with("|Inbox")).count()),
-        1, "reopening retains one Inbox panel view"
+        shell.read_with(cx, |s, _| s
+            .content
+            .keys()
+            .filter(|key| key.starts_with("panel|") && key.ends_with("|Inbox"))
+            .count()),
+        1,
+        "reopening retains one Inbox panel view"
     );
     for (w, h) in [(900., 700.), (1680., 1050.)] {
         let handle = cx.update(|window, _| window.window_handle());
         cx.cx.simulate_window_resize(handle, size(px(w), px(h)));
-        draw(cx);
+        shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+        // The panel's entering content slides inside a clipped column. Measure
+        // its settled layout, after the production 260 ms transition finishes.
+        let settled = Instant::now() + std::time::Duration::from_millis(320);
+        while Instant::now() < settled {
+            cx.run_until_parked();
+            draw(cx);
+        }
+        if w < 1180. {
+            assert!(
+                shell.read_with(cx, |s, _| s.panel_front_key().is_none()),
+                "compact shell must hide its right column"
+            );
+            assert_eq!(
+                shell.read_with(cx, |s, _| s.active()),
+                Some(Tab::Session("thoughts-review".into()))
+            );
+            continue;
+        }
+        inbox_panel(&shell, cx);
         let area = bounds(cx, "inbox-cards").unwrap();
-        assert!(area.origin.x >= px(0.) && area.right() <= px(w), "Inbox viewport must fit {w}x{h}: {area:?}");
+        assert!(
+            area.origin.x >= px(0.) && area.right() <= px(w),
+            "Inbox viewport must fit {w}x{h}: {area:?}"
+        );
         for (lane, _) in crate::inbox::VIEWS {
             assert!(bounds(cx, &format!("inbox-view-{lane}")).is_some());
         }
@@ -680,16 +714,23 @@ fn inbox_empty_and_server_error_never_claim_a_false_clean_state(cx: &mut TestApp
         assert!(bounds(cx, &format!("inbox-count-{lane}-0")).is_some());
     }
     click(cx, "panel-tab-close-inbox");
-    assert!(shell.read_with(cx, |s, _| s.panel_front_key().is_none_or(|key| !key.ends_with("|Inbox"))));
+    assert!(shell.read_with(cx, |s, _| {
+        s.panel_front_key()
+            .is_none_or(|key| !key.ends_with("|Inbox"))
+    }));
     assert!(shell.read_with(cx, |s, _| s.active().is_none()));
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("i n b o x enter");
     cx.run_until_parked();
     draw(cx);
-    let saved = serde_json::to_value(State::load(&fixture.root.join("empty.json")).unwrap()).unwrap();
-    assert_eq!(saved["right_panel"]["tabs"], serde_json::json!(["inbox"]));
-    assert_eq!(saved["right_panel"]["active"], "inbox");
-    assert_eq!(saved["right_panel"]["open"], true);
+    let saved =
+        serde_json::to_value(State::load(&fixture.root.join("empty.json")).unwrap()).unwrap();
+    assert_eq!(
+        saved["right_panel"]["utility_tabs"][""],
+        serde_json::json!(["inbox"])
+    );
+    assert_eq!(saved["right_panel"]["primary"], "inbox");
+    assert_eq!(saved["right_panel"]["visible"], true);
     let _ = Process::new("kill")
         .args(["-TERM", &fixture.server.id().to_string()])
         .status();
@@ -720,32 +761,55 @@ fn inbox_empty_and_server_error_never_claim_a_false_clean_state(cx: &mut TestApp
 #[gpui::test]
 fn inbox_legacy_main_tab_migrates_to_the_persisted_panel(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
-    let workspace = fixture.client.sessions().unwrap()[0].repo_path.clone().unwrap();
+    let workspace = fixture.client.sessions().unwrap()[0]
+        .repo_path
+        .clone()
+        .unwrap();
     for active in [0, 1] {
         let file = fixture.root.join(format!("legacy-inbox-{active}.json"));
-        let mut saved = State { selected: Some(workspace.clone()), ..Default::default() };
-        saved.workspaces.insert(workspace.clone(), Workspace {
-            tabs: vec![Tab::Session("thoughts-long".into()), Tab::Inbox],
-            active,
+        let mut saved = State {
+            selected: Some(workspace.clone()),
             ..Default::default()
-        });
+        };
+        saved.workspaces.insert(
+            workspace.clone(),
+            Workspace {
+                tabs: vec![Tab::Session("thoughts-long".into()), Tab::Inbox],
+                active,
+                ..Default::default()
+            },
+        );
         saved.save(&file).unwrap();
-        let (shell, mut visual) = open(fixture.client.clone(), file.clone(), State::load(&file).unwrap(), cx);
+        let (shell, mut visual) = open(
+            fixture.client.clone(),
+            file.clone(),
+            State::load(&file).unwrap(),
+            cx,
+        );
         for _ in 0..20 {
             visual.run_until_parked();
             draw(&mut visual);
             shell.update_in(&mut visual, |s, window, cx| s.tick(false, window, cx));
-            if shell.read_with(&visual, |s, _| s.connected && !s.current().unwrap().tabs.contains(&Tab::Inbox)) {
+            if shell.read_with(&visual, |s, _| {
+                s.connected && !s.current().unwrap().tabs.contains(&Tab::Inbox)
+            }) {
                 break;
             }
         }
         visual.run_until_parked();
         draw(&mut visual);
         let restored = State::load(&file).unwrap();
-        assert_eq!(restored.workspaces[&workspace].tabs, vec![Tab::Session("thoughts-long".into())]);
-        let panel = restored.right_panel.expect("legacy Inbox must become durable panel state");
-        assert_eq!(panel.tabs, vec!["inbox"]);
-        assert_eq!(panel.open, active == 1, "only the previously active Inbox opens the panel");
+        assert_eq!(
+            restored.workspaces[&workspace].tabs,
+            vec![Tab::Session("thoughts-long".into())]
+        );
+        let panel = restored.right_panel;
+        assert_eq!(panel.utility_tabs[&workspace], vec!["inbox"]);
+        assert_eq!(
+            panel.visible,
+            active == 1,
+            "only the previously active Inbox opens the panel"
+        );
         if active == 0 {
             assert!(shell.read_with(&visual, |s, _| s.panel_front_key().is_none()));
             visual.simulate_keystrokes("ctrl-shift-p i n b o x enter");

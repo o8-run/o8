@@ -47,10 +47,24 @@ use std::{
 gpui::actions!(
     o8_next,
     [
-        /// The composer mic: start or stop chat Live voice, which the shell owns.
-        ToggleVoice
+        /// The composer waveform: start or stop chat Live voice, which the shell owns.
+        ToggleVoice,
+        /// The composer mic: start dictation, or stop it and send what was said.
+        ToggleDictation
     ]
 );
+
+/// Composer dictation as this chat's mic shows it; the shell sets it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum DictationState {
+    #[default]
+    Off,
+    /// Asked for the microphone; the host has not confirmed it.
+    Starting,
+    Listening,
+    /// Stopped to send; the polished transcript has not arrived yet.
+    Finishing,
+}
 
 /// Chat Live voice as this chat's mic shows it; the shell sets it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -111,6 +125,7 @@ pub(crate) struct Surface {
     painted: Rc<Cell<u64>>,
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
     voice: VoiceState,
+    dictation: DictationState,
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -151,6 +166,7 @@ impl Surface {
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
             voice: VoiceState::Off,
+            dictation: DictationState::Off,
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {

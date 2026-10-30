@@ -90,6 +90,12 @@ impl Surface {
                     },
                 ))
             });
+        // MicButton's colors: recording and errors red, transcribing accent.
+        let color = match self.dictation {
+            super::DictationState::Listening => theme().danger,
+            super::DictationState::Finishing => theme().accent,
+            _ => theme().text_secondary,
+        };
         let trailing = div()
             .flex()
             .items_center()
@@ -115,12 +121,11 @@ impl Surface {
                 |s, w, cx| s.open_composer_picker("effort", w, cx),
             ))
             .child(
-                self.composer_button("composer-microphone", "", false, cx, |_, _, _| {})
-                    .w(px(26.))
+                self.mic_button(enabled, cx)
                     .child(
                         canvas(
                             |_, _, _| (),
-                            |bounds, _, window, _| {
+                            move |bounds, _, window, _| {
                                 // A stroked path activates viewport-sized GPU/MSAA
                                 // targets. This small icon fits the existing quad pass.
                                 let rect = |x, y, w, h| {
@@ -129,7 +134,6 @@ impl Surface {
                                         size(px(w), px(h)),
                                     )
                                 };
-                                let color = theme().text_secondary;
                                 let stroke = px(1.3);
                                 window.paint_quad(
                                     gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
@@ -198,6 +202,33 @@ impl Surface {
             .into_any_element()
     }
 
+    /// Dictation for this chat (MicButton, toggle mode): a tap starts it, the
+    /// next tap stops it and sends what was said. Ctrl+Z held dictates too.
+    fn mic_button(&self, enabled: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+        let state = self.dictation;
+        let tip = match state {
+            super::DictationState::Off => {
+                "Click to dictate, click again to finish (Ctrl+Z hold also works)"
+            }
+            super::DictationState::Starting => "Waiting for the microphone… click to cancel",
+            super::DictationState::Listening => "Click to finish dictation",
+            super::DictationState::Finishing => "Transcribing…",
+        };
+        // A recording can always be stopped; transcribing finishes uninterrupted.
+        let enabled = match state {
+            super::DictationState::Off => enabled,
+            super::DictationState::Finishing => false,
+            _ => true,
+        };
+        self.composer_button("composer-microphone", "", enabled, cx, |_, window, cx| {
+            window.dispatch_action(Box::new(super::ToggleDictation), cx);
+        })
+        .w(px(26.))
+        .when(state == super::DictationState::Listening, |button| {
+            button.bg(theme().danger_surface)
+        })
+        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
+    }
     /// GPT Live for this chat (ManagedLiveButton), beside the dictation mic
     /// as in the desktop footer: a waveform that turns accent while voice
     /// connects or is live. The shell owns the session; Caps Lock toggles it.

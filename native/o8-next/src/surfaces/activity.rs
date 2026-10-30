@@ -72,7 +72,7 @@ impl ShellView for ActivityPane {
                 // The main area's Activity tab, or Activity in front in the right panel.
                 let main =
                     shell.active() == Some(Tab::Activity) && shows(&shell.key(&Tab::Activity));
-                if main || shell.panel_front_key().is_some_and(|key| shows(&key)) {
+                if main || shell.panel_shows(|key| shows(key)) {
                     view.update(cx, |activity, cx| activity.tick(cx));
                 }
             });

@@ -53,6 +53,7 @@ pub struct Confirmation {
 pub struct PullRequests {
     client: Client,
     workspace: String,
+    contextual: Option<(String, u64)>,
     pub focus: FocusHandle,
     pub search: Entity<Composer>,
     pub editor: Entity<Composer>,
@@ -110,6 +111,7 @@ impl PullRequests {
         let mut s = Self {
             client,
             workspace,
+            contextual: None,
             focus,
             search,
             editor,
@@ -145,11 +147,33 @@ impl PullRequests {
         s.load(false, cx);
         s
     }
+    /// A contextual panel owns its selected PR independently of the main list.
+    pub(crate) fn new_context(
+        client: Client,
+        workspace: String,
+        repo: String,
+        number: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut view = Self::new(client, workspace, window, cx);
+        view.list_epoch += 1;
+        view.loading = false;
+        view.page = json!({"repo": repo, "prs": []});
+        view.contextual = Some((repo, number));
+        view.select(number, cx);
+        view
+    }
     pub fn changed(&mut self, cx: &mut Context<Self>) {
         self.revision += 1;
         cx.notify();
     }
     pub fn load(&mut self, more: bool, cx: &mut Context<Self>) {
+        if let Some((repo, number)) = self.contextual.clone() {
+            self.page["repo"] = repo.into();
+            self.select(number, cx);
+            return;
+        }
         let page = if more {
             self.page["nextPage"].as_u64().unwrap_or(1)
         } else {

@@ -41,6 +41,33 @@ impl Surface {
     pub(crate) fn voice(&self) -> VoiceState {
         self.voice
     }
+    pub(crate) fn dictation(&self) -> DictationState {
+        self.dictation
+    }
+    pub(crate) fn set_dictation(&mut self, dictation: DictationState, cx: &mut Context<Self>) {
+        if self.dictation != dictation {
+            self.dictation = dictation;
+            cx.notify();
+        }
+    }
+    /// The draft dictation starts from.
+    pub(crate) fn draft(&self, cx: &App) -> String {
+        self.composer.read(cx).text.clone()
+    }
+    /// A dictation snapshot in the composer, or the draft back after a cancel.
+    pub(crate) fn dictate(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.composer
+            .update(cx, |composer, cx| composer.show_dictation(text, cx));
+    }
+    /// The final transcript, sent through this chat's own send. One undo step
+    /// returns the composer to the draft dictation started from.
+    pub(crate) fn send_dictated(&mut self, draft: &str, text: &str, cx: &mut Context<Self>) {
+        self.composer.update(cx, |composer, cx| {
+            composer.show_dictation(draft, cx);
+            composer.set_text(text, cx);
+        });
+        self.send(None, cx);
+    }
     pub(crate) fn set_voice(&mut self, voice: VoiceState, cx: &mut Context<Self>) {
         if self.voice != voice {
             self.voice = voice;

@@ -178,14 +178,35 @@ pub(super) fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     );
 }
 
+/// Opens the workspace picker the way a person does: the sidebar project menu,
+/// then Switch workspace.
+pub(super) fn open_workspace_picker(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
+    for selector in ["sidebar-project-switcher", "sidebar-workspace-picker"] {
+        draw(cx);
+        let bounds = cx
+            .debug_bounds(selector)
+            .expect("sidebar workspace navigation");
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    }
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.palette && s.workspace_picker));
+}
+
 pub(super) fn inbox_panel(
     shell: &Entity<Shell>,
     cx: &VisualTestContext,
 ) -> Entity<crate::inbox::Inbox> {
     shell.read_with(cx, |s, _| {
         let key = s.panel_front_key().expect("Inbox panel must be open");
-        assert!(key.ends_with("|Inbox"), "Inbox must be the front panel tool: {key}");
-        assert_ne!(s.active(), Some(Tab::Inbox), "Inbox belongs beside the main surface");
+        assert!(
+            key.ends_with("|Inbox"),
+            "Inbox must be the front panel tool: {key}"
+        );
+        assert_ne!(
+            s.active(),
+            Some(Tab::Inbox),
+            "Inbox belongs beside the main surface"
+        );
         match s.content.get(&key) {
             Some(Content::Inbox(view)) => view.clone(),
             _ => panic!("the front tool must own the real Inbox view"),
