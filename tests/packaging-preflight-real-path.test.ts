@@ -411,9 +411,10 @@ export function spawnSync(command, args) {
     writeFileSync(archive, 'final-archive');
     truncateSync(archive, 95 * 1024 * 1024);
     expect(assertMacPackageSize(f.app, archive).updaterArchiveBytes).toBe(95 * 1024 * 1024);
-    truncateSync(archive, 100 * 1024 * 1024);
-    expect(assertMacPackageSize(f.app, archive).updaterArchiveBytes).toBe(100 * 1024 * 1024);
-    truncateSync(archive, 100 * 1024 * 1024 + 1);
+    const ceiling = FOOTPRINT_BUDGET.regressionCeilings.updaterArchiveBytes;
+    truncateSync(archive, ceiling);
+    expect(assertMacPackageSize(f.app, archive).updaterArchiveBytes).toBe(ceiling);
+    truncateSync(archive, ceiling + 1);
     expect(() => assertMacPackageSize(f.app, archive)).toThrow('updaterArchiveBytes');
     expect(existsSync(archive)).toBe(true);
   });

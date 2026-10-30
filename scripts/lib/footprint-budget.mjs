@@ -22,7 +22,7 @@ export const FOOTPRINT_BUDGET = Object.freeze({
   }),
   regressionCeilings: Object.freeze({
     appBundleBytes: 350 * MIB,
-    updaterArchiveBytes: 100 * MIB,
+    updaterArchiveBytes: 110 * MIB,
     idlePhysicalBytes: 1536 * MIB,
     idleCpuPercent: 15,
     idleProcessChurn: 0,

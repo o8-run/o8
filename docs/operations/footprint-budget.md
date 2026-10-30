@@ -11,7 +11,7 @@ Targets express the product goal. Regression ceilings are hard stops for the app
 | Metric | Target | Regression ceiling |
 |---|---:|---:|
 | Installed application | 250 MiB | 350 MiB |
-| Update archive | 75 MiB | 100 MiB |
+| Update archive | 75 MiB | 110 MiB |
 | Idle physical footprint | 1 GiB | 1.5 GiB |
 | Idle interval CPU, whole tree | 5% | 15% |
 | Native host idle CPU | 2% | 5% |
@@ -27,7 +27,7 @@ Targets express the product goal. Regression ceilings are hard stops for the app
 
 The hard memory ceiling is deliberately above the product target because long-running measurements can exceed the target. Lowering the ceiling before the implementation is lighter would turn the gate into a permanent bypass request instead of a regression check. CPU is budgeted both per component and across the whole tree; the earlier 2% target describes the native host, not the sum of every application and WebKit process.
 
-The shared package ceilings are 350 MiB installed and 100 MiB compressed, approved while dependency and export reduction continues under #3545. Signing and native footprint checks use the same limits for all versions and release channels. Version-specific package allowances are no longer needed.
+The shared package ceilings are 350 MiB installed and 110 MiB compressed, approved while dependency and export reduction continues under #3545. The compressed ceiling rose from 100 MiB in 0.1.815, when o8 next (a universal binary of about 52 MB) became the packaged app's window and the archive measured 100.25 MiB. Signing and native footprint checks use the same limits for all versions and release channels. Version-specific package allowances are no longer needed.
 
 The 250 MiB installed-app and 75 MiB archive targets remain unchanged. Runtime dependencies, both macOS architectures, native prebuilds and license files remain included. Memory, CPU, ownership, integrity, signing and notarization checks are unchanged. Packages above the shared ceilings still fail before signing or publication.
 
