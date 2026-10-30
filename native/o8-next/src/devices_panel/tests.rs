@@ -158,6 +158,7 @@ fn serve(
             .contains("authorization: bearer fixture-device-operator")
     );
     if path.contains("stream=controllers") {
+        requests.lock().unwrap().push(json!({"action":"STREAM"}));
         let _ = socket.write_all(
             b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
         );
@@ -411,6 +412,21 @@ fn devices_stream_updates_input_gate_and_panel_visibility(cx: &mut TestAppContex
         state["controllerRevision"] = json!(9);
     }
     wait(&s, &mut v, "devices-viewer-operator-9");
+    let renew_deadline = Instant::now() + Duration::from_secs(3);
+    while f.logs().iter().filter(|r| r["action"] == "STREAM").count() < 2 {
+        pump(&s, &mut v);
+        assert!(
+            Instant::now() < renew_deadline,
+            "ownership stream must renew before its request deadline"
+        );
+    }
+    for _ in 0..20 {
+        pump(&s, &mut v);
+    }
+    assert!(
+        v.debug_bounds("devices-viewer-passive-9").is_none(),
+        "healthy stream renewal must never revoke operator input"
+    );
     // A lagging helper status response must not revoke newer stream ownership.
     {
         let mut state = f.state.lock().unwrap();
@@ -436,12 +452,16 @@ fn devices_stream_updates_input_gate_and_panel_visibility(cx: &mut TestAppContex
     for _ in 0..25 {
         pump(&s, &mut v);
     }
-    let reads = f.logs().len();
+    let reads = f.logs().iter().filter(|r| r["action"] != "STREAM").count();
     v.cx.executor().advance_clock(Duration::from_secs(10));
     for _ in 0..10 {
         pump(&s, &mut v);
     }
-    assert_eq!(f.logs().len(), reads, "closed Devices must stop polling");
+    assert_eq!(
+        f.logs().iter().filter(|r| r["action"] != "STREAM").count(),
+        reads,
+        "closed Devices must stop polling"
+    );
     s.update_in(&mut v, |s, w, cx| {
         super::super::right_panel::toggle(s, w, cx)
     });
