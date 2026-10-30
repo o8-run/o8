@@ -494,6 +494,9 @@ fn issues_link_follows_worker_selection(cx: &mut TestAppContext) {
     cx.simulate_click(center, gpui::Modifiers::default());
     cx.simulate_keystrokes("tab down");
     wait(cx, "issue-unlinked");
+    // Tab now reaches the composer toolbar; leave from the editor (#5152).
+    let center = cx.debug_bounds("composer-input").unwrap().center();
+    cx.simulate_click(center, gpui::Modifiers::default());
     cx.simulate_keystrokes("escape");
     click(cx, "issue-link-7");
     click(cx, "issue-task-composer");
