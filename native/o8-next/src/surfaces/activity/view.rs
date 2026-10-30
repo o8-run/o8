@@ -1,9 +1,52 @@
+use super::super::marks::{self, tint};
 use super::feed::text;
 use super::*;
+use crate::icon;
 use crate::theme::current as theme;
-use gpui::{IntoElement, Render, SharedString, canvas, div, prelude::*, px};
+use gpui::{
+    FontWeight, IntoElement, Render, Rgba, SharedString, canvas, div, prelude::*, px, relative,
+};
+
+/// A 0.5px border, as classic's `0.5px solid` group outlines.
+fn hairline<E: Styled>(mut element: E) -> E {
+    let width = Some(px(0.5).into());
+    element.style().border_widths = gpui::EdgesRefinement {
+        top: width,
+        right: width,
+        bottom: width,
+        left: width,
+    };
+    element
+}
+
+const CLEAR: Rgba = Rgba {
+    r: 0.,
+    g: 0.,
+    b: 0.,
+    a: 0.,
+};
 
 impl ActivityPane {
+    /// A click and keyboard stop: its id, selector and action, unstyled.
+    fn control(
+        &mut self,
+        id: impl Into<String>,
+        action: Action,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
+        let id = id.into();
+        let control_id = id.clone();
+        self.controls.push((id.clone(), action.clone()));
+        div()
+            .id(SharedString::from(id.clone()))
+            .debug_selector(move || id.clone())
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.focus(window);
+                this.keyboard = Some(control_id.clone());
+                this.act(action.clone(), cx);
+            }))
+    }
     fn button(
         &mut self,
         id: impl Into<String>,
@@ -13,11 +56,7 @@ impl ActivityPane {
     ) -> gpui::Stateful<gpui::Div> {
         let id = id.into();
         let selected = self.keyboard.as_ref() == Some(&id);
-        let control_id = id.clone();
-        self.controls.push((id.clone(), action.clone()));
-        div()
-            .id(SharedString::from(id.clone()))
-            .debug_selector(move || id.clone())
+        self.control(id, action, cx)
             .min_h(px(26.))
             .px(px(9.))
             .py(px(4.))
@@ -30,13 +69,7 @@ impl ActivityPane {
                 theme().surface
             })
             .hover(|v| v.bg(theme().hover))
-            .cursor_pointer()
             .child(label.into())
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.focus(window);
-                this.keyboard = Some(control_id.clone());
-                this.act(action.clone(), cx);
-            }))
     }
     /// A control that is busy: same box, dimmed, with no click or keyboard stop.
     fn inert(id: impl Into<String>, label: impl Into<SharedString>) -> gpui::Stateful<gpui::Div> {
@@ -76,9 +109,6 @@ impl ActivityPane {
             .flex()
             .flex_col()
             .gap(px(6.))
-            .pl(px(24.))
-            .pr(px(12.))
-            .py(px(8.))
             .text_size(px(12.))
             .text_color(theme().text_secondary);
         match row.kind {
@@ -424,18 +454,213 @@ impl ActivityPane {
             .into_any_element()
     }
 }
+/// Classic feed-row parts: the status dot, subline and trailing badge.
+impl ActivityPane {
+    fn dot(row: &Row) -> gpui::Div {
+        let dot = div()
+            .size(px(20.))
+            .mt(px(1.))
+            .flex_shrink_0()
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center();
+        if row.kind == "packet" {
+            let (_, color, wash) = marks::packet_tone(&text(&row.data, "status"));
+            return dot
+                .bg(wash)
+                .child(div().size(px(6.)).rounded_full().bg(color));
+        }
+        let (path, hue) = marks::feed_icon(row);
+        dot.bg(tint(hue, 0.08))
+            .child(icon::stroke(path, tint(hue, 1.), 11., 2.))
+    }
+    fn subline(row: &Row, now: u64) -> gpui::Div {
+        let faint = theme().text_faint;
+        let sep = || div().flex_shrink_0().text_color(faint).child("·");
+        let clip = |value: String| {
+            div()
+                .min_w_0()
+                .whitespace_normal()
+                .line_clamp(1)
+                .text_ellipsis()
+                .child(value)
+        };
+        let chip = |label: String, hue: Rgba, wash: Rgba| {
+            div()
+                .flex_shrink_0()
+                .px(px(4.))
+                .rounded(px(4.))
+                .bg(wash)
+                .text_color(hue)
+                .font_weight(FontWeight::LIGHT)
+                .child(label)
+        };
+        let line = div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .mt(px(3.))
+            .min_w_0()
+            .overflow_hidden()
+            .text_size(px(9.5))
+            .font_weight(FontWeight(260.))
+            .line_height(relative(1.25))
+            .text_color(faint);
+        match row.kind {
+            "commit" => {
+                let date = text(&row.data, "date");
+                let line = line
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .text_color(theme().text_secondary)
+                            .child(row.id.clone()),
+                    )
+                    .child(sep())
+                    .child(marks::age(
+                        if date.is_empty() { &row.date } else { &date },
+                        now,
+                    ));
+                match &row.ci {
+                    Some(ci) => {
+                        let outcome = marks::conclusion(&ci.data);
+                        let hue = marks::outcome(&outcome);
+                        line.child(chip(
+                            if outcome.is_empty() {
+                                "ci".into()
+                            } else {
+                                outcome
+                            },
+                            tint(hue, 1.),
+                            tint(hue, 0.08),
+                        ))
+                    }
+                    None => line,
+                }
+            }
+            "pr" => line
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .text_color(tint(marks::ADD, 1.))
+                        .child(format!("+{}", row.data["additions"].as_u64().unwrap_or(0))),
+                )
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .text_color(tint(marks::DELETE, 1.))
+                        .child(format!("-{}", row.data["deletions"].as_u64().unwrap_or(0))),
+                )
+                .child(sep())
+                .child(clip(text(&row.data, "headRefName")))
+                .child(sep())
+                .child(div().flex_shrink_0().child(marks::age(&row.date, now))),
+            "issue" => {
+                let mut line = line;
+                let labels = row.data["labels"].as_array().cloned().unwrap_or_default();
+                for label in labels.iter().take(2) {
+                    let hue =
+                        u32::from_str_radix(&text(label, "color"), 16).unwrap_or(marks::MERGE);
+                    // Classic washes a label in its own color at #18.
+                    line = line.child(chip(text(label, "name"), tint(hue, 1.), tint(hue, 0.094)));
+                }
+                if !labels.is_empty() {
+                    line = line.child(sep());
+                }
+                line.child(marks::age(&row.date, now))
+            }
+            "ci" => {
+                let outcome = marks::conclusion(&row.data);
+                line.child(clip(text(&row.data, "workflowName")))
+                    .child(sep())
+                    .child(clip(text(&row.data, "headBranch")))
+                    .child(sep())
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .font_weight(FontWeight::NORMAL)
+                            .text_color(tint(marks::outcome(&outcome), 1.))
+                            .child(outcome),
+                    )
+            }
+            _ => {
+                let target = text(&row.data, "workspaceTargetPath");
+                let place = [
+                    target
+                        .rsplit(['/', '\\'])
+                        .find(|s| !s.is_empty())
+                        .unwrap_or(""),
+                    text(&row.data, "branchTarget").trim(),
+                ]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join("·");
+                let age = marks::age(&row.date, now);
+                let mut line = line;
+                for (i, part) in [place, age]
+                    .into_iter()
+                    .filter(|s| !s.is_empty())
+                    .enumerate()
+                {
+                    if i > 0 {
+                        line = line.child(sep());
+                    }
+                    line = line.child(clip(part));
+                }
+                line
+            }
+        }
+    }
+    fn badge(row: &Row) -> Option<gpui::Div> {
+        let state = text(&row.data, "state").to_lowercase();
+        let (label, hue, wash) = match row.kind {
+            "pr" if !state.is_empty() => {
+                let hue = match state.as_str() {
+                    "merged" => marks::MERGE,
+                    "open" => marks::SUCCESS,
+                    _ => marks::DANGER,
+                };
+                (state.to_uppercase(), tint(hue, 1.), tint(hue, 0.08))
+            }
+            "issue" if !state.is_empty() => {
+                let hue = if state == "open" {
+                    marks::SUCCESS
+                } else {
+                    marks::MERGE
+                };
+                (state.to_uppercase(), tint(hue, 1.), tint(hue, 0.08))
+            }
+            "packet" => {
+                let (label, color, _) = marks::packet_tone(&text(&row.data, "status"));
+                (label.to_uppercase(), color, Rgba { a: 0.1, ..color })
+            }
+            _ => return None,
+        };
+        Some(
+            div()
+                .flex_shrink_0()
+                .mt(px(4.))
+                .px(px(6.))
+                .py(px(1.))
+                .rounded_full()
+                .text_size(px(9.))
+                .font_weight(FontWeight::LIGHT)
+                .bg(wash)
+                .text_color(hue)
+                .child(label),
+        )
+    }
+}
 impl Render for ActivityPane {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.controls.clear();
         let revision = self.revision;
         let painted = self.painted.clone();
-        let mut header = div()
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .p(px(12.))
-            .child("Activity");
-        let mut scope = div().flex().flex_wrap().gap(px(4.));
+        let now = crate::clock::now();
+        // Repository scope and the mission controls share the first header row.
+        let mut scope = div().flex_1().min_w_0().flex().flex_wrap().gap(px(4.));
         scope = scope.child(self.button(
             "activity-scope-all",
             "All repositories",
@@ -458,64 +683,122 @@ impl Render for ActivityPane {
                 cx,
             ));
         }
-        header = header.child(scope);
-        let mut controls = div().flex().flex_wrap().gap(px(4.));
-        for (filter, label) in [
-            ("all", "All"),
-            ("commit", "Commits"),
-            ("pr", "PRs"),
-            ("issue", "Issues"),
-            ("ci", "CI"),
-            ("packet", "Packets"),
-        ] {
-            let count = self
-                .rows
-                .iter()
-                .filter(|r| filter == "all" || r.kind == filter || filter == "ci" && r.ci.is_some())
-                .count();
-            controls = controls.child(
-                self.button(
-                    format!("activity-filter-{filter}"),
-                    format!("{label} {count}"),
-                    Action::Filter(filter),
-                    cx,
-                )
-                .bg(if self.filter == filter {
-                    theme().selection
-                } else {
-                    theme().surface
-                }),
-            );
-        }
-        controls =
-            controls.child(self.button("activity-refresh", "Retry / Refresh", Action::Refresh, cx));
+        let mut top = div()
+            .flex()
+            .items_start()
+            .gap(px(8.))
+            .child(scope)
+            .child(self.button("activity-refresh", "Refresh", Action::Refresh, cx));
         if self.mission["missionId"]
             .as_str()
             .is_some_and(|s| !s.trim().is_empty())
             && !self.pending
         {
-            controls = controls.child(self.button(
+            top = top.child(self.button(
                 "activity-stop-mission",
                 "Stop mission",
                 Action::StopMission,
                 cx,
             ));
         }
-        header = header.child(controls);
+        // Classic's filter pills: one hairline group, the active pill in accent.
+        let accent = tint(marks::ACCENT, 1.);
+        let mut pills = hairline(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .p(px(3.))
+                .rounded(px(10.))
+                .border_color(theme().border)
+                .bg(theme().surface),
+        );
+        for (filter, label, path) in [
+            ("all", "All", marks::ZAP),
+            ("commit", "Commits", marks::COMMIT),
+            ("pr", "PRs", marks::PULL),
+            ("issue", "Issues", marks::ALERT),
+            ("ci", "CI", marks::CHECK),
+            ("packet", "Packets", marks::ZAP),
+        ] {
+            let count = self
+                .rows
+                .iter()
+                .filter(|r| filter == "all" || r.kind == filter || filter == "ci" && r.ci.is_some())
+                .count();
+            let id = format!("activity-filter-{filter}");
+            let active = self.filter == filter;
+            let selected = self.keyboard.as_ref() == Some(&id);
+            let color = if active { accent } else { theme().text_muted };
+            pills = pills.child(
+                self.control(id, Action::Filter(filter), cx)
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .pt(px(3.))
+                    .pb(px(3.))
+                    .pl(px(6.))
+                    .pr(px(8.))
+                    .rounded_full()
+                    .text_size(px(11.))
+                    .font_weight(FontWeight(350.))
+                    .text_color(color)
+                    .bg(if active {
+                        tint(marks::ACCENT, 0.08)
+                    } else if selected {
+                        theme().selection
+                    } else {
+                        CLEAR
+                    })
+                    .when(!active, |pill| pill.hover(|v| v.bg(theme().hover)))
+                    .child(icon::stroke(path, color, 11., 2.))
+                    .child(label)
+                    .when(count > 0 && filter != "all", |pill| {
+                        pill.child(
+                            div()
+                                .text_size(px(9.5))
+                                .font_weight(FontWeight(260.))
+                                .text_color(if active { accent } else { theme().text_faint })
+                                .child(count.to_string()),
+                        )
+                    }),
+            );
+        }
+        let header = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .flex_shrink_0()
+            .pt(px(10.))
+            .px(px(12.))
+            .pb(px(8.))
+            .border_b_1()
+            .border_color(theme().border)
+            .child(top)
+            .child(div().flex().child(pills));
         let mut list = div()
             .id("activity-list")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .flex()
-            .flex_col()
-            .gap(px(4.))
-            .p(px(12.));
-        for error in self.errors.clone() {
-            list = list.child(div().text_color(theme().warning).child(error));
+            .flex_col();
+        let status = || {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .py(px(16.))
+                .px(px(14.))
+                .text_size(px(13.))
+                .line_height(relative(1.45))
+                .text_color(theme().text_muted)
+        };
+        if !self.errors.is_empty() {
+            list = list.child(status().children(self.errors.clone()));
         }
         if !self.notice.is_empty() {
-            list = list.child(self.notice.clone());
+            list = list.child(status().child(self.notice.clone()));
         }
         let rows = self
             .rows
@@ -527,9 +810,19 @@ impl Render for ActivityPane {
             })
             .cloned()
             .collect::<Vec<_>>();
+        let quiet = || {
+            div()
+                .py(px(32.))
+                .px(px(14.))
+                .text_center()
+                .text_size(px(13.))
+                .font_weight(FontWeight::LIGHT)
+                .line_height(relative(1.45))
+                .text_color(theme().text_faint)
+        };
         if self.loading {
             list = list.child(
-                div()
+                quiet()
                     .debug_selector(|| "activity-loading".into())
                     .child("Loading activity…"),
             );
@@ -549,55 +842,111 @@ impl Render for ActivityPane {
                 "No activity yet for this repository."
             };
             list = list.child(
-                div()
+                quiet()
                     .debug_selector(|| "activity-empty".into())
-                    .text_color(theme().text_faint)
                     .child(message),
             );
         }
         let mut day = String::new();
         for row in rows {
-            let date = row.date.get(..10).unwrap_or("");
-            if date != day {
-                day = date.into();
+            let heading = marks::day(&row.date, now);
+            if heading != day {
+                day = heading;
                 list = list.child(
                     div()
-                        .text_size(px(10.))
+                        .pt(px(8.))
+                        .px(px(14.))
+                        .pb(px(4.))
+                        .text_size(px(9.))
+                        .font_weight(FontWeight::LIGHT)
                         .text_color(theme().text_faint)
-                        .child(day.clone()),
+                        .child(day.to_uppercase()),
                 );
             }
-            let key = row.key();
-            let expanded = self.expanded.as_ref() == Some(&key);
-            let mut summary = self
-                .button(
-                    row.selector(),
-                    row.title.clone(),
-                    Action::Expand(row.clone()),
-                    cx,
-                )
+            let expanded = self.expanded.as_ref() == Some(&row.key());
+            let selected = self.keyboard.as_ref() == Some(&row.selector());
+            let packet = row.kind == "packet";
+            // Packet rows use the input fill when open, feed rows the accent wash.
+            let (open, hover) = if packet {
+                (theme().surface_raised, theme().hover)
+            } else {
+                (tint(marks::ACCENT, 0.08), tint(marks::ACCENT, 0.08))
+            };
+            // Classic's `nowrap` folds a commit body onto the subject's line.
+            let title = row.title.split_whitespace().collect::<Vec<_>>().join(" ");
+            let title = match row.kind {
+                "commit" if !row.id.is_empty() => {
+                    format!("{title} · {}", row.id.get(..7).unwrap_or(&row.id))
+                }
+                _ => title,
+            };
+            let summary = self
+                .control(row.selector(), Action::Expand(row.clone()), cx)
+                .flex()
+                .items_start()
+                .gap(px(8.))
                 .w_full()
-                .text_size(px(13.5))
-                .bg(if expanded {
+                .px(px(14.))
+                .py(px(7.))
+                .bg(if selected {
                     theme().selection
+                } else if expanded {
+                    open
                 } else {
-                    theme().surface
-                });
-            if let Some(ci) = &row.ci {
-                summary = summary.child(format!(" · {}", text(&ci.data, "conclusion")));
-            }
-            list = list.child(summary).child(
-                div()
-                    .text_size(px(9.5))
-                    .text_color(theme().text_faint)
-                    .child(format!(
-                        "{} · {}",
-                        row.meta,
-                        row.repo.as_deref().unwrap_or("local")
-                    )),
-            );
+                    CLEAR
+                })
+                .when(!expanded, |row| row.hover(move |v| v.bg(hover)))
+                .child(
+                    div()
+                        .w(px(10.))
+                        .h(px(20.))
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(icon::fill(
+                            if expanded {
+                                marks::CHEVRON_OPEN
+                            } else {
+                                marks::CHEVRON
+                            },
+                            theme().text_faint,
+                            7.,
+                        )),
+                )
+                .child(Self::dot(&row))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_size(px(13.5))
+                                .font_weight(FontWeight::LIGHT)
+                                .line_height(relative(1.25))
+                                .text_color(theme().text)
+                                .min_w_0()
+                                // As the rail: truncation recomputes once flex sets the width.
+                                .whitespace_normal()
+                                .line_clamp(if packet { 2 } else { 1 })
+                                .text_ellipsis()
+                                .child(title),
+                        )
+                        .child(Self::subline(&row, now)),
+                )
+                .children(Self::badge(&row));
+            list = list.child(summary);
             if expanded {
-                list = list.child(self.detail_view(&row, cx));
+                list = list.child(
+                    div()
+                        .pt(px(6.))
+                        .pr(px(14.))
+                        .pb(px(10.))
+                        .pl(px(52.))
+                        .border_b_1()
+                        .border_color(theme().border)
+                        .child(self.detail_view(&row, cx)),
+                );
             }
         }
         div()
@@ -611,7 +960,7 @@ impl Render for ActivityPane {
             .bg(theme().background)
             .text_color(theme().text)
             .font_family(theme().font_ui)
-            .font_weight(gpui::FontWeight::LIGHT)
+            .font_weight(FontWeight::LIGHT)
             .child(header)
             .child(list)
             .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))

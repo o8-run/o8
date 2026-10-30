@@ -67,7 +67,6 @@ pub struct Row {
     pub repo: Option<String>,
     pub repo_identity: String,
     pub title: String,
-    pub meta: String,
     pub date: String,
     pub data: Value,
     pub ci: Option<Box<Row>>,
@@ -116,7 +115,7 @@ fn rows(
         .iter()
         .take(limit)
         .map(|v| {
-            let (identity, title, meta, date) = match kind {
+            let (identity, title, date) = match kind {
                 "commit" => (
                     v["hash"]
                         .as_str()
@@ -128,43 +127,21 @@ fn rows(
                         .or(v["subject"].as_str())
                         .unwrap_or("")
                         .to_owned(),
-                    String::new(),
                     text(v, "date"),
                 ),
                 "pr" => (
                     id(v, "number"),
                     format!("#{} {}", id(v, "number"), text(v, "title")),
-                    format!(
-                        "{} · {} · +{} -{}",
-                        text(v, "state"),
-                        text(v, "headRefName"),
-                        v["additions"].as_u64().unwrap_or(0),
-                        v["deletions"].as_u64().unwrap_or(0)
-                    ),
                     text(v, "createdAt"),
                 ),
                 "issue" => (
                     id(v, "number"),
                     format!("#{} {}", id(v, "number"), text(v, "title")),
-                    format!(
-                        "{} · {}",
-                        text(v, "state"),
-                        v["author"]["login"].as_str().unwrap_or("")
-                    ),
                     text(v, "createdAt"),
                 ),
                 _ => (
                     id(v, "databaseId"),
                     text(v, "displayTitle"),
-                    format!(
-                        "{} · {} · {}",
-                        text(v, "workflowName"),
-                        text(v, "headBranch"),
-                        v["conclusion"]
-                            .as_str()
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or(v["status"].as_str().unwrap_or(""))
-                    ),
                     text(v, "createdAt"),
                 ),
             };
@@ -177,7 +154,6 @@ fn rows(
                 repo: repo.clone(),
                 repo_identity: repo_identity.into(),
                 title,
-                meta,
                 date,
                 data: v.clone(),
                 ci: None,
@@ -277,12 +253,6 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
                     repo: None,
                     repo_identity: "local".into(),
                     title: text(packet, "title"),
-                    meta: format!(
-                        "{} · {} · {}",
-                        text(packet, "status"),
-                        text(packet, "runtime"),
-                        text(packet, "branchTarget")
-                    ),
                     date: packet["lane"]["lastEventAt"]
                         .as_str()
                         .or(packet["lastEventAt"].as_str())

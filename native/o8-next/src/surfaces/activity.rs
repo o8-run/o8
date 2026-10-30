@@ -4,6 +4,8 @@ use pane::{ActivityEvent, ActivityPane};
 
 #[path = "activity/feed.rs"]
 pub(crate) mod feed;
+#[path = "activity/marks.rs"]
+mod marks;
 #[path = "activity/pane.rs"]
 mod pane;
 #[path = "activity/transport.rs"]

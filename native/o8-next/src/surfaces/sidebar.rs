@@ -5,6 +5,10 @@ use crate::projects_model::Ledger;
 mod thread_list;
 /// Local weekday, hour and minute, for the rail usage card's reset times.
 pub(crate) use thread_list::recents::calendar::clock as calendar_clock;
+/// Local day boundaries, for Activity's Today / Yesterday / "Oct 24" headings.
+pub(crate) use thread_list::recents::calendar::{
+    date as calendar_date, midnight as calendar_midnight,
+};
 #[path = "sidebar/thread_list_client.rs"]
 mod thread_list_client;
 #[path = "sidebar/thread_mutations_client.rs"]

@@ -65,7 +65,12 @@ pub(crate) fn clock(now: u64) -> Option<(i32, i32, i32)> {
     local(now).map(|calendar| (calendar.weekday, calendar.hour, calendar.minute))
 }
 
-pub(super) fn midnight(now: u64) -> u64 {
+/// Local month (0 is January) and day of the month for an epoch second.
+pub(crate) fn date(time: u64) -> Option<(i32, i32)> {
+    local(time).map(|calendar| (calendar.month, calendar.day))
+}
+
+pub(crate) fn midnight(now: u64) -> u64 {
     let fallback = now / 86400 * 86400;
     let Some(mut calendar) = local(now) else {
         return fallback;

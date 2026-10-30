@@ -395,7 +395,8 @@ fn activity_loading_error_and_keyboard_controls(cx: &mut TestAppContext) {
     assert!(view.read_with(visual, |v, _| !v.loading
         && !v.errors.is_empty()
         && v.rows.is_empty()));
-    visual.simulate_keystrokes("tab tab enter");
+    // Classic's header order: scope, then Refresh, then the filter pills.
+    visual.simulate_keystrokes("tab tab tab enter");
     draw(visual);
     assert!(view.read_with(visual, |v, _| v.filter == "all"));
     visual.simulate_keystrokes("tab enter");
