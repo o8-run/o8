@@ -312,12 +312,16 @@ SOFTWARE.
   `f58fad04162165653bf06f0c987bbfb0074a8a4b`, files
   `apps/web/src/components/Sidebar.tsx`,
   `apps/web/src/components/Sidebar.logic.ts`,
-  `apps/web/src/components/sidebar/SidebarProjectFolderHeader.tsx` and
+  `apps/web/src/components/sidebar/SidebarProjectFolderHeader.tsx`,
+  `apps/web/src/components/sidebar/SidebarThreadRow.tsx`,
+  `apps/web/src/hooks/showThreadUndoNotice.ts` and
   `apps/web/src/components/threadActionMenu.logic.ts`
 - Use in o8: the repository scope picker and the thread row's Filter by
   menu in `native/o8-next/src/surfaces/sidebar/scope.rs`; the By repo
   folders and their attention dot in
-  `native/o8-next/src/surfaces/sidebar/folders.rs`
+  `native/o8-next/src/surfaces/sidebar/folders.rs`; the Inbox view's
+  Active and Settled sections, Settle and Un-settle, park-and-advance and
+  the Undo notice in `native/o8-next/src/surfaces/sidebar/inbox.rs`
 - License text: [T3 Code](src/lib/usage/history-readers/LICENSE.txt)
 
 ## o8 next update control states

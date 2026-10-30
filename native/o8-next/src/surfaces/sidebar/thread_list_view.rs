@@ -10,10 +10,6 @@ impl Render for ThreadList {
             self.focus.focus(window);
         }
         let _keep_subscriptions = &self.subscriptions;
-        let saved_chat = self
-            .choice_row()
-            .and_then(|r| r.id.as_ref())
-            .is_some_and(|id| !id.contains(':'));
         let status = if self.saving {
             "Saving…".to_string()
         } else if self.loading && self.rows.is_empty() {
@@ -35,7 +31,6 @@ impl Render for ThreadList {
         div()
             .id("thread-sidebar")
             .debug_selector(|| "thread-sidebar".into())
-            .group("thread-sidebar")
             .w_full()
             .h_full()
             .flex_shrink_0()
@@ -222,6 +217,9 @@ impl Render for ThreadList {
                                                             )
                                                         }),
                                                 )
+                                                .children(
+                                                    this.row_settle_control(&row, keyboard, cx),
+                                                )
                                                 .child(this.row_archive_control(&row, keyboard, cx))
                                             }),
                                     )
@@ -306,44 +304,6 @@ impl Render for ThreadList {
                 .flex_1()
                 .min_h_0(),
             )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(12.))
-                    .px(px(12.))
-                    .py(px(6.))
-                    .text_size(px(10.))
-                    .when(!self.focus.is_focused(window), |view| {
-                        view.invisible()
-                            .group_hover("thread-sidebar", |style| style.visible())
-                    })
-                    .when(saved_chat, |view| {
-                        view.child(
-                            div()
-                                .id("thread-rename")
-                                .debug_selector(|| "thread-rename".into())
-                                .cursor_pointer()
-                                .child("Rename")
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| {
-                                        this.start_rename(window, cx)
-                                    }),
-                                ),
-                        )
-                    })
-                    .child(
-                        div()
-                            .id("thread-archive")
-                            .debug_selector(|| "thread-archive".into())
-                            .cursor_pointer()
-                            .child(if this_archived(self) {
-                                "Restore"
-                            } else {
-                                "Archive"
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| this.archive(cx))),
-                    ),
-            )
             .when(
                 self.query.is_empty()
                     && (!self.archived_open
@@ -355,8 +315,4 @@ impl Render for ThreadList {
             )
             .children(self.row_menu(cx))
     }
-}
-
-fn this_archived(this: &ThreadList) -> bool {
-    this.choice_row().is_some_and(|r| r.status == "archived")
 }

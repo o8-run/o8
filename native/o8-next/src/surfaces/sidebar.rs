@@ -185,7 +185,9 @@ pub(super) const REGISTRATION: Registration = Registration {
     },
     key_down: |shell, event, window, cx| {
         if shell.surfaces.sidebar.view.as_ref().is_some_and(|view| {
-            view.update(cx, |sidebar, cx| sidebar.header_key(event, window, cx))
+            view.update(cx, |sidebar, cx| {
+                sidebar.header_key(event, window, cx) || sidebar.settle_key(event, cx)
+            })
         }) {
             return true;
         }
