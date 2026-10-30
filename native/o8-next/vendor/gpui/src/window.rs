@@ -2005,10 +2005,10 @@ impl Window {
         self.dirty_views.clear();
         self.next_frame.window_active = self.active.get();
 
-        // Register requested input handler with the platform window.
-        if let Some(input_handler) = self.next_frame.input_handlers.pop() {
-            self.platform_window
-                .set_input_handler(input_handler.unwrap());
+        // Register requested input handler with the platform window. An empty
+        // slot means the platform still holds it and gets it back on return.
+        if let Some(Some(input_handler)) = self.next_frame.input_handlers.pop() {
+            self.platform_window.set_input_handler(input_handler);
         }
 
         self.layout_engine.as_mut().unwrap().clear();
@@ -2376,11 +2376,13 @@ impl Window {
                 .iter()
                 .cloned(),
         );
+        // o8: a frame drawn while the platform holds the input handler leaves
+        // the rendered list without the entry this range recorded. Keep the
+        // slots aligned with an empty entry instead of slicing past the end.
+        let handlers = &mut self.rendered_frame.input_handlers;
         self.next_frame.input_handlers.extend(
-            self.rendered_frame.input_handlers
-                [range.start.input_handlers_index..range.end.input_handlers_index]
-                .iter_mut()
-                .map(|handler| handler.take()),
+            (range.start.input_handlers_index..range.end.input_handlers_index)
+                .map(|index| handlers.get_mut(index).and_then(Option::take)),
         );
         self.next_frame.mouse_listeners.extend(
             self.rendered_frame.mouse_listeners

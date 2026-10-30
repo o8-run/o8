@@ -28,6 +28,12 @@ Local changes:
   place, so a later measure paired short runs with the full text and a run
   boundary could fall inside a multibyte character, panicking in
   `layout_line` ("end byte index 13 is not a char boundary; it is inside '·'").
+- `src/window.rs`: a cached view's paint reuse keeps input-handler slots aligned.
+  A frame drawn while the platform still holds the input handler (inside text
+  entry) leaves the rendered list without the entry the view's range recorded;
+  `reuse_paint` sliced past the end ("range start index 1 out of range for
+  slice of length 0", #5111). Missing slots are now empty entries, and `draw`
+  skips an empty slot, so the platform keeps the handler it gets back.
 
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit
