@@ -197,8 +197,9 @@ impl BrowserPanel {
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .overflow_hidden()
-                                .whitespace_nowrap()
+                                // Clamp a single measured line so GPUI recomputes
+                                // truncation when flex layout narrows the pill.
+                                .line_clamp(1)
                                 .text_ellipsis()
                                 .text_size(px(11.5))
                                 .font_weight(FontWeight::LIGHT)
@@ -268,20 +269,22 @@ impl BrowserPanel {
                         cx.notify();
                     }))
             }))
-            .child(
-                button("browser-add-page", PLUS, "New tab", true)
-                    .on_key_down(cx.listener(|this, e: &gpui::KeyDownEvent, window, cx| {
-                        if matches!(e.keystroke.key.as_str(), "enter" | "space") {
+            .when(!self.in_header, |strip| {
+                strip.child(
+                    button("browser-add-page", PLUS, "New tab", true)
+                        .on_key_down(cx.listener(|this, e: &gpui::KeyDownEvent, window, cx| {
+                            if matches!(e.keystroke.key.as_str(), "enter" | "space") {
+                                this.add(String::new(), cx);
+                                this.focus(window);
+                                cx.stop_propagation();
+                            }
+                        }))
+                        .on_click(cx.listener(|this, _, window, cx| {
                             this.add(String::new(), cx);
                             this.focus(window);
-                            cx.stop_propagation();
-                        }
-                    }))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.add(String::new(), cx);
-                        this.focus(window);
-                    })),
-            )
+                        })),
+                )
+            })
             .into_any_element()
     }
     fn empty(&self, cx: &mut Context<Self>) -> AnyElement {

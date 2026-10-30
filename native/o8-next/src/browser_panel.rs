@@ -15,6 +15,7 @@ use std::{
 };
 mod address;
 mod favicon;
+pub(crate) mod header;
 mod model;
 mod state;
 mod view;
@@ -325,6 +326,10 @@ impl BrowserPanel {
         self.sync_address(cx);
         self.publish(cx);
         cx.notify();
+    }
+    pub fn new_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.add(String::new(), cx);
+        self.focus(window);
     }
     fn select(&mut self, id: u64, cx: &mut Context<Self>) {
         if !self.tabs.iter().any(|tab| tab.id == id) {

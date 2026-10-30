@@ -294,3 +294,119 @@ fn browser_restoration_shell_state_retains_order_active_and_empty(cx: &mut TestA
     );
     std::fs::remove_file(file).unwrap();
 }
+
+// The shell portals page pills into its header. A slotless pane's + must not
+// travel with them: the shell owns the launcher and More panel views controls.
+struct HeaderPages(Entity<BrowserPanel>);
+impl Render for HeaderPages {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .w(px(620.))
+            .child(self.0.update(cx, |p, cx| p.page_strip(cx)))
+    }
+}
+#[gpui::test]
+fn browser_header_omits_slotless_add_and_keeps_classic_density(cx: &mut TestAppContext) {
+    let (header, cx) = cx.add_window_view(|_, cx| {
+        HeaderPages(cx.new(|cx| {
+            let mut p = BrowserPanel::new(cx);
+            p.in_header = true;
+            for i in 1..=4 {
+                p.add(format!("https://example.org/{i}"), cx);
+            }
+            p
+        }))
+    });
+    draw(cx);
+    assert!(
+        cx.debug_bounds("browser-add-page").is_none(),
+        "slotless + leaked into the shell header"
+    );
+    let labelled = f32::from(cx.debug_bounds("browser-page-1").unwrap().size.width);
+    assert!(
+        labelled > 30. && labelled <= 120.,
+        "four pages retain host labels"
+    );
+    let browser = header.read_with(cx, |h, _| h.0.clone());
+    browser.update(cx, |p, cx| p.add("https://example.org/five".into(), cx));
+    draw(cx);
+    assert!(f32::from(cx.debug_bounds("browser-page-1").unwrap().size.width) <= 30.);
+    assert!(f32::from(cx.debug_bounds("browser-page-5").unwrap().size.width) > 30.);
+    assert_eq!(browser.read_with(cx, |p, _| p.active), Some(5));
+}
+
+struct HeaderControls {
+    browser: Entity<BrowserPanel>,
+    launcher: FocusHandle,
+    more: FocusHandle,
+    launches: usize,
+    menus: usize,
+    closed: bool,
+}
+impl Render for HeaderControls {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .child(header::launcher(|h, _, _| h.launches += 1, cx).track_focus(&self.launcher))
+            .child(
+                header::more(
+                    div()
+                        .id("browser-more-test")
+                        .debug_selector(|| "browser-more-test".into()),
+                    |h, _, _| h.menus += 1,
+                    cx,
+                )
+                .track_focus(&self.more),
+            )
+            .child(header::new_page_item(
+                self.browser.clone(),
+                |h, _| h.closed = true,
+                cx,
+            ))
+    }
+}
+#[gpui::test]
+fn browser_header_controls_open_launcher_and_new_page(cx: &mut TestAppContext) {
+    let (header, cx) = cx.add_window_view(|_, cx| HeaderControls {
+        browser: cx.new(|cx| {
+            let mut p = BrowserPanel::new(cx);
+            p.navigate("https://example.com", cx);
+            p
+        }),
+        launcher: cx.focus_handle(),
+        more: cx.focus_handle(),
+        launches: 0,
+        menus: 0,
+        closed: false,
+    });
+    draw(cx);
+    assert_eq!(
+        f32::from(cx.debug_bounds("browser-open-launcher").unwrap().size.width),
+        28.
+    );
+    assert_eq!(
+        f32::from(cx.debug_bounds("browser-more-test").unwrap().size.width),
+        28.
+    );
+    cx.update(|window, cx| header.read(cx).launcher.focus(window));
+    cx.simulate_keystrokes("enter");
+    draw(cx);
+    assert_eq!(header.read_with(cx, |h, _| h.launches), 1);
+    assert_eq!(
+        header.read_with(cx, |h, cx| h.browser.read(cx).tabs.len()),
+        1
+    );
+    cx.update(|window, cx| header.read(cx).more.focus(window));
+    cx.simulate_keystrokes("space");
+    draw(cx);
+    assert_eq!(header.read_with(cx, |h, _| h.menus), 1);
+    click(cx, "browser-menu-new-page");
+    assert!(header.read_with(cx, |h, _| h.closed));
+    header.read_with(cx, |h, cx| {
+        let browser = h.browser.read(cx);
+        assert_eq!(browser.tabs.len(), 2);
+        assert_eq!(browser.active, Some(2));
+        assert!(browser.tabs[1].url.is_empty());
+        assert_eq!(browser.tabs[0].url, "https://example.com");
+    });
+}
