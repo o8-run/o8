@@ -10,6 +10,8 @@ use std::{
 
 #[derive(Clone)]
 pub enum ActivityEvent {
+    Draft(String, String),
+    Preferences(preferences::Saved),
     Worker(String),
     /// A row's GitHub link, for the shell to open in the surface that
     /// claims it (pull requests, issues) or in the browser.
@@ -19,6 +21,10 @@ pub enum ActivityEvent {
 #[derive(Clone)]
 pub(super) enum Action {
     Packet(packet::Command),
+    Proposals,
+    ProposalDetail(String),
+    ProposalDecision(String, bool),
+    RetryProposals,
     Dossiers,
     DossierHistory(String),
     DossierDecision(String, &'static str),
@@ -74,6 +80,10 @@ pub(super) struct Detail {
 }
 pub struct ActivityPane {
     pub(super) packet: packet::State,
+    pub(super) proposals: proposals::Proposals,
+    pub(super) saved: preferences::Saved,
+    pub(super) scroll: gpui::ScrollHandle,
+    pub(super) restore_y: Option<f32>,
     pub(super) decisions: decisions::Decisions,
     pub(super) client: Client,
     pub(super) workspace: String,
@@ -108,9 +118,20 @@ pub struct ActivityPane {
 }
 impl EventEmitter<ActivityEvent> for ActivityPane {}
 impl ActivityPane {
-    pub fn new(client: Client, workspace: String, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        client: Client,
+        workspace: String,
+        saved: preferences::Saved,
+        open: bool,
+        seen: Vec<String>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut pane = Self {
             packet: packet::State::default(),
+            proposals: Default::default(),
+            saved: Default::default(),
+            scroll: gpui::ScrollHandle::new(),
+            restore_y: None,
             decisions: Default::default(),
             client,
             scope: workspace.clone(),
@@ -141,8 +162,10 @@ impl ActivityPane {
             revision: 0,
             painted: std::rc::Rc::new(std::cell::Cell::new(u64::MAX)),
         };
+        pane.hydrate(saved, open, seen);
         pane.load(cx);
         pane.load_dossiers(cx);
+        pane.load_proposals(cx);
         pane
     }
     pub fn focus(&self, window: &mut Window) {
@@ -150,12 +173,16 @@ impl ActivityPane {
     }
     #[cfg(test)]
     pub fn ready(&self) -> bool {
-        !self.loading && !self.decisions.loading && self.painted.get() == self.revision
+        !self.loading
+            && !self.decisions.loading
+            && !self.proposals.loading
+            && self.painted.get() == self.revision
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
         if self.loaded_at.elapsed() >= Duration::from_secs(300) && !self.loading && !self.pending {
             self.load(cx);
             self.load_dossiers(cx);
+            self.load_proposals(cx);
         }
         let retry = self.expanded.as_ref().and_then(|key| {
             let detail = self.details.get(key)?;
@@ -417,12 +444,19 @@ impl ActivityPane {
         }
         match action {
             Action::Packet(command) => self.packet_act(command, cx),
+            Action::Proposals => {self.proposals.open = !self.proposals.open; self.saved.proposals_open=Some(self.proposals.open); self.mark_proposals_seen(cx); self.remember_view(cx);},
+            Action::ProposalDetail(id) => {if !self.proposals.expanded.remove(&id){self.proposals.expanded.insert(id);}},
+            Action::ProposalDecision(id,accept) => self.proposal_action(id,accept,cx),
+            Action::RetryProposals => self.load_proposals(cx),
             Action::Filter(filter) => { self.filter = filter; self.expanded = None; }
             Action::ScopeMenu(open) => self.scope_menu = open,
             Action::Scope(scope) => {
+                self.remember_view(cx);
                 self.scope_menu = false;
-                self.scope = scope; self.generation += 1; self.loading = false;
-                self.packet.reads.clear(); self.packet.editor = None; self.rows.clear(); self.errors.clear(); self.expanded = None; self.details.clear(); self.keyboard = None; self.load(cx);
+                self.scope = scope;
+                self.restore_view();
+                if let Some(y)=self.restore_y {self.scroll.set_offset(gpui::point(gpui::px(0.),gpui::px(y)));} self.generation += 1; self.loading = false;
+                self.packet.reads.clear(); self.packet.editor = None; self.rows.clear(); self.errors.clear(); self.details.clear(); self.keyboard = None; self.load(cx);
             }
             Action::Refresh => { self.packet.reads.clear(); self.load(cx); self.load_dossiers(cx); },
             Action::Dossiers => self.decisions.open = !self.decisions.open,
@@ -483,6 +517,7 @@ impl ActivityPane {
                 .detach();
             }
         }
+        self.remember_view(cx);
         self.changed(cx);
     }
     /// The scope menu row for the current scope.
@@ -555,3 +590,7 @@ mod view;
 
 #[path = "packet.rs"]
 mod packet;
+#[path = "preferences.rs"]
+pub(super) mod preferences;
+#[path = "proposals.rs"]
+mod proposals;
