@@ -4,6 +4,7 @@ pub(super) struct Status {
     pub url: Option<String>,
     pub title: Option<String>,
     pub loading: bool,
+    pub document: bool,
     pub back: bool,
     pub forward: bool,
     pub error: Option<String>,
@@ -76,6 +77,10 @@ mod macos {
                 let mut events = events(object).borrow_mut();
                 events.error = None; events.navigating = true;
             }
+            extern "C" fn committed(object: &Object, _: Sel, _: id, _: id) {
+                // Present committed HTML while fonts/images are still loading.
+                events(object).borrow_mut().document = true;
+            }
             extern "C" fn finished(object: &Object, _: Sel, _: id, _: id) {
                 let mut events = events(object).borrow_mut();
                 events.navigating = false; events.document = true;
@@ -95,6 +100,7 @@ mod macos {
             decl.add_ivar::<usize>("events");
             unsafe {
                 decl.add_method(sel!(webView:didStartProvisionalNavigation:), started as extern "C" fn(&Object, Sel, id, id));
+                decl.add_method(sel!(webView:didCommitNavigation:), committed as extern "C" fn(&Object, Sel, id, id));
                 decl.add_method(sel!(webView:didFinishNavigation:), finished as extern "C" fn(&Object, Sel, id, id));
                 decl.add_method(sel!(webView:didFailProvisionalNavigation:withError:), failed as extern "C" fn(&Object, Sel, id, id, id));
                 decl.add_method(sel!(webView:didFailNavigation:withError:), failed as extern "C" fn(&Object, Sel, id, id, id));
@@ -105,6 +111,26 @@ mod macos {
             }
             decl.register()
         })
+    }
+
+    #[cfg(test)]
+    pub(super) fn commit_flags_for_test() -> (bool, bool) {
+        unsafe {
+            let delegate: id = msg_send![delegate_class(), new];
+            let events = Rc::new(RefCell::new(Events {
+                navigating: true,
+                ..Events::default()
+            }));
+            (*delegate).set_ivar("events", Rc::as_ptr(&events) as usize);
+            let handles_commit: BOOL =
+                msg_send![delegate, respondsToSelector: sel!(webView:didCommitNavigation:)];
+            if handles_commit == YES {
+                let _: () = msg_send![delegate, webView: nil didCommitNavigation: nil];
+            }
+            let flags = (events.borrow().document, events.borrow().navigating);
+            let _: () = msg_send![delegate, release];
+            flags
+        }
     }
 
     pub struct Web {
@@ -209,6 +235,7 @@ mod macos {
                     url: self.url(),
                     title: string(title),
                     loading: loading == YES || self.events.borrow().navigating,
+                    document: self.events.borrow().document,
                     back: back == YES,
                     forward: forward == YES,
                     error: self.events.borrow().error.clone(),
@@ -324,4 +351,9 @@ impl Web {
     pub fn take_popups(&self) -> Vec<String> {
         vec![]
     }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+pub(super) fn commit_flags_for_test() -> (bool, bool) {
+    macos::commit_flags_for_test()
 }

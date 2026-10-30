@@ -410,3 +410,14 @@ fn browser_header_controls_open_launcher_and_new_page(cx: &mut TestAppContext) {
         assert_eq!(browser.tabs[0].url, "https://example.com");
     });
 }
+
+#[cfg(target_os = "macos")]
+#[gpui::test]
+fn browser_first_document_commits_while_navigation_is_loading(_: &mut TestAppContext) {
+    // Exercise the actual ObjC navigation delegate without needing a native test window.
+    assert_eq!(
+        web::commit_flags_for_test(),
+        (true, true),
+        "committed HTML must be visible before navigation/subresource loading finishes"
+    );
+}

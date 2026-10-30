@@ -30,6 +30,7 @@ struct Page {
     web: Rc<RefCell<Option<web::Web>>>,
     pending: Rc<RefCell<Option<String>>>,
     loading: bool,
+    document: bool,
     error: Option<String>,
     back: bool,
     forward: bool,
@@ -41,6 +42,7 @@ impl Default for Page {
             web: Rc::default(),
             pending: Rc::default(),
             loading: false,
+            document: false,
             error: None,
             back: false,
             forward: false,
@@ -51,12 +53,14 @@ impl Default for Page {
 impl Page {
     fn observe_status(&mut self, tab: &mut Tab, status: web::Status) -> bool {
         let mut changed = false;
-        if self.loading != status.loading
+        if self.document != status.document
+            || self.loading != status.loading
             || self.back != status.back
             || self.forward != status.forward
             || self.error != status.error
         {
             self.loading = status.loading;
+            self.document = status.document;
             self.back = status.back;
             self.forward = status.forward;
             self.error = status.error;
