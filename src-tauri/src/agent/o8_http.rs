@@ -68,16 +68,23 @@ pub async fn get_json(path: &str) -> Result<Value, String> {
 
 /// GET with a custom timeout for bounded verification probes.
 pub async fn get_json_timeout(path: &str, timeout_secs: u64) -> Result<Value, String> {
+    read_json(path, get_response_timeout(path, timeout_secs).await?).await
+}
+
+/// GET with the existing loopback authorization, retaining the HTTP status.
+pub(crate) async fn get_response_timeout(
+    path: &str,
+    timeout_secs: u64,
+) -> Result<reqwest::Response, String> {
     let url = format!("{}{}", base(), path);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout_secs))
         .build()
         .map_err(|e| format!("reqwest build failed: {e}"))?;
-    let resp = with_auth(client.get(&url))
+    with_auth(client.get(&url))
         .send()
         .await
-        .map_err(|e| transport_error("GET", path, timeout_secs, &e))?;
-    read_json(path, resp).await
+        .map_err(|e| transport_error("GET", path, timeout_secs, &e))
 }
 
 /// POST a JSON body to a loopback path, parsing the JSON response.
