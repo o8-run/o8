@@ -13,6 +13,7 @@ fn inbox_is_reachable_from_the_real_shell_palette(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     ready(&shell, cx);
+    let main = shell.read_with(cx, |s, _| s.active());
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("i n b o x");
     assert_eq!(
@@ -27,9 +28,7 @@ fn inbox_is_reachable_from_the_real_shell_palette(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     draw(cx);
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.active().unwrap().label()),
-        "Inbox"
-    );
+    inbox_panel(&shell, cx);
+    assert_eq!(shell.read_with(cx, |s, _| s.active()), main, "Inbox must keep the main surface open beside it");
     assert!(cx.debug_bounds("inbox-view-replies").is_some());
 }

@@ -18,7 +18,12 @@ impl ShellFeature for RightPanel {
     fn ticks(&self) -> &'static [TickHook] {
         &[TickHook {
             order: 50,
-            run: |s, _, window, cx| move_inbox_tabs(s, window, cx),
+            run: |s, _, window, cx| {
+                if s.connected {
+                    move_inbox_tabs(s, window, cx);
+                    restore(s, window, cx);
+                }
+            },
         }]
     }
     fn keys(&self) -> &'static [KeyContext] {
@@ -188,6 +193,11 @@ impl Tool {
     fn slug(self) -> String {
         self.label().to_lowercase().replace([' ', '.'], "-")
     }
+    fn from_slug(slug: &str) -> Option<Self> {
+        std::iter::once(Self::Launcher)
+            .chain(Self::GROUPS.iter().flat_map(|(_, tools)| tools.iter().copied()))
+            .find(|tool| tool.slug() == slug)
+    }
 }
 
 /// A panel tab being dragged along the strip.
@@ -223,6 +233,7 @@ impl Render for Dragged {
 }
 
 struct Panel {
+    restored: bool,
     /// The column's width and fade: 260ms, as the desktop column animates.
     motion: Transition,
     /// The tool's own fade and 12px slide: 200ms.
@@ -248,6 +259,7 @@ struct Panel {
 impl Default for Panel {
     fn default() -> Self {
         Self {
+            restored: false,
             motion: Transition::new(260),
             content: Transition::new(200),
             tabs: vec![],
@@ -277,6 +289,47 @@ fn key(s: &Shell, tool: Tool) -> String {
         "panel|{}|{tool:?}",
         s.state.selected.as_deref().unwrap_or("")
     )
+}
+
+fn remember(s: &mut Shell) {
+    let panel = s.features.get::<Panel>();
+    let saved = crate::shell_state::RightPanelState {
+        tabs: panel.tabs.iter().map(|tool| tool.slug()).collect(),
+        active: panel.current().slug(),
+        open: panel.motion.is_open(),
+    };
+    s.state.right_panel = Some(saved);
+    s.persist();
+}
+
+fn restore(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    if s.features.get::<Panel>().restored {
+        return;
+    }
+    s.features.get::<Panel>().restored = true;
+    let Some(saved) = s.state.right_panel.clone() else { return };
+    let mut tabs = Vec::new();
+    for tool in saved.tabs.iter().filter_map(|slug| Tool::from_slug(slug)) {
+        if tool != Tool::Launcher && !tabs.contains(&tool) {
+            tabs.push(tool);
+        }
+    }
+    let active = Tool::from_slug(&saved.active);
+    let index = tabs.iter().position(|tool| Some(*tool) == active);
+    let panel = s.features.get::<Panel>();
+    panel.tabs = tabs;
+    panel.active = if active == Some(Tool::Launcher) {
+        panel.tabs.len()
+    } else {
+        index.unwrap_or(0)
+    };
+    let tool = panel.current();
+    if saved.open {
+        // Create the main surface first so its initial focus cannot steal the
+        // restored tool's focus. Only allowlisted tool identities reach show.
+        s.ensure(window, cx);
+        show(s, tool, window, cx);
+    }
 }
 
 impl Shell {
@@ -487,6 +540,7 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         s.features.get::<Panel>().browsers.insert(key.clone(), view);
     }
     let panel = s.features.get::<Panel>();
+    panel.restored = true;
     if panel.current() != tool || !panel.motion.is_open() {
         panel.content = Transition::new(200);
         panel.content.set(true);
@@ -519,6 +573,7 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     {
         view.read(cx).focus(window);
     }
+    remember(s);
     cx.notify();
 }
 
@@ -642,6 +697,7 @@ pub(super) fn open_browser(
 pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     if is_open(s) {
         s.features.get::<Panel>().motion.set(false);
+        remember(s);
         s.restore_focus(window, cx);
         cx.notify();
     } else {
@@ -690,7 +746,8 @@ pub(super) fn element(
     // A fixed-width inner column, clipped by the travelling outer width, so the
     // tool never reflows while the panel opens or closes.
     let element = div()
-        .w(px(full))
+        // The outer column includes its one-pixel separator.
+        .w(px((full - 1.).max(0.)))
         .h_full()
         .flex()
         .flex_col()
@@ -752,7 +809,9 @@ fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<
             show(s, tool, window, cx);
             return;
         }
+        s.restore_focus(window, cx);
     }
+    remember(s);
     cx.notify();
 }
 
@@ -889,6 +948,7 @@ fn launcher(cx: &mut Context<Shell>) -> impl IntoElement {
 
 /// Inbox tabs saved before the panel existed move into the panel.
 fn move_inbox_tabs(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    let active_inbox = s.active() == Some(Tab::Inbox);
     let mut moved = false;
     for saved in s.state.workspaces.values_mut() {
         while let Some(index) = saved.tabs.iter().position(|tab| tab == &Tab::Inbox) {
@@ -904,7 +964,20 @@ fn move_inbox_tabs(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         s.content
             .retain(|key, _| key.starts_with("panel|") || !key.ends_with("|Inbox"));
         s.ensure(window, cx);
-        s.persist();
+        if active_inbox {
+            show(s, Tool::Inbox, window, cx);
+        } else {
+            restore(s, window, cx);
+            let panel = s.features.get::<Panel>();
+            let launcher = panel.current() == Tool::Launcher;
+            if !panel.tabs.contains(&Tool::Inbox) {
+                panel.tabs.push(Tool::Inbox);
+                if launcher {
+                    panel.active = panel.tabs.len();
+                }
+            }
+            remember(s);
+        }
         cx.notify();
     }
 }
@@ -1052,6 +1125,7 @@ fn tab_pill(
                     .iter()
                     .position(|open| *open == active)
                     .unwrap_or(0);
+                remember(this);
                 cx.notify();
             }
         }))

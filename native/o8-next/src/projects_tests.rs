@@ -520,10 +520,11 @@ fn projects_preserve_session_focus_and_allow_inbox_navigation(cx: &mut TestAppCo
     cx.simulate_keystrokes("ctrl-shift-p i n b o x enter");
     settle(cx);
     assert!(
-        !shell.read_with(cx, |s, _| s.surfaces.projects.open),
-        "opening Inbox must leave Projects"
+        shell.read_with(cx, |s, _| s.surfaces.projects.open),
+        "the Inbox tool must retain Projects in the main area"
     );
-    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Inbox));
+    inbox_panel(&shell, cx);
+    assert!(shell.read_with(cx, |s, _| s.current().unwrap().composer), "the panel must retain the hidden session's composer focus");
     assert!(cx.debug_bounds("inbox-view-replies").is_some());
     cx.simulate_keystrokes("ctrl-shift-p p r o j e c t s enter");
     settle(cx);

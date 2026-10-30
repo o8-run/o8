@@ -41,6 +41,9 @@ pub struct State {
     /// The right panel width the person dragged; absent keeps the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub right_panel_width: Option<f32>,
+    /// Tool identities and visibility only, never a tool's content or drafts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right_panel: Option<RightPanelState>,
     /// Names the person gave tabs, by tab key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tab_labels: BTreeMap<String, String>,
@@ -64,6 +67,7 @@ impl Default for State {
             workspaces: BTreeMap::new(),
             sidebar_width: None,
             right_panel_width: None,
+            right_panel: None,
             tab_labels: BTreeMap::new(),
             quick_doc_pins: BTreeMap::new(),
             browser_pages: BTreeMap::new(),
@@ -71,6 +75,13 @@ impl Default for State {
             backup_file: Arc::default(),
         }
     }
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct RightPanelState {
+    pub tabs: Vec<String>,
+    pub active: String,
+    pub open: bool,
 }
 pub(crate) fn clean_pins(paths: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut pins = Vec::new();
