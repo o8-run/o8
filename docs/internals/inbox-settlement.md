@@ -63,19 +63,28 @@ slices.
 
 ## Polling cost
 
-Inventory reads lane identities once and indexes the newest lane per session
-for the request. Listings read inbox metadata with one indexed
-`app_state` key-prefix query and cache canonical workspace paths for that request.
-An unchanged runtime observation never opens a write transaction. A newer
-observation rechecks persisted state inside the write transaction before updating
-it. Request snapshots are discarded after the response. Prepared read statements are
-reused per SQLite connection; query results are always read again.
+Inventory checks SQLite `total_changes()` and `data_version` once per GET.
+It reuses the newest lane identity per session only while both revisions match;
+local writes, external commits and reopened database connections invalidate it.
+Settlement guards continue to read fresh full lane records inside the mutation.
+Listings read inbox metadata with one indexed `app_state` key-prefix query.
+Canonical workspace paths share a module-level cache across reads and mutations,
+bounded to 256 entries with a 30-second TTL; a request-local map avoids repeated
+lookups within a listing. Subject keys are built once per subject object. History
+rows use fixed-shape literals and look up state without temporary projection objects.
+
+An unchanged runtime observation opens no write transaction and writes no
+`app_state` rows. A newer observation rechecks persisted state inside the write
+transaction before updating it. Inbox state snapshots are discarded after the
+response; prepared read statements are reused per SQLite connection.
 
 `node scripts/bench-inbox-listings.mjs origin/main` compares bundled Node 22 GET
-handlers against the selected baseline route sources. The provider-discovery
-boundary returns the same fixed 40-agent snapshot to both versions; 200 lanes,
-500 saved conversations and inbox metadata use real temporary SQLite/filesystem
-storage. Each version receives five warmups and 50 measured requests, alternating
-which version goes first. The timer covers handler execution through response
-creation; status, row-count validation and client JSON decoding occur afterward.
-This measures server handler latency, excluding HTTP transport and provider discovery.
+handlers against the selected baseline's full source dependency graph. The
+provider-discovery boundary returns the same fixed 40-agent snapshot to both
+versions; 200 lanes, 500 saved conversations and runtime inbox metadata use real
+temporary SQLite/filesystem storage. Each version receives 20 warmups and 200
+measured requests, interleaved request by request, with alternating pair order.
+The timer covers handler execution through response creation; status, row-count
+validation and client JSON decoding occur afterward. This measures server handler
+latency, excluding HTTP transport and provider discovery. Each percentile must be
+within the baseline plus the larger of 10 percent or 5 ms.

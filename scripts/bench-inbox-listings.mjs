@@ -1,6 +1,6 @@
 import { build } from 'esbuild';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,12 +13,34 @@ const baseSha = git('rev-parse', base).trim();
 const temporary = mkdtempSync(join(root, '.inbox-listings-benchmark-'));
 const data = mkdtempSync(join(tmpdir(), 'o8-inbox-benchmark-'));
 try {
-  for (const [name, path] of [
-    ['inventory', 'src/app/api/runtime/inventory/route.ts'],
-    ['history', 'src/app/api/v2/chat-history/list/route.ts'],
-  ]) {
-    writeFileSync(join(temporary, `main-${name}.ts`), git('show', `${baseSha}:${path}`));
-  }
+  const mainRoot = join(temporary, 'main');
+  mkdirSync(mainRoot);
+  const archive = execFileSync('git', ['-c', 'core.bare=false', 'archive', baseSha, 'src', 'scripts', 'package.json'], { cwd: root, maxBuffer: 100 * 1024 * 1024 });
+  const extracted = spawnSync('tar', ['-x', '-C', mainRoot], { input: archive });
+  if (extracted.status !== 0) throw new Error('Could not extract baseline source');
+  const fixturePlugin = {
+    name: 'fixture-inventory',
+    setup(builder) {
+      builder.onResolve({ filter: /runtime\/inventory$/ }, () => ({ path: 'fixture', namespace: 'inbox-benchmark' }));
+      builder.onLoad({ filter: /.*/, namespace: 'inbox-benchmark' }, () => ({
+        contents: `export function invalidateRuntimeInventoryCache() {}
+          export async function getRuntimeInventorySnapshot() {
+            return { agents: globalThis.inboxBenchmarkAgents, generatedAt: '2026-01-01T00:00:00.000Z',
+              meta: { mode: 'live', sourceLabel: 'Fixture', mirrorMode: 'current-session-first' },
+              squads: [], events: [], artifacts: [] };
+          }`, loader: 'js',
+      }));
+    },
+  };
+  await build({
+    stdin: { contents: `export { GET as mainInventory } from '@/app/api/runtime/inventory/route';
+      export { GET as mainHistory } from '@/app/api/v2/chat-history/list/route';
+      export { closeDb as closeMainDb } from '@/lib/db';`, loader: 'ts', resolveDir: root },
+    bundle: true, platform: 'node', format: 'cjs', target: 'node22', packages: 'external',
+    outfile: join(temporary, 'baseline.cjs'),
+    alias: { '@': mainRoot + '/src', 'server-only': root + '/tests/stubs/server-only.ts' },
+    plugins: [fixturePlugin],
+  });
   const entry = `
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,8 +50,7 @@ import { createLane } from '@/lib/lane/registry';
 import { closeDb } from '@/lib/db';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { inboxSubject, observeInboxRuntimeRun } from '@/lib/inbox/store';
-import { GET as mainInventory } from '${temporary}/main-inventory.ts';
-import { GET as mainHistory } from '${temporary}/main-history.ts';
+import { mainInventory, mainHistory, closeMainDb } from '${temporary}/baseline.cjs';
 import { GET as branchInventory } from '@/app/api/runtime/inventory/route';
 import { GET as branchHistory } from '@/app/api/v2/chat-history/list/route';
 
@@ -73,7 +94,7 @@ for (const agent of agents) {
       'http://localhost/api/v2/chat-history/list?include=orchestrator&limit=500', 'conversations', 500],
   ]) {
     const samples = [[], []];
-    for (let i = 0; i < 55; i++) {
+    for (let i = 0; i < 220; i++) {
       for (const n of (i % 2 ? [1, 0] : [0, 1])) {
         const request = new NextRequest(url);
         const start = performance.now();
@@ -81,17 +102,21 @@ for (const agent of agents) {
         const elapsed = performance.now() - start;
         const body = await response.json();
         if (response.status !== 200 || body[field].length !== count) throw new Error('Invalid fixture response');
-        if (i >= 5) samples[n].push(elapsed);
+        if (i >= 20) samples[n].push(elapsed);
       }
     }
     const stats = samples.map(times => {
       times.sort((a, b) => a - b);
-      return { p50: times[24], p95: times[47] };
+      return { p50: times[99], p95: times[189] };
     });
-    results.push({ name, requests: 50, warmup: 5, main: stats[0], branch: stats[1] });
+    const allowed = Object.fromEntries(['p50', 'p95'].map(percentile => [percentile,
+      stats[0][percentile] + Math.max(stats[0][percentile] * 0.1, 5)]));
+    results.push({ name, requests: 200, warmup: 20, main: stats[0], branch: stats[1], allowed,
+      withinBudget: Object.fromEntries(['p50', 'p95'].map(percentile => [percentile, stats[1][percentile] <= allowed[percentile]])) });
   }
   writeFileSync('${temporary}/measurements.json', JSON.stringify(results));
   closeDb();
+  closeMainDb();
   process.exit(0); // Imported server modules can own background timers.
 })().catch(error => { console.error(error); process.exit(1); });
 `;
@@ -100,31 +125,18 @@ for (const agent of agents) {
     platform: 'node', format: 'cjs', target: 'node22', packages: 'external',
     outfile: join(temporary, 'benchmark.cjs'),
     alias: { '@': root + '/src', 'server-only': root + '/tests/stubs/server-only.ts' },
-    plugins: [{
-      name: 'fixture-inventory',
-      setup(builder) {
-        builder.onResolve({ filter: /runtime\/inventory$/ }, () => ({ path: 'fixture', namespace: 'inbox-benchmark' }));
-        builder.onLoad({ filter: /.*/, namespace: 'inbox-benchmark' }, () => ({
-          contents: `export function invalidateRuntimeInventoryCache() {}
-            export async function getRuntimeInventorySnapshot() {
-              return { agents: globalThis.inboxBenchmarkAgents, generatedAt: '2026-01-01T00:00:00.000Z',
-                meta: { mode: 'live', sourceLabel: 'Fixture', mirrorMode: 'current-session-first' },
-                squads: [], events: [], artifacts: [] };
-            }`,
-          loader: 'js',
-        }));
-      },
-    }],
+    plugins: [fixturePlugin],
+    external: [join(temporary, 'baseline.cjs')],
   });
   const env = { ...process.env, NODE_ENV: 'test', CORTEX_IDE_DATA_DIR: data };
   for (const key of ['O8_DATA_DIR', 'O8_API_TOKEN', 'O8_WORKER_TOKEN', 'O8_SPECTATOR_TOKEN']) delete env[key];
   const result = spawnSync(process.execPath, [join(temporary, 'benchmark.cjs')], {
-    cwd: root, env, encoding: 'utf8', timeout: 120_000,
+    cwd: root, env, encoding: 'utf8', timeout: 300_000,
   });
   if (result.status !== 0) throw new Error(result.stderr || result.error?.message || 'Benchmark child failed');
   console.log(JSON.stringify({
     baseSha,
-    methodology: 'Bundled Node 22 GET handler wall time; 5 warmups and 50 alternating requests per version; response validation outside the timer; fixed discovery snapshot and real SQLite/history files',
+    methodology: 'Independent baseline source graph at baseSha; bundled Node 22 GET handler wall time; 20 warmups and 200 request-by-request interleaved samples per version; alternating pair order; response validation outside the timer; fixed discovery snapshot and real SQLite/history files',
     results: JSON.parse(readFileSync(join(temporary, 'measurements.json'), 'utf8')),
   }, null, 2));
 } finally {

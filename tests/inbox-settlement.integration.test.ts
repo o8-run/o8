@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import Database from 'better-sqlite3';
+import { inboxSubject } from '@/lib/inbox/store';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { createEmptyOrchestratorMissionState } from '@/lib/orchestrator/store';
@@ -128,7 +130,7 @@ describe('inbox settlement through operator mutation and native listings', () =>
     fixture.transcript = [];
   });
 
-  it('reads lanes once and takes no write transaction when inventory activity is unchanged', async () => {
+  it('reads lanes once per poll and writes no app_state rows after adopting unchanged activity', async () => {
     fixture.agents = Array.from({ length: 4 }, (_, index) => ({
       sessionKey: `codex:poll-${process.pid}-${index}`, workspace: process.cwd(), runtime: 'codex', status: 'idle',
       runtimeSurface: { lifecycle: { lastRunStartedAt: '2026-01-01T00:00:00.000Z' } },
@@ -138,6 +140,7 @@ describe('inbox settlement through operator mutation and native listings', () =>
     expect((await PATCH(request({ sessionKey: fixture.agents[0].sessionKey, inboxAction: 'unsettle' }))).status).toBe(200);
     const statementPrototype = Object.getPrototypeOf(getSqlite().prepare('SELECT 1')) as {
       all: (...parameters: unknown[]) => unknown[];
+      run: (...parameters: unknown[]) => unknown;
     };
     const all = statementPrototype.all;
     let laneReads = 0;
@@ -145,21 +148,96 @@ describe('inbox settlement through operator mutation and native listings', () =>
       if (/\bFROM\s+["`]?lanes\b/i.test(this.source)) laneReads += 1;
       return all.apply(this, parameters);
     });
+    const run = statementPrototype.run;
+    let stateWrites = 0;
+    const writes = vi.spyOn(statementPrototype, 'run').mockImplementation(function(this: { source: string }, ...parameters: unknown[]) {
+      if (/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+["`]?app_state\b/i.test(this.source)) stateWrites += 1;
+      return run.apply(this, parameters);
+    });
     const transaction = vi.spyOn(getSqlite(), 'transaction');
     try {
-      const snapshot = await (await poll()).json();
-      expect(snapshot.agents).toHaveLength(4);
-      expect(snapshot.agents[0].settledOverride).toBe('active');
+      for (let index = 0; index < 3; index++) {
+        const snapshot = await (await poll()).json();
+        expect(snapshot.agents).toHaveLength(4);
+        expect(snapshot.agents[0].settledOverride).toBe('active');
+      }
       expect(transaction).not.toHaveBeenCalled();
-      expect(laneReads).toBe(1);
+      expect(stateWrites).toBe(0);
+      expect(laneReads).toBe(1); // First poll refreshes after PATCH; subsequent revision checks reuse it.
       fixture.agents[0].runtimeSurface = { lifecycle: { lastRunStartedAt: new Date(Date.now() + 1_000).toISOString() } };
       const advanced = await (await poll()).json();
       expect(advanced.agents[0].settledOverride).toBeNull();
       expect(transaction).toHaveBeenCalledTimes(1);
+      expect(stateWrites).toBe(1);
     } finally {
       trace.mockRestore();
+      writes.mockRestore();
       transaction.mockRestore();
       fixture.agents = [];
+    }
+  });
+
+  it('shares canonical workspace identities across reads and mutations until the bounded TTL expires', async () => {
+    const root = join(getDataDir(), 'inbox-workspace-cache');
+    const first = join(root, 'first');
+    const second = join(root, 'second');
+    const link = join(root, 'link');
+    mkdirSync(first, { recursive: true });
+    mkdirSync(second, { recursive: true });
+    symlinkSync(first, link);
+    const tabId = await seed('workspace-cache');
+    const file = join(getDataDir(), 'chat-history', `${tabId}.json`);
+    const history = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...history, repoPath: link }));
+    const native = vi.spyOn(realpathSync, 'native');
+    const clock = vi.spyOn(Date, 'now');
+    const now = Date.now();
+    const read = async () => {
+      const snapshot = await (await historyList(new NextRequest('http://localhost/api/v2/chat-history/list?include=orchestrator'))).json();
+      return snapshot.conversations.find((row: { tabId: string }) => row.tabId === tabId);
+    };
+    try {
+      clock.mockReturnValue(now);
+      expect((await mutate(tabId, 'unsettle')).status).toBe(200);
+      unlinkSync(link);
+      symlinkSync(second, link);
+      expect(await read()).toMatchObject({ inboxSubject: { workspace: first }, settledOverride: 'active' });
+      expect(native.mock.calls.filter(([path]) => path === link)).toHaveLength(1);
+      clock.mockReturnValue(now + 30_001);
+      expect(await read()).toMatchObject({ inboxSubject: { workspace: second }, settledOverride: null });
+      expect((await mutate(tabId, 'unsettle')).status).toBe(200);
+      expect(await read()).toMatchObject({ inboxSubject: { workspace: second }, settledOverride: 'active' });
+      expect(native.mock.calls.filter(([path]) => path === link)).toHaveLength(2);
+      // Eviction forces resolution again even before the TTL expires.
+      for (let index = 0; index < 256; index++) inboxSubject('runtime', 'cache-bound', join(root, `offline-${index}`));
+      expect(inboxSubject('conversation', tabId, link).workspace).toBe(second);
+      expect(native.mock.calls.filter(([path]) => path === link)).toHaveLength(3);
+    } finally {
+      native.mockRestore();
+      clock.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('invalidates lane identities after both external commits and local writes', async () => {
+    const sessionKey = `codex:lane-cache-${process.pid}`;
+    fixture.agents = [{ sessionKey, workspace: process.cwd(), runtime: 'codex', status: 'idle',
+      runtimeSurface: { lifecycle: { lastRunStartedAt: '2026-01-01T00:00:00.000Z' } } }];
+    const lane = createLane({ repoPath: process.cwd(), branch: 'cache-invalidation', runtime: 'codex', sessionKey, baseCommit: 'a'.repeat(40) });
+    const otherWorkspace = join(getDataDir(), 'inbox-external-workspace');
+    mkdirSync(otherWorkspace, { recursive: true });
+    const external = new Database(getSqlite().name);
+    const read = async () => (await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json()).agents[0];
+    try {
+      expect((await read()).inboxSubject.workspace).toBe(realpathSync.native(process.cwd()));
+      external.prepare('UPDATE lanes SET repo_path = ? WHERE id = ?').run(otherWorkspace, lane.id);
+      expect((await read()).inboxSubject.workspace).toBe(otherWorkspace);
+      getSqlite().prepare('UPDATE lanes SET repo_path = ? WHERE id = ?').run(process.cwd(), lane.id);
+      expect((await read()).inboxSubject.workspace).toBe(realpathSync.native(process.cwd()));
+    } finally {
+      external.close();
+      fixture.agents = [];
+      rmSync(otherWorkspace, { recursive: true, force: true });
     }
   });
 

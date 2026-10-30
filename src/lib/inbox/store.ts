@@ -34,6 +34,21 @@ export function inboxReadStatement(sql: string, raw = false): InboxReadStatement
   }
   return statement;
 }
+const workspaceCache = new Map<string, { path: string; expiresAt: number }>();
+const subjectKeys = new WeakMap<InboxSubject, string>();
+/** Reads and mutations share canonical identities, bounded to 256 paths / 30 seconds. */
+function canonicalWorkspace(recorded: string): string {
+  const absolute = resolve(recorded);
+  const now = Date.now();
+  const cached = workspaceCache.get(absolute);
+  if (cached && cached.expiresAt > now) return cached.path;
+  let path = absolute;
+  try { path = realpathSync.native(absolute); } catch { /* Offline checkout retains its recorded path. */ }
+  workspaceCache.delete(absolute);
+  if (workspaceCache.size >= 256) workspaceCache.delete(workspaceCache.keys().next().value!);
+  workspaceCache.set(absolute, { path, expiresAt: now + 30_000 });
+  return path;
+}
 export interface InboxReadContext {
   states: Map<string, StoredInboxState>;
   workspaces: Map<string, string | null>;
@@ -52,8 +67,7 @@ export function inboxSubject(kind: InboxSubject['kind'], id: string, workspace: 
     const recorded = path;
     if (workspaces?.has(recorded)) path = workspaces.get(recorded) ?? null;
     else {
-      path = resolve(path);
-      try { path = realpathSync.native(path); } catch { /* Offline checkout retains its recorded path. */ }
+      path = canonicalWorkspace(path);
       workspaces?.set(recorded, path);
     }
   }
@@ -62,10 +76,19 @@ export function inboxSubject(kind: InboxSubject['kind'], id: string, workspace: 
 function key(subject: InboxSubject): string {
   // Project metadata can be attached after creation. Recorded workspace and
   // qualified identity remain stable when the operator changes project scope.
-  return `inbox:subject:${JSON.stringify([subject.kind, subject.workspace, subject.id])}`;
+  let stored = subjectKeys.get(subject);
+  if (!stored) {
+    stored = `inbox:subject:${JSON.stringify([subject.kind, subject.workspace, subject.id])}`;
+    subjectKeys.set(subject, stored);
+  }
+  return stored;
+}
+/** No default-state allocation on read-only listing rows. */
+export function inboxListingState(subject: InboxSubject, context: InboxReadContext): StoredInboxState | undefined {
+  return context.states.size ? context.states.get(key(subject)) : undefined;
 }
 export function readInboxState(subject: InboxSubject, context?: InboxReadContext): StoredInboxState {
-  if (context) return context.states.get(key(subject)) ?? emptySettlement();
+  if (context) return inboxListingState(subject, context) ?? emptySettlement();
   const row = inboxReadStatement('SELECT value FROM app_state WHERE key = ?').get(key(subject)) as { value: string } | undefined;
   return row ? JSON.parse(row.value) as StoredInboxState : emptySettlement();
 }
@@ -93,9 +116,10 @@ export function inboxProjection<T extends object>(subject: InboxSubject, parent:
   context: InboxReadContext | undefined, base: T): T & InboxProjection;
 export function inboxProjection(subject: InboxSubject, parent?: InboxSubject | null, context?: InboxReadContext): InboxProjection;
 export function inboxProjection(subject: InboxSubject, parentInboxSubject: InboxSubject | null = null, context?: InboxReadContext, base?: object) {
-  const state = context ? (context.states.size ? context.states.get(key(subject)) : undefined) : readInboxState(subject);
-  return { ...base, inboxSubject: subject, parentInboxSubject, settledOverride: state?.settledOverride ?? null,
+  const state = context ? inboxListingState(subject, context) : readInboxState(subject);
+  const projection = { inboxSubject: subject, parentInboxSubject, settledOverride: state?.settledOverride ?? null,
     settledAt: state?.settledAt ?? null, unsettledAt: state?.unsettledAt ?? null };
+  return base ? Object.assign({}, base, projection) : projection;
 }
 
 /** Called by the WS broadcast chokepoint, never by a client history save. */

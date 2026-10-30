@@ -8,6 +8,7 @@
  * identities, with existing approval, queue, lane and run evidence.
  */
 import type { Lane } from '@/lib/lane/types';
+import { getSqlite } from '@/lib/db';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getRuntime } from '@/lib/runtimes';
@@ -34,8 +35,16 @@ export function inboxPackets() {
   return [...new Map([...others, ...current].map(packet => [packet.id, packet])).values()];
 }
 type InboxLane = Pick<Lane, 'sessionKey' | 'packetId' | 'repoPath' | 'projectId'>;
-/** Polling needs identity fields, not full ORM decoding of every lane column. */
+const laneReads = new WeakMap<ReturnType<typeof getSqlite>, {
+  changes: number; version: number; lanes: Map<string, InboxLane>;
+}>();
+/** Revision checks invalidate on local writes and commits from other SQLite connections. */
 export function readInboxLanes(): Map<string, InboxLane> {
+  const db = getSqlite();
+  const revision = inboxReadStatement('SELECT total_changes() AS changes, data_version AS version FROM pragma_data_version')
+    .get() as { changes: number; version: number };
+  const cached = laneReads.get(db);
+  if (!db.inTransaction && cached && cached.changes === revision.changes && cached.version === revision.version) return cached.lanes;
   const rows = inboxReadStatement(`SELECT session_key, packet_id, repo_path, project_id FROM lanes
     WHERE session_key IS NOT NULL ORDER BY created_at DESC, updated_at DESC, rowid DESC`, true)
     .all() as Array<[string, string | null, string, string | null]>;
@@ -43,6 +52,7 @@ export function readInboxLanes(): Map<string, InboxLane> {
   for (const row of rows) if (!newest.has(row[0])) newest.set(row[0], {
     sessionKey: row[0], packetId: row[1], repoPath: row[2], projectId: row[3],
   });
+  if (!db.inTransaction) laneReads.set(db, { ...revision, lanes: newest });
   return newest;
 }
 export function runtimeInboxIdentity(agent: Pick<AgentSummary, 'sessionKey' | 'workspace'>, packets = inboxPackets(), lanes: Lane[] | Map<string, InboxLane> = listLanes(), context?: InboxReadContext) {

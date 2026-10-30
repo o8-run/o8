@@ -15,7 +15,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { orchestratorDisplayTitle, stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { deleteCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
-import { createInboxReadContext, inboxProjection, inboxSubject } from '@/lib/inbox/store';
+import { createInboxReadContext, inboxListingState, type inboxProjection, inboxSubject } from '@/lib/inbox/store';
 import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
@@ -190,10 +190,10 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        const settlement = inboxProjection(inboxSubject('conversation', tabId, data.repoPath,
-          data.projectId, inbox.workspaces), null, inbox);
+        const subject = inboxSubject('conversation', tabId, data.repoPath, data.projectId, inbox.workspaces);
+        const settlement = inboxListingState(subject, inbox);
         conversations.push({
-          tabId: basename(file, '.json'),
+          tabId,
           title,
           preview,
           empty: isEmpty,
@@ -213,11 +213,11 @@ export async function GET(request: NextRequest) {
           backend: isOrchestratorBackendId(data.backend) ? data.backend : null,
           agent: typeof data.agent === 'string' && data.agent.trim() ? data.agent.trim() : null,
           archivedAt,
-          inboxSubject: settlement.inboxSubject,
-          parentInboxSubject: settlement.parentInboxSubject,
-          settledOverride: settlement.settledOverride,
-          settledAt: settlement.settledAt,
-          unsettledAt: settlement.unsettledAt,
+          inboxSubject: subject,
+          parentInboxSubject: null,
+          settledOverride: settlement?.settledOverride ?? null,
+          settledAt: settlement?.settledAt ?? null,
+          unsettledAt: settlement?.unsettledAt ?? null,
         });
       } catch { /* skip bad files */ }
     }
