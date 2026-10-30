@@ -209,19 +209,6 @@ export async function POST(request: NextRequest) {
   }
   const scope = packetId ?? 'operator';
 
-  // The owned Next child precedes classic's native/iframe panel path. Explicit
-  // canvas and engine targeting retain their existing routing. A lost receipt
-  // must never send a click/type a second time through a different renderer.
-  if (args.surface !== 'canvas' && args.surface !== 'engine') {
-    const next = requestNextBrowser(verb, args);
-    if (next) {
-      const result = await next as Record<string, unknown>;
-      if (packetId && verb !== 'probe') recordAction(packetId, verb, args, result?.ok === true, typeof result?.url === 'string' ? result.url : undefined, 'native');
-      return NextResponse.json(result);
-    }
-  }
-
-
   // Native-only Design Mode click-to-grab (Stage 4b) — handled before engine
   // routing (it drives the native browser-view agent, never the engine tier).
   if (verb === 'designgrab' || verb === 'stopdesigngrab') {
@@ -280,6 +267,18 @@ export async function POST(request: NextRequest) {
       const url = typeof result.url === 'string' ? result.url : undefined;
       if (packetId && verb !== 'probe') recordAction(packetId, verb, args, ok, url, 'engine');
       return NextResponse.json(result);
+    }
+
+    // The owned Next child precedes classic's native/iframe panel path. Explicit
+    // canvas and engine targeting retain their existing routing. A lost receipt
+    // must never send a click/type a second time through a different renderer.
+    if (args.surface !== 'canvas' && args.surface !== 'engine') {
+      const next = requestNextBrowser(verb, args);
+      if (next) {
+        const result = await next as Record<string, unknown>;
+        if (packetId && verb !== 'probe') recordAction(packetId, verb, args, result?.ok === true, typeof result?.url === 'string' ? result.url : undefined, 'native');
+        return NextResponse.json(result);
+      }
     }
 
     const client = webviewClient();
