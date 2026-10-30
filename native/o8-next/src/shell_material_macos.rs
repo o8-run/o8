@@ -49,8 +49,12 @@ pub(super) fn remove(window: &gpui::Window) {
         for index in 0..count {
             let view: id = msg_send![subviews, objectAtIndex: index];
             let name: id = msg_send![view, identifier];
+            // Most views carry no identifier; never message a nil name.
+            if name == nil {
+                continue;
+            }
             let same: cocoa::base::BOOL = msg_send![name, isEqualToString: mine];
-            if name != nil && same != cocoa::base::NO {
+            if same != cocoa::base::NO {
                 marked.push(view);
             }
         }
