@@ -132,7 +132,8 @@ fn inbox_state(cx: &mut gpui::VisualTestContext) -> String {
             Some(Content::Inbox(inbox)) => {
                 let i = inbox.read(cx);
                 Some(format!(
-                    "lane={} cards={:?} loading={} loaded={} errors={:?} notice={:?}",
+                    "focused={} lane={} cards={:?} loading={} loaded={} errors={:?} notice={:?}",
+                    i.focus.contains_focused(window, cx),
                     i.lane,
                     i.cards.iter().map(Vec::len).collect::<Vec<_>>(),
                     i.loading,
@@ -160,6 +161,7 @@ fn settle_shell(shell: &Entity<Shell>, cx: &mut gpui::VisualTestContext) {
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+    panic!("shell never connected: {}", inbox_state(cx));
 }
 fn click(cx: &mut gpui::VisualTestContext, selector: &str) {
     draw(cx);
@@ -230,7 +232,10 @@ fn tab_to_action(shell: &Entity<Shell>, cx: &mut gpui::VisualTestContext, id: &s
             return;
         }
     }
-    panic!("approval action must be reachable by Tab and show a visible focus ring");
+    panic!(
+        "approval action must be reachable by Tab and show a visible focus ring: {}",
+        inbox_state(cx)
+    );
 }
 
 #[gpui::test]
