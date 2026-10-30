@@ -84,6 +84,7 @@ pub struct ActivityPane {
     /// PacketCloseUnmergedActions' busy label while the close receipt settles.
     pub(super) close_stage: Option<&'static str>,
     pub(super) scope_menu: bool,
+    pub(super) remote_updated: Option<u64>,
     pub(super) focus: FocusHandle,
     pub(super) controls: Vec<(String, Action)>,
     pub(super) keyboard: Option<String>,
@@ -115,6 +116,7 @@ impl ActivityPane {
             close_reason: CLOSE_REASONS[0].0,
             close_stage: None,
             scope_menu: false,
+            remote_updated: None,
             focus: cx.focus_handle(),
             controls: vec![],
             keyboard: None,
@@ -202,6 +204,7 @@ impl ActivityPane {
                 this.errors = snapshot.errors;
                 this.cache = snapshot.cache;
                 this.mission = snapshot.mission;
+                this.remote_updated = snapshot.remote_updated;
                 if !this.rows.iter().any(|r| Some(r.key()) == this.expanded) {
                     this.expanded = None;
                 }

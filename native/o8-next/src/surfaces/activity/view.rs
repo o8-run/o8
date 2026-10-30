@@ -88,6 +88,36 @@ impl ActivityPane {
             .opacity(0.6)
             .child(label.into())
     }
+    /// O8ActivityMissionControls' compact button: 24px, hairline, 10px medium.
+    fn compact(
+        &mut self,
+        id: &'static str,
+        label: &'static str,
+        action: Action,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
+        let selected = self.keyboard.as_deref() == Some(id);
+        let base = if busy {
+            div().id(id).debug_selector(move || id.into()).opacity(0.55)
+        } else {
+            self.control(id, action, cx).hover(|v| v.bg(theme().hover))
+        };
+        hairline(
+            base.flex_shrink_0()
+                .h(px(24.))
+                .px(px(8.))
+                .rounded(px(8.))
+                .border_color(theme().border)
+                .flex()
+                .items_center()
+                .bg(if selected { theme().selection } else { CLEAR })
+                .text_size(px(10.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme().text_muted),
+        )
+        .child(label)
+    }
     fn link(
         &mut self,
         id: &str,
@@ -847,23 +877,31 @@ impl Render for ActivityPane {
         let now = crate::clock::now();
         // Repository scope and the mission controls share the first header row.
         let scope = self.scope_selector(cx);
+        let refresh = self.compact("activity-refresh", "Refresh", Action::Refresh, false, cx);
         let mut top = div()
             .flex()
             .items_center()
             .gap(px(8.))
             .child(scope)
-            .child(self.button("activity-refresh", "Refresh", Action::Refresh, cx));
+            .child(refresh);
         if self.mission["missionId"]
             .as_str()
             .is_some_and(|s| !s.trim().is_empty())
-            && !self.pending
         {
-            top = top.child(self.button(
-                "activity-stop-mission",
-                "Stop mission",
-                Action::StopMission,
-                cx,
-            ));
+            let pending = self.pending;
+            top = top.child(
+                self.compact(
+                    "activity-stop-mission",
+                    "Stop mission",
+                    Action::StopMission,
+                    pending,
+                    cx,
+                )
+                .tooltip(|_, cx| {
+                    cx.new(|_| icon::Tip("Stop and hold every packet in this mission".into()))
+                        .into()
+                }),
+            );
         }
         // Classic's filter pills: one hairline group, the active pill in accent.
         let accent = tint(marks::ACCENT, 1.);
@@ -958,8 +996,28 @@ impl Render for ActivityPane {
                 .line_height(relative(1.45))
                 .text_color(theme().text_muted)
         };
-        if !self.errors.is_empty() {
-            list = list.child(status().children(self.errors.clone()));
+        // Classic's read-failure block: the errors, how old the saved GitHub
+        // state is (GithubReadStatus), and Retry.
+        if !self.loading && !self.errors.is_empty() {
+            let mut block = status().children(self.errors.clone());
+            if self.errors.iter().any(|e| e.starts_with("GitHub")) {
+                let saved = match self.remote_updated.map(|t| now.saturating_sub(t)) {
+                    None => "No saved state is available.".to_owned(),
+                    Some(age) if age < 60 => format!("Showing saved state updated {age}s ago."),
+                    Some(age) => format!("Showing saved state updated {}m ago.", age / 60),
+                };
+                block = block.child(
+                    div()
+                        .debug_selector(|| "activity-github-status".into())
+                        .text_size(px(11.))
+                        .font_weight(FontWeight::LIGHT)
+                        .line_height(relative(1.35))
+                        .text_color(theme().warning)
+                        .child(format!("GitHub refresh delayed. {saved}")),
+                );
+            }
+            let retry = self.button("activity-retry", "Retry", Action::Refresh, cx);
+            list = list.child(block.child(div().mt(px(8.)).flex().child(retry)));
         }
         if !self.notice.is_empty() {
             list = list.child(status().child(self.notice.clone()));
@@ -996,14 +1054,34 @@ impl Render for ActivityPane {
                     .repos
                     .iter()
                     .any(|r| r.local_path == self.scope && r.slug().is_some());
-            let message = if self.scope.is_empty() {
-                "Choose a folder to see activity here."
-            } else if !connected && matches!(self.filter, "pr" | "issue" | "ci") {
-                "Connect GitHub to see pull requests, issues, and CI runs."
-            } else if !connected && matches!(self.filter, "all" | "commit") {
-                "No commits yet in this folder."
+            // Classic names the repository and the filter.
+            let label = self
+                .repos
+                .iter()
+                .find(|repo| repo.local_path == self.scope)
+                .map(|repo| repo_meta(repo).0)
+                .or_else(|| {
+                    self.scope
+                        .rsplit(['/', '\\'])
+                        .find(|s| !s.is_empty())
+                        .map(String::from)
+                })
+                .unwrap_or_else(|| "this folder".into());
+            let kind = if self.filter == "all" {
+                String::new()
             } else {
-                "No activity yet for this repository."
+                format!("{} ", self.filter)
+            };
+            let message = if self.scope.is_empty() {
+                "Choose a folder to see activity here.".to_owned()
+            } else if !connected && matches!(self.filter, "pr" | "issue" | "ci") {
+                "Connect GitHub to see pull requests, issues, and CI runs.".to_owned()
+            } else if !connected && matches!(self.filter, "all" | "commit") {
+                format!("No commits yet in {label}.")
+            } else if self.scope == "*" {
+                format!("No {kind}activity yet.")
+            } else {
+                format!("No {kind}activity yet for {label}.")
             };
             list = list.child(
                 quiet()

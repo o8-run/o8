@@ -164,6 +164,8 @@ fn rows(
 #[derive(Clone, Default)]
 pub struct Streams {
     pub remote: HashMap<&'static str, Vec<Row>>,
+    /// When each remote stream last read successfully, in epoch seconds.
+    pub updated: HashMap<&'static str, u64>,
 }
 #[derive(Default)]
 pub struct Snapshot {
@@ -171,6 +173,8 @@ pub struct Snapshot {
     pub errors: Vec<String>,
     pub cache: HashMap<String, Streams>,
     pub mission: Value,
+    /// The oldest successful remote read among the targets (classic remoteUpdatedAt).
+    pub remote_updated: Option<u64>,
 }
 
 pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams>) -> Snapshot {
@@ -178,6 +182,7 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
         cache: previous,
         ..Default::default()
     };
+    let mut stamps = vec![];
     for target in targets {
         let slug = target.slug();
         let identity = target.identity();
@@ -202,6 +207,7 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
             match read {
                 Some(Ok(rows)) => {
                     cache.remote.insert(kind, rows);
+                    cache.updated.insert(kind, crate::clock::now());
                 }
                 Some(Err(_)) => {
                     if !out.errors.iter().any(|s| s.starts_with("GitHub")) {
@@ -210,9 +216,11 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
                 }
                 None => {
                     cache.remote.remove(kind);
+                    cache.updated.remove(kind);
                 }
             }
         }
+        stamps.extend(cache.updated.values().copied());
         let mut commits = cache.remote.get("commit").cloned().unwrap_or_default();
         if !target.local_path.is_empty() {
             let local = client
@@ -296,6 +304,7 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
     grouped.sort_by(|a, b| b.date.cmp(&a.date));
     grouped.truncate(50);
     out.rows = grouped;
+    out.remote_updated = stamps.into_iter().min();
     out
 }
 

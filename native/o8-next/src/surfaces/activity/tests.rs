@@ -323,6 +323,15 @@ fn activity_empty_local_auth_and_scoped_retention(cx: &mut TestAppContext) {
             .iter()
             .any(|s| s.starts_with("GitHub sync delayed"))
     }));
+    // Classic's GithubReadStatus: the saved remote state's age, and Retry.
+    assert!(view.read_with(cx, |v, _| v.remote_updated.is_some()));
+    assert!(cx.debug_bounds("activity-github-status").is_some());
+    let loaded = view.read_with(cx, |v, _| v.loaded_at);
+    activity_click(cx, "activity-retry");
+    assert!(
+        view.read_with(cx, |v, _| v.loaded_at > loaded),
+        "Retry reloads"
+    );
     let _: Value = fixture
         .client
         .get("/api/activity-fixture", &[("mode", "empty")])
