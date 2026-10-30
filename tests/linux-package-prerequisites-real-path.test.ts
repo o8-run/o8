@@ -39,8 +39,10 @@ function fixture() {
   const scripts = {
     sudo: `const r = require('node:child_process').spawnSync(process.argv[2], process.argv.slice(3), { stdio: 'inherit', env: process.env }); process.exit(r.status ?? 1);`,
     'dpkg-query': `const state = JSON.parse(require('node:fs').readFileSync(process.env.APT_FIXTURE_STATE)); if (state.installed) console.log('install ok installed'); else process.exit(1);`,
-    'dpkg-deb': `process.stdout.write('fixture\\t1\\tall');`,
-    'apt-cache': `console.log('Package: fixture\\nVersion: 1\\nArchitecture: all\\nFilename: pool/main/f/fixture/fixture_1_all.deb\\nSHA256: ${trustedHash}\\n');`,
+    'dpkg-deb': `process.stdout.write('fixture\\t1\\t' + (process.env.APT_FIXTURE_VARIANT ? 'amd64' : 'all'));`,
+    'apt-cache': `const variant = process.env.APT_FIXTURE_VARIANT, declared = process.env.APT_FIXTURE_DECLARED ?? variant;
+      console.log(variant ? 'Package: fixture\\nVersion: 1\\nArchitecture: amd64\\nFilename: pool/main/f/fixture/fixture_1_' + variant + '.deb\\nSHA256: ${trustedHash}' + (declared ? '\\nArchitecture-Variant: ' + declared : '') + '\\n'
+        : 'Package: fixture\\nVersion: 1\\nArchitecture: all\\nFilename: pool/main/f/fixture/fixture_1_all.deb\\nSHA256: ${trustedHash}\\n');`,
     install: `const fs=require('node:fs'), path=require('node:path'), args=process.argv.slice(2);
       const input=args.at(-2), destination=args.at(-1);
       if (!destination.startsWith('/var/cache/apt/archives/')) process.exit(36);
@@ -51,7 +53,7 @@ function fixture() {
       if (args.includes('update')) process.exit(0);
       const local = args.find(arg => arg.endsWith('.deb'));
       const directory = args.find(arg => arg.startsWith('Dir::Cache::archives='))?.split('=').slice(1).join('=') ?? process.env.APT_FIXTURE_ARCHIVES;
-      const archive=path.join(directory,'fixture_1_all.deb');
+      const archive=path.join(directory,'fixture_1_'+(process.env.APT_FIXTURE_VARIANT ?? 'all')+'.deb');
       if (args.includes('--download-only')) {
         if (!fs.existsSync(archive)) {
           if (process.env.APT_FIXTURE_PACKAGE_NETWORK === 'false') process.exit(23);
@@ -109,6 +111,32 @@ linuxIt.each(['rust','resources'])('rejects a tampered archive and matching mani
   expect(JSON.parse(readFileSync(f.state,'utf8')).bytes).toBe(f.trusted);
   expect(result.stdout).toContain('signed index');
   expect(result.metadata).toContain('source=download');
+});
+
+linuxIt('authenticates an architecture-variant archive the signed index declares', () => {
+  const f=fixture(); const variant={APT_FIXTURE_VARIANT:'amd64v3'};
+  const miss=f.run('install',variant);
+  expect(miss.status,miss.stderr+miss.stdout).toBe(0);
+  expect(miss.metadata).toContain('source=download');
+  expect(JSON.parse(readFileSync(path.join(f.cache,'manifest.json'),'utf8')).archives).toEqual([{file:'fixture_1_amd64v3.deb',sha256:f.trustedHash}]);
+  f.reset(); const hit=f.run('install',{...variant,APT_FIXTURE_PACKAGE_NETWORK:'false'});
+  expect(hit.status,hit.stderr+hit.stdout).toBe(0);
+  expect(hit.metadata).toContain('source=cache');
+  expect(JSON.parse(readFileSync(f.state,'utf8')).bytes).toBe(f.trusted);
+  writeFileSync(path.join(f.cache,'fixture_1_amd64v3.deb'),f.trusted.slice(0,-1)+'!');
+  f.reset(); const tampered=f.run('install',variant);
+  expect(tampered.status,tampered.stderr+tampered.stdout).toBe(0);
+  expect(tampered.stdout).toContain('discarded fixture_1_amd64v3.deb: signed index mismatch');
+  expect(tampered.metadata).toContain('source=download');
+  expect(JSON.parse(readFileSync(f.state,'utf8')).bytes).toBe(f.trusted);
+});
+
+linuxIt.each([['undeclared', ''], ['differently declared', 'amd64v2']])('rejects a variant archive name the signed index left %s', (_, declared) => {
+  const f=fixture();
+  const result=f.run('install',{APT_FIXTURE_VARIANT:'amd64v3',APT_FIXTURE_DECLARED:declared});
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('APT archive does not match the signed index');
+  expect(JSON.parse(readFileSync(f.state,'utf8')).installed).toBe(false);
 });
 
 linuxIt('unlinks a tampered system-cache symlink without following or modifying its target', () => {
