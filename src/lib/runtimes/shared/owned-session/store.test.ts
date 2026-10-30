@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -55,7 +55,14 @@ describe('createOwnedSessionStore launch readiness gate', () => {
   let priorNodeEnv: string | undefined;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(path.join(process.cwd(), '.tmp-owned-store-'));
+    // Scratch lives under a dedicated hidden dir in the home tree — a
+    // validateWorkspace-allowed root — never the repo (process.cwd()): a
+    // hard-killed/detached runner can skip afterEach, and a leaked dir in the
+    // working tree pollutes the Files panel and can retain owned-session data
+    // (#1588, #5097). A home subdir contains any such leak in one place.
+    const scratchBase = path.join(os.homedir(), '.o8-owned-session-test-scratch');
+    mkdirSync(scratchBase, { recursive: true });
+    tempRoot = mkdtempSync(path.join(scratchBase, 'store-'));
     repoPath = path.join(tempRoot, 'repo');
     execFileSync('git', ['init', '-q', repoPath]);
     priorRoot = process.env.O8_TEST_OWNED_ROOT;
