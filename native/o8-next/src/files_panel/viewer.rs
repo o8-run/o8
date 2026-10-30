@@ -91,6 +91,12 @@ impl FilesPanel {
             )
     }
     fn set_view_mode(&mut self, mode: ViewMode, cx: &mut Context<Self>) {
+        if mode == ViewMode::Preview
+            && let File::Loaded { buffer, .. } = &mut self.file
+        {
+            buffer.editing = false;
+            self.editing_path = None;
+        }
         if let Some(path) = &self.selected {
             self.view_modes.insert(path.clone(), mode);
         }
@@ -183,7 +189,7 @@ impl FilesPanel {
                 })))
             .into_any_element()
     }
-    fn retry_file(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn retry_file(&mut self, cx: &mut Context<Self>) {
         if self.mode == Mode::Spec {
             self.load_spec(cx);
         } else if let Some(path) = self.selected.clone() {

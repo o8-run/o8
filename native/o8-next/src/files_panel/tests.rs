@@ -552,3 +552,47 @@ fn source_uses_classic_gutter_padding_and_two_space_tabs(cx: &mut TestAppContext
 fn source_syntax_failure_preserves_text_and_retry_recovers(cx: &mut TestAppContext) {
     source_tests::retry(cx);
 }
+
+#[path = "edit_tests.rs"]
+pub(super) mod edit_tests;
+#[gpui::test]
+fn edit_keyboard_tab_save_and_read_mode(cx: &mut TestAppContext) {
+    edit_tests::keyboard_save(cx);
+}
+#[gpui::test]
+fn edit_markdown_preview_uses_unsaved_draft(cx: &mut TestAppContext) {
+    edit_tests::markdown_draft(cx);
+}
+#[gpui::test]
+fn edit_conflict_keeps_draft_and_allows_save_retry(cx: &mut TestAppContext) {
+    edit_tests::conflict(cx);
+}
+#[gpui::test]
+fn edit_absolute_quick_doc_uses_file_io_read_and_write(cx: &mut TestAppContext) {
+    edit_tests::absolute(cx);
+}
+#[gpui::test]
+fn edit_truncated_preview_remains_read_only_guard(cx: &mut TestAppContext) {
+    edit_tests::truncated(cx);
+}
+#[gpui::test]
+fn edit_save_acknowledgement_keeps_newer_draft_dirty(cx: &mut TestAppContext) {
+    edit_tests::newer_draft(cx);
+}
+#[gpui::test]
+fn edit_server_revision_conflict_preserves_disk_and_draft(cx: &mut TestAppContext) {
+    edit_tests::server_conflict(cx);
+}
+#[gpui::test]
+fn edit_unicode_tab_selection_copy_and_undo_round_trip(cx: &mut TestAppContext) {
+    edit_tests::unicode_tabs(cx);
+}
+#[gpui::test]
+fn edit_svg_preview_uses_unsaved_draft_without_writing(cx: &mut TestAppContext) {
+    edit_tests::svg_draft(cx);
+}
+
+#[gpui::test]
+fn edit_legacy_server_uses_guarded_file_io_save(cx: &mut TestAppContext) {
+    edit_tests::legacy_save(cx);
+}

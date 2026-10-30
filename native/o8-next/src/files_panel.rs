@@ -1,6 +1,9 @@
 //! The right panel's Files and o8.md tools (WorkspaceFilesPane, O8SpecPane).
 //! Files lists the workspace a directory at a time through /api/panel/files
 //! and previews a file through /api/v2/files; o8.md reads /api/repo-spec.
+mod edit;
+mod editor;
+mod io;
 mod markdown;
 mod markdown_view;
 mod media;
@@ -46,6 +49,7 @@ enum File {
         markdown: std::rc::Rc<std::cell::RefCell<crate::retained::RowState>>,
         source: source::Source,
         image: Option<media::Preview>,
+        buffer: edit::Buffer,
     },
     Image(std::sync::Arc<gpui::RenderImage>),
     Failed(String),
@@ -79,6 +83,9 @@ pub struct FilesPanel {
     file_generation: u64,
     view_modes: HashMap<String, viewer::ViewMode>,
     wrap_lines: bool,
+    editor_subscription: Option<Subscription>,
+    editing_path: Option<String>,
+    viewer_focus: FocusHandle,
 }
 
 impl FilesPanel {
@@ -127,6 +134,9 @@ impl FilesPanel {
             file_generation: 0,
             view_modes: HashMap::new(),
             wrap_lines: true,
+            editor_subscription: None,
+            editing_path: None,
+            viewer_focus: cx.focus_handle(),
         };
         match mode {
             Mode::Files => panel.load_directory(String::new(), cx),
@@ -217,16 +227,9 @@ impl FilesPanel {
         }
         let client = self.client.clone();
         let workspace = self.workspace.clone();
-        let task = cx.background_executor().spawn(async move {
-            client.get::<Value>(
-                "/api/v2/files",
-                &[
-                    ("path", path.as_str()),
-                    ("preview", "1"),
-                    ("workspace", workspace.as_str()),
-                ],
-            )
-        });
+        let task = cx
+            .background_executor()
+            .spawn(async move { io::read(&client, &workspace, &path) });
         self.finish_file(task, cx);
         cx.notify();
     }
@@ -282,6 +285,13 @@ impl FilesPanel {
                         } else {
                             File::Loaded {
                                 image,
+                                buffer: {
+                                    let mut buffer =
+                                        edit::Buffer::new(content, body["mtimeMs"].as_f64(), cx);
+                                    buffer.editing = body["truncated"] != true
+                                        && this.editing_path == this.selected;
+                                    buffer
+                                },
                                 source: source::Source::new(content.split('\n').count()),
                                 lines: content
                                     .split('\n')
@@ -303,6 +313,7 @@ impl FilesPanel {
                     }
                     Err(error) => File::Failed(error),
                 };
+                this.watch_editor(cx);
                 cx.notify();
             });
         })
@@ -447,6 +458,9 @@ impl FilesPanel {
         let previewable = viewer::is_markdown(&title) || media::is_svg(&title);
         let preview = self.view_mode() == viewer::ViewMode::Preview;
         let body = match &self.file {
+            File::Loaded { buffer, .. } if buffer.editing => {
+                buffer.editor.clone().into_any_element()
+            }
             File::Image(image) => media::view(image.clone(), self.file_generation, false),
             File::Loaded {
                 image: Some(image), ..
@@ -472,9 +486,10 @@ impl FilesPanel {
                 cx,
             ),
             File::Failed(error) => self.file_error(error, cx),
-            _ => status("Loading…".into()).into_any_element(),
+            _ => status("Loading file...".into()).into_any_element(),
         };
         div()
+            .track_focus(&self.viewer_focus)
             .flex()
             .flex_col()
             .flex_1()
@@ -496,7 +511,8 @@ impl FilesPanel {
                     .child(crate::icon::stroke(file_icon(&title), file_color(&title), 14., 1.6))
                     .child(viewer::file_heading(&title, cx))
                     .when(previewable, |bar| bar.child(self.preview_toggle(cx)))
-                    .when(!preview && matches!(self.file, File::Loaded { .. }), |bar| bar.child(self.wrap_toggle(cx)))
+                    .when(self.mode==Mode::Files && matches!(self.file, File::Loaded {truncated:false,..}),|bar|bar.child(self.edit_toggle(cx)))
+                    .when(!preview && matches!(&self.file, File::Loaded {truncated:false,buffer,..} if !buffer.editing), |bar| bar.child(self.wrap_toggle(cx)))
                     .when(self.mode == Mode::Files, |bar| {
                         let label = if self.tree_visible {
                             "Hide file tree"
@@ -539,10 +555,12 @@ impl FilesPanel {
                     }),
             )
             .when(matches!(self.file, File::Loaded { truncated: true, .. }), |view| {
-                view.child(div().px(px(12.)).py(px(6.)).text_size(px(11.))
+                view.child(div().debug_selector(||"files-truncated".into()).px(px(12.)).py(px(8.)).text_size(px(11.))
                     .text_color(theme().text_muted)
                     .child("Read-only preview · first 1 MB. Use an editor to change the full file."))
             })
+            .when_some(match &self.file {File::Failed(error)=>Some(error.clone()),_=>None},|d,error|d.child(div().min_h(px(34.)).flex_shrink_0().px(px(12.)).py(px(8.)).text_size(px(11.)).text_color(theme().danger).border_b_1().border_color(theme().border).child(error)))
+            .child(self.edit_status(cx))
             .child(body)
     }
 }
@@ -564,6 +582,14 @@ impl Render for FilesPanel {
         let tree_width = (panel * 0.34).max((panel * 0.48).min(210.));
         div()
             .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                if event.keystroke.key == "s"
+                    && (event.keystroke.modifiers.platform || event.keystroke.modifiers.control)
+                {
+                    this.save_file(cx);
+                    cx.stop_propagation();
+                }
+            }))
             .size_full()
             .flex()
             .min_h_0()
