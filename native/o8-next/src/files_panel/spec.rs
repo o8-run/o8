@@ -4,8 +4,10 @@ use crate::{client::Client, theme::current as theme};
 use gpui::{prelude::*, *};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
+#[path = "spec_actions.rs"]
+mod actions;
 #[path = "spec_controls.rs"]
-mod controls;
+pub(super) mod controls;
 #[path = "spec_preferences.rs"]
 mod preferences;
 #[path = "spec_settings.rs"]
@@ -47,10 +49,21 @@ pub(super) struct Spec {
     active: bool,
     generation: u64,
     edits: u64,
+    reviewing: bool,
+    mutating: bool,
+    prewarmed: std::collections::HashSet<String>,
+    _actions: Subscription,
+    _activation: Option<Subscription>,
     _editor: Subscription,
 }
 impl Spec {
     pub(super) fn new(client: Client, workspace: String, cx: &mut Context<Self>) -> Self {
+        // Same self-hosted Caveat font as classic, decoded from public/fonts.
+        cx.text_system()
+            .add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!(
+                "caveat.ttf"
+            ))])
+            .expect("bundled notes handwriting font");
         let editor = cx.new(|cx| {
             let mut e = Editor::new("", cx);
             e.notes = true;
@@ -59,6 +72,15 @@ impl Spec {
         });
         let focus = cx.focus_handle();
         let observed = cx.observe(&editor, |this, _, cx| this.changed(cx));
+        editor.update(cx, |e, _| {
+            e.assets.target = Some((client.clone(), workspace.clone()))
+        });
+        let actions = cx.subscribe(
+            &editor,
+            |this, _, action: &super::editor::rail::Action, cx| {
+                this.note_action(action.clone(), cx)
+            },
+        );
         let target = target::Target::new(cx);
         Self {
             client,
@@ -86,6 +108,11 @@ impl Spec {
             active: true,
             generation: 0,
             edits: 0,
+            reviewing: false,
+            mutating: false,
+            prewarmed: Default::default(),
+            _actions: actions,
+            _activation: None,
             _editor: observed,
         }
     }
@@ -112,7 +139,11 @@ impl Spec {
             timer.await;
             let _ = this.update(cx, |this, cx| {
                 if generation == this.generation && edits == this.edits {
-                    this.persist(false, cx);
+                    if this.editor.read(cx).composing() {
+                        this.schedule_save(cx);
+                    } else {
+                        this.persist(false, cx);
+                    }
                 }
             });
         })
@@ -147,6 +178,8 @@ impl Spec {
                 || self.loading
                 || self.pending
                 || self.saving
+                || self.reviewing
+                || self.editor.read(cx).rail.busy.is_some()
                 || self.content != self.server)
         {
             return;
@@ -180,7 +213,12 @@ impl Spec {
                     return;
                 }
                 if background
-                    && (!this.active || this.pending || this.saving || this.content != this.server)
+                    && (!this.active
+                        || this.pending
+                        || this.saving
+                        || this.reviewing
+                        || this.editor.read(cx).rail.busy.is_some()
+                        || this.content != this.server)
                 {
                     return;
                 }
@@ -222,6 +260,7 @@ impl Spec {
             || self.loading
             || !self.loaded_once
             || self.saving
+            || self.mutating
             || self.conflict.is_some() && !force
         {
             return;
@@ -340,6 +379,7 @@ impl Spec {
             self.active = active;
             if active && self.started {
                 self.load(true, cx);
+                self.prewarm(cx);
             }
         }
     }
@@ -348,6 +388,12 @@ impl Spec {
             return;
         }
         self.started = true;
+        self._activation = Some(cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                this.load(true, cx);
+            }
+        }));
+        self.prewarm(cx);
         self.target._submit = Some(cx.subscribe_in(
             &self.target.input,
             window,
@@ -379,6 +425,9 @@ impl Spec {
         .detach();
     }
     fn status(&self) -> String {
+        if self.reviewing {
+            return "o8 is reading your notes…".into();
+        }
         if self.loading {
             "Loading notes".into()
         } else if let Some(error) = &self.error {

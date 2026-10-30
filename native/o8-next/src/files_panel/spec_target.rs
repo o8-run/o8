@@ -71,6 +71,16 @@ impl Spec {
             .clone()
             .unwrap_or_else(|| self.default_workspace.clone());
         self.client = self.client.in_workspace(&self.workspace);
+        self.reviewing = false;
+        self.mutating = false;
+        self.editor.update(cx, |e, _| {
+            e.assets = super::super::editor::assets::Assets {
+                target: Some((self.client.clone(), self.workspace.clone())),
+                generation: e.assets.generation + 1,
+                ..Default::default()
+            };
+            e.rail = Default::default();
+        });
         self.generation += 1;
         self.edits += 1;
         self.loaded_once = false;
@@ -86,6 +96,7 @@ impl Spec {
         self.editor.update(cx, |e, cx| e.initial_text("", cx));
         if self.started {
             self.load(false, cx);
+            self.prewarm(cx);
         }
         cx.notify();
     }
@@ -95,7 +106,7 @@ impl Spec {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.pending || self.saving {
+        if self.pending || self.saving || self.content != self.server {
             return;
         }
         let Some(path) = normalize(&path) else {
@@ -117,7 +128,7 @@ impl Spec {
         self.focus.focus(window);
     }
     fn follow_repo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pending || self.saving {
+        if self.pending || self.saving || self.content != self.server {
             return;
         }
         self.preferences.target_override = None;
@@ -127,7 +138,7 @@ impl Spec {
         self.focus.focus(window);
     }
     pub(super) fn target_toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pending || self.saving {
+        if self.pending || self.saving || self.content != self.server {
             return;
         }
         self.target.open = !self.target.open;
@@ -173,7 +184,7 @@ impl Spec {
         cx.notify();
     }
     fn browse(&mut self, file: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pending || self.saving {
+        if self.pending || self.saving || self.content != self.server {
             return;
         }
         self.target.loading = true;

@@ -236,6 +236,7 @@ impl Render for Editor {
                                             tabs: tabs.clone(),
                                             map: None,
                                             line_height: px(19.),
+                                            rich: None,
                                         });
                                     }
                                     offset += part.len() + 1;

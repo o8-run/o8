@@ -32,12 +32,7 @@ pub(super) fn unsupported(path: &str) -> Option<&'static str> {
         _ => None,
     }
 }
-fn read(
-    client: &Client,
-    workspace: &str,
-    path: &str,
-    decode: impl FnOnce(Image) -> Preview,
-) -> Preview {
+pub(super) fn read_image(client: &Client, workspace: &str, path: &str) -> Result<Image, String> {
     let mut url = client
         .url("/api/panel/file-asset")
         .map_err(|_| "Unable to preview this file.")?;
@@ -62,7 +57,15 @@ fn read(
     if bytes.len() as u64 > LIMIT {
         return Err("Image exceeds the preview size limit.".into());
     }
-    decode(Image::from_bytes(format, bytes))
+    Ok(Image::from_bytes(format, bytes))
+}
+pub(super) fn read(
+    client: &Client,
+    workspace: &str,
+    path: &str,
+    decode: impl FnOnce(Image) -> Preview,
+) -> Preview {
+    decode(read_image(client, workspace, path)?)
 }
 impl FilesPanel {
     pub(super) fn open_image(&mut self, path: String, cx: &mut Context<Self>) {

@@ -17,6 +17,7 @@ mod selection;
 mod source;
 mod spec;
 mod spec_document;
+mod spec_rfm;
 pub use spec::Preferences as NotesPreferences;
 pub struct NotesPreferencesChanged(pub NotesPreferences);
 impl gpui::EventEmitter<NotesPreferencesChanged> for FilesPanel {}

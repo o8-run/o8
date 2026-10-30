@@ -10,6 +10,8 @@ pub(super) struct Line {
     pub size: f32,
     pub height: f32,
     pub runs: Vec<TextRun>,
+    pub dotted: Vec<Range<usize>>,
+    pub note_color: Rgba,
 }
 pub(super) fn lines(
     source: &str,
@@ -17,16 +19,19 @@ pub(super) fn lines(
     marked: Option<&Range<usize>>,
     accent: Rgba,
 ) -> Vec<Line> {
+    let review = super::spec_rfm::parse(source);
     let mut offset = 0;
     let mut fenced = false;
     source
         .split('\n')
         .map(|raw| {
-            if raw.trim_start().starts_with("```") || raw.trim_start().starts_with("~~~") {
+            let fence = raw.trim_start().starts_with("```") || raw.trim_start().starts_with("~~~");
+            let in_code = fenced || fence;
+            if fence {
                 fenced = !fenced;
             }
             let hashes = raw.bytes().take_while(|b| *b == b'#').count();
-            let heading = if !fenced
+            let heading = if !in_code
                 && (1..=6).contains(&hashes)
                 && raw.as_bytes().get(hashes) == Some(&b' ')
             {
@@ -53,8 +58,15 @@ pub(super) fn lines(
             let mut display = String::new();
             let mut map = vec![(0, 0)];
             for (at, ch) in raw.char_indices() {
-                if at >= skip {
-                    if heading == 2 {
+                if review.dots.contains(&(offset + at)) {
+                    display.push('●');
+                }
+                if at >= skip && !review.hidden.iter().any(|r| r.contains(&(offset + at))) {
+                    if let Some(range) = review.arrows.iter().find(|r| r.start == offset + at) {
+                        let _ = range;
+                        display.push_str(" → ");
+                    } else if review.arrows.iter().any(|r| r.contains(&(offset + at))) {
+                    } else if heading == 2 {
                         display.extend(ch.to_uppercase());
                     } else if ch == '\t' {
                         display.push_str("  ");
@@ -105,6 +117,22 @@ pub(super) fn lines(
                     boundaries.extend([range.start, range.end]);
                 }
             }
+            for range in review
+                .anchors
+                .iter()
+                .chain(&review.adds)
+                .chain(&review.deletes)
+            {
+                for boundary in [range.start, range.end] {
+                    if boundary >= offset && boundary <= offset + raw.len() {
+                        if let Some((_, display)) =
+                            map.iter().find(|(r, _)| *r == boundary - offset)
+                        {
+                            boundaries.push(*display);
+                        }
+                    }
+                }
+            }
             for (raw, display) in &map {
                 if selection.start == offset + raw
                     || selection.end == offset + raw
@@ -118,7 +146,7 @@ pub(super) fn lines(
             let runs = boundaries
                 .windows(2)
                 .map(|span| {
-                    let code = fenced || code.iter().any(|r| r.contains(&span[0]));
+                    let code = in_code || code.iter().any(|r| r.contains(&span[0]));
                     let link = links.iter().any(|r| r.contains(&span[0]));
                     let mut font = font(if code {
                         theme().font_mono
@@ -130,24 +158,57 @@ pub(super) fn lines(
                     } else {
                         weight
                     };
-                    if !code && emph.iter().any(|r| r.contains(&span[0])) {
+                    if !code
+                        && !strong.iter().any(|r| r.contains(&span[0]))
+                        && emph.iter().any(|r| r.contains(&span[0]))
+                    {
                         font.style = FontStyle::Italic;
                     }
                     TextRun {
                         len: span[1] - span[0],
                         font,
-                        color: if link { accent.into() } else { color.into() },
-                        background_color: selection
-                            .contains(&raw_at(span[0]))
-                            .then(|| theme().selection.into()),
+                        color: if review.adds.iter().any(|r| r.contains(&raw_at(span[0]))) {
+                            theme().success.into()
+                        } else if review.deletes.iter().any(|r| r.contains(&raw_at(span[0]))) {
+                            theme().danger.into()
+                        } else if link {
+                            accent.into()
+                        } else {
+                            color.into()
+                        },
+                        background_color: if selection.contains(&raw_at(span[0])) {
+                            Some(theme().selection.into())
+                        } else {
+                            review
+                                .anchors
+                                .iter()
+                                .any(|r| r.contains(&raw_at(span[0])))
+                                .then(|| theme().selection.into())
+                        },
                         underline: (link || marked.is_some_and(|r| r.contains(&raw_at(span[0]))))
                             .then_some(UnderlineStyle {
                                 thickness: px(1.),
                                 color: None,
                                 wavy: false,
                             }),
-                        strikethrough: None,
+                        strikethrough: review
+                            .deletes
+                            .iter()
+                            .any(|r| r.contains(&raw_at(span[0])))
+                            .then_some(StrikethroughStyle {
+                                thickness: px(1.),
+                                color: None,
+                            }),
                     }
+                })
+                .collect();
+            let dotted = review
+                .adds
+                .iter()
+                .filter_map(|r| {
+                    let a = map.iter().find(|(raw, _)| offset + raw == r.start)?.1;
+                    let b = map.iter().find(|(raw, _)| offset + raw == r.end)?.1;
+                    Some(a..b)
                 })
                 .collect();
             let line = Line {
@@ -155,8 +216,10 @@ pub(super) fn lines(
                 len: raw.len(),
                 display: display.into(),
                 map,
-                size: if fenced { 12. } else { size },
-                height: size * 1.55,
+                size: if in_code { 12. } else { size },
+                height: size.max(13.5) * 1.55,
+                dotted,
+                note_color: accent,
                 runs,
             };
             offset += raw.len() + 1;

@@ -7,6 +7,7 @@ export function prewarmClaudeRepl() {}
 export async function askClaudeWarm(prompt: string) {
   const root = process.env.O8_FILES_FIXTURE_ROOT!;
   appendFileSync(join(root, 'provider-prompts.jsonl'), JSON.stringify(prompt) + '\n');
+  if (existsSync(join(root, 'provider-delay-ms'))) await new Promise(resolve => setTimeout(resolve, Number(readFileSync(join(root, 'provider-delay-ms'), 'utf8'))));
   if (existsSync(join(root, 'provider-error'))) throw new Error('Fixture review unavailable');
   if (prompt.includes('Continue one o8.md margin-note thread.')) return 'Keep this change scoped to the named anchor.';
   const custom = join(root, 'review-annotations.json');

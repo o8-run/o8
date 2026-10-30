@@ -8,6 +8,7 @@ pub(in crate::files_panel) struct Status {
     pub text: String,
     pub content: String,
     pub pending: bool,
+    pub reply: Option<String>,
 }
 impl gpui::Global for Status {}
 fn panel<'a>(
@@ -35,7 +36,11 @@ fn until(cx: &mut VisualTestContext, ready: impl Fn(&mut VisualTestContext) -> b
         if ready(cx) {
             return;
         }
-        assert!(Instant::now() < deadline, "notes operation timed out");
+        assert!(
+            Instant::now() < deadline,
+            "notes operation timed out: {:?}",
+            content(cx)
+        );
         std::thread::sleep(Duration::from_millis(10));
         cx.cx.executor().advance_clock(Duration::from_millis(10));
     }
@@ -112,6 +117,11 @@ pub(super) fn conflict(cx: &mut TestAppContext) {
     advance(cx, 810);
     wait(cx, "spec-conflict");
     assert_eq!(content(cx), "Operator draft\n");
+    click(cx, "spec-target");
+    assert!(
+        cx.debug_bounds("spec-target-menu").is_none(),
+        "a failed guarded save cannot discard the draft by changing targets"
+    );
     assert_eq!(fs::read_to_string(path(&f)).unwrap(), "External change\n");
     click(cx, "spec-conflict-reload");
     assert_eq!(content(cx), "External change\n");
@@ -182,3 +192,9 @@ pub(super) fn missing(cx: &mut TestAppContext) {
 
 #[path = "spec_preferences_tests.rs"]
 mod preferences;
+
+#[path = "spec_review_tests.rs"]
+mod review;
+
+#[path = "spec_asset_tests.rs"]
+mod assets;

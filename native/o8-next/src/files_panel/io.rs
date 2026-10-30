@@ -138,7 +138,16 @@ pub(super) fn json_request(
     url.query_pairs_mut().extend_pairs(query.iter().copied());
     let request = client
         .request(method, &url)
-        .timeout(std::time::Duration::from_secs(30));
+        .timeout(std::time::Duration::from_secs(
+            if query
+                .iter()
+                .any(|(k, v)| *k == "action" && matches!(*v, "review" | "scoped-reply"))
+            {
+                150
+            } else {
+                30
+            },
+        ));
     let response = match body {
         Some(body) => request.send_json(body),
         None => request.call(),
