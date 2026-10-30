@@ -193,7 +193,7 @@ mod macos {
                     if error != nil {
                         serde_json::json!({"ok":false,"error":"Browser page evaluation failed"})
                     } else {
-                        string(value).and_then(|raw| serde_json::from_str(&raw).ok())
+                        string(value).and_then(|text| serde_json::from_str(&text).ok())
                             .unwrap_or(serde_json::json!({"ok":false,"error":"Browser page returned an invalid result"}))
                     }
                 };
