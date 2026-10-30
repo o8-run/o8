@@ -45,6 +45,7 @@ impl ActivityPane {
                 this.focus(window);
                 this.keyboard = Some(control_id.clone());
                 this.act(action.clone(), cx);
+                this.packet_focus_editor(window, cx);
             }))
     }
     fn button(
@@ -569,96 +570,7 @@ impl ActivityPane {
                 });
                 view = view.child(actions);
             }
-            "packet" => {
-                view = view
-                    .child(text(&row.data, "summary"))
-                    .child(text(&row.data, "blockedReason"));
-                if let Some(key) = row.data["lane"]["sessionKey"]
-                    .as_str()
-                    .or(row.data["lane"]["tabId"].as_str())
-                    .filter(|s| !s.is_empty())
-                {
-                    view = view.child(self.button(
-                        "activity-open-worker",
-                        "Open worker",
-                        Action::Worker(key.into()),
-                        cx,
-                    ));
-                }
-                // PacketCard's lifecycle buttons and review section.
-                let status = text(&row.data, "status");
-                let lane = !text(&row.data["lane"], "laneId").is_empty();
-                let mut lifecycle = div().flex().flex_wrap().gap(px(6.));
-                let mut any = false;
-                if lane
-                    && !self.pending
-                    && row.data["operatorStopped"] != true
-                    && matches!(status.as_str(), "running" | "launching" | "recovering")
-                {
-                    lifecycle = lifecycle.child(self.button(
-                        "activity-lane-stop",
-                        "Stop",
-                        Action::Lane(row.clone(), "stop"),
-                        cx,
-                    ));
-                    any = true;
-                }
-                if lane
-                    && !self.pending
-                    && matches!(status.as_str(), "idle" | "awaiting_review" | "recovering")
-                {
-                    lifecycle = lifecycle.child(self.button(
-                        "activity-lane-resume",
-                        "Resume",
-                        Action::Lane(row.clone(), "resume"),
-                        cx,
-                    ));
-                    any = true;
-                }
-                if lane
-                    && !self.pending
-                    && (status == "awaiting_review"
-                        || (status == "blocked"
-                            && row.data["blockedReason"] == "Awaiting operator input"))
-                {
-                    lifecycle = lifecycle
-                        .child(self.button(
-                            "activity-lane-create-pr",
-                            "Create PR",
-                            Action::Lane(row.clone(), "create_pr"),
-                            cx,
-                        ))
-                        .child(self.button(
-                            "activity-lane-merge",
-                            "Merge",
-                            Action::Lane(row.clone(), "merge"),
-                            cx,
-                        ));
-                    any = true;
-                }
-                if any {
-                    view = view.child(lifecycle);
-                }
-                if status == "awaiting_review"
-                    && (!self.pending || self.closing.as_deref() == Some(row.id.as_str()))
-                {
-                    view = view.child(self.close_unmerged(row, cx));
-                }
-                if !self.pending && (row.data["queueState"] == "held" || row.data["lane"].is_null())
-                {
-                    let held = row.data["queueState"] == "held";
-                    view = view.child(self.button(
-                        if held {
-                            "activity-release"
-                        } else {
-                            "activity-hold"
-                        },
-                        if held { "Release hold" } else { "Hold" },
-                        Action::Hold(row.clone(), !held),
-                        cx,
-                    ));
-                }
-            }
+            "packet" => return self.packet_card(row, cx),
             _ => {}
         }
         view.into_any_element()
@@ -1229,6 +1141,8 @@ impl Render for ActivityPane {
             .child(div().flex().child(pills));
         let mut list = div()
             .id("activity-list")
+            .w_full()
+            .min_w(px(0.))
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
@@ -1268,7 +1182,12 @@ impl Render for ActivityPane {
             let retry = self.button("activity-retry", "Retry", Action::Refresh, cx);
             list = list.child(block.child(div().mt(px(8.)).flex().child(retry)));
         }
-        if !self.notice.is_empty() {
+        let packet_feedback_visible = self.rows.iter().any(|row| {
+            row.kind == "packet"
+                && Some(row.key()) == self.expanded
+                && self.packet.action.as_deref() == Some(row.id.as_str())
+        });
+        if !self.notice.is_empty() && !packet_feedback_visible {
             list = list.child(status().child(self.notice.clone()));
         }
         let rows = self
@@ -1437,6 +1356,8 @@ impl Render for ActivityPane {
             if expanded {
                 list = list.child(
                     div()
+                        .w_full()
+                        .min_w(px(0.))
                         .pt(px(6.))
                         .pr(px(14.))
                         .pb(px(10.))
@@ -1451,6 +1372,7 @@ impl Render for ActivityPane {
             .id("activity-pane")
             .debug_selector(|| "activity-pane".into())
             .size_full()
+            .min_w(px(0.))
             .flex()
             .flex_col()
             .track_focus(&self.focus)
@@ -1464,3 +1386,9 @@ impl Render for ActivityPane {
             .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
     }
 }
+
+#[path = "packet_view.rs"]
+mod packet_view;
+
+#[path = "packet_controls.rs"]
+mod packet_controls;

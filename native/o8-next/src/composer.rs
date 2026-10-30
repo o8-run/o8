@@ -37,6 +37,8 @@ pub struct Composer {
     pub(crate) framed: bool,
     /// One unpadded line, for a field inside a pill or row.
     pub(crate) inline: bool,
+    /// Textarea fields insert a newline on plain Enter; chat keeps Submit.
+    pub(crate) newline_on_enter: bool,
     pub(crate) controls: controls::State,
 }
 impl Composer {
@@ -62,6 +64,7 @@ impl Composer {
             placeholder: String::new(),
             framed: true,
             inline: false,
+            newline_on_enter: false,
             controls: controls::State::default(),
         }
     }
@@ -225,6 +228,9 @@ impl Composer {
             .map(|i| cursor + i)
             .unwrap_or(self.text.len());
         match key.key.as_str() {
+            "enter" if self.newline_on_enter && !command => {
+                self.replace_text_in_range(None, "\n", window, cx)
+            }
             "enter" if command && key.modifiers.shift => cx.emit(Submit(true)),
             "enter" if !key.modifiers.shift => cx.emit(Submit(false)),
             "enter" => self.replace_text_in_range(None, "\n", window, cx),
@@ -736,12 +742,12 @@ impl Render for Composer {
                                     // The viewport excludes the input's padding and border.
                                     let visible = (input.scroll.bounds().size.height
                                         - px(if input.inline {
-                                        0.
-                                    } else if input.framed {
-                                        18.
-                                    } else {
-                                        15.
-                                    }))
+                                            0.
+                                        } else if input.framed {
+                                            18.
+                                        } else {
+                                            15.
+                                        }))
                                     .max(px(20.));
                                     let bottom = top + visible;
                                     let next = if cursor_y < top {
