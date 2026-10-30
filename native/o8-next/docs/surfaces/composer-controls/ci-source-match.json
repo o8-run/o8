@@ -1,0 +1,121 @@
+{
+  "sourceCommit": "1a03c30ea8604163996c7dd62c9889687d0f8a54",
+  "files": [
+    {
+      "file": "native/o8-next/src/brain.rs",
+      "sha256": "dfc16932e5fb116c5d8c8a046f0d40cb50eb53891b86257d39258ed140160c42",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer.rs",
+      "sha256": "9c14fa845a33c9dc8225bd1b953d4f2cbd5cdbf2173ba21a5ac2fadd32d084bc",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/capture.rs",
+      "sha256": "bc6bec662c2b02cc1f3c9819895654e034bcc9b1ec80f9e561f4899b5bf5b32a",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/card.rs",
+      "sha256": "5d0ce4f4f002c4f4d7f3898b9108a311136063d103d9199ce675fffd3e0c5691",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/card_tests.rs",
+      "sha256": "0221948b3978a6a66b2c88729bff56ad60a057e50662481da0655315ac96c1fc",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/command_client.rs",
+      "sha256": "0ac13e8a1de9f0bbdedab325767b288bb6782b40b6f1f14a5f2274dd79d19465",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/commands.rs",
+      "sha256": "6be7a04fdcdd5512725d11ea278c9f46d4b0577db7abef304fdc3b1e2f0dd7bf",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/controls.rs",
+      "sha256": "dffed7c7091da61c9db0430a5ef1a94e64bab63761004b2a960060691f189e4c",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/mode_store.rs",
+      "sha256": "318a3c605ccd7ad9f0f71df91d60266d77a5cb29990f0c4c3d372063c644c52d",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/picker.rs",
+      "sha256": "4f28c34acdd28c90f78fe3c54622ea765df8245aea561cf4421543bddbefda3a",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/prompt_acceptance_tests.rs",
+      "sha256": "6abea3be0516427edcd1437e180218c3941df3af7d554ab1e69c3a9d6824ec4f",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/prompt_actions.rs",
+      "sha256": "e3bdc47bba17d1a313d6297672c9fc615ad4369ef35582c1a022637b8a9210af",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/prompt_controls.rs",
+      "sha256": "fdeb0bdd92a4684f17983bf294c84f4fb5181287e967950f8da099bea9412bc4",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/prompt_persistence_tests.rs",
+      "sha256": "241e41bb76646e3f7968455dca4228ca569a53b6a4ae0287d0c681bcff73cd84",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/prompt_rules.rs",
+      "sha256": "847130648f8c75d363251150e42dd3074edcc95915039f190e77cda1bd765a18",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/prompt_state.rs",
+      "sha256": "ce20ac33b60ea7eb34e8560c36b57e60e23ef881ea3a6b83c77ed51b68f5e678",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/prompt_tests.rs",
+      "sha256": "229b23589a28223a8b2a2a7bc557b313f0b507fe1eecf41a0eaf0a0f9b5b5ee3",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/composer/prompt_view.rs",
+      "sha256": "f8b42e6840fd99544a34190877458411281f9a7450ee73b18e6ccce5aa3a76db",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/conversation.rs",
+      "sha256": "4366f722fc299d88dedfa77cb4959dd85b7dcdddd277d8ab247f76849e80fa76",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/motion.rs",
+      "sha256": "25731977bc133ef75a9184e641d1097d3e9a87e93f8a249aa1d5e17d6ec1a047",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/shell_features/composer_controls.rs",
+      "sha256": "dc070dc9746892eaea3a98e2e2a324a34c348b87117403491021165b8f425aaf",
+      "matches": true
+    },
+    {
+      "file": "native/o8-next/src/ui.rs",
+      "sha256": "52aa3dfcd42b4fb10ec43e284cffd94a094bb028b92cda89039131991e75f066",
+      "matches": true
+    },
+    {
+      "file": "scripts/next/surfaces/06-composer-controls.surface.ts",
+      "sha256": "1cf3574500dc658b566b3a9cf81fe02353527073cfa505a863e5981655a40bca",
+      "matches": true
+    }
+  ],
+  "allMatch": true
+}

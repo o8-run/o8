@@ -95,7 +95,9 @@ recorded in [the preservation receipt](composer-controls/mic-preserved.json).
 | Node 22, packageManager npm, `npm run typecheck:fast` | Passed | [Typecheck](composer-controls/typecheck.txt) |
 | Scoped ESLint and `rule-check` against the rail base | Passed | [ESLint](composer-controls/eslint.txt), [rule check](composer-controls/rule-check.txt) |
 | Full `npm test` | 9,911 passed; 2 failed; 5 skipped | [Full failure tail](composer-controls/unit-failures.txt); existing [#4981](https://github.com/o8-run/o8/issues/4981), [#4989](https://github.com/o8-run/o8/issues/4989) |
-| `npm run verify:ci` | Running | Final broad-check receipt pending |
+| `npm run verify:ci` | Failed lint deadline and native selection; remaining checks running | Final broad-check receipt pending; selector diagnostic finding [#5137](https://github.com/o8-run/o8/issues/5137) |
+
+The Linux verification overlay [matches all 23 changed source files](composer-controls/ci-source-match.json) in source commit `1a03c30ea`. The isolated native selector returned `changed=true` in 12.25 seconds after the full verifier rejected selection. That separate result does not satisfy the skipped native gate.
 
 The two broad unit failures are in [unchanged baseline test files](composer-controls/unit-baseline-files.json). A [focused recheck](composer-controls/unit-recheck.txt) passed the Activity file and reproduced two redaction timing caps. This does not establish a new root cause for either existing issue.
 
@@ -107,6 +109,20 @@ measurements, not GPU, compositor or physical input latency measurements.
 Build and test commands use `nice -n 19`. Rust formatting is per file with
 `skip_children=true`; the baseline mic block is preserved instead of accepting
 formatting churn in another surface's owned control.
+
+The required acceptance command, run with the same test module on base and branch,
+was:
+
+```sh
+nice -n 19 cargo +1.97.1 test --locked \
+  --manifest-path native/o8-next/Cargo.toml --bin o8-next \
+  prompt_acceptance_tests::native_composer_controls -- --test-threads=1
+```
+
+The broader native run used the `native_composer` filter; final command and
+persistence receipts use `prompt_tests::native_composer_controls` and
+`prompt_persistence_tests`. Each uses the same production surface and disposable
+server fixture, not a helper-only simulation.
 
 ## Native captures
 
@@ -120,8 +136,12 @@ formatting churn in another surface's owned control.
 
 The owned native fixture uses the production composer with GPUI text-input and
 button-key dispatch. It requests a full native redraw before each snapshot so
-inactive-window damage tracking cannot omit cached siblings. Interaction and
-latency tests are separate. The glass captures use the native glass theme in the
+capture does not depend only on inactive-window damage tracking. Interaction and
+latency tests are separate. Repeated captures still exposed missing cached sibling
+text and footer content, including the glass mode frame above. This is tracked in
+[#5138](https://github.com/o8-run/o8/issues/5138); baseline presence and root cause
+are unverified. These images establish the open menu states, not complete native
+rendering acceptance. The glass captures use the native glass theme in the
 standalone fixture; they do not establish the installed shell's backdrop material.
 No operator server, provider session or installed application was used.
 
@@ -142,5 +162,5 @@ and Brain generation were not exercised against an operator runtime. Rules,
 prompt use/save, branch creation, queue sends and registered runtime draft
 creation were exercised through production handlers in disposable fixtures.
 
-Hold for review and the remaining broad-check receipts. No merge, release,
+Hold for review, missing destination surfaces, the rendering finding and the remaining broad-check receipts. No merge, release,
 installation or full destination-parity acceptance is implied.

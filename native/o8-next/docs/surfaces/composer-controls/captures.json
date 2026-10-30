@@ -52,5 +52,6 @@
     }
   ],
   "nativeInput": "GPUI EntityInputHandler for /; actual mode button Enter dispatch",
-  "result": "six captures inspected, both menus visible in every appearance"
+  "result": "six menu captures inspected; glass mode frame exposes cached sibling omissions tracked in #5138; no complete on-screen rendering acceptance",
+  "runs": "same binary, multiple owned fixture runs; retained complete frames when available"
 }
