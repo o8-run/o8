@@ -67,7 +67,7 @@ impl ShellView for ActivityPane {
         view.read(cx).focus(window);
     }
 
-    fn tick(view: &Entity<Self>, _: bool, cx: &mut Context<Shell>) {
+    fn tick(view: &Entity<Self>, refresh: bool, cx: &mut Context<Shell>) {
         // Inspect the active workspace after the shell's current borrow is returned.
         let shell = cx.weak_entity();
         let view = view.clone();
@@ -81,7 +81,12 @@ impl ShellView for ActivityPane {
                 let main =
                     shell.active() == Some(Tab::Activity) && shows(&shell.key(&Tab::Activity));
                 if main || shell.panel_shows(|key| shows(key)) {
-                    view.update(cx, |activity, cx| activity.tick(cx));
+                    view.update(cx, |activity, cx| {
+                        activity.tick(cx);
+                        if refresh {
+                            activity.load_dossiers(cx);
+                        }
+                    });
                 }
             });
         });
@@ -93,6 +98,9 @@ impl ShellView for ActivityPane {
     }
 }
 
+#[cfg(test)]
+#[path = "activity/dossier_tests.rs"]
+mod dossier_tests;
 #[cfg(test)]
 #[path = "activity/identity_tests.rs"]
 mod identity_tests;

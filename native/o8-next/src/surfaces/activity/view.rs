@@ -1148,6 +1148,9 @@ impl Render for ActivityPane {
             .overflow_y_scroll()
             .flex()
             .flex_col();
+        if let Some(dossiers) = self.dossiers(cx) {
+            list = list.child(dossiers);
+        }
         let status = || {
             div()
                 .flex()
@@ -1392,3 +1395,5 @@ mod packet_view;
 
 #[path = "packet_controls.rs"]
 mod packet_controls;
+#[path = "dossiers_view.rs"]
+mod dossiers;
