@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { parse, stringify } from 'yaml';
+import { createVerifierCoverageFixture } from './helpers/verify-ci-coverage.fixture';
 
 const repo = process.cwd();
 const root = mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-'));
+const coverageRoot = createVerifierCoverageFixture(repo, root);
 const workflowPath = path.join(repo, '.github/workflows/ci.yml');
-const guard = path.join(repo, 'scripts/ci/check-verify-ci.mjs');
+const guard = path.join(coverageRoot, 'scripts/ci/check-verify-ci.mjs');
 const manifest = JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8'));
 const nativeLocal = process.platform === 'linux' && process.arch === 'x64';
 const nativeIt = it.skipIf(!nativeLocal);
@@ -106,9 +108,9 @@ function execute(fail = '', parallel = false) {
 }
 
 function coverage(workflow: object) {
-  const fixture = path.join(root, 'ci.yml');
+  const fixture = path.join(coverageRoot, 'ci.yml');
   writeFileSync(fixture, stringify(workflow));
-  return spawnSync(process.execPath, [guard, '--workflow', fixture], { cwd: repo, encoding: 'utf8' });
+  return spawnSync(process.execPath, [guard, '--workflow', fixture], { cwd: coverageRoot, encoding: 'utf8' });
 }
 function executeFixture(selectedFile: string, nestedDependency = false,
   { fail = '', parallel = false, discoveryMs = 0, nativeChange = '', nativeState = 'untracked', setupChange = '',
@@ -587,7 +589,7 @@ describe('local CI verification through its command entry point', () => {
       const plan = readVerificationPlan(process.cwd(), undefined, { platform: '${platform}', arch: 'x64' });
       console.log(JSON.stringify({ hosted: plan.hostedJobs['o8-next-tests'], ids: plan.checks.map(check => check.id),
         required: plan.checks.find(check => check.id === 'test').requiredResults }));`;
-    const result = spawnSync(process.execPath, ['--input-type=module', '-e', source], { cwd: repo, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', source], { cwd: coverageRoot, encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
     const plan = JSON.parse(result.stdout);
     expect(plan.hosted).toContain('Linux x64');
