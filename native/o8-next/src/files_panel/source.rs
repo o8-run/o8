@@ -6,22 +6,39 @@ use std::cell::Cell;
 pub(super) struct Source {
     list: ListState,
     width: Cell<Option<Pixels>>,
+    colors: super::syntax::Colors,
+    selection: super::selection::Selection,
+    focus: FocusHandle,
+    horizontal: gpui::ScrollHandle,
 }
 impl Source {
-    pub(super) fn new(count: usize) -> Self {
+    pub(super) fn new(count: usize, cx: &mut Context<FilesPanel>) -> Self {
         Self {
             list: ListState::new(count, ListAlignment::Top, px(300.)),
             width: Cell::new(None),
+            colors: super::syntax::Colors::default(),
+            selection: super::selection::Selection::default(),
+            focus: cx.focus_handle(),
+            horizontal: gpui::ScrollHandle::new(),
         }
     }
     pub(super) fn view(
         &self,
         lines: &[SharedString],
+        raw: &str,
+        path: &str,
         wrap: bool,
         generation: u64,
         window: &mut Window,
+        cx: &mut Context<FilesPanel>,
     ) -> gpui::AnyElement {
-        let gutter = (lines.len().max(1).to_string().len() as f32) * 7.5 + 16.;
+        let gutter = ((lines.len().max(1).to_string().len() as f32) * 7.5 + 16.).max(36.);
+        let colors = self.colors.rows(path, lines, cx);
+        #[cfg(test)]
+        cx.set_global(super::tests::source_tests::Painted(
+            vec![],
+            self.colors.failed(),
+        ));
         let width = if wrap {
             px(0.)
         } else {
@@ -48,23 +65,116 @@ impl Source {
                     })
                     .max()
                     .unwrap_or(px(0.))
-                    + px(gutter + 16.);
+                    + px(gutter + 24.);
                 self.width.set(Some(width));
                 width
             })
         };
+        self.selection.configure(raw);
+        let selection = self.selection.clone();
+        let mouse = self.selection.clone();
+        let drag = self.selection.clone();
+        let end = self.selection.clone();
+        let outside = self.selection.clone();
+        let keys = self.selection.clone();
+        let focus = self.focus.clone();
+        let scroll = self.list.clone();
+        let horizontal = self.horizontal.clone();
+        let count = lines.len();
         let lines = lines.to_vec();
         div()
             .id("files-source")
             .debug_selector(move || format!("files-source-{generation}"))
+            .track_focus(&self.focus)
+            .tab_stop(true)
+            .cursor(gpui::CursorStyle::IBeam)
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |_, event: &gpui::MouseDownEvent, window, cx| {
+                    focus.focus(window);
+                    mouse.begin(event.position, event.modifiers.shift);
+                    cx.notify();
+                }),
+            )
+            .on_mouse_move(cx.listener(move |_, event: &gpui::MouseMoveEvent, _, cx| {
+                if event.pressed_button == Some(gpui::MouseButton::Left)
+                    && drag.drag(event.position)
+                {
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(move |_, _, _, _| end.end()),
+            )
+            .on_mouse_up_out(
+                gpui::MouseButton::Left,
+                cx.listener(move |_, _, _, _| outside.end()),
+            )
+            .on_key_down(
+                cx.listener(move |_, event: &gpui::KeyDownEvent, window, cx| {
+                    let command =
+                        event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
+                    match event.keystroke.key.as_str() {
+                        "a" if command => keys.all(),
+                        "c" if command => {
+                            if let Some(text) = keys.copy() {
+                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                            }
+                        }
+                        "down" => scroll.scroll_by(px(19.)),
+                        "up" => scroll.scroll_by(px(-19.)),
+                        "pagedown" => scroll.scroll_by(window.viewport_size().height * 0.7),
+                        "pageup" => scroll.scroll_by(window.viewport_size().height * (-0.7)),
+                        "home" => scroll.scroll_to(gpui::ListOffset {
+                            item_ix: 0,
+                            offset_in_item: px(0.),
+                        }),
+                        "end" => scroll.scroll_to(gpui::ListOffset {
+                            item_ix: count.saturating_sub(1),
+                            offset_in_item: px(0.),
+                        }),
+                        "left" | "right" if !wrap => {
+                            let offset = horizontal.offset();
+                            horizontal.set_offset(gpui::point(
+                                (offset.x
+                                    + px(if event.keystroke.key == "left" {
+                                        40.
+                                    } else {
+                                        -40.
+                                    }))
+                                .min(px(0.)),
+                                offset.y,
+                            ));
+                        }
+                        "escape" => keys.clear(),
+                        _ => return,
+                    }
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
             .flex_1()
             .min_w_0()
             .min_h_0()
             .flex()
             .flex_col()
             .overflow_x_scroll()
+            .track_scroll(&self.horizontal)
+            .when(self.colors.failed(), |view| {
+                view.child(self.colors.notice(cx))
+            })
             .child(
-                list(self.list.clone(), move |i, _, _| {
+                list(self.list.clone(), move |i, _, cx| {
+                    let spans = colors.get(i).cloned().unwrap_or_default();
+                    #[cfg(test)]
+                    cx.global_mut::<super::tests::source_tests::Painted>()
+                        .0
+                        .push((lines[i].to_string(), spans.clone()));
+                    let _ = cx;
+                    let text = gpui::StyledText::new(lines[i].clone())
+                        .with_runs(selection.runs(i, &lines[i], &spans));
+                    selection.register(i, text.layout().clone());
                     div()
                         .w_full()
                         .min_w_0()
@@ -77,9 +187,12 @@ impl Source {
                         .line_height(px(19.))
                         .child(
                             div()
+                                .debug_selector(move || {
+                                    format!("files-source-number-{generation}-{i}")
+                                })
                                 .w(px(gutter))
                                 .flex_shrink_0()
-                                .pr(px(10.))
+                                .pr(px(12.))
                                 .text_align(gpui::TextAlign::Right)
                                 .text_color(theme().text_faint)
                                 .child((i + 1).to_string()),
@@ -88,10 +201,14 @@ impl Source {
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .pr(px(16.))
+                                .ml(px(12.))
+                                .pr(px(12.))
+                                .debug_selector(move || {
+                                    format!("files-source-code-{generation}-{i}")
+                                })
                                 .text_color(theme().text)
                                 .when(!wrap, |text| text.whitespace_nowrap())
-                                .child(lines[i].clone()),
+                                .child(text),
                         )
                         .into_any_element()
                 })
@@ -99,7 +216,7 @@ impl Source {
                 .w_full()
                 .min_w(width)
                 .min_h_0()
-                .py(px(6.)),
+                .py(px(8.)),
             )
             .into_any_element()
     }

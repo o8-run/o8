@@ -51,7 +51,11 @@ impl Fixture {
         std::thread::spawn(move || for _ in output {});
         Self {
             child,
-            client: Client::authenticated(info["origin"].as_str().unwrap(), None).unwrap(),
+            client: Client::authenticated(
+                info["origin"].as_str().unwrap(),
+                info["token"].as_str().map(str::to_owned),
+            )
+            .unwrap(),
             repo: info["repo"].as_str().unwrap().into(),
             root,
         }

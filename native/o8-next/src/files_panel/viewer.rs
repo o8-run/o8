@@ -91,6 +91,12 @@ impl FilesPanel {
             )
     }
     fn set_view_mode(&mut self, mode: ViewMode, cx: &mut Context<Self>) {
+        if mode == ViewMode::Preview
+            && let File::Loaded { buffer, .. } = &mut self.file
+        {
+            buffer.editing = false;
+            self.editing_path = None;
+        }
         if let Some(path) = &self.selected {
             self.view_modes.insert(path.clone(), mode);
         }
@@ -99,7 +105,7 @@ impl FilesPanel {
 }
 
 /// FileViewer's two-line title; each line gets the available width independently.
-pub(super) fn file_heading(path: &str, _cx: &mut Context<FilesPanel>) -> impl IntoElement {
+pub(super) fn file_heading(path: &str, _cx: &mut gpui::App) -> impl IntoElement {
     let (folder, name) = path.rsplit_once('/').unwrap_or(("", path));
     let name_text = gpui::StyledText::new(name.to_owned());
     let folder_text = gpui::StyledText::new(if folder.is_empty() {
@@ -183,11 +189,11 @@ impl FilesPanel {
                 })))
             .into_any_element()
     }
-    fn retry_file(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn retry_file(&mut self, cx: &mut Context<Self>) {
         if self.mode == Mode::Spec {
             self.load_spec(cx);
         } else if let Some(path) = self.selected.clone() {
-            self.open_file(path, cx);
+            self.open_file_inner(path, true, cx);
         }
     }
 }
