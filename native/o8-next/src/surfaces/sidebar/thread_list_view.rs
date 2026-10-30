@@ -222,6 +222,9 @@ impl Render for ThreadList {
                                                             )
                                                         }),
                                                 )
+                                                .children(
+                                                    this.row_settle_control(&row, keyboard, cx),
+                                                )
                                                 .child(this.row_archive_control(&row, keyboard, cx))
                                             }),
                                     )
@@ -306,6 +309,7 @@ impl Render for ThreadList {
                 .flex_1()
                 .min_h_0(),
             )
+            .children(self.undo_notice(cx))
             .child(
                 div()
                     .flex()

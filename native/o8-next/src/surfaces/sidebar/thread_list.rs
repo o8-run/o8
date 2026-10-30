@@ -13,7 +13,7 @@ use gpui::{
     UniformListScrollHandle, Window, prelude::*,
 };
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::{
     cell::Cell,
     collections::{HashMap, HashSet},
@@ -81,6 +81,10 @@ pub struct ThreadList {
     pending_open: Option<String>,
     /// Closed By repo folders, by repository path.
     closed: HashSet<String>,
+    /// A Settle or Un-settle awaiting the server.
+    settling: Option<String>,
+    undo: Option<inbox::Undo>,
+    undo_serial: u64,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
@@ -158,6 +162,9 @@ impl ThreadList {
             new_menu: false,
             menu_press: None,
             pending_open: None,
+            settling: None,
+            undo: None,
+            undo_serial: 0,
             closed: HashSet::new(),
             sessions: vec![],
             rows: Rc::new(vec![]),
@@ -267,6 +274,8 @@ impl ThreadList {
             folders::View::Date => recents::group(session, recents::now()),
             folders::View::Chronological => "Chronological",
             folders::View::Repo => "",
+            folders::View::Inbox if session.settled() => "Settled",
+            folders::View::Inbox => "Active",
         }
     }
     fn view_rows(&self, sessions: &[Session]) -> Vec<Row> {
@@ -277,6 +286,7 @@ impl ThreadList {
             folders::View::Chronological => {
                 folders::chronological(sessions, query, matches, expanded, branches)
             }
+            folders::View::Inbox => inbox::rows(sessions, query, matches, expanded, branches),
             folders::View::Repo => {
                 let keys = self.scope_keys();
                 let repos: Vec<_> = self
@@ -414,6 +424,14 @@ impl ThreadList {
                             && (old.unread || incoming.last_message_at > old.last_message_at);
                         incoming.packet_header = old.packet_header.clone();
                         incoming.packet_state = old.packet_state;
+                        // Inbox settlement comes from the listings; the
+                        // stream does not carry it.
+                        if incoming.inbox_subject.is_none() {
+                            incoming.inbox_subject = old.inbox_subject.clone();
+                            incoming.parent_inbox_subject = old.parent_inbox_subject.clone();
+                            incoming.settled_override = old.settled_override.clone();
+                            incoming.settled_at = old.settled_at.clone();
+                        }
                         // Packet attention comes from the lifecycle API.
                         // A thread's own failure can recover on this stream.
                         if old.packet_state || old.outcome.is_some() {
@@ -767,6 +785,8 @@ impl ThreadList {
                 if key == "end" {
                     self.expanded.extend(
                         [
+                            "Active",
+                            "Settled",
                             "Chronological",
                             "Today",
                             "Previous 7 days",
@@ -854,3 +874,6 @@ pub(crate) mod folders;
 
 #[path = "archive_controls.rs"]
 mod archive_controls;
+
+#[path = "inbox.rs"]
+mod inbox;

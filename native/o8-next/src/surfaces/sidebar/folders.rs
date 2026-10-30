@@ -16,15 +16,17 @@ use gpui::{AnyElement, div, px};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum View {
+    Inbox,
     Chronological,
     #[default]
     Date,
     Repo,
 }
 impl View {
-    pub(crate) const ALL: [View; 3] = [View::Chronological, View::Repo, View::Date];
+    pub(crate) const ALL: [View; 4] = [View::Inbox, View::Chronological, View::Repo, View::Date];
     pub(crate) fn key(self) -> &'static str {
         match self {
+            View::Inbox => "inbox",
             View::Chronological => "chronological",
             View::Date => "date",
             View::Repo => "repo",
@@ -36,6 +38,7 @@ impl View {
     /// CHAT_VIEW_LABELS; the groupings read "Group by …" as in classic.
     pub(crate) fn label(self) -> &'static str {
         match self {
+            View::Inbox => "Inbox",
             View::Chronological => "Chronological",
             View::Date => "Group by date",
             View::Repo => "Group by repo",
@@ -178,7 +181,7 @@ const CHEVRON_DOWN: &str = "M6 9l6 6 6-6";
 const CHEVRON_RIGHT: &str = "M9 6l6 6-6 6";
 /// ChatGroupPicker's trigger: three dots.
 const DOTS: &str = "M5 12h.001 M12 12h.001 M19 12h.001";
-const CHECK: &str = "M20 6 9 17l-5-5";
+pub(super) const CHECK: &str = "M20 6 9 17l-5-5";
 
 impl ThreadList {
     /// The active project's view; By date until one is chosen.
@@ -190,6 +193,8 @@ impl ThreadList {
             .find(|p| p.id == self.header.ledger.active_project_id)
             .and_then(|p| self.views.get(&p.id))
             .copied()
+            // A host without inbox settlement keeps the sidebar it had.
+            .filter(|view| *view != View::Inbox || self.inbox_ready())
             .unwrap_or_default()
     }
     /// Restores each project's view and the closed folders from the shell state.
@@ -229,6 +234,7 @@ impl ThreadList {
     pub(super) fn view_picker(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let open = self.view_menu;
         let current = self.view();
+        let inbox = self.inbox_ready();
         let trigger = div()
             .id("sidebar-view")
             .debug_selector(|| "sidebar-view".into())
@@ -309,6 +315,7 @@ impl ThreadList {
                                     cx.notify();
                                 },
                             ))
+                            .when(inbox, |menu| menu.child(item(View::Inbox, cx)))
                             .child(item(View::Chronological, cx))
                             .child(div().my(px(4.)).h(px(1.)).bg(theme().border))
                             .child(item(View::Repo, cx))
