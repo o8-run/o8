@@ -554,6 +554,27 @@ pub(super) fn active_browser(s: &Shell) -> Option<Entity<crate::browser_panel::B
     panel.browsers.get(&key(s, Tool::Browser)).cloned()
 }
 
+/// Browser-owned read adapters for the hover PiP, including a closed panel.
+pub(super) fn browser_for_scope(s: &Shell) -> Option<Entity<crate::browser_panel::BrowserPanel>> {
+    s.features
+        .read::<Panel>()?
+        .browsers
+        .get(&key(s, Tool::Browser))
+        .cloned()
+}
+pub(super) fn browser_pip_ready(s: &Shell) -> bool {
+    s.features.read::<Panel>().is_none_or(|panel| {
+        let (value, moving) = panel.motion.value();
+        value == 0. && !moving
+    })
+}
+pub(super) fn browser_shown(s: &Shell) -> bool {
+    s.features.read::<Panel>().is_some_and(|panel| {
+        panel.motion.is_open()
+            && (panel.current() == Tool::Browser || panel.lower == Some(Tool::Browser))
+    })
+}
+
 /// Opens the panel on a desktop O8 panel tab as Symon names it
 /// (O8_TAB_SURFACES), loading `url` into the Browser; false for any other name.
 pub(super) fn open_surface(
@@ -751,7 +772,15 @@ fn cover_browsers(s: &Shell, cx: &mut Context<Shell>) {
     let current = panel.browsers.get(&key(s, Tool::Browser));
     for view in panel.browsers.values() {
         let covered = !visible || current != Some(view);
-        view.update(cx, |browser, _| browser.cover(covered));
+        view.update(cx, |browser, cx| {
+            browser.cover_with_context(covered, cx);
+            browser.remote_owner(
+                panel.motion.is_open()
+                    && (panel.current() == Tool::Browser || panel.lower == Some(Tool::Browser))
+                    && current == Some(view),
+                cx,
+            );
+        });
     }
 }
 
