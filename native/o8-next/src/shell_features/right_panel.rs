@@ -229,6 +229,7 @@ struct Panel {
     /// Open tabs in strip order; the empty strip shows the tool list.
     tabs: Vec<Tool>,
     active: usize,
+    scroll: super::tab_scroll::Strip,
     /// The "+" menu, and when it opened (its 140ms fade and drop).
     menu: Option<std::time::Instant>,
     /// Files and o8.md views, keyed like panel content.
@@ -250,6 +251,7 @@ impl Default for Panel {
             content: Transition::new(200),
             tabs: vec![],
             active: 0,
+            scroll: Default::default(),
             menu: None,
             files: Default::default(),
             browsers: Default::default(),
@@ -928,11 +930,19 @@ fn soon() -> impl IntoElement {
 
 /// One tab in the panel strip (RightPanelTab): 24px, at most 144px wide, its
 /// glyph turning into a close mark while the tab is hovered.
-fn tab_pill(index: usize, tool: Tool, active: bool, cx: &mut Context<Shell>) -> impl IntoElement {
+fn tab_pill(
+    index: usize,
+    tool: Tool,
+    active: bool,
+    scroll: &super::tab_scroll::Strip,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement {
     let group = SharedString::from(format!("panel-tab-{index}"));
     let label = tool.label();
     div()
         .id(("panel-tab", index))
+        .relative()
+        .when(active, |pill| pill.child(scroll.probe()))
         .debug_selector(move || {
             if active {
                 "panel-tab".to_string()
@@ -1144,9 +1154,11 @@ pub(super) fn header(
     let tabs = panel.map(|panel| panel.tabs.clone()).unwrap_or_default();
     let active = panel.map_or(0, |panel| panel.active);
     let travel = panel.map_or(0., |panel| panel.motion.value().0);
+    let scroll = panel.map(|panel| panel.scroll.clone()).unwrap_or_default();
+    let selected = panel.map(|panel| format!("{:?}", panel.current()));
     let mut pills = vec![];
     for (index, tool) in tabs.iter().enumerate() {
-        pills.push(tab_pill(index, *tool, index == active, cx).into_any_element());
+        pills.push(tab_pill(index, *tool, index == active, &scroll, cx).into_any_element());
     }
     let menu = panel
         .and_then(|panel| panel.menu)
@@ -1166,16 +1178,16 @@ pub(super) fn header(
                 .pl(px(8.))
                 .pr(px(8.))
                 .opacity(travel)
-                .child(
+                .child(super::tab_scroll::wrap(
                     div()
                         .id("panel-tabs")
-                        .flex_1()
+                        .debug_selector(|| "panel-tabs".into())
+                        .w_full()
                         .min_w_0()
                         .h_full()
                         .flex()
                         .items_center()
                         .gap(px(4.))
-                        .overflow_x_scroll()
                         .when(tabs.is_empty(), |strip| {
                             strip.child(
                                 div()
@@ -1224,7 +1236,16 @@ pub(super) fn header(
                                 )
                                 .children(menu.map(|appear| add_menu(appear, cx))),
                         ),
-                )
+                    scroll,
+                    selected,
+                    "panel-tabs",
+                    if s.system_glass {
+                        crate::theme::veil_color(crate::theme::GLASS_VEIL[0].1)
+                    } else {
+                        theme().background
+                    },
+                    cx,
+                ))
                 .child(div().mt(px(1.3)).child(toggle_button(true, cx))),
         )
 }
