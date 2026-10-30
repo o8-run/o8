@@ -206,6 +206,7 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
             cx,
             &format!("setting-{field}-{index}"),
         ));
+        assert_eq!(error(&shell, cx), None, "native selector {field}");
         assert_eq!(values(&fixture)[field], expected, "persisted {field}");
     }
     for (field, text, expected) in [
@@ -226,6 +227,11 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
     ] {
         edit(cx, field, text);
         frames.push(timed_action(&shell, cx, "settings-save"));
+        assert_eq!(error(&shell, cx), None, "native save {field}");
+        assert!(
+            cx.debug_bounds("settings-editor").is_none(),
+            "saved editor must close: {field}"
+        );
         assert_eq!(values(&fixture)[field], expected, "persisted {field}");
     }
     // A second desktop-shaped client changes the same file. The next native
