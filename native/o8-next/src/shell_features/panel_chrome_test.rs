@@ -131,6 +131,11 @@ fn panel_chrome_maximize_escape_and_narrow_guard(cx: &mut TestAppContext) {
     let before = bounds(&mut v, "header-right-panel").left();
     click(&mut v, "panel-maximize");
     assert!(bounds(&mut v, "panel-new-tab").left() < before);
+    let body = bounds(&mut v, "panel-content");
+    assert!(
+        body.right() <= px(1600.),
+        "maximized body must fit inside the window: {body:?}"
+    );
     v.simulate_keystrokes("escape");
     settle(&mut v);
     bounds(&mut v, "panel-tabs");

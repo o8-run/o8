@@ -50,15 +50,17 @@ fn render(
                     cx.notify();
                 },
             ))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .child(content),
-            )
+            .when(!super::right_panel::maximized(s), |row| {
+                row.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .child(content),
+                )
+            })
             .child(
                 div()
                     .w(px(shown))
