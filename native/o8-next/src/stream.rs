@@ -512,6 +512,16 @@ mod tests {
                 _ => None,
             })
         };
+        let activity_id = |transcript: &Transcript| {
+            transcript
+                .rows
+                .iter()
+                .find_map(|row| match row {
+                    Row::Activity { id, .. } => Some(id.clone()),
+                    _ => None,
+                })
+                .unwrap()
+        };
         assert!(
             trace(&transcript).is_none(),
             "an empty placeholder has no trace"
@@ -523,6 +533,7 @@ mod tests {
         )));
         let (steps, live) = trace(&transcript).expect("the thinking marker opens a trace");
         assert!(steps.is_empty() && live.live && live.thinking);
+        assert_eq!(activity_id(&transcript), "reply:trace");
         assert!(transcript.apply(&event(
             2,
             "tool-use",
@@ -533,6 +544,7 @@ mod tests {
         assert_eq!((steps.len(), steps[0].status.as_str()), (1, "running"));
         assert_eq!(steps[0].subject.as_deref(), Some("src/a.rs"));
         assert!(live.live);
+        assert_eq!(activity_id(&transcript), "reply:trace");
         assert!(
             !transcript.apply(&event(
                 2,
@@ -547,6 +559,7 @@ mod tests {
             serde_json::json!({"toolUseId":"t1","output":"ok"})
         )));
         assert_eq!(trace(&transcript).unwrap().0[0].status, "ok");
+        assert_eq!(activity_id(&transcript), "reply:trace");
         let other = serde_json::json!({"channel":"orchestrator","event":"tool-use","seq":4,
             "data":{"threadId":"thoughts-other","assistantMessageId":"x","toolUseId":"t9","name":"Bash"}});
         assert!(
@@ -572,6 +585,7 @@ mod tests {
             !trace(&transcript).unwrap().1.live,
             "ready settles the trace"
         );
+        assert_eq!(activity_id(&transcript), "reply:trace");
         // Saved history with the reply's work replaces the live copy.
         assert!(transcript.history(&serde_json::json!({"sessionKey":"llm-chat:thoughts-live","entries":[
             {"id":"reply","role":"assistant","text":"Done.","timestamp":now,
