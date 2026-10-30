@@ -120,6 +120,47 @@ impl Drop for Fixture {
 fn bounds(cx: &mut gpui::VisualTestContext, selector: &str) -> Option<Bounds<gpui::Pixels>> {
     cx.debug_bounds(Box::leak(selector.to_owned().into_boxed_str()))
 }
+/// The shell and front Inbox state, so a missing control names its cause.
+fn inbox_state(cx: &mut gpui::VisualTestContext) -> String {
+    cx.update(|window, cx| {
+        let Some(Some(shell)) = window.root::<Shell>() else {
+            return "no shell".into();
+        };
+        let s = shell.read(cx);
+        let key = s.panel_front_key();
+        let inbox = key.as_ref().and_then(|k| match s.content.get(k) {
+            Some(Content::Inbox(inbox)) => {
+                let i = inbox.read(cx);
+                Some(format!(
+                    "lane={} cards={:?} loading={} loaded={} errors={:?} notice={:?}",
+                    i.lane,
+                    i.cards.iter().map(Vec::len).collect::<Vec<_>>(),
+                    i.loading,
+                    i.loaded,
+                    i.errors,
+                    i.notice
+                ))
+            }
+            _ => None,
+        });
+        format!(
+            "front={key:?} selected={:?} loading={} connected={} inbox={inbox:?}",
+            s.state.selected, s.loading, s.connected
+        )
+    })
+}
+/// Let the shell finish connecting and selecting its workspace, so a panel
+/// opened next keeps its key.
+fn settle_shell(shell: &Entity<Shell>, cx: &mut gpui::VisualTestContext) {
+    for _ in 0..200 {
+        cx.run_until_parked();
+        draw(cx);
+        if shell.read_with(cx, |s, _| s.connected && !s.loading) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
 fn click(cx: &mut gpui::VisualTestContext, selector: &str) {
     draw(cx);
     if selector.starts_with("inbox-approve-")
@@ -135,7 +176,9 @@ fn click(cx: &mut gpui::VisualTestContext, selector: &str) {
             draw(cx);
         }
         for _ in 0..5 {
-            let target = bounds(cx, selector).expect("card action");
+            let target = bounds(cx, selector).unwrap_or_else(|| {
+                panic!("card action {selector} missing: {}", inbox_state(cx))
+            });
             let viewport = bounds(cx, "inbox-cards").expect("scroll viewport");
             if viewport.contains(&target.center()) {
                 break;
@@ -210,8 +253,7 @@ fn inbox_keyboard_buttons_activate_enter_space_and_skip_disabled(cx: &mut TestAp
         cx,
     );
     let cx = &mut visual;
-    cx.run_until_parked();
-    draw(cx);
+    settle_shell(&shell, cx);
     let main = shell.read_with(cx, |s, _| s.active());
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("i n b o x enter");
@@ -380,8 +422,7 @@ fn inbox_plan_session_header_preserves_desktop_authority_and_continuation(cx: &m
         cx,
     );
     let cx = &mut visual;
-    cx.run_until_parked();
-    draw(cx);
+    settle_shell(&shell, cx);
     let main = shell.read_with(cx, |s, _| s.active());
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("i n b o x enter");
@@ -426,8 +467,7 @@ fn inbox_cards_counts_statuses_and_approval_match_desktop_routes(cx: &mut TestAp
         cx,
     );
     let cx = &mut visual;
-    cx.run_until_parked();
-    draw(cx);
+    settle_shell(&shell, cx);
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("i n b o x enter");
     cx.run_until_parked();
@@ -582,8 +622,7 @@ fn inbox_opens_related_session_and_pull_request_and_restores(cx: &mut TestAppCon
         cx,
     );
     let cx = &mut visual;
-    cx.run_until_parked();
-    draw(cx);
+    settle_shell(&shell, cx);
     let started = Instant::now();
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("i n b o x enter");
@@ -676,8 +715,7 @@ fn inbox_empty_and_server_error_never_claim_a_false_clean_state(cx: &mut TestApp
         cx,
     );
     let cx = &mut visual;
-    cx.run_until_parked();
-    draw(cx);
+    settle_shell(&shell, cx);
     assert!(
         shell.read_with(cx, |s, _| s.workspaces.is_empty()),
         "the empty Inbox must also work before any session is saved"
