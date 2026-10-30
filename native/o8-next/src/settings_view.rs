@@ -397,6 +397,7 @@ impl Settings {
             .when(file, |v| v.child(div().text_size(px(11.)).text_color(theme().text_muted).child("Only declared settings are shown. Additional entries stay on the server and are preserved on save. Shift+Enter inserts a line. Reload replaces this draft.")))
             .when(matches!(editor.target, Target::Key(_)), |v| v.child(div().text_size(px(11.)).text_color(theme().text_muted).child("Saved keys are never displayed. The new key leaves this input on Save.")))
             .child(div().id("settings-editor").debug_selector(|| "settings-editor".into())
+                .flex().flex_col().w_full().min_w_0()
                 .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, window, cx| {
                     if let Some(editor) = &this.editor { match &editor.input { Input::Text(s) => s.read(cx).focus.focus(window), Input::Secret(s) => s.read(cx).focus.focus(window) } }
                 })).child(input)).into_any_element()
@@ -572,6 +573,10 @@ impl Render for Settings {
                 div()
                     .id("settings-search")
                     .debug_selector(|| "settings-search".into())
+                    .flex()
+                    .flex_col()
+                    .w_full()
+                    .min_w_0()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(|this, _, window, cx| this.search.read(cx).focus.focus(window)),

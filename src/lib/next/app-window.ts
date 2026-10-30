@@ -5,6 +5,7 @@ import { createInterface } from 'node:readline';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { getApiBase } from '@/lib/panel/api-port';
+import { bindNextBrowserPipe } from './browser-pipe';
 
 const UNAVAILABLE = 'o8 next is unavailable. Reinstall the app and try again.';
 // Only spawn-to-first-paint is parent-owned; server loads stay in the window.
@@ -40,6 +41,8 @@ function waitForStartup(child: ChildProcess): Promise<void> {
   });
 }
 type WindowState = { child?: ChildProcess; error: string | null; queue: Promise<unknown>; cleanup?: boolean };
+/** Set by the packaged macOS shell: o8 next is the main window, not a Settings switch. */
+const isMainWindow = () => process.env.O8_NEXT_MAIN_WINDOW === '1';
 const runtime = globalThis as typeof globalThis & { __o8NativeWindow?: WindowState };
 const state = runtime.__o8NativeWindow ??= { error: null, queue: Promise.resolve() };
 
@@ -78,6 +81,7 @@ async function start(): Promise<void> {
       env: childEnvironment({ inherit: false, inject: false, env: { ...display, O8_NEXT_API_TOKEN: getOrCreateWsToken(), O8_NEXT_PARENT_PIPE: '1' } }),
     });
     state.child = child;
+    bindNextBrowserPipe(child);
     // Errors have fixed public messages; never forward child output or spawn diagnostics.
     child.on('error', () => {});
     child.once('exit', () => { if (state.child === child) state.child = undefined; });
@@ -117,7 +121,8 @@ function serialized<T>(work: () => Promise<T>): Promise<T> {
 
 export function changeNextWindowPreference<T>(enabled: boolean | undefined, save: () => Promise<T>): Promise<T> {
   return serialized(async () => {
-    if (enabled === undefined) return save();
+    // The main window stays open; turning the old switch off only saves it.
+    if (enabled === undefined || (enabled === false && isMainWindow())) return save();
     const wasOpen = Boolean(state.child);
     await apply(enabled);
     try { return await save(); } catch (error) {
@@ -134,7 +139,6 @@ export function setNextWindowEnabled(enabled: boolean): Promise<void> {
 /** Called only by packaged server startup; false never reads the bearer or binary. */
 export async function restoreNextWindow(): Promise<void> {
   await serialized(async () => {
-    const { values } = await getOperatorDefaults();
-    if (values.experimentalNext) await apply(true);
+    if (isMainWindow() || (await getOperatorDefaults()).values.experimentalNext) await apply(true);
   }).catch(() => {});
 }

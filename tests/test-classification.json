@@ -912,6 +912,12 @@
       ]
     },
     {
+      "path": "src/lib/repos/project-icon-resolver.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/runtime/actions-owned-surface.test.ts",
       "reasons": [
         "process-signal"
@@ -3514,6 +3520,13 @@
       ]
     },
     {
+      "path": "tests/inbox-settlement.integration.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/independent-review-workspace-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5795,6 +5808,15 @@
       ]
     },
     {
+      "path": "tests/project-icons-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/project-threads-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -7509,6 +7531,12 @@
         "process-signal",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/update-next-window-apply-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {

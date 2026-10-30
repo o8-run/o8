@@ -25,6 +25,11 @@ pub struct Projects {
     slug: Entity<Composer>,
     description: Entity<Composer>,
     path: Entity<Composer>,
+    icon: Option<icons::Picker>,
+    icon_search: Entity<Composer>,
+    icon_letters: Entity<Composer>,
+    icon_emoji: Entity<Composer>,
+    icon_path: Entity<Composer>,
     revision: u64,
     pub painted: Rc<Cell<u64>>,
     _subscriptions: Vec<Subscription>,
@@ -40,8 +45,24 @@ impl Projects {
         let slug = cx.new(Composer::new);
         let description = cx.new(Composer::new);
         let path = cx.new(Composer::new);
+        let icon_search = cx.new(Composer::new);
+        let icon_letters = cx.new(Composer::new);
+        let icon_emoji = cx.new(Composer::new);
+        let icon_path = cx.new(Composer::new);
         let subscriptions = vec![
             cx.observe(&search, |_, _, cx| cx.notify()),
+            cx.observe(&icon_search, |_, _, cx| cx.notify()),
+            cx.observe(&icon_letters, |_, _, cx| cx.notify()),
+            cx.observe(&icon_path, |_, _, cx| cx.notify()),
+            // A pasted emoji becomes the choice, as in T3.
+            cx.observe(&icon_emoji, |this: &mut Self, input, cx| {
+                if let Some(emoji) = crate::project_icon::first_emoji(&input.read(cx).text)
+                    && let Some(picker) = this.icon.as_mut()
+                {
+                    picker.emoji = emoji;
+                }
+                cx.notify();
+            }),
             cx.observe(&path, |this, _, cx| {
                 this.validation = None;
                 cx.notify();
@@ -63,6 +84,11 @@ impl Projects {
             slug,
             description,
             path,
+            icon: None,
+            icon_search,
+            icon_letters,
+            icon_emoji,
+            icon_path,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             _subscriptions: subscriptions,
@@ -142,6 +168,7 @@ impl Projects {
         let client = self.client.clone();
         let close_form = matches!(action, Action::Save { .. });
         let close_add = matches!(action, Action::Register(..));
+        let close_icon = matches!(action, Action::Icon(..));
         let task = cx
             .background_executor()
             .spawn(async move { action.run(&client) });
@@ -159,6 +186,9 @@ impl Projects {
                         }
                         if close_add {
                             this.adding = false;
+                        }
+                        if close_icon {
+                            this.icon = None;
                         }
                     }
                     Err(error) => this.error = Some(error),
@@ -222,5 +252,7 @@ impl Projects {
         self.error.as_deref()
     }
 }
+#[path = "projects_icons.rs"]
+mod icons;
 #[path = "projects_view.rs"]
 mod view;

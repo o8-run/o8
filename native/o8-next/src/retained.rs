@@ -146,6 +146,8 @@ struct Thumbnail {
 }
 struct Layout {
     size: Size<Pixels>,
+    /// The appearance its colors were shaped in.
+    theme: u8,
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
     images: Vec<Thumbnail>,
@@ -593,6 +595,7 @@ fn layout(
                 b.y += px(2.);
                 return Layout {
                     size: size(width, b.y + px(8.)),
+                    theme: crate::theme::generation(),
                     lines: b.lines,
                     backgrounds: b.backgrounds,
                     images: vec![],
@@ -624,6 +627,7 @@ fn layout(
     }
     Layout {
         size: size(width, b.y + px(8.)),
+        theme: crate::theme::generation(),
         lines: b.lines,
         backgrounds: b.backgrounds,
         images: b.images,
@@ -754,11 +758,9 @@ impl Element for RetainedRow {
             // Rows wrap at the reading column and paint centred in wider panes.
             let column = width.min(px(COLUMN));
             let mut state = state.borrow_mut();
-            if state
-                .cache
-                .as_ref()
-                .is_none_or(|cache| cache.size.width != column)
-            {
+            if state.cache.as_ref().is_none_or(|cache| {
+                cache.size.width != column || cache.theme != crate::theme::generation()
+            }) {
                 state.cache = Some(layout(
                     &state.row,
                     column,

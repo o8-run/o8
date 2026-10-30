@@ -38,7 +38,7 @@ pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --ser
 #[path = "surface_registry.rs"]
 mod registry;
 use registry::{
-    EmptyState, NavPosition, Registration, ShellView, WorkspaceLoad, register_surfaces,
+    EmptyState, NavPosition, Registration, ShellView, WorkspaceLoad, github_item, register_surfaces,
 };
 
 register_surfaces! {
@@ -68,10 +68,13 @@ register_surfaces! {
 
 #[path = "shell_features.rs"]
 mod features;
+pub(crate) use features::toasts_api as toasts;
 
 pub struct Shell {
     features: features::State,
     system_glass: bool,
+    /// A window drawn without being shown keeps an opaque root.
+    offscreen: bool,
     chrome: crate::render_region::Regions<Shell>,
     client: Client,
     file: PathBuf,
@@ -107,6 +110,7 @@ impl Shell {
         let mut shell = Self {
             features: features::State::default(),
             system_glass: false,
+            offscreen: false,
             chrome: crate::render_region::Regions::default(),
             client,
             file,
@@ -319,6 +323,33 @@ impl Shell {
             })
             .collect()
     }
+    /// Opens a registered surface by its tab label, for callers that must keep
+    /// compiling when that registration is removed. False when it is absent.
+    pub(super) fn open_registered(
+        &mut self,
+        tab_label: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let command = registrations()
+            .iter()
+            .find(|registration| registration.tab_label == tab_label)
+            .and_then(|registration| registration.command)
+            .map(|(_, command)| command());
+        command.is_some_and(|command| {
+            self.execute(command, window, cx);
+            true
+        })
+    }
+    /// Opens a GitHub link in the surface that claims it, else in the browser.
+    pub(super) fn open_link(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !registrations()
+            .iter()
+            .any(|registration| (registration.claim_link)(self, url, window, cx))
+        {
+            cx.open_url(url);
+        }
+    }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
             return;
@@ -350,7 +381,13 @@ impl Shell {
             let saved = self.state.workspaces.entry(workspace).or_default();
             let index = saved.tabs.iter().position(|t| t == &tab);
             if index.is_none() && saved.tabs.len() >= 32 {
-                self.notice = "Close a surface before opening another.".into();
+                toasts::show(
+                    toasts::Kind::Info,
+                    "Close a surface before opening another.",
+                    vec![],
+                    Some(toasts::NOTICE_TIMEOUT),
+                    cx,
+                );
                 return;
             }
             saved.active = index.unwrap_or_else(|| {
@@ -404,3 +441,14 @@ mod feature_tests;
 #[cfg(test)]
 #[path = "startup_tests.rs"]
 mod startup_tests;
+
+// UI tests use the production shell without exposing its private view type.
+#[cfg(test)]
+pub(crate) fn notes_test_window(
+    client: Client,
+    file: PathBuf,
+    state: State,
+    cx: &mut gpui::App,
+) -> gpui::AnyWindowHandle {
+    view::open_window(client, file, state, true, cx).into()
+}

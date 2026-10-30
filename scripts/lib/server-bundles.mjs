@@ -124,6 +124,14 @@ export function bundleServers({ root, outDir }) {
 
   pruneOrphanOutputs(root, outDir, metafile);
   stageSharedCompiler(root, outDir, metafile);
+  // Keep upstream permission/copyright notices with distributed sidecars.
+  for (const file of ['NOTICE.md', 'licenses/t3code-MIT.txt']) {
+    const source = join(root, file);
+    if (!existsSync(source)) continue; // Minimal build fixtures have no notices.
+    const destination = join(outDir, file);
+    mkdirSync(dirname(destination), { recursive: true });
+    cpSync(source, destination);
+  }
 
   for (const label of Object.keys(SERVER_ENTRIES)) {
     // Selection must precede the dynamic import: shared modules may load SQLite.

@@ -67,6 +67,11 @@ pub(super) fn activity_open(
     let content_frame = started.elapsed().as_secs_f64() * 1000.;
     (shell, visual, (first_frame, content_frame))
 }
+/// Opens the repository scope menu and picks one of its rows.
+pub(super) fn activity_scope(cx: &mut VisualTestContext, selector: &'static str) -> f64 {
+    activity_click(cx, "activity-scope");
+    activity_click(cx, selector)
+}
 pub(super) fn activity_click(cx: &mut VisualTestContext, selector: &'static str) -> f64 {
     draw(cx);
     let bounds = cx
@@ -85,8 +90,8 @@ fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
     let (shell, mut visual, opened) = activity_open(&fixture, cx);
     let cx = &mut visual;
     let mut interactions = vec![
-        activity_click(cx, "activity-scope-all"),
-        activity_click(cx, "activity-scope-0"),
+        activity_scope(cx, "activity-scope-all"),
+        activity_scope(cx, "activity-scope-0"),
     ];
     for selector in [
         "activity-filter-commit",
@@ -124,18 +129,69 @@ fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
     activity_click(cx, "activity-filter-pr");
     activity_click(cx, "activity-row-pr-example/activity-7");
     assert!(cx.debug_bounds("activity-pr-file-0").is_some());
+    // Classic opens pull requests and issues in the app, not on GitHub.
     activity_click(cx, "activity-open-pr");
     assert_eq!(
-        cx.opened_url().as_deref(),
-        Some("https://github.com/example/activity/pull/7")
+        shell.read_with(cx, |s, _| s.active()),
+        Some(Tab::PullRequests)
     );
+    let (pr, state) = shell.read_with(cx, |s, cx| {
+        match s.content.get(&s.key(&Tab::PullRequests)) {
+            Some(Content::PullRequests(view)) => {
+                let view = view.read(cx);
+                let state = format!(
+                    "pending {:?}, page repo {}, error {:?}",
+                    view.pending, view.page["repo"], view.error
+                );
+                (view.selected, state)
+            }
+            _ => (None, "no Pull requests tab".into()),
+        }
+    });
+    assert_eq!(
+        pr,
+        Some(7),
+        "the pull request is selected in the Pull requests tab: {state}"
+    );
+    let back = |cx: &mut VisualTestContext| {
+        shell.update_in(cx, |s, window, cx| s.execute(Command::Activity, window, cx));
+        cx.run_until_parked();
+        draw(cx);
+    };
+    back(cx);
     activity_click(cx, "activity-filter-issue");
     activity_click(cx, "activity-row-issue-example/activity-8");
     activity_click(cx, "activity-open-issue");
-    assert_eq!(
-        cx.opened_url().as_deref(),
-        Some("https://github.com/example/activity/issues/8")
-    );
+    let issue = |cx: &mut VisualTestContext| {
+        shell.read_with(cx, |s, cx| match s.content.get(&s.key(&Tab::Issues)) {
+            Some(Content::Issues(view)) => view.read(cx).snapshot(),
+            _ => Value::Null,
+        })
+    };
+    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Issues));
+    assert_eq!(issue(cx)["detail"], 8, "{}", issue(cx));
+    // A double click on the row takes it to the same destination.
+    back(cx);
+    let row = cx
+        .debug_bounds("activity-row-issue-example/activity-8")
+        .unwrap()
+        .center();
+    let (button, modifiers) = (gpui::MouseButton::Left, gpui::Modifiers::default());
+    cx.simulate_event(gpui::MouseDownEvent {
+        button,
+        position: row,
+        modifiers,
+        click_count: 2,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui::MouseUpEvent {
+        button,
+        position: row,
+        modifiers,
+        click_count: 2,
+    });
+    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Issues));
+    back(cx);
     activity_click(cx, "activity-filter-commit");
     activity_click(cx, "activity-row-commit-example/activity-ddddddd");
     activity_click(cx, "activity-open-commit");
@@ -318,6 +374,15 @@ fn activity_empty_local_auth_and_scoped_retention(cx: &mut TestAppContext) {
             .iter()
             .any(|s| s.starts_with("GitHub sync delayed"))
     }));
+    // Classic's GithubReadStatus: the saved remote state's age, and Retry.
+    assert!(view.read_with(cx, |v, _| v.remote_updated.is_some()));
+    assert!(cx.debug_bounds("activity-github-status").is_some());
+    let loaded = view.read_with(cx, |v, _| v.loaded_at);
+    activity_click(cx, "activity-retry");
+    assert!(
+        view.read_with(cx, |v, _| v.loaded_at > loaded),
+        "Retry reloads"
+    );
     let _: Value = fixture
         .client
         .get("/api/activity-fixture", &[("mode", "empty")])
@@ -343,9 +408,16 @@ fn activity_empty_local_auth_and_scoped_retention(cx: &mut TestAppContext) {
     );
     // An unregistered local-only workspace never acquires the previous remote feed.
     view.update(cx, |v, _| v.client = fixture.client.clone());
-    activity_click(cx, "workspace-switcher");
-    activity_click(cx, "command-1");
+    // The header switcher is gone; switch the way the palette's workspace
+    // entry does.
+    let second = shell.read_with(cx, |s, _| s.workspaces[1].clone());
+    assert!(second.ends_with("/second-repo"), "{second}");
+    shell.update_in(cx, |s, window, cx| s.switch(second.clone(), window, cx));
     ready(&shell, cx);
+    assert_eq!(
+        shell.read_with(cx, |s, _| s.state.selected.clone()),
+        Some(second)
+    );
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("a c t i v i t y enter");
     ready(&shell, cx);
@@ -388,7 +460,8 @@ fn activity_loading_error_and_keyboard_controls(cx: &mut TestAppContext) {
     assert!(view.read_with(visual, |v, _| !v.loading
         && !v.errors.is_empty()
         && v.rows.is_empty()));
-    visual.simulate_keystrokes("tab tab enter");
+    // Classic's header order: scope, then Refresh, then the filter pills.
+    visual.simulate_keystrokes("tab tab tab enter");
     draw(visual);
     assert!(view.read_with(visual, |v, _| v.filter == "all"));
     visual.simulate_keystrokes("tab enter");
@@ -425,7 +498,7 @@ fn activity_fork_commits_keep_their_own_ci_badges(cx: &mut TestAppContext) {
         .client
         .get("/api/activity-fixture", &[("mode", "forks")])
         .unwrap();
-    activity_click(cx, "activity-scope-all");
+    activity_scope(cx, "activity-scope-all");
     activity_click(cx, "activity-filter-ci");
     let view = activity_view(&shell, cx);
     let badges = view.read_with(cx, |v, _| {
@@ -460,7 +533,7 @@ fn activity_open_fork_commits(
 ) -> (Fixture, Entity<Shell>, VisualTestContext, Vec<feed::Row>) {
     let fixture = Fixture::start_mode(false, "--activity --activity-forks");
     let (shell, mut visual, _) = activity_open(&fixture, cx);
-    activity_click(&mut visual, "activity-scope-all");
+    activity_scope(&mut visual, "activity-scope-all");
     activity_click(&mut visual, "activity-filter-commit");
     let view = activity_view(&shell, &mut visual);
     let rows = view.read_with(&visual, |view, _| {
@@ -553,5 +626,234 @@ fn activity_fork_keyboard_focus_stays_on_the_selected_row(cx: &mut TestAppContex
         view.read_with(&visual, |view, _| view.expanded.clone()),
         None,
         "Opening another fork must keep keyboard focus on its repository-qualified row"
+    );
+}
+
+#[gpui::test]
+fn activity_in_the_right_panel_refreshes_on_its_own(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("activity.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    // Symon's o8_ui_open puts Activity in front in the right panel.
+    let frame = serde_json::json!({"type": "ui-command", "kind": "symon-ui",
+        "payload": {"data": {"surface": "activity"}}});
+    shell.update_in(cx, |s, window, cx| s.ui_command(&frame, window, cx));
+    cx.run_until_parked();
+    draw(cx);
+    let view = shell
+        .read_with(cx, |s, _| {
+            s.content.iter().find_map(|(key, content)| match content {
+                Content::Activity(view) if key.starts_with("panel|") => Some(view.clone()),
+                _ => None,
+            })
+        })
+        .expect("Activity opens in the right panel");
+    for _ in 0..100 {
+        cx.run_until_parked();
+        draw(cx);
+        if view.read_with(cx, |v, _| v.ready()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_ne!(
+        shell.read_with(cx, |s, _| s.active()),
+        Some(Tab::Activity),
+        "the main area shows something else"
+    );
+    view.update(cx, |v, _| {
+        v.loaded_at = Instant::now() - Duration::from_secs(301);
+    });
+    shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+    for _ in 0..100 {
+        cx.run_until_parked();
+        if view.read_with(cx, |v, _| v.ready()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        view.read_with(cx, |v, _| v.loaded_at.elapsed() < Duration::from_secs(60)),
+        "a five-minute-old feed in the panel loads again without a click"
+    );
+}
+
+#[gpui::test]
+fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let view = activity_view(&shell, cx);
+    let settle = |cx: &mut VisualTestContext| {
+        for _ in 0..200 {
+            cx.run_until_parked();
+            draw(cx);
+            if view.read_with(cx, |v, _| !v.pending && !v.loading) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("the decision never settled");
+    };
+    let lane_commands = || {
+        let state = fixture
+            .client
+            .get::<Value>("/api/activity-fixture", &[])
+            .unwrap();
+        let commands = state["mutations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|body| serde_json::from_str::<Value>(body.as_str()?).ok())
+            .filter(|body| body["verb"].is_string())
+            .collect::<Vec<_>>();
+        (commands, state["laneId"].clone())
+    };
+    activity_click(cx, "activity-filter-packet");
+    activity_click(cx, "activity-row-packet-local-activity-packet");
+    // The fixture's packet waits for review behind an operator hold.
+    activity_click(cx, "activity-release");
+    settle(cx);
+    // An awaiting-review packet with a lane: Resume, the review section and
+    // Close unmerged, but no Stop, since it is not running.
+    for control in [
+        "activity-lane-resume",
+        "activity-lane-create-pr",
+        "activity-lane-merge",
+        "activity-close-unmerged",
+    ] {
+        assert!(cx.debug_bounds(control).is_some(), "{control}");
+    }
+    assert!(cx.debug_bounds("activity-lane-stop").is_none());
+
+    activity_click(cx, "activity-lane-create-pr");
+    settle(cx);
+    let (commands, lane) = lane_commands();
+    assert_eq!(
+        commands.last().unwrap(),
+        &serde_json::json!({"verb": "create_pr", "laneId": lane,
+            "commitMessage": "Auto-commit from lane"})
+    );
+    assert!(
+        view.read_with(cx, |v, _| v
+            .notice
+            .contains("https://github.com/example/activity/pull/8")),
+        "the created PR's note shows"
+    );
+
+    activity_click(cx, "activity-lane-merge");
+    settle(cx);
+    let (commands, _) = lane_commands();
+    assert_eq!(commands.last().unwrap()["verb"], "merge");
+    assert_eq!(
+        commands.last().unwrap()["commitMessage"],
+        "Merge lane: Fixture packet"
+    );
+    let notice = view.read_with(cx, |v, _| v.notice.clone());
+    assert!(
+        notice.contains("Merge conflict in fixture.ts.")
+            && notice.ends_with("Try \"Create PR\" instead."),
+        "{notice}"
+    );
+
+    // The first close answer is still running: the same body replays until its
+    // receipt settles, and the busy confirm cannot send a second close.
+    let _: Value = fixture
+        .client
+        .get("/api/activity-fixture", &[("mode", "slow-close")])
+        .unwrap();
+    activity_click(cx, "activity-close-unmerged");
+    activity_click(cx, "activity-close-reason-superseded");
+    // Send the confirm's own action twice before the first close settles.
+    let confirm = view.read_with(cx, |v, _| {
+        v.controls
+            .iter()
+            .find(|(id, _)| id == "activity-close-confirm")
+            .map(|(_, action)| action.clone())
+            .expect("the confirm is a control")
+    });
+    view.update(cx, |v, cx| {
+        v.act(confirm.clone(), cx);
+        v.act(confirm, cx);
+    });
+    draw(cx);
+    assert_eq!(
+        view.read_with(cx, |v, _| v.close_stage),
+        Some("Closing packet…")
+    );
+    assert!(
+        cx.debug_bounds("activity-close-confirm").is_some()
+            && view.read_with(cx, |v, _| v
+                .controls
+                .iter()
+                .all(|(id, _)| !id.starts_with("activity-close-"))),
+        "the busy confirm stays in place with no click or keyboard stop"
+    );
+    settle(cx);
+    let closes = fixture
+        .client
+        .get::<Value>("/api/activity-fixture", &[])
+        .unwrap()["closes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|body| serde_json::from_str::<Value>(body.as_str()?).ok())
+        .collect::<Vec<_>>();
+    assert!(
+        closes.len() >= 2,
+        "the in-progress answer replays the receipt: {closes:?}"
+    );
+    assert!(
+        closes.iter().all(|body| body == &closes[0]) && closes[0]["disposition"] == "superseded",
+        "every replay sends the same body and mutation id: {closes:?}"
+    );
+    let state: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
+    let packet = state["mission"]["packets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|packet| packet["id"] == "activity-packet")
+        .cloned();
+    let notice = view.read_with(cx, |v, _| v.notice.clone());
+    assert!(
+        packet
+            .as_ref()
+            .is_none_or(|packet| packet["status"] == "archived"),
+        "Close unmerged archives the packet: {packet:?}; notice: {notice}"
+    );
+}
+
+#[gpui::test]
+fn activity_scope_menu_picks_and_closes(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let view = activity_view(&shell, cx);
+    activity_click(cx, "activity-scope");
+    assert!(view.read_with(cx, |v, _| v.scope_menu
+        && v.controls.iter().any(|(id, _)| id == "activity-scope-0")));
+    activity_click(cx, "activity-scope-0");
+    let (open, scope, first) = view.read_with(cx, |v, _| {
+        (v.scope_menu, v.scope.clone(), v.repos[0].local_path.clone())
+    });
+    assert!(!open, "picking a scope closes the menu");
+    assert_eq!(scope, first);
+    // Enter on the chip opens on the checked row; Escape returns to the chip.
+    view.update(cx, |v, _| v.keyboard = Some("activity-scope".into()));
+    cx.simulate_keystrokes("enter");
+    assert_eq!(
+        view.read_with(cx, |v, _| (v.scope_menu, v.keyboard.clone())),
+        (true, Some("activity-scope-0".into()))
+    );
+    cx.simulate_keystrokes("escape");
+    assert_eq!(
+        view.read_with(cx, |v, _| (v.scope_menu, v.keyboard.clone())),
+        (false, Some("activity-scope".into()))
     );
 }

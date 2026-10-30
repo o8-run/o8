@@ -122,6 +122,20 @@ it('keeps default startup, all existing defaults, environment and the data direc
   expect(existsSync(receipt)).toBe(false);
 });
 
+it('opens o8 next as the main window of the packaged macOS app, and the old switch cannot close it', async () => {
+  // The packaged macOS shell sets this when it spawns the server (#5069).
+  vi.stubEnv('O8_NEXT_MAIN_WINDOW', '1');
+  expect((await getOperatorDefaults()).values.experimentalNext).toBe(false);
+  await boot();
+  await vi.waitFor(() => expect(existsSync(receipt)).toBe(true), { timeout: 10_000 });
+  const child = probe();
+  expect(child.authorized).toBe(true);
+  expect(child.argv).toContain('--app-shell');
+  expect((await post(false)).status).toBe(200);
+  expect((await getOperatorDefaults()).values.experimentalNext).toBe(false);
+  expect(alive(child.pid)).toBe(true);
+});
+
 async function mountSettings(beforeGet: () => Promise<void> = async () => {}) {
   vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
     const request = new Request(new URL(input, endpoint), init);

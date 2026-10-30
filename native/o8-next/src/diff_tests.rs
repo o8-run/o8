@@ -27,8 +27,10 @@ fn fixture() -> (Server, Client) {
             "scripts/next/dev-server.ts",
             "--review",
             "--review-drop-first",
+            "--owned-stdio",
         ])
         .env("O8_NEXT_API_TOKEN", "fixture-next-review-operator")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -106,6 +108,7 @@ fn diff_real_server_selection_modes_review_and_virtualized_paint(cx: &mut TestAp
     });
     cx.run_until_parked();
     let approve = cx.debug_bounds("diff-approve").unwrap();
+    let old_bounds = approve;
     cx.simulate_click(approve.center(), gpui::Modifiers::default());
     cx.run_until_parked();
     assert_eq!(
@@ -122,7 +125,11 @@ fn diff_real_server_selection_modes_review_and_virtualized_paint(cx: &mut TestAp
     let reject = cx.debug_bounds("diff-reject").unwrap();
     cx.simulate_click(reject.center(), gpui::Modifiers::default());
     cx.run_until_parked();
-    assert!(view.read_with(cx, |s, _| s.notice.contains("Diff changed")));
+    let notice = view.read_with(cx, |s, _| s.notice.clone());
+    assert!(
+        notice.contains("Diff changed"),
+        "changed diff refusal: {notice}"
+    );
     assert_eq!(
         saved.review_state("next-review-approve").unwrap()["orchestratorReview"]["verdict"],
         "approved"
@@ -148,10 +155,10 @@ fn diff_real_server_selection_modes_review_and_virtualized_paint(cx: &mut TestAp
         window.refresh();
         window.draw(cx).clear();
     });
-    // GPUI retains debug selector bounds after an element disappears. Clicking
-    // the old action location must still leave the server's receipt unchanged.
+    // The action disappears for an unsupported document. Clicking its saved
+    // position must still leave the server's receipt unchanged.
     let approval = saved.review_state("next-review-approve").unwrap()["orchestratorReview"].clone();
-    let old_bounds = cx.debug_bounds("diff-approve").unwrap();
+    assert!(cx.debug_bounds("diff-approve").is_none());
     cx.simulate_click(old_bounds.center(), gpui::Modifiers::default());
     cx.run_until_parked();
     assert!(view.read_with(cx, |s, _| s.notice.contains("Unsupported")
@@ -173,7 +180,11 @@ fn diff_real_server_selection_modes_review_and_virtualized_paint(cx: &mut TestAp
     });
     cx.simulate_click(old_bounds.center(), gpui::Modifiers::default());
     cx.run_until_parked();
-    assert!(view.read_with(cx, |s, _| s.notice.contains("truncated")));
+    assert!(
+        view.read_with(cx, |s, _| s.notice.contains("truncated")),
+        "truncated diff refusal: {}",
+        view.read_with(cx, |s, _| s.notice.clone())
+    );
     assert_eq!(
         saved.review_state("next-review-approve").unwrap()["orchestratorReview"],
         approval

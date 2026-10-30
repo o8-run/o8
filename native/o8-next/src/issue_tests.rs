@@ -54,7 +54,7 @@ impl Fixture {
         if worker {
             command.arg("--worker");
         }
-        command.args(flags);
+        command.args(flags).arg("--owned-stdio");
         let mut server = command
             .env("O8_NEXT_API_TOKEN", "fixture-next-issues-operator")
             .stdin(Stdio::piped())
@@ -62,14 +62,16 @@ impl Fixture {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        let origin = BufReader::new(server.stdout.take().unwrap())
-            .lines()
+        let mut output = BufReader::new(server.stdout.take().unwrap()).lines();
+        let origin = output.by_ref()
             .find_map(|line| {
                 serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
                     .as_str()
                     .map(str::to_owned)
             })
             .expect("fixture origin");
+        // Keep late production logs from writing into a closed readiness pipe.
+        std::thread::spawn(move || for _ in output {});
         Self {
             server,
             root,
@@ -92,8 +94,10 @@ fn issues_worker_receives_linked_context_through_stream(cx: &mut TestAppContext)
     let cx = &mut visual;
     click(cx, "issue-view-7");
     click(cx, "issue-work");
-    wait(cx, "issue-worker");
-    let deadline = Instant::now() + Duration::from_secs(35);
+    // Starting the worker and streaming its first reply take about 34s on a
+    // loaded Linux box, so this test allows 90s for each.
+    wait_with_bound(cx, "issue-worker", Duration::from_secs(90));
+    let deadline = Instant::now() + Duration::from_secs(90);
     while Instant::now() < deadline {
         draw(cx);
         let history = fixture.client.history("thoughts-composer-first").unwrap();
@@ -490,6 +494,9 @@ fn issues_link_follows_worker_selection(cx: &mut TestAppContext) {
     cx.simulate_click(center, gpui::Modifiers::default());
     cx.simulate_keystrokes("tab down");
     wait(cx, "issue-unlinked");
+    // Tab now reaches the composer toolbar; leave from the editor (#5152).
+    let center = cx.debug_bounds("composer-input").unwrap().center();
+    cx.simulate_click(center, gpui::Modifiers::default());
     cx.simulate_keystrokes("escape");
     click(cx, "issue-link-7");
     click(cx, "issue-task-composer");

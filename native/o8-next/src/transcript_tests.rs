@@ -221,10 +221,29 @@ fn persisted_workers_rich_events_and_older_history(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let retained = view.read_with(cx, |s, _| s.rows[0].clone());
     let layouts = retained.borrow().layouts;
-    let older = cx
-        .debug_bounds("load-older")
-        .expect("older-history control");
-    cx.simulate_click(older.center(), gpui::Modifiers::default());
+    assert!(
+        cx.debug_bounds("load-older").is_none(),
+        "scroll is the default"
+    );
+    view.update(cx, |s, cx| {
+        s.list.scroll_to(ListOffset {
+            item_ix: 0,
+            offset_in_item: px(241.),
+        });
+        s.on_transcript_scroll(cx);
+        assert!(!s.history_loading, "outside classic's 240 px threshold");
+        cx.notify();
+    });
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    let viewport = view.read_with(cx, |s, _| s.list.viewport_bounds());
+    cx.simulate_event(gpui::ScrollWheelEvent {
+        position: viewport.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(1.))),
+        ..Default::default()
+    });
     cx.run_until_parked();
     view.read_with(cx, |s, _| {
         assert_eq!(s.transcript.as_ref().unwrap().entries.len(), 200);
@@ -243,6 +262,133 @@ fn persisted_workers_rich_events_and_older_history(cx: &mut TestAppContext) {
         view.read_with(cx, |s, _| s.transcript.as_ref().unwrap().page.is_some()),
         "real bootstrap checkpoint must keep older-history reachable"
     );
+}
+
+#[gpui::test]
+fn history_backfill_is_single_flight_and_preserves_the_completion_time_anchor(
+    cx: &mut TestAppContext,
+) {
+    let (_host, client) = fixture();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| s.load_sessions(cx));
+    cx.run_until_parked();
+    view.update(cx, |s, cx| s.select("thoughts-pagination".into(), cx));
+    cx.run_until_parked();
+    let anchor = view.update(cx, |s, cx| {
+        s.list.scroll_to(ListOffset {
+            item_ix: 0,
+            offset_in_item: px(240.),
+        });
+        s.on_transcript_scroll(cx);
+        assert!(s.history_loading, "threshold includes 240 px");
+        for _ in 0..5 {
+            s.on_transcript_scroll(cx);
+            s.load_older(cx);
+        }
+        // The reader moves before the response completes. Do not restore the
+        // position captured when the request began.
+        s.list.scroll_to(ListOffset {
+            item_ix: 0,
+            offset_in_item: px(7.),
+        });
+        s.rows[0].clone()
+    });
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    let before = view.read_with(cx, |s, _| s.list.bounds_for_item(0).unwrap());
+    let viewport = view.read_with(cx, |s, _| s.list.viewport_bounds());
+    assert!(cx.debug_bounds("load-older").is_some(), "pending fallback");
+    cx.run_until_parked();
+    view.read_with(cx, |s, _| {
+        assert!(!s.history_loading);
+        assert_eq!(
+            s.transcript.as_ref().unwrap().entries.len(),
+            200,
+            "repeated scrolls must fetch just one older page"
+        );
+        let top = s.list.logical_scroll_top();
+        assert_eq!(top.item_ix, 100);
+        assert_eq!(top.offset_in_item, px(7.));
+        assert!(Rc::ptr_eq(&anchor, &s.rows[top.item_ix]));
+        assert_eq!(
+            s.list.bounds_for_item(top.item_ix).unwrap().top(),
+            before.top()
+        );
+        assert_eq!(
+            s.list.viewport_bounds(),
+            viewport,
+            "fallback must not shift the viewport"
+        );
+    });
+    // GPUI retains removed debug selectors across frames; check current state
+    // rather than using an old selector's cached bounds to infer visibility.
+    view.read_with(cx, |s, _| {
+        assert!(!s.history_loading && s.history_error.is_none())
+    });
+    view.update(cx, |s, cx| {
+        s.on_transcript_scroll(cx);
+        assert!(
+            !s.history_loading,
+            "prepended rows must count toward distance to the top"
+        );
+        s.transcript
+            .as_mut()
+            .unwrap()
+            .page
+            .as_mut()
+            .unwrap()
+            .has_more = false;
+        s.list.scroll_to(ListOffset {
+            item_ix: 0,
+            offset_in_item: px(0.),
+        });
+        s.on_transcript_scroll(cx);
+        assert!(!s.history_loading, "exhausted history must not load");
+    });
+}
+
+#[gpui::test]
+fn history_failure_waits_for_the_fallback_retry(cx: &mut TestAppContext) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let client = Client::authenticated(&origin, None).unwrap();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| {
+        s.selected = Some("thoughts-failed".into());
+        s.transcript = Some(Transcript::new(
+            serde_json::from_value(json!({
+                "sessionKey":"llm-chat:thoughts-failed",
+                "transcript":[{"id":"tail","role":"assistant","text":"Tail"}],
+                "page":{"hasMore":true,"beforeCursor":"older"}
+            }))
+            .unwrap(),
+        ));
+        s.install_rows(s.transcript.as_ref().unwrap().rows.clone(), cx);
+        s.on_transcript_scroll(cx);
+    });
+    cx.run_until_parked();
+    view.update(cx, |s, cx| {
+        assert!(s.history_error.is_some());
+        assert!(!s.history_loading);
+        s.on_transcript_scroll(cx);
+        assert!(!s.history_loading, "scroll must not spin on a failed page");
+        s.history_error = Some("retry sentinel".into());
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let retry = cx.debug_bounds("load-older").expect("failed-load fallback");
+    cx.simulate_click(retry.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    view.read_with(cx, |s, _| {
+        assert_ne!(
+            s.history_error.as_deref(),
+            Some("retry sentinel"),
+            "the fallback must retry the existing cursor even when failure completes immediately"
+        );
+    });
 }
 
 /// The same first-draw/key-paint endpoints as the existing harness. Linux's

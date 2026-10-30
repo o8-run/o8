@@ -394,6 +394,9 @@ pub struct TextStyle {
     /// How the text should be aligned within the element
     pub text_align: TextAlign,
 
+    /// Extra distance between shaped glyph clusters. Zero preserves normal layout.
+    pub letter_spacing: Pixels,
+
     /// The number of lines to display before truncating the text
     pub line_clamp: Option<usize>,
 }
@@ -417,6 +420,7 @@ impl Default for TextStyle {
             text_overflow: None,
             text_align: TextAlign::default(),
             line_clamp: None,
+            letter_spacing: Pixels::ZERO,
         }
     }
 }

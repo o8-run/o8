@@ -29,7 +29,10 @@ fn onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close(cx: &m
         cx.notify();
     });
     draw(cx);
-    click(cx, "shell-settings");
+    // Settings lives in the rail's profile menu, as in the desktop rail. Busy
+    // setup keeps that menu closed, so its Settings row is out of reach.
+    click(cx, "shell-profile");
+    assert!(cx.debug_bounds("profile-settings").is_none(), "busy setup must keep the profile menu closed");
     assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()), "busy setup must intercept shell navigation without a registry veto");
     for chord in ["ctrl-k", "cmd-k", "ctrl-shift-p", "cmd-shift-p"] {
         cx.simulate_keystrokes(chord);
@@ -44,7 +47,9 @@ fn onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close(cx: &m
     cx.run_until_parked();
     draw(cx);
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()), "closing setup is retained for this shell lifetime");
-    click(cx, "shell-settings");
+    // Settings lives in the rail's profile menu, as in the desktop rail.
+    click(cx, "shell-profile");
+    click(cx, "profile-settings");
     assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_some()), "idle navigation remains available");
     cx.simulate_keystrokes("ctrl-shift-p");
     assert!(shell.read_with(cx, |s, _| s.palette), "idle global palette navigation remains available");

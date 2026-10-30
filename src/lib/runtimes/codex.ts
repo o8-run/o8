@@ -24,7 +24,7 @@ import type {
 import '@/lib/runtimes/codex-cost-parser';
 import { readCodexContext } from './codex-context';
 import { parseCost } from '@/lib/runtimes/shared/cost-parser-registry';
-import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
+import { ownedTailToRuntimeTranscript, runtimeTranscriptTime } from '@/lib/runtimes/shared/owned-transcript';
 import { createOwnedExecutionPolicy } from '@/lib/runtimes/shared/owned-session/execution-policy';
 import { resolveCodexLaunchIdentity } from '@/lib/codex/launch-context';
 import {
@@ -337,7 +337,7 @@ export const codexRuntime: AgentRuntime = {
       text: entry.text,
       tokens: entry.tokens,
       model: entry.model,
-      timestamp: parseTranscriptTimestamp(entry.timestamp, entry.timestampLabel),
+      ...runtimeTranscriptTime(entry.timestamp, parseTranscriptTimestamp(entry.timestamp, entry.timestampLabel)),
       toolName: entry.kind === 'tool' ? entry.label : undefined,
     }));
   },

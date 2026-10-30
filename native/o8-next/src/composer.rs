@@ -4,8 +4,11 @@ use gpui::{prelude::*, *};
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
+pub(crate) mod commands;
 pub(crate) mod controls;
 pub(crate) mod images;
+pub(crate) mod mode_store;
+pub(crate) mod prompt_state;
 
 #[derive(Clone)]
 struct Snapshot {
@@ -35,6 +38,10 @@ pub struct Composer {
     typing: Option<std::time::Instant>,
     pub(crate) placeholder: String,
     pub(crate) framed: bool,
+    /// One unpadded line, for a field inside a pill or row.
+    pub(crate) inline: bool,
+    /// Textarea fields insert a newline on plain Enter; chat keeps Submit.
+    pub(crate) newline_on_enter: bool,
     pub(crate) controls: controls::State,
 }
 impl Composer {
@@ -59,8 +66,24 @@ impl Composer {
             typing: None,
             placeholder: String::new(),
             framed: true,
+            inline: false,
+            newline_on_enter: false,
             controls: controls::State::default(),
         }
+    }
+    pub(crate) fn select_all(&mut self, cx: &mut Context<Self>) {
+        self.anchor = 0;
+        self.selection = 0..self.text.len();
+        self.changed(cx);
+    }
+    pub(crate) fn insert_prompt(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.undo.push(self.snapshot());
+        self.redo.clear();
+        self.replace(self.selection.clone(), text);
+        self.marked = None;
+        self.composition = None;
+        self.typing = None;
+        self.changed(cx);
     }
     pub fn composing(&self) -> bool {
         self.marked.is_some()
@@ -103,7 +126,33 @@ impl Composer {
         self.composition = None;
         self.changed(cx);
     }
+    /// Dictation's live transcript: replaces the text without an undo step, so
+    /// snapshots never fill the undo history.
+    pub(crate) fn show_dictation(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.typing = None;
+        self.text = text.to_owned();
+        self.selection = self.text.len()..self.text.len();
+        self.anchor = self.text.len();
+        self.marked = None;
+        self.composition = None;
+        self.changed(cx);
+    }
     fn changed(&mut self, cx: &mut Context<Self>) {
+        if self.controls.slash.enabled {
+            if self.controls.slash.last != self.text {
+                let previous = self.controls.slash.last.trim_start();
+                let next = self.text.trim_start();
+                if previous.is_empty() != next.is_empty()
+                    || previous.starts_with('/')
+                    || next.starts_with('/')
+                {
+                    cx.emit(commands::Changed(false));
+                }
+                self.controls.slash.last = self.text.clone();
+                self.controls.slash.index = 0;
+                self.controls.slash.dismissed = None;
+            }
+        }
         self.revision += 1;
         self.reveal_cursor = true;
         cx.notify();
@@ -200,6 +249,9 @@ impl Composer {
             cx.stop_propagation();
             return;
         }
+        if self.slash_key(key, window, cx) {
+            return;
+        }
         let command = key.modifiers.control || key.modifiers.platform;
         if command || key.key.chars().count() != 1 {
             self.typing = None;
@@ -217,6 +269,9 @@ impl Composer {
             .map(|i| cursor + i)
             .unwrap_or(self.text.len());
         match key.key.as_str() {
+            "enter" if self.newline_on_enter && !command => {
+                self.replace_text_in_range(None, "\n", window, cx)
+            }
             "enter" if command && key.modifiers.shift => cx.emit(Submit(true)),
             "enter" if !key.modifiers.shift => cx.emit(Submit(false)),
             "enter" => self.replace_text_in_range(None, "\n", window, cx),
@@ -495,6 +550,9 @@ impl EntityInputHandler for Composer {
 }
 impl Render for Composer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.controls.slash.enabled {
+            self.controls.slash.window = Some(window.window_handle());
+        }
         if !self.focus.is_focused(window) {
             self.selecting = false;
             self.typing = None;
@@ -518,10 +576,20 @@ impl Render for Composer {
             .when(!self.framed, |d| {
                 d.min_h(px(52.)).pt(px(11.)).px(px(14.)).pb(px(4.))
             })
+            .when(self.inline, |d| {
+                d.min_h_0()
+                    .max_h(px(crate::theme::TYPE.body_line))
+                    .p_0()
+                    .border_0()
+            })
             .on_key_down(cx.listener(Self::key))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    if this.controls.slash.enabled && this.controls.open.take().is_some() {
+                        this.controls.prompt.generation += 1;
+                        cx.emit(commands::Changed(true));
+                    }
                     this.focus.focus(window);
                     this.selecting = true;
                     this.typing = None;
@@ -721,7 +789,13 @@ impl Render for Composer {
                                     let top = -scroll.y;
                                     // The viewport excludes the input's padding and border.
                                     let visible = (input.scroll.bounds().size.height
-                                        - px(if input.framed { 18. } else { 15. }))
+                                        - px(if input.inline {
+                                            0.
+                                        } else if input.framed {
+                                            18.
+                                        } else {
+                                            15.
+                                        }))
                                     .max(px(20.));
                                     let bottom = top + visible;
                                     let next = if cursor_y < top {

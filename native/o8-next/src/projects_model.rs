@@ -26,6 +26,9 @@ pub struct Repo {
     pub name: String,
     pub local_path: String,
     pub exists: bool,
+    /// The listing's icon override or image; older hosts send none.
+    #[serde(default, deserialize_with = "crate::project_icon::lenient")]
+    pub icon: Option<crate::project_icon::Icon>,
 }
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +118,8 @@ pub enum Action {
     Remove(String),
     /// Stable project and repository IDs; the folder is resolved at dispatch.
     Open(String, String),
+    /// A repository's icon patch: `projectIcon` and/or `faviconPath`.
+    Icon(String, Value),
     Activate(String),
 }
 pub struct Outcome {
@@ -268,6 +273,12 @@ impl Action {
             }
             Self::Remove(id) => {
                 request("DELETE", "/api/panel/repos", json!({"id":id}))?;
+            }
+            Self::Icon(id, patch) => {
+                let mut body = patch.clone();
+                body["action"] = json!("update-icon");
+                body["id"] = json!(id);
+                request("POST", "/api/panel/repos", body)?;
             }
             Self::Open(project, repo_id) => {
                 request(

@@ -45,6 +45,45 @@ impl Client {
         }
         Ok(())
     }
+    /// Settle or un-settle through the inbox contract: a chat by `tabId`, a
+    /// worker by `sessionKey`, and no other fields. Returns the new state.
+    pub(crate) fn inbox_action(
+        &self,
+        workspace: Option<&str>,
+        id: &str,
+        action: &str,
+    ) -> Result<Value, String> {
+        let workspace = workspace
+            .filter(|path| std::path::Path::new(path).is_absolute())
+            .ok_or("Select a workspace before changing this session.")?;
+        let mut url = self.url("/api/v2/chat-history").unwrap();
+        url.query_pairs_mut().append_pair("workspace", workspace);
+        let mut body = json!({"inboxAction": action});
+        let key = if id.contains(':') {
+            "sessionKey"
+        } else {
+            "tabId"
+        };
+        body[key] = json!(id);
+        let request = self.in_workspace(workspace).request("PATCH", &url);
+        let response = request.send_json(body).map_err(|error| match error {
+            // The server names what holds the thread open: a run, a
+            // queued message or a child worker.
+            ureq::Error::Status(409, response) => response
+                .into_json::<Value>()
+                .ok()
+                .and_then(|body| body["error"].as_str().map(str::to_owned))
+                .unwrap_or_else(|| "This thread is still working.".into()),
+            ureq::Error::Status(404, _) => "This thread is no longer available.".into(),
+            ureq::Error::Status(code, _) => format!("Settle rejected (HTTP {code})."),
+            _ => "Settle is unconfirmed. Refresh before retrying.".into(),
+        })?;
+        let result: Value = Self::read(response)?;
+        if result["ok"] != true {
+            return Err("Settle was not confirmed.".into());
+        }
+        Ok(result)
+    }
     pub(crate) fn archive_worker(&self, id: &str, mutation: &str) -> Result<(), String> {
         let mut url = self.url("/api/runtime/archive").unwrap();
         let workspace = self

@@ -57,6 +57,7 @@ mod models;
 mod no_window;
 mod native_test_instance;
 mod overlay_geometry;
+mod next_main;
 mod paste;
 mod point_overlay;
 mod presentation;
@@ -3807,6 +3808,16 @@ fn show_desktop_window(app: &AppHandle) {
     }
 }
 
+/// Bring up the window the operator works in: o8 next in the packaged macOS
+/// app, the classic window everywhere else.
+fn show_main_ui(app: &AppHandle) {
+    if next_main::enabled() {
+        next_main::show();
+    } else {
+        show_desktop_window(app);
+    }
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 fn background_desktop_app(app: &AppHandle) {
     set_tray_visible(true);
@@ -7171,6 +7182,11 @@ impl BundledNextSpawn {
                 command.env("O8_NEXT_BIN", directory.join("o8-next"));
             }
         }
+        // The server keeps o8 next open as the main window instead of
+        // following the old Settings switch.
+        if next_main::enabled() {
+            command.env(next_main::SERVER_ENV, "1");
+        }
         if let Some(path) = self.codebase_memory_bin.as_ref() {
             command.env("O8_CODEBASE_MEMORY_BIN", path);
         }
@@ -8703,7 +8719,7 @@ pub fn run() {
                     let id = event.id.as_ref();
                     match id {
                         "show" => {
-                            show_desktop_window(app);
+                            show_main_ui(app);
                         }
                         "quit" => {
                             app.exit(0);
@@ -8713,7 +8729,7 @@ pub fn run() {
                             // window so the operator sees the review queue,
                             // then emit a Tauri event the frontend can pick
                             // up to scroll the AgentPanel to the lane.
-                            show_desktop_window(app);
+                            show_main_ui(app);
                             let lane_id = &lane["lane:".len()..];
                             let _ = app.emit("tray:focus-lane", lane_id.to_string());
                         }
@@ -8728,7 +8744,7 @@ pub fn run() {
                     } = event
                     {
                         let app = tray.app_handle();
-                        show_desktop_window(app);
+                        show_main_ui(app);
                     }
                 })
                 .build(app)?;
@@ -8829,7 +8845,7 @@ pub fn run() {
                 // Registration failures are logged, not fatal — a chord already
                 // owned by another app must not block boot.
                 {
-                    use tauri::{Emitter, Manager};
+                    use tauri::Emitter;
                     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
                     // ⌘⇧Space → summon the o8 window to the front. o8's window is
@@ -8841,10 +8857,7 @@ pub fn run() {
                             if event.state != ShortcutState::Pressed {
                                 return;
                             }
-                            if let Some(win) = h.get_webview_window("main") {
-                                let _ = win.show();
-                                let _ = win.set_focus();
-                            }
+                            show_main_ui(&h);
                         }) {
                             log::warn!("[hotkey] failed to register CmdShiftSpace (summon): {e}");
                         }
@@ -9164,7 +9177,11 @@ pub fn run() {
             // ── Window FIRST ──
             // Built before any sidecar work so the loader paints the moment the
             // event loop starts, rather than after the whole bootstrap has run.
-            if app.get_webview_window("main").is_none() {
+            // The packaged macOS app opens o8 next instead (the server spawns
+            // it), so the classic window is never built there.
+            if next_main::enabled() {
+                log::info!("[main-window] o8 next is the main window; the classic window is not built");
+            } else if app.get_webview_window("main").is_none() {
                 if let Some(config) = main_window_config.as_ref() {
                     // __O8_HTML_TRAFFIC_LIGHTS__ tells the frontend this shell
                     // hides the native traffic lights, so it must render the
@@ -9541,7 +9558,7 @@ pub fn run() {
             // Auxiliary windows can keep has_visible_windows true while main
             // is hidden. Every Dock reopen restores the existing main window.
             #[cfg(target_os = "macos")]
-            RunEvent::Reopen { .. } => show_desktop_window(_app_handle),
+            RunEvent::Reopen { .. } => show_main_ui(_app_handle),
             // Finder "Open With → o8" / dock drop (file:// URLs) AND the auth
             // deep-link handoff (o8://auth/callback?...). macOS delivers both
             // through Opened; we partition by scheme. Buffer for cold launch

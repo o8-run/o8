@@ -35,8 +35,10 @@ fn fixture_with_tail_gate(gate: Option<std::path::PathBuf>) -> (Fixture, Client,
             "tsx",
             "scripts/next/dev-server.ts",
             "--terminal",
+            "--owned-stdio",
         ])
         .env("O8_NEXT_API_TOKEN", "fixture-next-terminal-operator")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     if let Some(gate) = &gate {
@@ -50,6 +52,7 @@ fn fixture_with_tail_gate(gate: Option<std::path::PathBuf>) -> (Fixture, Client,
             value["terminalSession"].is_string().then_some(value)
         })
         .expect("fixture metadata");
+    std::thread::spawn(move || for _ in lines {});
     let client = Client::authenticated(
         metadata["origin"].as_str().unwrap(),
         Some("fixture-next-terminal-operator".into()),
