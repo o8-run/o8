@@ -477,29 +477,22 @@ describe('report id + attribution (the #fixed loop)', () => {
     expect(payload.embeds[0].footer.text).toContain(body.reportId);
   });
 
-  it('credits the GitHub login from the auth cookie', async () => {
-    auth.ghUser = 'kleosr';
+  it('never records the reporter GitHub login, even with a connected account (data minimization)', async () => {
+    auth.ghUser = 'octo-user';
 
     await postReport(
       { category: 'bug', message: 'crash on merge', route: '/dashboard' },
       'o8-token=valid-token',
     );
 
-    const recorded = ledger.written[0] as { reporter: string | null };
-    expect(recorded.reporter, 'the #fixed post credits this').toBe('kleosr');
-
-    const payload = captured.json as { embeds: { fields: DiscordEmbedField[] }[] };
-    expect(payload.embeds[0].fields.find((f) => f.name === 'Reported by')?.value).toBe('@kleosr');
-  });
-
-  it('files anonymously when GitHub is not connected', async () => {
-    await postReport({ category: 'bug', message: 'crash on merge', route: '/dashboard' });
-
+    // #fixed is retired: the login is neither read from the cookie nor stored.
     const recorded = ledger.written[0] as { reporter: string | null };
     expect(recorded.reporter).toBeNull();
+    expect(JSON.stringify(ledger.written[0]).includes('octo-user')).toBe(false);
 
+    // No identity reaches the ops card either — the "Reported by" field is gone.
     const payload = captured.json as { embeds: { fields: DiscordEmbedField[] }[] };
-    expect(payload.embeds[0].fields.find((f) => f.name === 'Reported by')?.value).toBe('anonymous');
+    expect(payload.embeds[0].fields.find((f) => f.name === 'Reported by')).toBeUndefined();
   });
 
   it('errors loudly when no signed relay credential is available', async () => {
