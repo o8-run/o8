@@ -475,9 +475,10 @@ impl ThreadList {
                         .text_size(px(12.5))
                         .cursor_pointer()
                         .hover(|s| s.bg(theme().hover))
-                        .child(project_header::identity(
+                        .child(project_header::repo_identity(
                             &name,
                             None,
+                            self.repo_icon(&path),
                             15.,
                             "sidebar-new-thread-identity",
                         ))
@@ -573,9 +574,10 @@ impl ThreadList {
             .rounded(px(8.))
             .cursor_pointer()
             .hover(|style| style.bg(theme().hover))
-            .child(project_header::identity(
+            .child(project_header::repo_identity(
                 &name,
                 None,
+                self.repo_icon(&path),
                 15.,
                 "sidebar-folder-identity",
             ))

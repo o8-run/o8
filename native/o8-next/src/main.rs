@@ -26,6 +26,7 @@ mod motion;
 mod pane;
 mod pane_grid;
 mod pane_layout;
+mod project_icon;
 mod projects;
 mod projects_model;
 mod retained;

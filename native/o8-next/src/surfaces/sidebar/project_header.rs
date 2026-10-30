@@ -13,7 +13,33 @@ pub(super) use scope::{Menu as ScopeMenu, RowMenu};
 use identity::glyph;
 pub(super) use identity::identity;
 
+/// A repository's icon override when it has one, else its monogram.
+pub(crate) fn repo_identity(
+    name: &str,
+    color: Option<&str>,
+    icon: Option<&crate::project_icon::Icon>,
+    size: f32,
+    selector: &str,
+) -> AnyElement {
+    crate::project_icon::mark(name, icon, size, selector)
+        .unwrap_or_else(|| identity(name, color, size, selector).into_any_element())
+}
+
 impl ThreadList {
+    /// A registered repository's icon, by its folder.
+    pub(super) fn repo_icon(&self, path: &str) -> Option<&crate::project_icon::Icon> {
+        self.header
+            .repos
+            .iter()
+            .find(|r| r.local_path == path)?
+            .icon
+            .as_ref()
+    }
+    /// A project shows its first repository's icon override.
+    pub(super) fn project_icon(&self, id: &str) -> Option<&crate::project_icon::Icon> {
+        let project = self.header.ledger.projects.iter().find(|p| p.id == id)?;
+        self.repo_icon(project.repo_paths.first()?)
+    }
     /// An open header menu owns input before shell or row shortcut dispatch.
     pub fn header_key(
         &mut self,
@@ -153,6 +179,7 @@ impl ThreadList {
             .unwrap_or_else(|| "Projects".into());
         let color = project.and_then(|p| p.color.as_deref());
         let project_id = active.map(|p| p.id.clone()).unwrap_or_default();
+        let project_icon = self.project_icon(&project_id).cloned();
         let mut repos: Vec<_> = active
             .into_iter()
             .flat_map(|p| p.repo_paths.iter())
@@ -223,7 +250,13 @@ impl ThreadList {
                     } else {
                         theme().surface
                     })
-                    .child(identity(&repo.name, None, 14., "sidebar-repo-identity"))
+                    .child(repo_identity(
+                        &repo.name,
+                        None,
+                        repo.icon.as_ref(),
+                        14.,
+                        "sidebar-repo-identity",
+                    ))
                     .child(
                         div()
                             .min_w_0()
@@ -269,7 +302,13 @@ impl ThreadList {
                                     .flex_shrink_0()
                                     .relative()
                                     .left(px(-2.))
-                                    .child(identity(&name, color, 17., "sidebar-project-identity")),
+                                    .child(repo_identity(
+                                        &name,
+                                        color,
+                                        project_icon.as_ref(),
+                                        17.,
+                                        "sidebar-project-identity",
+                                    )),
                             )
                             .child(
                                 div()
@@ -422,9 +461,10 @@ impl ThreadList {
                             .text_ellipsis()
                             .cursor_pointer()
                             .hover(|s| s.bg(theme().hover))
-                            .child(identity(
+                            .child(repo_identity(
                                 name,
                                 color,
+                                self.project_icon(&item.id),
                                 22.,
                                 "sidebar-project-choice-identity",
                             ))
@@ -472,7 +512,13 @@ impl ThreadList {
                             .text_ellipsis()
                             .cursor_pointer()
                             .hover(|s| s.bg(theme().hover))
-                            .child(identity(&repo.name, None, 14., "sidebar-overflow-identity"))
+                            .child(repo_identity(
+                                &repo.name,
+                                None,
+                                repo.icon.as_ref(),
+                                14.,
+                                "sidebar-overflow-identity",
+                            ))
                             .child(crate::text::sanitize(&repo.name))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.header_select(Action::Open(project.clone(), id.clone()), cx)

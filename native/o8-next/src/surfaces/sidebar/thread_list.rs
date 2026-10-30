@@ -885,6 +885,7 @@ mod races;
 
 #[path = "project_header.rs"]
 mod project_header;
+pub(crate) use project_header::repo_identity;
 
 #[path = "recents.rs"]
 pub(crate) mod recents;

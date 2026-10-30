@@ -241,13 +241,26 @@ impl ThreadList {
             [] => div()
                 .child(crate::icon::stroke(FILTER, theme().text_muted, 15., 1.7))
                 .into_any_element(),
-            [(_, name)] => identity(name, None, 16., "sidebar-scope-identity").into_any_element(),
-            [(_, first), (_, second), ..] => div()
+            [(path, name)] => repo_identity(
+                name,
+                None,
+                self.repo_icon(path),
+                16.,
+                "sidebar-scope-identity",
+            ),
+            [(first_path, first), (second_path, second), ..] => div()
                 .flex()
-                .child(identity(first, None, 14., "sidebar-scope-identity"))
-                .child(div().ml(px(-6.)).child(identity(
+                .child(repo_identity(
+                    first,
+                    None,
+                    self.repo_icon(first_path),
+                    14.,
+                    "sidebar-scope-identity",
+                ))
+                .child(div().ml(px(-6.)).child(repo_identity(
                     second,
                     None,
+                    self.repo_icon(second_path),
                     14.,
                     "sidebar-scope-identity",
                 )))
@@ -345,9 +358,13 @@ impl ThreadList {
                 None => "sidebar-scope-all".to_owned(),
             };
             let mark = match &key {
-                Some(_) => {
-                    identity(&name, None, 16., "sidebar-scope-item-identity").into_any_element()
-                }
+                Some(path) => repo_identity(
+                    &name,
+                    None,
+                    self.repo_icon(path),
+                    16.,
+                    "sidebar-scope-item-identity",
+                ),
                 None => div()
                     .child(crate::icon::stroke(FOLDER, theme().text_muted, 16., 1.7))
                     .into_any_element(),

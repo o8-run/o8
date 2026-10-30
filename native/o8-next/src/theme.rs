@@ -170,6 +170,38 @@ pub fn brand_orange() -> Rgba {
 pub fn accent_hue(turn: f32) -> gpui::Hsla {
     gpui::hsla(turn, 0.8, 0.55, 1.)
 }
+/// A project icon color by its stored name, T3's palette: the ink on the
+/// surface (-600 in light, -400 otherwise), or the picker's swatch (-500).
+pub fn project_icon_color(name: &str, swatch: bool) -> Option<Rgba> {
+    let (light, middle, dark) = match name {
+        "gray" => (0x4b5563, 0x6b7280, 0x9ca3af),
+        "red" => (0xdc2626, 0xef4444, 0xf87171),
+        "orange" => (0xea580c, 0xf97316, 0xfb923c),
+        "amber" => (0xd97706, 0xf59e0b, 0xfbbf24),
+        "yellow" => (0xca8a04, 0xeab308, 0xfacc15),
+        "lime" => (0x65a30d, 0x84cc16, 0xa3e635),
+        "green" => (0x16a34a, 0x22c55e, 0x4ade80),
+        "emerald" => (0x059669, 0x10b981, 0x34d399),
+        "teal" => (0x0d9488, 0x14b8a6, 0x2dd4bf),
+        "cyan" => (0x0891b2, 0x06b6d4, 0x22d3ee),
+        "sky" => (0x0284c7, 0x0ea5e9, 0x38bdf8),
+        "blue" => (0x2563eb, 0x3b82f6, 0x60a5fa),
+        "indigo" => (0x4f46e5, 0x6366f1, 0x818cf8),
+        "violet" => (0x7c3aed, 0x8b5cf6, 0xa78bfa),
+        "purple" => (0x9333ea, 0xa855f7, 0xc084fc),
+        "fuchsia" => (0xc026d3, 0xd946ef, 0xe879f9),
+        "pink" => (0xdb2777, 0xec4899, 0xf472b6),
+        "rose" => (0xe11d48, 0xf43f5e, 0xfb7185),
+        _ => return None,
+    };
+    Some(rgb(if swatch {
+        middle
+    } else if matches!(selected(), Appearance::Light) {
+        light
+    } else {
+        dark
+    }))
+}
 /// The mark drawn on an accent fill, such as the trace's completed check.
 pub fn on_accent() -> Rgba {
     rgb(0xffffff)

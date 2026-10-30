@@ -366,3 +366,8 @@ native-consumed server listings. No project settlement scripts are ported.
   discovery, bounded resolver caching, separate file and identity overrides,
   validation, and regression tests. Uses o8's existing SQLite app state and
   rooted file reader; explicit file overrides must remain inside the repository.
+- Native o8 next: `apps/web/src/projectIconOptions.ts`,
+  `apps/web/src/projectIconColors.ts`, `apps/web/src/projectIdentity.ts` and
+  `apps/web/src/components/ProjectFavicon.tsx` adapted in
+  `native/o8-next/src/project_icon.rs`; the picker dialog adapted as an inline
+  card in `native/o8-next/src/projects_icons.rs`.

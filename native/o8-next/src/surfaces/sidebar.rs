@@ -9,6 +9,8 @@ pub(crate) use thread_list::recents::calendar::clock as calendar_clock;
 pub(crate) use thread_list::recents::calendar::{
     date as calendar_date, midnight as calendar_midnight,
 };
+/// A repository's icon override or monogram, for the Projects page.
+pub(crate) use thread_list::repo_identity;
 #[path = "sidebar/thread_list_client.rs"]
 mod thread_list_client;
 #[path = "sidebar/thread_mutations_client.rs"]

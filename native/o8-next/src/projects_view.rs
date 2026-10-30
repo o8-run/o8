@@ -1,7 +1,7 @@
 use super::*;
 use crate::theme::current as theme;
 
-fn control(
+pub(super) fn control(
     selector: impl Into<String>,
     label: impl Into<SharedString>,
     enabled: bool,
@@ -22,7 +22,11 @@ fn control(
         .when(enabled, |view| view.cursor_pointer())
         .child(label.into())
 }
-fn field(selector: &'static str, label: &'static str, input: Entity<Composer>) -> Stateful<Div> {
+pub(super) fn field(
+    selector: &'static str,
+    label: &'static str,
+    input: Entity<Composer>,
+) -> Stateful<Div> {
     div()
         .id(selector)
         .debug_selector(move || selector.into())
@@ -294,15 +298,22 @@ impl Render for Projects {
                     .map(|p| p.id.clone()).unwrap_or_else(|| self.snapshot.ledger.active_project_id.clone());
                 let repo_id = repo.id.clone();
                 let open_enabled = enabled && repo.exists;
-                div().flex().gap(px(8.)).items_center().py(px(6.)).border_b_1().border_color(theme().border)
-                    .child(div().flex_1().child(repo.name).child(div().text_size(px(11.)).text_color(theme().text_muted)
+                let choosing = self.icon.as_ref().is_some_and(|p| p.repo == repo.id);
+                let chosen = repo.clone();
+                let row = div().flex().gap(px(8.)).items_center().py(px(6.)).border_b_1().border_color(theme().border)
+                    .child(crate::shell::sidebar::repo_identity(&repo.name, None, repo.icon.as_ref(), 18., &format!("repo-identity-{i}")))
+                    .child(div().flex_1().min_w_0().child(div().truncate().child(repo.name)).child(div().truncate().text_size(px(11.)).text_color(theme().text_muted)
                         .child(if repo.exists { repo.local_path } else { "Folder missing. Locate the repository before opening.".into() })))
+                    .child(control(format!("repo-icon-{i}"), "Change icon", enabled).on_click(cx.listener(move |this, _, _, cx| {
+                        if enabled { this.open_icon(&chosen, cx); }
+                    })))
                     .child(control(format!("repo-open-{i}"), "Open repository", open_enabled).on_click(cx.listener(move |this, _, _, cx| {
                         if open_enabled { this.act(Action::Open(owner.clone(), repo_id.clone()), cx); }
                     })))
                     .child(control(format!("repo-remove-{i}"), "Remove repository", enabled).on_click(cx.listener(move |this, _, _, cx| {
                         if enabled { this.confirmation = Some(Action::Remove(remove.clone())); cx.notify(); }
-                    })))
+                    })));
+                div().child(row).when(choosing, |view| view.children(self.icon_picker(cx)))
             }))
             .when_some(self.confirmation.clone(), |view, action| view.child(div().mt(px(12.)).p(px(12.)).bg(theme().surface_raised)
                 .child(if matches!(action, Action::Delete(_)) {
