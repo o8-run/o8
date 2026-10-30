@@ -664,3 +664,26 @@ fn changes_late_diff_keeps_selection_and_files_draft(cx: &mut TestAppContext) {
 fn tree_reselect_keeps_unsaved_draft(cx: &mut TestAppContext) {
     edit_tests::reselect(cx);
 }
+
+#[path = "spec_tests.rs"]
+pub(super) mod spec_tests;
+#[gpui::test]
+fn spec_edit_autosave_debounce_and_roundtrip(cx: &mut TestAppContext) {
+    spec_tests::autosave(cx);
+}
+#[gpui::test]
+fn spec_conflict_reload_and_explicit_overwrite(cx: &mut TestAppContext) {
+    spec_tests::conflict(cx);
+}
+#[gpui::test]
+fn spec_clean_poll_and_dirty_race(cx: &mut TestAppContext) {
+    spec_tests::poll(cx);
+}
+#[gpui::test]
+fn spec_classic_heading_metrics_and_frame(cx: &mut TestAppContext) {
+    spec_tests::typography(cx);
+}
+#[gpui::test]
+fn spec_missing_document_and_load_failure(cx: &mut TestAppContext) {
+    spec_tests::missing(cx);
+}

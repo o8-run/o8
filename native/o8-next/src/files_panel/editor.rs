@@ -4,6 +4,18 @@ use gpui::{prelude::*, *};
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
+#[path = "notes_assets.rs"]
+pub(super) mod assets;
+#[path = "notes_context.rs"]
+mod context_menu;
+#[path = "editor_events.rs"]
+mod events;
+#[path = "notes_editor.rs"]
+mod notes_view;
+#[path = "notes_rail.rs"]
+pub(super) mod rail;
+#[path = "notes_layout.rs"]
+mod rich_layout;
 #[path = "editor_view.rs"]
 mod view;
 
@@ -17,14 +29,33 @@ struct EditorLine {
     start: usize,
     len: usize,
     tabs: Vec<usize>,
+    map: Option<Vec<(usize, usize)>>,
+    line_height: Pixels,
     line: WrappedLine,
+    rich: Option<rich_layout::RichLine>,
     origin: Point<Pixels>,
 }
 impl EditorLine {
     fn display_index(&self, index: usize) -> usize {
+        if let Some(map) = &self.map {
+            return map
+                .iter()
+                .rev()
+                .find(|(raw, _)| *raw <= index)
+                .map(|(_, display)| *display)
+                .unwrap_or(0);
+        }
         index + self.tabs.partition_point(|tab| *tab < index)
     }
     fn raw_index(&self, index: usize) -> usize {
+        if let Some(map) = &self.map {
+            return map
+                .iter()
+                .rev()
+                .find(|(_, display)| *display <= index)
+                .map(|(raw, _)| *raw)
+                .unwrap_or(0);
+        }
         index
             .saturating_sub(
                 self.tabs
@@ -36,12 +67,19 @@ impl EditorLine {
             .min(self.len)
     }
     fn position(&self, index: usize) -> Option<Point<Pixels>> {
+        if let Some(rich) = &self.rich {
+            return rich.position(self.display_index(index));
+        }
         self.line
-            .position_for_index(self.display_index(index), px(19.))
+            .position_for_index(self.display_index(index), self.line_height)
     }
 }
 pub struct Editor {
     pub focus: FocusHandle,
+    pub notes: bool,
+    pub note_color: Rgba,
+    pub(super) rail: rail::Rail,
+    pub(super) assets: assets::Assets,
     pub context: &'static str,
     pub text: String,
     selection: Range<usize>,
@@ -63,6 +101,10 @@ impl Editor {
         Self {
             focus: cx.focus_handle(),
             context: "FilesEditor",
+            notes: false,
+            rail: rail::Rail::default(),
+            assets: assets::Assets::default(),
+            note_color: crate::theme::brand_orange(),
             text: text.to_owned(),
             selection: 0..0,
             anchor: 0,
@@ -125,6 +167,15 @@ impl Editor {
         self.composition = None;
         self.changed(cx);
     }
+    /// Initial document load is not an operator edit and has no undo entry.
+    pub(super) fn initial_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.set_text(text, cx);
+        self.undo.clear();
+        self.redo.clear();
+        self.selection = 0..0;
+        self.anchor = 0;
+        self.layout.clear();
+    }
     fn changed(&mut self, cx: &mut Context<Self>) {
         self.revision += 1;
         self.reveal_cursor = true;
@@ -153,6 +204,26 @@ impl Editor {
         self.anchor = cursor;
     }
     fn move_to(&mut self, cursor: usize, shift: bool, cx: &mut Context<Self>) {
+        let cursor = if self.notes {
+            let hidden = super::spec_rfm::parse(&self.text).hidden;
+            if cursor >= self.cursor() {
+                hidden
+                    .iter()
+                    .filter(|r| r.start < cursor && cursor < r.end)
+                    .map(|r| r.end)
+                    .max()
+                    .unwrap_or(cursor)
+            } else {
+                hidden
+                    .iter()
+                    .filter(|r| r.start < cursor && cursor < r.end)
+                    .map(|r| r.start)
+                    .min()
+                    .unwrap_or(cursor)
+            }
+        } else {
+            cursor
+        };
         if !shift {
             self.anchor = cursor;
         }
@@ -167,11 +238,21 @@ impl Editor {
         }
     }
     fn previous(&self, cursor: usize) -> usize {
-        self.text[..cursor]
+        let index = self.text[..cursor]
             .grapheme_indices(true)
             .next_back()
             .map(|(i, _)| i)
-            .unwrap_or(0)
+            .unwrap_or(0);
+        if self.notes {
+            let hidden = super::spec_rfm::parse(&self.text).hidden;
+            return hidden
+                .iter()
+                .filter(|r| r.start <= index && index < r.end)
+                .map(|r| r.start)
+                .min()
+                .unwrap_or(index);
+        }
+        index
     }
     fn previous_word(&self, cursor: usize) -> usize {
         self.text[..cursor]
@@ -188,20 +269,40 @@ impl Editor {
             .unwrap_or(self.text.len())
     }
     fn next(&self, cursor: usize) -> usize {
-        cursor
+        let index = cursor
             + self.text[cursor..]
                 .graphemes(true)
                 .next()
                 .map(str::len)
-                .unwrap_or(0)
+                .unwrap_or(0);
+        if self.notes {
+            let hidden = super::spec_rfm::parse(&self.text).hidden;
+            return hidden
+                .iter()
+                .filter(|r| r.start < index && index <= r.end)
+                .map(|r| r.end)
+                .max()
+                .unwrap_or(index);
+        }
+        index
     }
     fn index_at(&self, point: Point<Pixels>) -> usize {
         for row in &self.layout {
-            if point.y < row.origin.y + px(19.) {
-                let index = row
-                    .line
-                    .closest_index_for_position(point - row.origin, px(19.))
-                    .unwrap_or_else(|i| i);
+            if point.y
+                < row.origin.y
+                    + row
+                        .rich
+                        .as_ref()
+                        .map(|r| r.height)
+                        .unwrap_or(row.line_height * (row.line.wrap_boundaries.len() + 1) as f32)
+            {
+                let index = if let Some(rich) = &row.rich {
+                    rich.index(point - row.origin)
+                } else {
+                    row.line
+                        .closest_index_for_position(point - row.origin, row.line_height)
+                        .unwrap_or_else(|i| i)
+                };
                 return (row.start + row.raw_index(index)).min(self.text.len());
             }
         }
@@ -254,6 +355,14 @@ impl Editor {
             }
             "v" if command => {
                 let item = cx.read_from_clipboard();
+                if self.notes
+                    && item
+                        .as_ref()
+                        .is_some_and(|item| self.paste_images(item, window, cx))
+                {
+                    cx.stop_propagation();
+                    return;
+                }
                 if let Some(text) = item.and_then(|item| item.text()) {
                     self.replace_text_in_range(
                         None,
@@ -316,11 +425,19 @@ impl Editor {
                     (cursor >= row.start && cursor <= row.start + row.len)
                         .then(|| row.position(cursor - row.start))
                         .flatten()
-                        .map(|p| row.origin + p)
+                        .map(|p| (row.origin + p, row.line_height))
                 });
-                if let Some(position) = position {
+                if let Some((position, height)) = position {
                     let next = self.index_at(
-                        position + point(px(0.), px(if key.key == "up" { -1. } else { 21. })),
+                        position
+                            + point(
+                                px(0.),
+                                if key.key == "up" {
+                                    px(-1.)
+                                } else {
+                                    height + px(1.)
+                                },
+                            ),
                     );
                     self.move_to(next, key.modifiers.shift, cx);
                 }
@@ -468,7 +585,7 @@ impl EntityInputHandler for Editor {
             let end = row.position(range.end.min(row.start + row.len) - row.start)?;
             Some(Bounds::new(
                 row.origin + point(start.x.min(end.x), start.y),
-                size((end.x - start.x).abs().max(px(1.)), px(19.)),
+                size((end.x - start.x).abs().max(px(1.)), row.line_height),
             ))
         })
     }

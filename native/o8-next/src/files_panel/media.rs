@@ -32,22 +32,63 @@ pub(super) fn unsupported(path: &str) -> Option<&'static str> {
         _ => None,
     }
 }
-fn read(
+pub(super) fn read_image(client: &Client, workspace: &str, path: &str) -> Result<Image, String> {
+    read_asset(client, workspace, path, false)
+}
+/// Workspace Notes also opens folders outside Projects. Use the existing
+/// operator image reader for those folders, retaining its authentication,
+/// path confinement and byte policy rather than changing a server route.
+pub(super) fn read_notes_image(
     client: &Client,
     workspace: &str,
     path: &str,
-    decode: impl FnOnce(Image) -> Preview,
-) -> Preview {
+) -> Result<Image, String> {
+    read_asset(client, workspace, path, true)
+}
+fn read_asset(client: &Client, workspace: &str, path: &str, notes: bool) -> Result<Image, String> {
     let mut url = client
         .url("/api/panel/file-asset")
         .map_err(|_| "Unable to preview this file.")?;
     url.query_pairs_mut()
         .append_pair("path", path)
         .append_pair("workspace", workspace);
-    let response = client
-        .request("GET", &url)
-        .call()
-        .map_err(|_| "Unable to preview this file.")?;
+    let response = match client.request("GET", &url).call() {
+        Ok(response) => response,
+        Err(ureq::Error::Status(400, response)) if notes => {
+            let mut reason = String::new();
+            response
+                .into_reader()
+                .take(1024)
+                .read_to_string(&mut reason)
+                .map_err(|_| "Unable to preview this file.")?;
+            if !reason.contains("Workspace is not registered") {
+                return Err("Unable to preview this file.".into());
+            }
+            if !path.starts_with("o8-assets/")
+                || !std::path::Path::new(path)
+                    .components()
+                    .all(|part| matches!(part, std::path::Component::Normal(_)))
+            {
+                return Err("Image path outside the notes folder.".into());
+            }
+            let root = std::fs::canonicalize(workspace).map_err(|_| "Image folder unavailable.")?;
+            let target =
+                std::fs::canonicalize(root.join(path)).map_err(|_| "Image unavailable.")?;
+            if !target.starts_with(&root) {
+                return Err("Image path outside the notes folder.".into());
+            }
+            let mut url = client
+                .url("/api/panel/serve-image")
+                .map_err(|_| "Unable to preview this image.")?;
+            url.query_pairs_mut()
+                .append_pair("path", target.to_str().ok_or("Invalid image path")?);
+            client
+                .request("GET", &url)
+                .call()
+                .map_err(|_| "Unable to preview this image.")?
+        }
+        Err(_) => return Err("Unable to preview this file.".into()),
+    };
     let format = response
         .header("Content-Type")
         .and_then(|value| ImageFormat::from_mime_type(value.split(';').next().unwrap_or("").trim()))
@@ -62,7 +103,15 @@ fn read(
     if bytes.len() as u64 > LIMIT {
         return Err("Image exceeds the preview size limit.".into());
     }
-    decode(Image::from_bytes(format, bytes))
+    Ok(Image::from_bytes(format, bytes))
+}
+pub(super) fn read(
+    client: &Client,
+    workspace: &str,
+    path: &str,
+    decode: impl FnOnce(Image) -> Preview,
+) -> Preview {
+    decode(read_image(client, workspace, path)?)
 }
 impl FilesPanel {
     pub(super) fn open_image(&mut self, path: String, cx: &mut Context<Self>) {
