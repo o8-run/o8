@@ -596,3 +596,71 @@ fn edit_svg_preview_uses_unsaved_draft_without_writing(cx: &mut TestAppContext) 
 fn edit_legacy_server_uses_guarded_file_io_save(cx: &mut TestAppContext) {
     edit_tests::legacy_save(cx);
 }
+
+#[path = "tree_tests.rs"]
+pub(super) mod tree_tests;
+#[gpui::test]
+fn tree_panel_track_reflows_at_actual_width(cx: &mut TestAppContext) {
+    tree_tests::resize(cx);
+}
+#[gpui::test]
+fn tree_refresh_expand_flatten_and_ignore_policy(cx: &mut TestAppContext) {
+    tree_tests::refresh_flatten(cx);
+}
+#[gpui::test]
+fn tree_keyboard_navigation_reveals_normalized_selection(cx: &mut TestAppContext) {
+    tree_tests::keyboard_reveal(cx);
+}
+#[gpui::test]
+fn tree_toolbar_search_clear_and_geometry(cx: &mut TestAppContext) {
+    tree_tests::toolbar_search(cx);
+}
+#[gpui::test]
+fn tree_complete_icons_and_compact_rows(cx: &mut TestAppContext) {
+    tree_tests::icons(cx);
+}
+#[gpui::test]
+fn tree_activation_refreshes_retained_directories(cx: &mut TestAppContext) {
+    tree_tests::activation(cx);
+}
+#[gpui::test]
+fn tree_quick_docs_hierarchy_tooltips_and_adaptive_picker(cx: &mut TestAppContext) {
+    tree_tests::docs(cx);
+}
+#[gpui::test]
+fn source_selection_copy_and_keyboard_scroll(cx: &mut TestAppContext) {
+    tree_tests::copy_scroll(cx);
+}
+#[gpui::test]
+fn tree_search_error_has_working_retry(cx: &mut TestAppContext) {
+    tree_tests::retry_search(cx);
+}
+
+#[gpui::test]
+fn tree_folder_error_has_scoped_retry(cx: &mut TestAppContext) {
+    tree_tests::folder_retry(cx);
+}
+
+#[path = "changes_tests.rs"]
+pub(super) mod changes_tests;
+#[gpui::test]
+fn changes_inventory_and_unified_side_modes(cx: &mut TestAppContext) {
+    changes_tests::modes(cx);
+}
+#[gpui::test]
+fn changes_clean_refresh_and_empty_diff(cx: &mut TestAppContext) {
+    changes_tests::clean_refresh(cx);
+}
+#[gpui::test]
+fn changes_staged_fallback_and_errors_retry(cx: &mut TestAppContext) {
+    changes_tests::staged_retry(cx);
+}
+#[gpui::test]
+fn changes_late_diff_keeps_selection_and_files_draft(cx: &mut TestAppContext) {
+    changes_tests::stale_and_draft(cx);
+}
+
+#[gpui::test]
+fn tree_reselect_keeps_unsaved_draft(cx: &mut TestAppContext) {
+    edit_tests::reselect(cx);
+}

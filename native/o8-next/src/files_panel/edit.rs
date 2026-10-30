@@ -59,7 +59,7 @@ impl FilesPanel {
                 .split('\n')
                 .map(|line| SharedString::from(line.replace('\t', "  ")))
                 .collect();
-            *source = source::Source::new(lines.len());
+            *source = source::Source::new(lines.len(), cx);
             if viewer::is_markdown(&path) {
                 *markdown = viewer::markdown(&buffer.text);
             }

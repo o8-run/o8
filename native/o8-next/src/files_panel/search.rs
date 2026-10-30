@@ -1,5 +1,5 @@
 //! Classic WorkspaceFileTree / QuickDocFilePicker search policy.
-use super::{Entry, FILE, status};
+use super::{Entry, FILE};
 use crate::{
     client::Client,
     composer::{Composer, Submit},
@@ -190,6 +190,14 @@ pub(super) fn merge_matches(
 pub(super) struct Pick(pub String);
 impl EventEmitter<Pick> for Search {}
 
+#[derive(Clone, Copy)]
+pub(super) enum Tool {
+    Refresh,
+    ToggleExpansion,
+}
+impl EventEmitter<Tool> for Search {}
+#[path = "search_view.rs"]
+mod view;
 pub(super) struct Search {
     client: Client,
     workspace: String,
@@ -197,6 +205,8 @@ pub(super) struct Search {
     pub(super) focus: FocusHandle,
     query: String,
     picker: bool,
+    pub(super) refreshing: bool,
+    pub(super) expanded: bool,
     pub(super) pinned: Vec<String>,
     pub(super) current: Option<String>,
     entries: Option<Result<Vec<Entry>, String>>,
@@ -251,6 +261,8 @@ impl Search {
             input,
             query: String::new(),
             picker,
+            refreshing: false,
+            expanded: false,
             pinned: vec![],
             current: None,
             entries: None,
@@ -274,6 +286,35 @@ impl Search {
             search.changed(true, cx);
         }
         search
+    }
+    pub(super) fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.session += 1;
+        self.flat = None;
+        self.git = None;
+        self.flat_pending = None;
+        self.git_pending = None;
+        if self.searching() {
+            self.load_flat(cx);
+            self.load_git(cx);
+        }
+        self.changed(true, cx);
+    }
+    fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.input.update(cx, |input, cx| input.clear(cx));
+        self.changed(false, cx);
+        self.focus(window);
+    }
+    pub(super) fn picker_height(&self) -> f32 {
+        let rows = if self
+            .entries
+            .as_ref()
+            .is_some_and(|e| e.as_ref().is_ok_and(|e| !e.is_empty()))
+        {
+            (self.visible_entries().len() as f32 * 34.).min(236.)
+        } else {
+            36.
+        };
+        88. + rows
     }
     pub(super) fn focus(&self, window: &mut Window) {
         self.focus.focus(window);
@@ -500,186 +541,5 @@ impl Search {
             );
         }
         entries
-    }
-}
-impl Render for Search {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let entries = self.visible_entries();
-        let picker = self.picker;
-        self.row_focus
-            .retain(|path, _| entries.iter().any(|entry| &entry.path == path));
-        for entry in &entries {
-            self.row_focus
-                .entry(entry.path.clone())
-                .or_insert_with(|| cx.focus_handle());
-        }
-        let mut tab_order = vec![self.focus.clone()];
-        tab_order.extend(
-            entries
-                .iter()
-                .filter(|entry| !self.pinned.contains(&entry.path))
-                .map(|entry| self.row_focus[&entry.path].clone()),
-        );
-        tab_order.extend(self.close_focus.clone());
-        div()
-            .flex()
-            .flex_col()
-            .min_h_0()
-            .when(self.searching() || self.picker, |d| d.flex_1())
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if event.keystroke.key == "tab" && this.picker {
-                    let current = tab_order
-                        .iter()
-                        .position(|focus| focus.is_focused(window))
-                        .unwrap_or(0);
-                    let next = if event.keystroke.modifiers.shift {
-                        (current + tab_order.len() - 1) % tab_order.len()
-                    } else {
-                        (current + 1) % tab_order.len()
-                    };
-                    tab_order[next].focus(window);
-                    cx.stop_propagation();
-                }
-                if event.keystroke.key == "escape"
-                    && !this.picker
-                    && !this.input.read(cx).composing()
-                {
-                    this.input.update(cx, |input, cx| input.clear(cx));
-                    this.changed(false, cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .child(
-                div()
-                    .id(if self.picker {
-                        "pin-search"
-                    } else {
-                        "files-search"
-                    })
-                    .debug_selector(move || {
-                        if picker {
-                            "pin-search".into()
-                        } else {
-                            "files-search".into()
-                        }
-                    })
-                    .m(px(6.))
-                    .p(px(6.))
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(theme().border)
-                    .child(self.input.clone()),
-            )
-            .when(self.searching() || self.picker, |view| {
-                view.child(
-                    uniform_list(
-                        "file-search-results",
-                        entries.len(),
-                        cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
-                            range
-                                .map(|i| {
-                                    let path = entries[i].path.clone();
-                                    let pinned = this.pinned.contains(&path);
-                                    let focus = this.row_focus[&path].clone();
-                                    let key_path = path.clone();
-                                    div()
-                                        .id(i)
-                                        .debug_selector({
-                                            let path = path.clone();
-                                            move || {
-                                                format!(
-                                                    "{}-{path}",
-                                                    if picker { "pin" } else { "file-search" }
-                                                )
-                                            }
-                                        })
-                                        .track_focus(&focus)
-                                        .h(px(34.))
-                                        .px(px(8.))
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(7.))
-                                        .rounded(px(6.))
-                                        .text_size(px(12.))
-                                        .text_color(if pinned {
-                                            theme().text_faint
-                                        } else {
-                                            theme().text_secondary
-                                        })
-                                        .child(crate::icon::stroke(
-                                            file_icon(&path),
-                                            file_color(&path),
-                                            14.,
-                                            1.6,
-                                        ))
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .min_w_0()
-                                                .overflow_hidden()
-                                                .whitespace_nowrap()
-                                                .text_ellipsis()
-                                                .child(path.clone()),
-                                        )
-                                        .when(this.picker, |d| {
-                                            d.child(if pinned { "Pinned" } else { "+" })
-                                        })
-                                        .when(!pinned, |d| {
-                                            d.tab_stop(true)
-                                                .on_key_down(cx.listener(
-                                                    move |_, event: &KeyDownEvent, _, cx| {
-                                                        if matches!(
-                                                            event.keystroke.key.as_str(),
-                                                            "enter" | "space"
-                                                        ) {
-                                                            cx.emit(Pick(key_path.clone()));
-                                                            cx.stop_propagation();
-                                                        }
-                                                    },
-                                                ))
-                                                .cursor_pointer()
-                                                .hover(|d| d.bg(theme().hover))
-                                                .on_click(cx.listener(move |_, _, _, cx| {
-                                                    cx.emit(Pick(path.clone()))
-                                                }))
-                                        })
-                                })
-                                .collect::<Vec<_>>()
-                        }),
-                    )
-                    .track_scroll(self.scroll.clone())
-                    .flex_1()
-                    .min_h_0(),
-                )
-                .when(self.entries.is_none(), |d| {
-                    d.child(status(
-                        if self.picker {
-                            "Loading files..."
-                        } else {
-                            "Searching files..."
-                        }
-                        .into(),
-                    ))
-                })
-                .when(
-                    matches!(&self.entries, Some(Ok(entries)) if entries.is_empty())
-                        && self.visible_entries().is_empty(),
-                    |d| d.child(status("No matching files.".into())),
-                )
-                .when(matches!(self.entries, Some(Err(_))), |d| {
-                    d.child(
-                        div()
-                            .id("file-search-retry")
-                            .p(px(9.))
-                            .text_size(px(12.))
-                            .cursor_pointer()
-                            .child("Couldn't load files. Retry")
-                            .on_click(cx.listener(|this, _, _, cx| this.changed(true, cx))),
-                    )
-                })
-                .when(self.truncated, |d| {
-                    d.child(status("Refine your search to see more matches.".into()))
-                })
-            })
     }
 }

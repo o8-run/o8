@@ -362,3 +362,54 @@ pub(super) fn legacy_save(cx: &mut TestAppContext) {
             .any(|r| r.starts_with("PUT /api/panel/file-io"))
     );
 }
+
+/// Selecting the same file is a tree operation, not permission to discard edits.
+pub(super) fn reselect(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    let (panel, cx) = test_panel(&f, cx);
+    click(cx, "files-row-AGENTS.md");
+    wait(cx, "files-edit-toggle");
+    click(cx, "files-edit-toggle");
+    replace(cx, "# Keep this draft\n");
+    let count = f
+        .requests()
+        .iter()
+        .filter(|r| r.contains("/api/v2/files?"))
+        .count();
+    click(cx, "files-row-AGENTS.md");
+    assert!(state(cx).0, "reselecting the current row keeps the draft");
+    panel.update(cx, |panel, cx| {
+        panel.open_file(format!("{}/AGENTS.md", f.repo), cx)
+    });
+    draw(cx);
+    assert!(
+        state(cx).0,
+        "an absolute alias of the same row keeps the draft"
+    );
+    assert_eq!(
+        f.requests()
+            .iter()
+            .filter(|r| r.contains("/api/v2/files?"))
+            .count(),
+        count
+    );
+    click(cx, "files-preview-toggle");
+    let text = cx.update(|_, cx| {
+        cx.global::<markdown_tests::DocumentView>()
+            .text
+            .iter()
+            .map(|(_, layout)| layout.text())
+            .collect::<Vec<_>>()
+    });
+    assert!(text.iter().any(|s| s == "Keep this draft"));
+    assert_eq!(
+        fs::read_to_string(PathBuf::from(&f.repo).join("AGENTS.md")).unwrap(),
+        "repo instructions"
+    );
+    click(cx, "files-save");
+    until(cx, |cx| !state(cx).1 && !state(cx).0);
+    assert_eq!(
+        fs::read_to_string(PathBuf::from(&f.repo).join("AGENTS.md")).unwrap(),
+        "# Keep this draft\n"
+    );
+}

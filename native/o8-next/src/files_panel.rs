@@ -1,16 +1,22 @@
 //! The right panel's Files and o8.md tools (WorkspaceFilesPane, O8SpecPane).
 //! Files lists the workspace a directory at a time through /api/panel/files
 //! and previews a file through /api/v2/files; o8.md reads /api/repo-spec.
+mod changes;
 mod edit;
 mod editor;
+mod file_diff;
+mod icons;
 mod io;
 mod markdown;
 mod markdown_view;
 mod media;
+mod modes;
 mod quick_docs;
 mod search;
+mod selection;
 mod source;
 mod syntax;
+mod tree;
 mod viewer;
 use quick_docs::QuickDocs;
 #[cfg(test)]
@@ -24,7 +30,7 @@ use gpui::{
 };
 use search::{Pick, Search, file_color, file_icon, parse_entries};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone)]
 struct Entry {
@@ -86,6 +92,21 @@ pub struct FilesPanel {
     editor_subscription: Option<Subscription>,
     editing_path: Option<String>,
     viewer_focus: FocusHandle,
+    directory_generation: u64,
+    directory_queue: VecDeque<String>,
+    directory_pending: usize,
+    expanding_all: bool,
+    tree_focus: FocusHandle,
+    tree_cursor: Option<String>,
+    tree_scroll: gpui::UniformListScrollHandle,
+    reveal: Option<String>,
+    tree_type: String,
+    tree_type_at: std::time::Instant,
+    measured_width: gpui::Pixels,
+    refresh_sender: async_channel::Sender<()>,
+    focused_once: std::cell::Cell<bool>,
+    show_changes: bool,
+    changes: Option<Entity<changes::Changes>>,
 }
 
 impl FilesPanel {
@@ -95,6 +116,19 @@ impl FilesPanel {
             this.open_file(pick.0.clone(), cx);
         });
         let observed = cx.observe(&search, |_, _, cx| cx.notify());
+        let tools = cx.subscribe(&search, |this, _, tool: &search::Tool, cx| match tool {
+            search::Tool::Refresh => this.refresh_tree(cx),
+            search::Tool::ToggleExpansion => this.toggle_all(cx),
+        });
+        let (refresh_sender, refresh_receiver) = async_channel::unbounded::<()>();
+        cx.spawn(async move |this, cx| {
+            while refresh_receiver.recv().await.is_ok() {
+                if this.update(cx, |this, cx| this.refresh_tree(cx)).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
         let quick_docs = (mode == Mode::Files)
             .then(|| cx.new(|cx| QuickDocs::new(client.clone(), workspace.clone(), cx)));
         let quick_pick = quick_docs.as_ref().map(|docs| {
@@ -126,7 +160,7 @@ impl FilesPanel {
             },
             search,
             quick_docs,
-            _subscriptions: vec![picked, observed]
+            _subscriptions: vec![picked, observed, tools]
                 .into_iter()
                 .chain(quick_pick)
                 .chain(pins_changed)
@@ -137,6 +171,21 @@ impl FilesPanel {
             editor_subscription: None,
             editing_path: None,
             viewer_focus: cx.focus_handle(),
+            directory_generation: 0,
+            directory_queue: VecDeque::new(),
+            directory_pending: 0,
+            expanding_all: false,
+            tree_focus: cx.focus_handle(),
+            tree_cursor: None,
+            tree_scroll: gpui::UniformListScrollHandle::new(),
+            reveal: None,
+            tree_type: String::new(),
+            tree_type_at: std::time::Instant::now(),
+            measured_width: px(0.),
+            refresh_sender,
+            focused_once: std::cell::Cell::new(false),
+            show_changes: false,
+            changes: None,
         };
         match mode {
             Mode::Files => panel.load_directory(String::new(), cx),
@@ -154,44 +203,29 @@ impl FilesPanel {
     }
     pub fn focus(&self, window: &mut Window) {
         self.focus.focus(window);
-    }
-
-    fn load_directory(&mut self, directory: String, cx: &mut Context<Self>) {
-        self.directories
-            .insert(directory.clone(), Directory::Loading);
-        let client = self.client.clone();
-        let workspace = self.workspace.clone();
-        let path = directory.clone();
-        let task = cx.background_executor().spawn(async move {
-            client.get::<Value>(
-                "/api/panel/files",
-                &[
-                    ("workspace", workspace.as_str()),
-                    ("directory", path.as_str()),
-                ],
-            )
-        });
-        cx.spawn(async move |this, cx| {
-            let result = task.await;
-            let _ = this.update(cx, |this, cx| {
-                let state = match result {
-                    Ok(body) if body["error"].is_null() => Directory::Loaded(parse_entries(&body)),
-                    Ok(body) => Directory::Failed(
-                        body["error"]
-                            .as_str()
-                            .unwrap_or("Directory listing failed")
-                            .into(),
-                    ),
-                    Err(error) => Directory::Failed(error),
-                };
-                this.directories.insert(directory, state);
-                cx.notify();
-            });
-        })
-        .detach();
+        if self.mode == Mode::Files && self.focused_once.replace(true) {
+            let _ = self.refresh_sender.try_send(());
+        }
     }
 
     fn open_file(&mut self, path: String, cx: &mut Context<Self>) {
+        self.open_file_inner(path, false, cx);
+    }
+    fn open_file_inner(&mut self, path: String, reload: bool, cx: &mut Context<Self>) {
+        self.reveal = search::repo_relative(&self.workspace, &path).map(str::to_owned);
+        self.tree_cursor = self.reveal.clone();
+        let same = self.selected.as_ref().is_some_and(|selected| {
+            selected == &path || matches!(
+                (search::repo_relative(&self.workspace, selected), search::repo_relative(&self.workspace, &path)),
+                (Some(left), Some(right)) if left == right
+            )
+        });
+        if !reload && same && matches!(&self.file, File::Loaded {buffer,..} if buffer.dirty()) {
+            self.reveal_selection();
+            cx.notify();
+            return;
+        }
+        self.editor_subscription = None;
         // Search and pinned selections reveal only their ancestors. Clearing
         // search or hiding the explorer keeps that expansion and the preview.
         if let Some(relative) = search::repo_relative(&self.workspace, &path) {
@@ -214,6 +248,7 @@ impl FilesPanel {
             });
         }
         self.selected = Some(path.clone());
+        self.reveal_selection();
         self.file = File::Loading;
         if media::is_image(&path) {
             self.open_image(path, cx);
@@ -292,7 +327,7 @@ impl FilesPanel {
                                         && this.editing_path == this.selected;
                                     buffer
                                 },
-                                source: source::Source::new(content.split('\n').count()),
+                                source: source::Source::new(content.split('\n').count(), cx),
                                 lines: content
                                     .split('\n')
                                     .map(|line| SharedString::from(line.replace('\t', "  ")))
@@ -320,139 +355,6 @@ impl FilesPanel {
         .detach();
     }
 
-    fn toggle(&mut self, entry: &Entry, cx: &mut Context<Self>) {
-        if !entry.dir {
-            self.open_file(entry.path.clone(), cx);
-            return;
-        }
-        if !self.expanded.remove(&entry.path) {
-            self.expanded.insert(entry.path.clone());
-            if !matches!(
-                self.directories.get(&entry.path),
-                Some(Directory::Loaded(_))
-            ) {
-                self.load_directory(entry.path.clone(), cx);
-            }
-        }
-        cx.notify();
-    }
-
-    /// The tree flattened to the rows on screen: (depth, entry), or a status row.
-    fn rows(&self) -> Vec<(usize, Result<Entry, SharedString>)> {
-        let mut rows = Vec::new();
-        self.push_rows("", 0, &mut rows);
-        rows
-    }
-
-    fn push_rows(
-        &self,
-        directory: &str,
-        depth: usize,
-        rows: &mut Vec<(usize, Result<Entry, SharedString>)>,
-    ) {
-        match self.directories.get(directory) {
-            Some(Directory::Loaded(entries)) => {
-                if entries.is_empty() && depth == 0 {
-                    rows.push((depth, Err("No files".into())));
-                }
-                for entry in entries {
-                    rows.push((depth, Ok(entry.clone())));
-                    if entry.dir && self.expanded.contains(&entry.path) {
-                        self.push_rows(&entry.path, depth + 1, rows);
-                    }
-                }
-            }
-            Some(Directory::Failed(error)) => rows.push((depth, Err(error.clone().into()))),
-            _ => rows.push((depth, Err("Loading…".into()))),
-        }
-    }
-
-    fn tree(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let rows = self.rows();
-        let selected = self.selected.clone();
-        uniform_list(
-            "files-tree",
-            rows.len(),
-            cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
-                range
-                    .map(|i| {
-                        let (depth, row) = rows[i].clone();
-                        let base = div()
-                            .id(i)
-                            .h(px(26.))
-                            .w_full()
-                            .pl(px(8. + 14. * depth as f32))
-                            .pr(px(8.))
-                            .flex()
-                            .items_center()
-                            .gap(px(5.))
-                            .rounded(px(6.))
-                            .text_size(px(12.))
-                            .whitespace_nowrap()
-                            .overflow_hidden();
-                        match row {
-                            Err(status) => base.text_color(theme().text_muted).child(status),
-                            Ok(entry) => {
-                                let open = this.expanded.contains(&entry.path);
-                                let chosen = selected.as_deref() == Some(entry.path.as_str());
-                                let path = entry.path.clone();
-                                base.debug_selector(move || format!("files-row-{path}"))
-                                    .cursor_pointer()
-                                    .when(chosen, |row| row.bg(theme().selection))
-                                    .when(!chosen, |row| row.hover(|row| row.bg(theme().hover)))
-                                    .text_color(if entry.ignored {
-                                        theme().text_faint
-                                    } else if entry.dir {
-                                        theme().text
-                                    } else {
-                                        theme().text_secondary
-                                    })
-                                    .child(div().w(px(12.)).flex_shrink_0().when(
-                                        entry.dir,
-                                        |slot| {
-                                            slot.child(crate::icon::stroke(
-                                                if open { CHEVRON_DOWN } else { CHEVRON_RIGHT },
-                                                theme().text_muted,
-                                                12.,
-                                                1.8,
-                                            ))
-                                        },
-                                    ))
-                                    .child(crate::icon::stroke(
-                                        if entry.dir {
-                                            FOLDER
-                                        } else {
-                                            file_icon(&entry.path)
-                                        },
-                                        if entry.dir {
-                                            theme().text_muted
-                                        } else {
-                                            file_color(&entry.path)
-                                        },
-                                        14.,
-                                        1.6,
-                                    ))
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .child(entry.name.clone()),
-                                    )
-                                    .on_click(
-                                        cx.listener(move |this, _, _, cx| this.toggle(&entry, cx)),
-                                    )
-                            }
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            }),
-        )
-        .flex_1()
-        .min_h_0()
-        .py(px(4.))
-    }
-
     fn viewer(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let title = self.selected.clone().unwrap_or_default();
         let previewable = viewer::is_markdown(&title) || media::is_svg(&title);
@@ -477,8 +379,14 @@ impl FilesPanel {
                 cx.set_global(tests::RenderedMarkdown(markdown.clone()));
                 markdown_view::view(markdown.clone(), self.file_generation, window, cx)
             }
-            File::Loaded { lines, source, .. } => source.view(
+            File::Loaded {
                 lines,
+                source,
+                buffer,
+                ..
+            } => source.view(
+                lines,
+                &buffer.text,
                 &title,
                 self.wrap_lines,
                 self.file_generation,
@@ -575,13 +483,25 @@ fn status(text: String) -> impl IntoElement {
 
 impl Render for FilesPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.mode == Mode::Files && self.show_changes {
+            let body = self
+                .changes
+                .as_ref()
+                .map(|c| c.clone().into_any_element())
+                .unwrap_or_else(|| status("Loading changes...".into()).into_any_element());
+            return self.frame(body, cx);
+        }
         let viewing = self.selected.is_some();
         // A selected file takes the column; the tree keeps a third beside it,
         // never narrower than min(210px, 48%) (the desktop's grid track).
-        let panel = crate::theme::right_panel_width(f32::from(window.viewport_size().width));
+        let panel = if self.measured_width > px(0.) {
+            f32::from(self.measured_width)
+        } else {
+            crate::theme::right_panel_width(f32::from(window.viewport_size().width))
+        };
+        let measured = cx.entity().downgrade();
         let tree_width = (panel * 0.34).max((panel * 0.48).min(210.));
-        div()
-            .track_focus(&self.focus)
+        let body = div()
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
                 if event.keystroke.key == "s"
                     && (event.keystroke.modifiers.platform || event.keystroke.modifiers.control)
@@ -591,14 +511,32 @@ impl Render for FilesPanel {
                 }
             }))
             .size_full()
+            .relative()
             .flex()
             .min_h_0()
+            .child(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |bounds, _, _, cx| {
+                        let _ = measured.update(cx, |this, cx| {
+                            let width = bounds.size.width.floor();
+                            if this.measured_width != width {
+                                this.measured_width = width;
+                                cx.notify();
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
             .when(viewing, |pane| pane.child(self.viewer(window, cx)))
             .when(
                 self.mode == Mode::Files && (self.tree_visible || !viewing),
                 |pane| {
                     pane.child(
                         div()
+                            .debug_selector(|| "files-explorer".into())
                             .when(viewing, |tree| {
                                 tree.w(px(tree_width))
                                     .flex_shrink_0()
@@ -618,6 +556,8 @@ impl Render for FilesPanel {
                     )
                 },
             )
+            .into_any_element();
+        self.frame(body, cx)
     }
 }
 

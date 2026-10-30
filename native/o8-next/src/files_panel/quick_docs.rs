@@ -53,6 +53,7 @@ pub(super) struct QuickDocs {
     pub(super) selected: Option<String>,
     pub(super) picker: Option<Entity<Search>>,
     picker_subscription: Option<Subscription>,
+    picker_observe: Option<Subscription>,
     return_focus: Option<FocusHandle>,
     pub(super) add_focus: FocusHandle,
     close_focus: FocusHandle,
@@ -69,6 +70,7 @@ impl QuickDocs {
             selected: None,
             picker: None,
             picker_subscription: None,
+            picker_observe: None,
             return_focus: None,
             add_focus: cx.focus_handle(),
             close_focus: cx.focus_handle(),
@@ -104,6 +106,7 @@ impl QuickDocs {
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.picker = None;
         self.picker_subscription = None;
+        self.picker_observe = None;
         if let Some(focus) = self.return_focus.take() {
             focus.focus(window);
         }
@@ -128,6 +131,7 @@ impl QuickDocs {
                     this.close(window, cx);
                 }),
             );
+        self.picker_observe = Some(cx.observe(&picker, |_, _, cx| cx.notify()));
         self.picker = Some(picker);
         cx.notify();
     }
@@ -161,8 +165,11 @@ fn button(id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
         .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(label.into())).into())
 }
 impl Render for QuickDocs {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let total = self.groups.iter().map(|g| g.entries.len()).sum::<usize>() + self.pins.len();
+        let count = StyledText::new(total.to_string());
+        #[cfg(test)]
+        cx.set_global(super::tests::tree_tests::DocsCount(count.layout().clone()));
         div()
             .relative()
             .flex_shrink_0()
@@ -198,9 +205,9 @@ impl Render for QuickDocs {
                                 10.,
                                 2.,
                             ))
-                            .child("Quick docs")
+                            .child(div().font_weight(FontWeight::NORMAL).child("Quick docs"))
                             .child(div().flex_1())
-                            .child(total.to_string())
+                            .child(div().text_size(px(10.)).font_family(theme().font_mono).font_weight(FontWeight(650.)).text_color(theme().text_faint).child(count))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.expanded = !this.expanded;
                                 cx.notify();
@@ -219,12 +226,87 @@ impl Render for QuickDocs {
                         .id("quick-docs-items")
                         .max_h(px(220.))
                         .overflow_y_scroll()
-                        // Pins lead the list, so they show without scrolling
-                        // past every Quick doc.
+                        .children(
+                            self.groups
+                                .clone()
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, group)| {
+                                    div()
+                                        .pb(px(6.))
+                                        .child(
+                                            div()
+                                                .debug_selector({let name=group.label.clone();move||format!("quick-doc-group-{name}")})
+                                                .h(px(24.))
+                                                .px(px(10.)).font_weight(FontWeight::NORMAL)
+                                                .text_size(px(11.))
+                                                .text_color(theme().text_faint)
+                                                .child(group.label),
+                                        )
+                                        .children(group.entries.into_iter().enumerate().map(
+                                            |(j, doc)| {
+                                                let path = doc.path.clone();
+                                                let selected =
+                                                    self.selected.as_ref() == Some(&path);
+                                                div()
+                                                    .id(("quick-doc", i * 100 + j))
+                                                    .tooltip(path_tip(full_path(&self.workspace,&doc.path)))
+                                                    .debug_selector(move || {
+                                                        format!("quick-doc-{path}")
+                                                    })
+                                                    .min_h(px(36.))
+                                                    .px(px(10.))
+                                                    .py(px(4.))
+                                                    .cursor_pointer()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap(px(8.))
+                                                    .when(selected, |d| d.bg(theme().selection))
+                                                    .hover(|d| d.bg(theme().hover))
+                                                    .child(
+                                                        div()
+                                                            .flex_1()
+                                                            .min_w_0()
+                                                            .flex()
+                                                            .flex_col()
+                                                            .gap(px(3.))
+                                                            .child(
+                                                                div()
+                                                                    .text_size(px(12.)).font_weight(FontWeight::LIGHT)
+                                                                    .text_color(theme().text_muted)
+                                                                    .overflow_hidden()
+                                                                    .whitespace_nowrap()
+                                                                    .text_ellipsis()
+                                                                    .child(doc.label),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_size(px(10.))
+                                                                    .font_family(theme().font_mono).font_weight(FontWeight::MEDIUM)
+                                                                    .text_color(theme().text_faint)
+                                                                    .overflow_hidden()
+                                                                    .whitespace_nowrap()
+                                                                    .text_ellipsis()
+                                                                    .child(doc.value),
+                                                            ),
+                                                    )
+                                                    .child(crate::icon::stroke(
+                                                        CHEVRON_RIGHT,
+                                                        theme().text_muted,
+                                                        13.,
+                                                        2.,
+                                                    ))
+                                                    .on_click(cx.listener(move |_, _, _, cx| {
+                                                        cx.emit(Pick(doc.path.clone()))
+                                                    }))
+                                            },
+                                        ))
+                                }),
+                        )
                         .when(!self.pins.is_empty(), |d| {
                             d.child(
                                 div()
-                                    .p(px(6.))
+                                    .pl(px(12.)).py(px(5.))
                                     .text_size(px(11.))
                                     .text_color(theme().text_faint)
                                     .child("Pinned files"),
@@ -244,6 +326,7 @@ impl Render for QuickDocs {
                                 .child(
                                     div()
                                         .id(("pinned-file", i))
+                                        .tooltip(path_tip(full_path(&self.workspace,&path)))
                                         .debug_selector(move || format!("pinned-file-{select}"))
                                         .flex_1()
                                         .min_w_0()
@@ -291,81 +374,6 @@ impl Render for QuickDocs {
                                         })),
                                 )
                         }))
-                        .children(
-                            self.groups
-                                .clone()
-                                .into_iter()
-                                .enumerate()
-                                .map(|(i, group)| {
-                                    div()
-                                        .pb(px(6.))
-                                        .child(
-                                            div()
-                                                .h(px(24.))
-                                                .px(px(10.))
-                                                .text_size(px(11.))
-                                                .text_color(theme().text_faint)
-                                                .child(group.label),
-                                        )
-                                        .children(group.entries.into_iter().enumerate().map(
-                                            |(j, doc)| {
-                                                let path = doc.path.clone();
-                                                let selected =
-                                                    self.selected.as_ref() == Some(&path);
-                                                div()
-                                                    .id(("quick-doc", i * 100 + j))
-                                                    .debug_selector(move || {
-                                                        format!("quick-doc-{path}")
-                                                    })
-                                                    .min_h(px(36.))
-                                                    .px(px(10.))
-                                                    .py(px(4.))
-                                                    .cursor_pointer()
-                                                    .flex()
-                                                    .items_center()
-                                                    .gap(px(8.))
-                                                    .when(selected, |d| d.bg(theme().selection))
-                                                    .hover(|d| d.bg(theme().hover))
-                                                    .child(
-                                                        div()
-                                                            .flex_1()
-                                                            .min_w_0()
-                                                            .flex()
-                                                            .flex_col()
-                                                            .gap(px(3.))
-                                                            .child(
-                                                                div()
-                                                                    .text_size(px(12.))
-                                                                    .text_color(theme().text_muted)
-                                                                    .overflow_hidden()
-                                                                    .whitespace_nowrap()
-                                                                    .text_ellipsis()
-                                                                    .child(doc.label),
-                                                            )
-                                                            .child(
-                                                                div()
-                                                                    .text_size(px(10.))
-                                                                    .font_family(theme().font_mono)
-                                                                    .text_color(theme().text_faint)
-                                                                    .overflow_hidden()
-                                                                    .whitespace_nowrap()
-                                                                    .text_ellipsis()
-                                                                    .child(doc.value),
-                                                            ),
-                                                    )
-                                                    .child(crate::icon::stroke(
-                                                        CHEVRON_RIGHT,
-                                                        theme().text_muted,
-                                                        13.,
-                                                        2.,
-                                                    ))
-                                                    .on_click(cx.listener(move |_, _, _, cx| {
-                                                        cx.emit(Pick(doc.path.clone()))
-                                                    }))
-                                            },
-                                        ))
-                                }),
-                        )
                         .when(total == 0, |d| {
                             d.child(status("Pin files you reach for often.".into()))
                         }),
@@ -382,13 +390,13 @@ impl Render for QuickDocs {
                                     div()
                                         .id("quick-doc-picker")
                                         .debug_selector(|| "quick-doc-picker".into())
-                                        .w(px(300.))
-                                        .h(px(326.))
+                                        .w(px((f32::from(window.viewport_size().width)-24.).clamp(0.,320.)))
+                                        .h(px(picker.read(cx).picker_height().min((f32::from(window.viewport_size().height)-24.).max(100.))))
                                         .occlude()
                                         .bg(crate::theme::popover_background())
                                         .border_1()
                                         .border_color(theme().border)
-                                        .rounded(px(12.))
+                                        .rounded(px(16.))
                                         .p(px(8.))
                                         .shadow_lg()
                                         .flex()
@@ -416,7 +424,7 @@ impl Render for QuickDocs {
                                         ))
                                         .child(
                                             div()
-                                                .flex()
+                                                .flex().p(px(6.)).font_weight(FontWeight::NORMAL)
                                                 .items_center()
                                                 .child(
                                                     div()
@@ -442,6 +450,31 @@ impl Render for QuickDocs {
                     ),
                 )
             })
+    }
+}
+
+fn full_path(workspace: &str, path: &str) -> String {
+    if std::path::Path::new(path).is_absolute() {
+        path.into()
+    } else {
+        format!("{}/{}", workspace.trim_end_matches('/'), path)
+    }
+}
+fn path_tip(path: String) -> impl Fn(&mut Window, &mut App) -> AnyView {
+    move |_, cx| {
+        #[cfg(test)]
+        {
+            if cx
+                .try_global::<super::tests::tree_tests::Tooltips>()
+                .is_none()
+            {
+                cx.set_global(super::tests::tree_tests::Tooltips::default());
+            }
+            cx.global_mut::<super::tests::tree_tests::Tooltips>()
+                .0
+                .insert(path.clone());
+        }
+        cx.new(|_| crate::icon::Tip(path.clone().into())).into()
     }
 }
 

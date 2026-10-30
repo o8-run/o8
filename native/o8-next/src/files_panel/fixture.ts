@@ -47,7 +47,8 @@ const server = createServer(async (req, res) => {
       ? JSON.parse(readFileSync(fallbackPath, 'utf8'))[fallbackKey] : null;
     const delayPath = join(root, 'save-delay-ms');
     if (['POST', 'PUT'].includes(req.method!) && existsSync(delayPath)) await new Promise(resolve => setTimeout(resolve, Number(readFileSync(delayPath, 'utf8'))));
-    let response = fallback ? Response.json(fallback) : route === '/api/v2/files/quick-docs' ? await docs.GET(request)
+    const fault = route === '/api/review/workspace' ? 'changes-error' : route === '/api/panel/file-diff' ? 'diff-error' : '';
+    let response = fault && existsSync(join(root, fault)) ? Response.json({ error: 'Owned fixture unavailable' }, { status: 503 }) : route === '/api/review/workspace' ? await (await import('../../../../src/app/api/review/workspace/route')).GET(request) : route === '/api/panel/file-diff' ? await (await import('../../../../src/app/api/panel/file-diff/route')).GET(request) : fallback ? Response.json(fallback) : route === '/api/v2/files/quick-docs' ? await docs.GET(request)
         : route === '/api/v2/files' ? req.method === 'POST' ? await preview.POST(request) : await preview.GET(request) : route === '/api/panel/file-io' ? req.method === 'PUT' ? await fileIo.PUT(request) : await fileIo.GET(request) : route === '/api/panel/file-asset' ? await asset.GET(request) : await files.GET(request);
     if (req.method === 'GET' && route === '/api/v2/files' && existsSync(join(root, 'omit-content-hash'))) {
       const status = response.status; const body = await response.json(); delete body.contentHash;
@@ -55,6 +56,9 @@ const server = createServer(async (req, res) => {
     }
     // Exercise stale completion: the earlier query/file finishes last.
     if (url.searchParams.get('search') === 'slow' || url.searchParams.get('path') === 'AGENTS.md') await new Promise(resolve => setTimeout(resolve, 250));
+    if (route === '/api/panel/file-diff' && existsSync(join(root, 'legacy-staged-diff')) && response.ok) {
+      const body = await response.json(); body.stagedDiff = body.diff; body.diff = ''; response = Response.json(body);
+    }
     res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(Buffer.from(await response.arrayBuffer()));
   } catch { res.writeHead(500).end('{}'); }
 });
