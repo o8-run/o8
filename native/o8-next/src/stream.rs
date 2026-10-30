@@ -595,6 +595,59 @@ mod tests {
         ]})));
         assert!(transcript.live.is_none());
         assert_eq!(trace(&transcript).unwrap().0.len(), 2);
+        assert_eq!(activity_id(&transcript), "reply:trace");
+    }
+    #[test]
+    fn a_tool_first_trace_keeps_its_first_step_id_until_history_carries_the_turn() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            .to_string();
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:thoughts-live","transcript":[
+                    {"id":"ask","role":"user","text":"Look around","timestamp":now},
+                    {"id":"reply","role":"assistant","text":"","timestamp":now}
+                ]}),
+            )
+            .unwrap(),
+        );
+        let event = |seq: u64, event: &str, data: Value| {
+            let mut data = data;
+            data["threadId"] = "thoughts-live".into();
+            data["assistantMessageId"] = "reply".into();
+            serde_json::json!({"channel":"orchestrator","event":event,"seq":seq,"data":data})
+        };
+        let activity_id = |transcript: &Transcript| {
+            transcript.rows.iter().find_map(|row| match row {
+                Row::Activity { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+        };
+        // No thinking marker: the block takes the web renderer's first-step id
+        // and keeps it through the result, ready and the saved history.
+        assert!(transcript.apply(&event(
+            1,
+            "tool-use",
+            serde_json::json!({"toolUseId":"t1","name":"Read","args":{"file_path":"src/a.rs"}})
+        )));
+        assert_eq!(activity_id(&transcript).as_deref(), Some("t1"));
+        assert!(transcript.apply(&event(
+            2,
+            "tool-result",
+            serde_json::json!({"toolUseId":"t1","output":"ok"})
+        )));
+        assert_eq!(activity_id(&transcript).as_deref(), Some("t1"));
+        assert!(transcript.apply(&event(3, "status", serde_json::json!({"status":"ready"}))));
+        assert_eq!(activity_id(&transcript).as_deref(), Some("t1"));
+        assert!(transcript.history(&serde_json::json!({"sessionKey":"llm-chat:thoughts-live","entries":[
+            {"id":"reply","role":"assistant","text":"Done.","timestamp":now,
+             "toolCalls":[{"id":"t1","name":"Read","args":{"file_path":"src/a.rs"},"status":"done"}],
+             "receipt":{"terminal":{"outcome":"completed"}}}
+        ]})));
+        assert!(transcript.live.is_none());
+        assert_eq!(activity_id(&transcript).as_deref(), Some("t1"));
     }
 
     #[test]
