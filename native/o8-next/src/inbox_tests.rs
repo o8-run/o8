@@ -57,21 +57,25 @@ impl Fixture {
             ])
             .args(if empty { vec!["--inbox-empty"] } else { vec![] })
             .args(if plan { vec!["--inbox-plan"] } else { vec![] })
+            .arg("--owned-stdio")
             .env("O8_NEXT_API_TOKEN", "fixture-inbox-operator-credential")
             .env("O8_NEXT_INBOX_ORACLE", root.join("oracle.json"))
             .env("O8_NEXT_INBOX_PLAN_FIXTURE", root.join("plan.json"))
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        let origin = BufReader::new(server.stdout.take().unwrap())
-            .lines()
+        let mut output = BufReader::new(server.stdout.take().unwrap()).lines();
+        let origin = output.by_ref()
             .find_map(|line| {
                 serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
                     .as_str()
                     .map(str::to_owned)
             })
             .expect("production Inbox fixture host must start");
+        // Keep late production logs from writing into a closed readiness pipe.
+        std::thread::spawn(move || for _ in output {});
         let client =
             Client::authenticated(&origin, Some("fixture-inbox-operator-credential".into()))
                 .unwrap();
