@@ -1,3 +1,6 @@
+#[cfg(all(target_os = "macos", feature = "macos-diagnostics"))]
+#[path = "composer/capture.rs"]
+mod composer_capture;
 use crate::theme::current as theme;
 #[path = "brain_dock.rs"]
 mod brain_dock;
@@ -179,7 +182,67 @@ impl Surface {
             }
         }
         if !self.drafts.contains_key(&id) {
-            let editor = cx.new(Composer::new);
+            let store = crate::composer::mode_store::path(
+                self.client
+                    .url("/")
+                    .map(|u| u.to_string())
+                    .unwrap_or_default()
+                    .as_str(),
+                &id,
+                cx,
+            );
+            let mode = crate::composer::mode_store::load(store.as_deref());
+            let prelude = crate::composer::mode_store::load_prelude(store.as_deref());
+            let editor = cx.new(|cx| {
+                let mut editor = Composer::new(cx);
+                editor.controls.slash.enabled = true;
+                editor.controls.prompt.store = store;
+                editor.controls.prompt.prelude = prelude;
+                if let Some(mode) = mode {
+                    editor.controls.overrides["mode"] =
+                        json!(if mode == "solo" { "single" } else { "fleet" });
+                    editor.controls.overrides["pickedMode"] = json!(mode);
+                }
+                editor
+            });
+            self.subscriptions.push(cx.subscribe(
+                &editor,
+                |s, editor, event: &crate::composer::commands::Changed, cx| {
+                    if s.composer == editor {
+                        if event.0 {
+                            cx.notify();
+                        } else {
+                            let view = editor
+                                .read(cx)
+                                .controls
+                                .prompt
+                                .view
+                                .as_ref()
+                                .map(|view| view.entity_id());
+                            if let Some(view) = view {
+                                App::notify(cx, view);
+                            }
+                        }
+                    }
+                },
+            ));
+            self.subscriptions.push(cx.subscribe(
+                &editor,
+                |s, editor, event: &crate::composer::commands::Execute, cx| {
+                    if s.composer == editor {
+                        let entity = cx.entity().downgrade();
+                        let handle = event.1;
+                        let text = event.0.clone();
+                        cx.defer(move |cx| {
+                            let _ = handle.update(cx, |_, window, cx| {
+                                let _ = entity.update(cx, |s, cx| {
+                                    s.execute_composer_command(text, window, cx)
+                                });
+                            });
+                        });
+                    }
+                },
+            ));
             self.subscriptions
                 .push(cx.subscribe(&editor, |this, _, event: &Submit, cx| {
                     if event.0 {
@@ -551,7 +614,18 @@ impl Render for Surface {
             .text_size(px(typography.body))
             .line_height(gpui::relative(typography.chrome_line))
             .track_focus(&self.focus)
-            .capture_key_down(cx.listener(Self::brain_key))
+            .capture_key_down(cx.listener(|s, event: &KeyDownEvent, w, cx| {
+                let key = &event.keystroke;
+                if key.key == "k"
+                    && key.modifiers.shift
+                    && (key.modifiers.platform || key.modifiers.control)
+                    && s.quick_action_shortcut(w, cx)
+                {
+                    cx.stop_propagation();
+                    return;
+                }
+                Self::brain_key(s, event, w, cx);
+            }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 match event.keystroke.key.as_str() {
                     "tab" => {
@@ -758,6 +832,10 @@ pub fn launch(
                 surface.load_sessions(cx);
                 surface
             })).expect("GPUI window");
+        #[cfg(all(target_os = "macos", feature = "macos-diagnostics"))]
+        if let Some(directory) = std::env::var_os("O8_NEXT_COMPOSER_CAPTURE_DIR") {
+            composer_capture::start(handle, std::path::PathBuf::from(directory), cx);
+        }
         if let Some(path) = composer_benchmark {
             composer_bench::start(handle, path, started, cx);
         }

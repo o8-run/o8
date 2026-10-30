@@ -4,8 +4,11 @@ use gpui::{prelude::*, *};
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
+pub(crate) mod commands;
 pub(crate) mod controls;
 pub(crate) mod images;
+pub(crate) mod mode_store;
+pub(crate) mod prompt_state;
 
 #[derive(Clone)]
 struct Snapshot {
@@ -73,6 +76,15 @@ impl Composer {
         self.selection = 0..self.text.len();
         self.changed(cx);
     }
+    pub(crate) fn insert_prompt(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.undo.push(self.snapshot());
+        self.redo.clear();
+        self.replace(self.selection.clone(), text);
+        self.marked = None;
+        self.composition = None;
+        self.typing = None;
+        self.changed(cx);
+    }
     pub fn composing(&self) -> bool {
         self.marked.is_some()
     }
@@ -126,6 +138,21 @@ impl Composer {
         self.changed(cx);
     }
     fn changed(&mut self, cx: &mut Context<Self>) {
+        if self.controls.slash.enabled {
+            if self.controls.slash.last != self.text {
+                let previous = self.controls.slash.last.trim_start();
+                let next = self.text.trim_start();
+                if previous.is_empty() != next.is_empty()
+                    || previous.starts_with('/')
+                    || next.starts_with('/')
+                {
+                    cx.emit(commands::Changed(false));
+                }
+                self.controls.slash.last = self.text.clone();
+                self.controls.slash.index = 0;
+                self.controls.slash.dismissed = None;
+            }
+        }
         self.revision += 1;
         self.reveal_cursor = true;
         cx.notify();
@@ -220,6 +247,9 @@ impl Composer {
         // IME owns confirmation, arrows and deletion while a marked range exists.
         if self.composing() {
             cx.stop_propagation();
+            return;
+        }
+        if self.slash_key(key, window, cx) {
             return;
         }
         let command = key.modifiers.control || key.modifiers.platform;
@@ -520,6 +550,9 @@ impl EntityInputHandler for Composer {
 }
 impl Render for Composer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.controls.slash.enabled {
+            self.controls.slash.window = Some(window.window_handle());
+        }
         if !self.focus.is_focused(window) {
             self.selecting = false;
             self.typing = None;
@@ -553,6 +586,10 @@ impl Render for Composer {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    if this.controls.slash.enabled && this.controls.open.take().is_some() {
+                        this.controls.prompt.generation += 1;
+                        cx.emit(commands::Changed(true));
+                    }
                     this.focus.focus(window);
                     this.selecting = true;
                     this.typing = None;

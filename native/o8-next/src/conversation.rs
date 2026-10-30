@@ -1,10 +1,20 @@
 use super::*;
 use crate::theme::current as theme;
 
+#[path = "composer/command_client.rs"]
+mod command_client;
 #[path = "composer/card.rs"]
 mod composer_card;
 #[path = "composer/picker.rs"]
 mod composer_picker;
+#[path = "composer/prompt_actions.rs"]
+mod prompt_actions;
+#[path = "composer/prompt_controls.rs"]
+mod prompt_controls;
+#[path = "composer/prompt_rules.rs"]
+mod prompt_rules;
+#[path = "composer/prompt_view.rs"]
+mod prompt_view;
 
 #[cfg(test)]
 #[path = "composer/card_tests.rs"]
@@ -33,6 +43,37 @@ fn receipt_matches(method: &str, body: &Value, response: &Value) -> bool {
 }
 impl Surface {
     pub(super) fn send(&mut self, promote: Option<String>, cx: &mut Context<Self>) {
+        if promote.is_none() {
+            let editor = self.composer.clone();
+            let input = editor.read(cx);
+            let raw = input.text.trim().to_owned();
+            let expanded = input
+                .controls
+                .prompt
+                .command_wire
+                .as_ref()
+                .is_some_and(|(text, _)| text == &raw);
+            if !expanded && crate::composer::commands::recognized(&raw) {
+                if self.saving || input.controls.busy || input.controls.slash.scheduled {
+                    return;
+                }
+                if let Some(window) = input.controls.slash.window {
+                    editor.update(cx, |i, _| i.controls.slash.scheduled = true);
+                    let owner = cx.entity().downgrade();
+                    cx.defer(move |cx| {
+                        let _ = window.update(cx, |_, window, cx| {
+                            let _ = owner.update(cx, |s, cx| {
+                                editor.update(cx, |i, _| i.controls.slash.scheduled = false);
+                                if s.composer == editor && editor.read(cx).text.trim() == raw {
+                                    s.execute_composer_command(raw, window, cx);
+                                }
+                            });
+                        });
+                    });
+                    return;
+                }
+            }
+        }
         self.mutate_message(promote, false, cx);
     }
     pub(super) fn remove_queued(&mut self, id: String, cx: &mut Context<Self>) {
@@ -228,7 +269,7 @@ impl Surface {
                 }
                 ("POST", pending.clone())
             } else {
-                let Some(routing) = self.composer_routing(cx) else {
+                let Some(mut routing) = self.composer_routing(cx) else {
                     return;
                 };
                 let nonce = std::time::SystemTime::now()
@@ -239,8 +280,46 @@ impl Surface {
                 let contextual = linked
                     .map(|context| format!("{context}\n\n{text}"))
                     .unwrap_or_else(|| text.clone());
-                let wire = if text.starts_with('/') && !self.linked_issues.contains_key(&session.id)
+                let advice = &self.composer.read(cx).controls.prompt;
+                let explicit_fleet = advice
+                    .command_wire
+                    .as_ref()
+                    .is_some_and(|(raw, _)| raw == &text)
+                    && text.split_whitespace().next().is_some_and(|token| {
+                        token.eq_ignore_ascii_case("/orchestrate")
+                            || token.eq_ignore_ascii_case("/fleet")
+                    });
+                if explicit_fleet {
+                    routing["mode"] = json!("fleet");
+                    routing["pickedMode"] = json!("multitask");
+                }
+                let contextual = if advice.repo.is_some() || !advice.branch.is_empty() {
+                    format!(
+                        "Intent scope: repository {} · base branch {}.\n\n{contextual}",
+                        advice.repo.as_deref().unwrap_or(&repo),
+                        if advice.branch.is_empty() {
+                            "main"
+                        } else {
+                            &advice.branch
+                        }
+                    )
+                } else {
+                    contextual
+                };
+                let contextual = if advice.prelude.is_empty() {
+                    contextual
+                } else {
+                    format!("{}\n\n{contextual}", advice.prelude)
+                };
+                let wire = if let Some((_, wire)) =
+                    advice.command_wire.as_ref().filter(|(raw, _)| raw == &text)
                 {
+                    if explicit_fleet {
+                        crate::composer::controls::wire(wire, "multitask")
+                    } else {
+                        wire.clone()
+                    }
+                } else if text.starts_with('/') && !self.linked_issues.contains_key(&session.id) {
                     text.clone()
                 } else {
                     crate::composer::controls::wire(
@@ -252,6 +331,12 @@ impl Surface {
                 let body = json!({"repoPath":repo,"threadId":session.id,"id":format!("next-{nonce:x}-{:x}", std::process::id()),
                     "intent":if !self.send_next && self.queue["canSteer"] == true { "steer-now" } else { "send-next" },
                     "payload":{"text":text,"wireMessage":wire,"images":images,"routing":routing}});
+                let frozen_prelude = advice.prelude.clone();
+                self.composer.update(cx, |i, _| {
+                    i.controls.prompt.queued_prelude = body["id"]
+                        .as_str()
+                        .map(|id| (id.to_owned(), frozen_prelude));
+                });
                 self.pending.insert(session.id.clone(), body.clone());
                 ("POST", body)
             }
@@ -270,6 +355,15 @@ impl Surface {
         .into();
         cx.notify();
         let client = self.client.clone();
+        let sent_prelude = self
+            .composer
+            .read(cx)
+            .controls
+            .prompt
+            .queued_prelude
+            .as_ref()
+            .filter(|(id, _)| body["id"].as_str() == Some(id.as_str()))
+            .map(|(_, prelude)| prelude.clone());
         let sent_images = body["payload"]["images"]
             .as_array()
             .cloned()
@@ -308,6 +402,30 @@ impl Surface {
                     Ok((method, session, queue, history)) => {
                         if method == "POST" {
                             this.pending.remove(&session.id);
+                            this.composer.update(cx, |i, _| {
+                                if let Some(sent) =
+                                    sent_prelude.as_ref().filter(|sent| !sent.is_empty())
+                                {
+                                    if i.controls.prompt.prelude == *sent {
+                                        i.controls.prompt.prelude.clear();
+                                    } else if let Some(remaining) = i
+                                        .controls
+                                        .prompt
+                                        .prelude
+                                        .strip_prefix(&format!("{sent}\n\n"))
+                                    {
+                                        i.controls.prompt.prelude = remaining.to_owned();
+                                    }
+                                    if let Err(error) = crate::composer::mode_store::save_prelude(
+                                        i.controls.prompt.store.as_deref(),
+                                        &i.controls.prompt.prelude,
+                                    ) {
+                                        i.controls.error = error;
+                                    }
+                                }
+                                i.controls.prompt.queued_prelude = None;
+                                i.controls.prompt.command_wire = None;
+                            });
                             if this.composer.read(cx).text == draft {
                                 this.composer.update(cx, |i, cx| {
                                     i.clear(cx);

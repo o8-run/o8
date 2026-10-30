@@ -9,6 +9,8 @@ pub(crate) mod context;
 
 pub(crate) struct State {
     pub context: context::MeterState,
+    pub slash: super::commands::Slash,
+    pub prompt: super::prompt_state::State,
     pub open: Option<&'static str>,
     pub model: Option<Entity<Composer>>,
     pub busy: bool,
@@ -27,6 +29,8 @@ impl Default for State {
     fn default() -> Self {
         Self {
             context: Default::default(),
+            slash: Default::default(),
+            prompt: Default::default(),
             open: None,
             model: None,
             busy: false,
