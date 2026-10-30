@@ -65,7 +65,7 @@ pub(super) fn listed(shell: &Entity<Shell>, cx: &VisualTestContext) -> Vec<Strin
             .collect()
     })
 }
-fn press(cx: &mut VisualTestContext, selector: &str, modifiers: gpui::Modifiers) {
+pub(super) fn press(cx: &mut VisualTestContext, selector: &str, modifiers: gpui::Modifiers) {
     draw(cx);
     let bounds = cx
         .debug_bounds(Box::leak(selector.to_owned().into_boxed_str()))

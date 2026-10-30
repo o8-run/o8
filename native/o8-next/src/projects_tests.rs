@@ -2,6 +2,8 @@
 use super::*;
 use crate::shell::test_support::*;
 
+#[path = "projects_icon_tests.rs"]
+mod icons;
 #[path = "projects_review_tests.rs"]
 mod review;
 
