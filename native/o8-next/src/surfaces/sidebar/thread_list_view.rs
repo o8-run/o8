@@ -85,11 +85,15 @@ impl Render for ThreadList {
                             .on_click(cx.listener(|this, _, window, cx| this.search(window, cx))),
                     )
                     .when(!self.scope_repos().is_empty(), |row| {
-                        row.child(self.scope_trigger(cx))
-                            .child(self.new_thread_button(cx))
+                        row.child(
+                            div()
+                                .relative()
+                                .child(self.scope_trigger(cx))
+                                .children(self.scope_picker(cx)),
+                        )
+                        .child(self.new_thread_button(cx))
                     }),
             )
-            .children(self.scope_picker(cx))
             .when(self.editing || !self.query.is_empty(), |view| {
                 view.child(self.editor.clone())
             })

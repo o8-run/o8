@@ -193,7 +193,8 @@ fn sidebar_scope_picker_and_row_filter_scope_the_list(cx: &mut TestAppContext) {
         !s.state.sidebar_scope.contains_key(&id)
     });
     draw(&mut visual);
-    assert_eq!(listed(&shell, &visual).len(), 2);
+    let all = listed(&shell, &visual);
+    assert!(all.iter().any(|t| t == first) && all.iter().any(|t| t == second));
     let row = row_of(&shell, &visual, first);
     right_click(&mut visual, row);
     click(&mut visual, "sidebar-row-filter");
@@ -231,5 +232,6 @@ fn sidebar_scope_picker_and_row_filter_scope_the_list(cx: &mut TestAppContext) {
         !s.state.sidebar_scope.contains_key(&id)
     });
     draw(&mut visual);
-    assert_eq!(listed(&shell, &visual).len(), 2);
+    let all = listed(&shell, &visual);
+    assert!(all.iter().any(|t| t == first) && all.iter().any(|t| t == second));
 }

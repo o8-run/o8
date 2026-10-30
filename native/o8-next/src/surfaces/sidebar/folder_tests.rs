@@ -209,6 +209,14 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
     let all = listed(&shell, &visual);
     assert!(all.iter().any(|t| t == first) && all.iter().any(|t| t == second));
 
+    // A trigger closes its own open menu rather than reopening it.
+    click(&mut visual, "sidebar-view");
+    draw(&mut visual);
+    assert!(visual.debug_bounds("sidebar-view-menu").is_some());
+    click(&mut visual, "sidebar-view");
+    draw(&mut visual);
+    assert!(visual.debug_bounds("sidebar-view-menu").is_none());
+
     // Outside By repo, with two repositories, New thread asks which one.
     click(&mut visual, "sidebar-new-thread");
     draw(&mut visual);

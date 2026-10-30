@@ -74,6 +74,9 @@ pub struct ThreadList {
     views: HashMap<String, folders::View>,
     view_menu: bool,
     new_menu: bool,
+    /// The press that last closed a menu from outside it; when that press
+    /// lands on the menu's trigger, its click must not reopen the menu.
+    menu_press: Option<gpui::Point<gpui::Pixels>>,
     /// Closed By repo folders, by repository path.
     closed: HashSet<String>,
     pub sessions: Vec<Session>,
@@ -151,6 +154,7 @@ impl ThreadList {
             views: HashMap::new(),
             view_menu: false,
             new_menu: false,
+            menu_press: None,
             closed: HashSet::new(),
             sessions: vec![],
             rows: Rc::new(vec![]),

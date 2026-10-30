@@ -246,8 +246,10 @@ impl ThreadList {
                     .into()
             })
             .child(crate::icon::stroke(DOTS, theme().text_muted, 12., 3.))
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.view_menu = !this.view_menu;
+            .on_click(cx.listener(|this, event: &gpui::ClickEvent, window, cx| {
+                if !this.dismissing(event) {
+                    this.view_menu = !this.view_menu;
+                }
                 this.focus.focus(window);
                 cx.notify();
             }));
@@ -281,6 +283,9 @@ impl ThreadList {
             gpui::deferred(
                 gpui::anchored()
                     .anchor(gpui::Corner::TopRight)
+                    // Right edges align: the trigger is 18px wide.
+                    .position_mode(gpui::AnchoredPositionMode::Local)
+                    .position(gpui::point(px(18.), px(0.)))
                     .snap_to_window_with_margin(px(12.))
                     .child(
                         div()
@@ -295,10 +300,13 @@ impl ThreadList {
                             .border_1()
                             .border_color(theme().border)
                             .shadow_lg()
-                            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                                this.view_menu = false;
-                                cx.notify();
-                            }))
+                            .on_mouse_down_out(cx.listener(
+                                |this, event: &gpui::MouseDownEvent, _, cx| {
+                                    this.view_menu = false;
+                                    this.dismissed(event);
+                                    cx.notify();
+                                },
+                            ))
                             .child(item(View::Chronological, cx))
                             .child(div().my(px(4.)).h(px(1.)).bg(theme().border))
                             .child(item(View::Repo, cx))
@@ -360,6 +368,18 @@ impl ThreadList {
         .detach();
         cx.notify();
     }
+    /// A menu's outside press closed it: remember the press for its trigger.
+    pub(super) fn dismissed(&mut self, event: &gpui::MouseDownEvent) {
+        self.menu_press = Some(event.position);
+    }
+    /// Whether this click is the press that just closed a menu from outside;
+    /// on the menu's own trigger that press closes the menu and nothing more.
+    pub(super) fn dismissing(&mut self, event: &gpui::ClickEvent) -> bool {
+        match event {
+            gpui::ClickEvent::Mouse(click) => self.menu_press.take() == Some(click.down.position),
+            gpui::ClickEvent::Keyboard(_) => false,
+        }
+    }
     /// SidebarThreadHeader's New thread: the current repository in By repo,
     /// with one repository, or with Shift; otherwise a repository menu.
     fn header_new_thread(&mut self, shift: bool, cx: &mut Context<Self>) {
@@ -397,8 +417,9 @@ impl ThreadList {
                 .border_1()
                 .border_color(theme().border)
                 .shadow_lg()
-                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                .on_mouse_down_out(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
                     this.new_menu = false;
+                    this.dismissed(event);
                     cx.notify();
                 }))
                 .child(
@@ -439,6 +460,9 @@ impl ThreadList {
             gpui::deferred(
                 gpui::anchored()
                     .anchor(gpui::Corner::TopRight)
+                    // Right edges align: the trigger is 28px wide.
+                    .position_mode(gpui::AnchoredPositionMode::Local)
+                    .position(gpui::point(px(28.), px(0.)))
                     .snap_to_window_with_margin(px(12.))
                     .child(list),
             )
@@ -474,7 +498,9 @@ impl ThreadList {
                         1.7,
                     ))
                     .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
-                        this.header_new_thread(event.modifiers().shift, cx)
+                        if !this.dismissing(event) {
+                            this.header_new_thread(event.modifiers().shift, cx)
+                        }
                     })),
             )
             .children(menu)
@@ -578,8 +604,10 @@ impl ThreadList {
                         .items_center()
                         .justify_center()
                         .rounded(px(5.))
-                        .invisible()
-                        .group_hover("sidebar-folder", |s| s.visible())
+                        // Transparent rather than hidden, so the pen keeps its
+                        // hit area for the press that arrives with the hover.
+                        .opacity(0.)
+                        .group_hover("sidebar-folder", |s| s.opacity(1.))
                         .hover(|s| s.bg(theme().selection))
                         .tooltip(|_, cx| {
                             cx.new(|_| crate::icon::Tip("New thread in this repository".into()))

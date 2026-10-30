@@ -265,13 +265,19 @@ impl ThreadList {
             .cursor_pointer()
             .hover(|style| style.bg(theme().hover))
             .when(self.scope_menu.is_some(), |v| v.bg(theme().hover))
-            .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(label.clone().into())).into())
+            .when(self.scope_menu.is_none(), |v| {
+                v.tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(label.clone().into())).into())
+            })
             .child(marks)
-            .on_click(cx.listener(|this, _, window, cx| this.toggle_scope_menu(window, cx)))
+            .on_click(cx.listener(|this, event: &gpui::ClickEvent, window, cx| {
+                if !this.dismissing(event) {
+                    this.toggle_scope_menu(window, cx)
+                }
+            }))
             .into_any_element()
     }
-    /// The picker under the search row: its search line, then each item with
-    /// a check badge on its mark while chosen.
+    /// The picker under the scope trigger: its search line, then each item
+    /// with a check badge on its mark while chosen.
     pub(in crate::shell::sidebar) fn scope_picker(
         &mut self,
         cx: &mut Context<Self>,
@@ -284,13 +290,22 @@ impl ThreadList {
         let mut picker = div()
             .id("sidebar-scope-menu")
             .debug_selector(|| "sidebar-scope-menu".into())
-            .mx(px(6.))
-            .mb(px(4.))
-            .max_h(px(280.))
+            .occlude()
+            .mt(px(32.))
+            .w(px(256.))
+            .max_h(px(320.))
             .overflow_y_scroll()
-            .rounded(px(14.))
-            .p(px(6.))
-            .bg(theme().surface_raised)
+            .rounded(px(12.))
+            .p(px(5.))
+            .bg(crate::theme::popover_background())
+            .border_1()
+            .border_color(theme().border)
+            .shadow_lg()
+            .on_mouse_down_out(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                this.scope_menu = None;
+                this.dismissed(event);
+                cx.notify();
+            }))
             .child(
                 div()
                     .debug_selector(|| "sidebar-scope-query".into())
@@ -369,7 +384,7 @@ impl ThreadList {
                                         .justify_center()
                                         .rounded_full()
                                         .border_2()
-                                        .border_color(theme().surface_raised)
+                                        .border_color(crate::theme::popover_background())
                                         .bg(theme().accent)
                                         .child(crate::icon::stroke(
                                             CHECK,
@@ -394,7 +409,19 @@ impl ThreadList {
                     })),
             );
         }
-        Some(picker.into_any_element())
+        Some(
+            deferred(
+                anchored()
+                    .anchor(Corner::TopRight)
+                    // Right edges align: the trigger is 28px wide.
+                    .position_mode(gpui::AnchoredPositionMode::Local)
+                    .position(gpui::point(px(28.), px(0.)))
+                    .snap_to_window_with_margin(px(12.))
+                    .child(picker),
+            )
+            .with_priority(1)
+            .into_any_element(),
+        )
     }
     /// A thread row's right-click: its repository's filter, when it has one.
     pub(in crate::shell::sidebar) fn open_row_menu(
