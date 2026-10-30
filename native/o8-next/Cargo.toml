@@ -49,6 +49,16 @@ raw-window-handle = "=0.6.2"
 
 [workspace]
 
+# Keep interactive debug painting and terminal parsing responsive while retaining
+# the debug assertions and overflow checks used by the native regression suite.
+[profile.dev]
+opt-level = 1
+debug-assertions = true
+overflow-checks = true
+
+[profile.dev.package."*"]
+opt-level = 2
+
 [[example]]
 name = "window-occlusion"
 path = "test-support/window_occlusion.rs"
