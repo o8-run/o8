@@ -27,6 +27,12 @@ fn packaged_next_beside(directory: &Path) -> bool {
 }
 
 /// Bring o8 next to the front, or ask the server to open it when it is closed.
+/// Only macOS uses o8 next as the main window (`enabled`).
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn show() {}
+
+/// Bring o8 next to the front, or ask the server to open it when it is closed.
+#[cfg(target_os = "macos")]
 pub(crate) fn show() {
     if activate_running() {
         return;
@@ -67,11 +73,6 @@ fn activate_running() -> bool {
         }
         false
     })
-}
-
-#[cfg(not(target_os = "macos"))]
-fn activate_running() -> bool {
-    false
 }
 
 #[cfg(target_os = "macos")]
