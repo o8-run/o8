@@ -127,3 +127,15 @@ it('reports busy for a new binding while the old capture is being retired', asyn
   f.controller.command({ ...target, action: 'dictation-stop', requestId: 'retire', submit: false }); await flush();
   expect(f.frames.at(-1)?.payload).toMatchObject({ nonce: target.nonce, state: 'idle' });
 });
+it('relays the recorder level on listening frames at most every 80 ms without replacing the replayed state', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const f = fixture(); f.controller.command(target); await flush();
+  f.controller.event({ type: 'level', origin: 'in-window', sessionId: 12, level: 0.4 });
+  f.controller.event({ type: 'level', origin: 'in-window', sessionId: 12, level: 0.9 });
+  vi.advanceTimersByTime(80);
+  f.controller.event({ type: 'level', origin: 'in-window', sessionId: 12, level: 1.7 });
+  expect(f.frames.filter(frame => frame.payload.level !== undefined).map(frame => frame.payload.level)).toEqual([0.4, 1]);
+  const before = f.frames.length;
+  f.controller.replayState('host');
+  expect(f.frames.slice(before)).toEqual([{ kind: 'dictation-state', payload: expect.not.objectContaining({ level: expect.anything() }) }]);
+});

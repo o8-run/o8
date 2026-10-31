@@ -5,12 +5,15 @@ export type DictationCommand = VoiceHostPayload & VoiceBinding & { hostId: strin
 export type DictationFrame = { kind: 'dictation-text' | 'dictation-state'; payload: Record<string, unknown> };
 type Run = { command: DictationCommand; sessionId?: number; cancelled: boolean; stopRequested: boolean;
   submit: boolean; stopped: boolean; terminal: boolean; error?: string; idleReason?: string; stop?: Promise<void>; cancel?: Promise<void>;
-  buffered: SttEventPayload[]; partial?: string; timer?: ReturnType<typeof setTimeout>; lease?: ReturnType<typeof setTimeout> };
+  buffered: SttEventPayload[]; partial?: string; levelAt?: number; timer?: ReturnType<typeof setTimeout>; lease?: ReturnType<typeof setTimeout> };
 interface NativeDictationDriver {
   ready: Promise<unknown>;
   invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
   emit: (frame: DictationFrame) => void;
 }
+
+/** Levels drive o8 next's dictation wave; each one is an HTTP relay hop. */
+const LEVEL_INTERVAL_MS = 80;
 
 /** The in-window native STT contract, with a binding in place of a DOM target. */
 export class NativeDictationController {
@@ -22,6 +25,14 @@ export class NativeDictationController {
     const { binding, nonce, threadId, repoPath, hostId, requestId } = run.command;
     this.lastState = { kind: 'dictation-state', payload: { binding, nonce, threadId, repoPath, hostId, requestId, state, ...(error ? { error } : {}) } };
     if (!this.disposed) this.driver.emit(this.lastState);
+  }
+  /** The recorder level for the composer wave; replay keeps the real state. */
+  private level(run: Run, level: number) {
+    const now = Date.now();
+    if (run.levelAt !== undefined && now - run.levelAt < LEVEL_INTERVAL_MS) return;
+    run.levelAt = now;
+    const { binding, nonce, threadId, repoPath, hostId, requestId } = run.command;
+    if (!this.disposed) this.driver.emit({ kind: 'dictation-state', payload: { binding, nonce, threadId, repoPath, hostId, requestId, state: 'listening', level: Math.min(1, Math.max(0, level)) } });
   }
   private text(run: Run, text: string, final: boolean) {
     const { binding, nonce, threadId, repoPath, hostId, requestId } = run.command;
@@ -98,6 +109,8 @@ export class NativeDictationController {
       this.abort('Stopped by Fn', undefined, true);
     } else if (event.type === 'complete' && !run.stopRequested) {
       this.abort('Dictation ended before it was submitted.');
+    } else if (event.type === 'level' && typeof event.level === 'number' && !run.stopRequested) {
+      this.level(run, event.level);
     } else if (event.type === 'partial' && typeof event.text === 'string' && run.partial !== event.text) {
       run.partial = event.text; this.text(run, event.text, false);
     } else if (event.type === 'polished' && run.stopRequested && run.submit) {
