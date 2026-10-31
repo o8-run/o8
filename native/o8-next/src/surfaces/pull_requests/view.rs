@@ -411,7 +411,8 @@ impl Render for PullRequests {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(12.))
             .track_focus(&self.focus)
-            .child(left.child(list))
+            // A contextual panel (opened from a thread's PR badge) shows just that PR.
+            .when(self.contextual.is_none(), |v| v.child(left.child(list)))
             .child(self.detail_view(cx))
             .child(
                 canvas(
