@@ -37,7 +37,7 @@ pub(super) fn control(id: String) -> gpui::Stateful<gpui::Div> {
         .text_color(theme().text)
 }
 
-fn icon(path: &str, size: f32) -> impl IntoElement {
+pub(super) fn icon(path: &str, size: f32) -> impl IntoElement {
     crate::icon::stroke(path, theme().text_secondary, size, 1.8)
 }
 
@@ -383,7 +383,7 @@ impl PullRequests {
     }
 }
 
-fn menu_row(id: String, chosen: bool) -> gpui::Stateful<gpui::Div> {
+pub(super) fn menu_row(id: String, chosen: bool) -> gpui::Stateful<gpui::Div> {
     let selector = id.clone();
     div()
         .id(gpui::SharedString::from(id))
@@ -404,7 +404,7 @@ fn menu_row(id: String, chosen: bool) -> gpui::Stateful<gpui::Div> {
 }
 
 /// A floating surface under its trigger; a click outside closes it.
-fn popover(
+pub(super) fn popover(
     id: String,
     width: f32,
     body: impl IntoElement,

@@ -52,6 +52,7 @@ fn shell_pull_requests_opens_from_palette(cx: &mut TestAppContext) {
     }
     draw(&mut visual);
     context.update_in(&mut visual, |s, window, cx| {
+        s.set_composer("comment", cx);
         s.editor.read(cx).focus.focus(window)
     });
     draw(&mut visual);
