@@ -54,7 +54,7 @@ fn hover_click(cx: &mut VisualTestContext, row: &str, selector: &str) {
 
 #[gpui::test]
 fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestAppContext) {
-    let fixture = Fixture::start_mode(true, "--shell --composer --sidebar");
+    let fixture = Fixture::start_mode(true, "--shell --composer --sidebar --settings");
     let (first, second) = ("thoughts-composer-first", "thoughts-composer-second");
     // The owned fixture repository is the only one that admits New thread.
     let repo = conversations(&fixture)
