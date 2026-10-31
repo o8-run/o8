@@ -445,7 +445,10 @@ pub(super) fn popover(
                             .debug_selector(move || selector.clone())
                             .occlude()
                             .w(px(width))
-                            .max_h(px(520.))
+                            // Tall enough for Filters with a field open, so
+                            // Done stays in view; the window snap keeps it on
+                            // screen and only a short window scrolls it.
+                            .max_h(px(720.))
                             .overflow_y_scroll()
                             .rounded(px(14.))
                             .bg(crate::theme::popover_background())
