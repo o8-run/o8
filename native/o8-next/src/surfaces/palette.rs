@@ -89,7 +89,8 @@ pub(super) fn open_workspaces(shell: &mut Shell, window: &mut Window, cx: &mut C
     shell.restore_focus(window, cx);
     cx.notify();
 }
-fn focused_control_owns_keys(shell: &Shell, window: &Window, cx: &App) -> bool {
+/// Whether a focused control keeps Cmd/Ctrl+K. `cmd` is Cmd+K rather than Ctrl+K.
+fn focused_control_owns_keys(shell: &Shell, window: &Window, cx: &App, cmd: bool) -> bool {
     if shell.focus.is_focused(window) {
         return false;
     }
@@ -97,7 +98,12 @@ fn focused_control_owns_keys(shell: &Shell, window: &Window, cx: &App) -> bool {
         .active()
         .and_then(|tab| shell.content.get(&shell.key(&tab)))
     {
-        Some(Content::Session(view)) => !view.read(cx).shell_reading_focused(window),
+        // The composer keeps Ctrl+K (delete to end of line) but has no Cmd+K,
+        // so Cmd+K opens the palette from it, as classic's hotkey does.
+        Some(Content::Session(view)) => {
+            let view = view.read(cx);
+            !view.shell_reading_focused(window) && !(cmd && view.shell_selection(window, cx).1)
+        }
         Some(Content::Grid(view)) => !view.read(cx).shell_reading_focused(window),
         _ => true,
     }
@@ -116,7 +122,13 @@ pub(super) fn key(
         && key == "k"
         && (modifiers.shift
             || modifiers.alt
-            || (!s.palette && focused_control_owns_keys(s, window, cx)))
+            || (!s.palette
+                && focused_control_owns_keys(
+                    s,
+                    window,
+                    cx,
+                    modifiers.platform && !modifiers.control,
+                )))
     {
         return KeyResult::Propagate;
     }
@@ -238,16 +250,28 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> Option<gpui::Any
                 .rounded(px(8.))
                 .cursor_pointer()
                 .text_size(px(13.))
-                .text_color(if chosen { theme().text } else { theme().text_secondary })
+                .text_color(if chosen {
+                    theme().text
+                } else {
+                    theme().text_secondary
+                })
                 .when(chosen, |row| row.bg(theme().selection))
                 .when(!chosen, |row| row.hover(|row| row.bg(theme().hover)))
                 .child(div().flex_1().min_w_0().truncate().child({
                     // The kind tag says Chat; the row needs only the title.
                     let label = entry.label(&shell.sessions);
-                    label.strip_prefix("Open session: ").map(str::to_owned).unwrap_or(label)
+                    label
+                        .strip_prefix("Open session: ")
+                        .map(str::to_owned)
+                        .unwrap_or(label)
                 }))
                 .when(!kind.is_empty(), |row| {
-                    row.child(div().text_size(px(11.)).text_color(theme().text_faint).child(kind))
+                    row.child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme().text_faint)
+                            .child(kind),
+                    )
                 })
                 .on_click(cx.listener(move |s, _, window, cx| entry.clone().run(s, window, cx)))
         }));
