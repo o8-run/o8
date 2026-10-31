@@ -3534,6 +3534,7 @@ dependencies = [
  "cocoa 0.26.0",
  "getrandom 0.3.4",
  "gpui",
+ "libc",
  "objc",
  "raw-window-handle",
  "regex",

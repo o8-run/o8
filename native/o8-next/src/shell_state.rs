@@ -104,6 +104,9 @@ pub struct State {
     /// Closed By repo folders, by repository path.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub sidebar_closed_folders: BTreeSet<String>,
+    /// Snoozed inbox threads: thread id to the Unix second they come back.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sidebar_snoozes: BTreeMap<String, u64>,
     /// Workspace Notes target history and user-selected annotation ink.
     #[serde(default)]
     pub notes: crate::files_panel::NotesPreferences,
@@ -130,6 +133,7 @@ impl Default for State {
             sidebar_scope: BTreeMap::new(),
             sidebar_view: BTreeMap::new(),
             sidebar_closed_folders: BTreeSet::new(),
+            sidebar_snoozes: BTreeMap::new(),
             notes: Default::default(),
             retain_file: false,
             backup_file: Arc::default(),
@@ -202,6 +206,7 @@ impl State {
             || self.sidebar_scope.values().any(|keys| keys.len() > 500)
             || self.sidebar_view.len() > 500
             || self.sidebar_closed_folders.len() > 2_000
+            || self.sidebar_snoozes.len() > 2_000
             || self.tab_labels.len() > 16_000
             || self
                 .tab_labels
