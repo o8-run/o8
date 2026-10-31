@@ -118,6 +118,33 @@ impl Node {
     /// splitTile with exact placement: `target` becomes a split of itself
     /// and `leaf`, half each. False when no pane has that id.
     pub fn split(&mut self, target: &str, zone: Zone, new_id: String, leaf: Leaf) -> bool {
+        // A moved pane splits again under its own id, so its split's id may
+        // still be taken by the split it left.
+        let mut taken = vec![];
+        self.ids(&mut taken);
+        let split = std::iter::once(format!("split-{new_id}"))
+            .chain((2..).map(|n| format!("split-{new_id}-{n}")))
+            .find(|id| !taken.contains(id))
+            .unwrap();
+        self.split_as(target, zone, new_id, leaf, &split)
+    }
+    fn ids(&self, out: &mut Vec<String>) {
+        match self {
+            Node::Leaf { id, .. } => out.push(id.clone()),
+            Node::Split { id, children, .. } => {
+                out.push(id.clone());
+                children.iter().for_each(|child| child.ids(out));
+            }
+        }
+    }
+    fn split_as(
+        &mut self,
+        target: &str,
+        zone: Zone,
+        new_id: String,
+        leaf: Leaf,
+        split: &str,
+    ) -> bool {
         match self {
             Node::Leaf { id, .. } if id == target => {
                 let (vertical, before) = zone.split();
@@ -132,7 +159,7 @@ impl Node {
                     [current, added]
                 };
                 *self = Node::Split {
-                    id: format!("split-{new_id}"),
+                    id: split.to_owned(),
                     vertical,
                     ratio: 0.5,
                     children: Box::new(children),
@@ -142,8 +169,8 @@ impl Node {
             Node::Leaf { .. } => false,
             Node::Split { children, .. } => {
                 let [first, second] = &mut **children;
-                first.split(target, zone, new_id.clone(), leaf.clone())
-                    || second.split(target, zone, new_id, leaf)
+                first.split_as(target, zone, new_id.clone(), leaf.clone(), split)
+                    || second.split_as(target, zone, new_id, leaf, split)
             }
         }
     }
@@ -194,6 +221,22 @@ impl Node {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_moved_pane_splits_under_a_fresh_id() {
+        let mut tree = Node::main();
+        assert!(tree.split(MAIN, Zone::Right, "a".into(), chat("a")));
+        assert!(tree.split("a", Zone::Below, "b".into(), chat("b")));
+        // Move a beside main: its old split stays as main's parent.
+        assert!(tree.close("a"));
+        assert!(tree.split(MAIN, Zone::Left, "a".into(), chat("a")));
+        let mut ids = vec![];
+        tree.ids(&mut ids);
+        let mut unique = ids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(ids.len(), unique.len(), "{ids:?}");
+        assert!(ids.contains(&"split-a-2".to_owned()), "{ids:?}");
+    }
     fn chat(id: &str) -> Leaf {
         Leaf::Chat {
             session: id.into(),
