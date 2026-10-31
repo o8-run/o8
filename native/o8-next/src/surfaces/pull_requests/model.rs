@@ -339,12 +339,15 @@ impl PullRequests {
     fn select_in(&mut self, number: u64, repo: String, cx: &mut Context<Self>) {
         // A refresh of the same PR refetches its activity too: in place when
         // Timeline shows, otherwise the next time it opens.
-        if self.selected == Some(number) && !self.timeline_loading {
+        // A request still running is superseded, so it can't land stale.
+        if self.selected == Some(number) {
             if self.tab == "timeline" {
                 self.load_timeline(false, cx);
             } else {
                 self.timeline.clear();
                 self.timeline_next = None;
+                self.timeline_loading = false;
+                self.timeline_epoch += 1;
             }
         }
         if self.selected != Some(number) {
