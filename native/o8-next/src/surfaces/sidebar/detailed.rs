@@ -150,6 +150,7 @@ impl ThreadList {
                     .filter(|b| !b.is_empty())
                     .map(str::to_owned)
             })
+            .or_else(|| s.branch.clone().filter(|b| !b.is_empty()))
     }
     /// A detailed row's three lines; the row container, its clicks and its
     /// menu stay with the list.
@@ -178,7 +179,12 @@ impl ThreadList {
                     .whitespace_nowrap()
                     .overflow_hidden()
                     .text_ellipsis()
-                    .child(label(&row.workspace)),
+                    .child(label(
+                        session
+                            .and_then(|s| s.repo_slug.as_deref())
+                            .filter(|r| !r.is_empty())
+                            .unwrap_or(&row.workspace),
+                    )),
             );
         if let Some(st) = st {
             let (icon, color) = status_look(st.key);

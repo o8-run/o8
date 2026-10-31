@@ -18,6 +18,7 @@ import { createLane, setLaneStatus } from '@/lib/lane/registry';
 import { createApproval } from '@/lib/approvals/store';
 import { getSqlite } from '@/lib/db';
 import { persistCanonicalChatHistoryRecord, readPersistedLlmChat } from '@/lib/llm/chat-history-store';
+import { threadGitContext } from '@/lib/repos/thread-git-context';
 import { enqueueComposerSend } from '@/lib/orchestrator/composer-queue';
 
 // Runtime discovery is an external provider boundary. The lanes, approvals,
@@ -139,6 +140,8 @@ describe('inbox settlement through operator mutation and native listings', () =>
 
   it('settles a plain chat without a runtime inventory scan but scans for bound runtime sessions', async () => {
     const tabId = await seed('noscan');
+    const git = threadGitContext(process.cwd());
+    expect(await listed(tabId)).toMatchObject({ repoSlug: git.repoSlug, branch: git.branch ?? null });
     fixture.scans = 0;
     expect((await mutate(tabId, 'settle')).status).toBe(200);
     expect((await mutate(tabId, 'unsettle')).status).toBe(200);
