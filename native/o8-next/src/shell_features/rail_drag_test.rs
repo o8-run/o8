@@ -118,15 +118,17 @@ fn rail_drags_split_workspace_panes_like_classic(cx: &mut TestAppContext) {
     assert!((saved_ratio - ratio as f64).abs() < 1e-4, "{saved_ratio} vs {ratio}");
 
     // Closing panes returns their space; the last one leaves no split.
-    v.simulate_click(bounds(&mut v, &format!("pane-close-{chat_pane}")).center(), Modifiers::default());
-    settle(&mut v);
-    v.simulate_click(bounds(&mut v, &format!("pane-close-{terminal}")).center(), Modifiers::default());
-    settle(&mut v);
+    for pane in [&chat_pane, terminal] {
+        let close = bounds(&mut v, &format!("pane-close-{pane}")).center();
+        v.simulate_click(close, Modifiers::default());
+        settle(&mut v);
+    }
     assert_eq!(panes(&s, &v), None);
     assert!(v.debug_bounds("pane-main").is_some());
 
     // A click still opens in place.
-    v.simulate_click(bounds(&mut v, "rail-terminal").center(), Modifiers::default());
+    let terminal_button = bounds(&mut v, "rail-terminal").center();
+    v.simulate_click(terminal_button, Modifiers::default());
     settle(&mut v);
     assert_eq!(s.read_with(&v, |s, _| s.active()), Some(Tab::Terminal));
 }

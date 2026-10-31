@@ -217,6 +217,10 @@ struct Panel {
     viewport: f32,
     scope: Option<String>,
     lower: Option<Tool>,
+    /// The split's bottom half keeps its own tabs, like the top's.
+    lower_tabs: Vec<Tool>,
+    /// The next selection opens in the bottom half.
+    into_lower: bool,
     maximized: bool,
     more: bool,
     menu_lower: bool,
@@ -254,6 +258,8 @@ impl Default for Panel {
             viewport: 1200.,
             scope: None,
             lower: None,
+            lower_tabs: vec![],
+            into_lower: false,
             maximized: false,
             more: false,
             menu_lower: false,
@@ -840,6 +846,27 @@ pub(super) fn devices_visible(s: &Shell) -> bool {
 }
 
 /// Closes one tab and focuses its neighbour, as a browser strip does.
+/// Closes a bottom-half tab; the last one closes the split.
+fn close_lower_tab(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
+    let p = s.features.get::<Panel>();
+    let Some(index) = p.lower_tabs.iter().position(|t| *t == tool) else {
+        return;
+    };
+    p.lower_tabs.remove(index);
+    if p.lower == Some(tool) {
+        match p.lower_tabs.get(index.min(p.lower_tabs.len().saturating_sub(1))).copied() {
+            Some(next) => {
+                p.into_lower = true;
+                show(s, next, window, cx);
+                s.features.get::<Panel>().into_lower = false;
+            }
+            None => p.lower = None,
+        }
+    }
+    layout::save(s);
+    cx.notify();
+}
+
 fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<Shell>) {
     let panel = s.features.get::<Panel>();
     if index >= panel.tabs.len() {
