@@ -54,11 +54,11 @@ fn working_section_takes_running_threads_before_later_shelves() {
     let titles = |rows: &[Row]| rows.iter().map(|r| r.title.clone()).collect::<Vec<_>>();
     assert_eq!(
         titles(&fold_working(rows.clone(), false)),
-        ["Active", "a", "Working · 1", "b", "Settled", "c"]
+        ["Working · 1", "b", "Active", "a", "Settled", "c"]
     );
     assert_eq!(
         titles(&fold_working(rows.clone(), true)),
-        ["Active", "a", "Working · 1", "Settled", "c"]
+        ["Working · 1", "Active", "a", "Settled", "c"]
     );
     let idle: Vec<_> = rows.into_iter().filter(|r| !r.running).collect();
     assert_eq!(titles(&fold_working(idle, false)), ["Active", "a", "Settled"]);

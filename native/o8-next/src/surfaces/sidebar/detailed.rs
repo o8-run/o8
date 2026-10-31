@@ -97,18 +97,20 @@ pub(crate) fn fold_working(rows: Vec<Row>, closed: bool) -> Vec<Row> {
     let (working, mut rest): (Vec<_>, Vec<_>) = rows
         .into_iter()
         .partition(|r| r.kind == "thread" && r.running && r.marker != "input");
+    let mut out = Vec::new();
     if !working.is_empty() {
-        rest.push(recents::header(
+        out.push(recents::header(
             "section",
             &format!("Working · {}", working.len()),
             "working",
         ));
         if !closed {
-            rest.extend(working);
+            out.extend(working);
         }
     }
-    rest.extend(tail);
-    rest
+    out.extend(rest);
+    out.extend(tail);
+    out
 }
 
 impl ThreadList {
