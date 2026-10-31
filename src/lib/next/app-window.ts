@@ -1,5 +1,5 @@
 import { dirname, isAbsolute, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { renameSync } from 'node:fs';
 import type { ChildProcess } from '@/lib/providers/child-process';
 import { access, constants, rename, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
@@ -76,9 +76,14 @@ async function start(startupResult?: string): Promise<void> {
     const { spawn } = await import('@/lib/providers/child-process');
     const { childEnvironment } = await import('@/lib/providers/spawn-environment');
     const { getOrCreateWsToken } = await import('@/lib/ws-auth');
-    // Linux startup ownership expires when the launcher removes this directory.
-    // Check after all async work, immediately before spawning a late restore.
-    if (startupResult && !existsSync(dirname(startupResult))) return;
+    // Linux launch ownership: claim the launcher's attempt by renaming its
+    // marker after all async work, immediately before spawning. A timed-out
+    // launcher cancels with the same rename, so exactly one side wins.
+    if (startupResult) {
+      try {
+        renameSync(join(dirname(startupResult), 'pending'), join(dirname(startupResult), 'claimed'));
+      } catch { return; }
+    }
     const child = spawn(binary, ['--enable-next', '--app-shell', '--server', getApiBase(),
       '--shell-state', join(directory, 'next-shell.json')], {
       cwd: directory, shell: false, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true,

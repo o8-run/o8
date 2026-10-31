@@ -73,9 +73,12 @@ attempt: `ready` after the first-paint handshake, or `failed` after reaping an
 unsuccessful child. The launcher waits up to 60 seconds while checking daemon health,
 covering delayed bootstrap and the server's 15-second first-paint deadline. A missing
 result releases the launch lock and reports an error without starting a competing
-window. Before releasing the lock, the launcher removes its result directory. A late
-Linux server restore checks that directory immediately before spawning and skips an
-expired attempt, so a retry cannot race it. A failed `serve` command
+window. Each attempt directory holds a `pending` marker. The server claims the
+attempt by renaming it to `claimed` immediately before spawning; a timed-out launcher
+cancels by renaming it to `cancelled`. `rename` is atomic, so exactly one side wins:
+a cancelled attempt never spawns, and a claimed one is waited out for up to 20 more
+seconds, which the server's 15-second first-paint deadline bounds. A retry therefore
+cannot race a late restore. A failed `serve` command
 permits reuse only for `serve_already_running` or `serve_desktop_owns_data_dir`, with
 a healthy status response. Other failures retain their output streams and exit code.
 

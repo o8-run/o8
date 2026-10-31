@@ -156,12 +156,16 @@ beforeAll(async () => {
     int main(int argc, char **argv) {
       FILE *log = fopen(getenv("O8_FIXTURE_LAUNCHES"), "a");
       for (int i = 0; i < argc; i++) fprintf(log, "%s%s", i ? "|" : "", argv[i]);
-      fprintf(log, "\\n"); fclose(log);
+      // Server-owned windows inherit the parent pipe; CLI fallback windows do not.
+      fprintf(log, "%s\\n", getenv("O8_NEXT_PARENT_PIPE") ? "|<parent-pipe>" : ""); fclose(log);
       if (getenv("O8_FIXTURE_FAIL_SERVER_WINDOW") && getenv("O8_NEXT_PARENT_PIPE")) {
         usleep(500000); return 2;
       }
       if (getenv("O8_FIXTURE_UNPAINTED_SERVER_WINDOW") && getenv("O8_NEXT_PARENT_PIPE")) {
         for (;;) pause();
+      }
+      if (getenv("O8_FIXTURE_PAINT_DELAY_MS") && getenv("O8_NEXT_PARENT_PIPE")) {
+        usleep(atoi(getenv("O8_FIXTURE_PAINT_DELAY_MS")) * 1000);
       }
       for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--shell-state")) {
         FILE *state = fopen(argv[i + 1], "w"); fputs("{}", state); fclose(state);
@@ -356,6 +360,27 @@ it.skipIf(process.platform !== 'linux')('cancels a timed-out server attempt befo
   expect(status.pid).toBe(daemon.pid);
   await stop(retry);
 }, 100_000);
+
+it.skipIf(process.platform !== 'linux')('waits for a server attempt claimed just before the deadline instead of erroring or racing a retry', async () => {
+  const f = installation('claimed-bootstrap');
+  // The server claims and spawns at ~57 s; its window paints at ~65 s, after
+  // the launcher's 60-second deadline but within app-window's 15-second one.
+  const env = { ...f.env, O8_FIXTURE_BOOT_DELAY_MS: '57000', O8_FIXTURE_PAINT_DELAY_MS: '8000' };
+  const app = captureLaunch(f.launcher, env);
+  await app.closed;
+  expect(app.stderr()).toBe('');
+  expect(app.child.exitCode).toBe(0);
+  // One server-owned window and no CLI fallback window.
+  expect(events(env)).toHaveLength(1);
+  expect(events(env)[0]).toContain('|<parent-pipe>');
+  expect(visibleWindows(f.relocated)).toHaveLength(1);
+  expect(readdirSync(f.data).filter(name => name.startsWith('linux-window-startup-'))).toEqual([]);
+  // A later click reuses that window.
+  const again = captureLaunch(f.launcher, env);
+  await again.closed;
+  expect(again.child.exitCode).toBe(0);
+  expect(events(env)).toHaveLength(1);
+}, 110_000);
 
 it.skipIf(process.platform !== 'linux')('preserves unrelated serve failures with a healthy daemon and reuses only allowed error codes', async () => {
   const f = installation('serve-failures');
