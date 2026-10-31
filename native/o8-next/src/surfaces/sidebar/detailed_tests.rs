@@ -82,7 +82,7 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
     click(&mut visual, "sidebar-view-detailed");
     wait_for(&shell, &mut visual, |s, _| s.state.sidebar_detailed_rows);
     draw(&mut visual);
-    assert_eq!(row_height(&mut visual), px(60.));
+    assert_eq!(row_height(&mut visual), px(super::thread_list::detailed::ROW_HEIGHT));
     click(&mut visual, "sidebar-view");
     click(&mut visual, "sidebar-view-working");
     wait_for(&shell, &mut visual, |s, _| s.state.sidebar_working_section);
