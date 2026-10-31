@@ -108,6 +108,9 @@ export function ChatLiveHost() {
         confirmation({ ...data, source: 'managed' }, decide);
       }
     });
+    // Caps Lock reaches this host as the `main` window; o8 next decides whether
+    // the tap starts or stops Live for its chat.
+    const offCapsLock = subscribeTauriEvent('o8:managed-chat-voice-toggle', () => { void emit({ action: 'voice-toggle' }).catch(() => {}); });
     const offConfirm = subscribeTauriEvent<Record<string, unknown>>('o8:agent-confirm', ({ payload }) => {
       confirmation({ ...payload, source: 'native' }, async allow => {
         const { invoke } = await import('@tauri-apps/api/core');
@@ -178,7 +181,7 @@ export function ChatLiveHost() {
     connect();
     return () => {
       disposed = true; clearInterval(heartbeat); clearTimeout(reconnect); socket?.close();
-      offManaged(); offConfirm(); offDismiss(); window.removeEventListener('o8:symon-voice-status', symonState);
+      offManaged(); offCapsLock(); offConfirm(); offDismiss(); window.removeEventListener('o8:symon-voice-status', symonState);
     };
   }, []);
   return command ? <BoundChatLiveHost key={command.nonce} command={command} hostId={hostId.current} stopping={stopping} terminals={terminals} pending={pending.current} remember={payload => { snapshot.current = payload; }} /> : null;

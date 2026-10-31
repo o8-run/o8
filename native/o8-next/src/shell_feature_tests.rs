@@ -233,8 +233,13 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
         })
     };
 
-    // Caps Lock's relay starts Live for the selected chat.
-    send("voice-toggle", json!({}), &mut visual);
+    // Caps Lock, relayed by the voice host as a voice-host-state frame, starts
+    // Live for the selected chat while o8 next is the active window.
+    send(
+        "voice-host-state",
+        json!({"action": "voice-toggle", "hostId": "host"}),
+        &mut visual,
+    );
     let start = controls(1, &mut visual)[0].clone();
     assert_eq!(start["action"], "start");
     assert_eq!(start["source"], "byok");

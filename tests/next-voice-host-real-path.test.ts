@@ -131,6 +131,12 @@ it('routes ready, start, delegate, acceptance and stop through the actual WS bri
   }) })));
   expect((await post({ action: 'stop', requestId: 'stop-one', ...target })).status).toBe(202);
 });
+it('relays the host Caps Lock tap to o8 next only from the leased host', async () => {
+  expect((await ui('voice-host-state', { hostId: 'host-one', action: 'voice-toggle' })).status).toBe(200);
+  await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ kind: 'voice-host-state', payload: expect.objectContaining({ hostId: 'host-one', action: 'voice-toggle' }) })));
+  expect((await ui('voice-host-state', { hostId: 'host-other', action: 'voice-toggle' })).status).toBe(409);
+  expect(frames).not.toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ hostId: 'host-other' }) }));
+});
 it('rejects stale delegation and retains the exact existing internal bearer gate', async () => {
   expect((await ui('voice-delegate', { hostId: 'host-one', ...target, nonce: 'stale', delegationId: 'late', text: 'No' })).status).toBe(409);
   const response = await fetch(reference.url.replace('ws:', 'http:').replace('/ws', '/internal/next/voice-host'), {

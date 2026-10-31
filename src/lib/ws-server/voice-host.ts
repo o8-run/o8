@@ -122,7 +122,7 @@ export class VoiceHostBroker {
       if (!voiceHostId(body.confirmationId)) return invalid();
       this.confirmations.delete(body.confirmationId); return result(200, { ok: true });
     }
-    if (command.kind === 'voice-host-state' && body.action === 'symon-state') return result(200, { ok: true });
+    if (command.kind === 'voice-host-state' && (body.action === 'symon-state' || body.action === 'voice-toggle')) return result(200, { ok: true });
     if (!this.active || !sameVoiceBinding(this.active, body)) return conflict();
     if (command.kind === 'voice-delegate') {
       if (this.active.state === 'closing' || !voiceHostId(body.delegationId) || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 16_000) return invalid();

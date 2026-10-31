@@ -57,10 +57,10 @@ pub fn managed_voice_presentation_epoch<R: tauri::Runtime>(
 
 /// FlagsChanged is emitted on both Caps Lock toggles. Duplicate edges do not retoggle.
 pub fn caps_lock_changed(app: &tauri::AppHandle, keycode: i64, flags: u64) {
+    // Under o8 next the hidden voice host holds the `main` label and relays
+    // the tap to the native window through the voice broker.
     if caps_lock_edge(&CAPS_STATE, keycode, flags) {
-        if !crate::voice_host::active(app) {
-            let _ = app.emit_to("main", "o8:managed-chat-voice-toggle", ());
-        }
+        let _ = app.emit_to("main", "o8:managed-chat-voice-toggle", ());
     }
 }
 
