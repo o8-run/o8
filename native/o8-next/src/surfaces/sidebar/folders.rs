@@ -353,9 +353,10 @@ impl ThreadList {
         let client = self.client.clone();
         let (thread, name) = (id.clone(), label(&repo));
         let task = cx.background_executor().spawn(async move {
+            // Without readable defaults the server's own runtime starts the thread.
             let defaults: Value = client
                 .get("/api/panel/operator-defaults", &[("include", "values")])
-                .map_err(|e| e.to_string())?;
+                .unwrap_or_default();
             let mut body = json!({
                 "tabId": thread, "messages": [], "repoPath": repo,
                 "repoName": name, "title": "New conversation",
