@@ -33,6 +33,17 @@ beforeAll(() => {
   writeFileSync(join(server, 'package.json'), '{"type":"commonjs"}');
   writeFileSync(join(server, 'o8-build-channel.json'), JSON.stringify({ schema: 'o8/build-channel/v1', channel: 'beta', version }));
   writeFileSync(join(server, 'server.js'), `
+    if (process.env.O8_FIXTURE_REQUIRE_BUNDLED_XKB) {
+      const path = require('node:path');
+      const probe = require('node:child_process').spawnSync(path.join(__dirname, '../o8-next'), [], {
+        encoding: 'utf8', env: { ...process.env, LD_DEBUG: 'libs' },
+      });
+      const libraries = ['libxkbcommon-x11.so.0', 'libxkbcommon.so.0', 'libxcb-xkb.so.1'];
+      if (probe.status !== 0 || !libraries.every(name => probe.stderr.split('\\n').some(line =>
+        line.includes('calling init:') && line.trim().endsWith(path.join(__dirname, '../lib', name))))) {
+        throw new Error('Native process did not load the bundled XKB runtime: ' + probe.stderr);
+      }
+    }
     require('node:http').createServer((req,res)=>res.end(JSON.stringify({product:'o8'})))
       .listen(Number(process.env.PORT), '127.0.0.1');
   `);
@@ -42,8 +53,8 @@ beforeAll(() => {
   `);
   const source = join(root, 'next.c');
   const next = join(root, 'o8-next');
-  writeFileSync(source, 'int main(void) { return 0; }');
-  expect(run('cc', [source, '-o', next]).status).toBe(0);
+  writeFileSync(source, 'extern int xkb_x11_get_core_keyboard_device_id(void*); int (*volatile dependency)(void*) = xkb_x11_get_core_keyboard_device_id; int main(void) { return dependency == 0; }');
+  expect(run('cc', [source, '-o', next, '-l:libxkbcommon-x11.so.0']).status).toBe(0);
   const staged = run(process.execPath, ['scripts/linux/stage-payload.mjs', '--server', server,
     '--node-root', runtime, '--next-binary', next, '--output', stage]);
   expect(staged.status, staged.stderr).toBe(0);
@@ -104,7 +115,7 @@ it.skipIf(process.platform !== 'linux' || process.env.O8_LINUX_PACKAGE_TESTS !==
   const appimage = join(output, receipt.artifacts.find((a: { format: string }) => a.format === 'appimage').name);
   const env = { ...process.env, HOME: join(root, 'home'), XDG_DATA_HOME: join(root, 'home/data'),
     O8_DATA_DIR: join(root, 'profile'), CORTEX_IDE_DATA_DIR: join(root, 'profile'),
-    APPIMAGE_EXTRACT_AND_RUN: '1' };
+    APPIMAGE_EXTRACT_AND_RUN: '1', O8_FIXTURE_REQUIRE_BUNDLED_XKB: '1' };
   const moved = join(root, 'moved.AppImage');
   cpSync(appimage, moved);
   try {

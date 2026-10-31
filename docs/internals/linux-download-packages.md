@@ -34,7 +34,7 @@ The packager requires a beta export and a new output directory. It produces an
 AppImage, DEB and RPM from the same `/usr` tree. RPM automatic dependency discovery
 and stripping are disabled so it retains the bundled runtime and native binaries;
 explicit runtime dependencies are declared instead. No system Node is required.
-The uncompressed input budget is **512 MiB** and each download's budget is
+The uncompressed payload budget is **512 MiB** and each download's budget is
 **256 MiB**. `linux-downloads.json` records actual sizes, hashes, application,
 version, channel, platform, baseline and `published: false`. This is a build
 receipt, not a replacement for the authenticated updater manifest.
@@ -51,9 +51,13 @@ in their existing data directory and are never copied into this application cach
 
 The first launch requires room for this additional uncompressed copy. Old payload
 directories are retained; remove one only after its windows and server are stopped.
-Updates are manual. AppImage requires a working graphics stack, Vulkan driver,
-X11 libraries, xkbcommon and `flock` from util-linux; DEB/RPM declare the corresponding
-package dependencies. The pinned runtime contains its own FUSE library. CI exercises
+Updates are manual. The packages include the build runner's xkbcommon,
+xkbcommon-x11 and xcb-xkb runtime libraries and their distribution copyright
+files. AppImage puts that private directory first in its child's library path;
+DEB/RPM use their declared system dependencies. Bundled libraries receive the
+same GLIBC 2.39 check and count toward the uncompressed budget. AppImage still
+requires a working graphics stack, Vulkan driver, base X11/XCB libraries and
+`flock` from util-linux. The pinned runtime contains its own FUSE library. CI exercises
 AppImage extract-and-run mode; a desktop FUSE mount remains a separate acceptance
 check.
 

@@ -2,15 +2,20 @@
 /** Build review artifacts only. This script never signs, uploads or releases. */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkLinuxGlibc } from '../ci/check-linux-glibc.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const PAYLOAD_BUDGET = 512 * 1024 * 1024;
 const ARTIFACT_BUDGET = 256 * 1024 * 1024;
+const XKB_LIBRARIES = [
+  ['libxkbcommon.so.0', 'libxkbcommon0'],
+  ['libxkbcommon-x11.so.0', 'libxkbcommon-x11-0'],
+  ['libxcb-xkb.so.1', 'libxcb-xkb1'],
+];
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: 'utf8', timeout: 300_000, maxBuffer: 8 * 1024 * 1024, ...options });
   if (result.error || result.status !== 0) throw new Error(`${command} failed: ${result.error?.message || result.stderr || result.stdout}`);
@@ -38,7 +43,7 @@ function main() {
   const output = options['--output'];
   if (existsSync(output)) throw new Error('Output already exists; choose a new directory');
   const payloadFiles = files(stage);
-  const payloadBytes = payloadFiles.reduce((sum, file) => sum + file.bytes, 0);
+  let payloadBytes = payloadFiles.reduce((sum, file) => sum + file.bytes, 0);
   if (payloadBytes > PAYLOAD_BUDGET) throw new Error(`Exceeded payload size budget: ${payloadBytes} > ${PAYLOAD_BUDGET}`);
   for (const name of ['usr/bin/o8', 'usr/lib/o8/node', 'usr/lib/o8/o8-next', 'usr/lib/o8/server/cli/desktop.mjs']) {
     if (!existsSync(join(stage, name))) throw new Error(`Incomplete stage: ${name}`);
@@ -52,6 +57,18 @@ function main() {
     const appdir = join(scratch, 'o8.AppDir');
     cpSync(stage, appdir, { recursive: true });
     cpSync(join(repository, 'scripts/linux/appimage-launch.mjs'), join(appdir, 'usr/lib/o8/appimage-launch.mjs'));
+    const libraries = join(appdir, 'usr/lib/o8/lib');
+    mkdirSync(libraries);
+    for (const [name, distributionPackage] of XKB_LIBRARIES) {
+      const source = run('cc', [`-print-file-name=${name}`]).trim();
+      if (!isAbsolute(source) || !existsSync(source)) throw new Error(`Missing build-host runtime library: ${name}`);
+      const file = realpathSync(source);
+      if (!statSync(file).isFile()) throw new Error(`Expected a runtime library file: ${name}`);
+      cpSync(file, join(libraries, name));
+      cpSync(`/usr/share/doc/${distributionPackage}/copyright`, join(appdir, 'usr/share/doc/o8', `${distributionPackage}-copyright`));
+    }
+    const libraryAbi = checkLinuxGlibc([libraries], { max: '2.39' });
+    if (libraryAbi.failures.length) throw new Error(libraryAbi.failures.join('\n'));
     const identity = createHash('sha256');
     for (const file of files(join(appdir, 'usr'))) identity.update(file.path.slice(appdir.length) + '\0' + file.bytes + '\0').update(readFileSync(file.path));
     const payloadId = identity.digest('hex');
@@ -60,6 +77,8 @@ function main() {
     cpSync(join(appdir, 'usr/share/applications/o8.desktop'), join(appdir, 'o8.desktop'));
     cpSync(join(appdir, 'usr/share/icons/hicolor/256x256/apps/o8.png'), join(appdir, 'o8.png'));
     cpSync(join(appdir, 'o8.png'), join(appdir, '.DirIcon'));
+    payloadBytes = files(appdir).reduce((sum, file) => sum + file.bytes, 0);
+    if (payloadBytes > PAYLOAD_BUDGET) throw new Error(`Exceeded payload size budget: ${payloadBytes} > ${PAYLOAD_BUDGET}`);
     const debroot = join(scratch, 'deb');
     mkdirSync(join(debroot, 'DEBIAN'), { recursive: true });
     cpSync(join(appdir, 'usr'), join(debroot, 'usr'), { recursive: true });
