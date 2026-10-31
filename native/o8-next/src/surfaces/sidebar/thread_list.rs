@@ -37,6 +37,8 @@ pub enum Event {
     View(String, &'static str),
     /// The closed By repo folders, by repository path.
     Folders(Vec<String>),
+    /// Snoozed inbox threads and when each comes back, in Unix seconds.
+    Snoozes(Vec<(String, u64)>),
     /// The project menu's Switch workspace, with the focus to give back.
     WorkspacePicker(Option<gpui::FocusHandle>),
 }
@@ -52,6 +54,8 @@ pub struct Row {
     pub age: String,
     pub branch: bool,
     pub attention: bool,
+    /// The Inbox row's badge: "input" (waiting on you) or "back" (a snooze ended).
+    pub marker: &'static str,
     /// Set on a By repo folder row.
     pub folder: Option<folders::Folder>,
 }
@@ -90,6 +94,9 @@ pub struct ThreadList {
     /// A Settle or Un-settle awaiting the server.
     settling: Option<String>,
     undo: Option<inbox::Undo>,
+    /// Snoozed threads, by id, to the Unix second each comes back. An ended
+    /// snooze stays until the thread is opened, so it can head the list.
+    snoozes: HashMap<String, u64>,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
@@ -163,6 +170,7 @@ impl ThreadList {
             scopes: HashMap::new(),
             scope_menu: None,
             row_menu: None,
+            snoozes: HashMap::new(),
             views: HashMap::new(),
             view_menu: false,
             new_menu: false,
@@ -282,6 +290,7 @@ impl ThreadList {
             folders::View::Chronological => "Chronological",
             folders::View::Repo => "",
             folders::View::Inbox if session.settled() => "Settled",
+            folders::View::Inbox if self.snoozed(&session.id) => "Snoozed",
             folders::View::Inbox => "Active",
         }
     }
@@ -293,7 +302,14 @@ impl ThreadList {
             folders::View::Chronological => {
                 folders::chronological(sessions, query, matches, expanded, branches)
             }
-            folders::View::Inbox => inbox::rows(sessions, query, matches, expanded, branches),
+            folders::View::Inbox => inbox::rows(
+                sessions,
+                query,
+                matches,
+                expanded,
+                branches,
+                &self.snoozes,
+            ),
             folders::View::Repo => {
                 let keys = self.scope_keys();
                 let repos: Vec<_> = self
@@ -396,6 +412,10 @@ impl ThreadList {
         cx.notify();
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
+        if self.snooze_due() {
+            self.rebuild();
+            cx.notify();
+        }
         if self.last_age.elapsed() >= Duration::from_secs(60) {
             self.last_age = Instant::now();
             self.rebuild();
@@ -641,6 +661,7 @@ impl ThreadList {
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
             s.unread = false;
         }
+        self.clear_woken(&id, cx);
         self.rebuild();
         cx.emit(Event::Selected(id));
         cx.notify();
@@ -901,3 +922,5 @@ mod archive_controls;
 
 #[path = "inbox.rs"]
 mod inbox;
+#[path = "snooze.rs"]
+mod snooze;

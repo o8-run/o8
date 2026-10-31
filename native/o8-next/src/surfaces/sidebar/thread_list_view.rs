@@ -186,6 +186,28 @@ impl Render for ThreadList {
                                                     })
                                                     .child(title),
                                             )
+                                            .when(!row.marker.is_empty(), |view| {
+                                                let (text, color) = if row.marker == "input" {
+                                                    ("Needs input", theme().warning)
+                                                } else {
+                                                    ("Back", theme().accent)
+                                                };
+                                                let marker = row.marker;
+                                                view.child(
+                                                    div()
+                                                        .debug_selector(move || {
+                                                            format!("sidebar-marker-{marker}")
+                                                        })
+                                                        .flex_shrink_0()
+                                                        .px(px(5.))
+                                                        .rounded(px(4.))
+                                                        .border_1()
+                                                        .border_color(color)
+                                                        .text_size(px(9.5))
+                                                        .text_color(color)
+                                                        .child(text),
+                                                )
+                                            })
                                             .when(!thread && i == 0, |view| {
                                                 view.child(this.view_picker(cx))
                                             })
