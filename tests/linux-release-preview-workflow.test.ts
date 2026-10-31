@@ -17,9 +17,9 @@ const steps = job.steps as Mapping[];
 const script = String(steps[0].run);
 
 describe('linux-release-preview workflow', () => {
-  it('runs only for published stable releases', () => {
+  it('holds the legacy WebKitGTK release dispatch during the GPUI migration', () => {
     expect(workflow.on).toEqual({ release: { types: ['published'] } });
-    expect(job.if).toBe('${{ !github.event.release.prerelease && !github.event.release.draft }}');
+    expect(job.if).toBe('${{ false }}');
     expect(script).toContain('^v[0-9]+\\.[0-9]+\\.[0-9]+$');
   });
 

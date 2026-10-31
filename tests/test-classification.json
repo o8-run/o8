@@ -3820,6 +3820,14 @@
       ]
     },
     {
+      "path": "tests/linux-download-packages-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/linux-glass-init-script.test.ts",
       "reasons": [
         "child-process",
