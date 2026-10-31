@@ -27,6 +27,7 @@ impl ShellFeature for RightPanel {
             order: 50,
             run: |s, _, window, cx| {
                 layout::sync(s, window, cx);
+                ensure_side_chat(s, window, cx);
                 move_inbox_tabs(s, window, cx)
             },
         }]
@@ -138,7 +139,7 @@ impl Tool {
     fn ready(self) -> bool {
         !matches!(
             self,
-            Tool::Threads | Tool::SideChat | Tool::Resources | Tool::Targeting
+            Tool::Threads | Tool::Resources | Tool::Targeting
         )
     }
     fn label(self) -> &'static str {
@@ -299,15 +300,36 @@ impl Shell {
                 && (probe(&key(self, p.current())) || p.lower.is_some_and(|t| probe(&key(self, t))))
         })
     }
-    /// Opens the panel's terminal in its top view, or its bottom one: where
-    /// the rail's Terminal was dropped on the panel.
-    pub(crate) fn panel_terminal(&mut self, lower: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens a dropped rail Terminal, or a new chat, in the panel's top view
+    /// or its bottom one, where it was let go.
+    pub(crate) fn panel_drop(
+        &mut self,
+        chat: bool,
+        lower: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let tool = if chat {
+            // A dropped chat is a new conversation, as on the workspace.
+            let Some(workspace) = self.state.selected.clone() else {
+                return;
+            };
+            let Some(id) = self.start_thread(false, cx) else {
+                return;
+            };
+            self.state.right_panel.side_chats.insert(workspace, id);
+            let key = key(self, Tool::SideChat);
+            self.content.remove(&key);
+            Tool::SideChat
+        } else {
+            Tool::Terminal
+        };
         if !lower {
-            show(self, Tool::Terminal, window, cx);
+            show(self, tool, window, cx);
             return;
         }
         self.features.get::<Panel>().menu_lower = true;
-        layout::choose(self, Tool::Terminal, window, cx);
+        layout::choose(self, tool, window, cx);
         self.features.get::<Panel>().menu_lower = false;
     }
     pub(crate) fn panel_front_key(&self) -> Option<String> {
@@ -478,7 +500,46 @@ pub(super) fn edge(
 }
 
 /// Opens the panel on one tool, creating that tool's view the first time.
+/// The side chat's conversation in the open workspace: a chat of its own,
+/// started on the operator's lead the first time the view opens.
+fn side_chat(s: &mut Shell, cx: &mut Context<Shell>) -> Option<String> {
+    let workspace = s.state.selected.clone()?;
+    if let Some(id) = s.state.right_panel.side_chats.get(&workspace) {
+        return Some(id.clone());
+    }
+    let id = s.start_thread(false, cx)?;
+    s.state.right_panel.side_chats.insert(workspace, id.clone());
+    s.persist();
+    Some(id)
+}
+
+/// Opens the side chat once its conversation is listed.
+fn ensure_side_chat(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    let Some(p) = s.features.read::<Panel>() else {
+        return;
+    };
+    if !(p.selected == Tool::SideChat || p.lower == Some(Tool::SideChat)) {
+        return;
+    }
+    let key = key(s, Tool::SideChat);
+    let workspace = s.state.selected.clone().unwrap_or_default();
+    let Some(id) = s.state.right_panel.side_chats.get(&workspace).cloned() else {
+        return;
+    };
+    if s.content.contains_key(&key) || !s.sessions.iter().any(|x| x.id == id) {
+        return;
+    }
+    let tab = Tab::Session(id);
+    if let Some(content) = (tab.registration().create)(s, tab, workspace, window, cx) {
+        s.content.insert(key, content);
+        cx.notify();
+    }
+}
+
 fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
+    if tool == Tool::SideChat {
+        side_chat(s, cx);
+    }
     let workspace = s.state.selected.clone().unwrap_or_default();
     let key = key(s, tool);
     if let Some(tab) = tool.tab()
