@@ -134,7 +134,10 @@ beforeAll(async () => {
     }).listen(Number(process.env.PORT), '127.0.0.1', () => {
       if (process.env.O8_PACKAGED_APP === '1' && process.env.O8_NEXT_MAIN_WINDOW === '1'
         && !process.env.O8_FIXTURE_SKIP_WINDOW_BOOTSTRAP) {
-        setTimeout(() => { void require('./native-window.cjs').restoreNextWindow(); },
+        setTimeout(async () => {
+          await require('./native-window.cjs').restoreNextWindow();
+          require('node:fs').writeFileSync(process.env.O8_DATA_DIR + '/window-bootstrap-finished', 'done');
+        },
           Number(process.env.O8_FIXTURE_BOOT_DELAY_MS || 0));
       }
     });
@@ -327,6 +330,32 @@ it.skipIf(process.platform !== 'linux')('bounds a never-published startup result
   expect(visibleWindows(f.relocated)).toHaveLength(1);
   await stop(retry);
 }, 80_000);
+
+it.skipIf(process.platform !== 'linux')('cancels a timed-out server attempt before late bootstrap can duplicate a retry window', async () => {
+  const f = installation('expired-bootstrap');
+  const env = { ...f.env, O8_FIXTURE_BOOT_DELAY_MS: '70000' };
+  const app = captureLaunch(f.launcher, env);
+  await app.closed;
+  expect(app.child.exitCode).toBe(1);
+  expect(app.stderr()).toContain('did not report its window startup result within 60 seconds');
+  await launchUnlocked(f.data, env);
+  expect(events(env)).toHaveLength(0);
+  const bootstrapFinished = join(f.data, 'window-bootstrap-finished');
+  expect(existsSync(bootstrapFinished)).toBe(false);
+  expect(readdirSync(f.data).filter(name => name.startsWith('linux-window-startup-'))).toEqual([]);
+  const daemon = JSON.parse(command(f.launcher, ['serve', 'status'], env).stdout);
+  const retry = launch(f.launcher, env);
+  await until(() => events(env).length > 0);
+  // Prove the retry opened while the original server attempt was still pending.
+  expect(existsSync(bootstrapFinished)).toBe(false);
+  await until(() => existsSync(bootstrapFinished), 30_000);
+  expect(events(env)).toHaveLength(1);
+  expect(visibleWindows(f.relocated)).toHaveLength(1);
+  const status = JSON.parse(command(f.launcher, ['serve', 'status'], env).stdout);
+  expect(status.healthy).toBe(true);
+  expect(status.pid).toBe(daemon.pid);
+  await stop(retry);
+}, 100_000);
 
 it.skipIf(process.platform !== 'linux')('preserves unrelated serve failures with a healthy daemon and reuses only allowed error codes', async () => {
   const f = installation('serve-failures');

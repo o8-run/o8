@@ -156,8 +156,9 @@ async function openDesktop(): Promise<number> {
     released = true;
     return (await next).code;
   } finally {
-    if (!released) closeSync(lock);
+    // Cancel an unstarted server restore before allowing another launch in.
     if (attempt) rmSync(attempt, { recursive: true, force: true });
+    if (!released) closeSync(lock);
   }
 }
 

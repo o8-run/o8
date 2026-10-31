@@ -1,4 +1,5 @@
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import type { ChildProcess } from '@/lib/providers/child-process';
 import { access, constants, rename, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
@@ -60,7 +61,7 @@ async function stop(): Promise<void> {
   if (state.child === child) state.child = undefined;
 }
 
-async function start(): Promise<void> {
+async function start(startupResult?: string): Promise<void> {
   if (state.child) return;
   const binary = process.env.O8_NEXT_BIN;
   if (process.env.O8_PACKAGED_APP !== '1' || !binary || !isAbsolute(binary)) throw new Error(UNAVAILABLE);
@@ -75,6 +76,9 @@ async function start(): Promise<void> {
     const { spawn } = await import('@/lib/providers/child-process');
     const { childEnvironment } = await import('@/lib/providers/spawn-environment');
     const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+    // Linux startup ownership expires when the launcher removes this directory.
+    // Check after all async work, immediately before spawning a late restore.
+    if (startupResult && !existsSync(dirname(startupResult))) return;
     const child = spawn(binary, ['--enable-next', '--app-shell', '--server', getApiBase(),
       '--shell-state', join(directory, 'next-shell.json')], {
       cwd: directory, shell: false, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true,
@@ -103,9 +107,9 @@ async function start(): Promise<void> {
   }
 }
 
-async function apply(enabled: boolean): Promise<void> {
+async function apply(enabled: boolean, startupResult?: string): Promise<void> {
   try {
-    if (enabled) await start(); else await stop();
+    if (enabled) await start(startupResult); else await stop();
     state.error = null;
   } catch (error) {
     state.error = error instanceof NextWindowStartupError ? error.message : UNAVAILABLE;
@@ -138,13 +142,15 @@ export function setNextWindowEnabled(enabled: boolean): Promise<void> {
 
 /** Called only by packaged server startup; false never reads the bearer or binary. */
 export async function restoreNextWindow(): Promise<void> {
+  const result = process.platform === 'linux' && isMainWindow() ? process.env.O8_NEXT_STARTUP_RESULT : undefined;
   await serialized(async () => {
-    if (isMainWindow() || (await getOperatorDefaults()).values.experimentalNext) await apply(true);
+    if (isMainWindow() || (await getOperatorDefaults()).values.experimentalNext) {
+      await apply(true, result && isAbsolute(result) ? result : undefined);
+    }
   }).catch(() => {});
   // A Linux launcher must wait for this actual attempt, including a delayed
   // startup hook and the child's full first-paint timeout. Failure is published
   // only after start() has reaped the child, so a CLI fallback cannot race it.
-  const result = process.platform === 'linux' && isMainWindow() ? process.env.O8_NEXT_STARTUP_RESULT : undefined;
   if (result && isAbsolute(result)) {
     const status = state.child?.exitCode === null && state.child.signalCode === null && !state.error ? 'ready' : 'failed';
     await writeFile(`${result}.tmp`, JSON.stringify({ status }), { mode: 0o600 })
