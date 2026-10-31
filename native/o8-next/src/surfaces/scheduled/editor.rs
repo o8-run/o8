@@ -274,7 +274,13 @@ impl Render for Editor {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::rgba(0x00000066))
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .bg(theme().text)
+                    .opacity(0.35),
+            )
             .on_click(cx.listener(|this, _, _, cx| this.cancel(cx)))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" {
