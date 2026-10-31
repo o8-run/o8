@@ -199,6 +199,17 @@ pub(crate) fn recognized(text: &str) -> bool {
         .any(|c| c.command == token || c.aliases.contains(&token.as_str()))
 }
 impl Composer {
+    /// The command text Enter would run now, as `apply_slash` decides it;
+    /// None when Enter would only complete the command or send plain text.
+    pub(super) fn slash_to_run(&self) -> Option<String> {
+        let commands = self.slash_suggestions();
+        let last = commands.len().checked_sub(1)?;
+        let command = commands.get(self.controls.slash.index.min(last))?;
+        let text = self.text.trim();
+        let token = text.split_whitespace().next().unwrap_or("");
+        let exact = token == command.command || command.aliases.contains(&token);
+        (exact && !(command.argument && text == token)).then(|| text.to_owned())
+    }
     pub(crate) fn slash_suggestions(&self) -> Vec<Command> {
         if !self.controls.slash.enabled
             || self.controls.slash.dismissed.as_ref() == Some(&self.text)

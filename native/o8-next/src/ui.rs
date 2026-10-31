@@ -278,6 +278,19 @@ impl Surface {
                     if this.composer == editor {
                         match event {
                             crate::composer::SendAs::Queue => this.queue_prompt(cx),
+                            crate::composer::SendAs::QueueCommand(text, handle) => {
+                                let (entity, text) = (cx.entity().downgrade(), text.clone());
+                                let handle = *handle;
+                                cx.defer(move |cx| {
+                                    let _ = handle.update(cx, |_, window, cx| {
+                                        let _ = entity.update(cx, |s, cx| {
+                                            let steer = std::mem::replace(&mut s.send_next, true);
+                                            s.execute_composer_command(text, window, cx);
+                                            s.send_next = steer;
+                                        });
+                                    });
+                                });
+                            }
                             crate::composer::SendAs::Fork => this.fork_prompt(cx),
                         }
                     }

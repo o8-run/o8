@@ -339,7 +339,7 @@ fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut Te
     surface.read_with(cx, |s, cx| {
         assert_eq!(
             s.composer.read(cx).placeholder,
-            "Ask anything · workers use isolated worktrees"
+            "↵ to send, ⌥⌘↵ to fork into a new thread"
         )
     });
 }

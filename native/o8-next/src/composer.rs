@@ -19,9 +19,11 @@ struct Snapshot {
 pub struct Submit(pub bool);
 impl EventEmitter<Submit> for Composer {}
 /// The chat composer's other sends: ⌘↵ queues for later, ⌥⌘↵ forks.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone)]
 pub enum SendAs {
     Queue,
+    /// ⌘↵ on a complete slash command: run it as Enter would, queued.
+    QueueCommand(String, gpui::AnyWindowHandle),
     Fork,
 }
 impl EventEmitter<SendAs> for Composer {}
@@ -284,7 +286,10 @@ impl Composer {
             }
             "enter" if self.send_intents && command && key.modifiers.alt => cx.emit(SendAs::Fork),
             "enter" if self.send_intents && command && !key.modifiers.shift => {
-                cx.emit(SendAs::Queue)
+                match self.slash_to_run() {
+                    Some(text) => cx.emit(SendAs::QueueCommand(text, window.window_handle())),
+                    None => cx.emit(SendAs::Queue),
+                }
             }
             "enter" if command && key.modifiers.shift => cx.emit(Submit(true)),
             "enter" if !key.modifiers.shift => cx.emit(Submit(false)),
