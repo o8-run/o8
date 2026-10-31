@@ -149,6 +149,9 @@ pub struct Session {
     /// The worktree's current branch; older hosts omit it.
     #[serde(default)]
     pub branch: Option<String>,
+    /// When the current run started; null when idle or on older hosts.
+    #[serde(default)]
+    pub run_started_at: Option<String>,
 }
 impl Session {
     pub fn settled(&self) -> bool {

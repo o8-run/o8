@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
-import { inboxSubject } from '@/lib/inbox/store';
+import { inboxSubject, recordInboxConversationEvent } from '@/lib/inbox/store';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { createEmptyOrchestratorMissionState } from '@/lib/orchestrator/store';
@@ -155,6 +155,20 @@ describe('inbox settlement through operator mutation and native listings', () =>
       fixture.agents = [{ sessionKey: 'claude-code:bound-noscan', status: 'idle', runtime: 'claude-code' }];
       expect((await mutate(tabId, 'settle')).status).toBe(200);
     } finally { fixture.agents = []; }
+  });
+
+  it('lists a run start that survives repeated busy events and clears when idle', async () => {
+    const tabId = await seed('timer');
+    const event = (status: string) => recordInboxConversationEvent({ event: 'status', data: { threadId: tabId, repoPath: process.cwd(), status } });
+    expect((await listed(tabId)).runStartedAt).toBeNull();
+    event('busy');
+    const started = (await listed(tabId)).runStartedAt;
+    expect(started).toEqual(expect.any(String));
+    await new Promise(r => setTimeout(r, 5));
+    event('busy');
+    expect((await listed(tabId)).runStartedAt).toBe(started);
+    event('ready');
+    expect((await listed(tabId)).runStartedAt).toBeNull();
   });
 
   it('rejects an actual durable queued send', async () => {

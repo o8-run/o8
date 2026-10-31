@@ -16,6 +16,8 @@ import { emptySettlement, transitionSettlement, type InboxSettlement, type Inbox
 interface StoredInboxState extends InboxSettlement, InboxPreferences {
   runStatus?: 'running' | 'idle';
   runAt?: string;
+  /** When the current run went busy; kept across repeated busy events. */
+  runStartedAt?: string;
   ownerPid?: number;
   observedRunAt?: string;
   overrideAt?: string;
@@ -183,8 +185,9 @@ export function recordInboxConversationEvent(event: { event?: string; data?: { t
   getSqlite().transaction(() => {
     const prior = readInboxState(subject);
     const now = new Date().toISOString();
+    const runStartedAt = busy ? (prior.runStatus === 'running' && prior.runStartedAt ? prior.runStartedAt : now) : undefined;
     write(subject, { ...prior, ...(busy ? transitionSettlement(prior, 'run', now) : {}),
-      runStatus: busy ? 'running' : 'idle', runAt: now, ownerPid: process.pid });
+      runStatus: busy ? 'running' : 'idle', runAt: now, runStartedAt, ownerPid: process.pid });
   }).immediate();
 }
 
@@ -205,4 +208,10 @@ export function observeInboxRuntimeRun(subject: InboxSubject, startedAt: string 
     return updated;
   }).immediate();
   context?.states.set(key(subject), updated);
+}
+
+/** Start of the conversation's current run, or null when it is not running. */
+export function inboxRunStartedAt(subject: InboxSubject): string | null {
+  const state = readInboxState(subject);
+  return state.runStatus === 'running' ? state.runStartedAt ?? state.runAt ?? null : null;
 }
