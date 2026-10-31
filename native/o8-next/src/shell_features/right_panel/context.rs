@@ -73,8 +73,15 @@ fn registered_view(
 }
 pub(super) fn ensure_prs(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
     let workspace = s.state.selected.clone().unwrap_or_default();
-    let state = &s.features.get::<Panel>().contexts;
-    if state.selected.is_some() {
+    // A restored tab gets its view the first time pull requests show.
+    if let Some((repo, number)) = unopened(s) {
+        let request = json!({"repo":repo,"number":number});
+        if let Some(view) = registered_view(s, &request, w, cx) {
+            let prs = &mut s.features.get::<Panel>().contexts.prs;
+            prs.insert(format!("{repo}#{number}"), view);
+        }
+    }
+    if s.features.get::<Panel>().contexts.selected.is_some() {
         return;
     }
     if let Some(view) = registered_view(s, &Value::Null, w, cx) {
@@ -104,6 +111,37 @@ pub(super) fn open_pr(
     state.selected = Some((repo, number));
     show(s, Tool::Prs, w, cx);
 }
+/// The open pull request tabs and the shown one, as saved state keys.
+pub(super) fn saved(s: &mut Shell) -> (Vec<String>, Option<String>) {
+    let state = &s.features.get::<Panel>().contexts;
+    let key = |(repo, n): &(String, u64)| format!("{repo}#{n}");
+    (
+        state.order.iter().map(key).collect(),
+        state.selected.as_ref().map(key),
+    )
+}
+
+/// Brings back a workspace's saved pull request tabs; the shown one opens
+/// when the panel shows pull requests.
+pub(super) fn restore(s: &mut Shell, tabs: &[String], selected: Option<&String>) {
+    let parse = |key: &String| {
+        let (repo, n) = key.rsplit_once('#')?;
+        Some((repo.to_owned(), n.parse::<u64>().ok()?))
+    };
+    let state = &mut s.features.get::<Panel>().contexts;
+    state.order = tabs.iter().filter_map(parse).collect();
+    state.selected = selected
+        .and_then(parse)
+        .filter(|pr| state.order.contains(pr));
+}
+
+/// The shown pull request still waiting for its view after a restore.
+pub(super) fn unopened(s: &mut Shell) -> Option<(String, u64)> {
+    let state = &s.features.get::<Panel>().contexts;
+    let (repo, n) = state.selected.clone()?;
+    (!state.prs.contains_key(&format!("{repo}#{n}"))).then_some((repo, n))
+}
+
 pub(super) fn pr(s: &Shell, _: &mut Context<Shell>) -> AnyElement {
     let p = s.features.read::<Panel>().unwrap();
     p.contexts

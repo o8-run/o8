@@ -1,13 +1,36 @@
 use super::*;
 use crate::theme::current as theme;
-use gpui::{AnyElement, ClickEvent, IntoElement, Render, canvas, div, prelude::*, px};
+use gpui::{AnyElement, IntoElement, Render, canvas, div, prelude::*, px};
 
-const ICON_PR: &str = "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M13 6h3a2 2 0 0 1 2 2v7 M6 9v12";
-const ICON_MERGED: &str = "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 21V9a9 9 0 0 0 9 9";
+pub(super) const ICON_PR: &str = "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M13 6h3a2 2 0 0 1 2 2v7 M6 9v12";
+pub(super) const ICON_MERGED: &str = "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 21V9a9 9 0 0 0 9 9";
 const ICON_DRAFT: &str = "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M18 6V5 M18 11v-1 M6 9v12";
 const RING: &str = "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20Z";
 
-fn group_header(label: &'static str, count: usize) -> impl IntoElement {
+/// PrLabel: size labels take their size's tone, others the hover fill.
+fn label_chip(label: &str) -> impl IntoElement {
+    let size = label
+        .to_ascii_lowercase()
+        .strip_prefix("size/")
+        .map(str::to_ascii_uppercase);
+    let tone = match size.as_deref() {
+        Some("XS" | "S") => Some(theme().success),
+        Some("M") => Some(theme().warning),
+        Some("L") => Some(crate::theme::brand_orange()),
+        Some("XL" | "XXL") => Some(theme().danger),
+        _ => None,
+    };
+    div()
+        .rounded(px(5.))
+        .px(px(6.))
+        .py(px(1.))
+        .text_size(px(11.))
+        .bg(tone.map_or(theme().hover, |t| gpui::Rgba { a: 0.12, ..t }))
+        .text_color(tone.unwrap_or(theme().text_secondary))
+        .child(label.to_owned())
+}
+
+fn group_header(label: &'static str, glyph: &'static str, count: usize) -> impl IntoElement {
     div()
         .mt(px(12.))
         .mb(px(4.))
@@ -18,6 +41,7 @@ fn group_header(label: &'static str, count: usize) -> impl IntoElement {
         .text_size(px(12.))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(theme().text_muted)
+        .child(crate::icon::stroke(glyph, theme().text_muted, 14., 1.8))
         .child(label)
         .child(count.to_string())
         .child(div().h(px(1.)).flex_1().ml(px(4.)).bg(theme().border))
@@ -53,6 +77,10 @@ impl PullRequests {
             _ => div().text_color(theme().text_muted).child("—"),
         };
         let selected = self.selected == Some(n);
+        let labels: Vec<String> = array(p, "labels")
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect();
         div()
             .id(gpui::SharedString::from(format!("pr-row-{n}")))
             .debug_selector(move || format!("pr-row-{n}"))
@@ -82,6 +110,7 @@ impl PullRequests {
                                 // one-line clamp ends in an ellipsis instead of clipping.
                                 div()
                                     .min_w_0()
+                                    .overflow_hidden()
                                     .whitespace_normal()
                                     .line_clamp(1)
                                     .text_ellipsis()
@@ -100,7 +129,19 @@ impl PullRequests {
                             .gap(px(7.))
                             .text_size(px(12.))
                             .text_color(theme().text_secondary)
-                            .child(string(p, "author").to_owned())
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(5.))
+                                    .child(crate::icon::stroke(
+                                        controls::USER,
+                                        theme().text_secondary,
+                                        18.,
+                                        1.6,
+                                    ))
+                                    .child(string(p, "author").to_owned()),
+                            )
                             .child(
                                 div()
                                     .text_color(theme().text_muted)
@@ -108,6 +149,14 @@ impl PullRequests {
                             )
                             .when(draft, |line| {
                                 line.child(div().text_color(theme().text_muted).child("Draft"))
+                            })
+                            .children(labels.iter().take(3).map(|l| label_chip(l)))
+                            .when(labels.len() > 3, |line| {
+                                line.child(
+                                    div()
+                                        .text_color(theme().text_muted)
+                                        .child(format!("+{}", labels.len() - 3)),
+                                )
                             }),
                     ),
             )
@@ -132,149 +181,13 @@ impl PullRequests {
                             )),
                     ),
             )
-            .on_click(cx.listener(move |s, _, _, cx| s.select(n, cx)))
-            .into_any_element()
-    }
-    fn button(
-        &self,
-        id: &str,
-        label: &str,
-        enabled: bool,
-        handler: impl Fn(&mut Self, &ClickEvent, &mut Window, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let selector = id.to_owned();
-        div()
-            .id(gpui::SharedString::from(id.to_owned()))
-            .debug_selector(move || selector.clone())
-            .px(px(8.))
-            .py(px(5.))
-            .rounded(px(7.))
-            .text_size(px(11.))
-            .font_weight(gpui::FontWeight::LIGHT)
-            .bg(theme().surface_raised)
-            .opacity(if enabled { 1. } else { 0.4 })
-            .when(enabled, |b| {
-                b.cursor_pointer().hover(|b| b.bg(theme().hover))
-            })
-            .child(label.to_owned())
-            .on_click(cx.listener(move |s, e, w, cx| {
-                if enabled {
-                    handler(s, e, w, cx);
-                }
-            }))
-            .into_any_element()
-    }
-    fn list_controls(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mut controls = div().flex().flex_wrap().gap(px(5.));
-        for (id, label, values) in [
-            (
-                "state",
-                self.state.as_str(),
-                vec!["open", "closed", "merged", "all"],
-            ),
-            (
-                "sort",
-                self.sort.as_str(),
-                vec!["updated", "oldest", "newest"],
-            ),
-            (
-                "scope",
-                self.scope.as_str(),
-                vec!["all", "authored", "reviewing", "others"],
-            ),
-            ("layout", self.layout.as_str(), vec!["authors", "stacks"]),
-        ] {
-            let index = values.iter().position(|v| *v == label).unwrap_or(0);
-            let next = values[(index + 1) % values.len()].to_owned();
-            controls = controls.child(self.button(
-                &format!("pr-{id}"),
-                &format!("{id}: {label}"),
-                !self.loading && (id != "scope" || !self.viewer.is_empty()),
-                move |s, _, _, cx| {
-                    match id {
-                        "state" => s.state = next.clone(),
-                        "sort" => s.sort = next.clone(),
-                        "scope" => s.scope = next.clone(),
-                        _ => s.layout = next.clone(),
-                    }
-                    if ["state", "sort"].contains(&id) {
-                        s.rows.clear();
-                        s.load(false, cx);
-                    } else {
-                        s.changed(cx);
-                    }
-                },
-                cx,
-            ));
-        }
-        for (key, label) in [
-            ("author", "Author"),
-            ("label", "Label"),
-            ("baseRefName", "Base"),
-            ("draft", "Draft"),
-            ("checks", "Checks"),
-        ] {
-            let mut values = vec![String::new()];
-            if key == "draft" {
-                values.extend(["draft".into(), "ready".into()]);
-            } else if key == "checks" {
-                values.extend([
-                    "success".into(),
-                    "failure".into(),
-                    "pending".into(),
-                    "unknown".into(),
-                ]);
-            } else {
-                for p in &self.rows {
-                    if key == "label" {
-                        values.extend(
-                            array(p, "labels")
-                                .iter()
-                                .filter_map(|v| v.as_str().map(str::to_owned)),
-                        );
-                    } else {
-                        values.push(string(p, key).into());
-                    }
-                }
-                values.sort();
-                values.dedup();
-            }
-            let current = self.filters.get(key).cloned().unwrap_or_default();
-            let index = values.iter().position(|v| v == &current).unwrap_or(0);
-            let next = values[(index + 1) % values.len()].clone();
-            controls = controls.child(self.button(
-                &format!("pr-filter-{key}"),
-                &format!(
-                    "{label}: {}",
-                    if current.is_empty() { "all" } else { &current }
-                ),
-                true,
-                move |s, _, _, cx| {
-                    s.filters.insert(key, next.clone());
-                    s.changed(cx);
-                },
-                cx,
-            ));
-        }
-        controls
-            .child(self.button(
-                "pr-refresh",
-                "Refresh",
-                !self.loading,
-                |s, _, _, cx| {
-                    s.load(false, cx);
-                    if let Some(n) = s.selected {
-                        s.select(n, cx);
-                    }
-                },
-                cx,
-            ))
+            .on_click(cx.listener(move |s, _, _, cx| s.pick(n, cx)))
             .into_any_element()
     }
 }
 impl Render for PullRequests {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.viewport = f32::from(window.viewport_size().height);
         let visible = self.visible(cx);
         let count = visible.len();
         let painted = self.painted.clone();
@@ -290,34 +203,64 @@ impl Render for PullRequests {
             .flex()
             .flex_col()
             .gap(px(4.));
-        if self.page["unavailable"] == true {
-            list = list.child("This repository needs a GitHub origin to show pull requests.");
-        }
+        // The desktop list's states: error with Retry, no origin, and empty.
+        let note = |text: String| {
+            div()
+                .mx(px(12.))
+                .my(px(20.))
+                .text_size(px(13.))
+                .text_color(theme().text_secondary)
+                .child(text)
+        };
         if !self.error.is_empty() {
-            list = list
-                .child(div().text_color(theme().danger).child(self.error.clone()))
-                .child(self.button(
-                    "pr-retry",
-                    "Retry",
-                    !self.loading,
-                    |s, _, _, cx| s.load(false, cx),
-                    cx,
-                ));
-        }
-        if !self.loading && !self.page.is_null() && visible.is_empty() {
+            let loading = self.loading;
             list = list.child(
+                div()
+                    .mt(px(8.))
+                    .mx(px(12.))
+                    .mb(px(16.))
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap(px(8.))
+                    .text_size(px(13.))
+                    .child(self.error.clone())
+                    .child(
+                        controls::control("pr-retry".into())
+                            .opacity(if loading { 0.5 } else { 1. })
+                            .when(!loading, |c| c.cursor_pointer().hover(|c| c.bg(theme().hover)))
+                            .child("Retry")
+                            .on_click(cx.listener(move |s, _, _, cx| {
+                                if !loading {
+                                    s.load(false, cx)
+                                }
+                            })),
+                    ),
+            );
+        }
+        if self.page["unavailable"] == true {
+            list = list.child(note(
+                "This repository needs a GitHub origin to show pull requests.".into(),
+            ));
+        } else if !self.loading && self.page["prs"].is_array() && self.error.is_empty() && visible.is_empty() {
+            list = list.child(note(
                 if self.search.read(cx).text.is_empty()
                     && self.filters.values().all(String::is_empty)
                     && self.scope == "all"
                 {
-                    format!("No {} pull requests.", self.state)
+                    if self.state == "all" {
+                        "No pull requests.".into()
+                    } else {
+                        format!("No {} pull requests.", self.state)
+                    }
                 } else {
                     "No pull requests shown match these filters.".into()
                 },
-            );
+            ));
         }
         let now = crate::clock::now();
-        if self.layout == "stacks" {
+        let loaded = self.page["prs"].is_array() && self.page["unavailable"] != true;
+        if loaded && self.layout == "stacks" {
             for p in &visible {
                 let Some(n) = p["number"].as_u64() else {
                     continue;
@@ -337,16 +280,19 @@ impl Render for PullRequests {
                     )
                     .child(self.pr_row(p, n, now, cx));
             }
-        } else {
+        } else if loaded {
             // The desktop's author groups: the viewer's PRs, then everyone else's.
             let (mine, others): (Vec<_>, Vec<_>) = visible
                 .iter()
                 .partition(|p| string(p, "author").to_lowercase() == self.viewer);
-            for (label, prs) in [("Authored", mine), ("Others", others)] {
+            for (label, glyph, prs) in [
+                ("Authored", controls::PENCIL, mine),
+                ("Others", controls::USER, others),
+            ] {
                 if prs.is_empty() && self.scope != "all" {
                     continue;
                 }
-                list = list.child(group_header(label, prs.len()));
+                list = list.child(group_header(label, glyph, prs.len()));
                 if prs.is_empty() && label == "Others" {
                     list = list.child(
                         div()
@@ -365,43 +311,110 @@ impl Render for PullRequests {
             }
         }
         if self.page["nextPage"].is_number() {
-            list = list.child(self.button(
-                "pr-more",
-                "Load more pull requests",
-                !self.loading,
-                |s, _, _, cx| s.load(true, cx),
-                cx,
-            ));
+            let loading = self.loading;
+            list = list.child(
+                div().mt(px(16.)).flex().justify_center().child(
+                    controls::control("pr-more".into())
+                        .when(!loading, |c| c.cursor_pointer().hover(|c| c.bg(theme().hover)))
+                        .child(if loading { "Loading…" } else { "Load more pull requests" })
+                        .on_click(cx.listener(move |s, _, _, cx| {
+                            if !loading {
+                                s.load(true, cx)
+                            }
+                        })),
+                ),
+            );
         }
-        let mut left = div()
-            .w(px(440.))
+        let muted = |text: &'static str| {
+            div()
+                .mt(px(6.))
+                .text_size(px(11.))
+                .text_color(theme().text_muted)
+                .child(text)
+        };
+        let repo = string(&self.page, "repo");
+        let status = if self.loading {
+            if self.page["prs"].is_array() {
+                "Refreshing pull requests…".to_owned()
+            } else {
+                "Reading pull requests from GitHub…".to_owned()
+            }
+        } else if self.page["prs"].is_array() {
+            let order = match self.sort.as_str() {
+                "oldest" => "Oldest update first",
+                "newest" => "Newest created first",
+                _ => "Recently updated first",
+            };
+            format!("{count} shown · {order}")
+        } else {
+            "Pull requests for this workspace".to_owned()
+        };
+        // The desktop RepositoryPullRequests header: title and repository,
+        // the control row, then the status line and its notes.
+        let header = div()
+            .flex_shrink_0()
+            .pt(px(20.))
+            .px(px(24.))
+            .pb(px(14.))
+            .child(
+                div()
+                    .mb(px(18.))
+                    .flex()
+                    .flex_wrap()
+                    .items_baseline()
+                    .gap(px(12.))
+                    .child(
+                        div()
+                            .text_size(px(18.))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child("Pull requests"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme().text_secondary)
+                            .child(if repo.is_empty() {
+                                "Current repository".to_owned()
+                            } else {
+                                repo.to_owned()
+                            }),
+                    ),
+            )
+            .child(self.controls(cx))
+            .child(
+                div()
+                    .debug_selector(|| "pr-status".into())
+                    .mt(px(12.))
+                    .text_size(px(12.))
+                    .text_color(theme().text_muted)
+                    .child(status),
+            )
+            .when(self.page["nextPage"].is_number(), |h| {
+                h.child(muted("Filters apply to the PRs shown. Load more to include older PRs."))
+            })
+            .when(self.page["statsUnavailable"] == true, |h| {
+                h.child(muted(
+                    "Some diff totals or review requests are unavailable. Refresh to try again.",
+                ))
+            })
+            .when(self.layout == "stacks", |h| {
+                h.child(muted(
+                    "Dependencies follow branches in the loaded PRs. This view does not change or merge them.",
+                ))
+            });
+        let split = !self.hosted && self.contextual.is_none();
+        let list_column = div()
+            .when(split, |c| c.w(px(440.)).flex_none())
+            .when(!split, |c| c.flex_1())
+            .min_w_0()
             .min_h_0()
             .flex()
             .flex_col()
-            .gap(px(8.))
-            .p(px(12.))
-            .child("Pull requests")
-            .child(string(&self.page, "repo").to_owned())
-            .child(
-                div()
-                    .h(px(40.))
-                    .bg(theme().surface_raised)
-                    .child(self.search.clone()),
-            )
-            .child(self.list_controls(cx))
-            .child(if self.loading {
-                "Reading pull requests…".into()
-            } else {
-                format!("{count} shown")
-            });
-        if self.page["nextPage"].is_number() {
-            left = left.child("Filters apply to loaded PRs. Load more to include older PRs.");
-        }
-        if self.page["statsUnavailable"] == true {
-            left = left.child(
-                "Some diff totals or review requests are unavailable. Refresh to try again.",
-            );
-        }
+            .child(header)
+            .child(list.px(px(12.)).pb(px(20.)));
+        // In the shell a picked pull request opens in the right panel, as
+        // classic's o8:open-pr does; the panel's own view shows only it.
+        let detail = split.then(|| self.detail_view(cx));
         div()
             .size_full()
             .flex()
@@ -411,8 +424,13 @@ impl Render for PullRequests {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(12.))
             .track_focus(&self.focus)
-            .child(left.child(list))
-            .child(self.detail_view(cx))
+            .map(|root| {
+                if self.contextual.is_some() {
+                    root.child(self.detail_view(cx))
+                } else {
+                    root.child(list_column).children(detail)
+                }
+            })
             .child(
                 canvas(
                     |_, _, _| (),
@@ -433,5 +451,7 @@ impl Render for PullRequests {
     }
 }
 
+#[path = "controls.rs"]
+mod controls;
 #[path = "detail.rs"]
 mod detail;

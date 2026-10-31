@@ -35,7 +35,24 @@ fn shell_pull_requests_opens_from_palette(cx: &mut TestAppContext) {
     visual.simulate_click(row.center(), gpui::Modifiers::default());
     visual.run_until_parked();
     draw(&mut visual);
-    prs.update_in(&mut visual, |s, window, cx| {
+    // As in classic, the picked pull request opens in the right panel's PR tabs.
+    let repo = prs.read_with(&visual, |s, _| s.page["repo"].as_str().unwrap().to_owned());
+    let context = shell
+        .read_with(&visual, |s, _| {
+            s.surfaces.pull_requests.contexts.get(&format!("{repo}#7")).cloned()
+        })
+        .expect("the panel opens the picked pull request");
+    assert_eq!(prs.read_with(&visual, |s, _| s.selected), Some(7));
+    for _ in 0..50 {
+        if context.read_with(&visual, |s, _| !s.detail_loading) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        visual.run_until_parked();
+    }
+    draw(&mut visual);
+    context.update_in(&mut visual, |s, window, cx| {
+        s.set_composer("comment", cx);
         s.editor.read(cx).focus.focus(window)
     });
     draw(&mut visual);
@@ -69,7 +86,8 @@ fn shell_pull_requests_opens_from_palette(cx: &mut TestAppContext) {
         "closing and reopening must retain the PR view"
     );
     assert_eq!(
-        reopened.read_with(&visual, |s, cx| s.editor.read(cx).text.clone()),
-        "Unsent shell review notes"
+        context.read_with(&visual, |s, cx| s.editor.read(cx).text.clone()),
+        "Unsent shell review notes",
+        "the panel's pull request keeps its unsent notes"
     );
 }

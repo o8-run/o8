@@ -91,7 +91,7 @@ fn mission_availability(cx: &mut TestAppContext, case: &str, allowed: bool) {
     });
     settle(visual);
     click(visual, "pr-row-7");
-    click(visual, "pr-merge-squash");
+    choose(visual, "pr-merge-squash");
     if view.read_with(visual, |s, _| s.confirmation.is_some()) {
         click(visual, "pr-confirm");
     }
@@ -153,7 +153,7 @@ fn pull_requests_unknown_packet_repository_is_not_absence(cx: &mut TestAppContex
     });
     settle(visual);
     click(visual, "pr-row-7");
-    click(visual, "pr-merge-squash");
+    choose(visual, "pr-merge-squash");
     if view.read_with(visual, |s, _| s.confirmation.is_some()) {
         click(visual, "pr-confirm");
     }
@@ -172,7 +172,7 @@ fn pull_requests_incomplete_reviews_cannot_confirm_merge(cx: &mut TestAppContext
     });
     settle(visual);
     click(visual, "pr-row-7");
-    click(visual, "pr-merge-squash");
+    choose(visual, "pr-merge-squash");
     assert!(view.read_with(visual, |s, _| s.confirmation.is_some()));
     fixture
         .client
@@ -230,7 +230,7 @@ fn pull_requests_confirm_refuses_every_changed_gate(cx: &mut TestAppContext) {
         settle(visual);
         click(visual, "pr-row-7");
         input(&view, visual, "Keep these review notes");
-        click(visual, "pr-merge-squash");
+        choose(visual, "pr-merge-squash");
         assert!(
             view.read_with(visual, |s, _| s.confirmation.is_some()),
             "{case}: prepare initial merge"
@@ -264,7 +264,7 @@ fn pull_requests_confirm_rereads_new_packet_membership(cx: &mut TestAppContext) 
     });
     settle(visual);
     click(visual, "pr-row-7");
-    click(visual, "pr-merge-squash");
+    choose(visual, "pr-merge-squash");
     assert!(view.read_with(visual, |s, _| s.confirmation.is_some()));
     fixture
         .client
@@ -317,7 +317,7 @@ fn pull_requests_merge_finds_blocked_packet_from_linked_worktree(cx: &mut TestAp
             Some("next-pr-controlled".into()),
             "resolve the actual packet across linked worktrees in either direction"
         );
-        click(visual, "pr-merge-squash");
+        choose(visual, "pr-merge-squash");
         if view.read_with(visual, |s, _| s.confirmation.is_some()) {
             click(visual, "pr-confirm");
         }

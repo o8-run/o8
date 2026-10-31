@@ -47,6 +47,9 @@ pub struct PanelState {
     pub secondary_tabs: BTreeMap<String, Vec<String>>,
     /// Each workspace's side chat conversation.
     pub side_chats: BTreeMap<String, String>,
+    /// Each workspace's open pull request tabs ("owner/repo#7"), and the one shown.
+    pub pr_tabs: BTreeMap<String, Vec<String>>,
+    pub pr_selected: BTreeMap<String, String>,
 }
 impl Default for PanelState {
     fn default() -> Self {
@@ -60,6 +63,8 @@ impl Default for PanelState {
             tool_widths: BTreeMap::new(),
             secondary_tabs: BTreeMap::new(),
             side_chats: BTreeMap::new(),
+            pr_tabs: BTreeMap::new(),
+            pr_selected: BTreeMap::new(),
         }
     }
 }

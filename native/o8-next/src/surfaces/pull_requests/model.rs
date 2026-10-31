@@ -50,6 +50,13 @@ pub struct Confirmation {
     pub draft: Option<String>,
     pub merge_gate: Option<String>,
 }
+/// A pull request picked in the shell's list, for the right panel to open.
+pub struct OpenPr {
+    pub repo: String,
+    pub number: u64,
+}
+impl gpui::EventEmitter<OpenPr> for PullRequests {}
+
 pub struct PullRequests {
     client: Client,
     workspace: String,
@@ -79,6 +86,28 @@ pub struct PullRequests {
     pub governance_error: String,
     /// A pull request to select once the first page names its repository.
     pub pending: Option<(String, u64)>,
+    /// The open picker or Filters panel, and the filter field showing its choices.
+    pub menu: Option<&'static str>,
+    pub filter_field: Option<&'static str>,
+    /// Set when the shell hosts this list: picks open in the right panel.
+    pub hosted: bool,
+    /// PrPanel view state: description, composer ("" while closed, else
+    /// "comment" or "review") and review choice, open diffs.
+    pub description_open: bool,
+    pub composer: &'static str,
+    /// A copy or other local result, as PrPanelActions' notice line.
+    pub notice: String,
+    pub review_action: &'static str,
+    pub open_files: std::collections::HashSet<String>,
+    /// The Timeline tab's activity pages, read when the tab first shows.
+    pub timeline: Vec<Value>,
+    pub timeline_next: Option<u64>,
+    pub timeline_loading: bool,
+    pub timeline_error: String,
+    pub newest_first: bool,
+    timeline_epoch: u64,
+    /// The window's height at the last render, which caps the popovers.
+    pub(super) viewport: f32,
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     pub painted_at: Rc<Cell<Option<Instant>>>,
@@ -95,8 +124,16 @@ impl PullRequests {
         cx: &mut Context<Self>,
     ) -> Self {
         cx.default_global::<Deliveries>();
-        let search = cx.new(Composer::new);
-        let editor = cx.new(Composer::new);
+        let search = cx.new(|cx| {
+            let mut search = Composer::new(cx);
+            search.placeholder = "Search pull requests, or label:bug".into();
+            search
+        });
+        let editor = cx.new(|cx| {
+            let mut editor = Composer::new(cx);
+            editor.placeholder = "Leave a comment".into();
+            editor
+        });
         let focus = cx.focus_handle();
         focus.focus(window);
         let subscriptions = vec![
@@ -136,6 +173,21 @@ impl PullRequests {
             preview: Value::Null,
             governance_error: String::new(),
             pending: None,
+            menu: None,
+            filter_field: None,
+            hosted: false,
+            description_open: true,
+            composer: "",
+            notice: String::new(),
+            review_action: "review-comment",
+            open_files: Default::default(),
+            timeline: vec![],
+            timeline_next: None,
+            timeline_loading: false,
+            timeline_error: String::new(),
+            newest_first: false,
+            timeline_epoch: 0,
+            viewport: 0.,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_at: Rc::new(Cell::new(None)),
@@ -236,7 +288,13 @@ impl PullRequests {
                         }
                         s.page = page;
                         if let Some((repo, number)) = s.pending.take() {
-                            s.open(&repo, number, cx);
+                            if s.hosted {
+                                s.selected = string(&s.page, "repo")
+                                    .eq_ignore_ascii_case(&repo)
+                                    .then_some(number);
+                            } else {
+                                s.open(&repo, number, cx);
+                            }
                         }
                     }
                     Ok(_) => s.error = "Pull requests could not be loaded. Try again.".into(),
@@ -244,7 +302,10 @@ impl PullRequests {
                 }
                 // Without a list, still show the requested pull request by its
                 // own repository, as classic PrPanel opens by repo and number.
-                if let Some((repo, number)) = s.pending.take() {
+                // A hosted list keeps the request until a list loads to check it.
+                if !s.hosted
+                    && let Some((repo, number)) = s.pending.take()
+                {
                     s.select_in(number, repo, cx);
                 }
                 s.changed(cx);
@@ -258,7 +319,20 @@ impl PullRequests {
     /// request opens on GitHub, since this list reads one repository. With
     /// no list, it opens by its own repository.
     pub fn open(&mut self, repo: &str, number: u64, cx: &mut Context<Self>) {
-        if self.page.is_null() && self.loading {
+        if self.hosted {
+            // Without a list (still loading, or it failed), the request names
+            // its own repository, as classic PrPanel opens by repo and number.
+            // A list that lands later, even after a failed load and a retry,
+            // keeps the mark only for its own repository.
+            let listed = !self.page.is_null();
+            if !listed {
+                self.pending = Some((repo.to_owned(), number));
+            }
+            self.selected = (!listed || string(&self.page, "repo").eq_ignore_ascii_case(repo))
+                .then_some(number);
+            cx.emit(OpenPr { repo: repo.to_owned(), number });
+            self.changed(cx);
+        } else if self.page.is_null() && self.loading {
             self.pending = Some((repo.to_owned(), number));
         } else if self.page.is_null() {
             self.select_in(number, repo.to_owned(), cx);
@@ -268,15 +342,42 @@ impl PullRequests {
             cx.open_url(&format!("https://github.com/{repo}/pull/{number}"));
         }
     }
+    /// A row click: in the shell the panel opens it; alone the detail shows beside the list.
+    pub fn pick(&mut self, number: u64, cx: &mut Context<Self>) {
+        if self.hosted {
+            let repo = string(&self.page, "repo").to_owned();
+            self.open(&repo, number, cx);
+        } else {
+            self.select(number, cx);
+        }
+    }
     pub fn select(&mut self, number: u64, cx: &mut Context<Self>) {
         let repo = string(&self.page, "repo").to_owned();
         self.select_in(number, repo, cx);
     }
     fn select_in(&mut self, number: u64, repo: String, cx: &mut Context<Self>) {
+        // A refresh of the same PR refetches its activity too: in place when
+        // Timeline shows, otherwise the next time it opens.
+        // A request still running is superseded, so it can't land stale.
+        if self.selected == Some(number) {
+            if self.tab == "timeline" {
+                self.load_timeline(false, cx);
+            } else {
+                self.timeline.clear();
+                self.timeline_next = None;
+                self.timeline_loading = false;
+                self.timeline_epoch += 1;
+            }
+        }
         if self.selected != Some(number) {
             self.detail = Value::Null;
             self.review_head.clear();
             self.tab = "summary".into();
+            self.timeline.clear();
+            self.timeline_next = None;
+            self.timeline_error.clear();
+            self.timeline_epoch += 1;
+            self.open_files.clear();
             self.editor.update(cx, |e, cx| e.clear(cx));
         }
         self.selected = Some(number);
@@ -325,6 +426,53 @@ impl PullRequests {
                         s.preview = preview;
                     }
                     Err(e) => s.governance_error = e,
+                }
+                s.changed(cx);
+            });
+        })
+        .detach();
+        self.changed(cx);
+    }
+    /// usePrTimeline: one page of activity at a time, oldest page first.
+    pub fn load_timeline(&mut self, more: bool, cx: &mut Context<Self>) {
+        let Some(number) = self.selected else {
+            return;
+        };
+        let page = if more { self.timeline_next.unwrap_or(1) } else { 1 };
+        self.timeline_epoch += 1;
+        let epoch = self.timeline_epoch;
+        self.timeline_loading = true;
+        self.timeline_error.clear();
+        let client = self.client.clone();
+        let repo = string(&self.page, "repo").to_owned();
+        let task = cx.background_executor().spawn(async move {
+            client.get::<Value>(
+                &format!("/api/panel/prs/{number}/timeline"),
+                &[("repo", &repo), ("page", &page.to_string())],
+            )
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |s, cx| {
+                if s.timeline_epoch != epoch {
+                    return;
+                }
+                s.timeline_loading = false;
+                match result {
+                    Ok(v) if v["events"].is_array() => {
+                        if !more {
+                            s.timeline.clear();
+                        }
+                        s.timeline.extend(array(&v, "events"));
+                        s.timeline_next = v["nextPage"].as_u64();
+                    }
+                    Ok(v) => {
+                        s.timeline_error = v["error"]
+                            .as_str()
+                            .unwrap_or("Activity could not be loaded.")
+                            .to_owned()
+                    }
+                    Err(e) => s.timeline_error = e,
                 }
                 s.changed(cx);
             });
