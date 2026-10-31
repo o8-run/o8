@@ -122,8 +122,16 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
             out
         });
     let (upper, lower) = (p.selected, p.lower);
+    contextual::restore(
+        s,
+        saved.pr_tabs.get(&scope).map_or(&[][..], |v| &v[..]),
+        saved.pr_selected.get(&scope),
+    );
     if saved.visible && viewport >= 1180. {
-        show(s, upper, window, cx);
+        match contextual::unopened(s).filter(|_| upper == Tool::Prs) {
+            Some((repo, n)) => contextual::open_pr(s, repo, n, window, cx),
+            None => show(s, upper, window, cx),
+        }
         if let Some(lower) = lower {
             s.features.get::<Panel>().into_lower = true;
             show(s, lower, window, cx);
@@ -145,7 +153,13 @@ pub(super) fn save(s: &mut Shell) {
         p.lower,
     );
     let lower_tabs = p.lower_tabs.iter().map(|t| t.slug()).collect();
+    let (prs, pr) = contextual::saved(s);
     let saved = &mut s.state.right_panel;
+    match pr {
+        Some(pr) => saved.pr_selected.insert(scope.clone(), pr),
+        None => saved.pr_selected.remove(&scope),
+    };
+    saved.pr_tabs.insert(scope.clone(), prs);
     saved.primary = primary;
     saved.secondary_tabs.insert(scope.clone(), lower_tabs);
     saved.utility_tabs.insert(scope, tabs);

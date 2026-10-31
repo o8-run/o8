@@ -33,7 +33,8 @@ fn check_summary(checks: &[Value]) -> (&'static str, usize, String) {
     } else if running > 0 {
         ("pending", 0, format!("{running} pending · {passed} of {total} passing"))
     } else if total > 0 {
-        ("success", 0, format!("{passed} of {total} passing"))
+        let tone = if passed > 0 { "success" } else { "unknown" };
+        (tone, 0, format!("{passed} of {total} passing"))
     } else {
         ("unknown", 0, "No checks reported".into())
     }
@@ -438,8 +439,11 @@ impl PullRequests {
                 );
             }
         }
-        if let Some(check) = array(&d["mergeGate"], "checks").iter().find(|c| c["verdict"] == "fail") {
-            out.push(line(format!("Merge refused: {}", string(check, "detail")), theme().danger).into_any_element());
+        // PrPanelActions: a closed merge gate names its failing check.
+        if d["mergeGate"].is_object() && d["mergeGate"]["allowed"] == false {
+            let failing = array(&d["mergeGate"], "checks").iter().find(|c| c["verdict"] == "fail").map(|c| string(c, "detail").to_owned());
+            let detail = failing.filter(|d| !d.is_empty()).unwrap_or_else(|| "Merge gates are unavailable. Refresh before merging.".into());
+            out.push(line(detail, theme().danger).into_any_element());
         }
         if !self.governance_error.is_empty() {
             out.push(

@@ -337,6 +337,16 @@ impl PullRequests {
         self.select_in(number, repo, cx);
     }
     fn select_in(&mut self, number: u64, repo: String, cx: &mut Context<Self>) {
+        // A refresh of the same PR refetches its activity too: in place when
+        // Timeline shows, otherwise the next time it opens.
+        if self.selected == Some(number) && !self.timeline_loading {
+            if self.tab == "timeline" {
+                self.load_timeline(false, cx);
+            } else {
+                self.timeline.clear();
+                self.timeline_next = None;
+            }
+        }
         if self.selected != Some(number) {
             self.detail = Value::Null;
             self.review_head.clear();
