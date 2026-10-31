@@ -39,6 +39,8 @@ pub enum Event {
     Folders(Vec<String>),
     /// Snoozed inbox threads and when each comes back, in Unix seconds.
     Snoozes(Vec<(String, u64)>),
+    /// Detailed rows, and whether running threads fold into a Working section.
+    RowMode(bool, bool),
     /// The project menu's Switch workspace, with the focus to give back.
     WorkspacePicker(Option<gpui::FocusHandle>),
 }
@@ -112,6 +114,13 @@ pub struct ThreadList {
     query: String,
     expanded: HashSet<String>,
     branch_ids: HashSet<String>,
+    /// The packet branch each thread works on, by thread id.
+    pub(super) branch_names: HashMap<String, String>,
+    /// Detailed three-line rows (T3 Code's), opt-in; compact otherwise.
+    pub(super) detailed: bool,
+    /// Running threads fold into a Working section; `working_closed` collapses it.
+    pub(super) working_section: bool,
+    pub(super) working_closed: bool,
     archived_open: bool,
     #[cfg(test)]
     pub(super) title_layouts: HashMap<String, gpui::TextLayout>,
@@ -199,6 +208,10 @@ impl ThreadList {
             query: String::new(),
             expanded: HashSet::new(),
             branch_ids: HashSet::new(),
+            branch_names: HashMap::new(),
+            detailed: false,
+            working_section: false,
+            working_closed: false,
             archived_open: false,
             #[cfg(test)]
             title_layouts: HashMap::new(),
@@ -304,6 +317,14 @@ impl ThreadList {
         }
     }
     fn view_rows(&self, sessions: &[Session]) -> Vec<Row> {
+        let mut rows = self.view_rows_base(sessions);
+        detailed::mark_dev_working(&mut rows);
+        if self.working_section {
+            rows = detailed::fold_working(rows, self.working_closed);
+        }
+        rows
+    }
+    fn view_rows_base(&self, sessions: &[Session]) -> Vec<Row> {
         let (query, matches) = (&self.query, &self.search_matches);
         let (expanded, branches) = (&self.expanded, &self.branch_ids);
         match self.view() {
@@ -383,7 +404,8 @@ impl ThreadList {
                 this.last_inventory = Instant::now();
                 match result {
                     Ok((mut sessions, ledger, header, branches)) => {
-                        this.branch_ids = branches;
+                        this.branch_ids = branches.keys().cloned().collect();
+                        this.branch_names = branches;
                         if let Some(header) = header {
                             this.header = header;
                         }
@@ -938,3 +960,5 @@ mod inbox;
 mod snooze;
 #[path = "pr_links.rs"]
 pub(crate) mod pr_links;
+#[path = "detailed.rs"]
+pub(crate) mod detailed;
