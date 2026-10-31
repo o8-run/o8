@@ -161,7 +161,13 @@ fn split(s: &mut Shell, target: &str, zone: Zone, pane: super::RailPane, cx: &mu
                 return;
             }
             let open = tree(s).leaves().into_iter().find_map(|(leaf, content)| {
-                matches!(content, Leaf::Chat { session } if *session == id).then(|| leaf.to_owned())
+                let Leaf::Chat { session } = content else { return None };
+                // A pane's view may have moved off its own thread.
+                let shown = match s.content.get(&key(s, leaf)) {
+                    Some(Content::Session(view)) => view.read(cx).shown_thread(),
+                    _ => None,
+                };
+                (shown.as_ref().unwrap_or(session) == &id).then(|| leaf.to_owned())
             });
             if let Some(leaf) = open {
                 return move_pane(s, &leaf, target, zone, cx);
