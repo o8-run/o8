@@ -136,8 +136,11 @@ async function measure(terminalDaemon) {
     reopened = spawn(launcher, [], { env, stdio: 'ignore' });
     await until(() => windows(data).length === 1, 'window reopen', 30_000);
     if (JSON.parse(cli(env, 'serve', 'status')).pid !== daemon.pid) throw new Error('Reopen replaced the daemon');
+    // AppImage's outer extraction process is not the native window. Close the
+    // actual window, as above, before waiting for its launcher to settle.
+    process.kill(windows(data)[0], 'SIGTERM');
+    await until(() => windows(data).length === 0, 'reopened window close', 10_000);
     await stop(reopened);
-    await until(() => windows(data).length === 0, 'fallback window cleanup', 10_000);
     const result = { case: name, connected: true, firstFrameMs, idleRssMiB: Math.round(Math.max(...rss) * 100) / 100,
       serverIdleRssMiB: Math.round(Math.max(...serverRss) * 100) / 100,
       windowOwner, repeatedLaunchWindows: 1, reopened: true, daemonReused: true, bundledRuntime: true };
@@ -147,6 +150,10 @@ async function measure(terminalDaemon) {
     writeFileSync(join(output, `${name}-launcher.log`), launcherOutput);
     await stop(reopened);
     await stop(app);
+    for (const pid of windows(data)) {
+      try { process.kill(pid, 'SIGTERM'); }
+      catch (error) { if (error.code !== 'ESRCH') throw error; }
+    }
     // Only this profile's serve lifecycle owns the daemon and its descendants.
     try {
       cli(env, 'serve', 'stop');
