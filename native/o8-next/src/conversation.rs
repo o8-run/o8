@@ -11,6 +11,8 @@ mod composer_picker;
 mod composer_screenshots;
 #[path = "composer/send_menu.rs"]
 mod send_menu;
+#[path = "composer/dictation_wave.rs"]
+pub(super) mod dictation_wave;
 #[path = "composer/selector.rs"]
 mod composer_selector;
 #[path = "composer/prompt_actions.rs"]
@@ -94,6 +96,9 @@ impl Surface {
     pub(crate) fn set_dictation(&mut self, dictation: DictationState, cx: &mut Context<Self>) {
         if self.dictation != dictation {
             self.dictation = dictation;
+            if dictation == DictationState::Off {
+                self.wave.borrow_mut().reset();
+            }
             cx.notify();
         }
     }

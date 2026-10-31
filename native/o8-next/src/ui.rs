@@ -139,6 +139,8 @@ pub(crate) struct Surface {
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
     /// A fork's new thread, whose carried draft sends once its queue is ready.
     fork_send: Option<String>,
+    /// The dictation wave's level history.
+    wave: Rc<RefCell<conversation::dictation_wave::Wave>>,
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -185,6 +187,7 @@ impl Surface {
             action_rows: BTreeSet::new(),
             action_feedback: Default::default(),
             fork_send: None,
+            wave: Default::default(),
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {

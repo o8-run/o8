@@ -191,6 +191,7 @@ impl Surface {
             .h(px(28.))
             .flex()
             .gap(px(PRIMARY_GAP))
+            .when(self.dictating(), |d| d.child(self.dictation_wave()))
             .when(self.turn_running(), |d| d.child(self.stop_button(cx)))
             .child(self.primary_button(morph, enabled, cx))
             .into_any_element()
@@ -198,11 +199,22 @@ impl Surface {
 
     /// The primary slot: the round button, and Stop beside it while a turn runs.
     fn primary_width(&self) -> f32 {
+        let mut width = 28.;
         if self.turn_running() {
-            28. * 2. + PRIMARY_GAP
-        } else {
-            28.
+            width += 28. + PRIMARY_GAP;
         }
+        if self.dictating() {
+            width += super::dictation_wave::WIDTH + 12. + PRIMARY_GAP;
+        }
+        width
+    }
+
+    /// Dictation is asking for or holding the microphone.
+    fn dictating(&self) -> bool {
+        matches!(
+            self.dictation,
+            super::DictationState::Starting | super::DictationState::Listening
+        )
     }
 
     /// The round primary button. `morph` runs 0 (empty: voice) to 1 (draft:
