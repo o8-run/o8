@@ -68,7 +68,6 @@ impl Surface {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        self.follow_frame();
         let rows = self.rows.clone();
         // Waiting messages ride as the list's last item, so they scroll with
         // the turns as in classic.
@@ -78,6 +77,8 @@ impl Surface {
         if count != rows.len() + tail && (count == rows.len() || count == rows.len() + 1) {
             self.list.splice(rows.len()..count, tail);
         }
+        // After the tail is in the list, so a just-sent message is revealed.
+        self.follow_frame();
         let queue_enabled = self.queue_ready && !self.saving;
         let steerable = Rc::new(self.queue["steerableIds"].clone());
         let painted_rows = self.painted_rows.clone();

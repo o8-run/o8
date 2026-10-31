@@ -1,7 +1,7 @@
 //! Composer-only wiring and presentation of the classic context/cache readout.
 use super::*;
 use crate::composer::controls::context::{self, Estimate, Projection, Reuse};
-use gpui::{FontWeight, TextRun};
+use gpui::FontWeight;
 
 fn now() -> f64 {
     std::time::SystemTime::now()
@@ -175,34 +175,6 @@ impl Surface {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (projection, reuse, runtime, estimate) = self.context_values(cx);
-        let full = context::label(&runtime, estimate.as_ref(), false);
-        let short = context::label(&runtime, estimate.as_ref(), true);
-        let width = (self.composer.read(cx).controls.context.width - 2.).max(24.);
-        let measure = |text: &str| {
-            let run = TextRun {
-                len: text.len(),
-                font: gpui::Font {
-                    weight: FontWeight::LIGHT,
-                    ..gpui::font(theme().font_ui)
-                },
-                color: theme().text_muted.into(),
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            };
-            f32::from(
-                window
-                    .text_system()
-                    .shape_line(text.to_owned().into(), px(9.5), &[run], None)
-                    .width,
-            )
-        };
-        let stacked = width < 29. + measure(&short);
-        let label = if width >= 29. + measure(&full) {
-            full
-        } else {
-            short
-        };
         let percent = projection.percent();
         let color = if percent >= 85. {
             crate::theme::brand_orange()
@@ -280,35 +252,10 @@ impl Surface {
             self.composer
                 .update(cx, |i, _| i.controls.context.focus_events = Some(events));
         }
-        let ring = rings(
-            percent,
-            reuse.as_ref().map(|r| r.percent),
-            color,
-            if stacked { 12.4 } else { 19. },
-        );
-        let button = if stacked {
-            button
-                .w(px(24.))
-                .relative()
-                .justify_center()
-                .child(div().absolute().top(px(0.)).child(ring))
-                .child(
-                    div()
-                        .absolute()
-                        .bottom(px(0.))
-                        .text_size(px(9.5))
-                        .text_color(theme().text_muted)
-                        .child(label),
-                )
-        } else {
-            button.child(ring).child(
-                div()
-                    .text_size(px(9.5))
-                    .font_weight(FontWeight::LIGHT)
-                    .text_color(theme().text_muted)
-                    .child(label),
-            )
-        };
+        // Only the ring (Q 2026-10-31): the cache estimate and the breakdown
+        // live in the popover it opens.
+        let ring = rings(percent, reuse.as_ref().map(|r| r.percent), color, 19.);
+        let button = button.w(px(24.)).justify_center().child(ring);
         let owner = cx.entity().downgrade();
         let anchor_owner = owner.clone();
         let button = button.relative().child(
@@ -354,7 +301,7 @@ impl Surface {
     }
 
     pub(crate) fn context_popover(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let (projection, reuse, _, _) = self.context_values(cx);
+        let (projection, reuse, runtime, estimate) = self.context_values(cx);
         let percent = projection.percent();
         let mut rows = div().border_t_1().border_color(theme().border).pb(px(6.));
         for (label, tokens, approximate) in [
@@ -426,13 +373,61 @@ impl Surface {
         );
         let has_reuse = reuse.is_some();
         let right = self.context_right(cx, 340.);
-        let cache = div().border_t_1().border_color(theme().border).px(px(14.)).py(px(12.))
-            .child(div().flex().justify_between().gap(px(8.)).text_size(px(12.)).child("Prompt cache")
-                .child(div().text_color(if reuse.is_some() { theme().accent } else { theme().text_muted }).child(cache_label)))
-            .when_some(reuse, |d, r| d.child(bar(r.percent, 5., theme().accent).mt(px(9.)).mb(px(9.))))
-            .child(div().text_size(px(10.5)).text_color(theme().text_muted).mt(px(if has_reuse { 0. } else { 7. })).child(cache_detail))
-            .child(div().text_size(px(10.5)).line_height(gpui::relative(1.4)).text_color(theme().text_faint).mt(px(6.))
-                .child("Expiry is not reported in this transcript. Reuse shows the last response, not whether the next prompt is still warm."));
+        let cache = div()
+            .border_t_1()
+            .border_color(theme().border)
+            .px(px(14.))
+            .py(px(12.))
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .gap(px(8.))
+                    .text_size(px(12.))
+                    .child("Prompt cache")
+                    .child(
+                        div()
+                            .text_color(if reuse.is_some() {
+                                theme().accent
+                            } else {
+                                theme().text_muted
+                            })
+                            .child(cache_label),
+                    ),
+            )
+            .when_some(reuse, |d, r| {
+                d.child(bar(r.percent, 5., theme().accent).mt(px(9.)).mb(px(9.)))
+            })
+            .child(
+                div()
+                    .text_size(px(10.5))
+                    .text_color(theme().text_muted)
+                    .mt(px(if has_reuse { 0. } else { 7. }))
+                    .child(cache_detail),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .gap(px(8.))
+                    .mt(px(9.))
+                    .text_size(px(12.))
+                    .debug_selector(|| "context-cache-estimate".into())
+                    .child("Next prompt")
+                    .child(div().text_color(theme().text_muted).child(context::label(
+                        &runtime,
+                        estimate.as_ref(),
+                        false,
+                    ))),
+            )
+            .child(
+                div()
+                    .text_size(px(10.5))
+                    .line_height(gpui::relative(1.4))
+                    .text_color(theme().text_faint)
+                    .mt(px(6.))
+                    .child(context::explanation(&runtime, estimate.as_ref())),
+            );
         div().id("context-breakdown").debug_selector(|| "context-breakdown".into())
             .absolute().bottom_full().right(px(right)).mb(px(8.)).w(px(340.)).max_w(gpui::relative(1.))
             .rounded(px(18.)).border_1().border_color(theme().border).bg(crate::theme::menu_fill()).shadow_lg()
