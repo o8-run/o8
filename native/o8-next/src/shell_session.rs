@@ -180,6 +180,11 @@ impl Surface {
             .collect();
         (steps, live)
     }
+    /// The conversation this view shows, which Up and Down in its transcript
+    /// can move off the tab's own thread.
+    pub(crate) fn shown_thread(&self) -> Option<String> {
+        self.selected.clone()
+    }
     #[cfg(test)]
     pub(crate) fn shell_selected(&self) -> String {
         self.selected.clone().unwrap()
