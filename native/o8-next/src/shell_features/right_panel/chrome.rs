@@ -303,7 +303,7 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
                     .child(pages),
             );
         }
-    } else if p.lower.is_none() && selected != Tool::Prs && selected != Tool::Compare {
+    } else if selected != Tool::Prs && selected != Tool::Compare {
         let strip = div()
             .id("panel-tabs")
             .debug_selector(|| "panel-tabs".into())
@@ -453,34 +453,96 @@ pub(super) fn divider(s: &Shell, lower: Tool, cx: &mut Context<Shell>) -> AnyEle
                 move || format!("panel-split-ratio-{ratio:.0}")
             })),
         )
+        // The bottom half's own strip: its tabs and its "+", as the top's.
         .child(
             div()
+                .debug_selector(|| "panel-lower-tabs".into())
                 .h(px(28.))
                 .flex()
                 .items_center()
+                .gap(px(4.))
                 .px(px(8.))
                 .relative()
                 .child(
-                    button(
-                        s,
-                        "panel-lower-picker",
-                        format!("Lower panel view: {}", lower.label()),
-                        cx,
-                        |s, w, cx| layout::menu(s, true, w, cx),
-                    )
-                    .h(px(28.))
-                    .px(px(9.))
-                    .gap(px(6.))
-                    .child(crate::icon::stroke(lower.icon(), theme().text, 15., 1.6))
-                    .child(lower.label())
-                    .child(crate::icon::stroke(
-                        "m6 9 6 6 6-6",
-                        theme().text_muted,
-                        9.,
-                        2.4,
-                    )),
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.))
+                        .overflow_hidden()
+                        .children(p.lower_tabs.iter().map(|t| lower_tab(s, *t, lower, cx))),
                 )
+                .child(icon(
+                    s,
+                    "panel-lower-picker",
+                    PLUS,
+                    "New tab below",
+                    cx,
+                    |s, w, cx| layout::menu(s, true, w, cx),
+                ))
                 .children(p.menu.filter(|_| p.menu_lower).map(|_| drawer::menu(s, cx))),
+        )
+        .into_any_element()
+}
+
+/// A bottom-half tab: selects its view below, and closes like a top tab.
+fn lower_tab(s: &Shell, tool: Tool, shown: Tool, cx: &mut Context<Shell>) -> AnyElement {
+    let active = tool == shown;
+    let slug = tool.slug();
+    div()
+        .id(SharedString::from(format!("panel-lower-tab-{slug}")))
+        .debug_selector({
+            let slug = slug.clone();
+            move || format!("panel-lower-tab-{slug}")
+        })
+        .h(px(26.))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .rounded(px(7.))
+        .when(active, |v| v.bg(theme().selection))
+        .child(
+            button(
+                s,
+                format!("panel-lower-select-{slug}"),
+                tool.label(),
+                cx,
+                move |s, w, cx| {
+                    s.features.get::<Panel>().into_lower = true;
+                    show(s, tool, w, cx);
+                    s.features.get::<Panel>().into_lower = false;
+                },
+            )
+            .h(px(26.))
+            .pl(px(8.))
+            .pr(px(5.))
+            .gap(px(6.))
+            .when(active, |b| b.text_color(theme().text))
+            .child(crate::icon::stroke(
+                tool.icon(),
+                if active { theme().text } else { theme().text_muted },
+                13.,
+                1.6,
+            ))
+            .child(tool.label()),
+        )
+        .child(
+            button(
+                s,
+                format!("panel-lower-close-{slug}"),
+                format!("Close {} tab below", tool.label()),
+                cx,
+                move |s, w, cx| close_lower_tab(s, tool, w, cx),
+            )
+            .w(px(20.))
+            .h(px(24.))
+            .child(crate::icon::stroke(
+                "M18 6 6 18M6 6l12 12",
+                theme().text_muted,
+                10.,
+                2.5,
+            )),
         )
         .into_any_element()
 }
