@@ -32,7 +32,7 @@ fn render(
         .flex_1()
         .min_h_0()
         .relative()
-        .child(content.unwrap_or_else(|| div().p(px(24.)).child(frame.empty).into_any_element()))
+        .child(content.unwrap_or_else(|| landing(s, frame, cx)))
         .children(super::activity_dock::element(s, window, cx))
         .into_any_element();
     let content = super::panes::element(s, content, cx);
@@ -109,4 +109,78 @@ fn render(
             .child(content)
             .into_any_element(),
     )
+}
+
+/// A workspace with nothing open lands on classic's compose-first prompt
+/// (OrchestratorEmptyState): the question, the repository, and how to start.
+fn landing(s: &Shell, frame: &Frame, cx: &mut Context<Shell>) -> AnyElement {
+    let Some(repo) = s.state.selected.clone() else {
+        return div().p(px(24.)).child(frame.empty).into_any_element();
+    };
+    let name = repo.rsplit('/').next().unwrap_or(&repo).to_owned();
+    let action = |id: &'static str, label: &'static str| {
+        div()
+            .id(id)
+            .debug_selector(move || id.into())
+            .h(px(36.))
+            .px(px(14.))
+            .flex()
+            .items_center()
+            .rounded(px(10.))
+            .border_1()
+            .border_color(theme().border)
+            .bg(theme().surface_raised)
+            .text_size(px(13.))
+            .text_color(theme().text)
+            .cursor_pointer()
+            .hover(|b| b.bg(theme().hover))
+            .child(label)
+    };
+    div()
+        .size_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .p(px(24.))
+        .child(
+            div()
+                .max_w(px(640.))
+                .flex()
+                .flex_col()
+                .items_center()
+                .child(
+                    div()
+                        .text_size(px(28.))
+                        .font_weight(gpui::FontWeight::EXTRA_LIGHT)
+                        .text_color(theme().text)
+                        .text_center()
+                        .child(format!("What should we build in {name}?")),
+                )
+                .child(
+                    div()
+                        .mt(px(10.))
+                        .text_size(px(11.))
+                        .text_color(theme().text_muted)
+                        .child(repo),
+                )
+                .child(
+                    div()
+                        .mt(px(24.))
+                        .flex()
+                        .gap(px(8.))
+                        .child(action("landing-new-chat", "New chat").on_click(cx.listener(
+                            |s, _, window, cx| {
+                                s.capture(window, cx);
+                                super::start_chat(s, window, cx);
+                            },
+                        )))
+                        .child(action("landing-terminal", "Terminal").on_click(cx.listener(
+                            |s, _, window, cx| {
+                                s.capture(window, cx);
+                                s.execute(Command::Terminal, window, cx);
+                            },
+                        ))),
+                ),
+        )
+        .into_any_element()
 }
