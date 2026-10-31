@@ -157,7 +157,7 @@ fn split(s: &mut Shell, target: &str, zone: Zone, pane: super::RailPane, cx: &mu
         // placeThreadPane: a thread shows once. The main chat's own thread
         // stays put, and one already in a pane moves there.
         super::RailPane::Thread { id, .. } => {
-            if s.active().and_then(|tab| shown(s, &tab, cx)).as_ref() == Some(&id) {
+            if main_thread(s, cx).as_ref() == Some(&id) {
                 return;
             }
             let open = tree(s).leaves().into_iter().find_map(|(leaf, content)| {
@@ -418,6 +418,12 @@ fn leaf(
         .on_drag_move({
             let over = over.clone();
             cx.listener(move |s, event: &DragMoveEvent<super::RailPane>, _, cx| {
+                // The main chat's own thread doesn't land, so it shows no target.
+                if let super::RailPane::Thread { id, .. } = event.drag(cx) {
+                    if main_thread(s, cx).as_ref() == Some(id) {
+                        return;
+                    }
+                }
                 track(s, &over, event.event.position, event.bounds, cx)
             })
         })
@@ -483,6 +489,11 @@ fn track(
     }
 }
 
+/// The conversation the main pane shows.
+fn main_thread(s: &Shell, cx: &gpui::App) -> Option<String> {
+    s.active().and_then(|tab| shown(s, &tab, cx))
+}
+
 /// The conversation a chat tab shows: its view's own pick, else its thread.
 fn shown(s: &Shell, tab: &Tab, cx: &gpui::App) -> Option<String> {
     let Tab::Session(id) = tab else { return None };
@@ -497,7 +508,7 @@ fn shown(s: &Shell, tab: &Tab, cx: &gpui::App) -> Option<String> {
 fn thread_tab(s: &Shell, index: usize, cx: &gpui::App) -> Option<super::RailPane> {
     let tab = s.current()?.tabs.get(index)?.clone();
     let id = shown(s, &tab, cx)?;
-    if s.active().and_then(|active| shown(s, &active, cx)).as_ref() == Some(&id) {
+    if main_thread(s, cx).as_ref() == Some(&id) {
         return None;
     }
     let title = s

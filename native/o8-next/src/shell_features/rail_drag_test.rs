@@ -191,11 +191,15 @@ fn sidebar_threads_and_pane_headers_drag_like_classic(cx: &mut TestAppContext) {
     let start = Instant::now();
     let (row, thread) = loop {
         settle(&mut v);
+        // Not the main chat's own thread, which stays put.
+        let main = match s.read_with(&v, |s, _| s.active()) {
+            Some(Tab::Session(id)) => Some(id),
+            _ => None,
+        };
         let found = list.read_with(&v, |l, _| {
-            l.rows
-                .iter()
-                .enumerate()
-                .find_map(|(i, r)| r.id.clone().map(|id| (i, id)))
+            l.rows.iter().enumerate().find_map(|(i, r)| {
+                r.id.clone().filter(|id| Some(id) != main.as_ref()).map(|id| (i, id))
+            })
         });
         if let Some(found) = found {
             break found;
