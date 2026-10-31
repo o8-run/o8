@@ -10,6 +10,9 @@ impl Render for ThreadList {
             self.focus.focus(window);
         }
         let _keep_subscriptions = &self.subscriptions;
+        if !cx.has_active_drag() {
+            self.pin_drop = None;
+        }
         let status = if self.saving {
             "Saving…".to_string()
         } else if self.loading && self.rows.is_empty() {
@@ -349,6 +352,30 @@ impl ThreadList {
                                 },
                             ))
                         })
+                        .when(
+                            thread && row.id.as_deref().is_some_and(|id| {
+                                this.pinned(id) && row.status != "archived"
+                            }),
+                            |view| {
+                                let id = row.id.clone().unwrap_or_default();
+                                let over = id.clone();
+                                let drag = pins::PinDrag {
+                                    id: id.clone(),
+                                    title: crate::text::sanitize(&row.title).into(),
+                                };
+                                view.relative()
+                                    .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
+                                    .on_drag_move(cx.listener(
+                                        move |this, event: &gpui::DragMoveEvent<pins::PinDrag>, _, cx| {
+                                            this.pin_drag_move(&over, event, cx);
+                                        },
+                                    ))
+                                    .on_drop(cx.listener(move |this, drag: &pins::PinDrag, _, cx| {
+                                        this.drop_pin(&drag.id, cx);
+                                    }))
+                                    .children(this.pin_drop_line(&id))
+                            },
+                        )
                         .when(thread, |view| {
                             let id = row.id.clone().unwrap_or_default();
                             view.on_mouse_down(

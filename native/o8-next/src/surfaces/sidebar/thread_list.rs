@@ -149,6 +149,8 @@ pub struct ThreadList {
     subscription: Subscription,
     subscriptions: Vec<gpui::Subscription>,
     notice: String,
+    /// A pinned-row drag's drop target: (target id, drop after it).
+    pub(super) pin_drop: Option<(String, bool)>,
     pub painted: Rc<Cell<usize>>,
     pub materialized: Rc<Cell<usize>>,
 }
@@ -239,6 +241,7 @@ impl ThreadList {
             inventory_loading: false,
             subscriptions: vec![observe, submit],
             notice: String::new(),
+            pin_drop: None,
             painted: Rc::new(Cell::new(usize::MAX)),
             materialized: Rc::new(Cell::new(0)),
         }
