@@ -735,3 +735,6 @@ mod recents_tests;
 
 #[path = "archive_tests.rs"]
 mod archive_tests;
+
+#[path = "pin_reorder_tests.rs"]
+mod pin_reorder_tests;
