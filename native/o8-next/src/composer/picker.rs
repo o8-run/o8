@@ -48,6 +48,26 @@ const CHECK: &str = "M5 12l5 5L20 7";
 
 impl Surface {
     /// The floating menu above the composer card for the open chip.
+    /// A drawer row swaps the drawer for its picker. The row goes away, so
+    /// focus returns to the paperclip and the picker's arrow keys still land.
+    fn open_from_drawer(
+        &mut self,
+        picker: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_composer_picker(picker, window, cx);
+        if let Some(focus) = self
+            .composer
+            .read(cx)
+            .controls
+            .focus
+            .get("composer-attach")
+            .cloned()
+        {
+            focus.focus(window);
+        }
+    }
     pub(super) fn composer_popover(
         &mut self,
         open: &'static str,
@@ -249,7 +269,7 @@ impl Surface {
                         false,
                         !busy,
                         cx,
-                        |s, w, cx| s.open_composer_picker("mode", w, cx),
+                        |s, w, cx| s.open_from_drawer("mode", w, cx),
                     ))
                     .child(self.menu_row(
                         "attach-repo",
@@ -276,7 +296,7 @@ impl Surface {
                         false,
                         !busy,
                         cx,
-                        |s, w, cx| s.open_composer_picker("access", w, cx),
+                        |s, w, cx| s.open_from_drawer("access", w, cx),
                     ));
             }
             "effort" => menu = menu.children(self.thinking_menu(routing, busy, cx)),
