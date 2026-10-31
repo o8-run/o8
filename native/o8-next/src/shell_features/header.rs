@@ -61,7 +61,7 @@ fn render(
         .gap(px(4.))
         // 4px workspace inset, plus the strip's 10px collapsed padding, or its
         // 8px padding after the 4px sidebar resize edge.
-        .pl(px(if hidden { 14. } else { 16. }))
+        .pl(px(if hidden && !moving { 14. } else { 16. }))
         .pr(px(8.))
         .when(hidden && !moving, |row| {
             row.child(sidebar_toggle(true, cx)).child(search_button(cx))
@@ -94,6 +94,7 @@ fn render(
         });
     Some(
         div()
+            .relative()
             .flex()
             .items_center()
             .flex_shrink_0()
@@ -106,15 +107,12 @@ fn render(
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
-            // The column's slot travels with it, so the tabs move with the
-            // workspace instead of jumping at the start or end.
-            .when(!hidden || moving, |row| {
+            .when(!hidden && !moving, |row| {
                 row.child(
                     div()
-                        .w(px(super::super::sidebar::width(s) * open))
+                        .w(px(super::super::sidebar::width(s)))
                         .h_full()
                         .flex_shrink_0()
-                        .overflow_hidden()
                         .flex()
                         .items_center()
                         .gap(px(4.))
@@ -124,6 +122,23 @@ fn render(
                         .child(div().flex_1())
                         .child(search_button(cx)),
                 )
+            })
+            // In flight the column's slot travels with it, so the tabs move with
+            // the workspace, while the toggle holds its place and search rides
+            // the column's edge down to its spot beside the toggle. At either
+            // end every button sits where the resting header puts it.
+            .when(moving, |row| {
+                let edge = super::super::sidebar::width(s) * open;
+                let top = (crate::theme::GEOMETRY.header - 26.) / 2.;
+                row.child(div().w(px(edge.max(FOLDED))).h_full().flex_shrink_0())
+                    .child(div().absolute().left(px(14.)).top(px(top)).child(sidebar_toggle(hidden, cx)))
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px((edge - 8. - SEARCH_W).max(14. + TOGGLE_W + 4.)))
+                            .top(px(top))
+                            .child(search_button(cx)),
+                    )
             })
             .when(!super::right_panel::maximized(s), |row| {
                 row.child(workspace)
@@ -136,6 +151,14 @@ fn render(
 }
 
 /// SidebarTogglePill: 14px panel glyph, orange while the sidebar is pinned open.
+/// The toggle's and search's widths: 7px either side of a 14px and a 16px glyph.
+const TOGGLE_W: f32 = 28.;
+const SEARCH_W: f32 = 30.;
+/// The travelling slot's floor: the folded strip's 14px inset, toggle, 4px gap,
+/// search and 4px gap, less the strip's 16px padding in flight, so Back lands
+/// where the folded header puts it.
+const FOLDED: f32 = 14. + TOGGLE_W + 4. + SEARCH_W + 4. - 16.;
+
 fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
     pill(
         "header-sidebar",
