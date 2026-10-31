@@ -24,6 +24,12 @@ pub(crate) struct State {
     pub attachment_target: bool,
     pub images_enabled: bool,
     pub pending_images: usize,
+    /// The model picker's selected house: favorites, claude or codex.
+    pub lead_house: &'static str,
+    /// The effort stop under the pointer while the slider is dragged.
+    pub effort_preview: Option<usize>,
+    /// Service tier answers by backend:model; Null while a check is running.
+    pub tiers: HashMap<String, Value>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -43,6 +49,9 @@ impl Default for State {
             attachment_target: false,
             images_enabled: false,
             pending_images: 0,
+            lead_house: "codex",
+            effort_preview: None,
+            tiers: HashMap::new(),
         }
     }
 }

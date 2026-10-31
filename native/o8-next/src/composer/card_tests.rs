@@ -150,6 +150,11 @@ fn native_composer_idle_card_avoids_viewport_path_targets(cx: &mut TestAppContex
 fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
+    // The Thinking chip shows only for leads with effort stops, as in classic.
+    surface.update(cx, |s, _| {
+        s.routing.as_mut().unwrap()["backend"] = json!("codex");
+    });
+    draw(cx);
     let mut previous = gpui::px(0.);
     for selector in [
         "composer-mode",
@@ -165,7 +170,10 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
         previous = bounds.right();
     }
     surface.read_with(cx, |s, cx| {
-        assert_eq!(s.composer.read(cx).placeholder, "Message Shared…");
+        assert_eq!(
+            s.composer.read(cx).placeholder,
+            "Ask anything · workers share this checkout"
+        );
     });
     assert!(cx.debug_bounds("composer-hint").is_none());
     click("composer-mode", cx);
@@ -254,7 +262,10 @@ fn native_composer_modes_match_classic_and_saved_solo_sends_shared(cx: &mut Test
         let routing = s.composer_routing(cx).unwrap();
         assert_eq!(routing["pickedMode"], "fast");
         assert_eq!(routing["mode"], "fleet");
-        assert_eq!(s.composer.read(cx).placeholder, "Message Shared…");
+        assert_eq!(
+            s.composer.read(cx).placeholder,
+            "Ask anything · workers share this checkout"
+        );
     });
     surface.update_in(cx, |s, window, cx| {
         s.send_next = true;
@@ -291,13 +302,19 @@ fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut Te
     cx.run_until_parked();
     draw(cx);
     surface.read_with(cx, |s, cx| {
-        assert_eq!(s.composer.read(cx).placeholder, "Message Shared…")
+        assert_eq!(
+            s.composer.read(cx).placeholder,
+            "Ask anything · workers share this checkout"
+        )
     });
     surface.update(cx, |s, cx| s.select("thoughts-composer-first".into(), cx));
     cx.run_until_parked();
     draw(cx);
     surface.read_with(cx, |s, cx| {
-        assert_eq!(s.composer.read(cx).placeholder, "Message Worktrees…")
+        assert_eq!(
+            s.composer.read(cx).placeholder,
+            "Ask anything · workers use isolated worktrees"
+        )
     });
 }
 

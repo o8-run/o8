@@ -50,30 +50,49 @@ impl Surface {
         }
         view.into_any_element()
     }
+    /// ModeChip: icon only, a checkout for Shared and a branch for Worktrees,
+    /// accent while open or in Worktrees.
     pub(super) fn mode_chip(
         &self,
         picked: &str,
         enabled: bool,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
+        let open = self.composer.read(cx).controls.open == Some("mode");
+        let worktrees = picked == "multitask";
+        let tip = gpui::SharedString::from(format!(
+            "{}. {}. Shift+Tab changes checkout.",
+            crate::composer::controls::mode_label(picked),
+            if worktrees {
+                "Give delegated workers separate checkouts"
+            } else {
+                "Workers share this checkout with separate file scopes"
+            }
+        ));
         self.track_prompt_anchor(
-            self.composer_button(
-                "composer-mode",
-                crate::composer::controls::mode_label(picked),
-                enabled,
-                cx,
-                |s, w, cx| s.open_composer_picker("mode", w, cx),
-            ),
+            self.composer_button("composer-mode", "", enabled, cx, |s, w, cx| {
+                s.open_composer_picker("mode", w, cx)
+            }),
             "mode",
         )
-        .when(picked != "solo", |v| {
-            v.bg(theme().selection).text_color(theme().accent)
-        })
+        .w(px(28.))
+        .h(px(28.))
+        .px(px(0.))
+        .justify_center()
+        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.clone())).into())
         .child(crate::icon::stroke(
-            "m6 9 6 6 6-6",
-            theme().text_secondary,
-            9.,
-            1.5,
+            if worktrees {
+                "M6 6v12m0-9h8a4 4 0 0 0 4-4M4 4a2 2 0 1 0 4 0 2 2 0 1 0-4 0M4 20a2 2 0 1 0 4 0 2 2 0 1 0-4 0M16 3a2 2 0 1 0 4 0 2 2 0 1 0-4 0"
+            } else {
+                "M6 5h12a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3ZM8 10v4m-2-2h4m5 0h3"
+            },
+            if open || worktrees {
+                theme().accent
+            } else {
+                theme().text_muted
+            },
+            18.,
+            1.6,
         ))
     }
     pub(super) fn composer_intent(&self, cx: &mut Context<Self>) -> AnyElement {

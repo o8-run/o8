@@ -7,6 +7,8 @@ mod command_client;
 mod composer_card;
 #[path = "composer/picker.rs"]
 mod composer_picker;
+#[path = "composer/selector.rs"]
+mod composer_selector;
 #[path = "composer/prompt_actions.rs"]
 mod prompt_actions;
 #[path = "composer/prompt_controls.rs"]

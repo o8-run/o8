@@ -79,14 +79,20 @@ impl Surface {
             .absolute()
             .bottom_full()
             .mb(px(8.))
-            .w(px(if open == "effort" { 300. } else { 260. }))
-            .max_h(px(520.))
+            .w(px(match open {
+                "mode" => 224.,
+                "effort" => 300.,
+                "model" => 366.,
+                _ => 260.,
+            }))
+            .max_h(px(if open == "model" { 470. } else { 520. }))
             .overflow_y_scroll()
-            .p(px(6.))
+            .p(px(if open == "model" { 0. } else { 6. }))
             .flex()
-            .flex_col()
+            .when(open == "model", |m| m.flex_row().overflow_hidden())
+            .when(open != "model", |m| m.flex_col())
             .gap(px(1.))
-            .rounded(px(16.))
+            .rounded(px(18.))
             .border_1()
             .border_color(theme().border)
             .bg(crate::theme::menu_fill())
@@ -99,15 +105,32 @@ impl Surface {
         };
         match open {
             "mode" => {
+                menu = menu.child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .px(px(8.))
+                        .pt(px(2.))
+                        .pb(px(4.))
+                        .text_size(px(10.))
+                        .font_weight(gpui::FontWeight::LIGHT)
+                        .text_color(theme().text_faint)
+                        .child("WORKER CHECKOUT")
+                        .child("Shift+Tab cycles"),
+                );
                 let picked = routing["pickedMode"].as_str().unwrap_or("fast");
                 let shares =
                     crate::composer::controls::shares_checkout(routing["backend"].as_str());
                 for (value, label, detail) in [
-                    ("fast", "Shared", "Workers share this checkout"),
+                    (
+                        "fast",
+                        "Shared",
+                        "Workers share this checkout with separate file scopes",
+                    ),
                     (
                         "multitask",
                         "Worktrees",
-                        "Parallel packets in isolated worktrees",
+                        "Give delegated workers separate checkouts",
                     ),
                 ] {
                     menu = menu.child(self.menu_row(
@@ -192,81 +215,8 @@ impl Surface {
                     },
                 ));
             }
-            "effort" => {
-                let effort = routing["effort"].as_str().unwrap_or("medium");
-                let mut stops = div().flex().gap(px(4.)).p(px(4.));
-                for (value, label) in [
-                    ("low", "Low"),
-                    ("medium", "Medium"),
-                    ("high", "High"),
-                    ("xhigh", "Extra"),
-                    ("max", "Max"),
-                ] {
-                    let selected = effort == value;
-                    stops = stops.child(
-                        self.composer_button(
-                            &format!("effort-{value}"),
-                            label,
-                            !busy,
-                            cx,
-                            move |s, w, cx| s.composer_choice("effort", value, w, cx),
-                        )
-                        .flex_1()
-                        .justify_center()
-                        .h(px(30.))
-                        .rounded(px(8.))
-                        .when(selected, |stop| {
-                            stop.bg(theme().selection).text_color(theme().text)
-                        }),
-                    );
-                }
-                menu = menu.child(header("Reasoning")).child(stops);
-            }
-            "model" => {
-                let current = routing["model"].as_str().unwrap_or("");
-                for (house, models) in HOUSES {
-                    menu = menu.child(header(house));
-                    for &(backend, value, label, detail) in *models {
-                        menu = menu.child(self.menu_row(
-                            &format!("model-{value}"),
-                            label,
-                            detail,
-                            current == value,
-                            !busy,
-                            cx,
-                            move |s, w, cx| s.choose_lead(backend, value, w, cx),
-                        ));
-                    }
-                }
-                if let Some(model) = model {
-                    let input = model.clone();
-                    menu = menu.child(header("Other model")).child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.))
-                            .px(px(4.))
-                            .child(
-                                div()
-                                    .id("composer-model-input")
-                                    .debug_selector(|| "composer-model-input".into())
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(model),
-                            )
-                            .child(self.composer_button(
-                                "composer-model-save",
-                                if busy { "Saving…" } else { "Save" },
-                                !busy,
-                                cx,
-                                move |s, w, cx| {
-                                    let model = input.read(cx).text.trim().to_owned();
-                                    s.composer_choice("model", &model, w, cx);
-                                },
-                            )),
-                    );
-                }
-            }
+            "effort" => menu = menu.children(self.thinking_menu(routing, busy, cx)),
+            "model" => menu = menu.children(self.lead_menu(routing, busy, model, cx)),
             _ => {}
         }
         menu.when(matches!(open, "mode" | "attach"), |v| {
@@ -290,7 +240,9 @@ impl Surface {
     ) -> Stateful<Div> {
         self.composer_button(id, "", enabled, cx, action)
             .w_full()
-            .h(px(34.))
+            .h_auto()
+            .min_h(px(34.))
+            .py(px(5.))
             .px(px(10.))
             .rounded(px(8.))
             .when(selected, |row| row.bg(theme().hover))
@@ -322,7 +274,7 @@ impl Surface {
     /// A model on the thread's runtime switches in place. Another runtime cannot
     /// take over a thread with history (the desktop hands off or starts fresh), so
     /// it starts a fresh conversation there; an empty thread changes runtime.
-    fn choose_lead(
+    pub(super) fn choose_lead(
         &mut self,
         backend: &str,
         model: &str,
@@ -409,14 +361,4 @@ impl Surface {
         })
         .detach();
     }
-}
-
-fn header(label: &'static str) -> impl IntoElement {
-    div()
-        .px(px(10.))
-        .pt(px(8.))
-        .pb(px(4.))
-        .text_size(px(10.5))
-        .text_color(theme().text_muted)
-        .child(label)
 }

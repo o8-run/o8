@@ -1,5 +1,5 @@
 use super::*;
-use crate::composer::controls::{mode_label, model_label};
+use crate::composer::controls::mode_label;
 use gpui::{AnyElement, Div, KeyDownEvent, SharedString, Stateful};
 
 #[path = "context_view.rs"]
@@ -83,26 +83,8 @@ impl Surface {
             .flex()
             .items_center()
             .gap(px(6.))
-            .child(
-                self.composer_button(
-                    "composer-model",
-                    &routing["model"]
-                        .as_str()
-                        .map_or("Model".into(), model_label),
-                    enabled,
-                    cx,
-                    |s, w, cx| s.open_composer_picker("model", w, cx),
-                )
-                .max_w(px(140.))
-                .truncate(),
-            )
-            .child(self.composer_button(
-                "composer-effort",
-                routing["effort"].as_str().unwrap_or("Effort"),
-                enabled,
-                cx,
-                |s, w, cx| s.open_composer_picker("effort", w, cx),
-            ))
+            .child(self.lead_chip(&routing, enabled, cx))
+            .children(self.thinking_chip(&routing, enabled, cx))
             .child(
                 self.mic_button(enabled, cx).child(
                     canvas(
@@ -254,6 +236,13 @@ impl Surface {
         );
         routing["pickedMode"] = json!(picked);
         routing["mode"] = json!("fleet");
+        if let Some(tier) = super::composer_selector::service_tier(
+            routing["backend"].as_str().unwrap_or(""),
+            routing["model"].as_str().unwrap_or(""),
+            cx,
+        ) {
+            routing["serviceTier"] = json!(tier);
+        }
         Some(routing)
     }
     pub(super) fn composer_button(
@@ -350,10 +339,6 @@ impl Surface {
         if self.composer.read(cx).controls.busy {
             return;
         }
-        let model = self.composer_routing(cx).unwrap_or(Value::Null)["model"]
-            .as_str()
-            .unwrap_or("")
-            .to_owned();
         self.composer.update(cx, |i, cx| {
             // A second press on the same chip closes its menu, as on the desktop.
             if i.controls.open == Some(picker) {
@@ -367,14 +352,16 @@ impl Surface {
             i.controls.error.clear();
             if picker == "model" {
                 i.controls.model = Some(cx.new(|cx| {
-                    let mut input = Composer::new(cx);
-                    input.set_text(&model, cx);
+                    let input = Composer::new(cx);
                     input.focus.focus(window);
                     input
                 }));
             }
             cx.notify();
         });
+        if self.composer.read(cx).controls.open == Some(picker) {
+            self.prepare_selector(picker, cx);
+        }
         cx.notify();
     }
     pub(super) fn composer_choice(
@@ -422,6 +409,8 @@ impl Surface {
             cx.notify();
         });
         let requested = value.clone();
+        // Classic saves a model choice on the thread too, so it survives a reload.
+        let thread = (field == "model").then(|| self.selected.clone()).flatten();
         let task = cx.background_executor().spawn(async move {
             let url = client.url("/api/panel/operator-defaults").unwrap();
             let mutation = client
@@ -432,6 +421,15 @@ impl Surface {
             let confirmed: Value =
                 client.get("/api/panel/operator-defaults", &[("include", "values")])?;
             if confirmed["values"][setting] == requested {
+                if let Some(thread) = thread {
+                    let history = client.url("/api/v2/chat-history").unwrap();
+                    client
+                        .request("POST", &history)
+                        .send_json(json!({"tabId": thread, "messages": [], "model": requested}))
+                        .map_err(|_| {
+                            "Model saved as the default, but not on this chat.".to_owned()
+                        })?;
+                }
                 Ok(())
             } else if mutation.is_err() {
                 Err("Settings update failed. Previous selection retained.".into())
@@ -506,7 +504,20 @@ impl Surface {
                     routing["backend"].as_str(),
                     Some("codex" | "claude" | "fable" | "collide")
                 );
-            let placeholder = format!("Message {mode}…");
+            // ComposerArea: the placeholder teaches the mode, or the send
+            // action while a turn runs.
+            let placeholder = if self.queue["canSteer"] == true {
+                if self.send_next {
+                    "Queue for the next turn…"
+                } else {
+                    "Steer the agent…"
+                }
+            } else if mode == "Worktrees" {
+                "Ask anything · workers use isolated worktrees"
+            } else {
+                "Ask anything · workers share this checkout"
+            }
+            .to_owned();
             if i.placeholder != placeholder || i.framed {
                 i.placeholder = placeholder;
                 i.framed = false;
