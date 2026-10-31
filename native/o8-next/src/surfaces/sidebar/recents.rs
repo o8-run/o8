@@ -92,6 +92,7 @@ pub(super) fn header(kind: &str, title: &str, status: &str) -> Row {
         age: String::new(),
         branch: false,
         attention: false,
+        marker: "",
         folder: None,
     }
 }
@@ -111,6 +112,7 @@ pub(super) fn thread_row(s: &Session, now: u64, branches: &HashSet<String>) -> R
                 .and_then(|h| h["branch"].as_str())
                 .is_some_and(|b| !b.is_empty()),
         attention: sidebar::rank(s) > 0 || s.unread,
+        marker: "",
         folder: None,
     }
 }

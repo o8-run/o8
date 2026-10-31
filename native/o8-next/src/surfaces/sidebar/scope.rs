@@ -19,7 +19,8 @@ pub(in crate::shell::sidebar) struct Menu {
 }
 /// A thread row's right-click menu, where it opened.
 pub(in crate::shell::sidebar) struct RowMenu {
-    pub repo: String,
+    pub repo: Option<String>,
+    pub id: String,
     pub position: Point<Pixels>,
 }
 
@@ -448,13 +449,18 @@ impl ThreadList {
         cx: &mut Context<Self>,
     ) {
         let repos = self.scope_repos();
-        self.row_menu = self
+        let repo = self
             .sessions
             .iter()
             .find(|s| s.id == id)
             .and_then(|s| s.repo_path.clone())
-            .filter(|repo| repos.iter().any(|(path, _)| path == repo))
-            .map(|repo| RowMenu { repo, position });
+            .filter(|repo| repos.iter().any(|(path, _)| path == repo));
+        // The Inbox view's rows always offer Snooze.
+        self.row_menu = (repo.is_some() || self.snoozable(id)).then(|| RowMenu {
+            repo,
+            id: id.to_owned(),
+            position,
+        });
         cx.notify();
     }
     /// The row menu's Filter by <repository> / Show all repositories.
@@ -462,20 +468,43 @@ impl ThreadList {
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let id = self.row_menu.as_ref()?.id.clone();
+        let snooze = self.snooze_items(&id, cx);
         let menu = self.row_menu.as_ref()?;
-        let repo = menu.repo.clone();
-        let active = self.scope_keys().contains(&repo);
-        let name = self
-            .scope_repos()
-            .into_iter()
-            .find(|(path, _)| *path == repo)
-            .map(|(_, name)| name)
-            .unwrap_or_else(|| label(&repo));
-        let text = if active {
-            "Show all repositories".to_owned()
-        } else {
-            format!("Filter by {}", crate::text::sanitize(&name))
-        };
+        let filter = menu.repo.clone().map(|repo| {
+            let active = self.scope_keys().contains(&repo);
+            let name = self
+                .scope_repos()
+                .into_iter()
+                .find(|(path, _)| *path == repo)
+                .map(|(_, name)| name)
+                .unwrap_or_else(|| label(&repo));
+            let text = if active {
+                "Show all repositories".to_owned()
+            } else {
+                format!("Filter by {}", crate::text::sanitize(&name))
+            };
+            div()
+                .id("sidebar-row-filter")
+                .debug_selector(|| "sidebar-row-filter".into())
+                .h(px(28.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(7.))
+                .text_size(px(12.5))
+                .cursor_pointer()
+                .hover(|s| s.bg(theme().hover))
+                .child(crate::icon::stroke(FOLDER, theme().text_muted, 14., 1.7))
+                .child(text)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.row_menu = None;
+                    let keys = if active { vec![] } else { vec![repo.clone()] };
+                    this.set_scope(keys, cx);
+                }))
+        });
         Some(
             deferred(
                 anchored()
@@ -498,35 +527,8 @@ impl ThreadList {
                                 this.row_menu = None;
                                 cx.notify();
                             }))
-                            .child(
-                                div()
-                                    .id("sidebar-row-filter")
-                                    .debug_selector(|| "sidebar-row-filter".into())
-                                    .h(px(28.))
-                                    .px(px(8.))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.))
-                                    .rounded(px(7.))
-                                    .text_size(px(12.5))
-                                    .cursor_pointer()
-                                    .hover(|s| s.bg(theme().hover))
-                                    .child(crate::icon::stroke(
-                                        FOLDER,
-                                        theme().text_muted,
-                                        14.,
-                                        1.7,
-                                    ))
-                                    .child(text)
-                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                        cx.stop_propagation()
-                                    })
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.row_menu = None;
-                                        let keys = if active { vec![] } else { vec![repo.clone()] };
-                                        this.set_scope(keys, cx);
-                                    })),
-                            ),
+                            .children(filter)
+                            .children(snooze),
                     ),
             )
             .with_priority(1)
