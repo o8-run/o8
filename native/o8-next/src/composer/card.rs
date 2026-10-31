@@ -24,7 +24,7 @@ impl Surface {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
-        let picked = routing["pickedMode"].as_str().unwrap_or("solo");
+        let picked = routing["pickedMode"].as_str().unwrap_or("fast");
         let plan = routing["permissionMode"] == "plan";
         let access = if plan { "Plan only" } else { "Full access" };
         let enabled = self.queue_ready
@@ -257,6 +257,12 @@ impl Surface {
         for (key, value) in self.composer.read(cx).controls.overrides.as_object()? {
             routing[key] = value.clone();
         }
+        let picked = crate::composer::controls::visible_mode(
+            routing["pickedMode"].as_str(),
+            routing["backend"].as_str(),
+        );
+        routing["pickedMode"] = json!(picked);
+        routing["mode"] = json!("fleet");
         Some(routing)
     }
     pub(super) fn composer_button(
@@ -500,7 +506,7 @@ impl Surface {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
-        let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("solo"));
+        let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("fast"));
         self.sync_context_meter(&routing, cx);
         let (open, busy, error, model) = self.composer.update(cx, |i, cx| {
             i.controls.attachment_target = true;

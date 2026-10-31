@@ -99,9 +99,9 @@ impl Surface {
         };
         match open {
             "mode" => {
-                let picked = routing["pickedMode"].as_str().unwrap_or("solo");
+                let picked = routing["pickedMode"].as_str().unwrap_or("fast");
+                let shares = crate::composer::controls::shares_checkout(routing["backend"].as_str());
                 for (value, label, detail) in [
-                    ("solo", "Solo", "Delegation off · works in this session"),
                     ("fast", "Shared", "Workers share this checkout"),
                     (
                         "multitask",
@@ -114,7 +114,7 @@ impl Surface {
                         label,
                         detail,
                         picked == value,
-                        !busy,
+                        !busy && (value != "fast" || shares),
                         cx,
                         move |s, w, cx| s.composer_choice("pickedMode", value, w, cx),
                     ));

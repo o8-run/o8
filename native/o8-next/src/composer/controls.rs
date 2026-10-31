@@ -49,9 +49,25 @@ impl Default for State {
 pub(crate) fn mode_label(mode: &str) -> &'static str {
     match mode {
         "multitask" => "Worktrees",
-        "fast" => "Shared",
-        _ => "Solo",
+        _ => "Shared",
     }
+}
+/// Classic shows only Shared and Worktrees (VISIBLE_COMPOSER_SELECTOR_MODES);
+/// Solo and the advanced modes are internal. Any other saved mode reads the way
+/// classic's cycleComposerSelectorMode maps it: Shared when the backend can
+/// share a checkout (composerSupportsFastMode), otherwise Worktrees.
+pub(crate) fn visible_mode(mode: Option<&str>, backend: Option<&str>) -> &'static str {
+    let shares = shares_checkout(backend);
+    match mode {
+        Some("multitask") => "multitask",
+        _ if shares => "fast",
+        _ => "multitask",
+    }
+}
+/// composerSupportsFastMode: the backends whose workers can share a checkout.
+/// Shared is unavailable for the rest, as classic disables it.
+pub(crate) fn shares_checkout(backend: Option<&str>) -> bool {
+    backend.is_none_or(|b| matches!(b, "codex" | "claude" | "fable" | "pi" | "o8"))
 }
 /// The desktop's model names (formatModelLabel): "gpt-6.1-sol" reads "GPT-6.1 Sol",
 /// "claude-opus-5-5" reads "Opus 5.5". Unknown ids pass through.
@@ -103,4 +119,17 @@ pub(crate) fn wire(text: &str, mode: &str) -> String {
         }
     };
     format!("{directive}\n\n{text}")
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use super::*;
+    #[test]
+    fn shared_is_offered_only_where_workers_can_share_a_checkout() {
+        assert!(shares_checkout(Some("codex")) && shares_checkout(None));
+        assert!(!shares_checkout(Some("openclaw")));
+        assert_eq!(visible_mode(Some("fast"), Some("openclaw")), "multitask");
+        assert_eq!(visible_mode(Some("solo"), Some("claude")), "fast");
+        assert_eq!(visible_mode(Some("multitask"), Some("codex")), "multitask");
+    }
 }

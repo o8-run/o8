@@ -165,7 +165,7 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
         previous = bounds.right();
     }
     surface.read_with(cx, |s, cx| {
-        assert_eq!(s.composer.read(cx).placeholder, "Message Solo…");
+        assert_eq!(s.composer.read(cx).placeholder, "Message Shared…");
     });
     assert!(cx.debug_bounds("composer-hint").is_none());
     click("composer-mode", cx);
@@ -208,7 +208,7 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
         assert!(s.composer.read(cx).text.is_empty());
         production_wire_oracle(&s.queue["items"][0]["payload"]);
     });
-    for (mode, selector) in [("solo", "mode-solo"), ("fast", "mode-fast")] {
+    for (mode, selector) in [("fast", "mode-fast")] {
         click("composer-mode", cx);
         click(selector, cx);
         cx.simulate_input(mode);
@@ -227,6 +227,55 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
     }
 }
 
+/// Classic offers only Shared and Worktrees. A chat saved on Solo (or with no
+/// saved mode) reads and sends Shared, so it never routes into Solo's private
+/// Codex home (#5165).
+#[gpui::test]
+fn native_composer_modes_match_classic_and_saved_solo_sends_shared(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-mode", cx);
+    assert!(
+        cx.debug_bounds("mode-solo").is_none(),
+        "classic has no Solo choice"
+    );
+    assert!(cx.debug_bounds("mode-fast").is_some());
+    assert!(cx.debug_bounds("mode-multitask").is_some());
+    cx.simulate_keystrokes("escape");
+    surface.update(cx, |s, cx| {
+        s.composer.update(cx, |i, _| {
+            i.controls.overrides["pickedMode"] = json!("solo");
+            i.controls.overrides["mode"] = json!("single");
+        });
+        cx.notify();
+    });
+    draw(cx);
+    surface.read_with(cx, |s, cx| {
+        let routing = s.composer_routing(cx).unwrap();
+        assert_eq!(routing["pickedMode"], "fast");
+        assert_eq!(routing["mode"], "fleet");
+        assert_eq!(s.composer.read(cx).placeholder, "Message Shared…");
+    });
+    surface.update_in(cx, |s, window, cx| {
+        s.send_next = true;
+        s.composer.read(cx).focus.focus(window);
+    });
+    cx.simulate_input("Saved solo chat");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    surface.read_with(cx, |s, _| {
+        let item = s.queue["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["payload"]["text"] == "Saved solo chat")
+            .unwrap();
+        assert_eq!(item["payload"]["routing"]["pickedMode"], "fast");
+        assert_eq!(item["payload"]["routing"]["mode"], "fleet");
+        production_wire_oracle(&item["payload"]);
+    });
+}
+
 include!("lead_picker_tests.rs");
 
 #[gpui::test]
@@ -242,7 +291,7 @@ fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut Te
     cx.run_until_parked();
     draw(cx);
     surface.read_with(cx, |s, cx| {
-        assert_eq!(s.composer.read(cx).placeholder, "Message Solo…")
+        assert_eq!(s.composer.read(cx).placeholder, "Message Shared…")
     });
     surface.update(cx, |s, cx| s.select("thoughts-composer-first".into(), cx));
     cx.run_until_parked();

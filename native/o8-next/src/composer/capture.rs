@@ -59,7 +59,7 @@ pub(super) fn start(handle: WindowHandle<Surface>, directory: PathBuf, cx: &mut 
         cx.background_executor().timer(Duration::from_millis(350)).await;
         let mode = handle.update(cx, |s, _, cx| {
             assert_eq!(s.composer.read(cx).controls.open, Some("mode"));
-            json!(s.composer.read(cx).controls.overrides["pickedMode"].as_str().unwrap_or("solo"))
+            json!(s.composer.read(cx).controls.overrides["pickedMode"].as_str().unwrap_or("fast"))
         }).unwrap();
         let mode_path = directory.join(format!("{appearance}-mode.png"));
         gpui::AnyWindowHandle::from(handle).update(cx, |_, w, _| w.refresh()).unwrap();
