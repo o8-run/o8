@@ -1,7 +1,7 @@
 //! The composer's floating pickers, after the desktop ComposerPicker: mode and
 //! permission menus, the lead model list grouped by runtime, and effort stops.
 use super::*;
-use gpui::{AnyElement, Div, Entity, Stateful};
+use gpui::{AnyElement, Div, Entity, SharedString, Stateful};
 
 /// COMPOSER_MODEL_GROUPS in ModelThinkingChip.tsx: house, then
 /// (runtime, model id, label, detail).
@@ -81,6 +81,7 @@ impl Surface {
             .mb(px(8.))
             .w(px(match open {
                 "mode" => 224.,
+                "attach" => 300.,
                 "effort" => 300.,
                 "model" => 366.,
                 _ => 260.,
@@ -172,15 +173,37 @@ impl Surface {
                 }
             }
             // AttachFilesButton's menu: saved prompts, then files from disk.
+            // The "+" drawer, after the mobile Add context sheet: recent
+            // screenshots, files, prompts, scope and permission in one place
+            // so the footer stays clean (Q 2026-10-31).
             "attach" => {
                 let has_text = !self.composer.read(cx).text.trim().is_empty();
                 let images = matches!(
                     routing["backend"].as_str(),
                     Some("codex" | "claude" | "fable" | "collide")
                 );
+                if images {
+                    menu = menu.children(self.recent_screenshots(busy, cx));
+                }
+                menu = menu.child(self.menu_row(
+                    "attach-upload",
+                    "Add files",
+                    if images {
+                        "Images from disk"
+                    } else {
+                        "This runtime takes no images"
+                    },
+                    false,
+                    !busy && images,
+                    cx,
+                    |s, w, cx| {
+                        s.close_composer_picker(w, cx);
+                        s.attach_composer_image(cx);
+                    },
+                ));
                 menu = menu.child(self.menu_row(
                     "attach-browse-prompts",
-                    "Browse saved prompts",
+                    "Saved prompts",
                     "Insert a prompt from your library",
                     false,
                     !busy,
@@ -198,22 +221,50 @@ impl Surface {
                         |s, w, cx| s.open_prompt("save-prompt", w, cx),
                     ));
                 }
-                menu = menu.child(self.menu_row(
-                    "attach-upload",
-                    "Upload from disk",
-                    if images {
-                        "Images for this chat"
-                    } else {
-                        "This runtime takes no images"
-                    },
-                    false,
-                    !busy && images,
-                    cx,
-                    |s, w, cx| {
-                        s.close_composer_picker(w, cx);
-                        s.attach_composer_image(cx);
-                    },
-                ));
+                let repo = self
+                    .intent_repo(cx)
+                    .as_deref()
+                    .and_then(|p| std::path::Path::new(p).file_name())
+                    .map_or("Choose a repository".to_owned(), |n| {
+                        n.to_string_lossy().into_owned()
+                    });
+                let branch = match self.composer.read(cx).controls.prompt.branch.as_str() {
+                    "" => "main".to_owned(),
+                    branch => branch.to_owned(),
+                };
+                let access = if routing["permissionMode"] == "plan" {
+                    "Plan only"
+                } else {
+                    "Full access"
+                };
+                menu = menu
+                    .child(self.menu_row(
+                        "attach-repo",
+                        "Repository",
+                        repo,
+                        false,
+                        !busy,
+                        cx,
+                        |s, w, cx| s.open_prompt("repo", w, cx),
+                    ))
+                    .child(self.menu_row(
+                        "attach-branch",
+                        "Base branch",
+                        branch,
+                        false,
+                        !busy,
+                        cx,
+                        |s, w, cx| s.open_prompt("branch", w, cx),
+                    ))
+                    .child(self.menu_row(
+                        "attach-permission",
+                        "Permission",
+                        access,
+                        false,
+                        !busy,
+                        cx,
+                        |s, w, cx| s.open_composer_picker("access", w, cx),
+                    ));
             }
             "effort" => menu = menu.children(self.thinking_menu(routing, busy, cx)),
             "model" => menu = menu.children(self.lead_menu(routing, busy, model, cx)),
@@ -232,7 +283,7 @@ impl Surface {
         &self,
         id: &str,
         label: &'static str,
-        detail: &'static str,
+        detail: impl Into<SharedString>,
         selected: bool,
         enabled: bool,
         cx: &mut Context<Self>,
@@ -263,12 +314,85 @@ impl Surface {
                         div()
                             .text_size(px(10.5))
                             .text_color(theme().text_muted)
-                            .child(detail),
+                            .child(detail.into()),
                     ),
             )
             .when(selected, |row| {
                 row.child(crate::icon::stroke(CHECK, theme().accent, 14., 2.))
             })
+    }
+
+    /// A strip of the newest screenshots; a click attaches one. Thumbnails
+    /// are made in the background the first time they are shown.
+    fn recent_screenshots(&self, busy: bool, cx: &mut Context<Self>) -> Option<Div> {
+        let shots = super::composer_screenshots::recent(5);
+        if shots.is_empty() {
+            return None;
+        }
+        let missing: Vec<_> = shots
+            .iter()
+            .filter(|p| super::composer_screenshots::thumbnail(p).is_none_or(|t| !t.exists()))
+            .cloned()
+            .collect();
+        if !missing.is_empty() && !self.composer.read(cx).controls.thumbs_pending {
+            self.composer
+                .update(cx, |i, _| i.controls.thumbs_pending = true);
+            let task = cx
+                .background_executor()
+                .spawn(async move { super::composer_screenshots::make_thumbnails(missing) });
+            let editor = self.composer.downgrade();
+            cx.spawn(async move |this, cx| {
+                task.await;
+                let _ = editor.update(cx, |i, _| i.controls.thumbs_pending = false);
+                let _ = this.update(cx, |_, cx| cx.notify());
+            })
+            .detach();
+        }
+        let mut strip = div().flex().gap(px(6.)).px(px(4.)).pb(px(6.));
+        for (index, path) in shots.into_iter().enumerate() {
+            let thumb = super::composer_screenshots::thumbnail(&path).filter(|t| t.exists());
+            let attach = path.clone();
+            strip = strip.child(
+                self.composer_button(
+                    &format!("attach-shot-{index}"),
+                    "",
+                    !busy,
+                    cx,
+                    move |s, w, cx| {
+                        s.close_composer_picker(w, cx);
+                        s.composer
+                            .update(cx, |i, cx| i.attach_paths(vec![attach.clone()], cx));
+                    },
+                )
+                .w(px(50.))
+                .h(px(50.))
+                .px(px(0.))
+                .rounded(px(9.))
+                .overflow_hidden()
+                .border_1()
+                .border_color(theme().border)
+                .bg(theme().hover)
+                .children(
+                    thumb.map(|t| gpui::img(t).size_full().object_fit(gpui::ObjectFit::Cover)),
+                ),
+            );
+        }
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .px(px(8.))
+                        .pt(px(2.))
+                        .pb(px(6.))
+                        .text_size(px(10.))
+                        .font_weight(gpui::FontWeight::LIGHT)
+                        .text_color(theme().text_faint)
+                        .child("RECENT SCREENSHOTS"),
+                )
+                .child(strip),
+        )
     }
 
     /// A model on the thread's runtime switches in place. Another runtime cannot

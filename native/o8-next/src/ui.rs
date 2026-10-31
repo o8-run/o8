@@ -217,14 +217,15 @@ impl Surface {
                         if event.0 {
                             cx.notify();
                         } else {
-                            let view = editor
-                                .read(cx)
-                                .controls
-                                .prompt
-                                .view
-                                .as_ref()
-                                .map(|view| view.entity_id());
-                            if let Some(view) = view {
+                            // Presence and slash changes redraw only the cached
+                            // intent row and the mic/Send pair, not the session.
+                            let controls = &editor.read(cx).controls;
+                            let views: Vec<_> = [&controls.prompt.view, &controls.send_view]
+                                .into_iter()
+                                .flatten()
+                                .map(|view| view.entity_id())
+                                .collect();
+                            for view in views {
                                 App::notify(cx, view);
                             }
                         }

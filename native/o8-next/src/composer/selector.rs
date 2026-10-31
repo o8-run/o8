@@ -35,22 +35,81 @@ fn efforts(backend: &str) -> &'static [(&'static str, &'static str, &'static str
 fn hot(effort: &str) -> bool {
     matches!(effort, "xhigh" | "max" | "ultra")
 }
-fn house_of(backend: &str) -> &'static str {
-    if matches!(backend, "claude" | "fable") {
-        "claude"
-    } else {
-        "codex"
+/// A provider mark: filled Simple Icons paths, or classic's stroked glyphs.
+#[derive(Clone, Copy)]
+enum Glyph {
+    Fill(&'static str),
+    Stroke(&'static str, f32),
+}
+impl Glyph {
+    fn icon(self, color: gpui::Rgba, size: f32) -> gpui::Svg {
+        match self {
+            Glyph::Fill(path) => crate::icon::fill(path, color, size),
+            Glyph::Stroke(path, weight) => crate::icon::stroke(path, color, size, weight),
+        }
     }
 }
-fn mark(backend: &str) -> Option<&'static str> {
+const O8: Glyph = Glyph::Stroke(
+    "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18M12 10.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 1 0 0-2.8",
+    2.2,
+);
+const PI: Glyph = Glyph::Stroke("M4 8h16M8 8v12M16 8v9q0 3 3 3", 2.5);
+const TERMINAL: Glyph = Glyph::Stroke("m5 7 5 5-5 5M12 19h7", 2.2);
+// OpenCode's public silhouette, scaled from its 240x300 box onto the 24 grid.
+const OPENCODE: Glyph = Glyph::Fill("M16.8 4.8H7.2v14.4h9.6V4.8ZM21.6 24H2.4V0h19.2v24Z");
+
+/// COMPOSER_MODEL_GROUPS houses: key, label, the runtime that must be
+/// installed, mark, and whether the models come from a live catalog. o8 is the
+/// built-in agent (bundled Pi on the managed model) and is always shown.
+const LEAD_HOUSES: [(&str, &str, &str, Glyph, bool); 8] = [
+    (
+        "claude",
+        "Claude Code",
+        "claude-code",
+        Glyph::Fill(ANTHROPIC),
+        false,
+    ),
+    ("codex", "Codex", "codex", Glyph::Fill(OPENAI), false),
+    ("opencode", "OpenCode", "opencode", OPENCODE, true),
+    ("o8", "o8", "", O8, false),
+    ("pi", "Pi", "pi", PI, false),
+    ("muse", "Muse Code", "muse", TERMINAL, true),
+    // Hermes leads through `hermes acp` on its governed profile (#1304; worker
+    // runtime by kvnloo in #3391). Shown to anyone who has it installed.
+    ("hermes", "Hermes", "hermes", TERMINAL, true),
+    ("acp", "Local ACP", "acp", TERMINAL, true),
+];
+fn house_of(backend: &str) -> &'static str {
     match backend {
-        "claude" | "fable" => Some(ANTHROPIC),
-        "codex" => Some(OPENAI),
+        "claude" | "fable" => "claude",
+        "opencode" => "opencode",
+        "o8" => "o8",
+        "pi" => "pi",
+        "acp" => "acp",
+        "hermes" => "hermes",
+        "muse" => "muse",
+        _ => "codex",
+    }
+}
+fn mark(backend: &str) -> Option<Glyph> {
+    match backend {
+        "claude" | "fable" => Some(Glyph::Fill(ANTHROPIC)),
+        "codex" => Some(Glyph::Fill(OPENAI)),
+        "o8" => Some(O8),
+        "pi" => Some(PI),
+        "opencode" => Some(OPENCODE),
+        "muse" | "hermes" | "acp" => Some(TERMINAL),
         _ => None,
     }
 }
-/// The chip's short name: the provider mark stands in for "GPT" or "Claude".
-fn short_label(full: &str) -> String {
+/// The chip's short name, classic's triggerLabel: the mark stands in for
+/// "GPT" or "Claude" ("6.1 Sol", "Opus 5.5", "Astra").
+fn short_label(model: &str, full: &str) -> String {
+    match model {
+        "gpt-6-astra" => return "Astra".into(),
+        "gpt-5.6-terra" => return "Terra".into(),
+        _ => {}
+    }
     ["GPT-", "GPT ", "Claude "]
         .iter()
         .find_map(|prefix| full.strip_prefix(prefix))
@@ -153,7 +212,7 @@ impl Surface {
         let full = routing["model"].as_str().map_or("Model".into(), |m| {
             crate::composer::controls::model_label(m)
         });
-        let label = short_label(&full);
+        let label = short_label(routing["model"].as_str().unwrap_or(""), &full);
         let tip = SharedString::from(format!("Orchestrator: {full}"));
         let open = self.composer.read(cx).controls.open == Some("model");
         self.composer_button("composer-model", "", enabled, cx, |s, w, cx| {
@@ -166,8 +225,8 @@ impl Surface {
         .font_weight(gpui::FontWeight::LIGHT)
         .when(open, |chip| chip.bg(theme().hover))
         .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.clone())).into())
-        .when_some(mark(backend), |chip, path| {
-            chip.child(crate::icon::fill(path, theme().text_secondary, 13.))
+        .when_some(mark(backend), |chip, glyph| {
+            chip.child(glyph.icon(theme().text_secondary, 13.))
         })
         .child(div().min_w_0().truncate().child(label))
     }
@@ -236,7 +295,9 @@ impl Surface {
                 "favorites"
             };
             self.composer
-                .update(cx, |i, _| i.controls.lead_house = house);
+                .update(cx, |i, _| i.controls.lead_house = house.to_owned());
+            self.load_inventory(cx);
+            self.load_catalogue(house, cx);
             if let Some(input) = self.composer.read(cx).controls.model.clone() {
                 input.update(cx, |i, cx| {
                     i.set_text("", cx);
@@ -719,7 +780,112 @@ impl Surface {
         cx.notify();
     }
 
-    /// ComposerPicker: a rail of houses (Favorites, then each runtime's mark)
+    /// The installed runtimes (classic useRuntimeInventory), once per open.
+    fn load_inventory(&mut self, cx: &mut Context<Self>) {
+        if !self.composer.read(cx).controls.inventory.is_null() {
+            return;
+        }
+        self.composer
+            .update(cx, |i, _| i.controls.inventory = json!("loading"));
+        let client = self.client.clone();
+        let task = cx.background_executor().spawn(async move {
+            client
+                .get("/api/panel/operator-defaults", &[])
+                .ok()
+                .and_then(|v: Value| v["dispatchableRuntimes"].as_array().cloned())
+                .map_or(json!("failed"), Value::Array)
+        });
+        let editor = self.composer.downgrade();
+        cx.spawn(async move |this, cx| {
+            let inventory = task.await;
+            let _ = editor.update(cx, |i, cx| {
+                i.controls.inventory = inventory;
+                cx.notify();
+            });
+            let _ = this.update(cx, |_, cx| cx.notify());
+        })
+        .detach();
+    }
+
+    /// A searchable house's live model catalog (AcpModelPicker).
+    fn load_catalogue(&mut self, house: &str, cx: &mut Context<Self>) {
+        if !LEAD_HOUSES.iter().any(|h| h.0 == house && h.4)
+            || self
+                .composer
+                .read(cx)
+                .controls
+                .catalogues
+                .contains_key(house)
+        {
+            return;
+        }
+        let key = house.to_owned();
+        self.composer.update(cx, |i, _| {
+            i.controls.catalogues.insert(key.clone(), Value::Null);
+        });
+        let client = self.client.clone();
+        let backend = key.clone();
+        let task = cx.background_executor().spawn(async move {
+            client
+                .get("/api/orchestrator/backend-models", &[("backend", &backend)])
+                .unwrap_or_else(|_| json!({"available": false, "groups": []}))
+        });
+        let editor = self.composer.downgrade();
+        cx.spawn(async move |this, cx| {
+            let catalogue: Value = task.await;
+            let _ = editor.update(cx, |i, cx| {
+                i.controls.catalogues.insert(key, catalogue);
+                cx.notify();
+            });
+            let _ = this.update(cx, |_, cx| cx.notify());
+        })
+        .detach();
+    }
+
+    /// Every lead house the operator has installed (o8 always). Worker-only
+    /// runtimes stay out of the picker (Q 2026-10-31: keep it clean); they
+    /// belong to Settings and the transcript. key, label, mark, can lead, ready.
+    fn rail_houses(&self, lead: &str, cx: &App) -> Vec<(String, String, Glyph, bool, bool)> {
+        let inventory = self
+            .composer
+            .read(cx)
+            .controls
+            .inventory
+            .as_array()
+            .cloned();
+        let item = |runtime: &str| {
+            inventory
+                .as_ref()
+                .and_then(|items| items.iter().find(|i| i["id"] == runtime).cloned())
+        };
+        let shown = |i: &Value| {
+            i["available"] == true
+                || i["installed"] == true
+                || i["builtIn"].is_object()
+                || matches!(
+                    i["unavailableReason"].as_str(),
+                    Some("needs_auth" | "needs_restart")
+                )
+        };
+        let mut houses = vec![];
+        for &(key, label, runtime, glyph, _) in &LEAD_HOUSES {
+            let found = item(runtime);
+            let visible = key == lead
+                || key == "o8"
+                || found.as_ref().is_some_and(shown)
+                || (inventory.is_none() && matches!(key, "claude" | "codex"));
+            if visible {
+                let ready = key == "o8"
+                    || found
+                        .as_ref()
+                        .map_or(inventory.is_none(), |i| i["available"] == true);
+                houses.push((key.to_owned(), label.to_owned(), glyph, true, ready));
+            }
+        }
+        houses
+    }
+
+    /// ComposerPicker: a rail of houses (Favorites, then every runtime's mark)
     /// beside search and the model rows, starred favorites first.
     pub(super) fn lead_menu(
         &mut self,
@@ -730,18 +896,16 @@ impl Surface {
     ) -> Vec<AnyElement> {
         let lead_backend = routing["backend"].as_str().unwrap_or("").to_owned();
         let current = routing["model"].as_str().unwrap_or("").to_owned();
-        let house = self.composer.read(cx).controls.lead_house;
+        let house = self.composer.read(cx).controls.lead_house.clone();
         let query = search
             .as_ref()
             .map(|s| s.read(cx).text.trim().to_owned())
             .unwrap_or_default();
         let needle = query.to_lowercase();
         let starred = favorites(cx);
-        let houses: [(&'static str, &'static str, &'static str); 2] = [
-            ("claude", "Claude Code", ANTHROPIC),
-            ("codex", "Codex", OPENAI),
-        ];
+        let houses = self.rail_houses(house_of(&lead_backend), cx);
         let mut rail = div()
+            .id("composer-lead-rail")
             .w(px(44.))
             .flex_shrink_0()
             .flex()
@@ -749,22 +913,38 @@ impl Surface {
             .items_center()
             .gap(px(4.))
             .py(px(8.))
+            .overflow_y_scroll()
             .border_r_1()
             .border_color(theme().border);
-        for (key, label, glyph) in [("favorites", "Favorites", STAR)].into_iter().chain(houses) {
+        let entries = std::iter::once((
+            "favorites".to_owned(),
+            "Favorites".to_owned(),
+            Glyph::Fill(STAR),
+            true,
+            true,
+        ))
+        .chain(houses.iter().cloned());
+        for (key, label, glyph, lead, ready) in entries {
             let on = house == key;
             let color = if on {
                 theme().accent
-            } else {
+            } else if lead {
                 theme().text_muted
+            } else {
+                theme().text_faint
             };
             let icon = if key == "favorites" && !on {
-                crate::icon::stroke(glyph, color, 14., 1.7).into_any_element()
+                crate::icon::stroke(STAR, color, 14., 1.7)
             } else {
-                crate::icon::fill(glyph, color, if key == "favorites" { 14. } else { 17. })
-                    .into_any_element()
+                glyph.icon(color, if key == "favorites" { 14. } else { 17. })
             };
             let input = search.clone();
+            let tip = SharedString::from(if ready {
+                label.clone()
+            } else {
+                format!("{label} · not signed in")
+            });
+            let pick = key.clone();
             rail = rail.child(
                 self.composer_button(
                     &format!("lead-house-{key}"),
@@ -773,9 +953,10 @@ impl Surface {
                     cx,
                     move |s, _, cx| {
                         s.composer.update(cx, |i, cx| {
-                            i.controls.lead_house = key;
+                            i.controls.lead_house = pick.clone();
                             cx.notify();
                         });
+                        s.load_catalogue(&pick, cx);
                         if let Some(input) = &input {
                             input.update(cx, |i, cx| i.set_text("", cx));
                         }
@@ -787,46 +968,72 @@ impl Surface {
                 .justify_center()
                 .rounded(px(9.))
                 .when(on, |b| b.bg(tint(theme().accent, 0.14)))
-                .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(label.into())).into())
+                .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.clone())).into())
                 .child(icon),
             );
         }
-        // (backend, id, label, house label) for every listed model.
-        let listed: Vec<(&'static str, &'static str, &'static str, &'static str)> = HOUSES
-            .iter()
-            .flat_map(|(house_label, models)| {
-                models
+        let ready_house = |key: &str| houses.iter().any(|h| h.0 == key && h.3 && h.4);
+        let house_label = |key: &str| {
+            houses
+                .iter()
+                .find(|h| h.0 == key)
+                .map_or_else(|| key.to_owned(), |h| h.1.clone())
+        };
+        // (backend, id, label, house) for each model the visible lead houses offer.
+        let catalogues = self.composer.read(cx).controls.catalogues.clone();
+        let models_of = |key: &str| -> Vec<(String, String, String, String)> {
+            match key {
+                "claude" | "codex" => HOUSES
                     .iter()
-                    .map(move |&(backend, id, label, _)| (backend, id, label, *house_label))
-            })
-            .collect();
+                    .flat_map(|(_, models)| models.iter())
+                    .filter(|m| house_of(m.0) == key)
+                    .map(|m| (m.0.into(), m.1.into(), m.2.into(), key.into()))
+                    .collect(),
+                "o8" => vec![("o8".into(), "o8-free".into(), "o8".into(), "o8".into())],
+                "pi" => vec![("pi".into(), "pi".into(), "Pi".into(), "pi".into())],
+                _ => catalogues
+                    .get(key)
+                    .and_then(|c| c["groups"].as_array())
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|g| g["models"].as_array().cloned().unwrap_or_default())
+                    .filter_map(|m| {
+                        let id = m["id"].as_str()?.to_owned();
+                        let label = m["label"].as_str().unwrap_or(&id).to_owned();
+                        Some((key.to_owned(), id, label, key.to_owned()))
+                    })
+                    .collect(),
+            }
+        };
+        let lead_keys: Vec<String> = houses.iter().filter(|h| h.3).map(|h| h.0.clone()).collect();
         let mut picks: Vec<(String, String, String, Option<String>)> = if house == "favorites" {
             starred
                 .iter()
                 .map(|(backend, id)| {
-                    let known = listed.iter().find(|l| l.0 == backend && l.1 == id);
-                    (
-                        backend.clone(),
-                        id.clone(),
-                        known.map_or_else(
-                            || crate::composer::controls::model_label(id),
-                            |l| l.2.to_owned(),
-                        ),
-                        Some(known.map_or(backend.clone(), |l| l.3.to_owned())),
-                    )
+                    let key = house_of(backend);
+                    let label = models_of(key)
+                        .into_iter()
+                        .find(|m| &m.1 == id)
+                        .map_or_else(|| crate::composer::controls::model_label(id), |m| m.2);
+                    (backend.clone(), id.clone(), label, Some(house_label(key)))
                 })
                 .collect()
-        } else {
-            listed
+        } else if !needle.is_empty() {
+            lead_keys
                 .iter()
-                .filter(|l| !needle.is_empty() || house_of(l.0) == house)
-                .map(|l| {
-                    (
-                        l.0.to_owned(),
-                        l.1.to_owned(),
-                        l.2.to_owned(),
-                        (!needle.is_empty()).then(|| l.3.to_owned()),
-                    )
+                .flat_map(|key| models_of(key))
+                .map(|m| (m.0, m.1, m.2, Some(house_label(&m.3))))
+                .collect()
+        } else {
+            models_of(&house)
+                .into_iter()
+                .map(|m| {
+                    let detail = match m.3.as_str() {
+                        "o8" => Some("Managed model · built-in Pi agent".to_owned()),
+                        "pi" => Some("Your Pi setup and its model".to_owned()),
+                        _ => None,
+                    };
+                    (m.0, m.1, m.2, detail)
                 })
                 .collect()
         };
@@ -836,6 +1043,7 @@ impl Surface {
                     .to_lowercase()
                     .contains(&needle)
         });
+        picks.truncate(300);
         picks.sort_by_key(|(backend, id, ..)| {
             !starred.iter().any(|f| &f.0 == backend && &f.1 == id)
         });
@@ -850,9 +1058,9 @@ impl Surface {
             .gap(px(1.));
         let empty = picks.is_empty();
         for (backend, id, label, detail) in picks {
-            let selected = backend == lead_backend && id == current
-                || (lead_backend == "fable" && backend == "fable" && id == current);
+            let selected = backend == lead_backend && id == current;
             let favorite = starred.iter().any(|f| f.0 == backend && f.1 == id);
+            let enabled = !busy && ready_house(house_of(&backend));
             let (pick_backend, pick_id) = (backend.clone(), id.clone());
             let (star_backend, star_id) = (backend.clone(), id.clone());
             rows = rows.child(
@@ -866,7 +1074,7 @@ impl Surface {
                         self.composer_button(
                             &format!("model-{id}"),
                             "",
-                            !busy,
+                            enabled,
                             cx,
                             move |s, w, cx| s.choose_lead(&pick_backend, &pick_id, w, cx),
                         )
@@ -913,22 +1121,33 @@ impl Surface {
                     ),
             );
         }
+        let loading = catalogues.get(house.as_str()).is_some_and(Value::is_null);
         if empty {
+            let note = if loading {
+                "Loading models…".into()
+            } else if house == "favorites" && needle.is_empty() {
+                "Star a model to keep it here.".into()
+            } else if needle.is_empty() {
+                format!("{} has no models available.", house_label(&house))
+            } else {
+                "No models match this search.".into()
+            };
+            rows = rows.child(light(note, 11., theme().text_muted).p(px(12.)));
+        } else if house != "favorites" && needle.is_empty() && !ready_house(&house) {
             rows = rows.child(
                 light(
-                    if house == "favorites" && needle.is_empty() {
-                        "Star a model to keep it here."
-                    } else {
-                        "No models match this search."
-                    },
+                    format!(
+                        "Sign in to {} in Settings to lead with it.",
+                        house_label(&house)
+                    ),
                     11.,
                     theme().text_muted,
                 )
-                .p(px(12.)),
+                .p(px(8.)),
             );
         }
-        // Native keeps classic's free model id as the last row: any id the
-        // lead's runtime accepts, without changing runtime.
+        // Native keeps a free model id as the last row: any id the lead's
+        // runtime accepts, without changing runtime.
         if !query.is_empty() {
             let custom = query.clone();
             rows = rows.child(
@@ -963,10 +1182,11 @@ impl Surface {
                     .px(px(8.))
                     .child(light("Orchestrator", 11., theme().text_muted))
                     .child(light(
-                        houses
-                            .iter()
-                            .find(|h| h.0 == house)
-                            .map_or("Favorites", |h| h.1),
+                        if house == "favorites" {
+                            "Favorites".to_owned()
+                        } else {
+                            house_label(&house)
+                        },
                         11.,
                         theme().text_muted,
                     )),

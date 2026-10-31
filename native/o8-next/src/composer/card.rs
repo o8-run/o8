@@ -5,6 +5,63 @@ use gpui::{AnyElement, Div, KeyDownEvent, SharedString, Stateful};
 #[path = "context_view.rs"]
 mod context_view;
 
+/// The mic and primary button in their own cached view: the draft turning
+/// empty or non-empty redraws only this, never the session (typing budget).
+struct PrimaryView {
+    owner: gpui::WeakEntity<Surface>,
+    _subscription: gpui::Subscription,
+}
+impl gpui::Render for PrimaryView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.owner
+            .update(cx, |s, cx| s.primary_cluster(window, cx))
+            .unwrap()
+    }
+}
+
+/// The dictation mic drawn with quads at `scale`: a stroked path would
+/// activate viewport-sized GPU/MSAA targets, and this fits the quad pass.
+fn mic_glyph(color: gpui::Rgba, scale: f32) -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            // Scale about the 14x20 box's center.
+            let (ox, oy) = (7. * (1. - scale), 10. * (1. - scale));
+            let rect = |x: f32, y: f32, w: f32, h: f32| {
+                Bounds::new(
+                    bounds.origin + point(px(ox + x * scale), px(oy + y * scale)),
+                    size(px(w * scale), px(h * scale)),
+                )
+            };
+            let stroke = px(1.3 * scale);
+            window.paint_quad(
+                gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
+                    .corner_radii(px(3. * scale))
+                    .border_widths(stroke),
+            );
+            window.paint_quad(
+                gpui::outline(rect(1., 7., 12., 8.), color, Default::default())
+                    .corner_radii(gpui::Corners {
+                        top_left: px(0.),
+                        top_right: px(0.),
+                        bottom_right: px(6. * scale),
+                        bottom_left: px(6. * scale),
+                    })
+                    .border_widths(gpui::Edges {
+                        top: px(0.),
+                        right: stroke,
+                        bottom: stroke,
+                        left: stroke,
+                    }),
+            );
+            window.paint_quad(gpui::fill(rect(6.35, 14., 1.3, 4.), color));
+            window.paint_quad(gpui::fill(rect(4., 17.35, 6., 1.3), color));
+        },
+    )
+    .w(px(14.))
+    .h(px(20.))
+}
+
 /// An icon-only footer control: a 28px target with the label as its tooltip.
 fn icon_only(button: Stateful<Div>, path: &str, color: gpui::Rgba, label: String) -> Stateful<Div> {
     let label = SharedString::from(label);
@@ -25,8 +82,6 @@ impl Surface {
     ) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
         let picked = routing["pickedMode"].as_str().unwrap_or("fast");
-        let plan = routing["permissionMode"] == "plan";
-        let access = if plan { "Plan only" } else { "Full access" };
         let enabled = self.queue_ready
             && !self.saving
             && !self.composer.read(cx).controls.busy
@@ -38,18 +93,7 @@ impl Surface {
             .gap(px(6.))
             // The desktop footer's icon-only mode, permission and attach controls.
             .child(self.mode_chip(picked, enabled, cx))
-            .child(icon_only(
-                self.composer_button("composer-access", "", enabled, cx, |s, w, cx| {
-                    s.open_composer_picker("access", w, cx)
-                }),
-                if plan {
-                    "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Zm0 0v6h6M8 13h8M8 17h5"
-                } else {
-                    "M7 11h10a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z M8 11V7a4 4 0 0 1 7.5-2M12 15v2"
-                },
-                if plan { theme().accent } else { crate::theme::brand_orange() },
-                format!("Permissions: {access}"),
-            ))
+            // Permission lives in the "+" drawer (Q 2026-10-31).
             .child(icon_only(
                 self.track_prompt_anchor(
                     self.composer_button("composer-attach", "", enabled, cx, |s, w, cx| {
@@ -73,80 +117,20 @@ impl Surface {
                     },
                 ))
             });
-        // MicButton's colors: recording and errors red, transcribing accent.
-        let color = match self.dictation {
-            super::DictationState::Listening => theme().danger,
-            super::DictationState::Finishing => theme().accent,
-            _ => theme().text_secondary,
-        };
         let trailing = div()
             .flex()
             .items_center()
             .gap(px(6.))
-            .child(self.lead_chip(&routing, enabled, cx))
-            .children(self.thinking_chip(&routing, enabled, cx))
+            // The bars sit against the model name, one quiet group.
             .child(
-                self.mic_button(enabled, cx).child(
-                    canvas(
-                        |_, _, _| (),
-                        move |bounds, _, window, _| {
-                            // A stroked path activates viewport-sized GPU/MSAA
-                            // targets. This small icon fits the existing quad pass.
-                            let rect = |x, y, w, h| {
-                                Bounds::new(bounds.origin + point(px(x), px(y)), size(px(w), px(h)))
-                            };
-                            let stroke = px(1.3);
-                            window.paint_quad(
-                                gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
-                                    .corner_radii(px(3.))
-                                    .border_widths(stroke),
-                            );
-                            window.paint_quad(
-                                gpui::outline(rect(1., 7., 12., 8.), color, Default::default())
-                                    .corner_radii(gpui::Corners {
-                                        top_left: px(0.),
-                                        top_right: px(0.),
-                                        bottom_right: px(6.),
-                                        bottom_left: px(6.),
-                                    })
-                                    .border_widths(gpui::Edges {
-                                        top: px(0.),
-                                        right: stroke,
-                                        bottom: stroke,
-                                        left: stroke,
-                                    }),
-                            );
-                            window.paint_quad(gpui::fill(rect(6.35, 14., 1.3, 4.), color));
-                            window.paint_quad(gpui::fill(rect(4., 17.35, 6., 1.3), color));
-                        },
-                    )
-                    .w(px(14.))
-                    .h(px(20.)),
-                ),
+                div()
+                    .flex()
+                    .items_center()
+                    .child(self.lead_chip(&routing, enabled, cx))
+                    .children(self.thinking_chip(&routing, enabled, cx)),
             )
             .child(self.voice_button(cx))
-            .child(
-                self.composer_button(
-                    "send",
-                    if self.saving { "…" } else { "↑" },
-                    enabled,
-                    cx,
-                    |s, window, cx| {
-                        s.send(None, cx);
-                        s.composer.read(cx).focus.focus(window);
-                    },
-                )
-                // Round send target, as in the desktop composer. White reads on the
-                // accent in every appearance; the glass background token is transparent.
-                .w(px(26.))
-                .px(px(0.))
-                .rounded_full()
-                .justify_center()
-                .text_size(px(14.))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .bg(theme().accent)
-                .text_color(gpui::white()),
-            );
+            .child(self.primary_view(cx));
         div()
             .flex()
             .flex_wrap()
@@ -163,33 +147,140 @@ impl Surface {
             .into_any_element()
     }
 
-    /// Dictation for this chat (MicButton, toggle mode): a tap starts it, the
-    /// next tap stops it and sends what was said. Ctrl+Z held dictates too.
-    fn mic_button(&self, enabled: bool, cx: &mut Context<Self>) -> Stateful<Div> {
-        let state = self.dictation;
-        let tip = match state {
-            super::DictationState::Off => {
-                "Click to dictate, click again to finish (Ctrl+Z hold also works)"
-            }
-            super::DictationState::Starting => "Waiting for the microphone… click to cancel",
-            super::DictationState::Listening => "Click to finish dictation",
-            super::DictationState::Finishing => "Transcribing…",
+    fn primary_view(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let view = if let Some(view) = &self.composer.read(cx).controls.send_view {
+            view.clone()
+        } else {
+            let owner = cx.entity();
+            let view: gpui::AnyView = cx
+                .new(|cx| PrimaryView {
+                    owner: owner.downgrade(),
+                    _subscription: cx.observe(&owner, |_, _, cx| cx.notify()),
+                })
+                .into();
+            self.composer
+                .update(cx, |i, _| i.controls.send_view = Some(view.clone()));
+            view
         };
-        // A recording can always be stopped; transcribing finishes uninterrupted.
-        let enabled = match state {
-            super::DictationState::Off => enabled,
-            super::DictationState::Finishing => false,
-            _ => true,
-        };
-        self.composer_button("composer-microphone", "", enabled, cx, |_, window, cx| {
-            window.dispatch_action(Box::new(super::ToggleDictation), cx);
-        })
-        .w(px(26.))
-        .when(state == super::DictationState::Listening, |button| {
-            button.bg(theme().danger_surface)
-        })
-        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
+        let mut style = gpui::StyleRefinement::default();
+        style.size.width = Some(px(28.).into());
+        style.size.height = Some(px(28.).into());
+        style.flex_shrink = Some(0.);
+        view.cached(style).into_any_element()
     }
+
+    /// Q 2026-10-31: an empty composer offers voice first. The round primary
+    /// button is the dictation mic and morphs into Send once there is a
+    /// draft. v1; the motion will be refined.
+    fn primary_cluster(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let enabled = self.queue_ready
+            && !self.saving
+            && !self.composer.read(cx).controls.busy
+            && self.composer.read(cx).controls.pending_images == 0;
+        let drafted = {
+            let input = self.composer.read(cx);
+            !input.text.trim().is_empty()
+                || !input.controls.images.is_empty()
+                || !input.controls.files.is_empty()
+        };
+        // Dictation fills the draft as it listens; the button stays the mic
+        // (stop) until it finishes, then turns into Send.
+        let drafted = drafted && self.dictation == super::DictationState::Off;
+        let (morph, moving) = self.composer.update(cx, |i, _| {
+            i.controls.send_morph.set(drafted);
+            i.controls.send_morph.value()
+        });
+        if moving {
+            window.request_animation_frame();
+        }
+        // One voice entry point: with a draft, Ctrl+Z hold still dictates
+        // into it; a mockup pass will revisit mic and Live side by side.
+        div()
+            .size(px(28.))
+            .child(self.primary_button(morph, enabled, cx))
+            .into_any_element()
+    }
+
+    /// The round primary button. `morph` runs 0 (empty: dictate) to 1 (draft:
+    /// send); the mic shrinks and fades as the arrow grows in, and the press
+    /// follows whichever side of the midpoint the button is on.
+    fn primary_button(&self, morph: f32, enabled: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+        use super::DictationState::*;
+        let sending = morph >= 0.5;
+        let state = self.dictation;
+        let (id, tip, enabled) = if sending {
+            ("send", "Send", enabled)
+        } else {
+            (
+                "composer-microphone",
+                match state {
+                    Off => "Talk first: click to dictate, click again to finish",
+                    Starting => "Waiting for the microphone… click to cancel",
+                    Listening => "Click to finish dictation",
+                    Finishing => "Polishing…",
+                },
+                match state {
+                    Off => enabled,
+                    Finishing => false,
+                    _ => true,
+                },
+            )
+        };
+        let white = crate::theme::on_accent();
+        let recording = !sending && matches!(state, Starting | Listening);
+        let button = self
+            .composer_button(id, "", enabled, cx, move |s, window, cx| {
+                if sending {
+                    s.send(None, cx);
+                    s.composer.read(cx).focus.focus(window);
+                } else {
+                    window.dispatch_action(Box::new(super::ToggleDictation), cx);
+                }
+            })
+            .relative()
+            .w(px(28.))
+            .h(px(28.))
+            .px(px(0.))
+            .rounded_full()
+            .justify_center()
+            .bg(if recording {
+                theme().danger
+            } else {
+                theme().accent
+            })
+            .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into());
+        let layer = || {
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+        };
+        if self.saving && sending {
+            return button.child(layer().text_color(white).child("…"));
+        }
+        let mic = if recording {
+            layer()
+                .child(div().size(px(9.)).rounded(px(2.)).bg(white))
+                .into_any_element()
+        } else {
+            layer()
+                .opacity((1. - morph) * if state == Finishing { 0.6 } else { 1. })
+                .child(mic_glyph(white, 1. - 0.45 * morph))
+                .into_any_element()
+        };
+        let grow = 0.6 + 0.4 * morph;
+        button
+            .child(mic)
+            .child(layer().opacity(morph).child(crate::icon::stroke(
+                "M12 19V5M5 12l7-7 7 7",
+                white,
+                15. * grow,
+                2.,
+            )))
+    }
+
     /// GPT Live for this chat (ManagedLiveButton), beside the dictation mic
     /// as in the desktop footer: a waveform that turns accent while voice
     /// connects or is live. The shell owns the session; Caps Lock toggles it.

@@ -1,5 +1,4 @@
 //! Slash suggestions, intent chips and prompt insertion beside the native editor.
-use super::prompt_view::small;
 use super::*;
 use crate::composer::commands;
 use gpui::{AnyElement, KeyDownEvent};
@@ -30,11 +29,16 @@ impl Surface {
                 .update(cx, |i, _| i.controls.prompt.view = Some(view.clone()));
             view
         };
-        // Reserve one toolbar row so changing the draft never resizes the
-        // transcript. Only slash/filter/presence changes invalidate this scene.
+        // The row holds only a command result now; it takes no height until
+        // there is one. Only slash/filter/presence changes invalidate this scene.
+        let row = if self.composer.read(cx).controls.prompt.feedback.is_empty() {
+            0.
+        } else {
+            34.
+        };
         let mut style = gpui::StyleRefinement::default();
         style.size.width = Some(gpui::relative(1.).into());
-        style.size.height = Some(px(34.).into());
+        style.size.height = Some(px(row).into());
         style.flex_shrink = Some(0.);
         view.cached(style)
     }
@@ -97,18 +101,6 @@ impl Surface {
     }
     pub(super) fn composer_intent(&self, cx: &mut Context<Self>) -> AnyElement {
         let editor = self.composer.read(cx);
-        let has_text = !editor.text.trim().is_empty();
-        let repo = self.intent_repo(cx);
-        let label = repo
-            .as_deref()
-            .and_then(|p| std::path::Path::new(p).file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "choose repo".into());
-        let branch = if editor.controls.prompt.branch.is_empty() {
-            "main".to_owned()
-        } else {
-            editor.controls.prompt.branch.clone()
-        };
         let enabled = !self.saving && !editor.controls.busy;
         let feedback = editor.controls.prompt.feedback.clone();
         div()
@@ -119,26 +111,8 @@ impl Surface {
             .gap(px(6.))
             .px(px(12.))
             .py(px(4.))
-            .when(has_text, |v| {
-                v.child(small("Work on"))
-                    .child(
-                        self.prompt_trigger("composer-intent-repo", &label, "repo", enabled, cx)
-                            .max_w(px(160.))
-                            .truncate(),
-                    )
-                    .child(small("off"))
-                    .child(
-                        self.prompt_trigger(
-                            "composer-intent-branch",
-                            &branch,
-                            "branch",
-                            enabled,
-                            cx,
-                        )
-                        .max_w(px(160.))
-                        .truncate(),
-                    )
-            })
+            // Repository and base branch moved into the "+" drawer: classic
+            // retired the Work on row (20d627a8d) and it crowded the composer.
             // Classic has no Commands or Prompts buttons: quick actions open
             // with Cmd+Shift+K or "/", saved prompts from the "+" menu.
             .when(!feedback.is_empty(), |v| {

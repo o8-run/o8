@@ -24,8 +24,18 @@ pub(crate) struct State {
     pub attachment_target: bool,
     pub images_enabled: bool,
     pub pending_images: usize,
-    /// The model picker's selected house: favorites, claude or codex.
-    pub lead_house: &'static str,
+    /// The model picker's selected house: favorites, a lead house or a runtime id.
+    pub lead_house: String,
+    /// dispatchableRuntimes from operator defaults; Null until first asked.
+    pub inventory: Value,
+    /// A background thumbnail pass for the "+" drawer is running.
+    pub thumbs_pending: bool,
+    /// The cached mic/Send view, redrawn when the draft empties or fills.
+    pub send_view: Option<gpui::AnyView>,
+    /// Mic-to-Send morph of the primary button: open while there is a draft.
+    pub send_morph: crate::motion::Transition,
+    /// Live model catalogs of searchable houses; Null while loading.
+    pub catalogues: HashMap<String, Value>,
     /// The effort stop under the pointer while the slider is dragged.
     pub effort_preview: Option<usize>,
     /// Service tier answers by backend:model; Null while a check is running.
@@ -49,7 +59,12 @@ impl Default for State {
             attachment_target: false,
             images_enabled: false,
             pending_images: 0,
-            lead_house: "codex",
+            lead_house: "codex".into(),
+            inventory: Value::Null,
+            catalogues: HashMap::new(),
+            thumbs_pending: false,
+            send_view: None,
+            send_morph: crate::motion::Transition::settled(180, false),
             effort_preview: None,
             tiers: HashMap::new(),
         }
