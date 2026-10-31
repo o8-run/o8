@@ -67,13 +67,20 @@ A desktop launch sets `O8_PACKAGED_APP=1`, an absolute `O8_NEXT_BIN`, and
 `app-window.ts` opens the first GPUI window. An existing terminal daemon cannot
 inherit these variables; the launcher uses packaged `o8 next --binary ...` when
 there is no window. The existing CLI owns health, port and connection resolution.
-For a fresh server, a new shell-state write confirms startup beyond merely seeing
-a native PID. A server-owned window that exits during display initialization gets
-the same CLI fallback after the existing startup deadline.
+For a fresh server, the launcher requests a per-launch result file through
+`O8_NEXT_STARTUP_RESULT`. The server writes it atomically after its actual window
+attempt: `ready` after the first-paint handshake, or `failed` after reaping an
+unsuccessful child. The launcher waits for that result while checking daemon health;
+it has no independent deadline that could race a delayed startup hook. Only a
+completed failed attempt permits the CLI fallback. Result files are removed when
+the launch finishes. A missing result while the server stays healthy keeps the
+launch pending, rather than risking a second window.
 
 An advisory `flock` in the existing data directory serializes desktop launches.
 Linux `/proc` inspection reuses a running GPUI executable with the same shell-state
-path, including a server-owned window. Closing the window and launching again opens
+path, including a server-owned window, and excludes `--offscreen` hosts. CLI status
+responses are parsed from stdout and validated before use. Stderr warnings remain
+separate. Closing the window and launching again opens
 a new window against the same daemon. Repeated launches do not raise/focus an existing
 window; that desktop interaction remains open work.
 

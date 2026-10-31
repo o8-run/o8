@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { build } from 'esbuild';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -40,6 +41,14 @@ function launch(launcher: string, env: NodeJS.ProcessEnv) {
 function events(env: NodeJS.ProcessEnv): string[] {
   try { return readFileSync(env.O8_FIXTURE_LAUNCHES!, 'utf8').trim().split('\n'); } catch { return []; }
 }
+function visibleWindows(relocated: string): string[] {
+  return readdirSync('/proc').filter(pid => {
+    try {
+      return readlinkSync(`/proc/${pid}/exe`) === join(relocated, 'usr/lib/o8/o8-next')
+        && !readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').includes('--offscreen');
+    } catch { return false; }
+  });
+}
 function installation(name: string) {
   const output = join(root, name);
   const result = command(process.execPath, [stage, '--server', server, '--node-root', runtime,
@@ -59,33 +68,57 @@ function installation(name: string) {
   return { launcher, env, relocated, data };
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   mkdirSync(join(server, 'bin'), { recursive: true });
   mkdirSync(join(runtime, 'bin'), { recursive: true });
   cpSync(process.execPath, join(runtime, 'bin/node'));
   writeFileSync(join(runtime, 'LICENSE'), 'fixture runtime license');
   const cli = command(process.execPath, ['cli/esbuild.config.mjs']);
   expect(cli.status, cli.stderr).toBe(0);
-  cpSync('cli/dist/o8.mjs', join(server, 'bin/o8.mjs'));
+  const bundledCli = readFileSync('cli/dist/o8.mjs', 'utf8').replace(/^#![^\n]*\n/, '');
+  writeFileSync(join(server, 'bin/o8.mjs'), `
+    if (process.env.O8_FIXTURE_CLI_WARNING) process.stderr.write('fixture runtime warning\\n');
+    if (process.env.O8_FIXTURE_STATUS_JSON && process.argv.includes('status')) {
+      process.stdout.write(process.env.O8_FIXTURE_STATUS_JSON); process.exit(0);
+    }
+    ${bundledCli}
+  `);
   stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: server });
   writeFileSync(join(server, 'package.json'), '{"type":"commonjs"}');
+  // Exercise app-window's actual readiness handshake, timeout and child reap.
+  // Only the surrounding server services and display executable are fixtures.
+  await build({
+    entryPoints: [resolve('src/lib/next/app-window.ts')], outfile: join(server, 'native-window.cjs'),
+    bundle: true, platform: 'node', format: 'cjs', plugins: [{
+      name: 'server-services', setup(build) {
+        const services: Record<string, string> = {
+          '@/lib/data-dir-migration': 'exports.getDataDir = () => process.env.O8_DATA_DIR;',
+          '@/lib/operator/defaults': 'exports.getOperatorDefaults = async () => ({ values: {} });',
+          '@/lib/panel/api-port': 'exports.getApiBase = () => "http://127.0.0.1:" + process.env.PORT;',
+          '@/lib/providers/child-process': 'module.exports = require("node:child_process");',
+          '@/lib/providers/spawn-environment': 'exports.childEnvironment = ({env}) => ({...process.env, ...env});',
+          '@/lib/ws-auth': 'exports.getOrCreateWsToken = () => "fixture";',
+          './browser-pipe': 'exports.bindNextBrowserPipe = () => {};',
+        };
+        build.onResolve({ filter: /.*/ }, args => args.path in services
+          ? { path: args.path, namespace: 'fixture' } : undefined);
+        build.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: services[args.path] }));
+      },
+    }],
+  });
   // Fixture at the display edge; daemon lifecycle, bundled CLI, staging and launcher are real.
   writeFileSync(join(server, 'server.js'), `
     const http = require('node:http');
-    const { spawn } = require('node:child_process');
-    let app;
     http.createServer((req, res) => {
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ product: 'o8' }));
     }).listen(Number(process.env.PORT), '127.0.0.1', () => {
       if (process.env.O8_PACKAGED_APP === '1' && process.env.O8_NEXT_MAIN_WINDOW === '1') {
-        app = spawn(process.env.O8_NEXT_BIN, ['--enable-next', '--app-shell', '--server',
-          'http://127.0.0.1:' + process.env.PORT, '--shell-state',
-          require('node:path').join(process.env.O8_DATA_DIR, 'next-shell.json')],
-          { stdio: 'ignore', env: { ...process.env, O8_NEXT_PARENT_PIPE: '1' } });
+        setTimeout(() => { void require('./native-window.cjs').restoreNextWindow(); },
+          Number(process.env.O8_FIXTURE_BOOT_DELAY_MS || 0));
       }
     });
-    process.on('SIGTERM', () => { app?.kill(); process.exit(0); });
+    process.on('SIGTERM', () => { process.exit(0); });
   `);
   writeFileSync(join(server, 'ws-server.mjs'), `
     import { createServer } from 'node:net';
@@ -104,9 +137,13 @@ beforeAll(() => {
       if (getenv("O8_FIXTURE_FAIL_SERVER_WINDOW") && getenv("O8_NEXT_PARENT_PIPE")) {
         usleep(500000); return 2;
       }
+      if (getenv("O8_FIXTURE_UNPAINTED_SERVER_WINDOW") && getenv("O8_NEXT_PARENT_PIPE")) {
+        for (;;) pause();
+      }
       for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--shell-state")) {
         FILE *state = fopen(argv[i + 1], "w"); fputs("{}", state); fclose(state);
       }
+      fputs("o8-next-ready\\n", stdout); fflush(stdout);
       for (;;) pause();
     }
   `);
@@ -195,6 +232,62 @@ it.skipIf(process.platform !== 'linux')('falls back when a fresh server window e
   expect(app.exitCode).toBe(null);
   expect(JSON.parse(command(f.launcher, ['serve', 'status'], env).stdout).healthy).toBe(true);
   await stop(app);
+}, 60_000);
+
+it.skipIf(process.platform !== 'linux')('waits for delayed server bootstrap instead of racing a fallback window', async () => {
+  const f = installation('delayed-bootstrap');
+  const env = { ...f.env, O8_FIXTURE_BOOT_DELAY_MS: '18000' };
+  const app = launch(f.launcher, env);
+  await until(() => events(env).length > 0, 25_000);
+  await delay(3_000);
+  expect(events(env)).toHaveLength(1);
+  expect(app.exitCode).toBe(0);
+  expect(visibleWindows(f.relocated)).toHaveLength(1);
+  expect(existsSync(join(f.data, 'next-shell.json'))).toBe(true);
+}, 60_000);
+
+it.skipIf(process.platform !== 'linux')('waits for a delayed live-but-unpainted server window to be reaped before fallback', async () => {
+  const f = installation('unpainted');
+  const env = { ...f.env, O8_FIXTURE_BOOT_DELAY_MS: '2000', O8_FIXTURE_UNPAINTED_SERVER_WINDOW: '1' };
+  const app = launch(f.launcher, env);
+  await until(() => events(env).length === 2 && existsSync(join(f.data, 'next-shell.json')), 25_000);
+  expect(app.exitCode).toBe(null);
+  expect(visibleWindows(f.relocated)).toHaveLength(1);
+  expect(JSON.parse(command(f.launcher, ['serve', 'status'], env).stdout).healthy).toBe(true);
+  await stop(app);
+}, 60_000);
+
+it.skipIf(process.platform !== 'linux')('keeps CLI warnings separate from daemon status and already-running JSON', async () => {
+  const f = installation('warnings');
+  const env = { ...f.env, O8_FIXTURE_CLI_WARNING: '1' };
+  expect(command(f.launcher, ['serve'], env).status).toBe(0);
+  const app = launch(f.launcher, env);
+  await until(() => events(env).length === 1);
+  const repeat = command(f.launcher, [], env);
+  expect(repeat.status, repeat.stderr).toBe(0);
+  for (const status of ['null', '[]', '{"healthy":"true"}', '{"running":true,"healthy":true}', 'not-json']) {
+    const invalid = command(f.launcher, [], { ...env, O8_FIXTURE_STATUS_JSON: status });
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toContain('server is not healthy');
+  }
+  expect(events(env)).toHaveLength(1);
+  await stop(app);
+}, 60_000);
+
+it.skipIf(process.platform !== 'linux')('does not reuse an offscreen app-shell process as the desktop window', async () => {
+  const f = installation('offscreen');
+  mkdirSync(f.data, { recursive: true });
+  const hidden = spawn(join(f.relocated, 'usr/lib/o8/o8-next'),
+    ['--app-shell', '--offscreen', '--shell-state', join(f.data, 'next-shell.json')], { env: f.env, stdio: 'ignore' });
+  children.push(hidden);
+  // An offscreen host may share persisted shell state with the desktop.
+  await until(() => events(f.env).length === 1);
+  const app = launch(f.launcher, f.env);
+  await until(() => events(f.env).length === 2);
+  await until(() => app.exitCode === 0);
+  expect(events(f.env).filter(args => !args.includes('--offscreen'))).toHaveLength(1);
+  expect(visibleWindows(f.relocated)).toHaveLength(1);
+  await stop(hidden);
 }, 60_000);
 
 it.skipIf(process.platform !== 'linux')('refuses to overwrite an existing stage or accept a non-ELF runtime', () => {

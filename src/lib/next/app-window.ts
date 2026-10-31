@@ -1,6 +1,6 @@
 import { isAbsolute, join } from 'node:path';
 import type { ChildProcess } from '@/lib/providers/child-process';
-import { access, constants } from 'node:fs/promises';
+import { access, constants, rename, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { getOperatorDefaults } from '@/lib/operator/defaults';
@@ -141,4 +141,13 @@ export async function restoreNextWindow(): Promise<void> {
   await serialized(async () => {
     if (isMainWindow() || (await getOperatorDefaults()).values.experimentalNext) await apply(true);
   }).catch(() => {});
+  // A Linux launcher must wait for this actual attempt, including a delayed
+  // startup hook and the child's full first-paint timeout. Failure is published
+  // only after start() has reaped the child, so a CLI fallback cannot race it.
+  const result = process.platform === 'linux' && isMainWindow() ? process.env.O8_NEXT_STARTUP_RESULT : undefined;
+  if (result && isAbsolute(result)) {
+    const status = state.child?.exitCode === null && state.child.signalCode === null && !state.error ? 'ready' : 'failed';
+    await writeFile(`${result}.tmp`, JSON.stringify({ status }), { mode: 0o600 })
+      .then(() => rename(`${result}.tmp`, result)).catch(() => {});
+  }
 }
