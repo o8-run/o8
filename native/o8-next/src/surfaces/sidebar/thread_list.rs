@@ -97,6 +97,11 @@ pub struct ThreadList {
     /// Snoozed threads, by id, to the Unix second each comes back. An ended
     /// snooze stays until the thread is opened, so it can head the list.
     snoozes: HashMap<String, u64>,
+    /// Linked pull requests by thread id (pr_links.rs).
+    pr_links: HashMap<String, Vec<pr_links::PrLink>>,
+    pr_links_at: Option<Instant>,
+    pr_loading: bool,
+    pr_hover: Option<pr_links::PrHover>,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
@@ -171,6 +176,10 @@ impl ThreadList {
             scope_menu: None,
             row_menu: None,
             snoozes: HashMap::new(),
+            pr_links: HashMap::new(),
+            pr_links_at: None,
+            pr_loading: false,
+            pr_hover: None,
             views: HashMap::new(),
             view_menu: false,
             new_menu: false,
@@ -412,6 +421,9 @@ impl ThreadList {
         cx.notify();
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
+        if self.pr_links_due() {
+            self.load_pr_links(cx);
+        }
         if self.snooze_due() {
             self.rebuild();
             cx.notify();
@@ -924,3 +936,5 @@ mod archive_controls;
 mod inbox;
 #[path = "snooze.rs"]
 mod snooze;
+#[path = "pr_links.rs"]
+pub(crate) mod pr_links;
