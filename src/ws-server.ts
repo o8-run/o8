@@ -1,4 +1,5 @@
 import { recordInboxConversationEvent } from '@/lib/inbox/store';
+import { VoiceHostBroker, handleVoiceHostHttp } from '@/lib/ws-server/voice-host';
 import { startProductSession, endProductSession } from '@/lib/analytics/session';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
@@ -2348,6 +2349,13 @@ function recordTerminalBenchDrop(preStringified: string) {
     // Bench diagnostics never affect delivery.
   }
 }
+
+const voiceHostBroker = new VoiceHostBroker(frame => broadcast(frame));
+// Settlement may follow the last stream event, or happen in another HTTP worker.
+const voiceQueueTimer = setInterval(() => {
+  try { voiceHostBroker.refreshQueuedTerminals(); } catch (error) { console.warn('[voice-host] Queue receipt read failed:', error); }
+}, 250);
+voiceQueueTimer.unref();
 
 function broadcast(msg: Record<string, unknown>, filter?: (c: ClientState) => boolean) {
   const json = JSON.stringify(msg);
@@ -8791,6 +8799,12 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === '/internal/next/voice-host') {
+    if (!isAuthorizedInternalRequest(req)) { res.writeHead(401).end('unauthorized'); return; }
+    await handleVoiceHostHttp(req, res, voiceHostBroker);
+    return;
+  }
+
   // ── Mobile dev-host URL push ──
   // Invoked by /api/mobile/push-url after a desktop user long-presses a port
   // chip and clicks "Send to mobile". Fans out a one-shot `mobile-dev-host`
@@ -10100,6 +10114,7 @@ async function shutdown(signal: string, exitCode = 0) {
   if (browserDiscoveryTimer) clearInterval(browserDiscoveryTimer);
   if (attachedBrowserRefreshTimer) clearInterval(attachedBrowserRefreshTimer);
 
+  clearInterval(voiceQueueTimer);
   // Destroy all terminal PTY handles (tmux sessions persist independently)
   for (const [, att] of terminalAttachments) {
     if (att.batchTimer) clearTimeout(att.batchTimer);

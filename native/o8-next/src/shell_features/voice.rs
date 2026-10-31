@@ -215,6 +215,11 @@ pub(super) fn host_state(s: &mut Shell, payload: &Value, cx: &mut Context<Shell>
         Some("state") => session_state(s, payload, cx),
         Some("interrupt") => interrupt(s, payload, cx),
         Some("confirmation") => add_gate(s, &payload["confirmation"], cx),
+        // Caps Lock, relayed by the voice host. As in classic, it always stops
+        // Live but starts it only while o8 next is the active app.
+        Some("voice-toggle") if s.features.get::<Live>().on || cx.active_window().is_some() => {
+            s.toggle_voice(cx)
+        }
         Some("confirmation-dismissed") => {
             if let Some(id) = payload["confirmationId"].as_str() {
                 drop_gate(s, id, cx);

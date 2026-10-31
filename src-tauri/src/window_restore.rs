@@ -158,7 +158,7 @@ fn run_clamp_on_main_thread(app: AppHandle, intent: ClampIntent) {
     let app_for_clamp = app.clone();
     let _ = app.run_on_main_thread(move || {
         run_clamp_callback(intent, move || {
-            if let Some(window) = app_for_clamp.get_webview_window("main") {
+            if let Some(window) = crate::voice_host::classic_window(&app_for_clamp) {
                 clamp_main_window(&app_for_clamp, &window, intent);
             }
         });
