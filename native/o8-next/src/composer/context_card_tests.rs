@@ -60,7 +60,8 @@ fn native_context_meter_uses_only_spare_width_and_preserves_draft_render_isolati
         assert_eq!(meter.size.height, px(24.));
         assert!(meter.right() <= model.left());
         assert!(meter.left() >= card.left());
-        assert!(cx.debug_bounds("send").unwrap().right() <= card.right());
+        // Empty composer: the round primary button is the mic.
+        assert!(cx.debug_bounds("composer-microphone").unwrap().right() <= card.right());
         assert_eq!(cx.debug_path_count(), 0, "rings must use the icon atlas");
     }
     click("composer-input", cx);

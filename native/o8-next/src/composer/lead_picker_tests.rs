@@ -161,9 +161,17 @@ fn native_composer_lead_picker_same_runtime_only_changes_the_model(cx: &mut Test
         assert_eq!(routing["backend"], "claude");
         assert_eq!(routing["model"], "claude-opus-5-5");
     });
+    // Classic saves the model on the chat so it survives a reload; nothing
+    // else about the saved chat changes.
+    let mut after = lead_history(&fixture);
+    assert_eq!(after["model"], "claude-opus-5-5");
+    let mut expected = before;
+    for field in ["model", "savedAt"] {
+        after.as_object_mut().unwrap().remove(field);
+        expected.as_object_mut().unwrap().remove(field);
+    }
     assert_eq!(
-        lead_history(&fixture),
-        before,
-        "a model-only choice must not rewrite saved history"
+        after, expected,
+        "a model-only choice changes only the chat's model"
     );
 }

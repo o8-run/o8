@@ -525,7 +525,15 @@ impl Surface {
         });
         let requested = value.clone();
         // Classic saves a model choice on the thread too, so it survives a reload.
-        let thread = (field == "model").then(|| self.selected.clone()).flatten();
+        // The chat's own repository scopes the write, as for every other
+        // chat-history mutation; the server refuses an unscoped one.
+        let thread = (field == "model")
+            .then(|| {
+                let id = self.selected.clone()?;
+                let repo = self.sessions.iter().find(|s| s.id == id)?.repo_path.clone();
+                Some((id, repo))
+            })
+            .flatten();
         let task = cx.background_executor().spawn(async move {
             let url = client.url("/api/panel/operator-defaults").unwrap();
             let mutation = client
@@ -536,11 +544,15 @@ impl Surface {
             let confirmed: Value =
                 client.get("/api/panel/operator-defaults", &[("include", "values")])?;
             if confirmed["values"][setting] == requested {
-                if let Some(thread) = thread {
+                if let Some((thread, repo)) = thread {
                     let history = client.url("/api/v2/chat-history").unwrap();
+                    let mut body = json!({"tabId": thread, "messages": [], "model": requested});
+                    if let Some(repo) = repo {
+                        body["repoPath"] = json!(repo);
+                    }
                     client
                         .request("POST", &history)
-                        .send_json(json!({"tabId": thread, "messages": [], "model": requested}))
+                        .send_json(body)
                         .map_err(|_| {
                             "Model saved as the default, but not on this chat.".to_owned()
                         })?;
