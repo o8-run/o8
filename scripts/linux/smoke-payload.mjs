@@ -8,8 +8,8 @@ import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const args = process.argv.slice(2);
-if (args.length !== 4 || args[0] !== '--stage' || args[2] !== '--output' || !process.env.DISPLAY) {
-  console.error('Usage on a private display: smoke-payload.mjs --stage PAYLOAD --output RECEIPT_DIRECTORY');
+if (args.length !== 4 || !['--stage', '--appimage', '--installed-root'].includes(args[0]) || args[2] !== '--output' || !process.env.DISPLAY) {
+  console.error('Usage on a private display: smoke-payload.mjs --stage PAYLOAD|--appimage FILE|--installed-root ROOT --output RECEIPT_DIRECTORY');
   process.exit(1);
 }
 const output = resolve(args[3]);
@@ -21,9 +21,21 @@ mkdirSync(output);
 const root = mkdtempSync(join(tmpdir(), 'o8-linux-installed-'));
 const home = join(root, 'home');
 mkdirSync(home);
-const installed = join(root, 'installed payload');
-cpSync(resolve(args[1]), installed, { recursive: true });
-const launcher = join(installed, 'usr/bin/o8');
+let installed = join(root, 'installed payload');
+let launcher;
+if (args[0] === '--installed-root') {
+  installed = resolve(args[1]);
+  launcher = join(installed, 'usr/bin/o8');
+} else if (args[0] === '--appimage') {
+  launcher = join(root, 'o8.AppImage');
+  cpSync(resolve(args[1]), launcher);
+  installed = execFileSync(launcher, ['--o8-appimage-root'], { env: environment(join(root, 'probe')),
+    encoding: 'utf8', timeout: 60_000 }).trim();
+  if (!installed.startsWith(join(home, '.local/share/o8/appimage/'))) throw new Error('Unexpected AppImage application path');
+} else {
+  cpSync(resolve(args[1]), installed, { recursive: true });
+  launcher = join(installed, 'usr/bin/o8');
+}
 const binary = join(installed, 'usr/lib/o8/o8-next');
 const results = [];
 
@@ -31,7 +43,7 @@ function environment(data) {
   const env = { HOME: home, PATH: '/usr/bin:/bin', NODE_ENV: 'production',
     O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data };
   for (const key of ['DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS', 'LANG',
-    'VK_DRIVER_FILES', 'VK_ICD_FILENAMES', 'LIBGL_ALWAYS_SOFTWARE', 'FONTCONFIG_FILE', 'FONTCONFIG_PATH']) {
+    'VK_DRIVER_FILES', 'VK_ICD_FILENAMES', 'LIBGL_ALWAYS_SOFTWARE', 'FONTCONFIG_FILE', 'FONTCONFIG_PATH', 'APPIMAGE_EXTRACT_AND_RUN']) {
     if (process.env[key]) env[key] = process.env[key];
   }
   return env;
@@ -149,13 +161,15 @@ async function measure(terminalDaemon) {
 try {
   await measure(false);
   await measure(true);
-  rmSync(installed, { recursive: true });
+  if (args[0] !== '--installed-root') rmSync(installed, { recursive: true });
   for (const name of ['fresh-server', 'terminal-daemon']) {
     if (!existsSync(join(root, name, 'next-shell.json'))) throw new Error('Removing the installation lost user data');
   }
-  const receipt = { schema: 1, status: 'passed', installationRemovedDataPreserved: true, runs: results };
+  const receipt = { schema: 1, status: 'passed', format: args[0].slice(2),
+    installationRemovedDataPreserved: args[0] !== '--installed-root',
+    ...(args[0] === '--installed-root' ? { retainedProfileRoot: root } : {}), runs: results };
   writeFileSync(join(output, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
-  rmSync(root, { recursive: true });
+  if (args[0] !== '--installed-root') rmSync(root, { recursive: true });
 } catch (error) {
   console.error(`[linux-payload] failed: ${error.message}; diagnostic state retained at ${root}`);
   process.exitCode = 1;

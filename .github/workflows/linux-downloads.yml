@@ -1,0 +1,126 @@
+name: Linux GPUI download artifacts
+
+on:
+  pull_request:
+    branches: [main, linux/claimed-startup]
+    paths: ['scripts/linux/**', 'scripts/ci/check-linux-glibc.mjs', 'cli/**', 'src/lib/next/**', '.github/workflows/linux-downloads.yml', '.github/actions/next-linux-setup/**', 'package.json', 'package-lock.json']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-downloads-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Ubuntu 24.04 x64, unpublished GPUI packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/next-linux-setup
+        with:
+          cache-key: downloads-ubuntu24-glibc239
+      - name: Package tools and pinned build inputs
+        run: |
+          df -h /
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends rpm cpio squashfs-tools
+          mkdir -p work
+          node scripts/linux/fetch-build-inputs.mjs "$RUNNER_TEMP/linux-dl-cache" > work/linux-inputs.json
+          echo "O8_APPIMAGETOOL=$(node -p 'require("./work/linux-inputs.json").appimagetool')" >> "$GITHUB_ENV"
+          echo "O8_APPIMAGE_RUNTIME=$(node -p 'require("./work/linux-inputs.json").runtime')" >> "$GITHUB_ENV"
+      - name: Real package entry-point regressions
+        env:
+          O8_LINUX_PACKAGE_TESTS: 'true'
+        run: nice -n 10 npx vitest run tests/linux-download-packages-real-path.test.ts
+      - name: Build GPUI and export the bundled server
+        run: |
+          df -h /
+          nice -n 10 cargo build --release --locked --manifest-path native/o8-next/Cargo.toml
+          nice -n 10 npm run tauri:prebuild
+      - name: Stage, package and scan every shipped ELF
+        run: |
+          NODE_ROOT=$(node -p 'require("./work/linux-inputs.json").nodeRoot')
+          nice -n 10 node scripts/linux/stage-payload.mjs --server out/server --node-root "$NODE_ROOT" --next-binary native/o8-next/target/release/o8-next --output work/linux-stage
+          nice -n 10 node scripts/linux/package-payload.mjs --stage work/linux-stage --output work/linux-downloads --appimagetool "$O8_APPIMAGETOOL" --runtime "$O8_APPIMAGE_RUNTIME"
+          nice -n 10 node scripts/ci/check-linux-glibc.mjs --max 2.39 work/linux-downloads/*.AppImage work/linux-downloads/*.deb work/linux-downloads/*.rpm
+      - name: Save unpublished packages and their size and hash manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-gpui-review-packages
+          path: work/linux-downloads/
+          if-no-files-found: error
+          retention-days: 7
+
+  acceptance:
+    name: Fresh Ubuntu 24.04 ${{ matrix.format }} and connected windows
+    strategy:
+      fail-fast: false
+      matrix:
+        format: [deb, appimage]
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-gpui-review-packages
+          path: work/linux-downloads
+      # This runner never installs Node or builds o8. Package installation must
+      # provide its own runtime and dependencies; these tools capture evidence.
+      - name: Graphical proof prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xvfb xauth x11-xserver-utils imagemagick mesa-vulkan-drivers fonts-dejavu-core
+          chmod +x work/linux-downloads/*.AppImage
+      - name: Install DEB, fresh-server and terminal-daemon launch, then uninstall
+        if: matrix.format == 'deb'
+        run: |
+          sudo apt-get install -y ./work/linux-downloads/*.deb
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          test -n "$VK_ICD_FILENAMES"
+          xvfb-run -a -s '-screen 0 1440x1024x24 -nolisten tcp -noreset -br' /usr/lib/o8/node scripts/linux/smoke-payload.mjs --installed-root / --output work/deb-proof
+          cp /usr/lib/o8/node "$RUNNER_TEMP/o8-proof-node"
+          sudo apt-get remove -y o8
+          test ! -e /usr/bin/o8
+          "$RUNNER_TEMP/o8-proof-node" --input-type=module -e '
+            import {existsSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+            const path = "work/deb-proof/receipt.json";
+            const receipt = JSON.parse(readFileSync(path));
+            const root = receipt.retainedProfileRoot;
+            if (!root.startsWith("/tmp/o8-linux-installed-")) throw new Error("Unexpected proof profile root");
+            for (const name of ["fresh-server", "terminal-daemon"]) {
+              if (!existsSync(root + "/" + name + "/next-shell.json")) throw new Error("Uninstall lost user data");
+            }
+            receipt.installationRemovedDataPreserved = true;
+            delete receipt.retainedProfileRoot;
+            writeFileSync(path, JSON.stringify(receipt, null, 2));
+            rmSync(root, {recursive:true});
+          '
+          rm "$RUNNER_TEMP/o8-proof-node"
+      - name: AppImage fresh-server and terminal-daemon launch
+        if: matrix.format == 'appimage'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          work/linux-downloads/*.AppImage --appimage-extract
+          xvfb-run -a -s '-screen 0 1440x1024x24 -nolisten tcp -noreset -br' squashfs-root/usr/lib/o8/node scripts/linux/smoke-payload.mjs --appimage "$(find work/linux-downloads -name '*.AppImage' -print -quit)" --output work/appimage-proof
+      - name: Save first frames, launch evidence and idle RSS
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-gpui-${{ matrix.format }}-install-proof
+          path: |
+            work/deb-proof/
+            work/appimage-proof/
+          if-no-files-found: error
+          retention-days: 7

@@ -308,7 +308,7 @@ o8 should be light on the machine it runs on, and it should run on the machine y
 
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
-| Linux | A fresh Ubuntu machine installs o8, launches it, dispatches a packet, and merges it through the governed path. | active | GPUI download payload and launcher work is active; distro packages and install-to-merge proof remain outstanding. | [#1672](https://github.com/o8-run/o8/issues/1672) |
+| Linux | A fresh Ubuntu machine installs o8, launches it, dispatches a packet, and merges it through the governed path. | active | GPUI payload and launcher are merged; Ubuntu 24.04 package artifacts and beta downloads are under review. Publication and install-to-merge proof remain outstanding. | [#1672](https://github.com/o8-run/o8/issues/1672) |
 | Windows | The same as Linux, on Windows. | parked | Maintainer VM validation is paused; install-to-merge proof remains outstanding. | [#2204](https://github.com/o8-run/o8/issues/2204) |
 | Speed and idle-work pass | Interaction budgets hold under real load, not only at idle. | open | Conversation switching and long histories slow down under streaming load. | [#2202](https://github.com/o8-run/o8/issues/2202) |
 | Packaged release size | Reduce exported dependencies toward the 250 MiB app and 75 MiB update targets. | open | Shared package ceilings are 350 MiB installed and 110 MiB compressed. The compressed ceiling rose from 100 MiB in 0.1.815 for o8 next and comes back down once the classic UI's files leave the packaged app (#5161). CPU-specific preparation is in development under #3646. Intel delivery stays off until Intel acceptance; Apple Silicon keeps universal delivery pending #3656. | [#3545](https://github.com/o8-run/o8/issues/3545) |

@@ -7,7 +7,7 @@
 // needed GLIBC_2.39, which locks out Ubuntu 22.04, Debian 12 and their
 // derivatives before any o8 code runs.
 //
-// usage: node scripts/ci/check-linux-glibc.mjs [--max 2.35] <dir|.deb|.AppImage>...
+// usage: node scripts/ci/check-linux-glibc.mjs [--max 2.35] <dir|.deb|.rpm|.AppImage>...
 import { spawnSync } from 'node:child_process';
 import { closeSync, lstatSync, mkdtempSync, openSync, readdirSync, readSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -67,7 +67,7 @@ function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...options });
   if (result.error) throw new Error(`${command} failed to start: ${result.error.message}`);
   if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(' ')} exited ${result.status}: ${result.stderr.trim()}`);
+    throw new Error(`${command} ${args.join(' ')} exited ${result.status}: ${String(result.stderr).trim()}`);
   }
   return result.stdout;
 }
@@ -79,6 +79,11 @@ function unpack(target, scratch) {
   const destination = mkdtempSync(join(scratch, `${basename(absolute)}-`));
   if (absolute.endsWith('.deb')) {
     run('dpkg-deb', ['-x', absolute, destination]);
+    return destination;
+  }
+  if (absolute.endsWith('.rpm')) {
+    const archive = run('rpm2cpio', [absolute], { encoding: null, maxBuffer: 544 * 1024 * 1024 });
+    run('cpio', ['-idm', '--quiet', '--no-absolute-filenames'], { cwd: destination, input: archive });
     return destination;
   }
   if (absolute.endsWith('.AppImage')) {
@@ -124,7 +129,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     args.splice(maxIndex, 2);
   }
   if (!max || !/^\d+\.\d+$/.test(max) || args.length === 0) {
-    console.error('usage: node scripts/ci/check-linux-glibc.mjs [--max 2.35] <dir|.deb|.AppImage>...');
+    console.error('usage: node scripts/ci/check-linux-glibc.mjs [--max 2.35] <dir|.deb|.rpm|.AppImage>...');
     process.exit(2);
   }
   try {
