@@ -24,6 +24,7 @@ import { listQueuedComposerSends } from '@/lib/orchestrator/composer-queue';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 import { inboxListingProjection, inboxReadStatement, inboxSubject, observeInboxRuntimeRun, readInboxState, type InboxReadContext } from './store';
+import { legacyInboxPin } from './preferences';
 import { hasQueuedTurnStart, type InboxSubject } from './settlement';
 
 export class InboxMutationError extends Error {
@@ -66,7 +67,8 @@ export function runtimeInboxIdentity(agent: Pick<AgentSummary, 'sessionKey' | 'w
     ? inboxSubject('conversation', parentId, parentHistory?.repoPath ?? packet?.workspaceTargetPath ?? workspace,
       (parentHistory as { projectId?: string } | null)?.projectId ?? packet?.projectId, context?.workspaces)
     : null;
-  return { inboxSubject: parentInboxSubject ?? inboxSubject('runtime', agent.sessionKey, lane?.repoPath ?? workspace, lane?.projectId, context?.workspaces), parentInboxSubject };
+  return { inboxSubject: parentInboxSubject ?? inboxSubject('runtime', agent.sessionKey, lane?.repoPath ?? workspace, lane?.projectId, context?.workspaces),
+    parentInboxSubject, legacyPin: parentHistory ? legacyInboxPin(parentHistory as { pinned?: unknown }) : null };
 }
 function agentRunStartedAt(agent: AgentSummary): string | undefined {
   return agent.runtimeSurface?.lifecycle?.lastRunStartedAt
@@ -74,7 +76,7 @@ function agentRunStartedAt(agent: AgentSummary): string | undefined {
 }
 export function projectRuntimeInbox(agent: AgentSummary, packets = inboxPackets(), lanes: Lane[] | Map<string, InboxLane> = listLanes(), context?: InboxReadContext) {
   const identity = runtimeInboxIdentity(agent, packets, lanes, context);
-  const project = () => inboxListingProjection(identity.inboxSubject, identity.parentInboxSubject, context, agent);
+  const project = () => inboxListingProjection(identity.inboxSubject, identity.parentInboxSubject, context, agent, identity.legacyPin);
   const startedAt = agentRunStartedAt(agent);
   if (startedAt) {
     observeInboxRuntimeRun(identity.inboxSubject, startedAt, context);

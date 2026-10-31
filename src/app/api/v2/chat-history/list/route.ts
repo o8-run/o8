@@ -15,7 +15,8 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { orchestratorDisplayTitle, stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { deleteCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
-import { createInboxReadContext, inboxListingState, type InboxListingProjection, inboxSubject } from '@/lib/inbox/store';
+import { legacyInboxPin } from '@/lib/inbox/preferences';
+import { appendInboxPreferences, createInboxReadContext, inboxListingState, type InboxListingProjection, inboxSubject } from '@/lib/inbox/store';
 import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
@@ -145,7 +146,10 @@ export async function GET(request: NextRequest) {
         // orchestrator/chat tab, even before the operator types. Those
         // threads are noise in the left rail until they have content.
         // Pinned / starred empties stay visible (operator explicitly cared).
-        const explicitlyKept = data.pinned === true
+        const subject = inboxSubject('conversation', tabId, data.repoPath, data.projectId, inbox.workspaces);
+        const settlement = inboxListingState(subject, inbox);
+        const pinnedAt = settlement?.pinnedAt === undefined ? legacyInboxPin(data) : settlement.pinnedAt;
+        const explicitlyKept = pinnedAt != null
           || data.starred === true
           || (includeOrchestrator && data.orchestratorVisible === true);
         if (isEmpty && !explicitlyKept) {
@@ -190,9 +194,7 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        const subject = inboxSubject('conversation', tabId, data.repoPath, data.projectId, inbox.workspaces);
-        const settlement = inboxListingState(subject, inbox);
-        conversations.push({
+        const row: ChatHistoryEntry = {
           tabId,
           title,
           preview,
@@ -202,7 +204,7 @@ export async function GET(request: NextRequest) {
           savedAt: data.savedAt || stat.mtime.toISOString(),
           modifiedAt: lastSpokeMs > 0 ? new Date(lastSpokeMs).toISOString() : stat.mtime.toISOString(),
           starred: data.starred || false,
-          pinned: data.pinned === true,
+          pinned: pinnedAt != null,
           planText: typeof data.planText === 'string' && data.planText.trim() ? data.planText : null,
           firstUserMessage: firstUserMsg ? firstUserMsg.content.slice(0, 500) : null,
           projectId: typeof data.projectId === 'string' && data.projectId.trim() ? data.projectId.trim() : null,
@@ -218,7 +220,9 @@ export async function GET(request: NextRequest) {
           settledOverride: settlement?.settledOverride ?? undefined,
           settledAt: settlement?.settledAt ?? undefined,
           unsettledAt: settlement?.unsettledAt ?? undefined,
-        });
+        };
+        if (settlement || pinnedAt != null) appendInboxPreferences(row, settlement, pinnedAt);
+        conversations.push(row);
       } catch { /* skip bad files */ }
     }
 
