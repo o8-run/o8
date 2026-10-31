@@ -239,6 +239,9 @@ impl Render for ThreadList {
                                                             )
                                                         }),
                                                 )
+                                                .children(row.id.as_deref().and_then(|id| {
+                                                    this.pr_badge(id, cx)
+                                                }))
                                                 .children(
                                                     this.row_settle_control(&row, keyboard, cx),
                                                 )
@@ -336,5 +339,6 @@ impl Render for ThreadList {
                 |view| view.child(self.archived_control(cx)),
             )
             .children(self.row_menu(cx))
+            .children(self.pr_hover_list(cx))
     }
 }
