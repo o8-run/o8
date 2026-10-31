@@ -32,6 +32,17 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
     let cx = &mut visual;
     cx.run_until_parked();
     draw(cx);
+    // More opens one destination at a time: Customize replaces Projects.
+    custom_click(cx, "rail-more");
+    custom_click(cx, "rail-more-projects");
+    assert!(shell.read_with(cx, |s, _| s.surfaces.projects.open));
+    custom_click(cx, "rail-more");
+    custom_click(cx, "rail-more-customize");
+    assert!(
+        !shell.read_with(cx, |s, _| s.surfaces.projects.open),
+        "Projects stays open"
+    );
+    custom_click(cx, "shell-home");
     let start = Instant::now();
     custom_click(cx, "rail-more");
     custom_click(cx, "rail-more-customize");

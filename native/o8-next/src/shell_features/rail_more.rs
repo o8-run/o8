@@ -162,7 +162,12 @@ fn menu(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement {
             row(id, glyph, label, description, current).on_click(cx.listener(
                 move |this, _, window, cx| {
                     close(this, cx);
-                    this.execute(command(), window, cx);
+                    // One destination at a time, as classic's More menu; the
+                    // open one stays as it is.
+                    if !current {
+                        this.close_rail_overlays(window, cx);
+                        this.execute(command(), window, cx);
+                    }
                 },
             ))
         }));
