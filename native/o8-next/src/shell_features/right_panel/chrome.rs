@@ -259,11 +259,16 @@ fn tool_tab(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement {
                     layout::focus(s, &id, w)
                 },
             )
-            .w(px(20.))
-            .h(px(24.))
+            // ContextualPanel's tab close: a faint 16px X inset from the
+            // tab's edge, with no hover box.
+            .w(px(16.))
+            .h(px(16.))
+            .mr(px(5.))
+            .rounded(px(4.))
+            .hover(|b| b)
             .child(crate::icon::stroke(
                 "M18 6 6 18M6 6l12 12",
-                theme().text_muted,
+                theme().text_faint,
                 10.,
                 2.5,
             )),
@@ -535,11 +540,16 @@ fn lower_tab(s: &Shell, tool: Tool, shown: Tool, cx: &mut Context<Shell>) -> Any
                 cx,
                 move |s, w, cx| close_lower_tab(s, tool, w, cx),
             )
-            .w(px(20.))
-            .h(px(24.))
+            // ContextualPanel's tab close: a faint 16px X inset from the
+            // tab's edge, with no hover box.
+            .w(px(16.))
+            .h(px(16.))
+            .mr(px(5.))
+            .rounded(px(4.))
+            .hover(|b| b)
             .child(crate::icon::stroke(
                 "M18 6 6 18M6 6l12 12",
-                theme().text_muted,
+                theme().text_faint,
                 10.,
                 2.5,
             )),
