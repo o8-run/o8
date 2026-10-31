@@ -724,6 +724,8 @@ mod folder_tests;
 mod settle_tests;
 #[path = "pr_links_tests.rs"]
 mod pr_links_tests;
+#[path = "detailed_tests.rs"]
+mod detailed_tests;
 
 #[path = "icon_tests.rs"]
 mod icon_tests;
