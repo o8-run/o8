@@ -14,6 +14,7 @@ const runtime = join(root, 'runtime');
 const binary = join(root, 'o8-next');
 const stage = resolve('scripts/linux/stage-payload.mjs');
 const children: ChildProcess[] = [];
+const pausedWorkers = new Set<number>();
 const profiles: Array<{ launcher: string; env: NodeJS.ProcessEnv }> = [];
 
 function command(file: string, args: string[], env = process.env) {
@@ -118,6 +119,17 @@ beforeAll(async () => {
           '@/lib/providers/spawn-environment': 'exports.childEnvironment = ({env}) => ({...process.env, ...env});',
           '@/lib/ws-auth': 'exports.getOrCreateWsToken = () => "fixture";',
           './browser-pipe': 'exports.bindNextBrowserPipe = () => {};',
+          'node:fs': `
+            const fs = require('fs');
+            module.exports = { ...fs, renameSync(from, to) {
+              const result = fs.renameSync(from, to);
+              if (process.env.O8_FIXTURE_PAUSE_CLAIM && to.endsWith('/claimed')) {
+                fs.writeFileSync(process.env.O8_DATA_DIR + '/window-claim-paused.json', JSON.stringify({ pid: process.pid }));
+                process.kill(process.pid, 'SIGSTOP');
+              }
+              return result;
+            } };
+          `,
         };
         build.onResolve({ filter: /.*/ }, args => args.path in services
           ? { path: args.path, namespace: 'fixture' } : undefined);
@@ -125,23 +137,45 @@ beforeAll(async () => {
       },
     }],
   });
+  writeFileSync(join(server, 'window-bootstrap.cjs'), `
+    process.on('SIGTERM', () => process.exit(0));
+    void require('./native-window.cjs').restoreNextWindow().then(() => {
+      require('node:fs').writeFileSync(process.env.O8_DATA_DIR + '/window-bootstrap-finished', 'done');
+    });
+  `);
   // Fixture at the display edge; daemon lifecycle, bundled CLI, staging and launcher are real.
   writeFileSync(join(server, 'server.js'), `
     const http = require('node:http');
+    const fs = require('node:fs');
+    let windowWorker;
     http.createServer((req, res) => {
+      if (fs.existsSync(process.env.O8_DATA_DIR + '/fixture-unhealthy')) {
+        res.statusCode = 503;
+        fs.writeFileSync(process.env.O8_DATA_DIR + '/health-probe-failed', 'done');
+      }
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ product: 'o8' }));
     }).listen(Number(process.env.PORT), '127.0.0.1', () => {
       if (process.env.O8_PACKAGED_APP === '1' && process.env.O8_NEXT_MAIN_WINDOW === '1'
         && !process.env.O8_FIXTURE_SKIP_WINDOW_BOOTSTRAP) {
         setTimeout(async () => {
+          if (process.env.O8_FIXTURE_PAUSE_CLAIM) {
+            // Keep HTTP independent while pausing the real claim-to-spawn hook.
+            windowWorker = require('node:child_process').spawn(process.execPath,
+              [__dirname + '/window-bootstrap.cjs'], { stdio: 'ignore', env: process.env });
+            return;
+          }
           await require('./native-window.cjs').restoreNextWindow();
           require('node:fs').writeFileSync(process.env.O8_DATA_DIR + '/window-bootstrap-finished', 'done');
         },
           Number(process.env.O8_FIXTURE_BOOT_DELAY_MS || 0));
       }
     });
-    process.on('SIGTERM', () => { process.exit(0); });
+    process.on('SIGTERM', () => {
+      windowWorker?.kill('SIGCONT');
+      windowWorker?.kill('SIGTERM');
+      process.exit(0);
+    });
   `);
   writeFileSync(join(server, 'ws-server.mjs'), `
     import { createServer } from 'node:net';
@@ -179,7 +213,11 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
+  for (const pid of pausedWorkers) {
+    try { process.kill(pid, 'SIGCONT'); } catch { /* Worker already exited. */ }
+  }
   await Promise.all(children.map(stop));
+  for (const { env } of profiles) rmSync(join(env.O8_DATA_DIR!, 'fixture-unhealthy'), { force: true });
   const stopped = profiles.filter(({ env }) => existsSync(join(env.O8_DATA_DIR!, 'serve-state.json'))
     || existsSync(join(env.O8_DATA_DIR!, 'serve.pid')))
     .map(({ launcher, env }) => command(launcher, ['serve', 'stop'], env));
@@ -381,6 +419,56 @@ it.skipIf(process.platform !== 'linux')('waits for a server attempt claimed just
   expect(again.child.exitCode).toBe(0);
   expect(events(env)).toHaveLength(1);
 }, 110_000);
+
+it.skipIf(process.platform !== 'linux')('retains ownership through a health failure while claimed and a concurrent retry', async () => {
+  const f = installation('claimed-health-failure');
+  const env = { ...f.env, O8_FIXTURE_PAUSE_CLAIM: '1', O8_FIXTURE_BOOT_DELAY_MS: '2000' };
+  const app = captureLaunch(f.launcher, env);
+  const paused = join(f.data, 'window-claim-paused.json');
+  await until(() => existsSync(paused));
+  const { pid } = JSON.parse(readFileSync(paused, 'utf8'));
+  pausedWorkers.add(pid);
+  writeFileSync(join(f.data, 'fixture-unhealthy'), 'unhealthy');
+  await until(() => existsSync(join(f.data, 'health-probe-failed')));
+  await delay(2_000); // Let the launcher's failed status probe settle.
+  rmSync(join(f.data, 'fixture-unhealthy'));
+  const retry = captureLaunch(f.launcher, env);
+  await until(() => retry.child.exitCode !== null || events(env).length > 0);
+  process.kill(pid, 'SIGCONT');
+  await until(() => existsSync(join(f.data, 'window-bootstrap-finished')));
+  await app.closed;
+  expect(events(env)).toHaveLength(1);
+  expect(events(env)[0]).toContain('|<parent-pipe>');
+  expect(visibleWindows(f.relocated)).toHaveLength(1);
+  expect(app.child.exitCode).toBe(0);
+  await stop(retry.child);
+}, 60_000);
+
+it.skipIf(process.platform !== 'linux')('honors a live claim held beyond the grace on a later launch', async () => {
+  const f = installation('claimed-past-grace');
+  const env = { ...f.env, O8_FIXTURE_PAUSE_CLAIM: '1', O8_FIXTURE_BOOT_DELAY_MS: '2000' };
+  const app = captureLaunch(f.launcher, env);
+  const paused = join(f.data, 'window-claim-paused.json');
+  await until(() => existsSync(paused));
+  const { pid } = JSON.parse(readFileSync(paused, 'utf8'));
+  pausedWorkers.add(pid);
+  await app.closed; // 60-second startup wait plus the 20-second claim grace.
+  expect(app.child.exitCode).toBe(1);
+  await launchUnlocked(f.data, env);
+  const retry = captureLaunch(f.launcher, env);
+  await until(() => retry.child.exitCode !== null || events(env).length > 0);
+  process.kill(pid, 'SIGCONT');
+  await until(() => existsSync(join(f.data, 'window-bootstrap-finished')));
+  expect(events(env)).toHaveLength(1);
+  expect(events(env)[0]).toContain('|<parent-pipe>');
+  expect(visibleWindows(f.relocated)).toHaveLength(1);
+  const again = captureLaunch(f.launcher, env);
+  await again.closed;
+  expect(again.child.exitCode).toBe(0);
+  expect(readdirSync(f.data).filter(name => name.startsWith('linux-window-startup-'))).toEqual([]);
+  expect(events(env)).toHaveLength(1);
+  await stop(retry.child);
+}, 120_000);
 
 it.skipIf(process.platform !== 'linux')('preserves unrelated serve failures with a healthy daemon and reuses only allowed error codes', async () => {
   const f = installation('serve-failures');
