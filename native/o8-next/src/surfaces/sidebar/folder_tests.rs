@@ -54,7 +54,7 @@ fn hover_click(cx: &mut VisualTestContext, row: &str, selector: &str) {
 
 #[gpui::test]
 fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestAppContext) {
-    let fixture = Fixture::start_mode(true, "--shell --composer --sidebar");
+    let fixture = Fixture::start_mode(true, "--shell --composer --sidebar --settings");
     let (first, second) = ("thoughts-composer-first", "thoughts-composer-second");
     // The owned fixture repository is the only one that admits New thread.
     let repo = conversations(&fixture)
@@ -171,7 +171,13 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
         s.state.sidebar_closed_folders.is_empty()
     });
 
-    // A folder's New thread starts a conversation in that repository.
+    // A folder's New thread starts a conversation in that repository, on the
+    // operator's lead rather than the server's runtime placeholder.
+    fixture
+        .client
+        .request("POST", &fixture.client.url("/api/panel/operator-defaults").unwrap())
+        .send_json(json!({"orchestratorBackend": "claude", "orchestratorModel": "claude-opus-5-5"}))
+        .unwrap();
     hover_click(
         &mut visual,
         &format!("sidebar-folder-{}", names[0]),
@@ -186,6 +192,9 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
         .get("/api/v2/chat-history", &[("tabId", &created)])
         .unwrap();
     assert_eq!(record["repoPath"], paths[0]);
+    assert_eq!(record["backend"], "claude");
+    // The lead's model, not the placeholder "claude-code" that failed to send.
+    assert_eq!(record["model"], "claude-opus-5-5");
     // The shell opened it rather than putting the previous thread back.
     for _ in 0..3 {
         draw(&mut visual);
