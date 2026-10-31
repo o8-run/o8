@@ -27,6 +27,11 @@ async function until(check: () => boolean, timeout = 20_000) {
   }
   throw new Error('Packaged entry point did not reach the expected state');
 }
+async function launchUnlocked(data: string, env: NodeJS.ProcessEnv) {
+  // A PID/launch receipt appears before the launcher releases its lock. A
+  // concurrent click intentionally returns success without inspecting status.
+  await until(() => command('flock', ['--nonblock', join(data, 'linux-desktop.lock'), '/usr/bin/true'], env).status === 0);
+}
 async function stop(child: ChildProcess) {
   if (child.exitCode !== null || child.signalCode !== null) return;
   const exited = once(child, 'exit');
@@ -213,6 +218,7 @@ it.skipIf(process.platform !== 'linux')('attaches to a terminal-started daemon a
   const concurrent = launch(f.launcher, f.env);
   await until(() => events(f.env).length === 1);
   await until(() => app.exitCode === 0 || concurrent.exitCode === 0);
+  await launchUnlocked(f.data, f.env);
   expect(events(f.env)[0]).toContain(`--server|http://127.0.0.1:${daemon.apiPort}`);
   expect(events(f.env)[0]).toContain(`--shell-state|${f.data}/next-shell.json`);
   expect(JSON.parse(command(f.launcher, ['serve', 'status'], f.env).stdout).pid).toBe(daemon.pid);
@@ -263,6 +269,7 @@ it.skipIf(process.platform !== 'linux')('keeps CLI warnings separate from daemon
   expect(command(f.launcher, ['serve'], env).status).toBe(0);
   const app = launch(f.launcher, env);
   await until(() => events(env).length === 1);
+  await launchUnlocked(f.data, env);
   const repeat = command(f.launcher, [], env);
   expect(repeat.status, repeat.stderr).toBe(0);
   for (const status of ['null', '[]', '{"healthy":"true"}', '{"running":true,"healthy":true}', 'not-json']) {
