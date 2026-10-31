@@ -123,7 +123,8 @@ fn native_composer_mode_survives_reopen_through_the_picker(app: &mut TestAppCont
     ));
     app.update(|cx| cx.set_global(crate::composer::mode_store::TestRoot(root.clone())));
     let (surface, visual) = open(app, &fixture);
-    click("composer-mode", visual);
+    click("composer-attach", visual);
+    click("attach-mode", visual);
     click("mode-multitask", visual);
     let path = surface.read_with(visual, |s, cx| {
         s.composer.read(cx).controls.prompt.store.clone().unwrap()

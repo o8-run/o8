@@ -8,6 +8,14 @@ impl Surface {
         // The image loader owns the list's scroll handler. Share that deferred
         // callback so pagination never replaces image-cache maintenance.
         self.load_images(cx);
+        // Far enough above the latest message, the jump button appears.
+        let below = self.list.max_offset_for_scrollbar().height
+            + self.list.scroll_px_offset_for_scrollbar().y;
+        let away = below > px(240.);
+        if away != self.away_from_end {
+            self.away_from_end = away;
+            cx.notify();
+        }
         if self.history_error.is_none()
             && -self.list.scroll_px_offset_for_scrollbar().y <= px(TOP_LOAD_THRESHOLD_PX)
         {

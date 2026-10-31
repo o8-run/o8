@@ -86,7 +86,8 @@ fn native_composer_controls_mode_arrows_change_the_next_real_send(cx: &mut TestA
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     click("send-mode-steer", cx);
-    click("composer-mode", cx);
+    click("composer-attach", cx);
+    click("attach-mode", cx);
     cx.simulate_keystrokes("down enter");
     cx.run_until_parked();
     focus(&surface, cx);

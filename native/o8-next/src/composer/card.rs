@@ -91,9 +91,9 @@ impl Surface {
             .flex_wrap()
             .items_center()
             .gap(px(6.))
-            // The desktop footer's icon-only mode, permission and attach controls.
-            .child(self.mode_chip(picked, enabled, cx))
-            // Permission lives in the "+" drawer (Q 2026-10-31).
+            // One attachments control (Q 2026-10-31): files, screenshots,
+            // prompts, the worker checkout and permission all live in its
+            // drawer, so the composer keeps only what you type with.
             .child(icon_only(
                 self.track_prompt_anchor(
                     self.composer_button("composer-attach", "", enabled, cx, |s, w, cx| {
@@ -101,9 +101,12 @@ impl Surface {
                     }),
                     "attach",
                 ),
-                "M12 5v14M5 12h14",
+                PAPERCLIP,
                 theme().text_secondary,
-                "Attach files".into(),
+                format!(
+                    "Attach and settings · {}",
+                    crate::composer::controls::mode_label(picked)
+                ),
             ))
             .when(self.queue["canSteer"] == true, |d| {
                 d.child(self.composer_button(
@@ -765,6 +768,8 @@ impl Surface {
 }
 
 /// Lucide audio-lines, as the desktop Live button draws it.
+/// Lucide "paperclip" (ISC).
+const PAPERCLIP: &str = "m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48";
 /// How long a press on the empty primary button waits before it starts Live.
 const VOICE_HOLD_MS: u64 = 350;
 const WAVEFORM: &str = "M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4";

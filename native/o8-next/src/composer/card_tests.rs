@@ -157,7 +157,6 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
     draw(cx);
     let mut previous = gpui::px(0.);
     for selector in [
-        "composer-mode",
         "composer-attach",
         "composer-model",
         "composer-effort",
@@ -182,7 +181,8 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
         );
     });
     assert!(cx.debug_bounds("composer-hint").is_none());
-    click("composer-mode", cx);
+    click("composer-attach", cx);
+    click("attach-mode", cx);
     click("mode-multitask", cx);
     click("composer-attach", cx);
     click("attach-permission", cx);
@@ -224,7 +224,8 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
         production_wire_oracle(&s.queue["items"][0]["payload"]);
     });
     for (mode, selector) in [("fast", "mode-fast")] {
-        click("composer-mode", cx);
+        click("composer-attach", cx);
+        click("attach-mode", cx);
         click(selector, cx);
         cx.simulate_input(mode);
         cx.simulate_keystrokes("enter");
@@ -249,7 +250,8 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
 fn native_composer_modes_match_classic_and_saved_solo_sends_shared(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    click("composer-mode", cx);
+    click("composer-attach", cx);
+    click("attach-mode", cx);
     assert!(
         cx.debug_bounds("mode-solo").is_none(),
         "classic has no Solo choice"
@@ -302,7 +304,8 @@ include!("lead_picker_tests.rs");
 fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    click("composer-mode", cx);
+    click("composer-attach", cx);
+    click("attach-mode", cx);
     click("mode-multitask", cx);
     surface.update_in(cx, |s, window, cx| {
         assert!(s.composer.read(cx).focus.is_focused(window))

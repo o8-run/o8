@@ -70,6 +70,16 @@ impl Surface {
     ) -> gpui::AnyElement {
         self.follow_frame();
         let rows = self.rows.clone();
+        // Waiting messages ride as the list's last item, so they scroll with
+        // the turns as in classic.
+        let queued = Rc::new(self.queued_items());
+        let tail = usize::from(!queued.is_empty());
+        let count = self.list.item_count();
+        if count != rows.len() + tail && (count == rows.len() || count == rows.len() + 1) {
+            self.list.splice(rows.len()..count, tail);
+        }
+        let queue_enabled = self.queue_ready && !self.saving;
+        let steerable = Rc::new(self.queue["steerableIds"].clone());
         let painted_rows = self.painted_rows.clone();
         // Play and Copy under each finished turn's answer; a row that gains or
         // loses them is measured again.
@@ -107,7 +117,16 @@ impl Surface {
             .child(
                 list(self.list.clone(), {
                     let list_state = self.list.clone();
+                    let view = view.clone();
                     move |index, _, _| {
+                        if index >= rows.len() {
+                            return super::conversation::queue_tail(
+                                &queued,
+                                queue_enabled,
+                                &steerable,
+                                view.clone(),
+                            );
+                        }
                         let row = RetainedRow {
                             state: rows[index].clone(),
                             index,
@@ -136,7 +155,48 @@ impl Surface {
                 .min_h_0(),
             )
             .child(self.history_control(cx))
+            .when(self.away_from_end, |d| d.child(self.jump_to_end(cx)))
             .into_any_element()
+    }
+    /// Classic's round jump-to-latest button, centred over the transcript's
+    /// bottom edge while the reader is scrolled up.
+    fn jump_to_end(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .bottom(px(12.))
+            .left_0()
+            .right_0()
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .id("transcript-jump-to-end")
+                    .debug_selector(|| "transcript-jump-to-end".into())
+                    .size(px(40.))
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .bg(theme().surface_raised)
+                    .border_1()
+                    .border_color(theme().border)
+                    .shadow_md()
+                    .hover(|d| d.bg(theme().hover))
+                    .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Jump to latest".into())).into())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let last = this.list.item_count().saturating_sub(1);
+                        this.list.scroll_to_reveal_item(last);
+                        this.away_from_end = false;
+                        cx.notify();
+                    }))
+                    .child(crate::icon::stroke(
+                        "M12 5v14M5 12l7 7 7-7",
+                        theme().text,
+                        18.,
+                        2.,
+                    )),
+            )
     }
 }
 

@@ -132,6 +132,8 @@ pub(crate) struct Surface {
     /// The primary button's press count and whether that press's hold
     /// already started GPT Live.
     voice_hold: (u64, bool),
+    /// The reader is scrolled well above the latest message.
+    away_from_end: bool,
     /// Rows that end a finished turn and carry Play and Copy.
     action_rows: BTreeSet<usize>,
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
@@ -177,6 +179,7 @@ impl Surface {
             voice: VoiceState::Off,
             dictation: DictationState::Off,
             voice_hold: (0, false),
+            away_from_end: false,
             action_rows: BTreeSet::new(),
             action_feedback: Default::default(),
         }
@@ -426,7 +429,8 @@ impl Surface {
         if let Some(start) = self.following
             && let Some(last) = self.rows.last()
         {
-            self.list.scroll_to_reveal_item(self.rows.len() - 1);
+            self.list
+                .scroll_to_reveal_item(self.list.item_count().saturating_sub(1));
             let turn = self
                 .rows
                 .get(start.min(self.rows.len())..)
@@ -449,7 +453,8 @@ impl Surface {
     /// scrolling the transcript ends the follow.
     pub(crate) fn follow_frame(&mut self) {
         if self.following.is_some() && !self.rows.is_empty() {
-            self.list.scroll_to_reveal_item(self.rows.len() - 1);
+            self.list
+                .scroll_to_reveal_item(self.list.item_count().saturating_sub(1));
         }
     }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {

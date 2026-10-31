@@ -237,7 +237,20 @@ impl Surface {
                 } else {
                     "Full access"
                 };
+                let picked = crate::composer::controls::visible_mode(
+                    routing["pickedMode"].as_str(),
+                    routing["backend"].as_str(),
+                );
                 menu = menu
+                    .child(self.menu_row(
+                        "attach-mode",
+                        "Workers",
+                        crate::composer::controls::mode_label(picked),
+                        false,
+                        !busy,
+                        cx,
+                        |s, w, cx| s.open_composer_picker("mode", w, cx),
+                    ))
                     .child(self.menu_row(
                         "attach-repo",
                         "Repository",

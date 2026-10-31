@@ -205,6 +205,15 @@ fn warmth_uses_existing_clock_and_never_counts_below_zero() {
     )];
     let after_minute = estimate(&rows, "warm", "codex", "fixture", now + 60_000.).unwrap();
     assert_eq!(label("codex", Some(&after_minute), false), "Warm ~4m");
+    // Long estimates read in hours and days, not thousands of minutes.
+    let long = |minutes: f64| Estimate {
+        remaining: minutes * 60_000.,
+        requested: false,
+    };
+    assert_eq!(label("codex", Some(&long(90.)), false), "Warm ~2h");
+    assert_eq!(label("codex", Some(&long(5404.)), false), "Warm ~4d");
+    assert_eq!(label("codex", Some(&long(5404.)), true), "~4d");
+    assert!(explanation("codex", Some(&long(5404.))).contains("about 4 days left"));
     assert_eq!(label("codex", Some(&after_minute), true), "~4m");
     let expired = estimate(&rows, "warm", "codex", "fixture", now + 360_000.).unwrap();
     assert_eq!(expired.remaining, 0.);
