@@ -68,6 +68,10 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         {
             s.features.get::<Panel>().motion.set(true);
             s.features.get::<Panel>().morph.set(true);
+            // A PR tab restored while the window was too narrow opens now.
+            if s.features.get::<Panel>().selected == Tool::Prs {
+                contextual::ensure_prs(s, window, cx);
+            }
             cx.notify();
         }
         if finish_drag {
