@@ -338,6 +338,16 @@ impl Shell {
         layout::choose(self, tool, window, cx);
         self.features.get::<Panel>().menu_lower = false;
     }
+    /// Opens one pull request in the panel's PR tabs, as classic's PRs list does.
+    pub(crate) fn open_pr_in_panel(
+        &mut self,
+        repo: String,
+        number: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        open_pr(self, repo, number, window, cx);
+    }
     pub(crate) fn panel_front_key(&self) -> Option<String> {
         let panel = self.features.read::<Panel>()?;
         panel.motion.is_open().then(|| key(self, panel.current()))

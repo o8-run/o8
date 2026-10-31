@@ -21,13 +21,7 @@ pub(super) const REGISTRATION: Registration = Registration {
         if let Some(view) = shell.surfaces.pull_requests.views.get(&workspace) {
             return Some(Content::PullRequests(view.clone()));
         }
-        let client = shell.client.in_workspace(&workspace);
-        let view = cx.new(|cx| View::new(client, workspace.clone(), window, cx));
-        shell
-            .surfaces
-            .pull_requests
-            .views
-            .insert(workspace, view.clone());
+        let view = hosted_view(shell, &workspace, window, cx);
         Some(Content::PullRequests(view))
     },
     // The rail entry lives with the surface, so removing this registration
@@ -99,15 +93,37 @@ fn panel_view(
         view.read(cx).focus.focus(window);
         return Some(view.clone().into());
     }
-    let client = shell.client.in_workspace(&workspace);
-    let view = cx.new(|cx| View::new(client, workspace.clone(), window, cx));
+    let view = hosted_view(shell, &workspace, window, cx);
     view.read(cx).focus.focus(window);
+    Some(view.into())
+}
+/// The workspace's list. A picked pull request opens in the right panel's
+/// PR tabs, as classic's PRs list opens RightPrTabs.
+fn hosted_view(
+    shell: &mut Shell,
+    workspace: &str,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) -> Entity<View> {
+    let client = shell.client.in_workspace(workspace);
+    let view = cx.new(|cx| {
+        let mut view = View::new(client, workspace.to_owned(), window, cx);
+        view.hosted = true;
+        view
+    });
+    shell.subscriptions.push(cx.subscribe_in(
+        &view,
+        window,
+        |shell, _, event: &model::OpenPr, window, cx| {
+            shell.open_pr_in_panel(event.repo.clone(), event.number, window, cx);
+        },
+    ));
     shell
         .surfaces
         .pull_requests
         .views
-        .insert(workspace, view.clone());
-    Some(view.into())
+        .insert(workspace.to_owned(), view.clone());
+    view
 }
 /// Opens the Pull requests tab on one pull request, as classic Activity
 /// opens PrPanel.

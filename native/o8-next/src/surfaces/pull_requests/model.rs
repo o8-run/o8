@@ -50,6 +50,13 @@ pub struct Confirmation {
     pub draft: Option<String>,
     pub merge_gate: Option<String>,
 }
+/// A pull request picked in the shell's list, for the right panel to open.
+pub struct OpenPr {
+    pub repo: String,
+    pub number: u64,
+}
+impl gpui::EventEmitter<OpenPr> for PullRequests {}
+
 pub struct PullRequests {
     client: Client,
     workspace: String,
@@ -79,6 +86,11 @@ pub struct PullRequests {
     pub governance_error: String,
     /// A pull request to select once the first page names its repository.
     pub pending: Option<(String, u64)>,
+    /// The open picker or Filters panel, and the filter field showing its choices.
+    pub menu: Option<&'static str>,
+    pub filter_field: Option<&'static str>,
+    /// Set when the shell hosts this list: picks open in the right panel.
+    pub hosted: bool,
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     pub painted_at: Rc<Cell<Option<Instant>>>,
@@ -95,7 +107,11 @@ impl PullRequests {
         cx: &mut Context<Self>,
     ) -> Self {
         cx.default_global::<Deliveries>();
-        let search = cx.new(Composer::new);
+        let search = cx.new(|cx| {
+            let mut search = Composer::new(cx);
+            search.placeholder = "Search pull requests, or label:bug".into();
+            search
+        });
         let editor = cx.new(Composer::new);
         let focus = cx.focus_handle();
         focus.focus(window);
@@ -136,6 +152,9 @@ impl PullRequests {
             preview: Value::Null,
             governance_error: String::new(),
             pending: None,
+            menu: None,
+            filter_field: None,
+            hosted: false,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_at: Rc::new(Cell::new(None)),
@@ -258,7 +277,13 @@ impl PullRequests {
     /// request opens on GitHub, since this list reads one repository. With
     /// no list, it opens by its own repository.
     pub fn open(&mut self, repo: &str, number: u64, cx: &mut Context<Self>) {
-        if self.page.is_null() && self.loading {
+        if self.hosted {
+            self.selected = string(&self.page, "repo")
+                .eq_ignore_ascii_case(repo)
+                .then_some(number);
+            cx.emit(OpenPr { repo: repo.to_owned(), number });
+            self.changed(cx);
+        } else if self.page.is_null() && self.loading {
             self.pending = Some((repo.to_owned(), number));
         } else if self.page.is_null() {
             self.select_in(number, repo.to_owned(), cx);
@@ -266,6 +291,15 @@ impl PullRequests {
             self.select(number, cx);
         } else {
             cx.open_url(&format!("https://github.com/{repo}/pull/{number}"));
+        }
+    }
+    /// A row click: in the shell the panel opens it; alone the detail shows beside the list.
+    pub fn pick(&mut self, number: u64, cx: &mut Context<Self>) {
+        if self.hosted {
+            let repo = string(&self.page, "repo").to_owned();
+            self.open(&repo, number, cx);
+        } else {
+            self.select(number, cx);
         }
     }
     pub fn select(&mut self, number: u64, cx: &mut Context<Self>) {
