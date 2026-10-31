@@ -129,9 +129,7 @@ async function observeAgentInboxTranscript(runtime: AgentRuntime, agent: AgentSu
   return activity;
 }
 
-export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary[], runtimeActivity?: RuntimeInboxActivity): void {
-  const packets = inboxPackets();
-  const lanes = listLanes();
+function settleScope(subject: InboxSubject, packets = inboxPackets(), lanes = listLanes()) {
   const childPackets = subject.kind === 'conversation' ? packets.filter(packet =>
     (packet.orchestratorThreadId || packet.launchContext?.parentThreadId) === subject.id) : [];
   const childIds = new Set(childPackets.map(packet => packet.id));
@@ -148,6 +146,20 @@ export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary
   const history = subject.kind === 'conversation' ? readPersistedLlmChat(subject.id)?.history : null;
   const boundIds = (history as { orchestratorSessionIds?: Record<string, string> } | null)?.orchestratorSessionIds;
   for (const [runtime, id] of Object.entries(boundIds ?? {})) if (id) sessionKeys.add(`${runtime === 'claude' ? 'claude-code' : runtime}:${id}`);
+  return { packets, lanes, childPackets, childIds, relevantLanes, sessionKeys, history };
+}
+
+/**
+ * Runtime session keys whose live inventory status can block settling this
+ * subject. A plain conversation only has its in-process `llm-chat:` key, which
+ * the runtime inventory never lists, so settle can skip the inventory scan.
+ */
+export function inboxSettleInventoryKeys(subject: InboxSubject): string[] {
+  return [...settleScope(subject).sessionKeys].filter(key => !key.startsWith('llm-chat:'));
+}
+
+export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary[], runtimeActivity?: RuntimeInboxActivity): void {
+  const { lanes, childPackets, childIds, relevantLanes, sessionKeys, history } = settleScope(subject);
   const relevantAgents = agents.filter(agent => sessionKeys.has(agent.sessionKey));
   const approvals = listRecordedApprovals();
   if (approvals.some(approval => {

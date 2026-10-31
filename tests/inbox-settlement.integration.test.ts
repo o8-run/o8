@@ -17,6 +17,7 @@ import { GET as inventory } from '@/app/api/runtime/inventory/route';
 import { createLane, setLaneStatus } from '@/lib/lane/registry';
 import { createApproval } from '@/lib/approvals/store';
 import { getSqlite } from '@/lib/db';
+import { persistCanonicalChatHistoryRecord, readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { enqueueComposerSend } from '@/lib/orchestrator/composer-queue';
 
 // Runtime discovery is an external provider boundary. The lanes, approvals,
@@ -25,7 +26,7 @@ const fixture = vi.hoisted(() => {
   const previousClaudeHome = process.env.CLAUDE_HOME;
   const claudeHome = `${process.env.CORTEX_IDE_DATA_DIR}/inbox-claude`;
   process.env.CLAUDE_HOME = claudeHome;
-  return { previousClaudeHome, claudeHome, realTranscript: false, agents: [] as Array<Record<string, unknown>>,
+  return { previousClaudeHome, claudeHome, realTranscript: false, scans: 0, agents: [] as Array<Record<string, unknown>>,
     transcript: [] as Array<{ id: string; role: 'user'; text: string; timestamp: Date; activityAt?: Date }> };
 });
 vi.mock('@/lib/runtimes', async original => {
@@ -35,7 +36,7 @@ vi.mock('@/lib/runtimes', async original => {
     return fixture.realTranscript ? runtime : runtime ? { ...runtime, readTranscript: async () => fixture.transcript } : undefined;
   } };
 });
-vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: async () => ({ agents: fixture.agents }) }));
+vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: async () => { fixture.scans++; return { agents: fixture.agents }; } }));
 const prefix = `thoughts-inbox-${process.pid}`;
 const ids: string[] = [];
 const request = (body: Record<string, unknown>, query = '') => new NextRequest(`http://localhost/api/v2/chat-history${query}`, {
@@ -134,6 +135,23 @@ describe('inbox settlement through operator mutation and native listings', () =>
     // An unadopted user send, rather than an assistant-completed turn.
     await POST(new NextRequest('http://localhost/api/v2/chat-history', { method: 'POST', body: JSON.stringify({ tabId, replace: true, messages: [{ id: 'u', role: 'user', content: 'queued', timestamp: Date.now() + direction * 60_000 }] }) }));
     expect((await mutate(tabId, 'settle')).status).toBe(409);
+  });
+
+  it('settles a plain chat without a runtime inventory scan but scans for bound runtime sessions', async () => {
+    const tabId = await seed('noscan');
+    fixture.scans = 0;
+    expect((await mutate(tabId, 'settle')).status).toBe(200);
+    expect((await mutate(tabId, 'unsettle')).status).toBe(200);
+    expect(fixture.scans).toBe(0);
+    const record = readPersistedLlmChat(tabId)!.history;
+    persistCanonicalChatHistoryRecord(tabId, { ...record, orchestratorSessionIds: { claude: 'bound-noscan' } } as typeof record);
+    fixture.agents = [{ sessionKey: 'claude-code:bound-noscan', status: 'running', runtime: 'claude-code' }];
+    try {
+      expect((await mutate(tabId, 'settle')).status).toBe(409);
+      expect(fixture.scans).toBe(1);
+      fixture.agents = [{ sessionKey: 'claude-code:bound-noscan', status: 'idle', runtime: 'claude-code' }];
+      expect((await mutate(tabId, 'settle')).status).toBe(200);
+    } finally { fixture.agents = []; }
   });
 
   it('rejects an actual durable queued send', async () => {
