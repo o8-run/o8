@@ -246,7 +246,8 @@ fn placement_empty_state_composer_and_right_panel(cx: &mut TestAppContext) {
             .expect("existing Brain uses the right slot");
         let card = cx.debug_bounds("composer-card").unwrap();
         assert!(right.left() >= card.right());
-        let send = cx.debug_bounds("send").unwrap();
+        // Empty composer: the round primary button is the mic.
+        let send = cx.debug_bounds("composer-microphone").unwrap();
         assert!(
             send.right() <= card.right(),
             "composer controls must fit beside the right panel"

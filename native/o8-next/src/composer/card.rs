@@ -129,8 +129,9 @@ impl Surface {
                     .child(self.lead_chip(&routing, enabled, cx))
                     .children(self.thinking_chip(&routing, enabled, cx)),
             )
-            .child(self.voice_button(cx))
-            .child(self.primary_view(cx));
+            // The round primary button sits over this slot from the card, so
+            // the emptiness flip never re-renders the footer region.
+            .child(div().w(px(28.)).h(px(28.)).flex_shrink_0());
         div()
             .flex()
             .flex_wrap()
@@ -201,20 +202,37 @@ impl Surface {
             .into_any_element()
     }
 
-    /// The round primary button. `morph` runs 0 (empty: dictate) to 1 (draft:
+    /// The round primary button. `morph` runs 0 (empty: voice) to 1 (draft:
     /// send); the mic shrinks and fades as the arrow grows in, and the press
-    /// follows whichever side of the midpoint the button is on.
+    /// follows whichever side of the midpoint the button is on. Empty, it is
+    /// the only voice control (Q 2026-10-31): tap dictates and polishes, a
+    /// hold starts GPT Live, and while Live runs it shows the waveform and a
+    /// tap ends it. Caps Lock still toggles Live.
     fn primary_button(&self, morph: f32, enabled: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         use super::DictationState::*;
+        use super::VoiceState;
         let sending = morph >= 0.5;
         let state = self.dictation;
+        let live = !sending && matches!(self.voice, VoiceState::Connecting | VoiceState::Live);
         let (id, tip, enabled) = if sending {
             ("send", "Send", enabled)
+        } else if live || self.voice == VoiceState::Closing {
+            (
+                "composer-microphone",
+                match self.voice {
+                    VoiceState::Connecting => "Connecting GPT Live… click to stop",
+                    VoiceState::Closing => "Closing voice…",
+                    _ => {
+                        "GPT Live · voice usage is billed to your OpenAI key. Click or Caps Lock to stop."
+                    }
+                },
+                self.voice != VoiceState::Closing,
+            )
         } else {
             (
                 "composer-microphone",
                 match state {
-                    Off => "Talk first: click to dictate, click again to finish",
+                    Off => "Click to dictate · hold for GPT Live (Caps Lock)",
                     Starting => "Waiting for the microphone… click to cancel",
                     Listening => "Click to finish dictation",
                     Finishing => "Polishing…",
@@ -228,11 +246,19 @@ impl Surface {
         };
         let white = crate::theme::on_accent();
         let recording = !sending && matches!(state, Starting | Listening);
+        let holdable = !sending && !live && state == Off && enabled;
         let button = self
             .composer_button(id, "", enabled, cx, move |s, window, cx| {
+                // A hold that already started Live consumes its release.
+                if std::mem::take(&mut s.voice_hold.1) {
+                    return;
+                }
+                s.voice_hold.0 += 1;
                 if sending {
                     s.send(None, cx);
                     s.composer.read(cx).focus.focus(window);
+                } else if live {
+                    window.dispatch_action(Box::new(super::ToggleVoice), cx);
                 } else {
                     window.dispatch_action(Box::new(super::ToggleDictation), cx);
                 }
@@ -248,6 +274,36 @@ impl Surface {
             } else {
                 theme().accent
             })
+            .when(holdable, |b| {
+                b.on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(|s, _, window, cx| {
+                        s.voice_hold = (s.voice_hold.0 + 1, false);
+                        let press = s.voice_hold.0;
+                        cx.spawn_in(window, async move |this, cx| {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(VOICE_HOLD_MS))
+                                .await;
+                            let _ = this.update_in(cx, |s, window, cx| {
+                                if s.voice_hold == (press, false) {
+                                    s.voice_hold.1 = true;
+                                    window.dispatch_action(Box::new(super::ToggleVoice), cx);
+                                }
+                            });
+                        })
+                        .detach();
+                    }),
+                )
+                // A release off the button cancels a pending hold.
+                .on_mouse_up_out(
+                    gpui::MouseButton::Left,
+                    cx.listener(|s, _, _, _| {
+                        if !s.voice_hold.1 {
+                            s.voice_hold.0 += 1;
+                        }
+                    }),
+                )
+            })
             .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into());
         let layer = || {
             div()
@@ -259,6 +315,9 @@ impl Surface {
         };
         if self.saving && sending {
             return button.child(layer().text_color(white).child("…"));
+        }
+        if live || (!sending && self.voice == VoiceState::Closing) {
+            return button.child(layer().child(crate::icon::stroke(WAVEFORM, white, 15., 1.9)));
         }
         let mic = if recording {
             layer()
@@ -281,41 +340,6 @@ impl Surface {
             )))
     }
 
-    /// GPT Live for this chat (ManagedLiveButton), beside the dictation mic
-    /// as in the desktop footer: a waveform that turns accent while voice
-    /// connects or is live. The shell owns the session; Caps Lock toggles it.
-    fn voice_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let active = matches!(
-            self.voice,
-            super::VoiceState::Connecting | super::VoiceState::Live
-        );
-        let tip = match self.voice {
-            super::VoiceState::Off => "GPT Live for this chat · Caps Lock starts or stops voice.",
-            super::VoiceState::Closing => "Closing voice…",
-            _ => {
-                "Live with your OpenAI key · voice usage is billed to your key. Caps Lock stops voice."
-            }
-        };
-        // Closing admits no new start until the host confirms closure.
-        let enabled = self.voice != super::VoiceState::Closing;
-        self.composer_button("composer-voice", "", enabled, cx, |_, window, cx| {
-            window.dispatch_action(Box::new(super::ToggleVoice), cx);
-        })
-        .w(px(26.))
-        .px(px(0.))
-        .justify_center()
-        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
-        .child(crate::icon::stroke(
-            WAVEFORM,
-            if active {
-                theme().accent
-            } else {
-                theme().text_muted
-            },
-            17.,
-            1.7,
-        ))
-    }
     pub(super) fn composer_routing(&self, cx: &App) -> Option<Value> {
         let mut routing = self.routing.clone()?;
         for (key, value) in self.composer.read(cx).controls.overrides.as_object()? {
@@ -687,7 +711,14 @@ impl Surface {
             .child(self.composer.clone())
             .child(self.composer_control_view(cx))
             .child(self.composer.update(cx, |i, cx| i.image_chips(cx)))
-            .child(footer);
+            .child(footer)
+            .child(
+                div()
+                    .absolute()
+                    .right(px(8.))
+                    .bottom(px(8.))
+                    .child(self.primary_view(cx)),
+            );
         let owner = cx.entity().downgrade();
         card = card.child(
             canvas(
@@ -722,4 +753,6 @@ impl Surface {
 }
 
 /// Lucide audio-lines, as the desktop Live button draws it.
+/// How long a press on the empty primary button waits before it starts Live.
+const VOICE_HOLD_MS: u64 = 350;
 const WAVEFORM: &str = "M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4";

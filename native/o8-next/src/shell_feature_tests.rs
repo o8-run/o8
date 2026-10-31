@@ -431,12 +431,23 @@ fn dictation_mic_fills_the_draft_and_sends_the_final_transcript(cx: &mut TestApp
         });
         panic!("the voice host never received {count} controls; notice: {notice}");
     };
+    // With a draft the primary button is Send, so dictation into the draft
+    // runs through the mic action (the hotkey path); an empty composer's
+    // round button is the mic itself.
     let tap = |visual: &mut VisualTestContext| {
         draw(visual);
-        let mic = visual
-            .debug_bounds("composer-microphone")
-            .expect("the composer mic is visible");
-        visual.simulate_click(mic.center(), gpui::Modifiers::default());
+        match visual.debug_bounds("composer-microphone") {
+            Some(mic) => visual.simulate_click(mic.center(), gpui::Modifiers::default()),
+            None => {
+                assert!(
+                    visual.debug_bounds("send").is_some(),
+                    "the primary button is Send"
+                );
+                visual.update(|window, cx| {
+                    window.dispatch_action(Box::new(crate::ui::ToggleDictation), cx)
+                });
+            }
+        }
         visual.run_until_parked();
         draw(visual);
     };

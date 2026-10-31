@@ -168,6 +168,13 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
         assert!(bounds.left() >= previous, "footer order: {selector}");
         previous = bounds.right();
     }
+    // The fixture's chat is mid-turn, so the composer offers Steer; the
+    // checkout wording shows once nothing is steerable.
+    surface.update(cx, |s, cx| {
+        s.queue["canSteer"] = json!(false);
+        cx.notify();
+    });
+    draw(cx);
     surface.read_with(cx, |s, cx| {
         assert_eq!(
             s.composer.read(cx).placeholder,
@@ -255,6 +262,7 @@ fn native_composer_modes_match_classic_and_saved_solo_sends_shared(cx: &mut Test
             i.controls.overrides["pickedMode"] = json!("solo");
             i.controls.overrides["mode"] = json!("single");
         });
+        s.queue["canSteer"] = json!(false);
         cx.notify();
     });
     draw(cx);
@@ -268,6 +276,7 @@ fn native_composer_modes_match_classic_and_saved_solo_sends_shared(cx: &mut Test
         );
     });
     surface.update_in(cx, |s, window, cx| {
+        s.queue["canSteer"] = json!(true);
         s.send_next = true;
         s.composer.read(cx).focus.focus(window);
     });
@@ -301,6 +310,13 @@ fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut Te
     surface.update(cx, |s, cx| s.select("thoughts-composer-second".into(), cx));
     cx.run_until_parked();
     draw(cx);
+    // The fixture's chat is mid-turn, so the composer offers Steer; the
+    // checkout wording shows once nothing is steerable.
+    surface.update(cx, |s, cx| {
+        s.queue["canSteer"] = json!(false);
+        cx.notify();
+    });
+    draw(cx);
     surface.read_with(cx, |s, cx| {
         assert_eq!(
             s.composer.read(cx).placeholder,
@@ -309,6 +325,13 @@ fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut Te
     });
     surface.update(cx, |s, cx| s.select("thoughts-composer-first".into(), cx));
     cx.run_until_parked();
+    draw(cx);
+    // The fixture's chat is mid-turn, so the composer offers Steer; the
+    // checkout wording shows once nothing is steerable.
+    surface.update(cx, |s, cx| {
+        s.queue["canSteer"] = json!(false);
+        cx.notify();
+    });
     draw(cx);
     surface.read_with(cx, |s, cx| {
         assert_eq!(
@@ -459,7 +482,8 @@ fn native_composer_card_controls_fit_compact_and_wide_windows(cx: &mut TestAppCo
         cx.simulate_resize(gpui::size(gpui::px(width), gpui::px(height)));
         draw(cx);
         let card = cx.debug_bounds("composer-card").unwrap();
-        let send = cx.debug_bounds("send").unwrap();
+        // Empty composer: the round primary button is the mic.
+        let send = cx.debug_bounds("composer-microphone").unwrap();
         assert!(send.right() <= card.right() && send.bottom() <= card.bottom());
         assert!(card.left() >= gpui::px(0.) && card.right() <= gpui::px(width));
     }

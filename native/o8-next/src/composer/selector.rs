@@ -870,15 +870,15 @@ impl Surface {
         let mut houses = vec![];
         for &(key, label, runtime, glyph, _) in &LEAD_HOUSES {
             let found = item(runtime);
-            let visible = key == lead
-                || key == "o8"
-                || found.as_ref().is_some_and(shown)
-                || (inventory.is_none() && matches!(key, "claude" | "codex"));
+            // Claude and Codex always hold the rail, as in the desktop
+            // picker; other houses appear once installed.
+            let core = matches!(key, "claude" | "codex");
+            let visible = key == lead || key == "o8" || core || found.as_ref().is_some_and(shown);
             if visible {
                 let ready = key == "o8"
                     || found
                         .as_ref()
-                        .map_or(inventory.is_none(), |i| i["available"] == true);
+                        .map_or(inventory.is_none() || core, |i| i["available"] == true);
                 houses.push((key.to_owned(), label.to_owned(), glyph, true, ready));
             }
         }
@@ -1060,7 +1060,9 @@ impl Surface {
         for (backend, id, label, detail) in picks {
             let selected = backend == lead_backend && id == current;
             let favorite = starred.iter().any(|f| f.0 == backend && f.1 == id);
-            let enabled = !busy && ready_house(house_of(&backend));
+            // Readiness only hints: inventory can lag a fresh sign-in, and
+            // the server reports a house that cannot start.
+            let enabled = !busy;
             let (pick_backend, pick_id) = (backend.clone(), id.clone());
             let (star_backend, star_id) = (backend.clone(), id.clone());
             rows = rows.child(

@@ -129,6 +129,9 @@ pub(crate) struct Surface {
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
     voice: VoiceState,
     dictation: DictationState,
+    /// The primary button's press count and whether that press's hold
+    /// already started GPT Live.
+    voice_hold: (u64, bool),
     /// Rows that end a finished turn and carry Play and Copy.
     action_rows: BTreeSet<usize>,
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
@@ -173,6 +176,7 @@ impl Surface {
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
             voice: VoiceState::Off,
             dictation: DictationState::Off,
+            voice_hold: (0, false),
             action_rows: BTreeSet::new(),
             action_feedback: Default::default(),
         }
