@@ -589,8 +589,18 @@ impl Surface {
                 items
                     .iter()
                     .filter(|item| item["status"] != "applied" && item["status"] != "cancelled")
-                    .filter(|item| !shown(item))
-                    .cloned()
+                    .filter_map(|item| match (shown(item), item["status"] == "held") {
+                        (false, _) => Some(item.clone()),
+                        // A held send already in the transcript still blocks
+                        // everything after it; keep its reason and Remove, as
+                        // classic's tag on that bubble does, without a second bubble.
+                        (true, true) => {
+                            let mut item = item.clone();
+                            item["captionOnly"] = Value::Bool(true);
+                            Some(item)
+                        }
+                        (true, false) => None,
+                    })
                     .collect()
             })
             .unwrap_or_default()
@@ -650,13 +660,14 @@ pub(super) fn queue_tail(
                             .is_some_and(|ids| ids.iter().any(|v| v == &id));
                     let text =
                         crate::text::sanitize(item["payload"]["text"].as_str().unwrap_or(""));
+                    let caption_only = item["captionOnly"] == true;
                     div()
                         .flex()
                         .flex_col()
                         .items_end()
                         .min_w_0()
                         .gap(px(4.))
-                        .child(
+                        .when(!caption_only, |row| row.child(
                             div()
                                 .max_w(gpui::relative(0.8))
                                 .px(px(12.))
@@ -673,7 +684,7 @@ pub(super) fn queue_tail(
                                         .line_clamp(3)
                                         .child(text),
                                 ),
-                        )
+                        ))
                         .child(
                             div()
                                 .w_full()
@@ -687,11 +698,17 @@ pub(super) fn queue_tail(
                                     div()
                                         .flex_1()
                                         .min_w_0()
-                                        .whitespace_nowrap()
-                                        .overflow_hidden()
-                                        .text_ellipsis()
                                         .text_right()
-                                        .child(queue_caption(&item)),
+                                        // A held earlier message explains itself in
+                                        // full; it is why everything after it waits.
+                                        .when(!caption_only, |d| {
+                                            d.whitespace_nowrap().overflow_hidden().text_ellipsis()
+                                        })
+                                        .child(if caption_only {
+                                            format!("Earlier message · {}", queue_caption(&item))
+                                        } else {
+                                            queue_caption(&item)
+                                        }),
                                 )
                                 .when(steerable, |d| {
                                     d.child(
