@@ -353,10 +353,11 @@ impl ThreadList {
         let client = self.client.clone();
         let (thread, name) = (id.clone(), label(&repo));
         let task = cx.background_executor().spawn(async move {
-            // Without readable defaults the server's own runtime starts the thread.
+            // Without the lead the server would save its runtime placeholder,
+            // and the first send would fail, so an unreadable lead fails here.
             let defaults: Value = client
                 .get("/api/panel/operator-defaults", &[("include", "values")])
-                .unwrap_or_default();
+                .map_err(|e| e.to_string())?;
             let mut body = json!({
                 "tabId": thread, "messages": [], "repoPath": repo,
                 "repoName": name, "title": "New conversation",
