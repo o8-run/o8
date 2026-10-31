@@ -75,8 +75,10 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
         cx,
     );
     wait_for(&shell, &mut visual, |s, _| s.connected);
+    let first_thread = rows_kinds(&shell, &visual).iter().position(|(_, thread)| *thread).unwrap();
+    let selector: &'static str = Box::leak(format!("thread-row-{first_thread}").into_boxed_str());
     let row_height = |visual: &mut VisualTestContext| {
-        visual.debug_bounds("thread-row-1").expect("a thread row").size.height
+        visual.debug_bounds(selector).expect("a thread row").size.height
     };
     assert_eq!(row_height(&mut visual), px(28.));
     click(&mut visual, "sidebar-view");
@@ -84,6 +86,9 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
     wait_for(&shell, &mut visual, |s, _| s.state.sidebar_detailed_rows);
     draw(&mut visual);
     assert_eq!(row_height(&mut visual), px(super::thread_list::detailed::ROW_HEIGHT));
+    // Headings stay compact in detailed mode, so no tall gap sits above them.
+    let heading = visual.debug_bounds("thread-row-0").expect("a heading").size.height;
+    assert_eq!(heading, px(28.));
     click(&mut visual, "sidebar-view");
     click(&mut visual, "sidebar-view-working");
     wait_for(&shell, &mut visual, |s, _| s.state.sidebar_working_section);
@@ -108,7 +113,7 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
     });
     shell.update(&mut visual, |s, cx| {
         s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
-            l.scroll.scroll_to_item(first_index, ScrollStrategy::Center);
+            l.scroll_row(first_index, ScrollStrategy::Center, false);
             cx.notify();
         })
     });
@@ -124,7 +129,7 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
     });
     shell.update(&mut visual, |s, cx| {
         s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
-            l.scroll.scroll_to_item(index, ScrollStrategy::Center);
+            l.scroll_row(index, ScrollStrategy::Center, false);
             cx.notify();
         })
     });
@@ -139,7 +144,7 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
         .expect("a running thread in the fixture");
     shell.update(&mut visual, |s, cx| {
         s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
-            l.scroll.scroll_to_item(0, ScrollStrategy::Top);
+            l.scroll_row(0, ScrollStrategy::Top, false);
             cx.notify();
         })
     });
@@ -158,7 +163,7 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
     assert_eq!(rows.iter().filter(|r| r["id"] == running.as_str()).count(), 1);
     shell.update(&mut visual, |s, cx| {
         s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
-            l.scroll.scroll_to_item(header, ScrollStrategy::Center);
+            l.scroll_row(header, ScrollStrategy::Center, false);
             cx.notify();
         })
     });
@@ -250,7 +255,7 @@ fn sidebar_pins_through_the_row_menu_and_the_server(cx: &mut TestAppContext) {
     let index = rows(&shell, &visual).iter().position(|r| r.id.as_deref() == Some(target)).unwrap();
     shell.update(&mut visual, |s, cx| {
         s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
-            l.scroll.scroll_to_item(index, ScrollStrategy::Center);
+            l.scroll_row(index, ScrollStrategy::Center, false);
             cx.notify();
         })
     });
@@ -303,7 +308,7 @@ fn sidebar_pins_through_the_row_menu_and_the_server(cx: &mut TestAppContext) {
 fn scroll_top(shell: &Entity<Shell>, visual: &mut VisualTestContext) {
     shell.update(visual, |s, cx| {
         s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
-            l.scroll.scroll_to_item(0, ScrollStrategy::Top);
+            l.scroll_row(0, ScrollStrategy::Top, false);
             cx.notify();
         })
     });
@@ -315,4 +320,9 @@ fn let_http_land(visual: &mut VisualTestContext) {
         visual.run_until_parked();
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+}
+
+/// Each row's kind and whether it is a thread.
+fn rows_kinds(shell: &Entity<Shell>, visual: &VisualTestContext) -> Vec<(String, bool)> {
+    shell.read_with(visual, |s, cx| s.surfaces.sidebar.view.as_ref().unwrap().read(cx).rows.iter().map(|r| (r.kind.clone(), r.id.is_some())).collect())
 }

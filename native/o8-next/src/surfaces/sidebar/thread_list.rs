@@ -108,6 +108,8 @@ pub struct ThreadList {
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
     pub scroll: UniformListScrollHandle,
+    /// Detailed mode's variable-height list (threads 66px, headings 28px).
+    pub detailed_list: gpui::ListState,
     focus: FocusHandle,
     archived_focus: FocusHandle,
     editor: Entity<Composer>,
@@ -202,6 +204,7 @@ impl ThreadList {
             rows: Rc::new(vec![]),
             selected: None,
             scroll: UniformListScrollHandle::new(),
+            detailed_list: gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(200.)),
             focus: cx.focus_handle(),
             archived_focus: cx.focus_handle().tab_stop(true),
             editor,
@@ -281,6 +284,11 @@ impl ThreadList {
             rows.truncate(index);
         }
         self.rows = Rc::new(rows);
+        // Remeasure detailed rows; keep the reader's place.
+        let top = self.detailed_list.logical_scroll_top();
+        let old = self.detailed_list.item_count();
+        self.detailed_list.splice(0..old, self.rows.len());
+        self.detailed_list.scroll_to(top);
         if !self
             .rows
             .iter()
@@ -301,7 +309,7 @@ impl ThreadList {
             .position(|r| r.id.is_some() && r.id == self.choice)
             && previous_choice.is_some_and(|previous| previous != index)
         {
-            self.scroll.scroll_to_item(index, ScrollStrategy::Top);
+            self.scroll_row(index, ScrollStrategy::Top, false);
         }
     }
     /// The disclosure group a thread belongs to in the current view.
@@ -924,7 +932,7 @@ impl ThreadList {
                 };
                 self.choice = Some(ids[next].1.clone());
                 self.follow_selection = false;
-                self.scroll.scroll_to_item(ids[next].0, ScrollStrategy::Top);
+                self.scroll_row(ids[next].0, ScrollStrategy::Top, false);
             }
             _ => return,
         }
@@ -981,3 +989,17 @@ pub(crate) mod pr_links;
 pub(crate) mod detailed;
 #[path = "pins.rs"]
 pub(crate) mod pins;
+
+impl ThreadList {
+    /// Scroll either list to a row; detailed mode reveals it in its list.
+    pub(crate) fn scroll_row(&self, index: usize, strategy: ScrollStrategy, strict: bool) {
+        if strict {
+            self.scroll.scroll_to_item_strict(index, strategy);
+        } else {
+            self.scroll.scroll_to_item(index, strategy);
+        }
+        if self.detailed {
+            self.detailed_list.scroll_to(gpui::ListOffset { item_ix: index, offset_in_item: gpui::px(0.) });
+        }
+    }
+}
