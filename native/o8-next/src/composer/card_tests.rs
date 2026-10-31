@@ -858,3 +858,16 @@ fn model_names_read_like_the_desktop() {
         assert_eq!(model_label(id), label);
     }
 }
+
+#[gpui::test]
+fn native_composer_model_search_on_favorites_searches_every_house(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (_surface, cx) = open(cx, &fixture);
+    click("composer-model", cx);
+    click("lead-house-favorites", cx);
+    click("composer-model-input", cx);
+    cx.simulate_input("son");
+    draw(cx);
+    // Sonnet lives on the Claude tab; typing on Favorites must still find it.
+    assert!(cx.debug_bounds("model-claude-sonnet-5").is_some());
+}

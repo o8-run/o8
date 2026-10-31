@@ -211,9 +211,11 @@ impl Surface {
         // from the name ("6.1 Sol", "Opus 5.5"); the tooltip keeps the full name.
         // A house's runtime id saved as the model ("claude-code", from threads
         // made without a lead) is no selection: the house runs its default.
-        let model = routing["model"]
-            .as_str()
-            .filter(|m| !LEAD_HOUSES.iter().any(|house| !house.2.is_empty() && house.2 == *m));
+        let model = routing["model"].as_str().filter(|m| {
+            !LEAD_HOUSES
+                .iter()
+                .any(|house| !house.2.is_empty() && house.2 == *m)
+        });
         let full = match (model, routing["model"].as_str()) {
             (Some(m), _) => crate::composer::controls::model_label(m),
             (None, Some(_)) => "Default".into(),
@@ -1017,7 +1019,15 @@ impl Surface {
             }
         };
         let lead_keys: Vec<String> = houses.iter().filter(|h| h.3).map(|h| h.0.clone()).collect();
-        let mut picks: Vec<(String, String, String, Option<String>)> = if house == "favorites" {
+        // A query searches every house from any tab, Favorites included:
+        // "son" on Favorites found nothing while Sonnet sat one tab away.
+        let mut picks: Vec<(String, String, String, Option<String>)> = if !needle.is_empty() {
+            lead_keys
+                .iter()
+                .flat_map(|key| models_of(key))
+                .map(|m| (m.0, m.1, m.2, Some(house_label(&m.3))))
+                .collect()
+        } else if house == "favorites" {
             starred
                 .iter()
                 .map(|(backend, id)| {
@@ -1028,12 +1038,6 @@ impl Surface {
                         .map_or_else(|| crate::composer::controls::model_label(id), |m| m.2);
                     (backend.clone(), id.clone(), label, Some(house_label(key)))
                 })
-                .collect()
-        } else if !needle.is_empty() {
-            lead_keys
-                .iter()
-                .flat_map(|key| models_of(key))
-                .map(|m| (m.0, m.1, m.2, Some(house_label(&m.3))))
                 .collect()
         } else {
             models_of(&house)
