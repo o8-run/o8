@@ -44,6 +44,9 @@ pub(crate) fn status(s: &Session, woken: bool, running: bool, age: &str) -> Stat
     } else if running {
         // Time since the thread's last activity: o8 records no run start.
         ("running", age.to_owned())
+    } else if s.outcome.is_none() && s.message_count == 0 {
+        // A thread nobody has written in yet has nothing to be done with.
+        ("new", "New".into())
     } else if s.outcome.is_some()
         || matches!(st.as_str(), "idle" | "ready" | "completed" | "done" | "merged" | "released")
     {

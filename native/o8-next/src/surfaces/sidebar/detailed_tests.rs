@@ -6,7 +6,7 @@ use super::thread_list::Row;
 use super::*;
 
 fn session(status: &str) -> Session {
-    serde_json::from_value(json!({"id": "t", "title": "T", "status": status})).unwrap()
+    serde_json::from_value(json!({"id": "t", "title": "T", "status": status, "messageCount": 2})).unwrap()
 }
 fn header(kind: &str, title: &str, _status: &str) -> Row {
     Row {
@@ -39,6 +39,9 @@ fn detailed_status_names_input_woke_running_and_done() {
     assert_eq!(status(&session("queued"), false, false, "1m").label, "Waiting");
     assert_eq!(status(&session("idle"), false, false, "2d").label, "Done");
     assert_eq!(status(&session("failed"), false, false, "2d").label, "Error");
+    // A thread with no messages yet is new, not done.
+    let fresh: Session = serde_json::from_value(json!({"id": "n", "title": "New conversation", "status": "idle"})).unwrap();
+    assert_eq!(status(&fresh, false, false, "now").label, "New");
     // An unknown status shows its age, not a guessed state.
     assert_eq!(status(&session("mystery"), false, false, "4d").label, "4d");
 }
