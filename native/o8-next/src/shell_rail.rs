@@ -18,6 +18,7 @@ pub(super) enum Icon {
     Play,
     Gauge,
     Terminal,
+    Clock,
     PullRequest,
 }
 
@@ -30,6 +31,7 @@ impl Icon {
             }
             Self::Gauge => "m12 14 4-4 M3.34 19a10 10 0 1 1 17.32 0",
             Self::Terminal => "m4 17 6-6-6-6 M12 19h8",
+            Self::Clock => "M12 6v6l4 2 M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20Z",
             Self::PullRequest => {
                 "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M13 6h3a2 2 0 0 1 2 2v7 M6 9v12"
             }
@@ -504,7 +506,13 @@ impl Shell {
         if self.surfaces.customize.open {
             self.close_customize(window, cx);
         }
-        if self.surfaces.setup.view.as_ref().is_some_and(|v| !v.read(cx).busy()) {
+        if self
+            .surfaces
+            .setup
+            .view
+            .as_ref()
+            .is_some_and(|v| !v.read(cx).busy())
+        {
             self.surfaces.setup.view = None;
             self.revision += 1;
         }
@@ -592,6 +600,14 @@ impl Shell {
                     cx.new(|_| drag.clone())
                 }),
             )
+            // AutomationsPage, as the desktop rail's Scheduled entry.
+            .child(tab(
+                "rail-scheduled",
+                Icon::Clock,
+                "Scheduled",
+                Tab::Scheduled,
+                || Command::Scheduled,
+            ))
             // Grid stays in code but off the rail until it earns a place (Q, 10-30).
             .child(divider())
             // RailMoreMenu, then PRs last, as CompactNavigationRail orders them.

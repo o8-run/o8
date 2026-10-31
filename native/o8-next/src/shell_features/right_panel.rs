@@ -834,8 +834,7 @@ fn cover_browsers(s: &Shell, cx: &mut Context<Shell>) {
         && panel.motion.is_open()
         && !panel.motion.value().1
         && !s.palette
-        && panel.menu.is_none()
-        && !super::header_tools::any_open(s);
+        && panel.menu.is_none();
     let current = panel.browsers.get(&key(s, Tool::Browser));
     for view in panel.browsers.values() {
         let covered = !visible || current != Some(view);
@@ -851,7 +850,6 @@ pub(super) fn devices_visible(s: &Shell) -> bool {
             && !panel.motion.value().1
             && !s.palette
             && panel.menu.is_none()
-            && !super::header_tools::any_open(s)
     })
 }
 

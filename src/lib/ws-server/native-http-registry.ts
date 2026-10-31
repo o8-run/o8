@@ -37,6 +37,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   grid: [],
   shortcuts: [], // Local shortcut reference has no HTTP transport.
   terminal: [route('/api/mobile/terminal-sessions', 'GET', () => import('@/app/api/mobile/terminal-sessions/route'))],
+  scheduled: [
+    route('/api/automations', 'GET POST', () => import('@/app/api/automations/route')),
+    route('/api/automations/[id]', 'PATCH DELETE', () => import('@/app/api/automations/[id]/route')),
+    route('/api/automations/[id]/run', 'POST', () => import('@/app/api/automations/[id]/run/route')),
+    route('/api/automations/connected', 'GET PATCH', () => import('@/app/api/automations/connected/route')),
+    route('/api/panel/repos', 'GET', () => import('@/app/api/panel/repos/route')),
+  ],
   palette: [], // Local commands and workspace navigation reuse the selected surface's transport.
   sidebar: [
     route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),

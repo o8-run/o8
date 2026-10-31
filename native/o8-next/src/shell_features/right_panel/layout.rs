@@ -357,7 +357,7 @@ pub(super) fn key(
     cx: &mut Context<Shell>,
 ) -> bool {
     let key = event.keystroke.key.as_str();
-    let overlays = s.palette || super::super::header_tools::any_open(s);
+    let overlays = s.palette;
     let p = s.features.get::<Panel>();
     if p.menu.is_some() {
         if matches!(key, "escape" | "tab") {

@@ -71,7 +71,6 @@ fn render(
                 .items_center()
                 .gap(px(4.))
                 .mt(px(1.3))
-                .child(super::header_tools::play(s, window, cx))
                 .child(super::activity_dock::toggle_button(s, cx))
                 .when(!panel_open, |row| {
                     row.child(super::right_panel::toggle_button(s, false, cx))

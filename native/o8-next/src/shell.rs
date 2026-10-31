@@ -53,6 +53,7 @@ register_surfaces! {
         issues: Issues = "surfaces/issues.rs";
         diff: Diff = "surfaces/diff.rs";
         terminal: Terminal = "surfaces/terminal.rs";
+        scheduled: Scheduled = "surfaces/scheduled.rs";
         #[cfg(test)] fake: Fake = "surfaces/fake.rs";
     }
     commands {
