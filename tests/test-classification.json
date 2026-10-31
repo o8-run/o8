@@ -3847,6 +3847,16 @@
       ]
     },
     {
+      "path": "tests/linux-payload-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/linux-pi-write-helper.test.ts",
       "reasons": [
         "child-process"

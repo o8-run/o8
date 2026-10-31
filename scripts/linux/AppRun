@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+SELF="$(readlink -f -- "$0")"
+DIR="$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)"
+exec "$DIR/usr/bin/o8" "$@"

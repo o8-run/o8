@@ -11,7 +11,7 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 3. **Runs on your subscriptions.** The coding-agent CLIs you already pay for, behind one runtime contract.
 4. **One control plane, every surface.** Desktop, phone, CLI, MCP, headless, voice. Same verbs, different authority.
 5. **Smooth for people and for agents.** Fast and legible for a person; drivable through a real interface for a program.
-6. **Runs where you are.** Light on the machine, on the machine you have. Mac today; Linux and Windows have compile evidence, while maintainer VM validation is paused. Windows help is welcome.
+6. **Runs where you are.** Light on the machine, on the machine you have. Mac today; Linux GPUI download staging is active. Full Linux install-to-merge acceptance and Windows VM validation remain outstanding. Windows help is welcome.
 7. **Ahead.** Longer-term bets, advanced when their next proof warrants it.
 
 ## Current focus
@@ -31,7 +31,7 @@ Outside contributors should choose one open, unclaimed task from the [two contri
 
 Broad remote-project expansion is outside this month's default queue. Existing separately scoped remote and plugin work keeps its own owner, bounded acceptance and release decision; it is not automatically part of the first-run candidate. Remote recovery and continuation proof remains incomplete. [#2282](https://github.com/o8-run/o8/issues/2282)
 
-Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-worker, collision and isolated-mode acceptance remain open. Linux and Windows product validation stay parked; running existing tests on Linux does not change that status. [#2772](https://github.com/o8-run/o8/issues/2772), [#1672](https://github.com/o8-run/o8/issues/1672), [#2204](https://github.com/o8-run/o8/issues/2204)
+Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-worker, collision and isolated-mode acceptance remain open. Linux download staging is active; full Linux install-to-merge acceptance and Windows product validation remain outstanding. [#2772](https://github.com/o8-run/o8/issues/2772), [#1672](https://github.com/o8-run/o8/issues/1672), [#2204](https://github.com/o8-run/o8/issues/2204)
 
 ## Source work awaiting installed acceptance
 
@@ -308,7 +308,7 @@ o8 should be light on the machine it runs on, and it should run on the machine y
 
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
-| Linux | A fresh Ubuntu machine installs o8, launches it, dispatches a packet, and merges it through the governed path. | parked | Maintainer VM validation is paused; install-to-merge proof remains outstanding. | [#1672](https://github.com/o8-run/o8/issues/1672) |
+| Linux | A fresh Ubuntu machine installs o8, launches it, dispatches a packet, and merges it through the governed path. | active | GPUI download payload and launcher work is active; distro packages and install-to-merge proof remain outstanding. | [#1672](https://github.com/o8-run/o8/issues/1672) |
 | Windows | The same as Linux, on Windows. | parked | Maintainer VM validation is paused; install-to-merge proof remains outstanding. | [#2204](https://github.com/o8-run/o8/issues/2204) |
 | Speed and idle-work pass | Interaction budgets hold under real load, not only at idle. | open | Conversation switching and long histories slow down under streaming load. | [#2202](https://github.com/o8-run/o8/issues/2202) |
 | Packaged release size | Reduce exported dependencies toward the 250 MiB app and 75 MiB update targets. | open | Shared package ceilings are 350 MiB installed and 110 MiB compressed. The compressed ceiling rose from 100 MiB in 0.1.815 for o8 next and comes back down once the classic UI's files leave the packaged app (#5161). CPU-specific preparation is in development under #3646. Intel delivery stays off until Intel acceptance; Apple Silicon keeps universal delivery pending #3656. | [#3545](https://github.com/o8-run/o8/issues/3545) |
