@@ -48,17 +48,6 @@ pub(super) const REGISTRATION: Registration = Registration {
                 .map(|p| p.repo_paths.clone());
         }
     },
-    nav: |s, position, cx| {
-        if position != NavPosition::BeforeWorkspaces {
-            return vec![];
-        }
-        // The rail's Home target returns to the workspace while Projects is open.
-        vec![
-            super::rail::button("shell-projects", super::rail::Icon::Folder, "Projects", s.surfaces.projects.open)
-                .on_click(cx.listener(|this, _, window, cx| this.open_projects(window, cx)))
-                .into_any_element(),
-        ]
-    },
     ..Registration::new("", "Open projects and repositories", |s, _, window, cx| {
         s.open_projects(window, cx);
         None

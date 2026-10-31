@@ -156,10 +156,11 @@ fn onboarding_project_tools_privacy_and_workspace(cx: &mut TestAppContext) {
         "the opened workspace must persist a send through the production queue"
     );
     let start = Instant::now();
-    click(cx, "setup-open");
+    click(cx, "rail-more");
+    click(cx, "rail-more-setup");
     let interaction = start.elapsed().as_secs_f64() * 1000.;
     assert!(cx.debug_bounds("setup-projects").is_some());
-    click(cx, "setup-close");
+    click(cx, "shell-home");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
     println!(
         "O8_NEXT_ONBOARDING_EVIDENCE {}",
@@ -294,7 +295,8 @@ fn onboarding_operator_auth_error_retry(cx: &mut TestAppContext) {
     let cx = &mut visual;
     cx.run_until_parked();
     draw(cx);
-    click(cx, "setup-open");
+    click(cx, "rail-more");
+    click(cx, "rail-more-setup");
     assert!(cx.debug_bounds("setup-error").is_some());
     click(cx, "setup-refresh");
     assert!(cx.debug_bounds("setup-error").is_some());

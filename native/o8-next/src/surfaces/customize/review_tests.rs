@@ -29,7 +29,8 @@ fn start(f: &Fixture, cx: &mut TestAppContext) -> VisualTestContext {
     );
     visual.run_until_parked();
     draw(&mut visual);
-    custom_click(&mut visual, "customize-open");
+    custom_click(&mut visual, "rail-more");
+    custom_click(&mut visual, "rail-more-customize");
     custom_click(&mut visual, "custom-tab-prompts");
     visual
 }
