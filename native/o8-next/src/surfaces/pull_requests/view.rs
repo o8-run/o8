@@ -110,6 +110,7 @@ impl PullRequests {
                                 // one-line clamp ends in an ellipsis instead of clipping.
                                 div()
                                     .min_w_0()
+                                    .overflow_hidden()
                                     .whitespace_normal()
                                     .line_clamp(1)
                                     .text_ellipsis()
