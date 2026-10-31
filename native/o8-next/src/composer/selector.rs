@@ -209,11 +209,22 @@ impl Surface {
         let backend = routing["backend"].as_str().unwrap_or("");
         // Q 2026-10-31: the mark names the provider, so the chip drops it
         // from the name ("6.1 Sol", "Opus 5.5"); the tooltip keeps the full name.
-        let full = routing["model"].as_str().map_or("Model".into(), |m| {
-            crate::composer::controls::model_label(m)
+        // A house's runtime id saved as the model ("claude-code", from threads
+        // made without a lead) is no selection: the house runs its default.
+        let model = routing["model"]
+            .as_str()
+            .filter(|m| !LEAD_HOUSES.iter().any(|house| !house.2.is_empty() && house.2 == *m));
+        let full = match (model, routing["model"].as_str()) {
+            (Some(m), _) => crate::composer::controls::model_label(m),
+            (None, Some(_)) => "Default".into(),
+            (None, None) => "Model".into(),
+        };
+        let label = short_label(model.unwrap_or(""), &full);
+        let tip = SharedString::from(if full == "Default" {
+            "Orchestrator: the house's default model".to_owned()
+        } else {
+            format!("Orchestrator: {full}")
         });
-        let label = short_label(routing["model"].as_str().unwrap_or(""), &full);
-        let tip = SharedString::from(format!("Orchestrator: {full}"));
         let open = self.composer.read(cx).controls.open == Some("model");
         self.composer_button("composer-model", "", enabled, cx, |s, w, cx| {
             s.open_composer_picker("model", w, cx)
