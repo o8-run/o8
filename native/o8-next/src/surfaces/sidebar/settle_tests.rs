@@ -372,3 +372,33 @@ fn sidebar_without_inbox_settlement_is_unchanged(cx: &mut TestAppContext) {
             .is_none()
     );
 }
+
+#[gpui::test]
+fn sidebar_inbox_mod_z_undoes_the_last_settle(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, project) = start("--shell --composer --sidebar", cx);
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-inbox");
+    wait_for(&shell, &mut visual, |s, _| {
+        s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
+    });
+    draw(&mut visual);
+    let target = row(&shell, &mut visual, FIRST);
+    let at = visual.debug_bounds(target).unwrap().center();
+    visual.simulate_mouse_move(at, None, gpui::Modifiers::default());
+    click(
+        &mut visual,
+        Box::leak(format!("thread-settle-{FIRST}").into_boxed_str()),
+    );
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Settled"));
+    assert_eq!(stored(&fixture, FIRST), "settled");
+    assert!(settled_toast(&shell, &visual));
+    let undo = if cfg!(target_os = "macos") { "cmd-z" } else { "ctrl-z" };
+    visual.simulate_keystrokes(undo);
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Active"));
+    assert_eq!(stored(&fixture, FIRST), "active");
+    assert!(!settled_toast(&shell, &visual));
+    // With nothing left to undo, the key is not swallowed and changes nothing.
+    visual.simulate_keystrokes(undo);
+    settle(&shell, &mut visual);
+    assert_eq!(stored(&fixture, FIRST), "active");
+}
