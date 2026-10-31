@@ -3,7 +3,7 @@
 use crate::client::{Client, Session, same_workspace};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Deserialize)]
 struct Sessions {
@@ -185,7 +185,7 @@ impl Client {
     }
     pub(crate) fn sidebar_sessions_with_branches(
         &self,
-    ) -> Result<(Vec<Session>, HashSet<String>), String> {
+    ) -> Result<(Vec<Session>, HashMap<String, String>), String> {
         let (mut sessions, state) = self.sidebar_threads_with_state()?;
         let archived: Value = self.get(
             "/api/v2/chat-history/list",
@@ -217,13 +217,15 @@ impl Client {
                     && p["branchTarget"].as_str().is_some_and(|b| !b.is_empty())
             })
             .flat_map(|p| {
+                let branch = p["branchTarget"].as_str().unwrap_or_default();
                 [
                     p["orchestratorThreadId"].as_str(),
                     p["lane"]["sessionKey"].as_str(),
                 ]
+                .into_iter()
+                .flatten()
+                .map(move |id| (id.strip_prefix("llm-chat:").unwrap_or(id).to_owned(), branch.to_owned()))
             })
-            .flatten()
-            .map(|id| id.strip_prefix("llm-chat:").unwrap_or(id).to_owned())
             .collect();
         Ok((sessions, branches))
     }

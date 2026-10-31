@@ -115,6 +115,10 @@ impl Render for ThreadList {
                                     return this.folder_row(&row, folder, cx);
                                 }
                                 let thread = row.id.is_some();
+                                let detailed = this.detailed;
+                                let detailed_thread = detailed && thread;
+                                let detailed_content = detailed_thread
+                                    .then(|| this.detailed_content(&row, keyboard, cx));
                                 let by_repo = this.view() == folders::View::Repo;
                                 let title =
                                     gpui::StyledText::new(crate::text::sanitize(&row.title));
@@ -138,9 +142,15 @@ impl Render for ThreadList {
                                     .group("thread-row")
                                     .w_full()
                                     .min_w_0()
-                                    .h(px(28.))
+                                    .h(px(if detailed {
+                                        detailed::ROW_HEIGHT
+                                    } else {
+                                        28.
+                                    }))
                                     .flex()
                                     .items_center()
+                                    // Headings sit on their section in the taller rows.
+                                    .when(detailed && !thread, |v| v.items_end().pb(px(6.)))
                                     .px(px(12.))
                                     .rounded(px(8.))
                                     .overflow_hidden()
@@ -152,7 +162,8 @@ impl Render for ThreadList {
                                     .when(thread, |view| {
                                         view.cursor_pointer().hover(|style| style.bg(theme().hover))
                                     })
-                                    .child(
+                                    .when_some(detailed_content, |v, content| v.child(content))
+                                    .when(!detailed_thread, |v| v.child(
                                         div()
                                             .flex()
                                             .w_full()
@@ -247,7 +258,14 @@ impl Render for ThreadList {
                                                 )
                                                 .child(this.row_archive_control(&row, keyboard, cx))
                                             }),
-                                    )
+                                    ))
+                                    .when(row.kind == "section" && row.status == "working", |view| {
+                                        view.debug_selector(|| "sidebar-working-header".into())
+                                            .cursor_pointer()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.toggle_working_closed(cx);
+                                            }))
+                                    })
                                     .when(
                                         row.kind == "section" && row.title == "Archived",
                                         |view| {
