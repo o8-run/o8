@@ -186,7 +186,8 @@ impl PullRequests {
     }
 }
 impl Render for PullRequests {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.viewport = f32::from(window.viewport_size().height);
         let visible = self.visible(cx);
         let count = visible.len();
         let painted = self.painted.clone();

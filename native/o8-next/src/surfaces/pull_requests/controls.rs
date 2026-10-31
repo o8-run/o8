@@ -155,7 +155,7 @@ impl PullRequests {
                     }))
                     .into_any_element()
             });
-            popover(format!("pr-{id}-menu"), 200., div().p(px(6.)).children(rows), cx)
+            popover(format!("pr-{id}-menu"), 200., self.viewport, div().p(px(6.)).children(rows), cx)
         });
         div()
             .relative()
@@ -330,7 +330,7 @@ impl PullRequests {
                             })),
                     ),
             );
-            popover("pr-filters-menu".into(), 280., body, cx)
+            popover("pr-filters-menu".into(), 280., self.viewport, body, cx)
         });
         div()
             .relative()
@@ -407,6 +407,7 @@ pub(super) fn menu_row(id: String, chosen: bool) -> gpui::Stateful<gpui::Div> {
 pub(super) fn popover(
     id: String,
     width: f32,
+    viewport: f32,
     body: impl IntoElement,
     cx: &mut Context<PullRequests>,
 ) -> AnyElement {
@@ -446,9 +447,10 @@ pub(super) fn popover(
                             .occlude()
                             .w(px(width))
                             // Tall enough for Filters with a field open, so
-                            // Done stays in view; the window snap keeps it on
-                            // screen and only a short window scrolls it.
-                            .max_h(px(720.))
+                            // Done stays in view, but never taller than the
+                            // window less the snap margins; a short window
+                            // scrolls it instead.
+                            .max_h(px(if viewport > 0. { (viewport - 24.).min(720.) } else { 720. }))
                             .overflow_y_scroll()
                             .rounded(px(14.))
                             .bg(crate::theme::popover_background())

@@ -106,6 +106,8 @@ pub struct PullRequests {
     pub timeline_error: String,
     pub newest_first: bool,
     timeline_epoch: u64,
+    /// The window's height at the last render, which caps the popovers.
+    pub(super) viewport: f32,
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     pub painted_at: Rc<Cell<Option<Instant>>>,
@@ -185,6 +187,7 @@ impl PullRequests {
             timeline_error: String::new(),
             newest_first: false,
             timeline_epoch: 0,
+            viewport: 0.,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_at: Rc::new(Cell::new(None)),
