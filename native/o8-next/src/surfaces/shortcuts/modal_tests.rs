@@ -100,8 +100,14 @@ fn shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs(cx: &mut Tes
                 let before = tabs(&shell, &visual);
                 match surface {
                     "settings" => visual.simulate_keystrokes("cmd-,"),
-                    "projects" => shortcuts_click(&mut visual, "shell-projects"),
-                    "setup" => shortcuts_click(&mut visual, "setup-open"),
+                    "projects" => {
+                        shortcuts_click(&mut visual, "rail-more");
+                        shortcuts_click(&mut visual, "rail-more-projects")
+                    }
+                    "setup" => {
+                        shortcuts_click(&mut visual, "rail-more");
+                        shortcuts_click(&mut visual, "rail-more-setup")
+                    }
                     "help" => shortcuts_open(&mut visual),
                     "palette" => visual.simulate_keystrokes("cmd-shift-p"),
                     "shell-help" => shell.update_in(&mut visual, |s, window, cx| {

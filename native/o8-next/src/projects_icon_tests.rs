@@ -38,7 +38,8 @@ fn projects_repository_icon_picker_saves_each_choice(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     settle(cx);
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     assert_eq!(icon(&fixture), Value::Null);
     assert!(shown(cx, format!("repo-identity-0:{}", monogram(&name))));
 

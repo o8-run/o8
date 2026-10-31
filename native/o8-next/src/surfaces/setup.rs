@@ -49,35 +49,8 @@ pub(super) const REGISTRATION: Registration = Registration {
                 });
             });
         }
-        // One rail target: it opens setup, and closes it while open unless setup is busy.
-        if s.surfaces.setup.view.is_none() {
-            return vec![
-                super::rail::button("setup-open", super::rail::Icon::Setup, "Setup", false)
-                    .on_click(cx.listener(|s, _, window, cx| {
-                        s.capture(window, cx);
-                        s.execute(Command::Setup, window, cx);
-                    }))
-                    .into_any_element(),
-            ];
-        }
-        vec![
-            super::rail::button("setup-close", super::rail::Icon::Setup, "Close setup", true)
-                .on_click(cx.listener(|s, _, window, cx| {
-                    if s.surfaces
-                        .setup
-                        .view
-                        .as_ref()
-                        .is_some_and(|v| v.read(cx).busy())
-                    {
-                        return;
-                    }
-                    s.surfaces.setup.view = None;
-                    s.restore_focus(window, cx);
-                    s.revision += 1;
-                    cx.notify();
-                }))
-                .into_any_element(),
-        ]
+        // Setup opens from the rail's More menu; Home closes it unless it is busy.
+        vec![]
     },
     ..Registration::new("", "Open setup", |s, _, _, cx| {
         s.open_setup(cx);
