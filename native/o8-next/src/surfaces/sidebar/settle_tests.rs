@@ -89,7 +89,7 @@ fn under(
             .and_then(|_| list(shell, cx, |l| l.rows[i].id.clone()))
     })
 }
-fn start(
+pub(super) fn start(
     args: &str,
     cx: &mut TestAppContext,
 ) -> (Fixture, Entity<Shell>, VisualTestContext, String) {
