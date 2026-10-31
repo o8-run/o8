@@ -576,7 +576,7 @@ impl Shell {
                         features::start_chat(this, window, cx);
                     }))
                     .on_drag(features::RailPane::Chat, |drag, _, _, cx| {
-                        cx.new(|_| *drag)
+                        cx.new(|_| drag.clone())
                     }),
             )
             // A click opens a terminal; a drag drops one onto the workspace.
@@ -589,7 +589,7 @@ impl Shell {
                     || Command::Terminal,
                 )
                 .on_drag(features::RailPane::Terminal, |drag, _, _, cx| {
-                    cx.new(|_| *drag)
+                    cx.new(|_| drag.clone())
                 }),
             )
             // Grid stays in code but off the rail until it earns a place (Q, 10-30).
