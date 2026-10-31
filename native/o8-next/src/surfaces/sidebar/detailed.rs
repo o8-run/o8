@@ -13,7 +13,7 @@ use crate::theme::current as theme;
 use gpui::{AnyElement, Rgba, div, px};
 use std::sync::OnceLock;
 
-pub(crate) const ROW_HEIGHT: f32 = 60.;
+pub(crate) const ROW_HEIGHT: f32 = 66.;
 pub(super) const DEV_WORKING_ENV: &str = "O8_DEV_SIDEBAR_WORKING";
 /// Lucide icons.
 const DONE: &str = "M21.8 10A10 10 0 1 1 17 3.3 M9 11l3 3L22 4";
