@@ -9,6 +9,8 @@ mod composer_card;
 mod composer_picker;
 #[path = "composer/screenshots.rs"]
 mod composer_screenshots;
+#[path = "composer/send_menu.rs"]
+mod send_menu;
 #[path = "composer/selector.rs"]
 mod composer_selector;
 #[path = "composer/prompt_actions.rs"]
@@ -548,13 +550,40 @@ impl Surface {
             .into_any_element()
     }
     /// Messages still waiting in this chat's queue, oldest first.
+    /// Sends still waiting, without the ones the transcript already shows
+    /// (ComposerQueuedMessages' pending filter): a message carrying the item's
+    /// id, or for an admitted send, the same text saved after it was queued.
     pub(super) fn queued_items(&self) -> Vec<Value> {
+        let entries = self
+            .transcript
+            .as_ref()
+            .map(|t| t.shown_entries())
+            .unwrap_or_default();
+        let shown = |item: &Value| {
+            let id = item["id"].as_str().unwrap_or_default();
+            let ids = [
+                format!("composer-steer-{id}"),
+                format!("composer-queued-{id}"),
+                format!("review-user-assistant-queued-{id}"),
+            ];
+            let admitted = item["status"] == "dispatching" && !item["admittedAt"].is_null();
+            let created = item["createdAt"].as_f64().unwrap_or(f64::MAX);
+            entries.iter().any(|entry| {
+                ids.contains(&entry.id)
+                    || admitted
+                        && entry.role == "user"
+                        && item["payload"]["text"] == entry.text.as_str()
+                        && entry.extra.get("timestamp").and_then(Value::as_f64).unwrap_or(0.)
+                            >= created
+            })
+        };
         self.queue["items"]
             .as_array()
             .map(|items| {
                 items
                     .iter()
                     .filter(|item| item["status"] != "applied" && item["status"] != "cancelled")
+                    .filter(|item| !shown(item))
                     .cloned()
                     .collect()
             })

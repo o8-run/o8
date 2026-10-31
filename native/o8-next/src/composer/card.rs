@@ -107,19 +107,7 @@ impl Surface {
                     "Attach and settings · {}",
                     crate::composer::controls::mode_label(picked)
                 ),
-            ))
-            .when(self.queue["canSteer"] == true, |d| {
-                d.child(self.composer_button(
-                    "send-mode",
-                    if self.send_next { "Queue" } else { "Steer" },
-                    enabled,
-                    cx,
-                    |s, _, cx| {
-                        s.send_next = !s.send_next;
-                        cx.notify();
-                    },
-                ))
-            });
+            ));
         let trailing = div()
             .flex()
             .items_center()
@@ -134,7 +122,7 @@ impl Surface {
             )
             // The round primary button sits over this slot from the card, so
             // the emptiness flip never re-renders the footer region.
-            .child(div().w(px(28.)).h(px(28.)).flex_shrink_0());
+            .child(div().w(px(self.primary_width())).h(px(28.)).flex_shrink_0());
         div()
             .flex()
             .flex_wrap()
@@ -167,7 +155,7 @@ impl Surface {
             view
         };
         let mut style = gpui::StyleRefinement::default();
-        style.size.width = Some(px(28.).into());
+        style.size.width = Some(px(self.primary_width()).into());
         style.size.height = Some(px(28.).into());
         style.flex_shrink = Some(0.);
         view.cached(style).into_any_element()
@@ -200,9 +188,21 @@ impl Surface {
         // One voice entry point: with a draft, Ctrl+Z hold still dictates
         // into it; a mockup pass will revisit mic and Live side by side.
         div()
-            .size(px(28.))
+            .h(px(28.))
+            .flex()
+            .gap(px(PRIMARY_GAP))
+            .when(self.turn_running(), |d| d.child(self.stop_button(cx)))
             .child(self.primary_button(morph, enabled, cx))
             .into_any_element()
+    }
+
+    /// The primary slot: the round button, and Stop beside it while a turn runs.
+    fn primary_width(&self) -> f32 {
+        if self.turn_running() {
+            28. * 2. + PRIMARY_GAP
+        } else {
+            28.
+        }
     }
 
     /// The round primary button. `morph` runs 0 (empty: voice) to 1 (draft:
@@ -218,7 +218,7 @@ impl Surface {
         let state = self.dictation;
         let live = !sending && matches!(self.voice, VoiceState::Connecting | VoiceState::Live);
         let (id, tip, enabled) = if sending {
-            ("send", "Send", enabled)
+            ("send", "Send · hold for Queue and Fork", enabled)
         } else if live || self.voice == VoiceState::Closing {
             (
                 "composer-microphone",
@@ -249,7 +249,8 @@ impl Surface {
         };
         let white = crate::theme::on_accent();
         let recording = !sending && matches!(state, Starting | Listening);
-        let holdable = !sending && !live && state == Off && enabled;
+        // Empty, a hold starts Live; with a draft, it opens the send menu.
+        let holdable = (sending || !live && state == Off) && enabled;
         let button = self
             .composer_button(id, "", enabled, cx, move |s, window, cx| {
                 // A hold that already started Live consumes its release.
@@ -272,15 +273,11 @@ impl Surface {
             .px(px(0.))
             .rounded_full()
             .justify_center()
-            .bg(if recording {
-                theme().danger
-            } else {
-                theme().accent
-            })
+            .group("composer-primary")
             .when(holdable, |b| {
                 b.on_mouse_down(
                     gpui::MouseButton::Left,
-                    cx.listener(|s, _, window, cx| {
+                    cx.listener(move |s, _, window, cx| {
                         s.voice_hold = (s.voice_hold.0 + 1, false);
                         let press = s.voice_hold.0;
                         cx.spawn_in(window, async move |this, cx| {
@@ -290,7 +287,11 @@ impl Surface {
                             let _ = this.update_in(cx, |s, window, cx| {
                                 if s.voice_hold == (press, false) {
                                     s.voice_hold.1 = true;
-                                    window.dispatch_action(Box::new(super::ToggleVoice), cx);
+                                    if sending {
+                                        s.open_composer_picker("send", window, cx);
+                                    } else {
+                                        window.dispatch_action(Box::new(super::ToggleVoice), cx);
+                                    }
                                 }
                             });
                         })
@@ -307,6 +308,12 @@ impl Surface {
                     }),
                 )
             })
+            .when(sending && enabled, |b| {
+                b.on_mouse_down(
+                    gpui::MouseButton::Right,
+                    cx.listener(|s, _, window, cx| s.open_composer_picker("send", window, cx)),
+                )
+            })
             .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into());
         let layer = || {
             div()
@@ -316,6 +323,18 @@ impl Surface {
                 .items_center()
                 .justify_center()
         };
+        // The fill sits over the shared button's hover background, so a hover
+        // dims the accent instead of replacing it.
+        let button = button.child(
+            layer()
+                .rounded_full()
+                .bg(if recording {
+                    theme().danger
+                } else {
+                    theme().accent
+                })
+                .group_hover("composer-primary", |d| d.opacity(0.86)),
+        );
         if self.saving && sending {
             return button.child(layer().text_color(white).child("…"));
         }
@@ -627,6 +646,7 @@ impl Surface {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
         let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("fast"));
         self.sync_context_meter(&routing, cx);
+        let (running, forkable) = (self.turn_running(), self.can_fork());
         let (open, busy, error, model) = self.composer.update(cx, |i, cx| {
             i.controls.attachment_target = true;
             i.controls.images_enabled = self.queue_ready
@@ -634,14 +654,16 @@ impl Surface {
                     routing["backend"].as_str(),
                     Some("codex" | "claude" | "fable" | "collide")
                 );
-            // ComposerArea: the placeholder teaches the mode, or the send
-            // action while a turn runs.
-            let placeholder = if self.queue["canSteer"] == true {
-                if self.send_next {
-                    "Queue for the next turn…"
+            // The placeholder teaches the keys (Q 2026-10-31): steer or
+            // queue while a turn runs, send or fork after one, else the mode.
+            let placeholder = if running {
+                if self.send_next || self.queue["canSteer"] != true {
+                    "↵ to queue for later · Esc to stop"
                 } else {
-                    "Steer the agent…"
+                    "↵ to steer now, ⌘↵ to queue for later"
                 }
+            } else if forkable {
+                "↵ to send, ⌥⌘↵ to fork into a new thread"
             } else if mode == "Worktrees" {
                 "Ask anything · workers use isolated worktrees"
             } else {
@@ -716,6 +738,17 @@ impl Surface {
                         s.dismiss_composer_picker(window, cx);
                         cx.stop_propagation();
                     }
+                    // Esc on an empty composer stops the running turn.
+                    "escape"
+                        if s.turn_running()
+                            && s.dictation == super::DictationState::Off
+                            && s.voice == super::VoiceState::Off
+                            && s.composer.read(cx).focus.is_focused(window)
+                            && s.composer.read(cx).text.trim().is_empty() =>
+                    {
+                        s.stop_turn(cx);
+                        cx.stop_propagation();
+                    }
                     _ => {}
                 }
             }))
@@ -772,4 +805,6 @@ impl Surface {
 const PAPERCLIP: &str = "m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48";
 /// How long a press on the empty primary button waits before it starts Live.
 const VOICE_HOLD_MS: u64 = 350;
+/// The space between Stop and the primary button.
+const PRIMARY_GAP: f32 = 6.;
 const WAVEFORM: &str = "M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4";

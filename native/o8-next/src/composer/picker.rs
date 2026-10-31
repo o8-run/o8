@@ -299,11 +299,12 @@ impl Surface {
                         |s, w, cx| s.open_from_drawer("access", w, cx),
                     ));
             }
+            "send" => menu = menu.children(self.send_menu_rows(busy, cx)),
             "effort" => menu = menu.children(self.thinking_menu(routing, busy, cx)),
             "model" => menu = menu.children(self.lead_menu(routing, busy, model, cx)),
             _ => {}
         }
-        menu.when(matches!(open, "mode" | "attach"), |v| {
+        menu.when(matches!(open, "mode" | "attach" | "send"), |v| {
             v.on_mouse_down_out(cx.listener(|s, event: &gpui::MouseDownEvent, _, cx| {
                 s.dismiss_prompt_outside(event, cx)
             }))

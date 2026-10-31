@@ -137,6 +137,8 @@ pub(crate) struct Surface {
     /// Rows that end a finished turn and carry Play and Copy.
     action_rows: BTreeSet<usize>,
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
+    /// A fork's new thread, whose carried draft sends once its queue is ready.
+    fork_send: Option<String>,
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -182,6 +184,7 @@ impl Surface {
             away_from_end: false,
             action_rows: BTreeSet::new(),
             action_feedback: Default::default(),
+            fork_send: None,
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
@@ -208,6 +211,7 @@ impl Surface {
             let editor = cx.new(|cx| {
                 let mut editor = Composer::new(cx);
                 editor.controls.slash.enabled = true;
+                editor.send_intents = true;
                 editor.controls.prompt.store = store;
                 editor.controls.prompt.prelude = prelude;
                 if let Some(mode) = mode {
@@ -265,6 +269,17 @@ impl Surface {
                         this.send(None, cx);
                     }
                 }));
+            self.subscriptions.push(cx.subscribe(
+                &editor,
+                |this, editor, event: &crate::composer::SendAs, cx| {
+                    if this.composer == editor {
+                        match event {
+                            crate::composer::SendAs::Queue => this.queue_prompt(cx),
+                            crate::composer::SendAs::Fork => this.fork_prompt(cx),
+                        }
+                    }
+                },
+            ));
             self.subscriptions.push(cx.subscribe(
                 &editor,
                 |this, editor, _: &crate::composer::images::ImagesChanged, cx| {
@@ -357,6 +372,10 @@ impl Surface {
                                 this.queue = queue;
                                 this.routing = Some(routing);
                                 this.queue_ready = true;
+                                if this.fork_send.is_some() && this.fork_send == this.selected {
+                                    this.fork_send = None;
+                                    this.send(None, cx);
+                                }
                             }
                             (Err(error), _) | (_, Err(error)) => {
                                 this.notice =

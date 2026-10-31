@@ -18,6 +18,13 @@ struct Snapshot {
 }
 pub struct Submit(pub bool);
 impl EventEmitter<Submit> for Composer {}
+/// The chat composer's other sends: ⌘↵ queues for later, ⌥⌘↵ forks.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SendAs {
+    Queue,
+    Fork,
+}
+impl EventEmitter<SendAs> for Composer {}
 pub struct Composer {
     pub focus: FocusHandle,
     pub context: &'static str,
@@ -42,6 +49,8 @@ pub struct Composer {
     pub(crate) inline: bool,
     /// Textarea fields insert a newline on plain Enter; chat keeps Submit.
     pub(crate) newline_on_enter: bool,
+    /// The chat composer: ⌘↵ and ⌥⌘↵ emit [`SendAs`] instead of Submit.
+    pub(crate) send_intents: bool,
     pub(crate) controls: controls::State,
 }
 impl Composer {
@@ -68,6 +77,7 @@ impl Composer {
             framed: true,
             inline: false,
             newline_on_enter: false,
+            send_intents: false,
             controls: controls::State::default(),
         }
     }
@@ -271,6 +281,10 @@ impl Composer {
         match key.key.as_str() {
             "enter" if self.newline_on_enter && !command => {
                 self.replace_text_in_range(None, "\n", window, cx)
+            }
+            "enter" if self.send_intents && command && key.modifiers.alt => cx.emit(SendAs::Fork),
+            "enter" if self.send_intents && command && !key.modifiers.shift => {
+                cx.emit(SendAs::Queue)
             }
             "enter" if command && key.modifiers.shift => cx.emit(Submit(true)),
             "enter" if !key.modifiers.shift => cx.emit(Submit(false)),
