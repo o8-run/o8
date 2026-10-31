@@ -27,29 +27,6 @@ pub(super) const REGISTRATION: Registration = Registration {
         (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
             && ["k", "w", "tab"].contains(&event.keystroke.key.as_str())
     },
-    nav: |s, position, cx| {
-        if position != NavPosition::BeforeWorkspaces {
-            return vec![];
-        }
-        // One rail target: it opens Customize, and closes it while open.
-        let open = s.surfaces.customize.open;
-        vec![
-            super::rail::button(
-                if open { "customize-close" } else { "customize-open" },
-                super::rail::Icon::Plugins,
-                "Customize",
-                open,
-            )
-            .on_click(cx.listener(move |s, _, window, cx| {
-                if open {
-                    s.close_customize(window, cx)
-                } else {
-                    s.execute(Command::Customize, window, cx)
-                }
-            }))
-            .into_any_element(),
-        ]
-    },
     ..Registration::new("", "Open Customize", |s, _, window, cx| {
         s.open_customize(window, cx);
         None
@@ -77,7 +54,7 @@ impl Shell {
         self.revision += 1;
         cx.notify();
     }
-    fn close_customize(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn close_customize(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self
             .surfaces
             .customize

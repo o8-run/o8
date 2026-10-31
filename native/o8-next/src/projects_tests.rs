@@ -99,7 +99,8 @@ fn projects_first_run_crud_membership_and_focus(cx: &mut TestAppContext) {
             && s.state.selected.is_none()),
         "first run has neither registered repositories nor saved sessions"
     );
-    let open_ms = measured_click(&shell, cx, "shell-projects");
+    click(cx, "rail-more");
+    let open_ms = measured_click(&shell, cx, "rail-more-projects");
     assert!(cx.debug_bounds("projects-empty").is_some());
     assert!(cx.debug_bounds("repositories-empty").is_some());
     click(cx, "project-new");
@@ -194,7 +195,8 @@ fn projects_first_run_crud_membership_and_focus(cx: &mut TestAppContext) {
         fs::canonicalize(shell.read_with(cx, |s, _| s.state.selected.clone().unwrap())).unwrap(),
         canonical
     );
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     click(cx, "repo-remove-0");
     click(cx, "projects-cancel-confirm");
     assert_eq!(repos(&fixture).len(), 1);
@@ -230,7 +232,8 @@ fn projects_auth_refusal_and_retry(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     settle(cx);
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     assert!(cx.debug_bounds("projects-error").is_some());
     click(cx, "projects-refresh");
     assert!(cx.debug_bounds("projects-error").is_some());
@@ -313,7 +316,8 @@ fn projects_switch_active_without_saved_sessions(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     settle(cx);
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     let mut interaction_ms = vec![];
     for i in 0..20 {
         let slug = if i % 2 == 0 {
@@ -419,7 +423,8 @@ fn projects_reconnect_and_runtime_removal_refusal(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     settle(cx);
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     click(cx, "repo-add");
     fill(cx, "repo-path", &fixture.folders[0]);
     click(cx, "repo-register");
@@ -471,7 +476,8 @@ fn projects_lost_registration_response_preserves_membership_role(cx: &mut TestAp
     );
     let cx = &mut visual;
     settle(cx);
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     click(cx, "project-details-recovery-project");
     click(cx, "repo-add");
     fill(cx, "repo-path", &fixture.folders[0]);
@@ -513,7 +519,8 @@ fn projects_preserve_session_focus_and_allow_inbox_navigation(cx: &mut TestAppCo
     cx.simulate_keystrokes("ctrl-k n e w enter");
     settle(cx);
     assert!(shell.read_with(cx, |s, _| s.current().unwrap().composer));
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
     assert!(
         shell.read_with(cx, |s, _| s.current().unwrap().composer),

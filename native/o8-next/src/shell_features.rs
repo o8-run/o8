@@ -89,6 +89,7 @@ macro_rules! register_shell_feature {
 include!(concat!(env!("OUT_DIR"), "/shell_features.rs"));
 
 pub(super) use rail_drag::{Pane as RailPane, start_chat};
+pub(super) use rail_more::button as rail_more;
 
 /// Stable public API; the host remains one discovered shell feature.
 pub(crate) mod toasts_api {

@@ -38,10 +38,10 @@ fn onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close(cx: &m
         cx.simulate_keystrokes(chord);
         assert!(!shell.read_with(cx, |s, _| s.palette), "busy setup must block palette navigation: {chord}");
     }
-    click(cx, "setup-close");
+    click(cx, "shell-home");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_some()));
     setup.update(cx, |s, cx| { s.busy = false; cx.notify(); });
-    click(cx, "setup-close");
+    click(cx, "shell-home");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
     shell.update(cx, |s, cx| s.load(cx));
     cx.run_until_parked();
