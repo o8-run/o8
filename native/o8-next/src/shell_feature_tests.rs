@@ -235,6 +235,7 @@ fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppCo
 
     // Caps Lock, relayed by the voice host as a voice-host-state frame, starts
     // Live for the selected chat while o8 next is the active window.
+    visual.update(|window, _| window.activate_window());
     send(
         "voice-host-state",
         json!({"action": "voice-toggle", "hostId": "host"}),
