@@ -142,7 +142,7 @@ impl Surface {
                 let picked = routing["pickedMode"].as_str().unwrap_or("fast");
                 let shares =
                     crate::composer::controls::shares_checkout(routing["backend"].as_str());
-                for (value, label, detail) in [
+                for (number, (value, label, detail)) in [
                     (
                         "fast",
                         "Shared",
@@ -153,21 +153,27 @@ impl Surface {
                         "Worktrees",
                         "Give delegated workers separate checkouts",
                     ),
-                ] {
-                    menu = menu.child(self.menu_row(
-                        &format!("mode-{value}"),
-                        label,
-                        detail,
-                        picked == value,
-                        !busy && (value != "fast" || shares),
-                        cx,
-                        move |s, w, cx| s.composer_choice("pickedMode", value, w, cx),
-                    ));
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    menu = menu.child(
+                        self.menu_row(
+                            &format!("mode-{value}"),
+                            label,
+                            detail,
+                            picked == value,
+                            !busy && (value != "fast" || shares),
+                            cx,
+                            move |s, w, cx| s.composer_choice("pickedMode", value, w, cx),
+                        )
+                        .child(row_number(number)),
+                    );
                 }
             }
             "access" => {
                 let plan = routing["permissionMode"] == "plan";
-                for (value, label, detail, selected) in [
+                for (number, (value, label, detail, selected)) in [
                     (
                         "full",
                         "Full access",
@@ -180,16 +186,22 @@ impl Surface {
                         "Inspect and propose without edits",
                         plan,
                     ),
-                ] {
-                    menu = menu.child(self.menu_row(
-                        &format!("access-{value}"),
-                        label,
-                        detail,
-                        selected,
-                        !busy,
-                        cx,
-                        move |s, w, cx| s.composer_choice("permissionMode", value, w, cx),
-                    ));
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    menu = menu.child(
+                        self.menu_row(
+                            &format!("access-{value}"),
+                            label,
+                            detail,
+                            selected,
+                            !busy,
+                            cx,
+                            move |s, w, cx| s.composer_choice("permissionMode", value, w, cx),
+                        )
+                        .child(row_number(number)),
+                    );
                 }
             }
             // AttachFilesButton's menu: saved prompts, then files from disk.
@@ -519,4 +531,15 @@ impl Surface {
         })
         .detach();
     }
+}
+
+/// The faint key number at the end of a menu row; that number key picks it.
+fn row_number(index: usize) -> Div {
+    div()
+        .w(px(14.))
+        .flex()
+        .justify_end()
+        .text_size(px(11.))
+        .text_color(theme().text_faint)
+        .child(SharedString::from((index + 1).to_string()))
 }

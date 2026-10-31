@@ -529,6 +529,28 @@ impl Surface {
             cx.stop_propagation();
             return true;
         }
+        // Number keys pick a row, as in the Claude desktop permission menu
+        // (Q 2026-10-31); the rows show their numbers.
+        if matches!(open, "mode" | "access")
+            && !event.keystroke.modifiers.modified()
+            && let Some(index) = key.parse::<usize>().ok().and_then(|n| n.checked_sub(1))
+        {
+            let (field, values) = if open == "mode" {
+                ("pickedMode", ["fast", "multitask"])
+            } else {
+                ("permissionMode", ["full", "plan"])
+            };
+            if let Some(value) = values.get(index) {
+                let routing = self.composer_routing(cx).unwrap_or(Value::Null);
+                if *value != "fast"
+                    || crate::composer::controls::shares_checkout(routing["backend"].as_str())
+                {
+                    self.composer_choice(field, value, window, cx);
+                }
+            }
+            cx.stop_propagation();
+            return true;
+        }
         if open == "rules"
             && key == "enter"
             && self
