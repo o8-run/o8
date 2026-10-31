@@ -76,6 +76,21 @@ fn ensure(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
             Leaf::Main => {}
             Leaf::Chat { session } => {
                 if !s.sessions.iter().any(|x| &x.id == session) {
+                    let failed = s
+                        .surfaces
+                        .sidebar
+                        .view
+                        .as_ref()
+                        .is_some_and(|list| list.read(cx).failed_starts.contains(session));
+                    if failed {
+                        let state = s.features.get::<State>();
+                        if !state.failed.contains_key(id) {
+                            state
+                                .failed
+                                .insert(id.to_owned(), "Could not start this chat.".into());
+                            cx.notify();
+                        }
+                    }
                     continue;
                 }
                 let tab = Tab::Session(session.clone());

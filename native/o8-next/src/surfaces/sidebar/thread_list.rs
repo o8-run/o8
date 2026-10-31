@@ -83,6 +83,8 @@ pub struct ThreadList {
     menu_press: Option<gpui::Point<gpui::Pixels>>,
     /// A thread New thread created; the shell opens it once the list has it.
     pending_open: Option<String>,
+    /// Threads whose start failed, so a pane waiting on one can say so.
+    pub failed_starts: HashSet<String>,
     /// Closed By repo folders, by repository path.
     closed: HashSet<String>,
     /// A Settle or Un-settle awaiting the server.
@@ -166,6 +168,7 @@ impl ThreadList {
             new_menu: false,
             menu_press: None,
             pending_open: None,
+            failed_starts: HashSet::new(),
             settling: None,
             undo: None,
             closed: HashSet::new(),
