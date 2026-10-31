@@ -299,6 +299,17 @@ impl Shell {
                 && (probe(&key(self, p.current())) || p.lower.is_some_and(|t| probe(&key(self, t))))
         })
     }
+    /// Opens the panel's terminal in its top view, or its bottom one: where
+    /// the rail's Terminal was dropped on the panel.
+    pub(crate) fn panel_terminal(&mut self, lower: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if !lower {
+            show(self, Tool::Terminal, window, cx);
+            return;
+        }
+        self.features.get::<Panel>().menu_lower = true;
+        layout::choose(self, Tool::Terminal, window, cx);
+        self.features.get::<Panel>().menu_lower = false;
+    }
     pub(crate) fn panel_front_key(&self) -> Option<String> {
         let panel = self.features.read::<Panel>()?;
         panel.motion.is_open().then(|| key(self, panel.current()))

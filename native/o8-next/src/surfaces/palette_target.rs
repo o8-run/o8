@@ -59,6 +59,9 @@ pub(in crate::shell) struct Picker<P: Port> {
     open_own: bool,
     /// Inventory generations never invalidate an in-flight creation result.
     generation: u64,
+    /// A split pane's own target: opened even before the inventory lists it,
+    /// and never swapped for the surface's own target.
+    pinned: bool,
 }
 impl<P: Port> Picker<P> {
     pub fn new(
@@ -83,6 +86,33 @@ impl<P: Port> Picker<P> {
             own: OwnTarget::Unrequested,
             open_own: true,
             generation: 0,
+            pinned: false,
+        };
+        view.load(cx);
+        view
+    }
+    /// Opens `id` and only `id`: a split pane's own terminal.
+    pub fn pinned(client: Client, workspace: String, id: String, cx: &mut Context<Self>) -> Self {
+        let mut view = Self {
+            client,
+            workspace,
+            selected: Some(id.clone()),
+            child: None,
+            choices: vec![Choice {
+                id: id.clone(),
+                label: id.clone(),
+            }],
+            focus: cx.focus_handle(),
+            child_focus: None,
+            query: String::new(),
+            choice: 0,
+            loading: false,
+            failed: false,
+            requested: Some(id),
+            own: OwnTarget::Unavailable,
+            open_own: true,
+            generation: 0,
+            pinned: true,
         };
         view.load(cx);
         view
@@ -134,6 +164,15 @@ impl<P: Port> Picker<P> {
                 match result {
                     Ok(choices) => {
                         s.choices = choices;
+                        if s.pinned
+                            && let Some(id) = s.selected.clone()
+                            && !s.choices.iter().any(|choice| choice.id == id)
+                        {
+                            s.choices.push(Choice {
+                                id: id.clone(),
+                                label: id,
+                            });
+                        }
                         s.merge_own();
                     }
                     Err(_) => s.failed = true,

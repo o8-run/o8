@@ -14,6 +14,9 @@ use std::{
 pub struct Workspace {
     pub tabs: Vec<Tab>,
     pub active: usize,
+    /// Split panes beside the main one; none until a drop splits it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panes: Option<crate::pane_tree::Node>,
     #[serde(flatten)]
     pub surfaces: crate::shell::WorkspaceState,
 }

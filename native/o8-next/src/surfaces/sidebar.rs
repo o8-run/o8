@@ -381,6 +381,14 @@ impl Shell {
         }
         self.persist();
     }
+    /// Starts a thread on the operator's lead in the open repository, as the
+    /// sidebar's New thread does, opening it in the main pane when `open`;
+    /// None when no repository is open.
+    pub(crate) fn start_thread(&mut self, open: bool, cx: &mut Context<Self>) -> Option<String> {
+        let repo = self.state.selected.clone().filter(|w| w != "Unassigned")?;
+        let list = self.surfaces.sidebar.view.clone()?;
+        Some(list.update(cx, |list, cx| list.start_thread(repo, open, cx)))
+    }
     fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(workspace) = self
             .sessions
