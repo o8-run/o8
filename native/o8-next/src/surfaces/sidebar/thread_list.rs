@@ -37,6 +37,10 @@ pub enum Event {
     View(String, &'static str),
     /// The closed By repo folders, by repository path.
     Folders(Vec<String>),
+    /// Snoozed inbox threads and when each comes back, in Unix seconds.
+    Snoozes(Vec<(String, u64)>),
+    /// Detailed rows, and whether running threads fold into a Working section.
+    RowMode(bool, bool),
     /// The project menu's Switch workspace, with the focus to give back.
     WorkspacePicker(Option<gpui::FocusHandle>),
 }
@@ -52,6 +56,8 @@ pub struct Row {
     pub age: String,
     pub branch: bool,
     pub attention: bool,
+    /// The Inbox row's badge: "input" (waiting on you) or "back" (a snooze ended).
+    pub marker: &'static str,
     /// Set on a By repo folder row.
     pub folder: Option<folders::Folder>,
 }
@@ -90,16 +96,33 @@ pub struct ThreadList {
     /// A Settle or Un-settle awaiting the server.
     settling: Option<String>,
     undo: Option<inbox::Undo>,
+    /// Snoozed threads, by id, to the Unix second each comes back. An ended
+    /// snooze stays until the thread is opened, so it can head the list.
+    snoozes: HashMap<String, u64>,
+    /// Linked pull requests by thread id (pr_links.rs).
+    pr_links: HashMap<String, Vec<pr_links::PrLink>>,
+    pr_links_at: Option<Instant>,
+    pr_loading: bool,
+    pr_hover: Option<pr_links::PrHover>,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
     pub scroll: UniformListScrollHandle,
+    /// Detailed mode's variable-height list (threads 66px, headings 28px).
+    pub detailed_list: gpui::ListState,
     focus: FocusHandle,
     archived_focus: FocusHandle,
     editor: Entity<Composer>,
     query: String,
     expanded: HashSet<String>,
     branch_ids: HashSet<String>,
+    /// The packet branch each thread works on, by thread id.
+    pub(super) branch_names: HashMap<String, String>,
+    /// Detailed three-line rows (T3 Code's), opt-in; compact otherwise.
+    pub(super) detailed: bool,
+    /// Running threads fold into a Working section; `working_closed` collapses it.
+    pub(super) working_section: bool,
+    pub(super) working_closed: bool,
     archived_open: bool,
     #[cfg(test)]
     pub(super) title_layouts: HashMap<String, gpui::TextLayout>,
@@ -126,6 +149,11 @@ pub struct ThreadList {
     subscription: Subscription,
     subscriptions: Vec<gpui::Subscription>,
     notice: String,
+    /// A pinned-row drag's drop target: (target id, drop after it).
+    pub(super) pin_drop: Option<(String, bool)>,
+    /// Each pinned row's bounds during a drag, so the empty list space
+    /// below a shelf that ends the list can drop last.
+    pub(super) pin_bounds: HashMap<String, gpui::Bounds<gpui::Pixels>>,
     pub painted: Rc<Cell<usize>>,
     pub materialized: Rc<Cell<usize>>,
 }
@@ -163,6 +191,11 @@ impl ThreadList {
             scopes: HashMap::new(),
             scope_menu: None,
             row_menu: None,
+            snoozes: HashMap::new(),
+            pr_links: HashMap::new(),
+            pr_links_at: None,
+            pr_loading: false,
+            pr_hover: None,
             views: HashMap::new(),
             view_menu: false,
             new_menu: false,
@@ -176,12 +209,17 @@ impl ThreadList {
             rows: Rc::new(vec![]),
             selected: None,
             scroll: UniformListScrollHandle::new(),
+            detailed_list: gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(200.)),
             focus: cx.focus_handle(),
             archived_focus: cx.focus_handle().tab_stop(true),
             editor,
             query: String::new(),
             expanded: HashSet::new(),
             branch_ids: HashSet::new(),
+            branch_names: HashMap::new(),
+            detailed: false,
+            working_section: false,
+            working_closed: false,
             archived_open: false,
             #[cfg(test)]
             title_layouts: HashMap::new(),
@@ -206,6 +244,8 @@ impl ThreadList {
             inventory_loading: false,
             subscriptions: vec![observe, submit],
             notice: String::new(),
+            pin_drop: None,
+            pin_bounds: HashMap::new(),
             painted: Rc::new(Cell::new(usize::MAX)),
             materialized: Rc::new(Cell::new(0)),
         }
@@ -251,6 +291,11 @@ impl ThreadList {
             rows.truncate(index);
         }
         self.rows = Rc::new(rows);
+        // Remeasure detailed rows; keep the reader's place.
+        let top = self.detailed_list.logical_scroll_top();
+        let old = self.detailed_list.item_count();
+        self.detailed_list.splice(0..old, self.rows.len());
+        self.detailed_list.scroll_to(top);
         if !self
             .rows
             .iter()
@@ -271,7 +316,7 @@ impl ThreadList {
             .position(|r| r.id.is_some() && r.id == self.choice)
             && previous_choice.is_some_and(|previous| previous != index)
         {
-            self.scroll.scroll_to_item(index, ScrollStrategy::Top);
+            self.scroll_row(index, ScrollStrategy::Top, false);
         }
     }
     /// The disclosure group a thread belongs to in the current view.
@@ -282,10 +327,27 @@ impl ThreadList {
             folders::View::Chronological => "Chronological",
             folders::View::Repo => "",
             folders::View::Inbox if session.settled() => "Settled",
+            folders::View::Inbox if self.snoozed(&session.id) => "Snoozed",
             folders::View::Inbox => "Active",
         }
     }
     fn view_rows(&self, sessions: &[Session]) -> Vec<Row> {
+        let mut rows = self.view_rows_base(sessions);
+        detailed::mark_dev_working(&mut rows);
+        rows = pins::fold_pinned(rows, &pins::pinned_order(sessions));
+        if self.working_section {
+            // The Pinned shelf stays first and keeps its running threads.
+            let shelf = if rows.first().is_some_and(|r| r.status == "pinned") {
+                1 + rows[1..].iter().take_while(|r| r.kind == "thread").count()
+            } else {
+                0
+            };
+            let rest = rows.split_off(shelf);
+            rows.extend(detailed::fold_working(rest, self.working_closed));
+        }
+        rows
+    }
+    fn view_rows_base(&self, sessions: &[Session]) -> Vec<Row> {
         let (query, matches) = (&self.query, &self.search_matches);
         let (expanded, branches) = (&self.expanded, &self.branch_ids);
         match self.view() {
@@ -293,7 +355,14 @@ impl ThreadList {
             folders::View::Chronological => {
                 folders::chronological(sessions, query, matches, expanded, branches)
             }
-            folders::View::Inbox => inbox::rows(sessions, query, matches, expanded, branches),
+            folders::View::Inbox => inbox::rows(
+                sessions,
+                query,
+                matches,
+                expanded,
+                branches,
+                &self.snoozes,
+            ),
             folders::View::Repo => {
                 let keys = self.scope_keys();
                 let repos: Vec<_> = self
@@ -358,7 +427,8 @@ impl ThreadList {
                 this.last_inventory = Instant::now();
                 match result {
                     Ok((mut sessions, ledger, header, branches)) => {
-                        this.branch_ids = branches;
+                        this.branch_ids = branches.keys().cloned().collect();
+                        this.branch_names = branches;
                         if let Some(header) = header {
                             this.header = header;
                         }
@@ -396,6 +466,13 @@ impl ThreadList {
         cx.notify();
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
+        if self.pr_links_due() {
+            self.load_pr_links(cx);
+        }
+        if self.snooze_due() {
+            self.rebuild();
+            cx.notify();
+        }
         if self.last_age.elapsed() >= Duration::from_secs(60) {
             self.last_age = Instant::now();
             self.rebuild();
@@ -438,6 +515,15 @@ impl ThreadList {
                             incoming.parent_inbox_subject = old.parent_inbox_subject.clone();
                             incoming.settled_override = old.settled_override.clone();
                             incoming.settled_at = old.settled_at.clone();
+                            incoming.pinned_at = old.pinned_at.clone();
+                            incoming.pin_order_key = old.pin_order_key.clone();
+                            incoming.inbox_revision = old.inbox_revision;
+                        }
+                        // Repo, branch and run start are listing-only too.
+                        incoming.repo_slug = incoming.repo_slug.take().or(old.repo_slug.clone());
+                        incoming.branch = incoming.branch.take().or(old.branch.clone());
+                        if incoming.run_started_at.is_none() && incoming.status == "running" {
+                            incoming.run_started_at = old.run_started_at.clone();
                         }
                         // Packet attention comes from the lifecycle API.
                         // A thread's own failure can recover on this stream.
@@ -641,6 +727,7 @@ impl ThreadList {
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
             s.unread = false;
         }
+        self.clear_woken(&id, cx);
         self.rebuild();
         cx.emit(Event::Selected(id));
         cx.notify();
@@ -852,7 +939,7 @@ impl ThreadList {
                 };
                 self.choice = Some(ids[next].1.clone());
                 self.follow_selection = false;
-                self.scroll.scroll_to_item(ids[next].0, ScrollStrategy::Top);
+                self.scroll_row(ids[next].0, ScrollStrategy::Top, false);
             }
             _ => return,
         }
@@ -901,3 +988,25 @@ mod archive_controls;
 
 #[path = "inbox.rs"]
 mod inbox;
+#[path = "snooze.rs"]
+mod snooze;
+#[path = "pr_links.rs"]
+pub(crate) mod pr_links;
+#[path = "detailed.rs"]
+pub(crate) mod detailed;
+#[path = "pins.rs"]
+pub(crate) mod pins;
+
+impl ThreadList {
+    /// Scroll either list to a row; detailed mode reveals it in its list.
+    pub(crate) fn scroll_row(&self, index: usize, strategy: ScrollStrategy, strict: bool) {
+        if strict {
+            self.scroll.scroll_to_item_strict(index, strategy);
+        } else {
+            self.scroll.scroll_to_item(index, strategy);
+        }
+        if self.detailed {
+            self.detailed_list.scroll_to(gpui::ListOffset { item_ix: index, offset_in_item: gpui::px(0.) });
+        }
+    }
+}

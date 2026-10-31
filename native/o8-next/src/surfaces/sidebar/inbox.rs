@@ -30,6 +30,7 @@ pub(super) fn rows(
     matches: &HashSet<String>,
     expanded: &HashSet<String>,
     branches: &HashSet<String>,
+    snoozes: &HashMap<String, u64>,
 ) -> Vec<Row> {
     let now = recents::now();
     let searching = !query.trim().is_empty();
@@ -39,6 +40,14 @@ pub(super) fn rows(
         .partition(|s| s.status != "archived");
     let (mut settled, active): (Vec<_>, Vec<_>) = live.into_iter().partition(|s| s.settled());
     settled.sort_by(|a, b| b.settled_at.cmp(&a.settled_at));
+    // A snooze hides an Active thread until its time; then it comes back on
+    // top, under the threads waiting on you, until it is opened.
+    let (mut snoozed, mut active): (Vec<_>, Vec<_>) = active
+        .into_iter()
+        .partition(|s| snoozes.get(&s.id).is_some_and(|until| *until > now));
+    snoozed.sort_by_key(|s| snoozes[&s.id]);
+    let woken = |s: &Session| snoozes.contains_key(&s.id);
+    active.sort_by_key(|s| (!needs_input(s), !woken(s)));
     // Active always heads the list; its row carries the view picker.
     let mut rows = vec![recents::header("section", "Active", "")];
     let open = searching || expanded.contains("Active");
@@ -47,18 +56,32 @@ pub(super) fn rows(
     } else {
         active.len().min(50)
     };
-    rows.extend(
-        active
-            .iter()
-            .take(count)
-            .map(|s| recents::thread_row(s, now, branches)),
-    );
+    rows.extend(active.iter().take(count).map(|s| {
+        let mut row = recents::thread_row(s, now, branches);
+        row.marker = if needs_input(s) {
+            "input"
+        } else if woken(s) {
+            "back"
+        } else {
+            ""
+        };
+        row
+    }));
     if count < active.len() {
         rows.push(recents::header(
             "more",
             &format!("Show {} more", active.len() - count),
             "Active",
         ));
+    }
+    let open = searching || expanded.contains("Snoozed");
+    let at = rows.len();
+    recents::group_rows(&mut rows, "Snoozed", &snoozed, 10, open, now, branches);
+    // A snoozed row reads when it comes back in place of its age.
+    for row in &mut rows[at..] {
+        if let Some(until) = row.id.as_ref().and_then(|id| snoozes.get(id)) {
+            row.age = snooze::until_label(*until, now);
+        }
     }
     let open = searching || expanded.contains("Settled");
     recents::group_rows(&mut rows, "Settled", &settled, 10, open, now, branches);
@@ -67,9 +90,14 @@ pub(super) fn rows(
     rows
 }
 
+/// A thread waiting on the user: a question or an approval.
+pub(super) fn needs_input(s: &Session) -> bool {
+    sidebar::rank(s) == 3 || s.status.trim().eq_ignore_ascii_case("approval")
+}
+
 impl ThreadList {
     /// Settle applies in the Inbox view on a host that projects settlement.
-    fn settleable(&self, id: &str) -> Option<&Session> {
+    pub(super) fn settleable(&self, id: &str) -> Option<&Session> {
         (self.view() == folders::View::Inbox)
             .then(|| {
                 self.sessions
@@ -101,6 +129,36 @@ impl ThreadList {
             return false;
         };
         self.settle_id(id, cx);
+        true
+    }
+    /// Mod+Z, right after a Settle, un-settles it as the toast's Undo does.
+    /// It applies only while the sidebar or nothing holds focus, so an
+    /// editor's own undo is untouched.
+    pub(crate) fn undo_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let stroke = &event.keystroke;
+        let secondary = if cfg!(target_os = "macos") {
+            stroke.modifiers.platform
+        } else {
+            stroke.modifiers.control
+        };
+        if !(secondary && !stroke.modifiers.shift && !stroke.modifiers.alt && stroke.key == "z")
+            || self.editing
+        {
+            return false;
+        }
+        let sidebar = window.focused(cx).is_none_or(|focused| {
+            focused == self.focus || focused == self.archived_focus
+        });
+        let Some(undo) = self.undo.take_if(|_| sidebar) else {
+            return false;
+        };
+        toasts::dismiss(undo.toast, cx);
+        self.settle_id(undo.id, cx);
         true
     }
     pub(super) fn settle_id(&mut self, id: String, cx: &mut Context<Self>) {
@@ -141,6 +199,10 @@ impl ThreadList {
         if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
             session.settled_override = state["settledOverride"].as_str().map(str::to_owned);
             session.settled_at = state["settledAt"].as_str().map(str::to_owned);
+            // Settling bumps the subject's revision; a later Pin must quote it.
+            if let Some(revision) = state["inboxRevision"].as_u64() {
+                session.inbox_revision = Some(revision);
+            }
         }
         // A listing already in flight predates this answer; fence it, as
         // archive and rename do, so it cannot put the row back.
@@ -180,7 +242,7 @@ impl ThreadList {
         self.load(cx);
     }
     /// The Active thread now in the settled row's place, else the one above.
-    fn next_active(&self, index: Option<usize>) -> Option<String> {
+    pub(super) fn next_active(&self, index: Option<usize>) -> Option<String> {
         let index = index?;
         let end = self
             .rows
@@ -241,8 +303,10 @@ impl ThreadList {
                     11.,
                     2.6,
                 ))
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_click(cx.listener(move |this, _, window, cx| {
                     cx.stop_propagation();
+                    // Keeps Mod+Z with the list for the Undo that follows.
+                    this.focus.focus(window);
                     this.settle_id(id.clone(), cx);
                 }))
                 .into_any_element(),

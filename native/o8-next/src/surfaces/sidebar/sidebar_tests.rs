@@ -722,6 +722,10 @@ mod scope_tests;
 mod folder_tests;
 #[path = "settle_tests.rs"]
 mod settle_tests;
+#[path = "pr_links_tests.rs"]
+mod pr_links_tests;
+#[path = "detailed_tests.rs"]
+mod detailed_tests;
 
 #[path = "icon_tests.rs"]
 mod icon_tests;
@@ -731,3 +735,6 @@ mod recents_tests;
 
 #[path = "archive_tests.rs"]
 mod archive_tests;
+
+#[path = "pin_reorder_tests.rs"]
+mod pin_reorder_tests;

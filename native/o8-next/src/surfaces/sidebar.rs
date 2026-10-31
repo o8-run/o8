@@ -188,7 +188,9 @@ pub(super) const REGISTRATION: Registration = Registration {
     key_down: |shell, event, window, cx| {
         if shell.surfaces.sidebar.view.as_ref().is_some_and(|view| {
             view.update(cx, |sidebar, cx| {
-                sidebar.header_key(event, window, cx) || sidebar.settle_key(event, cx)
+                sidebar.header_key(event, window, cx)
+                    || sidebar.settle_key(event, cx)
+                    || sidebar.undo_key(event, window, cx)
             })
         }) {
             return true;
@@ -245,9 +247,16 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         shell.state.sidebar_view.clone(),
         shell.state.sidebar_closed_folders.clone(),
     );
+    let snoozes = shell.state.sidebar_snoozes.clone();
+    let (detailed, working) = (
+        shell.state.sidebar_detailed_rows,
+        shell.state.sidebar_working_section,
+    );
     sidebar.update(cx, |sidebar, _| {
         sidebar.restore_scopes(scopes);
         sidebar.restore_views(&views, &closed);
+        sidebar.restore_snoozes(&snoozes);
+        sidebar.restore_row_mode(detailed, working);
     });
     shell.subscriptions.push(
         cx.subscribe_in(&sidebar, window, |shell, _, event, window, cx| {
@@ -295,6 +304,15 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                 }
                 ThreadEvent::Folders(closed) => {
                     shell.state.sidebar_closed_folders = closed.iter().cloned().collect();
+                    shell.persist();
+                }
+                ThreadEvent::RowMode(detailed, working) => {
+                    shell.state.sidebar_detailed_rows = *detailed;
+                    shell.state.sidebar_working_section = *working;
+                    shell.persist();
+                }
+                ThreadEvent::Snoozes(snoozes) => {
+                    shell.state.sidebar_snoozes = snoozes.iter().cloned().collect();
                     shell.persist();
                 }
                 ThreadEvent::Error(error) => {
