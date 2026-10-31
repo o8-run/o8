@@ -12,6 +12,9 @@ const binary = realpathSync(join(payload, 'o8-next'));
 const directory = resolve(resolveCliDataDir());
 const shellState = join(directory, 'next-shell.json');
 const cli = join(payload, 'server/cli/o8.mjs');
+// Allow delayed bootstrap plus the server's 15-second first-paint deadline.
+// Expiry reports an error; it never starts a competing window.
+const SERVER_WINDOW_RESULT_TIMEOUT_MS = 60_000;
 
 function record(text: string): Record<string, unknown> | undefined {
   try {
@@ -22,6 +25,21 @@ function record(text: string): Record<string, unknown> | undefined {
 }
 
 type CliResult = { code: number; stdout: string; stderr: string };
+function reusableServeError(result: CliResult): boolean {
+  // Prefer the structured stdout response. The ordinary CLI currently emits
+  // error envelopes on stderr, one pretty-printed JSON object per write; keep
+  // surrounding runtime warnings separate instead of merging the streams.
+  const responses = [record(result.stdout),
+    ...Array.from(result.stderr.matchAll(/^\{[\s\S]*?^\}/gm), match => record(match[0]))];
+  for (const response of responses) {
+    const error = response?.error;
+    if (response?.schema !== 'o8/cli/error/v1' || !error || typeof error !== 'object' || Array.isArray(error)) continue;
+    const detail = error as Record<string, unknown>;
+    if (typeof detail.code !== 'string' || typeof detail.message !== 'string') continue;
+    return ['serve_already_running', 'serve_desktop_owns_data_dir'].includes(detail.code);
+  }
+  return false;
+}
 function healthy(result: CliResult): boolean {
   const status = record(result.stdout);
   return result.code === 0 && status?.schema === 'o8/cli/serve-status/v1'
@@ -29,9 +47,11 @@ function healthy(result: CliResult): boolean {
     && typeof status.pid === 'number' && Number.isSafeInteger(status.pid) && status.pid > 0;
 }
 
-async function runCli(args: string[], capture = false): Promise<CliResult> {
+async function runCli(args: string[], capture = false, timeoutMs?: number): Promise<CliResult> {
   return new Promise((done, reject) => {
-    const child = spawn(process.execPath, [cli, ...args], { stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit' });
+    const child = spawn(process.execPath, [cli, ...args], {
+      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit', timeout: timeoutMs, killSignal: 'SIGKILL',
+    });
     let stdout = '';
     let stderr = '';
     child.stdout?.on('data', chunk => { stdout += String(chunk); });
@@ -61,20 +81,24 @@ function windowIsOpen(): boolean {
 }
 
 async function serverWindowResult(file: string): Promise<'ready' | 'failed'> {
+  const deadline = Date.now() + SERVER_WINDOW_RESULT_TIMEOUT_MS;
   let healthAt = 0;
-  for (;;) {
+  while (Date.now() < deadline) {
     try {
       const result = record(readFileSync(file, 'utf8'));
       if (result?.status === 'ready' || result?.status === 'failed') return result.status;
     } catch { /* The async server hook has not published its result yet. */ }
     if (Date.now() >= healthAt) {
-      if (!healthy(await runCli(['serve', 'status'], true))) {
+      const status = await runCli(['serve', 'status'], true, Math.max(1, deadline - Date.now()));
+      if (Date.now() >= deadline) break;
+      if (!healthy(status)) {
         throw new Error('The server stopped being healthy before reporting its window startup result.');
       }
       healthAt = Date.now() + 1_000;
     }
     await delay(100);
   }
+  throw new Error('The server did not report its window startup result within 60 seconds. Try launching o8 again.');
 }
 
 async function openDesktop(): Promise<number> {
@@ -108,10 +132,9 @@ async function openDesktop(): Promise<number> {
     if (serve.code === 0 && !healthy(serve)) throw new Error('The server returned an invalid startup status.');
     const started = serve.code === 0;
     if (!started) {
-      // CLI errors and runtime warnings both use stderr. A separate, shaped
-      // status response is the authority for reuse, not parsing that stream.
-      if (!healthy(await runCli(['serve', 'status'], true))) {
-        process.stderr.write(serve.stderr + serve.stdout);
+      if (!reusableServeError(serve) || !healthy(await runCli(['serve', 'status'], true))) {
+        process.stderr.write(serve.stderr);
+        process.stdout.write(serve.stdout);
         return serve.code;
       }
     }

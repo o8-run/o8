@@ -43,6 +43,15 @@ function launch(launcher: string, env: NodeJS.ProcessEnv) {
   children.push(child);
   return child;
 }
+function captureLaunch(launcher: string, env: NodeJS.ProcessEnv) {
+  const child = spawn(launcher, [], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  children.push(child);
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', chunk => { stdout += String(chunk); });
+  child.stderr.on('data', chunk => { stderr += String(chunk); });
+  return { child, closed: once(child, 'close'), stdout: () => stdout, stderr: () => stderr };
+}
 function events(env: NodeJS.ProcessEnv): string[] {
   try { return readFileSync(env.O8_FIXTURE_LAUNCHES!, 'utf8').trim().split('\n'); } catch { return []; }
 }
@@ -86,6 +95,11 @@ beforeAll(async () => {
     if (process.env.O8_FIXTURE_STATUS_JSON && process.argv.includes('status')) {
       process.stdout.write(process.env.O8_FIXTURE_STATUS_JSON); process.exit(0);
     }
+    if (process.env.O8_FIXTURE_SERVE_ERROR && process.argv.slice(2).join(' ') === 'serve') {
+      process.stdout.write(JSON.stringify({ schema: 'o8/cli/error/v1',
+        error: { code: process.env.O8_FIXTURE_SERVE_ERROR, message: 'fixture serve failure' } }));
+      process.exit(7);
+    }
     ${bundledCli}
   `);
   stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: server });
@@ -118,7 +132,8 @@ beforeAll(async () => {
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ product: 'o8' }));
     }).listen(Number(process.env.PORT), '127.0.0.1', () => {
-      if (process.env.O8_PACKAGED_APP === '1' && process.env.O8_NEXT_MAIN_WINDOW === '1') {
+      if (process.env.O8_PACKAGED_APP === '1' && process.env.O8_NEXT_MAIN_WINDOW === '1'
+        && !process.env.O8_FIXTURE_SKIP_WINDOW_BOOTSTRAP) {
         setTimeout(() => { void require('./native-window.cjs').restoreNextWindow(); },
           Number(process.env.O8_FIXTURE_BOOT_DELAY_MS || 0));
       }
@@ -295,6 +310,54 @@ it.skipIf(process.platform !== 'linux')('does not reuse an offscreen app-shell p
   expect(events(f.env).filter(args => !args.includes('--offscreen'))).toHaveLength(1);
   expect(visibleWindows(f.relocated)).toHaveLength(1);
   await stop(hidden);
+}, 60_000);
+
+it.skipIf(process.platform !== 'linux')('bounds a never-published startup result, releases the lock and permits a retry', async () => {
+  const f = installation('missing-result');
+  const env = { ...f.env, O8_FIXTURE_SKIP_WINDOW_BOOTSTRAP: '1' };
+  const app = captureLaunch(f.launcher, env);
+  await app.closed; // Old launcher hangs here until this test's outer deadline.
+  expect(app.child.exitCode).toBe(1);
+  expect(app.stderr()).toContain('did not report its window startup result within 60 seconds');
+  await launchUnlocked(f.data, env);
+  expect(events(env)).toHaveLength(0);
+  expect(JSON.parse(command(f.launcher, ['serve', 'status'], env).stdout).healthy).toBe(true);
+  const retry = launch(f.launcher, env);
+  await until(() => events(env).length === 1);
+  expect(visibleWindows(f.relocated)).toHaveLength(1);
+  await stop(retry);
+}, 80_000);
+
+it.skipIf(process.platform !== 'linux')('preserves unrelated serve failures with a healthy daemon and reuses only allowed error codes', async () => {
+  const f = installation('serve-failures');
+  expect(command(f.launcher, ['serve'], f.env).status).toBe(0);
+  const env = { ...f.env, O8_REVIEW_MODE: 'invalid-fixture-mode' };
+  const rejected = command(f.launcher, ['serve'], env);
+  expect(rejected.status).not.toBe(0);
+  const app = captureLaunch(f.launcher, env);
+  await until(() => app.child.exitCode !== null, 5_000);
+  await app.closed;
+  expect(app.child.exitCode).toBe(rejected.status);
+  expect(app.stderr()).toBe(rejected.stderr);
+  expect(app.stdout()).toBe(rejected.stdout);
+  expect(events(f.env)).toHaveLength(0);
+  for (const [index, code] of ['serve_already_running', 'serve_desktop_owns_data_dir'].entries()) {
+    const allowed = launch(f.launcher, { ...f.env, O8_FIXTURE_SERVE_ERROR: code, O8_FIXTURE_CLI_WARNING: '1' });
+    await until(() => events(f.env).length === index + 1);
+    await launchUnlocked(f.data, f.env);
+    expect(visibleWindows(f.relocated)).toHaveLength(1);
+    await stop(allowed);
+    await until(() => visibleWindows(f.relocated).length === 0);
+  }
+  const denied = captureLaunch(f.launcher, { ...f.env,
+    O8_FIXTURE_SERVE_ERROR: 'serve_unexpected', O8_FIXTURE_CLI_WARNING: '1' });
+  await until(() => denied.child.exitCode !== null, 5_000);
+  await denied.closed;
+  expect(denied.child.exitCode).toBe(7);
+  expect(JSON.parse(denied.stdout()).error.code).toBe('serve_unexpected');
+  expect(denied.stderr()).toContain('fixture runtime warning');
+  expect(events(f.env)).toHaveLength(2);
+  expect(JSON.parse(command(f.launcher, ['serve', 'status'], f.env).stdout).healthy).toBe(true);
 }, 60_000);
 
 it.skipIf(process.platform !== 'linux')('refuses to overwrite an existing stage or accept a non-ELF runtime', () => {

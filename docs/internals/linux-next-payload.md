@@ -70,11 +70,12 @@ there is no window. The existing CLI owns health, port and connection resolution
 For a fresh server, the launcher requests a per-launch result file through
 `O8_NEXT_STARTUP_RESULT`. The server writes it atomically after its actual window
 attempt: `ready` after the first-paint handshake, or `failed` after reaping an
-unsuccessful child. The launcher waits for that result while checking daemon health;
-it has no independent deadline that could race a delayed startup hook. Only a
-completed failed attempt permits the CLI fallback. Result files are removed when
-the launch finishes. A missing result while the server stays healthy keeps the
-launch pending, rather than risking a second window.
+unsuccessful child. The launcher waits up to 60 seconds while checking daemon health,
+covering delayed bootstrap and the server's 15-second first-paint deadline. A missing
+result releases the launch lock and reports an error without starting a competing
+window. Result files are removed when the launch finishes. A failed `serve` command
+permits reuse only for `serve_already_running` or `serve_desktop_owns_data_dir`, with
+a healthy status response. Other failures retain their output streams and exit code.
 
 An advisory `flock` in the existing data directory serializes desktop launches.
 Linux `/proc` inspection reuses a running GPUI executable with the same shell-state
