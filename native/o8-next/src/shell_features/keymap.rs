@@ -23,6 +23,10 @@ fn dispatch(
     {
     } else if (modifiers.control || modifiers.platform) && !modifiers.shift && !modifiers.alt && key == "b" {
         super::header::toggle_sidebar(s, window, cx);
+    } else if modifiers.platform && !modifiers.control && !modifiers.shift && !modifiers.alt && key == "n" {
+        // New chat on the lead, as the rail's Play does.
+        s.capture(window, cx);
+        super::start_chat(s, window, cx);
     } else if (modifiers.control || modifiers.platform) && key == "k" {
         if !s.palette {
             s.capture(window, cx);
