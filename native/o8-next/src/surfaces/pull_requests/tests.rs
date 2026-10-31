@@ -524,20 +524,28 @@ fn pull_requests_filters_empty_retry_and_server_merge_refusal(cx: &mut TestAppCo
         PullRequests::new(fixture.client.clone(), fixture.workspace.clone(), w, cx)
     });
     settle(cx);
+    // Each picker opens its menu and takes a choice, as the desktop controls do.
     for id in [
-        "pr-filter-author",
-        "pr-filter-label",
-        "pr-filter-baseRefName",
+        "pr-filters",
         "pr-filter-draft",
+        "pr-filter-draft-ready",
         "pr-filter-checks",
-        "pr-scope",
+        "pr-filter-checks-unknown",
+        "pr-filters-done",
         "pr-layout",
+        "pr-layout-stacks",
         "pr-sort",
+        "pr-sort-oldest",
         "pr-state",
+        "pr-state-closed",
         "pr-refresh",
     ] {
         click(cx, id);
     }
+    assert_eq!(
+        view.read_with(cx, |s, _| (s.filters.get("draft").cloned(), s.layout.clone(), s.menu)),
+        (Some("ready".to_owned()), "stacks".to_owned(), None)
+    );
     view.update_in(cx, |s, w, cx| {
         s.search.read(cx).focus.focus(w);
     });
@@ -637,6 +645,7 @@ fn pull_requests_loading_error_retry_and_unavailable(cx: &mut TestAppContext) {
     });
     settle(cx);
     click(cx, "pr-state");
+    click(cx, "pr-state-closed");
     assert!(
         view.read_with(cx, |s, _| !s.error.is_empty()),
         "closed-page fixture refusal must expose Retry"
