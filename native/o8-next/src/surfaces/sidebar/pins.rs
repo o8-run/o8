@@ -216,31 +216,13 @@ pub(crate) fn plan_key(order: &[String], keys: &HashMap<String, String>, moved: 
     Some((moved.to_owned(), key_between(lo.map(String::as_str), hi.map(String::as_str))))
 }
 
-/// A dragged pinned row, drawn as a pill that follows the pointer.
-#[derive(Clone)]
-pub(crate) struct PinDrag {
-    pub id: String,
-    pub title: gpui::SharedString,
-}
-impl gpui::Render for PinDrag {
-    fn render(&mut self, _: &mut gpui::Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
-        div()
-            .debug_selector(|| "sidebar-pin-drag".into())
-            .h(px(26.))
-            .max_w(px(220.))
-            .px(px(10.))
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .rounded(px(7.))
-            .bg(crate::theme::popover_background())
-            .border_1()
-            .border_color(theme().border)
-            .text_size(px(12.5))
-            .text_color(theme().text)
-            .opacity(0.92)
-            .child(crate::icon::stroke(PIN, theme().text_muted, 12., 1.8))
-            .child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().child(self.title.clone()))
+/// Sidebar rows drag as main's pane drag (`RailPane::Thread`); over the
+/// Pinned shelf the same drag reorders when the dragged thread is pinned.
+pub(crate) type PinDrag = crate::shell::features::RailPane;
+fn dragged_pin(drag: &PinDrag, order: &[String]) -> Option<String> {
+    match drag {
+        PinDrag::Thread { id, .. } if order.contains(id) => Some(id.clone()),
+        _ => None,
     }
 }
 
@@ -257,6 +239,9 @@ impl ThreadList {
         cx: &mut Context<Self>,
     ) {
         let (bounds, at) = (event.bounds, event.event.position);
+        if dragged_pin(event.drag(cx), &pinned_order(&self.sessions)).is_none() {
+            return;
+        }
         if side.is_none() {
             self.pin_bounds.insert(target.to_owned(), bounds);
         }
@@ -277,6 +262,9 @@ impl ThreadList {
         let shelf_ends = self.rows.last().and_then(|r| r.id.as_ref()).is_some_and(|id| order.contains(id));
         let bottom = self.pin_bounds.values().map(|b| b.bottom()).max();
         let Some(last) = order.last() else { return };
+        if dragged_pin(event.drag(cx), &order).is_none() {
+            return;
+        }
         if shelf_ends && event.bounds.contains(&at) && bottom.is_some_and(|b| at.y > b) {
             let next = Some((last.clone(), true));
             if self.pin_drop != next {
@@ -304,9 +292,11 @@ impl ThreadList {
     /// Drops a pinned row: optimistic order, then one pin-reorder write
     /// (#5141) for the moved thread only; a refusal (stale revision
     /// included) reverts and reloads.
-    pub(super) fn drop_pin(&mut self, moved: &str, cx: &mut Context<Self>) {
+    pub(super) fn drop_pin(&mut self, drag: &PinDrag, cx: &mut Context<Self>) {
         let Some((target, after)) = self.pin_drop.take() else { return cx.notify() };
         let order = pinned_order(&self.sessions);
+        let Some(moved) = dragged_pin(drag, &order) else { return cx.notify() };
+        let moved = moved.as_str();
         let Some(next) = reorder(&order, moved, &target, after) else { return cx.notify() };
         let keys: HashMap<String, String> = self
             .sessions

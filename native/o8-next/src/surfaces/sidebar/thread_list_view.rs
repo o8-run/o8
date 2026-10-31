@@ -114,7 +114,7 @@ impl Render for ThreadList {
                     .on_drag_move(cx.listener(
                         |this, event: &gpui::DragMoveEvent<pins::PinDrag>, _, cx| this.pin_tail_move(event, cx),
                     ))
-                    .on_drop(cx.listener(|this, drag: &pins::PinDrag, _, cx| this.drop_pin(&drag.id, cx)))
+                    .on_drop(cx.listener(|this, drag: &pins::PinDrag, _, cx| this.drop_pin(drag, cx)))
                     .child(
                 if self.detailed {
                     // Detailed rows vary: 66px threads under 28px headings.
@@ -371,19 +371,15 @@ impl ThreadList {
                             |view| {
                                 let id = row.id.clone().unwrap_or_default();
                                 let over = id.clone();
-                                let drag = pins::PinDrag {
-                                    id: id.clone(),
-                                    title: crate::text::sanitize(&row.title).into(),
-                                };
+                                // The row's pane drag (above) doubles as the reorder drag.
                                 view.relative()
-                                    .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
                                     .on_drag_move(cx.listener(
                                         move |this, event: &gpui::DragMoveEvent<pins::PinDrag>, _, cx| {
                                             this.pin_drag_move(&over, None, event, cx);
                                         },
                                     ))
                                     .on_drop(cx.listener(move |this, drag: &pins::PinDrag, _, cx| {
-                                        this.drop_pin(&drag.id, cx);
+                                        this.drop_pin(drag, cx);
                                     }))
                                     .children(this.pin_drop_line(&id))
                             },
@@ -396,7 +392,7 @@ impl ThreadList {
                                 },
                             ))
                             .on_drop(cx.listener(move |this, drag: &pins::PinDrag, _, cx| {
-                                this.drop_pin(&drag.id, cx);
+                                this.drop_pin(drag, cx);
                             }))
                         })
                         .when(thread, |view| {
