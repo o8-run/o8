@@ -144,7 +144,9 @@ export const ORCHESTRATOR_RUNTIMES = {
     binaryName: 'claude',
     workerProvider: 'claude',
     authHouse: 'claude',
-    modelIdPattern: /^(claude|anthropic\/)/i,
+    // A Claude id, never the runtime's own name: threads made without a lead
+    // saved "claude-code" as their model, and it must fall to the default.
+    modelIdPattern: /^(claude-(?!code$)|anthropic\/)/i,
     reasoningEffort: true,
     tier: 'frontier',
     description: 'Claude Code CLI worker via interactive stream-json. Uses the existing Claude account by default or an explicitly selected API gateway model; never --print.',
