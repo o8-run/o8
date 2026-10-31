@@ -212,12 +212,14 @@ fn settings_review_updates_the_running_desktop_presentation(cx: &mut TestAppCont
         "leaving quiet mode restores the live state"
     );
     search(cx, "notificationsReviewReady");
-    for (index, enabled) in [(0, false), (1, true)] {
-        click(cx, &format!("setting-notificationsReviewReady-{index}"));
+    // The switch flips the gate both ways, live.
+    for _ in 0..2 {
+        let enabled = live()["presentation"]["notifications"] == true;
+        click(cx, "setting-notificationsReviewReady");
         frame(&shell, cx);
         assert_eq!(
             live()["presentation"]["notifications"],
-            enabled,
+            !enabled,
             "the running desktop notification gate must change now"
         );
     }

@@ -129,17 +129,42 @@ impl Settings {
         };
         let mut controls = div().flex().flex_wrap().gap(px(8.));
         match field.kind {
-            Kind::Toggle => {
-                let next = !value.as_bool().unwrap_or(false);
-                controls = controls.child(self.button(
-                    format!("setting-{}", field.id),
-                    field.display(&value),
-                    !locked,
-                    value == true,
-                    window,
-                    cx,
-                    move |this, _, cx| this.set(field, Value::Bool(next), cx),
-                ));
+            // A switch, not a button labelled with its state: a lone "Off"
+            // read as text. An Off/On choice is the same control.
+            Kind::Toggle | Kind::Choice(&[("off", "Off"), ("on", "On")]) => {
+                let toggle = matches!(field.kind, Kind::Toggle);
+                let on = if toggle { value == true } else { value == "on" };
+                let next = match (toggle, on) {
+                    (true, on) => Value::Bool(!on),
+                    (false, true) => Value::from("off"),
+                    (false, false) => Value::from("on"),
+                };
+                let track = if on { theme().accent } else { theme().border };
+                controls = controls.child(
+                    self.button(
+                        format!("setting-{}", field.id),
+                        String::new(),
+                        !locked,
+                        false,
+                        window,
+                        cx,
+                        move |this, _, cx| this.set(field, next.clone(), cx),
+                    )
+                    .w(px(34.))
+                    .h(px(20.))
+                    .p(px(2.))
+                    .rounded_full()
+                    .bg(track)
+                    .hover(move |v| v.bg(track).opacity(0.85))
+                    .when(on, |v| v.justify_end())
+                    .child(
+                        div()
+                            .size(px(16.))
+                            .rounded_full()
+                            .bg(gpui::white())
+                            .shadow_sm(),
+                    ),
+                );
             }
             Kind::Choice(options) => {
                 for (index, (key, label)) in options.iter().enumerate() {
@@ -558,7 +583,30 @@ impl Render for Settings {
                     .flex_wrap()
                     .gap(px(8.))
                     .items_center()
-                    .child(div().flex_1().child("Settings"))
+                    // Status sits beside the title: a line above the list
+                    // pushed every row down mid-click, so a second click on a
+                    // switch landed in the gap.
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .items_baseline()
+                            .gap(px(10.))
+                            .child("Settings")
+                            .when(!self.note.is_empty(), |v| {
+                                v.child(
+                                    div()
+                                        .when(self.busy, |v| {
+                                            v.debug_selector(|| "settings-loading".into())
+                                        })
+                                        .truncate()
+                                        .text_size(px(11.))
+                                        .text_color(theme().text_muted)
+                                        .child(self.note.clone()),
+                                )
+                            }),
+                    )
                     .child(file)
                     .child(
                         div()
@@ -583,22 +631,6 @@ impl Render for Settings {
                     )
                     .child(self.search.clone()),
             )
-            .when(self.busy, |v| {
-                v.child(
-                    div()
-                        .debug_selector(|| "settings-loading".into())
-                        .text_size(px(11.))
-                        .child(self.note.clone()),
-                )
-            })
-            .when(!self.busy && !self.note.is_empty(), |v| {
-                v.child(
-                    div()
-                        .text_size(px(11.))
-                        .text_color(theme().text_muted)
-                        .child(self.note.clone()),
-                )
-            })
             .when_some(self.error.clone(), |v, error| {
                 v.child(
                     div()

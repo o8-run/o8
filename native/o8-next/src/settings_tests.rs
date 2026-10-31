@@ -277,14 +277,7 @@ fn settings_fixture_validation_locks_loading_errors_and_empty(cx: &mut TestAppCo
     frame(&shell, cx);
     let notifications = values(&fixture)["notificationsReviewReady"].clone();
     search(cx, "notificationsReviewReady");
-    click(
-        cx,
-        if notifications == "on" {
-            "setting-notificationsReviewReady-0"
-        } else {
-            "setting-notificationsReviewReady-1"
-        },
-    );
+    click(cx, "setting-notificationsReviewReady");
     settle(cx);
     assert_eq!(
         values(&fixture)["notificationsReviewReady"],
