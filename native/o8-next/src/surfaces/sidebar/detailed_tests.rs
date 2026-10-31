@@ -1,6 +1,7 @@
 //! Detailed rows and the Working section, opt-in from the view menu.
 use super::recents_tests::native_rows;
 use super::thread_list::detailed::{elapsed, fold_working, status};
+use super::thread_list::pins;
 use super::thread_list::Row;
 use super::*;
 
@@ -195,4 +196,123 @@ fn run_timer_formats_elapsed_time() {
     let s: Session = serde_json::from_value(json!({"id": "t", "title": "T", "status": "running",
         "runStartedAt": "2026-10-31T12:00:00.000Z"})).unwrap();
     assert!(s.run_started_at.is_some());
+}
+
+#[test]
+fn pinned_threads_lift_into_a_shelf_in_server_order() {
+    let rows = vec![
+        header("section", "Active", ""),
+        thread("a", false),
+        thread("b", true),
+        header("section", "Older", ""),
+        thread("c", false),
+        header("section", "Archived", ""),
+        thread("d", false),
+    ];
+    let titles = |rows: &[Row]| rows.iter().map(|r| r.title.clone()).collect::<Vec<_>>();
+    let order = vec!["c".to_owned(), "a".to_owned(), "d".to_owned()];
+    // Older empties and goes; archived "d" stays archived.
+    assert_eq!(
+        titles(&pins::fold_pinned(rows.clone(), &order)),
+        ["Pinned", "c", "a", "Active", "b", "Archived", "d"]
+    );
+    assert_eq!(titles(&pins::fold_pinned(rows.clone(), &[])), titles(&rows));
+    let pinned = |id: &str, at: &str, key: Option<&str>| -> Session {
+        serde_json::from_value(json!({"id": id, "title": id, "status": "idle",
+            "pinnedAt": at, "pinOrderKey": key})).unwrap()
+    };
+    let sessions = vec![
+        pinned("late", "2026-10-31T02:00:00Z", None),
+        pinned("keyed-b", "2026-10-31T00:00:00Z", Some("b")),
+        pinned("early", "2026-10-31T01:00:00Z", None),
+        pinned("keyed-a", "2026-10-31T03:00:00Z", Some("a")),
+        session("idle"),
+    ];
+    assert_eq!(pins::pinned_order(&sessions), ["keyed-a", "keyed-b", "early", "late"]);
+}
+
+#[gpui::test]
+fn sidebar_pins_through_the_row_menu_and_the_server(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_options(&["--sidebar", "--sidebar-markers"]);
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("pins.json"),
+        State::default(),
+        cx,
+    );
+    wait_for(&shell, &mut visual, |s, _| s.connected);
+    let target = "thoughts-sidebar-0019";
+    let rows = |shell: &Entity<Shell>, visual: &VisualTestContext| {
+        shell.read_with(visual, |s, cx| {
+            s.surfaces.sidebar.view.as_ref().unwrap().read(cx).rows.as_ref().clone()
+        })
+    };
+    let index = rows(&shell, &visual).iter().position(|r| r.id.as_deref() == Some(target)).unwrap();
+    shell.update(&mut visual, |s, cx| {
+        s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
+            l.scroll.scroll_to_item(index, ScrollStrategy::Center);
+            cx.notify();
+        })
+    });
+    draw(&mut visual);
+    let selector: &'static str = Box::leak(format!("thread-row-{index}").into_boxed_str());
+    let at = visual.debug_bounds(selector).unwrap().center();
+    visual.simulate_mouse_down(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+    visual.simulate_mouse_up(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+    assert!(visual.debug_bounds("sidebar-row-pin").is_some(), "Pin in the row menu");
+    click(&mut visual, "sidebar-row-pin");
+    let_http_land(&mut visual);
+    settle(&shell, &mut visual);
+    wait_for(&shell, &mut visual, |s, cx| {
+        let rows = &s.surfaces.sidebar.view.as_ref().unwrap().read(cx).rows;
+        rows.first().is_some_and(|r| r.title == "Pinned")
+            && rows[1..].iter().take_while(|r| r.kind == "thread").any(|r| r.id.as_deref() == Some(target))
+    });
+    // The server holds the pin, so a fresh listing keeps it.
+    let listed: Value = fixture
+        .client
+        .get("/api/mobile/orchestrator/threads", &[("limit", "500")])
+        .unwrap();
+    let mut found = None;
+    for offset in [0, 500, 1000, 1500] {
+        let page: Value = fixture.client.get("/api/mobile/orchestrator/threads",
+            &[("limit", "500"), ("offset", &offset.to_string())]).unwrap();
+        if let Some(t) = page["threads"].as_array().unwrap().iter().find(|t| t["id"] == target) {
+            found = Some(t.clone());
+            break;
+        }
+    }
+    let _ = listed;
+    assert!(found.expect("listed")["pinnedAt"].is_string());
+    scroll_top(&shell, &mut visual);
+    assert!(visual.debug_bounds(Box::leak(format!("thread-pin-{target}").into_boxed_str())).is_some());
+    // Unpin from the same menu.
+    let shelf_index = rows(&shell, &visual).iter().position(|r| r.id.as_deref() == Some(target)).unwrap();
+    let shelf_row: &'static str = Box::leak(format!("thread-row-{shelf_index}").into_boxed_str());
+    let at = visual.debug_bounds(shelf_row).unwrap().center();
+    visual.simulate_mouse_down(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+    visual.simulate_mouse_up(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+    click(&mut visual, "sidebar-row-pin");
+    let_http_land(&mut visual);
+    wait_for(&shell, &mut visual, |s, cx| {
+        let l = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+        l.sessions.iter().any(|x| x.id == target && x.pinned_at.is_none())
+            && !l.rows[1..].iter().take_while(|r| r.kind == "thread").any(|r| r.id.as_deref() == Some(target))
+    });
+}
+fn scroll_top(shell: &Entity<Shell>, visual: &mut VisualTestContext) {
+    shell.update(visual, |s, cx| {
+        s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
+            l.scroll.scroll_to_item(0, ScrollStrategy::Top);
+            cx.notify();
+        })
+    });
+    draw(visual);
+}
+/// The pin PATCH runs on a real background thread; give it wall time.
+fn let_http_land(visual: &mut VisualTestContext) {
+    for _ in 0..30 {
+        visual.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }

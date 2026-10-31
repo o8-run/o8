@@ -245,6 +245,7 @@ impl Render for ThreadList {
                                                         .font_weight(gpui::FontWeight(260.))
                                                         .text_size(px(9.5))
                                                         .text_color(theme().text_faint)
+                                                        .children(row.id.as_deref().and_then(|id| this.pin_mark(id)))
                                                         .child(row.age.clone())
                                                         .when(row.branch, |v| v.child("⑂"))
                                                         .when(row.attention || row.running, |v| {

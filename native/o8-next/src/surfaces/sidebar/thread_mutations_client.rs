@@ -84,6 +84,39 @@ impl Client {
         }
         Ok(result)
     }
+    /// Pin or unpin through the inbox preference contract (#5141), quoting
+    /// the revision the row was drawn from so a stale pin is refused.
+    pub(crate) fn inbox_pin(
+        &self,
+        workspace: Option<&str>,
+        id: &str,
+        pin: bool,
+        revision: u64,
+    ) -> Result<Value, String> {
+        let workspace = workspace
+            .filter(|path| std::path::Path::new(path).is_absolute())
+            .ok_or("Select a workspace before changing this session.")?;
+        let mut url = self.url("/api/v2/chat-history").unwrap();
+        url.query_pairs_mut().append_pair("workspace", workspace);
+        let key = if id.contains(':') { "sessionKey" } else { "tabId" };
+        let body = json!({ key: id, "inboxAction": if pin { "pin" } else { "unpin" }, "inboxRevision": revision });
+        let request = self.in_workspace(workspace).request("PATCH", &url);
+        let response = request.send_json(body).map_err(|error| match error {
+            ureq::Error::Status(409, response) => response
+                .into_json::<Value>()
+                .ok()
+                .and_then(|body| body["error"].as_str().map(str::to_owned))
+                .unwrap_or_else(|| "This thread changed. Refresh and try again.".into()),
+            ureq::Error::Status(404, _) => "This thread is no longer available.".into(),
+            ureq::Error::Status(code, _) => format!("Pin rejected (HTTP {code})."),
+            _ => "Pin is unconfirmed. Refresh before retrying.".into(),
+        })?;
+        let result: Value = Self::read(response)?;
+        if result["ok"] != true {
+            return Err("Pin was not confirmed.".into());
+        }
+        Ok(result)
+    }
     pub(crate) fn archive_worker(&self, id: &str, mutation: &str) -> Result<(), String> {
         let mut url = self.url("/api/runtime/archive").unwrap();
         let workspace = self

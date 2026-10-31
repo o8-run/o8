@@ -152,6 +152,14 @@ pub struct Session {
     /// When the current run started; null when idle or on older hosts.
     #[serde(default)]
     pub run_started_at: Option<String>,
+    /// Inbox pin (#5141), its order key and the preference revision a
+    /// pin/unpin must quote; older hosts omit them.
+    #[serde(default)]
+    pub pinned_at: Option<String>,
+    #[serde(default)]
+    pub pin_order_key: Option<String>,
+    #[serde(default)]
+    pub inbox_revision: Option<u64>,
 }
 impl Session {
     pub fn settled(&self) -> bool {

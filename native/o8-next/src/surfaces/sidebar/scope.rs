@@ -456,7 +456,7 @@ impl ThreadList {
             .and_then(|s| s.repo_path.clone())
             .filter(|repo| repos.iter().any(|(path, _)| path == repo));
         // The Inbox view's rows always offer Snooze.
-        self.row_menu = (repo.is_some() || self.snoozable(id)).then(|| RowMenu {
+        self.row_menu = (repo.is_some() || self.snoozable(id) || self.pinnable(id).is_some()).then(|| RowMenu {
             repo,
             id: id.to_owned(),
             position,
@@ -470,6 +470,7 @@ impl ThreadList {
     ) -> Option<AnyElement> {
         let id = self.row_menu.as_ref()?.id.clone();
         let snooze = self.snooze_items(&id, cx);
+        let pin = self.pin_item(&id, cx);
         let menu = self.row_menu.as_ref()?;
         let filter = menu.repo.clone().map(|repo| {
             let active = self.scope_keys().contains(&repo);
@@ -527,6 +528,7 @@ impl ThreadList {
                                 this.row_menu = None;
                                 cx.notify();
                             }))
+                            .children(pin)
                             .children(filter)
                             .children(snooze),
                     ),

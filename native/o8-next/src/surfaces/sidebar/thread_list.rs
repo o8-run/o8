@@ -319,8 +319,16 @@ impl ThreadList {
     fn view_rows(&self, sessions: &[Session]) -> Vec<Row> {
         let mut rows = self.view_rows_base(sessions);
         detailed::mark_dev_working(&mut rows);
+        rows = pins::fold_pinned(rows, &pins::pinned_order(sessions));
         if self.working_section {
-            rows = detailed::fold_working(rows, self.working_closed);
+            // The Pinned shelf stays first and keeps its running threads.
+            let shelf = if rows.first().is_some_and(|r| r.status == "pinned") {
+                1 + rows[1..].iter().take_while(|r| r.kind == "thread").count()
+            } else {
+                0
+            };
+            let rest = rows.split_off(shelf);
+            rows.extend(detailed::fold_working(rest, self.working_closed));
         }
         rows
     }
@@ -492,6 +500,15 @@ impl ThreadList {
                             incoming.parent_inbox_subject = old.parent_inbox_subject.clone();
                             incoming.settled_override = old.settled_override.clone();
                             incoming.settled_at = old.settled_at.clone();
+                            incoming.pinned_at = old.pinned_at.clone();
+                            incoming.pin_order_key = old.pin_order_key.clone();
+                            incoming.inbox_revision = old.inbox_revision;
+                        }
+                        // Repo, branch and run start are listing-only too.
+                        incoming.repo_slug = incoming.repo_slug.take().or(old.repo_slug.clone());
+                        incoming.branch = incoming.branch.take().or(old.branch.clone());
+                        if incoming.run_started_at.is_none() && incoming.status == "running" {
+                            incoming.run_started_at = old.run_started_at.clone();
                         }
                         // Packet attention comes from the lifecycle API.
                         // A thread's own failure can recover on this stream.
@@ -962,3 +979,5 @@ mod snooze;
 pub(crate) mod pr_links;
 #[path = "detailed.rs"]
 pub(crate) mod detailed;
+#[path = "pins.rs"]
+pub(crate) mod pins;
