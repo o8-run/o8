@@ -288,7 +288,13 @@ impl PullRequests {
                         }
                         s.page = page;
                         if let Some((repo, number)) = s.pending.take() {
-                            s.open(&repo, number, cx);
+                            if s.hosted {
+                                s.selected = string(&s.page, "repo")
+                                    .eq_ignore_ascii_case(&repo)
+                                    .then_some(number);
+                            } else {
+                                s.open(&repo, number, cx);
+                            }
                         }
                     }
                     Ok(_) => s.error = "Pull requests could not be loaded. Try again.".into(),
@@ -296,7 +302,9 @@ impl PullRequests {
                 }
                 // Without a list, still show the requested pull request by its
                 // own repository, as classic PrPanel opens by repo and number.
-                if let Some((repo, number)) = s.pending.take() {
+                if let Some((repo, number)) = s.pending.take()
+                    && !s.hosted
+                {
                     s.select_in(number, repo, cx);
                 }
                 s.changed(cx);
@@ -311,8 +319,14 @@ impl PullRequests {
     /// no list, it opens by its own repository.
     pub fn open(&mut self, repo: &str, number: u64, cx: &mut Context<Self>) {
         if self.hosted {
-            self.selected = string(&self.page, "repo")
-                .eq_ignore_ascii_case(repo)
+            // Without a list (still loading, or it failed), the request names
+            // its own repository, as classic PrPanel opens by repo and number.
+            // A list that lands later keeps the mark only for its repository.
+            let listed = !self.page.is_null();
+            if !listed && self.loading {
+                self.pending = Some((repo.to_owned(), number));
+            }
+            self.selected = (!listed || string(&self.page, "repo").eq_ignore_ascii_case(repo))
                 .then_some(number);
             cx.emit(OpenPr { repo: repo.to_owned(), number });
             self.changed(cx);
