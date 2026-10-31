@@ -153,6 +153,9 @@ pub(super) fn draw(cx: &mut VisualTestContext) {
         window.refresh();
         window.draw(cx).clear();
     });
+    if let Some(shell) = cx.update(|window, _| window.root::<Shell>().flatten()) {
+        features::settle_test_window(&shell, cx);
+    }
 }
 pub(super) fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     for _ in 0..20 {

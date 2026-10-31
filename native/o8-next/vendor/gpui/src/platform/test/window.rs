@@ -89,6 +89,17 @@ impl TestWindow {
         self.0.lock().resize_callback = Some(callback);
     }
 
+    pub fn simulate_move(&mut self, origin: Point<Pixels>) {
+        let mut lock = self.0.lock();
+        let Some(mut callback) = lock.moved_callback.take() else {
+            return;
+        };
+        lock.bounds.origin = origin;
+        drop(lock);
+        callback();
+        self.0.lock().moved_callback = Some(callback);
+    }
+
     pub(crate) fn simulate_active_status_change(&self, active: bool) {
         let mut lock = self.0.lock();
         let Some(mut callback) = lock.active_status_change_callback.take() else {
