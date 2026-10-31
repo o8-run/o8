@@ -161,6 +161,19 @@ struct Builder {
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
     images: Vec<Thumbnail>,
+    /// Where the last paragraph gap ended, so blank lines collapse to one gap.
+    gap_end: Option<Pixels>,
+}
+// The desktop transcript's prose: 14px on a 23.8px line, with a paragraph gap.
+const PROSE: (f32, f32) = (14., 24.);
+const PARAGRAPH_GAP: f32 = 22.;
+/// A message's blocks without trailing blank lines, which would only pad its end.
+fn trimmed(nodes: &[Node]) -> &[Node] {
+    let end = nodes
+        .iter()
+        .rposition(|n| n.kind != "break")
+        .map_or(0, |i| i + 1);
+    &nodes[..end]
 }
 impl Builder {
     fn rich_node(&mut self, kind: &str, data: &serde_json::Value, expanded: bool, window: &Window) {
@@ -192,6 +205,7 @@ impl Builder {
                         y: top,
                         lines: vec![],
                         backgrounds: vec![],
+                        gap_end: None,
                     };
                     let mut runs: Vec<Run> =
                         serde_json::from_value(cell.clone()).unwrap_or_default();
@@ -200,7 +214,7 @@ impl Builder {
                             run.style = "strong".into();
                         }
                     }
-                    builder.text(&runs, 13., 19.5, 0., window);
+                    builder.text(&runs, PROSE.0, PROSE.1, 0., window);
                     for mut line in builder.lines {
                         line.origin.x += width * column as f32;
                         line.align = match data["aligns"][column].as_str() {
@@ -380,7 +394,14 @@ impl Builder {
             return;
         }
         if node.kind == "break" {
-            self.y += px(6.);
+            // A blank line is classic's paragraph margin: once, and never
+            // before the first block.
+            if self.gap_end != Some(self.y)
+                && (!self.lines.is_empty() || !self.backgrounds.is_empty())
+            {
+                self.y += px(PARAGRAPH_GAP);
+                self.gap_end = Some(self.y);
+            }
             return;
         }
         if node.kind == "rule" {
@@ -451,8 +472,8 @@ impl Builder {
         } else {
             self.text(
                 &runs,
-                if code { 12. } else { 13. },
-                19.5,
+                if code { 12. } else { PROSE.0 },
+                if code { 19.5 } else { PROSE.1 },
                 if code { 10. } else { 0. },
                 window,
             );
@@ -489,6 +510,7 @@ fn layout(
         y: px(8.),
         lines: vec![],
         backgrounds: vec![],
+        gap_end: None,
     };
     let mut placements = vec![];
     match row {
@@ -534,7 +556,7 @@ fn layout(
             user_bubble::layout(&mut b, width, nodes, expanded, window);
         }
         Row::Message { nodes, .. } => {
-            for node in nodes {
+            for node in trimmed(nodes) {
                 let card = node
                     .data
                     .as_ref()
@@ -635,7 +657,7 @@ fn layout(
     }
 }
 // The desktop transcript's reading column: the composer width plus the 24px row insets.
-const COLUMN: f32 = crate::theme::GEOMETRY.composer_width + 48.;
+pub(crate) const COLUMN: f32 = crate::theme::GEOMETRY.composer_width + 48.;
 
 pub struct RetainedRow {
     pub state: Rc<RefCell<RowState>>,

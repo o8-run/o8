@@ -293,13 +293,17 @@ impl Render for Pane {
                     .scroll((f32::from(delta) / CELL_HEIGHT).round() as i32);
                 cx.notify();
             }))
-            .child(
-                div()
-                    .h(px(26.))
-                    .px(px(8.))
-                    .text_size(px(11.))
-                    .child(self.notice),
-            )
+            // Like classic's xterm panels, a working terminal has no status
+            // line; connecting, exits and failures still say so.
+            .when(self.notice != "Terminal · connected", |pane| {
+                pane.child(
+                    div()
+                        .h(px(26.))
+                        .px(px(8.))
+                        .text_size(px(11.))
+                        .child(self.notice),
+                )
+            })
             .child(
                 // Match WorkspaceTerminalPanels' 12px panel padding and
                 // XtermPanel's additional 2px top/left content padding.

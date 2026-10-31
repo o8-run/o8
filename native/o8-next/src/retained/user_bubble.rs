@@ -19,8 +19,9 @@ pub(super) fn layout(
         lines: vec![],
         backgrounds: vec![],
         images: vec![],
+        gap_end: None,
     };
-    for node in nodes {
+    for node in super::trimmed(nodes) {
         bubble.node(node, expanded, window);
     }
     let text = bubble

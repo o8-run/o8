@@ -129,6 +129,9 @@ pub(crate) struct Surface {
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
     voice: VoiceState,
     dictation: DictationState,
+    /// Rows that end a finished turn and carry Play and Copy.
+    action_rows: BTreeSet<usize>,
+    action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -170,6 +173,8 @@ impl Surface {
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
             voice: VoiceState::Off,
             dictation: DictationState::Off,
+            action_rows: BTreeSet::new(),
+            action_feedback: Default::default(),
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {

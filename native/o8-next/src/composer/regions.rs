@@ -71,6 +71,21 @@ impl Surface {
         self.follow_frame();
         let rows = self.rows.clone();
         let painted_rows = self.painted_rows.clone();
+        // Play and Copy under each finished turn's answer; a row that gains or
+        // loses them is measured again.
+        let ends = Rc::new(crate::transcript_actions::turn_ends(&rows));
+        let marked: BTreeSet<usize> = ends.keys().copied().collect();
+        for index in marked.symmetric_difference(&self.action_rows) {
+            if *index < rows.len() {
+                self.list.splice(*index..*index + 1, 1);
+            }
+        }
+        self.action_rows = marked;
+        let (view, client, feedback) = (
+            cx.entity(),
+            self.client.clone(),
+            self.action_feedback.clone(),
+        );
         div()
             .size_full()
             .relative()
@@ -93,12 +108,28 @@ impl Surface {
                 list(self.list.clone(), {
                     let list_state = self.list.clone();
                     move |index, _, _| {
-                        RetainedRow {
+                        let row = RetainedRow {
                             state: rows[index].clone(),
                             index,
                             painted: painted_rows.clone(),
                         }
-                        .interactive(&list_state)
+                        .interactive(&list_state);
+                        match ends.get(&index) {
+                            Some(text) => div()
+                                .w_full()
+                                .flex()
+                                .flex_col()
+                                .child(row)
+                                .child(crate::transcript_actions::row(
+                                    view.clone(),
+                                    client.clone(),
+                                    feedback.clone(),
+                                    index,
+                                    text.clone(),
+                                ))
+                                .into_any_element(),
+                            None => row,
+                        }
                     }
                 })
                 .flex_1()
