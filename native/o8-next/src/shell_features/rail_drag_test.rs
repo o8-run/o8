@@ -295,9 +295,11 @@ fn sidebar_threads_and_pane_headers_drag_like_classic(cx: &mut TestAppContext) {
                 .map(|id| (i, id))
         })
     });
-    let (other_row, other) = other.expect("a third thread");
-    let click = bounds(&mut v, &format!("thread-row-{other_row}")).center();
-    v.simulate_click(click, Modifiers::default());
+    let (_, other) = other.expect("a third thread");
+    // A sidebar click shows a thread inside the current tab; its own tab opens it beside.
+    s.update_in(&mut v, |s, window, cx| {
+        s.execute(Command::Session(other.clone()), window, cx)
+    });
     let start = Instant::now();
     while s.read_with(&v, |s, _| s.active()) != Some(Tab::Session(other.clone())) {
         assert!(
