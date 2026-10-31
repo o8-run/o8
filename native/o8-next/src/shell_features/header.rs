@@ -30,7 +30,8 @@ fn render(
     let forward = adjacent(s, 1);
     let hidden = s.surfaces.sidebar.hidden;
     // Redraw each frame while the sidebar column opens or closes.
-    if super::super::sidebar::travel(s).1 {
+    let (open, moving) = super::super::sidebar::travel(s);
+    if moving {
         window.request_animation_frame();
     }
     let panel = super::right_panel::width(s, window);
@@ -62,7 +63,7 @@ fn render(
         // 8px padding after the 4px sidebar resize edge.
         .pl(px(if hidden { 14. } else { 16. }))
         .pr(px(8.))
-        .when(hidden, |row| {
+        .when(hidden && !moving, |row| {
             row.child(sidebar_toggle(true, cx)).child(search_button(cx))
         })
         .child(history("header-back", BACK, "Back", back, cx))
@@ -105,12 +106,15 @@ fn render(
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
-            .when(!hidden, |row| {
+            // The column's slot travels with it, so the tabs move with the
+            // workspace instead of jumping at the start or end.
+            .when(!hidden || moving, |row| {
                 row.child(
                     div()
-                        .w(px(super::super::sidebar::width(s)))
+                        .w(px(super::super::sidebar::width(s) * open))
                         .h_full()
                         .flex_shrink_0()
+                        .overflow_hidden()
                         .flex()
                         .items_center()
                         .gap(px(4.))
@@ -228,7 +232,7 @@ pub(super) fn icon_button(
     ))
 }
 
-pub(super) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+pub(crate) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     super::super::sidebar::toggle(s, cx);
     s.restore_focus(window, cx);
     cx.notify();

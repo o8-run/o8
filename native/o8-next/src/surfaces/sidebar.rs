@@ -39,8 +39,9 @@ const MAX_WIDTH: f32 = 500.;
 /// The edge's grab target reaches this far either side of the boundary.
 const EDGE_SLOP: f32 = 8.;
 
-/// Open and close travel for the column (Q 2026-10-31).
-const TRAVEL_MS: u64 = 220;
+/// Open and close travel for the column (Q 2026-10-31). It grows out of the
+/// rail's o8 mark and folds back into it, as the phone's drawer leaves its chip.
+const TRAVEL_MS: u64 = 340;
 
 /// Starts the column toward shown or hidden; opening fades its rows in.
 pub(super) fn toggle(shell: &mut Shell, cx: &mut gpui::App) {
@@ -60,8 +61,15 @@ pub(super) fn toggle(shell: &mut Shell, cx: &mut gpui::App) {
 /// How open the column is now (0 hidden, 1 shown) and whether it is moving.
 pub(super) fn travel(shell: &Shell) -> (f32, bool) {
     let sidebar = &shell.surfaces.sidebar;
-    match sidebar.motion.map(|motion| motion.value()) {
-        Some((open, true)) => (open, true),
+    let smooth = |x: f32| x * x * (3. - 2. * x);
+    match sidebar.motion.map(|motion| (motion.position(), motion.is_open())) {
+        // Opening eases out with a soft start, so the card stays on the mark
+        // for its first frames; closing eases in and out, so the fold back
+        // into the mark reads as clearly as the way out.
+        Some(((x, true), opening)) => (
+            if opening { smooth(crate::motion::ease_out(x)) } else { smooth(x) },
+            true,
+        ),
         _ => (if sidebar.hidden { 0. } else { 1. }, false),
     }
 }
@@ -209,17 +217,55 @@ pub(super) const REGISTRATION: Registration = Registration {
                 if !moving {
                     return row.child(list);
                 }
-                // In flight the column clips its full-width rows rather than
-                // reflowing them; closing fades them out together.
-                row.child(
-                    div()
-                        .w(px(width * open))
-                        .h_full()
-                        .flex_shrink_0()
-                        .overflow_hidden()
-                        .when(shell.surfaces.sidebar.hidden, |column| column.opacity(open))
-                        .child(list),
-                )
+                // In flight the workspace makes room while a card carries the
+                // full-width rows out of the rail's o8 mark: it starts as the
+                // mark's tile, lifts with a fill and shadow, and lands flush.
+                let mix = |from: f32, to: f32| from + (to - from) * open;
+                let mark_left = -(crate::shell::rail::WIDTH + crate::shell::rail::TARGET) / 2.;
+                let lift = (open / 0.12).min(1.) * ((1. - open) / 0.25).min(1.);
+                let tint = |color: gpui::Rgba| gpui::Rgba { a: color.a * lift, ..color };
+                let card = div()
+                    .absolute()
+                    .left(px(mix(mark_left, 0.)))
+                    .top(px(mix(crate::shell::rail::PAD, 0.)))
+                    .w(px(mix(crate::shell::rail::TARGET, width)))
+                    .h(gpui::relative(open))
+                    .min_h(px(crate::shell::rail::TARGET))
+                    .overflow_hidden()
+                    .rounded(px(mix(10., 0.)))
+                    .bg(tint(crate::theme::current().surface_raised))
+                    .border_1()
+                    .border_color(tint(crate::theme::current().border))
+                    .shadow(vec![gpui::BoxShadow {
+                        color: gpui::black().opacity(0.4 * lift),
+                        offset: gpui::point(px(0.), px(10.)),
+                        blur_radius: px(28.),
+                        spread_radius: px(0.),
+                    }])
+                    // The rows keep the row's height while the card is shorter.
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .w(px(width))
+                            .h(gpui::relative(1. / open.max(0.01)))
+                            .when(shell.surfaces.sidebar.hidden, |rows| {
+                                rows.opacity(((open - 0.5) / 0.5).clamp(0., 1.))
+                            })
+                            .child(list),
+                    )
+                    // The mark itself, fading as the card leaves it.
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px((crate::shell::rail::TARGET - 24.) / 2. - 1.))
+                            .top(px((crate::shell::rail::TARGET - 24.) / 2. - 1.))
+                            .opacity((1. - open / 0.3).max(0.))
+                            .child(crate::shell::rail::brand()),
+                    );
+                row.child(div().w(px(width * open)).h_full().flex_shrink_0())
+                    .child(gpui::deferred(card).with_priority(1))
             })
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
             .when(!moving, |row| {

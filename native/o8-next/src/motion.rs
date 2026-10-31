@@ -150,6 +150,13 @@ impl Transition {
         }
     }
 
+    /// The linear position (0 closed, 1 open) and whether it is still moving,
+    /// for callers that shape each direction themselves.
+    pub fn position(&self) -> (f32, bool) {
+        let t = self.linear();
+        (if self.open { t } else { 1. - t }, t < 1.)
+    }
+
     /// The eased position (0 closed, 1 open) and whether it is still moving.
     pub fn value(&self) -> (f32, bool) {
         let t = self.linear();

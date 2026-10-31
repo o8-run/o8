@@ -10,7 +10,9 @@ use std::sync::{Arc, Mutex, Once, OnceLock};
 
 // NAVIGATION_RAIL_WIDTH and the 44px rail target in shell-geometry.ts.
 pub(super) const WIDTH: f32 = 60.;
-const TARGET: f32 = 44.;
+pub(super) const TARGET: f32 = 44.;
+/// The rail's padding above its first target, the o8 mark.
+pub(super) const PAD: f32 = 8.;
 const ICON: f32 = 19.;
 
 #[derive(Clone, Copy)]
@@ -481,7 +483,7 @@ fn divider() -> Div {
         .bg(theme().border)
 }
 
-fn brand() -> impl IntoElement {
+pub(super) fn brand() -> impl IntoElement {
     static LOGO: OnceLock<Arc<Image>> = OnceLock::new();
     let logo = LOGO.get_or_init(|| {
         Arc::new(Image::from_bytes(
@@ -531,6 +533,11 @@ impl Shell {
             .flat_map(|r| (r.nav)(self, NavPosition::AfterWorkspaces, cx))
             .collect::<Vec<_>>();
         watch_usage(&self.client);
+        // The sidebar grows out of the home mark below; keep its frames coming
+        // when the mark, not the header, started it.
+        if super::sidebar::travel(self).1 {
+            window.request_animation_frame();
+        }
         let active = self.active();
         let tab = |id: &'static str,
                    icon: Icon,
@@ -556,13 +563,15 @@ impl Shell {
             .flex()
             .flex_col()
             .items_center()
-            .py(px(8.))
+            .py(px(PAD))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
             .child(
-                // Home returns to the workspace from Projects, Customize or Setup.
+                // Home returns to the workspace from Projects, Settings, Customize
+                // or Setup; on the workspace it opens or folds the sidebar, which
+                // grows out of this mark (Q 2026-10-31).
                 target(if projects_open {
                     "shell-workspace"
                 } else {
@@ -571,9 +580,17 @@ impl Shell {
                 .tooltip(|_, cx| cx.new(|_| Tip("o8 — Home".into())).into())
                 .child(brand())
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.close_rail_overlays(window, cx);
-                    this.restore_focus(window, cx);
-                    cx.notify();
+                    let overlay = this.surfaces.projects.open
+                        || this.surfaces.settings.view.is_some()
+                        || this.surfaces.customize.open
+                        || this.surfaces.setup.view.is_some();
+                    if overlay {
+                        this.close_rail_overlays(window, cx);
+                        this.restore_focus(window, cx);
+                        cx.notify();
+                    } else {
+                        features::toggle_sidebar(this, window, cx);
+                    }
                 })),
             )
             // A click starts a chat on the lead; a drag drops one onto the workspace.

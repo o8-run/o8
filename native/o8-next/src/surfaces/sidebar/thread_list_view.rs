@@ -16,7 +16,8 @@ const SETTLE_PX: f32 = 6.;
 impl ThreadList {
     /// Fades the rows in top-down, as the column opens.
     pub(crate) fn stagger_in(&mut self, cx: &mut Context<Self>) {
-        self.reveal = Some(std::time::Instant::now());
+        // The first row waits for the card to clear the rail's mark.
+        self.reveal = Some(std::time::Instant::now() + std::time::Duration::from_millis(70));
         cx.notify();
     }
 
