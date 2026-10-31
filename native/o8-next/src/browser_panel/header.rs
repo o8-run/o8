@@ -1,6 +1,8 @@
 //! Browser-only header controls from PanelHeaderStrip and O8HeaderTabs.
 use super::*;
 
+pub(crate) const GLOBE: &str = super::view::GLOBE;
+
 pub(crate) const MORE: &str = "M5 12h.001 M12 12h.001 M19 12h.001";
 
 pub(crate) fn keyboard_button<V: 'static>(

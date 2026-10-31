@@ -287,6 +287,33 @@ impl ThreadList {
                 .child(view.label())
                 .on_click(cx.listener(move |this, _, _, cx| this.set_view(view, cx)))
         };
+        let (detailed, working) = (self.detailed, self.working_section);
+        let toggle = |key: &'static str, label: &'static str, on: bool, cx: &mut Context<Self>| {
+            let selector = format!("sidebar-view-{key}");
+            div()
+                .id(gpui::ElementId::Name(selector.clone().into()))
+                .debug_selector(move || selector.clone())
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .px(px(10.))
+                .py(px(6.))
+                .text_size(px(12.))
+                .text_color(theme().text)
+                .cursor_pointer()
+                .hover(|v| v.bg(theme().hover))
+                .child(div().w(px(14.)).flex().justify_center().when(on, |v| {
+                    v.child(crate::icon::stroke(CHECK, theme().accent, 11., 2.6))
+                }))
+                .child(label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if key == "detailed" {
+                        this.toggle_detailed(cx)
+                    } else {
+                        this.toggle_working_section(cx)
+                    }
+                }))
+        };
         let menu = open.then(|| {
             gpui::deferred(
                 gpui::anchored()
@@ -323,7 +350,10 @@ impl ThreadList {
                             .child(item(View::Chronological, cx))
                             .child(div().my(px(4.)).h(px(1.)).bg(theme().border))
                             .child(item(View::Repo, cx))
-                            .child(item(View::Date, cx)),
+                            .child(item(View::Date, cx))
+                            .child(div().my(px(4.)).h(px(1.)).bg(theme().border))
+                            .child(toggle("detailed", "Detailed rows", detailed, cx))
+                            .child(toggle("working", "Working section", working, cx)),
                     ),
             )
             .with_priority(1)

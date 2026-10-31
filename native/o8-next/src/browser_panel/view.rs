@@ -332,8 +332,18 @@ impl BrowserPanel {
     }
 }
 impl Render for BrowserPanel {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.request_favicons(cx);
+        if self.menu_requested {
+            self.focus_chrome();
+            self.focus.focus(window);
+            self.menu_requested = false;
+        }
+        if self.address_requested {
+            self.focus(window);
+            self.address.update(cx, |a, cx| a.select_all(cx));
+            self.address_requested = false;
+        }
         self.window = Some(window.window_handle());
         if !self.focus_observed {
             self.focus_observed = true;
@@ -356,9 +366,23 @@ impl Render for BrowserPanel {
             self.blur_address = false;
         }
         self.editing = self.address_focus.is_focused(window);
-        let active = self.current().cloned();
+        if let Some(remote) = &self.remote {
+            if self.preview.is_none() {
+                return div().size_full().child(remote.clone()).into_any_element();
+            }
+        }
+        let preview = self.preview.is_some();
+        let viewport = self.preview_viewport;
+        let active = self
+            .tabs
+            .iter()
+            .find(|tab| Some(tab.id) == self.preview.or(self.active))
+            .cloned();
         let has_url = active.as_ref().is_some_and(|tab| !tab.url.is_empty());
-        let page = self.active.and_then(|id| self.pages.get(&id));
+        let page = self
+            .preview
+            .or(self.active)
+            .and_then(|id| self.pages.get(&id));
         let back = page.is_some_and(|p| p.back);
         let forward = page.is_some_and(|p| p.forward);
         let loading = page.is_some_and(|p| p.loading);
@@ -366,13 +390,14 @@ impl Render for BrowserPanel {
         let web = page.map(|p| p.web.clone());
         let pending = page.map(|p| p.pending.clone());
         let creation_failed = page.map(|p| p.creation_failed.clone());
-        let covered = self.covered;
+        let covered = (self.covered && !preview) || self.menu;
         let agent_glow = self.agent_glow.is_some();
         let redacted = active.as_ref().is_some_and(|tab| tab.redacted);
         let empty = self.tabs.is_empty();
         let explain = redacted || error.is_some() || (!has_url && self.previews.is_empty());
-        div().track_focus(&self.focus)
+        div().track_focus(&self.focus).relative()
             .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if this.browser_key(event, window, cx) { cx.stop_propagation(); window.prevent_default(); return; }
                 let key = &event.keystroke;
                 if key.key == "tab" && !key.modifiers.control && !key.modifiers.platform && !key.modifiers.alt {
                     this.focus_chrome();
@@ -382,10 +407,10 @@ impl Render for BrowserPanel {
             }))
             .size_full().flex().flex_col().min_h_0()
             .text_color(theme().text).font_family(theme().font_ui).font_weight(FontWeight::LIGHT)
-            .when(!self.in_header && !empty, |d| d.child(self.page_strip(cx)))
+            .when(!preview && !self.in_header && !empty, |d| d.child(self.page_strip(cx)))
             .when(empty, |d| d.child(self.empty(cx)))
             .when(!empty, |d| d
-                .child(div().h(px(30.)).px(px(5.)).flex_shrink_0().flex().items_center().gap(px(3.))
+                .when(!preview, |d| d.child(div().h(px(30.)).px(px(5.)).flex_shrink_0().flex().items_center().gap(px(3.))
                     .border_b_1().border_color(theme().border)
                     .child(control("browser-back", BACK, "Back", back, Control::Back, cx))
                     .child(control("browser-forward", FORWARD, "Forward", forward, Control::Forward, cx))
@@ -400,7 +425,7 @@ impl Render for BrowserPanel {
                         })))
                     .child(button("browser-design", DESIGN, "Design Mode requires the classic browser bridge", false))
                     .child(control("browser-copy", if self.copied.is_some() { CHECK } else { COPY }, "Copy current URL", has_url, Control::Copy, cx))
-                    .child(control("browser-external", EXTERNAL, "Open in browser", has_url, Control::External, cx)))
+                    .child(control("browser-external", EXTERNAL, "Open in browser", has_url, Control::External, cx))))
                 .when(loading, |d| d.child(div().id("browser-loading").h(px(2.)).w_full().bg(theme().accent).debug_selector(|| "browser-loading".into())))
                 .child(div().flex_1().min_h_0().relative().overflow_hidden()
                     .when(loading, |body| body.child(div().size_full().absolute().flex().items_center().justify_center().text_size(px(12.)).text_color(theme().text_muted).child("Loading page…")))
@@ -411,7 +436,7 @@ impl Render for BrowserPanel {
                             .child(div().text_size(px(13.5)).font_weight(if redacted { FontWeight::NORMAL } else { FontWeight::LIGHT })
                                 .mb(px(if !has_url && !redacted { 10. } else { 0. }))
                                 .text_color(if redacted { theme().text } else { theme().text_muted }).child(if redacted { "Navigate again to reopen this page" }
-                                    else if error.is_some() { "Site not loading?" }
+                                    else if error.is_some() { "Could not load this page" }
                                     else if has_url { "The Browser needs macOS for now." }
                                     else { "Open a running dev server" }))
                             .when(explain, |d| d.child(div().text_size(px(12.)).text_color(theme().text_faint).child(if redacted {
@@ -420,7 +445,7 @@ impl Render for BrowserPanel {
                             .when(!has_url && !redacted, |d| d.children(self.previews.iter().map(|port| {
                                 let port = *port;
                                 div().id(("browser-port", port as usize)).focusable().debug_selector(move || format!("browser-port-{port}"))
-                                    .w_full().max_w(px(320.)).px(px(16.)).py(px(12.)).rounded(px(12.))
+                                    .w_full().max_w(px(320.)).pl(px(14.)).pr(px(16.)).py(px(12.)).rounded(px(12.))
                                     .border_1().border_color(theme().border).bg(theme().surface_raised)
                                     .cursor_pointer().hover(|d| d.bg(theme().hover)).flex().items_center().gap(px(12.))
                                     .child(div().size(px(34.)).rounded(px(9.)).bg(theme().selection).flex().items_center().justify_center()
@@ -433,9 +458,17 @@ impl Render for BrowserPanel {
                                     }))
                                     .on_click(cx.listener(move |this, _, _, cx| this.load_current(&format!("http://localhost:{port}"), cx)))
                             })))
-                            .when(has_url, |d| d.child(div().id("browser-recover").debug_selector(|| "browser-recover".into()).rounded(px(6.)).px(px(8.)).py(px(4.))
-                                .bg(theme().hover).text_size(px(11.)).text_color(theme().syntax_link).cursor_pointer().child("Open in browser")
-                                .on_click(cx.listener(|this, _, _, cx| this.external(cx)))))
+                            .when(has_url, |d| d.child(
+                                div().id("browser-error-banner").debug_selector(|| "browser-error-banner".into())
+                                    .absolute().bottom(px(12.)).left_0().right_0().flex().justify_center()
+                                    .child(div().flex().items_center().gap(px(8.)).px(px(12.)).py(px(6.)).rounded(px(8.))
+                                        .bg(crate::theme::popover_background()).border_1().border_color(theme().border)
+                                        .text_size(px(11.)).text_color(theme().text_muted).child("Site not loading?")
+                                        .child(header::keyboard_button(div().id("browser-recover").debug_selector(|| "browser-recover".into())
+                                            .rounded(px(4.)).px(px(8.)).py(px(2.)).bg(theme().hover)
+                                            .text_size(px(11.)).font_weight(FontWeight::MEDIUM).text_color(theme().syntax_link)
+                                            .cursor_pointer().hover(|b| b.bg(theme().selection)).child("Open in browser"), cx)
+                                            .on_click(cx.listener(|this, _, _, cx| this.external(cx)))))))
                     ))
                     .when(has_url && error.is_none() && cfg!(target_os = "macos"), |body| body.child(canvas(
                         |bounds, _, _| bounds,
@@ -450,11 +483,15 @@ impl Render for BrowserPanel {
                                 if let Some(page) = slot.as_ref() {
                                     if covered || !page.has_document() { page.hide(); } else {
                                         let bounds = if agent_glow { Bounds::new(gpui::point(bounds.left() + px(2.), bounds.top() + px(2.)), gpui::size((bounds.size.width - px(4.)).max(px(0.)), (bounds.size.height - px(4.)).max(px(0.)))) } else { bounds };
+                                        page.set_zoom(if preview && viewport > 0. { f64::from(bounds.size.width) / f64::from(viewport) } else { 1. });
                                         page.position(bounds, window);
                                     }
                                 }
                             }
                         }).absolute().top_0().left_0().size_full()))
                 ))
+            .when(self.menu, |d| d.child(self.browser_menu(cx)))
+            .on_mouse_down(gpui::MouseButton::Right, cx.listener(|this, _, _, cx| { this.menu = true; this.hide_pages(); cx.notify(); }))
+            .into_any_element()
     }
 }

@@ -110,6 +110,8 @@ it('attaches idempotently, survives database reopen, and keeps same-number cross
   const forward = await history(f.threadId);
   expect(forward.pullRequestContext.links.map((link: { pullRequestId: number }) => link.pullRequestId))
     .toEqual([f.first.pullRequestId, f.second.pullRequestId]);
+  // The sidebar's PR badge reads the mirrored title and state with each link.
+  expect(forward.pullRequestContext.links[0]).toMatchObject({ title: 'Fixture PR', state: 'open' });
   const query = new URLSearchParams(Object.entries(f.first).map(([key, value]) => [key, String(value)]));
   const reverse = await linksApi.GET(request('GET', undefined, `?${query}`));
   expect((await reverse.json()).result.links.map((link: { threadId: string }) => link.threadId)).toEqual([f.threadId]);

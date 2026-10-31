@@ -12,8 +12,7 @@ impl ThreadList {
                 .iter()
                 .position(|r| r.kind == "section" && r.title == "Archived")
         {
-            self.scroll
-                .scroll_to_item_strict(index, ScrollStrategy::Top);
+            self.scroll_row(index, ScrollStrategy::Top, true);
         }
         cx.notify();
     }
@@ -49,8 +48,7 @@ impl ThreadList {
                     }
                 } else {
                     if let Some(index) = header {
-                        self.scroll
-                            .scroll_to_item_strict(index, ScrollStrategy::Top);
+                        self.scroll_row(index, ScrollStrategy::Top, true);
                     }
                     self.archived_focus.focus(window);
                 }
@@ -78,7 +76,7 @@ impl ThreadList {
                 };
                 if let Some((index, row)) = next {
                     self.choice = row.id.clone();
-                    self.scroll.scroll_to_item(index, ScrollStrategy::Top);
+                    self.scroll_row(index, ScrollStrategy::Top, false);
                 }
             }
             "delete" | "f2" if focused => {} // Disclosure focus never mutates a thread.

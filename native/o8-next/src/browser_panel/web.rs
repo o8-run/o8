@@ -31,6 +31,7 @@ mod macos {
     struct Events {
         error: Option<String>,
         popups: Vec<String>,
+        commands: Vec<String>,
         navigating: bool,
         document: bool,
     }
@@ -60,7 +61,7 @@ mod macos {
         }
     }
 
-    /// Links that ask for a new window open in this page instead.
+    /// New-window requests are delivered to the page collection.
     fn delegate_class() -> &'static Class {
         static CLASS: OnceLock<&'static Class> = OnceLock::new();
         CLASS.get_or_init(|| {
@@ -113,6 +114,73 @@ mod macos {
         })
     }
 
+    fn view_class() -> &'static Class {
+        static CLASS: OnceLock<&'static Class> = OnceLock::new();
+        CLASS.get_or_init(|| {
+            fn command(object: &Object, event: id) -> bool {
+                unsafe {
+                    let flags: usize = msg_send![event, modifierFlags];
+                    let chars: id = msg_send![event, charactersIgnoringModifiers];
+                    let key = string(chars).unwrap_or_default();
+                    let primary = flags & ((1 << 20) | (1 << 18)) != 0;
+                    let alt = flags & (1 << 19) != 0;
+                    let shift = flags & (1 << 17) != 0;
+                    let value = if primary && !alt && !shift {
+                        match key.as_str() {
+                            "l" => Some("focus"),
+                            "r" => Some("reload"),
+                            "[" => Some("back"),
+                            "]" => Some("forward"),
+                            _ => None,
+                        }
+                    } else if alt && !primary && !shift {
+                        match key.as_str() {
+                            "\u{f702}" => Some("back"),
+                            "\u{f703}" => Some("forward"),
+                            _ => None,
+                        }
+                    } else if shift && !primary && !alt && key == "\u{f70d}" {
+                        Some("menu")
+                    } else {
+                        None
+                    };
+                    if let Some(value) = value {
+                        events(object).borrow_mut().commands.push(value.into());
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+            extern "C" fn equivalent(object: &Object, _: Sel, event: id) -> BOOL {
+                if command(object, event) {
+                    YES
+                } else {
+                    unsafe {
+                        msg_send![super(object, class!(WKWebView)), performKeyEquivalent: event]
+                    }
+                }
+            }
+            extern "C" fn down(object: &Object, _: Sel, event: id) {
+                if !command(object, event) {
+                    unsafe {
+                        let _: () = msg_send![super(object,class!(WKWebView)), keyDown: event];
+                    }
+                }
+            }
+            let mut decl = ClassDecl::new("O8BrowserWebView", class!(WKWebView)).unwrap();
+            decl.add_ivar::<usize>("events");
+            unsafe {
+                decl.add_method(
+                    sel!(performKeyEquivalent:),
+                    equivalent as extern "C" fn(&Object, Sel, id) -> BOOL,
+                );
+                decl.add_method(sel!(keyDown:), down as extern "C" fn(&Object, Sel, id));
+            }
+            decl.register()
+        })
+    }
+
     #[cfg(test)]
     pub(super) fn commit_flags_for_test() -> (bool, bool) {
         unsafe {
@@ -141,6 +209,17 @@ mod macos {
 
     impl Web {
         #[cfg(test)]
+        pub fn popup_for_test(url: &str) -> Self {
+            Self {
+                view: nil,
+                delegate: nil,
+                events: Rc::new(RefCell::new(Events {
+                    popups: vec![url.into()],
+                    ..Events::default()
+                })),
+            }
+        }
+        #[cfg(test)]
         pub fn new(_: &gpui::Window) -> Option<Self> {
             None
         }
@@ -165,7 +244,7 @@ mod macos {
                 let preferences: id = msg_send![configuration, preferences];
                 let _: () = msg_send![preferences, setJavaScriptCanOpenWindowsAutomatically: NO];
                 let rect = NSRect::new(NSPoint::new(0., 0.), NSSize::new(1., 1.));
-                let view: id = msg_send![class!(WKWebView), alloc];
+                let view: id = msg_send![view_class(), alloc];
                 let view: id = msg_send![view, initWithFrame: rect configuration: configuration];
                 let _: () = msg_send![configuration, release];
                 if view == nil {
@@ -173,6 +252,7 @@ mod macos {
                 }
                 let delegate: id = msg_send![delegate_class(), new];
                 let events = Rc::new(RefCell::new(Events::default()));
+                (*view).set_ivar("events", Rc::as_ptr(&events) as usize);
                 (*delegate).set_ivar("events", Rc::as_ptr(&events) as usize);
                 let _: () = msg_send![view, setUIDelegate: delegate];
                 let _: () = msg_send![view, setNavigationDelegate: delegate];
@@ -221,6 +301,10 @@ mod macos {
         }
 
         pub fn focus_chrome(&self) {
+            #[cfg(test)]
+            if self.view == nil {
+                return;
+            }
             unsafe {
                 let window: id = msg_send![self.view, window];
                 let parent: id = msg_send![self.view, superview];
@@ -231,6 +315,10 @@ mod macos {
             self.events.borrow().document
         }
         pub fn is_focused(&self) -> bool {
+            #[cfg(test)]
+            if self.view == nil {
+                return false;
+            }
             unsafe {
                 let window: id = msg_send![self.view, window];
                 let responder: id = msg_send![window, firstResponder];
@@ -243,6 +331,10 @@ mod macos {
             }
         }
         pub fn status(&self) -> Status {
+            #[cfg(test)]
+            if self.view == nil {
+                return Status::default();
+            }
             unsafe {
                 let title: id = msg_send![self.view, title];
                 let loading: BOOL = msg_send![self.view, isLoading];
@@ -261,6 +353,14 @@ mod macos {
         }
         pub fn take_popups(&self) -> Vec<String> {
             std::mem::take(&mut self.events.borrow_mut().popups)
+        }
+        pub fn take_commands(&self) -> Vec<String> {
+            std::mem::take(&mut self.events.borrow_mut().commands)
+        }
+        pub fn set_zoom(&self, zoom: f64) {
+            unsafe {
+                let _: () = msg_send![self.view, setPageZoom: zoom];
+            }
         }
 
         pub fn back(&self) {
@@ -319,6 +419,10 @@ mod macos {
         }
 
         pub fn hide(&self) {
+            #[cfg(test)]
+            if self.view == nil {
+                return;
+            }
             unsafe {
                 let _: () = msg_send![self.view, setHidden: YES];
             }
@@ -327,6 +431,10 @@ mod macos {
 
     impl Drop for Web {
         fn drop(&mut self) {
+            #[cfg(test)]
+            if self.view == nil {
+                return;
+            }
             unsafe {
                 let _: () = msg_send![self.view, stopLoading];
                 let _: () = msg_send![self.view, setUIDelegate: nil];
@@ -371,6 +479,10 @@ impl Web {
     pub fn take_popups(&self) -> Vec<String> {
         vec![]
     }
+    pub fn take_commands(&self) -> Vec<String> {
+        vec![]
+    }
+    pub fn set_zoom(&self, _: f64) {}
 }
 
 #[cfg(all(test, target_os = "macos"))]

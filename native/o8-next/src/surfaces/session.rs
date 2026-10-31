@@ -143,6 +143,23 @@ pub struct Session {
     pub settled_override: Option<String>,
     #[serde(default)]
     pub settled_at: Option<String>,
+    /// `owner/repo` from the repo's git remote, else its folder; older hosts omit it.
+    #[serde(default)]
+    pub repo_slug: Option<String>,
+    /// The worktree's current branch; older hosts omit it.
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// When the current run started; null when idle or on older hosts.
+    #[serde(default)]
+    pub run_started_at: Option<String>,
+    /// Inbox pin (#5141), its order key and the preference revision a
+    /// pin/unpin must quote; older hosts omit them.
+    #[serde(default)]
+    pub pinned_at: Option<String>,
+    #[serde(default)]
+    pub pin_order_key: Option<String>,
+    #[serde(default)]
+    pub inbox_revision: Option<u64>,
 }
 impl Session {
     pub fn settled(&self) -> bool {

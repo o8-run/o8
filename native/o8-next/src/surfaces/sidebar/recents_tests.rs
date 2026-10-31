@@ -114,7 +114,7 @@ fn sidebar_recents_groups_times_more_and_keyboard(cx: &mut TestAppContext) {
     });
 }
 
-fn native_rows(shell: &Entity<Shell>, cx: &VisualTestContext) -> Value {
+pub(super) fn native_rows(shell: &Entity<Shell>, cx: &VisualTestContext) -> Value {
     shell.read_with(cx, |s, cx| {
         serde_json::to_value(&*s.surfaces.sidebar.view.as_ref().unwrap().read(cx).rows).unwrap()
     })
