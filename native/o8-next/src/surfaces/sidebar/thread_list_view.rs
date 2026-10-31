@@ -12,6 +12,7 @@ impl Render for ThreadList {
         let _keep_subscriptions = &self.subscriptions;
         if !cx.has_active_drag() {
             self.pin_drop = None;
+            self.pin_bounds.clear();
         }
         let status = if self.saving {
             "Saving…".to_string()
@@ -105,6 +106,16 @@ impl Render for ThreadList {
                 )
             })
             .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .on_drag_move(cx.listener(
+                        |this, event: &gpui::DragMoveEvent<pins::PinDrag>, _, cx| this.pin_tail_move(event, cx),
+                    ))
+                    .on_drop(cx.listener(|this, drag: &pins::PinDrag, _, cx| this.drop_pin(&drag.id, cx)))
+                    .child(
                 if self.detailed {
                     // Detailed rows vary: 66px threads under 28px headings.
                     let view = cx.entity();
@@ -136,6 +147,7 @@ impl Render for ThreadList {
                     .min_h_0()
                     .into_any_element()
                 },
+            ),
             )
             .when(
                 self.query.is_empty()

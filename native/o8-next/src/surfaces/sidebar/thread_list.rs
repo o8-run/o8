@@ -151,6 +151,9 @@ pub struct ThreadList {
     notice: String,
     /// A pinned-row drag's drop target: (target id, drop after it).
     pub(super) pin_drop: Option<(String, bool)>,
+    /// Each pinned row's bounds during a drag, so the empty list space
+    /// below a shelf that ends the list can drop last.
+    pub(super) pin_bounds: HashMap<String, gpui::Bounds<gpui::Pixels>>,
     pub painted: Rc<Cell<usize>>,
     pub materialized: Rc<Cell<usize>>,
 }
@@ -242,6 +245,7 @@ impl ThreadList {
             subscriptions: vec![observe, submit],
             notice: String::new(),
             pin_drop: None,
+            pin_bounds: HashMap::new(),
             painted: Rc::new(Cell::new(usize::MAX)),
             materialized: Rc::new(Cell::new(0)),
         }
