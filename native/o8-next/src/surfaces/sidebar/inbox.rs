@@ -199,6 +199,10 @@ impl ThreadList {
         if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
             session.settled_override = state["settledOverride"].as_str().map(str::to_owned);
             session.settled_at = state["settledAt"].as_str().map(str::to_owned);
+            // Settling bumps the subject's revision; a later Pin must quote it.
+            if let Some(revision) = state["inboxRevision"].as_u64() {
+                session.inbox_revision = Some(revision);
+            }
         }
         // A listing already in flight predates this answer; fence it, as
         // archive and rename do, so it cannot put the row back.

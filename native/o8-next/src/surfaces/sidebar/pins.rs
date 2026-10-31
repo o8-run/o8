@@ -99,7 +99,12 @@ impl ThreadList {
                         this.rebuild();
                         this.load(cx);
                     }
-                    Err(error) => this.notice = error,
+                    Err(error) => {
+                        this.notice = error;
+                        // A stale revision heals on the next listing.
+                        this.generation += 1;
+                        this.load(cx);
+                    }
                 }
                 cx.notify();
             });
