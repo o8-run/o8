@@ -452,6 +452,12 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
         Tool::Compare => contextual::comparison(s, cx),
         Tool::Prs => contextual::pr(s, cx),
         tool if !tool.ready() => placeholder(tool).into_any_element(),
+        // The side chat opens once its new conversation is listed.
+        Tool::SideChat => s
+            .content
+            .get(&super::key(s, tool))
+            .map(Content::element)
+            .unwrap_or_else(|| div().child("Starting chat…").into_any_element()),
         tool => s
             .content
             .get(&super::key(s, tool))
