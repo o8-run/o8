@@ -104,7 +104,7 @@ pub(crate) fn fold_working(rows: Vec<Row>, closed: bool) -> Vec<Row> {
         .unwrap_or(rows.len());
     let mut rows = rows;
     let tail = rows.split_off(end);
-    let (working, mut rest): (Vec<_>, Vec<_>) = rows
+    let (working, rest): (Vec<_>, Vec<_>) = rows
         .into_iter()
         .partition(|r| r.kind == "thread" && r.running && r.marker != "input");
     let mut out = Vec::new();
