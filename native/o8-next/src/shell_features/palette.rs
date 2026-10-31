@@ -9,9 +9,11 @@ impl ShellFeature for Palette {
         }]
     }
     fn slots(&self) -> &'static [RenderSlot] {
+        // A floating card over the workspace, so it renders with the content's
+        // overlays rather than inside the measured header.
         &[RenderSlot {
-            group: RenderGroup::Chrome,
-            order: 400,
+            group: RenderGroup::Content,
+            order: 930,
             render: |s, _, _, cx| {
                 if !s.palette {
                     return None;
