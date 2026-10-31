@@ -177,7 +177,7 @@ fn rail_drags_split_workspace_panes_like_classic(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn sidebar_threads_and_pane_headers_drag_like_classic(cx: &mut TestAppContext) {
-    let f = Fixture::new();
+    let f = Fixture::start(true);
     let (s, mut v) = open(
         f.client.clone(),
         f.root.join("thread-drag.json"),
@@ -246,27 +246,77 @@ fn sidebar_threads_and_pane_headers_drag_like_classic(cx: &mut TestAppContext) {
     assert_eq!(ids, [pane.clone(), "main".to_owned()]);
     assert_eq!(panes(&s, &v).unwrap().leaves().len(), 2);
 
-    // A header chat tab dropped near a pane's bottom opens its thread below
-    // it and stays in the header, as in classic.
-    let tabs = s.read_with(&v, |s, _| s.current().unwrap().tabs.clone());
-    let (index, session) = tabs
-        .iter()
-        .enumerate()
-        .find_map(|(i, t)| match t {
-            Tab::Session(id) => Some((i, id.clone())),
-            _ => None,
-        })
-        .expect("a chat tab");
-    let moved = bounds(&mut v, &format!("pane-{pane}"));
-    let below = gpui::point(moved.center().x, moved.bottom() - px(20.));
+    // The same thread dropped again moves its pane instead of opening twice.
+    let main = bounds(&mut v, "pane-main");
+    let below = gpui::point(main.center().x, main.bottom() - px(20.));
     assert_eq!(
-        drag(&mut v, &format!("surface-tab-{index}"), below),
+        drag(&mut v, &format!("thread-row-{row}"), below),
         Some("pane-drop-below")
+    );
+    let Some(Node::Split {
+        vertical: false,
+        children,
+        ..
+    }) = panes(&s, &v)
+    else {
+        panic!("thread did not move below: {:?}", panes(&s, &v));
+    };
+    let ids: Vec<_> = children.iter().map(|c| c.id().to_owned()).collect();
+    assert_eq!(ids, ["main".to_owned(), pane.clone()]);
+
+    // The main chat's own header tab stays put: no preview, no new pane.
+    let tabs = s.read_with(&v, |s, _| s.current().unwrap().tabs.clone());
+    let active = s.read_with(&v, |s, _| s.active());
+    let main_tab = tabs
+        .iter()
+        .position(|t| Some(t) == active.as_ref())
+        .unwrap();
+    let moved = bounds(&mut v, &format!("pane-{pane}"));
+    let right = gpui::point(moved.right() - px(20.), moved.center().y);
+    assert_eq!(
+        drag(&mut v, &format!("surface-tab-{main_tab}"), right),
+        None
+    );
+    assert_eq!(panes(&s, &v).unwrap().leaves().len(), 2);
+
+    // Once another thread takes the main pane, that chat tab drops beside a
+    // pane and stays in the header, as in classic.
+    let Some(Tab::Session(earlier)) = active else {
+        panic!("{active:?}")
+    };
+    let other = list.read_with(&v, |l, _| {
+        l.rows.iter().enumerate().find_map(|(i, r)| {
+            r.id.clone()
+                .filter(|id| *id != thread && *id != earlier)
+                .map(|id| (i, id))
+        })
+    });
+    let (other_row, other) = other.expect("a third thread");
+    let click = bounds(&mut v, &format!("thread-row-{other_row}")).center();
+    v.simulate_click(click, Modifiers::default());
+    let start = Instant::now();
+    while s.read_with(&v, |s, _| s.active()) != Some(Tab::Session(other.clone())) {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the third thread never opened"
+        );
+        settle(&mut v);
+    }
+    let tabs = s.read_with(&v, |s, _| s.current().unwrap().tabs.clone());
+    let index = tabs
+        .iter()
+        .position(|t| *t == Tab::Session(earlier.clone()))
+        .unwrap();
+    let moved = bounds(&mut v, &format!("pane-{pane}"));
+    let right = gpui::point(moved.right() - px(20.), moved.center().y);
+    assert_eq!(
+        drag(&mut v, &format!("surface-tab-{index}"), right),
+        Some("pane-drop-right")
     );
     let tree = panes(&s, &v).unwrap();
     let leaves = tree.leaves();
     assert_eq!(leaves.len(), 3, "{tree:?}");
-    assert_eq!(leaves[1].1, &Leaf::Chat { session }, "{tree:?}");
+    assert_eq!(leaves[2].1, &Leaf::Chat { session: earlier }, "{tree:?}");
     assert_eq!(
         s.read_with(&v, |s, _| s.current().unwrap().tabs.clone()),
         tabs
@@ -275,7 +325,7 @@ fn sidebar_threads_and_pane_headers_drag_like_classic(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn header_play_menu_items_drag_onto_panes_like_classic(cx: &mut TestAppContext) {
-    let f = Fixture::new();
+    let f = Fixture::start(true);
     let (s, mut v) = open(
         f.client.clone(),
         f.root.join("play-drag.json"),

@@ -154,7 +154,20 @@ fn split(s: &mut Shell, target: &str, zone: Zone, pane: super::RailPane, cx: &mu
             None => return,
         },
         super::RailPane::Terminal => Leaf::Terminal { session: None },
-        super::RailPane::Thread { id, .. } => Leaf::Chat { session: id },
+        // placeThreadPane: a thread shows once. The main chat's own thread
+        // stays put, and one already in a pane moves there.
+        super::RailPane::Thread { id, .. } => {
+            if s.active() == Some(Tab::Session(id.clone())) {
+                return;
+            }
+            let open = tree(s).leaves().into_iter().find_map(|(leaf, content)| {
+                matches!(content, Leaf::Chat { session } if *session == id).then(|| leaf.to_owned())
+            });
+            if let Some(leaf) = open {
+                return move_pane(s, &leaf, target, zone, cx);
+            }
+            Leaf::Chat { session: id }
+        }
         super::RailPane::Move { leaf, .. } => return move_pane(s, &leaf, target, zone, cx),
     };
     let id = format!(
@@ -464,9 +477,13 @@ fn track(
     }
 }
 
-/// The thread behind header tab `index`, when it is a chat.
+/// The thread behind header tab `index`, when it is a chat the main pane
+/// isn't showing.
 fn thread_tab(s: &Shell, index: usize) -> Option<super::RailPane> {
     let tab = s.current()?.tabs.get(index)?.clone();
+    if s.active().as_ref() == Some(&tab) {
+        return None;
+    }
     let Tab::Session(id) = tab else { return None };
     let title = s
         .sessions
