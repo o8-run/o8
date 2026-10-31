@@ -97,13 +97,14 @@ fn native_composer_controls_mode_arrows_change_the_next_real_send(cx: &mut TestA
     });
     surface.read_with(cx, |s, _| {
         let payload = &s.queue["items"][0]["payload"];
-        assert_eq!(payload["routing"]["pickedMode"], "fast");
+        // Shared is the default; Down moves to Worktrees, the only other mode.
+        assert_eq!(payload["routing"]["pickedMode"], "multitask");
         assert_eq!(payload["routing"]["mode"], "fleet");
         assert!(
             payload["wireMessage"]
                 .as_str()
                 .unwrap()
-                .starts_with("[Mode: Shared]"),
+                .starts_with("[Mode: Multitask]"),
             "actual payload: {payload}"
         );
     });
