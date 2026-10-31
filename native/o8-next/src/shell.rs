@@ -49,6 +49,7 @@ register_surfaces! {
         activity: Activity = "surfaces/activity.rs";
         workers: Workers = "surfaces/workers.rs";
         pull_requests: PullRequests = "surfaces/pull_requests.rs";
+        bots: Bot(String) = "surfaces/bots.rs";
         inbox: Inbox = "surfaces/inbox.rs";
         issues: Issues = "surfaces/issues.rs";
         diff: Diff = "surfaces/diff.rs";
