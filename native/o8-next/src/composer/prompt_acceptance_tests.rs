@@ -153,7 +153,10 @@ fn native_composer_controls_intent_chips_apply_without_sending(cx: &mut TestAppC
 fn native_composer_controls_quick_action_and_prompt_insert_without_send(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    click("composer-quick", cx);
+    focus(&surface, cx);
+    cx.simulate_keystrokes("ctrl-shift-k");
+    cx.run_until_parked();
+    draw(cx);
     click("composer-command-query", cx);
     cx.simulate_input("decompose");
     cx.simulate_keystrokes("enter");
@@ -165,7 +168,8 @@ fn native_composer_controls_quick_action_and_prompt_insert_without_send(cx: &mut
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("Replace this");
     cx.simulate_keystrokes("ctrl-a");
-    click("composer-prompts", cx);
+    click("composer-attach", cx);
+    click("attach-browse-prompts", cx);
     wait_selector(cx, "composer-prompt-item-0");
     click("composer-prompt-item-0", cx);
     surface.read_with(cx, |s, cx| {

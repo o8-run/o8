@@ -175,7 +175,8 @@ fn native_composer_controls_save_prompt_and_create_branch_persist_without_send(
     focus(&surface, cx);
     cx.simulate_input("A saved composer prompt");
     draw(cx);
-    click("composer-save-prompt", cx);
+    click("composer-attach", cx);
+    click("attach-save-prompt", cx);
     click("composer-prompt-submit", cx);
     wait(&surface, cx, |s, cx| {
         !s.composer.read(cx).controls.prompt.result.is_empty()

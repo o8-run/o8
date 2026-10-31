@@ -51,20 +51,15 @@ impl Surface {
                 format!("Permissions: {access}"),
             ))
             .child(icon_only(
-                self.composer_button(
-                    "composer-attach",
-                    "",
-                    enabled
-                        && matches!(
-                            routing["backend"].as_str(),
-                            Some("codex" | "claude" | "fable" | "collide")
-                        ),
-                    cx,
-                    |s, _, cx| s.attach_composer_image(cx),
+                self.track_prompt_anchor(
+                    self.composer_button("composer-attach", "", enabled, cx, |s, w, cx| {
+                        s.open_composer_picker("attach", w, cx)
+                    }),
+                    "attach",
                 ),
                 "M12 5v14M5 12h14",
                 theme().text_secondary,
-                "Attach image".into(),
+                "Attach files".into(),
             ))
             .when(self.queue["canSteer"] == true, |d| {
                 d.child(self.composer_button(
@@ -109,47 +104,43 @@ impl Surface {
                 |s, w, cx| s.open_composer_picker("effort", w, cx),
             ))
             .child(
-                self.mic_button(enabled, cx)
-                    .child(
-                        canvas(
-                            |_, _, _| (),
-                            move |bounds, _, window, _| {
-                                // A stroked path activates viewport-sized GPU/MSAA
-                                // targets. This small icon fits the existing quad pass.
-                                let rect = |x, y, w, h| {
-                                    Bounds::new(
-                                        bounds.origin + point(px(x), px(y)),
-                                        size(px(w), px(h)),
-                                    )
-                                };
-                                let stroke = px(1.3);
-                                window.paint_quad(
-                                    gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
-                                        .corner_radii(px(3.))
-                                        .border_widths(stroke),
-                                );
-                                window.paint_quad(
-                                    gpui::outline(rect(1., 7., 12., 8.), color, Default::default())
-                                        .corner_radii(gpui::Corners {
-                                            top_left: px(0.),
-                                            top_right: px(0.),
-                                            bottom_right: px(6.),
-                                            bottom_left: px(6.),
-                                        })
-                                        .border_widths(gpui::Edges {
-                                            top: px(0.),
-                                            right: stroke,
-                                            bottom: stroke,
-                                            left: stroke,
-                                        }),
-                                );
-                                window.paint_quad(gpui::fill(rect(6.35, 14., 1.3, 4.), color));
-                                window.paint_quad(gpui::fill(rect(4., 17.35, 6., 1.3), color));
-                            },
-                        )
-                        .w(px(14.))
-                        .h(px(20.)),
-                    ),
+                self.mic_button(enabled, cx).child(
+                    canvas(
+                        |_, _, _| (),
+                        move |bounds, _, window, _| {
+                            // A stroked path activates viewport-sized GPU/MSAA
+                            // targets. This small icon fits the existing quad pass.
+                            let rect = |x, y, w, h| {
+                                Bounds::new(bounds.origin + point(px(x), px(y)), size(px(w), px(h)))
+                            };
+                            let stroke = px(1.3);
+                            window.paint_quad(
+                                gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
+                                    .corner_radii(px(3.))
+                                    .border_widths(stroke),
+                            );
+                            window.paint_quad(
+                                gpui::outline(rect(1., 7., 12., 8.), color, Default::default())
+                                    .corner_radii(gpui::Corners {
+                                        top_left: px(0.),
+                                        top_right: px(0.),
+                                        bottom_right: px(6.),
+                                        bottom_left: px(6.),
+                                    })
+                                    .border_widths(gpui::Edges {
+                                        top: px(0.),
+                                        right: stroke,
+                                        bottom: stroke,
+                                        left: stroke,
+                                    }),
+                            );
+                            window.paint_quad(gpui::fill(rect(6.35, 14., 1.3, 4.), color));
+                            window.paint_quad(gpui::fill(rect(4., 17.35, 6., 1.3), color));
+                        },
+                    )
+                    .w(px(14.))
+                    .h(px(20.)),
+                ),
             )
             .child(self.voice_button(cx))
             .child(
@@ -484,7 +475,7 @@ impl Surface {
         })
         .detach();
     }
-    fn attach_composer_image(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn attach_composer_image(&mut self, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
             directories: false,
@@ -569,7 +560,7 @@ impl Surface {
                                 })
                                 .or_else(|| {
                                     input.controls.focus.get(if input.text.trim().is_empty() {
-                                        "composer-quick"
+                                        "composer-attach"
                                     } else {
                                         "composer-intent-repo"
                                     })

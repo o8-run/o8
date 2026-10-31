@@ -120,17 +120,8 @@ impl Surface {
                         .truncate(),
                     )
             })
-            .child(self.prompt_trigger("composer-quick", "Commands", "quick", enabled, cx))
-            .child(self.prompt_trigger("composer-prompts", "Prompts", "prompts", enabled, cx))
-            .when(has_text, |v| {
-                v.child(self.prompt_trigger(
-                    "composer-save-prompt",
-                    "Save prompt",
-                    "save-prompt",
-                    enabled,
-                    cx,
-                ))
-            })
+            // Classic has no Commands or Prompts buttons: quick actions open
+            // with Cmd+Shift+K or "/", saved prompts from the "+" menu.
             .when(!feedback.is_empty(), |v| {
                 v.child(
                     self.prompt_trigger(
@@ -150,7 +141,7 @@ impl Surface {
             })
             .into_any_element()
     }
-    fn track_prompt_anchor(
+    pub(super) fn track_prompt_anchor(
         &self,
         button: gpui::Stateful<gpui::Div>,
         kind: &'static str,
@@ -225,9 +216,7 @@ impl Surface {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.composer.read(cx).focus.is_focused(window) {
-            return false;
-        }
+        // The composer has no Commands button, so the shortcut works while typing.
         if self.composer.read(cx).controls.open == Some("quick") {
             if let Some(query) = &self.composer.read(cx).controls.prompt.query {
                 query.read(cx).focus.focus(window);
@@ -561,11 +550,12 @@ impl Surface {
         if open == "mode" && matches!(key, "up" | "down") {
             let routing = self.composer_routing(cx).unwrap_or(Value::Null);
             // Arrows skip Shared where it is unavailable, as classic's cycle does.
-            let ids: &[&str] = if crate::composer::controls::shares_checkout(routing["backend"].as_str()) {
-                &["mode-fast", "mode-multitask"]
-            } else {
-                &["mode-multitask"]
-            };
+            let ids: &[&str] =
+                if crate::composer::controls::shares_checkout(routing["backend"].as_str()) {
+                    &["mode-fast", "mode-multitask"]
+                } else {
+                    &["mode-multitask"]
+                };
             let current = ids
                 .iter()
                 .position(|id| {

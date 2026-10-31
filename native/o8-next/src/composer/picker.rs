@@ -92,7 +92,7 @@ impl Surface {
             .bg(crate::theme::menu_fill())
             .shadow_lg();
         // Mode and permission sit on the left of the footer; model and effort on the right.
-        menu = if matches!(open, "mode" | "access") {
+        menu = if matches!(open, "mode" | "access" | "attach") {
             menu.left(px(8.))
         } else {
             menu.right(px(8.))
@@ -100,7 +100,8 @@ impl Surface {
         match open {
             "mode" => {
                 let picked = routing["pickedMode"].as_str().unwrap_or("fast");
-                let shares = crate::composer::controls::shares_checkout(routing["backend"].as_str());
+                let shares =
+                    crate::composer::controls::shares_checkout(routing["backend"].as_str());
                 for (value, label, detail) in [
                     ("fast", "Shared", "Workers share this checkout"),
                     (
@@ -146,6 +147,50 @@ impl Surface {
                         move |s, w, cx| s.composer_choice("permissionMode", value, w, cx),
                     ));
                 }
+            }
+            // AttachFilesButton's menu: saved prompts, then files from disk.
+            "attach" => {
+                let has_text = !self.composer.read(cx).text.trim().is_empty();
+                let images = matches!(
+                    routing["backend"].as_str(),
+                    Some("codex" | "claude" | "fable" | "collide")
+                );
+                menu = menu.child(self.menu_row(
+                    "attach-browse-prompts",
+                    "Browse saved prompts",
+                    "Insert a prompt from your library",
+                    false,
+                    !busy,
+                    cx,
+                    |s, w, cx| s.open_prompt("prompts", w, cx),
+                ));
+                if has_text {
+                    menu = menu.child(self.menu_row(
+                        "attach-save-prompt",
+                        "Save as prompt",
+                        "Keep this draft in your library",
+                        false,
+                        !busy,
+                        cx,
+                        |s, w, cx| s.open_prompt("save-prompt", w, cx),
+                    ));
+                }
+                menu = menu.child(self.menu_row(
+                    "attach-upload",
+                    "Upload from disk",
+                    if images {
+                        "Images for this chat"
+                    } else {
+                        "This runtime takes no images"
+                    },
+                    false,
+                    !busy && images,
+                    cx,
+                    |s, w, cx| {
+                        s.close_composer_picker(w, cx);
+                        s.attach_composer_image(cx);
+                    },
+                ));
             }
             "effort" => {
                 let effort = routing["effort"].as_str().unwrap_or("medium");
@@ -224,7 +269,7 @@ impl Surface {
             }
             _ => {}
         }
-        menu.when(open == "mode", |v| {
+        menu.when(matches!(open, "mode" | "attach"), |v| {
             v.on_mouse_down_out(cx.listener(|s, event: &gpui::MouseDownEvent, _, cx| {
                 s.dismiss_prompt_outside(event, cx)
             }))
