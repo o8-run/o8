@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { githubInstallationFetch } from './auth';
+import { withGitHubAbort } from './abort';
 import type { PullRequestListPage, PullRequestListState, PullRequestListSort } from './pull-request-list.types';
 
 interface GitHubListPull {
@@ -52,7 +53,7 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
     }
     throw new Error('Pull requests could not be loaded from GitHub. Try again.');
   }
-  const pulls = await response.json() as GitHubListPull[];
+  const pulls = await withGitHubAbort(init.signal, () => response.json()) as GitHubListPull[];
   const stats = new Map<number, PullStats>();
   if (pulls.length > 0 && !anonymous) {
     try {
@@ -61,7 +62,7 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
         body: JSON.stringify({ query: STATS_QUERY, variables: { ids: pulls.map((pull) => pull.node_id) } }),
       });
       if (result.response.ok) {
-        const payload = await result.response.json() as { data?: { nodes?: Array<PullStats | null> } };
+        const payload = await withGitHubAbort(init.signal, () => result.response.json()) as { data?: { nodes?: Array<PullStats | null> } };
         for (const node of payload.data?.nodes ?? []) if (node) stats.set(node.number, node);
       }
     } catch { /* Keep the list usable when optional summary data is unavailable. */ }
