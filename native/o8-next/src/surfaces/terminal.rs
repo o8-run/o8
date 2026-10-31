@@ -95,6 +95,11 @@ impl Client {
     /// the session that survived a restart, or reserves one in the workspace that
     /// the pane then attaches to (DesktopWebSocketContext.tsx).
     fn own_terminal(&self, workspace: &str) -> Result<String, String> {
+        self.create_terminal(workspace, &format!("o8-next:{workspace}:terminal"))
+    }
+    /// Reserves the shell an owner keeps across restarts: the workspace's own,
+    /// or a split pane's (`o8-next:<workspace>:pane:<id>`).
+    pub(super) fn create_terminal(&self, workspace: &str, owner: &str) -> Result<String, String> {
         use std::time::{Duration, Instant};
         use tungstenite::Message;
         let (url, address) = self.websocket()?;
@@ -108,7 +113,7 @@ impl Client {
             .send(Message::Text(
                 serde_json::json!({
                     "type": "terminal-create", "cols": 120, "rows": 30, "requestId": request,
-                    "cwd": workspace, "ownerKey": format!("o8-next:{workspace}:terminal"),
+                    "cwd": workspace, "ownerKey": owner,
                 })
                 .to_string()
                 .into(),

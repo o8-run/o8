@@ -323,7 +323,7 @@ const SEARCH: &str = "M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z M16 16l5 5"
 const CLOSE: &str = "M6 6l12 12M18 6L6 18";
 
 /// The desktop's single-colour pill glyphs (PillRuntimeGlyph), chosen by label.
-fn glyph(tab: &Tab) -> &'static str {
+pub(super) fn glyph(tab: &Tab) -> &'static str {
     match tab {
         Tab::Session(_) => {
             "M12 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z M6 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z M18 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z M12 8v4M12 12l-6 4M12 12l6 4"
