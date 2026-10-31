@@ -12,6 +12,16 @@ pub(super) fn button(
     cx: &mut Context<Shell>,
     action: impl Fn(&mut Shell, &mut Window, &mut Context<Shell>) + 'static,
 ) -> gpui::Stateful<gpui::Div> {
+    bare(s, id, tip, cx, action).hover(|b| b.bg(theme().hover).text_color(theme().text))
+}
+/// A panel control without a hover box; GPUI allows one hover style per element.
+fn bare(
+    s: &Shell,
+    id: impl Into<String>,
+    tip: impl Into<SharedString>,
+    cx: &mut Context<Shell>,
+    action: impl Fn(&mut Shell, &mut Window, &mut Context<Shell>) + 'static,
+) -> gpui::Stateful<gpui::Div> {
     let id = id.into();
     let label: SharedString = tip.into();
     let selector = id.clone();
@@ -43,7 +53,6 @@ pub(super) fn button(
         .text_size(px(12.))
         .font_weight(gpui::FontWeight::LIGHT)
         .text_color(theme().text_muted)
-        .hover(|b| b.bg(theme().hover).text_color(theme().text))
         .active(|b| b.bg(theme().selection))
         .focus(|b| b.bg(theme().selection))
         .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(label.clone())).into())
@@ -243,7 +252,7 @@ fn tool_tab(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement {
             .child(tool.label()),
         )
         .child(
-            button(
+            bare(
                 s,
                 format!("panel-tab-close-{}", tool.slug()),
                 format!("Close {} tab", tool.label()),
@@ -260,12 +269,11 @@ fn tool_tab(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement {
                 },
             )
             // ContextualPanel's tab close: a faint 16px X inset from the
-            // tab's edge, with no hover box.
+            // tab's edge, with no hover box (a bare control).
             .w(px(16.))
             .h(px(16.))
             .mr(px(5.))
             .rounded(px(4.))
-            .hover(|b| b)
             .child(crate::icon::stroke(
                 "M18 6 6 18M6 6l12 12",
                 theme().text_faint,
@@ -533,7 +541,7 @@ fn lower_tab(s: &Shell, tool: Tool, shown: Tool, cx: &mut Context<Shell>) -> Any
             .child(tool.label()),
         )
         .child(
-            button(
+            bare(
                 s,
                 format!("panel-lower-close-{slug}"),
                 format!("Close {} tab below", tool.label()),
@@ -541,12 +549,11 @@ fn lower_tab(s: &Shell, tool: Tool, shown: Tool, cx: &mut Context<Shell>) -> Any
                 move |s, w, cx| close_lower_tab(s, tool, w, cx),
             )
             // ContextualPanel's tab close: a faint 16px X inset from the
-            // tab's edge, with no hover box.
+            // tab's edge, with no hover box (a bare control).
             .w(px(16.))
             .h(px(16.))
             .mr(px(5.))
             .rounded(px(4.))
-            .hover(|b| b)
             .child(crate::icon::stroke(
                 "M18 6 6 18M6 6l12 12",
                 theme().text_faint,
