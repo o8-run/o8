@@ -257,6 +257,9 @@ impl ThreadList {
         cx: &mut Context<Self>,
     ) {
         let (bounds, at) = (event.bounds, event.event.position);
+        if side.is_none() {
+            self.pin_bounds.insert(target.to_owned(), bounds);
+        }
         if !bounds.contains(&at) {
             return;
         }
@@ -265,6 +268,21 @@ impl ThreadList {
         if self.pin_drop != next {
             self.pin_drop = next;
             cx.notify();
+        }
+    }
+    /// The list's empty space below a shelf that ends the list drops last.
+    pub(super) fn pin_tail_move(&mut self, event: &gpui::DragMoveEvent<PinDrag>, cx: &mut Context<Self>) {
+        let at = event.event.position;
+        let order = pinned_order(&self.sessions);
+        let shelf_ends = self.rows.last().and_then(|r| r.id.as_ref()).is_some_and(|id| order.contains(id));
+        let bottom = self.pin_bounds.values().map(|b| b.bottom()).max();
+        let Some(last) = order.last() else { return };
+        if shelf_ends && event.bounds.contains(&at) && bottom.is_some_and(|b| at.y > b) {
+            let next = Some((last.clone(), true));
+            if self.pin_drop != next {
+                self.pin_drop = next;
+                cx.notify();
+            }
         }
     }
     /// The drop zone a non-pin row offers: the Pinned header drops first;
