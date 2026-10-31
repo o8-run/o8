@@ -202,6 +202,7 @@ impl ThreadList {
                             .unwrap_or(&row.workspace),
                     )),
             );
+        first = first.children(self.pin_mark(&id));
         if let Some(st) = st {
             let (icon, color) = status_look(st.key);
             let key = st.key;

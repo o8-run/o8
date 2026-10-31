@@ -114,6 +114,9 @@ impl Client {
             }));
             sessions.push(Session {
                 repo_slug: None,
+                pinned_at: agent["pinnedAt"].as_str().map(str::to_owned),
+                pin_order_key: agent["pinOrderKey"].as_str().map(str::to_owned),
+                inbox_revision: agent["inboxRevision"].as_u64(),
                 run_started_at: agent["startedAt"].as_str().map(str::to_owned),
                 branch: ["branch", "gitBranch"]
                     .iter()
