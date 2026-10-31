@@ -18,11 +18,7 @@ pub(super) enum Icon {
     Play,
     Gauge,
     Terminal,
-    Canvas,
-    Plugins,
-    Folder,
     PullRequest,
-    Setup,
 }
 
 impl Icon {
@@ -34,20 +30,8 @@ impl Icon {
             }
             Self::Gauge => "m12 14 4-4 M3.34 19a10 10 0 1 1 17.32 0",
             Self::Terminal => "m4 17 6-6-6-6 M12 19h8",
-            Self::Canvas => {
-                "M8 3h8a5 5 0 0 1 5 5v8a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5V8a5 5 0 0 1 5-5Z M9 9h.01 M15 9h.01 M9 15h.01 M15 15h.01"
-            }
-            Self::Plugins => {
-                "M8 3H5a2 2 0 0 0-2 2v3a3 3 0 1 1 0 6v3a2 2 0 0 0 2 2h3a3 3 0 1 1 6 0h3a2 2 0 0 0 2-2v-3a3 3 0 1 0 0-6V5a2 2 0 0 0-2-2h-3a3 3 0 1 0-6 0Z"
-            }
-            Self::Folder => {
-                "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
-            }
             Self::PullRequest => {
                 "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M13 6h3a2 2 0 0 1 2 2v7 M6 9v12"
-            }
-            Self::Setup => {
-                "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z"
             }
         }
     }
@@ -554,7 +538,7 @@ impl Shell {
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
             .child(
-                // Home returns to the workspace, which is what "Back to workspace" did.
+                // Home returns to the workspace from Projects, Customize or Setup.
                 target(if projects_open {
                     "shell-workspace"
                 } else {
@@ -564,6 +548,13 @@ impl Shell {
                 .child(brand())
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.surfaces.projects.open = false;
+                    if this.surfaces.customize.open {
+                        this.close_customize(window, cx);
+                    }
+                    if this.surfaces.setup.view.as_ref().is_some_and(|v| !v.read(cx).busy()) {
+                        this.surfaces.setup.view = None;
+                        this.revision += 1;
+                    }
                     this.restore_focus(window, cx);
                     cx.notify();
                 })),
@@ -592,10 +583,10 @@ impl Shell {
                     cx.new(|_| *drag)
                 }),
             )
-            .child(tab("rail-grid", Icon::Canvas, "Grid", Tab::Grid, || {
-                Command::Grid
-            }))
+            // Grid stays in code but off the rail until it earns a place (Q, 10-30).
             .child(divider())
+            // RailMoreMenu, then PRs last, as CompactNavigationRail orders them.
+            .child(features::rail_more(self, cx))
             .children(top)
             .child(divider())
             .child(div().flex_1().min_h_0())

@@ -33,7 +33,8 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
     cx.run_until_parked();
     draw(cx);
     let start = Instant::now();
-    custom_click(cx, "customize-open");
+    custom_click(cx, "rail-more");
+    custom_click(cx, "rail-more-customize");
     let open_ms = start.elapsed().as_secs_f64() * 1000.;
     custom_click(cx, "custom-tab-agents");
     custom_click(cx, "custom-copy-0");
@@ -147,8 +148,9 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
     let retained_view = shell.read_with(cx, |s, _| {
         s.surfaces.customize.view.as_ref().unwrap().entity_id()
     });
-    custom_click(cx, "customize-close");
-    custom_click(cx, "customize-open");
+    custom_click(cx, "shell-home");
+    custom_click(cx, "rail-more");
+    custom_click(cx, "rail-more-customize");
     assert_eq!(
         retained_view,
         shell.read_with(cx, |s, _| s
@@ -181,7 +183,7 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
         .get("/api/prompt-library", &[("repoPath", &repo)])
         .unwrap();
     assert_eq!(empty["prompts"], json!([]));
-    custom_click(cx, "customize-close");
+    custom_click(cx, "shell-home");
     println!(
         "O8_NEXT_CUSTOMIZE_EVIDENCE {}",
         json!({"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":open_ms,"interactionToFrameMs":interaction})
@@ -200,7 +202,8 @@ fn customize_auth_error_and_retry(cx: &mut TestAppContext) {
     let cx = &mut visual;
     cx.run_until_parked();
     draw(cx);
-    custom_click(cx, "customize-open");
+    custom_click(cx, "rail-more");
+    custom_click(cx, "rail-more-customize");
     assert!(cx.debug_bounds("custom-error").is_some());
     custom_click(cx, "custom-refresh");
     assert!(cx.debug_bounds("custom-error").is_some());
