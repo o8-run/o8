@@ -47,6 +47,11 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("up enter");
     draw(cx);
     assert!(shell.read_with(cx, |s, _| s.surfaces.projects.open && !s.surfaces.customize.open));
+    // ArrowDown from Projects reaches Customize again.
+    custom_click(cx, "rail-more");
+    cx.simulate_keystrokes("down enter");
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.surfaces.customize.open && !s.surfaces.projects.open));
     custom_click(cx, "shell-home");
     let start = Instant::now();
     custom_click(cx, "rail-more");
