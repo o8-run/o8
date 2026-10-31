@@ -373,6 +373,12 @@ impl Transcript {
         }
         Some(live)
     }
+    /// The server confirmed a stop: the stream to this client never reports
+    /// it, so the turn settles here, as the desktop stop pill does.
+    pub fn interrupted(&mut self) -> bool {
+        let was_running = std::mem::replace(&mut self.context_busy, false);
+        self.settle("interrupted") || was_running
+    }
     /// The turn ended: stop the marker, close open tools and record the outcome
     /// until saved history arrives.
     fn settle(&mut self, outcome: &str) -> bool {
@@ -482,6 +488,28 @@ impl Transcript {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_confirmed_stop_settles_the_running_turn() {
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:thoughts-stop","transcript":[
+                    {"id":"reply","role":"assistant","text":"","timestamp":1}
+                ]}),
+            )
+            .unwrap(),
+        );
+        assert!(transcript.apply(&serde_json::json!({"channel":"orchestrator","event":"tool-use","seq":1,
+            "data":{"threadId":"thoughts-stop","assistantMessageId":"reply",
+                    "toolUseId":"t1","name":"Bash","args":{"command":"sleep 60"}}})));
+        assert!(transcript.context_snapshot().1, "a tool call marks the turn running");
+        // The server answers the stop only on the stop request's socket.
+        assert!(transcript.interrupted());
+        assert!(!transcript.context_snapshot().1);
+        let live = transcript.live.as_ref().unwrap();
+        assert_eq!(live.extra["receipt"]["terminal"]["outcome"], "interrupted");
+        assert!(live.tools.iter().flatten().all(|tool| tool["status"] != "running"));
+        assert!(!transcript.interrupted(), "a second stop changes nothing");
+    }
     #[test]
     fn saved_tail_keeps_older_rows_and_yields_to_newer_websocket_history() {
         let history = |text: &str| {

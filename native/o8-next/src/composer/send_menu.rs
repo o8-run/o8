@@ -145,21 +145,34 @@ impl Surface {
         let Some(repo) = session.repo_path.clone() else {
             return;
         };
+        let session = session.clone();
         let thread = session.id.clone();
+        let thread_id = thread.clone();
         let backend = self
             .composer_routing(cx)
             .and_then(|routing| routing["backend"].as_str().map(str::to_owned));
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
-            crate::transport::interrupt(&client, &repo, &thread, backend.as_deref())
+            let state = crate::transport::interrupt(&client, &repo, &thread, backend.as_deref())?;
+            release_stopped(&client, &session);
+            Ok::<_, String>(state)
         });
         cx.spawn(async move |this, cx| {
-            if let Err(error) = task.await {
-                let _ = this.update(cx, |s, cx| {
-                    s.notice = error;
-                    cx.notify();
-                });
-            }
+            let result = task.await;
+            let _ = this.update(cx, |s, cx| {
+                match result {
+                    // Each state means no turn runs now; a stale busy flag clears too.
+                    Ok(_) => {
+                        if s.selected.as_ref() == Some(&thread_id)
+                            && let Some(transcript) = s.transcript.as_mut()
+                        {
+                            transcript.interrupted();
+                        }
+                    }
+                    Err(error) => s.notice = error,
+                }
+                cx.notify();
+            });
         })
         .detach();
     }
@@ -228,5 +241,23 @@ impl Surface {
             .into_any_element()
         })
         .collect()
+    }
+}
+
+/// The server holds the stopped turn's message ("Chat stopped."), and a held
+/// item blocks every later send in this chat. That message already reached
+/// the agent, so it is removed as classic's Remove would; items that never
+/// started stay held.
+fn release_stopped(client: &crate::client::Client, session: &Session) {
+    let Ok(queue) = client.queue(session) else {
+        return;
+    };
+    for item in queue["items"].as_array().into_iter().flatten() {
+        if item["status"] == "held" && !item["admittedAt"].is_null() {
+            let _ = client.mutate_queue(
+                "DELETE",
+                &json!({"repoPath": session.repo_path, "threadId": session.id, "id": item["id"]}),
+            );
+        }
     }
 }

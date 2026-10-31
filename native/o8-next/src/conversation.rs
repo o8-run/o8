@@ -169,6 +169,7 @@ impl Surface {
                 &target.thread,
                 target.backend.as_deref(),
             )
+            .map(drop)
         })
     }
     /// Sends a Live delegation as a new message through this chat's queue,
