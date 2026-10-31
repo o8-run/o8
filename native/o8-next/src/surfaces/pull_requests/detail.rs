@@ -26,25 +26,20 @@ impl PullRequests {
             .min_h_0()
             .gap(px(8.))
             .p(px(12.));
-        panel = panel.child(
-            div()
-                .flex()
-                .justify_between()
-                .child(format!("PR #{number} · {}", string(&self.detail, "title")))
-                .child(self.button(
-                    "pr-detail-close",
-                    "Back to list",
-                    true,
-                    |s, _, w, cx| {
-                        s.selected = None;
-                        s.detail_epoch += 1;
-                        s.confirmation = None;
-                        s.focus.focus(w);
-                        s.changed(cx);
-                    },
-                    cx,
-                )),
+        let close = self.button(
+            "pr-detail-close",
+            "Back to list",
+            true,
+            |s, _, w, cx| {
+                s.selected = None;
+                s.detail_epoch += 1;
+                s.confirmation = None;
+                s.focus.focus(w);
+                s.changed(cx);
+            },
+            cx,
         );
+        panel = panel.child(self.header(number, close, cx));
         if self.detail_loading {
             panel = panel.child("Loading changes, checks and discussion…");
         }
@@ -234,51 +229,44 @@ impl PullRequests {
             .flex_col()
             .gap(px(8.));
         if self.tab == "summary" {
+            let body = string(&self.detail, "body").trim().to_owned();
             content = content
-                .child(format!(
-                    "{} · {} → {} · +{} −{} · {} files",
-                    string(&self.detail, "author"),
-                    string(&self.detail, "headRefName"),
-                    string(&self.detail, "baseRefName"),
-                    self.detail["additions"],
-                    self.detail["deletions"],
-                    self.detail["changedFiles"]
-                ))
-                .child(string(&self.detail, "body").to_owned())
-                .child(format!(
-                    "Review: {}",
-                    string(&self.detail, "reviewDecision")
-                ));
+                .child(
+                    div()
+                        .debug_selector(|| "pr-description".into())
+                        .text_size(px(12.5))
+                        .line_height(px(19.))
+                        .text_color(if body.is_empty() {
+                            theme().text_muted
+                        } else {
+                            theme().text
+                        })
+                        .child(if body.is_empty() {
+                            "No description provided.".to_owned()
+                        } else {
+                            crate::text::sanitize(&body)
+                        }),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme().text_muted)
+                        .child(format!(
+                            "Review: {}",
+                            match string(&self.detail, "reviewDecision") {
+                                "" => "none yet",
+                                decision => decision,
+                            }
+                        )),
+                );
         }
         if self.tab == "changes" {
             let files = array(&self.detail, "files");
             if files.is_empty() {
                 content = content.child("No file changes reported.");
             }
-            for f in files {
-                content = content.child(
-                    div()
-                        .child(format!(
-                            "{} · {} +{} −{}",
-                            string(&f, "path"),
-                            string(&f, "status"),
-                            f["additions"],
-                            f["deletions"]
-                        ))
-                        .child(
-                            div()
-                                .font_family(theme().font_mono)
-                                .text_size(px(11.))
-                                .child(
-                                    f["patch"]
-                                        .as_str()
-                                        .unwrap_or(
-                                            "Patch unavailable. Open GitHub to inspect this file.",
-                                        )
-                                        .to_owned(),
-                                ),
-                        ),
-                );
+            for (i, f) in files.iter().enumerate() {
+                content = content.child(file_diff(i, f));
             }
         }
         if self.tab == "checks" {
@@ -458,3 +446,7 @@ impl PullRequests {
         panel.child(post).into_any_element()
     }
 }
+
+#[path = "header.rs"]
+mod header;
+use header::file_diff;
