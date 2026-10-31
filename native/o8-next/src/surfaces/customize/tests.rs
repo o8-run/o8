@@ -42,6 +42,11 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
         !shell.read_with(cx, |s, _| s.surfaces.projects.open),
         "Projects stays open"
     );
+    // RailMoreMenu's keys: More opens on Customize, ArrowUp reaches Projects.
+    custom_click(cx, "rail-more");
+    cx.simulate_keystrokes("up enter");
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.surfaces.projects.open && !s.surfaces.customize.open));
     custom_click(cx, "shell-home");
     let start = Instant::now();
     custom_click(cx, "rail-more");

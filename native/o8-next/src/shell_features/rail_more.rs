@@ -8,14 +8,30 @@ impl ShellFeature for RailMore {
         &[KeyContext {
             order: 10,
             dispatch: |s, event, window, cx| {
-                if event.keystroke.key == "escape"
-                    && s.features.read::<Menu>().is_some_and(|menu| menu.open)
-                {
-                    close(s, cx);
-                    s.restore_focus(window, cx);
-                    return KeyResult::Handled;
+                if !s.features.read::<Menu>().is_some_and(|menu| menu.open) {
+                    return KeyResult::Unhandled;
                 }
-                KeyResult::Unhandled
+                // RailMoreMenu's keys: arrows wrap, Home and End jump, Enter picks.
+                let last = items(s).len() - 1;
+                let menu = s.features.get::<Menu>();
+                menu.keyed = true;
+                match event.keystroke.key.as_str() {
+                    "escape" => {
+                        close(s, cx);
+                        s.restore_focus(window, cx);
+                    }
+                    "down" => menu.active = if menu.active == last { 0 } else { menu.active + 1 },
+                    "up" => menu.active = if menu.active == 0 { last } else { menu.active - 1 },
+                    "home" => menu.active = 0,
+                    "end" => menu.active = last,
+                    "enter" | "space" => {
+                        let index = menu.active;
+                        pick(s, index, window, cx);
+                    }
+                    _ => return KeyResult::Unhandled,
+                }
+                cx.notify();
+                KeyResult::Handled
             },
         }]
     }
@@ -24,6 +40,9 @@ impl ShellFeature for RailMore {
 #[derive(Default)]
 struct Menu {
     open: bool,
+    /// The row the keyboard is on, ringed once a key has moved it.
+    active: usize,
+    keyed: bool,
 }
 
 fn close(s: &mut Shell, cx: &mut Context<Shell>) {
@@ -31,9 +50,12 @@ fn close(s: &mut Shell, cx: &mut Context<Shell>) {
     cx.notify();
 }
 
-/// Projects, Customize or Setup, whichever is open, marks the button.
+/// Projects, Customize, Settings or Setup, whichever is open, marks the button.
 fn selected(s: &Shell) -> bool {
-    s.surfaces.projects.open || s.surfaces.customize.open || s.surfaces.setup.view.is_some()
+    s.surfaces.projects.open
+        || s.surfaces.customize.open
+        || s.surfaces.settings.view.is_some()
+        || s.surfaces.setup.view.is_some()
 }
 
 pub(crate) fn button(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement {
@@ -76,7 +98,12 @@ pub(crate) fn button(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement
                     if menu.open {
                         close(this, cx);
                     } else {
+                        // The open destination takes focus, else the first.
+                        let current = items(this).iter().position(|item| item.4).unwrap_or(0);
+                        let menu = this.features.get::<Menu>();
                         menu.open = true;
+                        menu.active = current;
+                        menu.keyed = false;
                         this.capture(window, cx);
                         cx.notify();
                     }
@@ -87,12 +114,56 @@ pub(crate) fn button(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement
 }
 
 /// One destination: its glyph, label and, for some, a line under the label.
+type Item = (&'static str, &'static str, &'static str, Option<&'static str>, bool, fn() -> Command);
+
+fn items(s: &Shell) -> [Item; 4] {
+    [
+        ("rail-more-projects", PROJECTS, "Projects", None, s.surfaces.projects.open, || Command::Projects),
+        (
+            "rail-more-customize",
+            CUSTOMIZE,
+            "Customize",
+            Some("Agent and workspace capabilities"),
+            s.surfaces.customize.open,
+            || Command::Customize,
+        ),
+        (
+            "rail-more-settings",
+            SETTINGS,
+            "Settings",
+            Some("Appearance and app preferences"),
+            s.surfaces.settings.view.is_some(),
+            || Command::Settings,
+        ),
+        (
+            "rail-more-setup",
+            SETUP,
+            "Setup",
+            Some("Repositories and agent runtimes"),
+            s.surfaces.setup.view.is_some(),
+            || Command::Setup,
+        ),
+    ]
+}
+
+/// Opens destination `index`. One destination at a time, as classic's More
+/// menu; the open one stays as it is.
+fn pick(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<Shell>) {
+    let (.., current, command) = items(s)[index];
+    close(s, cx);
+    if !current {
+        s.close_rail_overlays(window, cx);
+        s.execute(command(), window, cx);
+    }
+}
+
 fn row(
     id: &'static str,
     glyph: &'static str,
     label: &'static str,
     description: Option<&'static str>,
     current: bool,
+    focused: bool,
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
@@ -107,6 +178,9 @@ fn row(
         .rounded(px(6.))
         .cursor_pointer()
         .when(current, |row| row.bg(theme().hover))
+        // The keyboard's row wears a focus ring, as a focused button does.
+        .border_1()
+        .border_color(if focused { theme().accent } else { gpui::transparent_black().into() })
         .hover(|row| row.bg(theme().hover))
         .child(crate::icon::stroke(glyph, theme().text_secondary, 16., 1.7))
         .child(
@@ -127,50 +201,19 @@ fn row(
 }
 
 fn menu(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement {
-    let items: [(&'static str, &'static str, &'static str, Option<&'static str>, bool, fn() -> Command); 4] = [
-        ("rail-more-projects", PROJECTS, "Projects", None, s.surfaces.projects.open, || Command::Projects),
-        (
-            "rail-more-customize",
-            CUSTOMIZE,
-            "Customize",
-            Some("Agent and workspace capabilities"),
-            s.surfaces.customize.open,
-            || Command::Customize,
-        ),
-        (
-            "rail-more-settings",
-            SETTINGS,
-            "Settings",
-            Some("Appearance and app preferences"),
-            false,
-            || Command::Settings,
-        ),
-        (
-            "rail-more-setup",
-            SETUP,
-            "Setup",
-            Some("Repositories and agent runtimes"),
-            s.surfaces.setup.view.is_some(),
-            || Command::Setup,
-        ),
-    ];
+    let menu = s.features.get::<Menu>();
+    let active = menu.keyed.then_some(menu.active);
     let body = div()
         .p(px(8.))
         .flex()
         .flex_col()
-        .children(items.into_iter().map(|(id, glyph, label, description, current, command)| {
-            row(id, glyph, label, description, current).on_click(cx.listener(
-                move |this, _, window, cx| {
-                    close(this, cx);
-                    // One destination at a time, as classic's More menu; the
-                    // open one stays as it is.
-                    if !current {
-                        this.close_rail_overlays(window, cx);
-                        this.execute(command(), window, cx);
-                    }
-                },
-            ))
-        }));
+        .children(items(s).into_iter().enumerate().map(
+            |(index, (id, glyph, label, description, current, _))| {
+                row(id, glyph, label, description, current, active == Some(index)).on_click(
+                    cx.listener(move |this, _, window, cx| pick(this, index, window, cx)),
+                )
+            },
+        ));
     div()
         .absolute()
         .left(px(54.))

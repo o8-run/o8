@@ -493,10 +493,14 @@ fn brand() -> impl IntoElement {
 }
 
 impl Shell {
-    /// Closes Projects, Customize and an idle Setup, the overlays the rail
+    /// Closes Projects, Settings, Customize and an idle Setup, the overlays the rail
     /// and its More menu open over the workspace.
     pub(crate) fn close_rail_overlays(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.surfaces.projects.open = false;
+        if self.surfaces.settings.view.take().is_some() {
+            self.surfaces.settings.subscription = None;
+            self.revision += 1;
+        }
         if self.surfaces.customize.open {
             self.close_customize(window, cx);
         }
