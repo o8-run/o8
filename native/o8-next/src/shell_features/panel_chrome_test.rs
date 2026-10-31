@@ -70,9 +70,10 @@ fn panel_chrome_tabs_geometry_keyboard_close_and_saved_restore(cx: &mut TestAppC
     click(&mut v, "panel-tool-threads");
     click(&mut v, "panel-more-views");
     click(&mut v, "panel-add-resources");
+    // ContextualPanel's tab close is a 16px X.
     assert_eq!(
         bounds(&mut v, "panel-tab-close-resources").size,
-        size(px(20.), px(24.))
+        size(px(16.), px(16.))
     );
     click(&mut v, "panel-tab-select-threads");
     v.simulate_keystrokes("end delete");

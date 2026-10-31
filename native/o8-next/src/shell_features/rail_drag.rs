@@ -1,5 +1,5 @@
 use super::*;
-use gpui::DragMoveEvent;
+use gpui::{DragMoveEvent, SharedString};
 // The rail's Run orchestrator and Run terminal buttons are also drag handles,
 // as in classic's CompactNavigationRail (startPaneDrag). Dropped on the
 // workspace they split the pane under the pointer (panes.rs); either can also
@@ -8,22 +8,43 @@ struct RailDrag;
 register_shell_feature!(RailDrag);
 impl ShellFeature for RailDrag {}
 
-/// The dragged rail button, drawn as a header tab pill.
-#[derive(Clone, Copy, PartialEq)]
+/// What is dragged onto the workspace, drawn as a header tab pill: the rail's
+/// new chat or terminal, a sidebar thread, or a pane moved by its header
+/// (classic's thread-drag and pane-header drag).
+#[derive(Clone, PartialEq)]
 pub(crate) enum Pane {
     Chat,
     Terminal,
+    Thread {
+        id: String,
+        title: SharedString,
+    },
+    Move {
+        leaf: String,
+        title: SharedString,
+        terminal: bool,
+    },
+}
+impl Pane {
+    /// Only the rail's new chat or terminal can open in the right panel.
+    fn opens_in_panel(&self) -> bool {
+        matches!(self, Pane::Chat | Pane::Terminal)
+    }
 }
 impl Render for Pane {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let chat = super::header::glyph(&Tab::Session(String::new()));
+        let terminal = super::header::glyph(&Tab::Terminal);
         match self {
-            Pane::Chat => super::header_tabs::pill(
-                "New chat".into(),
-                super::header::glyph(&Tab::Session(String::new())),
-            ),
-            Pane::Terminal => {
-                super::header_tabs::pill("Terminal".into(), super::header::glyph(&Tab::Terminal))
-            }
+            Pane::Chat => super::header_tabs::pill("New chat".into(), chat),
+            Pane::Terminal => super::header_tabs::pill("Terminal".into(), terminal),
+            Pane::Thread { title, .. } => super::header_tabs::pill(title.clone(), chat),
+            Pane::Move {
+                title,
+                terminal: true,
+                ..
+            } => super::header_tabs::pill(title.clone(), terminal),
+            Pane::Move { title, .. } => super::header_tabs::pill(title.clone(), chat),
         }
     }
 }
@@ -51,9 +72,7 @@ pub(super) fn panel_target(s: &Shell, panel: gpui::Div, cx: &mut Context<Shell>)
         .relative()
         .on_drag_move(cx.listener(|s, event: &DragMoveEvent<Pane>, _, cx| {
             let position = event.event.position;
-            let next = event
-                .bounds
-                .contains(&position)
+            let next = (event.drag(cx).opens_in_panel() && event.bounds.contains(&position))
                 .then(|| position.y > event.bounds.center().y);
             let target = s.features.get::<Target>();
             if target.lower != next {
@@ -63,7 +82,7 @@ pub(super) fn panel_target(s: &Shell, panel: gpui::Div, cx: &mut Context<Shell>)
         }))
         .on_drop(cx.listener(|s, pane: &Pane, window, cx| {
             let lower = s.features.get::<Target>().lower.take();
-            if let Some(lower) = lower {
+            if let Some(lower) = lower.filter(|_| pane.opens_in_panel()) {
                 s.capture(window, cx);
                 s.panel_drop(*pane == Pane::Chat, lower, window, cx);
             }
@@ -74,7 +93,14 @@ pub(super) fn panel_target(s: &Shell, panel: gpui::Div, cx: &mut Context<Shell>)
 fn overlay(lower: bool) -> gpui::Div {
     let accent = theme().accent;
     div()
-        .debug_selector(move || if lower { "panel-drop-below" } else { "panel-drop-above" }.into())
+        .debug_selector(move || {
+            if lower {
+                "panel-drop-below"
+            } else {
+                "panel-drop-above"
+            }
+            .into()
+        })
         .absolute()
         .left_0()
         .right_0()
@@ -89,5 +115,9 @@ fn overlay(lower: bool) -> gpui::Div {
         .border_color(accent)
         .text_size(px(13.))
         .text_color(theme().text)
-        .child(if lower { "Open below in panel" } else { "Open in panel" })
+        .child(if lower {
+            "Open below in panel"
+        } else {
+            "Open in panel"
+        })
 }

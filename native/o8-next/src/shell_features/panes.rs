@@ -103,7 +103,8 @@ fn ensure(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
             } => {
                 let client = s.client.in_workspace(&ws);
                 let (ws, session) = (ws.clone(), session.clone());
-                let view = cx.new(|cx| super::super::terminal::View::pinned(client, ws, session, cx));
+                let view =
+                    cx.new(|cx| super::super::terminal::View::pinned(client, ws, session, cx));
                 s.content.insert(key, Content::Terminal(view));
             }
             Leaf::Terminal { session: None } => start_terminal(s, id.to_owned(), cx),
@@ -146,19 +147,34 @@ fn start_terminal(s: &mut Shell, leaf: String, cx: &mut Context<Shell>) {
 }
 
 /// Splits `target` with a new chat or terminal pane where it was dropped.
-fn split(
-    s: &mut Shell,
-    target: &str,
-    zone: Zone,
-    pane: super::RailPane,
-    cx: &mut Context<Shell>,
-) {
+fn split(s: &mut Shell, target: &str, zone: Zone, pane: super::RailPane, cx: &mut Context<Shell>) {
     let leaf = match pane {
         super::RailPane::Chat => match s.start_thread(false, cx) {
             Some(session) => Leaf::Chat { session },
             None => return,
         },
         super::RailPane::Terminal => Leaf::Terminal { session: None },
+        // placeThreadPane: a thread shows once. The main chat's own thread
+        // stays put, and one already in a pane moves there.
+        super::RailPane::Thread { id, .. } => {
+            if main_thread(s, cx).as_ref() == Some(&id) {
+                return;
+            }
+            let open = tree(s).leaves().into_iter().find_map(|(leaf, content)| {
+                let Leaf::Chat { session } = content else { return None };
+                // A pane's view may have moved off its own thread.
+                let shown = match s.content.get(&key(s, leaf)) {
+                    Some(Content::Session(view)) => view.read(cx).shown_thread(),
+                    _ => None,
+                };
+                (shown.as_ref().unwrap_or(session) == &id).then(|| leaf.to_owned())
+            });
+            if let Some(leaf) = open {
+                return move_pane(s, &leaf, target, zone, cx);
+            }
+            Leaf::Chat { session: id }
+        }
+        super::RailPane::Move { leaf, .. } => return move_pane(s, &leaf, target, zone, cx),
     };
     let id = format!(
         "pane-{}",
@@ -169,6 +185,26 @@ fn split(
     );
     let mut tree = tree(s);
     if tree.split(target, zone, id, leaf) {
+        save_tree(s, tree);
+    }
+    cx.notify();
+}
+
+/// Moves a pane beside `target`, keeping its id so its chat or terminal view stays.
+fn move_pane(s: &mut Shell, leaf: &str, target: &str, zone: Zone, cx: &mut Context<Shell>) {
+    let mut tree = tree(s);
+    let Some(content) = tree
+        .leaves()
+        .into_iter()
+        .find(|(id, _)| *id == leaf)
+        .map(|(_, content)| content.clone())
+    else {
+        return;
+    };
+    if leaf == target || !tree.close(leaf) {
+        return;
+    }
+    if tree.split(target, zone, leaf.to_owned(), content) {
         save_tree(s, tree);
     }
     cx.notify();
@@ -226,29 +262,37 @@ fn node(
                 .size_full()
                 .min_w_0()
                 .min_h_0()
-                .on_drag_move(cx.listener(move |s, event: &DragMoveEvent<Divider>, _, cx| {
-                    if event.drag(cx).0 != split {
-                        return;
-                    }
-                    let (at, size) = if vertical {
-                        (event.event.position.x - event.bounds.left(), event.bounds.size.width)
-                    } else {
-                        (event.event.position.y - event.bounds.top(), event.bounds.size.height)
-                    };
-                    let mut tree = tree(s);
-                    if tree.resize(&split, f32::from(at) / f32::from(size).max(1.)) {
-                        if let Some(w) = s
-                            .state
-                            .selected
-                            .clone()
-                            .and_then(|w| s.state.workspaces.get_mut(&w))
-                        {
-                            w.panes = Some(tree);
+                .on_drag_move(
+                    cx.listener(move |s, event: &DragMoveEvent<Divider>, _, cx| {
+                        if event.drag(cx).0 != split {
+                            return;
                         }
-                        s.features.get::<State>().resizing = true;
-                        cx.notify();
-                    }
-                }))
+                        let (at, size) = if vertical {
+                            (
+                                event.event.position.x - event.bounds.left(),
+                                event.bounds.size.width,
+                            )
+                        } else {
+                            (
+                                event.event.position.y - event.bounds.top(),
+                                event.bounds.size.height,
+                            )
+                        };
+                        let mut tree = tree(s);
+                        if tree.resize(&split, f32::from(at) / f32::from(size).max(1.)) {
+                            if let Some(w) = s
+                                .state
+                                .selected
+                                .clone()
+                                .and_then(|w| s.state.workspaces.get_mut(&w))
+                            {
+                                w.panes = Some(tree);
+                            }
+                            s.features.get::<State>().resizing = true;
+                            cx.notify();
+                        }
+                    }),
+                )
                 .child(
                     div()
                         .flex()
@@ -358,7 +402,10 @@ fn leaf(
         .min_w_0()
         .min_h_0()
         .overflow_hidden()
-        .when_some(title, |pane, title| pane.child(header(id, title, cx)))
+        .when_some(title, |pane, title| {
+            let terminal = matches!(content, Leaf::Terminal { .. });
+            pane.child(header(id, title, terminal, cx))
+        })
         .child(
             div()
                 .flex()
@@ -368,24 +415,27 @@ fn leaf(
                 .min_h_0()
                 .child(body),
         )
-        .on_drag_move(cx.listener(move |s, event: &DragMoveEvent<super::RailPane>, _, cx| {
-            let position = event.event.position;
-            let bounds = event.bounds;
-            let state = s.features.get::<State>();
-            let next = if bounds.contains(&position) {
-                let x = f32::from(position.x - bounds.left()) / f32::from(bounds.size.width).max(1.);
-                let y = f32::from(position.y - bounds.top()) / f32::from(bounds.size.height).max(1.);
-                Some((over.clone(), Zone::at(x, y)))
-            } else if state.hover.as_ref().is_some_and(|(leaf, _)| *leaf == over) {
-                None
-            } else {
-                return;
-            };
-            if state.hover != next {
-                state.hover = next;
-                cx.notify();
-            }
-        }))
+        .on_drag_move({
+            let over = over.clone();
+            cx.listener(move |s, event: &DragMoveEvent<super::RailPane>, _, cx| {
+                // The main chat's own thread doesn't land, so it shows no target.
+                if let super::RailPane::Thread { id, .. } = event.drag(cx) {
+                    if main_thread(s, cx).as_ref() == Some(id) {
+                        return;
+                    }
+                }
+                track(s, &over, event.event.position, event.bounds, cx)
+            })
+        })
+        // A header chat tab dragged here opens its thread beside this pane,
+        // as classic's header tabs do.
+        .on_drag_move(cx.listener(
+            move |s, event: &DragMoveEvent<super::header_tabs::Dragged>, _, cx| {
+                if thread_tab(s, event.drag(cx).index, cx).is_some() {
+                    track(s, &over, event.event.position, event.bounds, cx)
+                }
+            },
+        ))
         .on_drop(cx.listener(move |s, pane: &super::RailPane, window, cx| {
             let zone = s
                 .features
@@ -395,16 +445,100 @@ fn leaf(
                 .filter(|(leaf, _)| *leaf == dropped)
                 .map_or(Zone::Center, |(_, zone)| zone);
             s.capture(window, cx);
-            split(s, &dropped, zone, *pane, cx);
+            split(s, &dropped, zone, pane.clone(), cx);
         }))
+        .on_drop({
+            let dropped = id.to_owned();
+            cx.listener(move |s, tab: &super::header_tabs::Dragged, window, cx| {
+                let zone = s.features.get::<State>().hover.take();
+                let Some(thread) = thread_tab(s, tab.index, cx) else {
+                    return;
+                };
+                let zone = zone
+                    .filter(|(leaf, _)| *leaf == dropped)
+                    .map_or(Zone::Center, |(_, zone)| zone);
+                s.capture(window, cx);
+                split(s, &dropped, zone, thread, cx);
+            })
+        })
         .when_some(hover, |pane, zone| pane.child(overlay(zone)))
         .into_any_element()
 }
 
-/// TileContainer's pane header: the pane's name and its close.
-fn header(id: &str, title: String, cx: &mut Context<Shell>) -> impl IntoElement {
+/// Shows where a drag over pane `over` would land.
+fn track(
+    s: &mut Shell,
+    over: &str,
+    position: gpui::Point<gpui::Pixels>,
+    bounds: gpui::Bounds<gpui::Pixels>,
+    cx: &mut Context<Shell>,
+) {
+    let state = s.features.get::<State>();
+    let next = if bounds.contains(&position) {
+        let x = f32::from(position.x - bounds.left()) / f32::from(bounds.size.width).max(1.);
+        let y = f32::from(position.y - bounds.top()) / f32::from(bounds.size.height).max(1.);
+        Some((over.to_owned(), Zone::at(x, y)))
+    } else if state.hover.as_ref().is_some_and(|(leaf, _)| leaf == over) {
+        None
+    } else {
+        return;
+    };
+    if state.hover != next {
+        state.hover = next;
+        cx.notify();
+    }
+}
+
+/// The conversation the main pane shows.
+fn main_thread(s: &Shell, cx: &gpui::App) -> Option<String> {
+    s.active().and_then(|tab| shown(s, &tab, cx))
+}
+
+/// The conversation a chat tab shows: its view's own pick, else its thread.
+fn shown(s: &Shell, tab: &Tab, cx: &gpui::App) -> Option<String> {
+    let Tab::Session(id) = tab else { return None };
+    match s.content.get(&s.key(tab)) {
+        Some(Content::Session(view)) => view.read(cx).shown_thread().or_else(|| Some(id.clone())),
+        _ => Some(id.clone()),
+    }
+}
+
+/// The conversation behind header tab `index`, when it is a chat the main
+/// pane isn't showing.
+fn thread_tab(s: &Shell, index: usize, cx: &gpui::App) -> Option<super::RailPane> {
+    let tab = s.current()?.tabs.get(index)?.clone();
+    let id = shown(s, &tab, cx)?;
+    if main_thread(s, cx).as_ref() == Some(&id) {
+        return None;
+    }
+    let title = s
+        .sessions
+        .iter()
+        .find(|x| x.id == id)
+        .map(|x| crate::pane::title(&x.title))
+        .unwrap_or_else(|| "New chat".into());
+    Some(super::RailPane::Thread {
+        id,
+        title: title.into(),
+    })
+}
+
+/// TileContainer's pane header: the pane's name and its close. Dragging it
+/// moves the pane, as ThreadChatPane's header does.
+fn header(id: &str, title: String, terminal: bool, cx: &mut Context<Shell>) -> impl IntoElement {
     let leaf = id.to_owned();
+    let moved = super::RailPane::Move {
+        leaf: id.to_owned(),
+        title: title.clone().into(),
+        terminal,
+    };
     div()
+        .id(SharedString::from(format!("pane-header-{id}")))
+        .debug_selector({
+            let id = id.to_owned();
+            move || format!("pane-header-{id}")
+        })
+        .on_drag(moved, |drag, _, _, cx| cx.new(|_| drag.clone()))
         .flex()
         .items_center()
         .gap(px(6.))
