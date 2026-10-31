@@ -200,7 +200,7 @@ impl Transcript {
             let changed = self.context_busy != (data["status"] == "busy");
             self.context_busy = data["status"] == "busy";
             // A subscribe snapshot reporting an idle session settles a stale reply.
-            let settled = matches!(data["status"].as_str(), Some("ready" | "dead"))
+            let settled = matches!(data["status"].as_str(), Some("ready" | "dead" | "stopped"))
                 && self.settle("completed");
             return settled || changed;
         }
@@ -311,6 +311,12 @@ impl Transcript {
                     .into(),
                 );
                 tool["result"] = data["output"].clone();
+            }
+            // A stopped lead ends its turn too; without it a replayed "busy"
+            // kept Stop showing on a finished chat.
+            "status" if data["status"] == "stopped" => {
+                self.context_busy = false;
+                return self.settle("interrupted") || was_running;
             }
             "status" if matches!(data["status"].as_str(), Some("ready" | "dead")) => {
                 self.context_busy = false;
@@ -498,17 +504,59 @@ mod tests {
             )
             .unwrap(),
         );
-        assert!(transcript.apply(&serde_json::json!({"channel":"orchestrator","event":"tool-use","seq":1,
+        assert!(transcript.apply(
+            &serde_json::json!({"channel":"orchestrator","event":"tool-use","seq":1,
             "data":{"threadId":"thoughts-stop","assistantMessageId":"reply",
-                    "toolUseId":"t1","name":"Bash","args":{"command":"sleep 60"}}})));
-        assert!(transcript.context_snapshot().1, "a tool call marks the turn running");
+                    "toolUseId":"t1","name":"Bash","args":{"command":"sleep 60"}}})
+        ));
+        assert!(
+            transcript.context_snapshot().1,
+            "a tool call marks the turn running"
+        );
         // The server answers the stop only on the stop request's socket.
         assert!(transcript.interrupted());
         assert!(!transcript.context_snapshot().1);
         let live = transcript.live.as_ref().unwrap();
         assert_eq!(live.extra["receipt"]["terminal"]["outcome"], "interrupted");
-        assert!(live.tools.iter().flatten().all(|tool| tool["status"] != "running"));
+        assert!(
+            live.tools
+                .iter()
+                .flatten()
+                .all(|tool| tool["status"] != "running")
+        );
         assert!(!transcript.interrupted(), "a second stop changes nothing");
+    }
+    #[test]
+    fn a_replayed_stopped_turn_is_not_left_running() {
+        // The frames a reopened chat received (2026-10-31): an idle snapshot,
+        // then the since-0 replay of a turn that ended "stopped".
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:thoughts-replay","transcript":[]}),
+            )
+            .unwrap(),
+        );
+        let frame = |seq: u64, event: &str, data: Value| {
+            let mut data = data;
+            data["threadId"] = "thoughts-replay".into();
+            data["assistantMessageId"] = "reply".into();
+            serde_json::json!({"channel":"orchestrator","event":event,"seq":seq,"data":data})
+        };
+        transcript.apply(
+            &serde_json::json!({"channel":"orchestrator","event":"status",
+            "data":{"threadId":"thoughts-replay","status":"ready","snapshot":true}}),
+        );
+        transcript.apply(&frame(1, "status", serde_json::json!({"status":"busy"})));
+        transcript.apply(&frame(
+            2,
+            "tool-use",
+            serde_json::json!({"toolUseId":"t1","name":"Read"}),
+        ));
+        assert!(transcript.context_snapshot().1);
+        assert!(transcript.apply(&frame(3, "status", serde_json::json!({"status":"stopped"}))));
+        assert!(!transcript.context_snapshot().1, "Stop must not stay up");
+        let live = transcript.live.as_ref().unwrap();
+        assert_eq!(live.extra["receipt"]["terminal"]["outcome"], "interrupted");
     }
     #[test]
     fn saved_tail_keeps_older_rows_and_yields_to_newer_websocket_history() {

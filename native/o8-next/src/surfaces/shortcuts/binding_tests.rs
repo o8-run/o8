@@ -142,7 +142,7 @@ fn shortcuts_every_displayed_chord_has_a_live_binding(cx: &mut TestAppContext) {
             visual.update(|window, _| window.remove_window());
         }
     }
-    assert_eq!(checked, 16, "exercise every expanded displayed chord");
+    assert_eq!(checked, 18, "exercise every expanded displayed chord");
     println!(
         "All {checked} displayed chords dispatch live actions in their advertised focus contexts."
     );
