@@ -702,6 +702,48 @@ fn pull_requests_loading_error_retry_and_unavailable(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn pull_requests_hosted_open_survives_a_failed_list_and_checks_the_retry(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (view, cx) = cx.add_window_view(|w, cx| {
+        PullRequests::new(fixture.client.clone(), fixture.workspace.clone(), w, cx)
+    });
+    settle(cx);
+    let repo = view.read_with(cx, |s, _| string(&s.page, "repo").to_owned());
+    // The fixture refuses the first closed page, so the list fails with no page.
+    view.update(cx, |s, cx| {
+        s.hosted = true;
+        s.page = Value::Null;
+        s.state = "closed".into();
+        s.load(false, cx);
+    });
+    settle(cx);
+    assert!(view.read_with(cx, |s, _| !s.error.is_empty() && s.page.is_null()));
+    // Activity's Open PR still marks the request after a failed list...
+    view.update(cx, |s, cx| s.open("other/elsewhere", 7, cx));
+    assert_eq!(view.read_with(cx, |s, _| s.selected), Some(7));
+    // ...and the list that loads on retry drops another repository's mark.
+    view.update(cx, |s, cx| {
+        s.state = "open".into();
+        s.load(false, cx);
+    });
+    settle(cx);
+    assert_eq!(
+        view.read_with(cx, |s, _| s.selected),
+        None,
+        "a {repo} list must not mark another repository's pull request"
+    );
+    // A request for the list's own repository, made while it loads, keeps its mark.
+    view.update(cx, |s, cx| {
+        s.page = Value::Null;
+        s.load(false, cx);
+        s.open(&repo, 7, cx);
+    });
+    assert_eq!(view.read_with(cx, |s, _| s.selected), Some(7));
+    settle(cx);
+    assert_eq!(view.read_with(cx, |s, _| s.selected), Some(7));
+}
+
+#[gpui::test]
 fn pull_requests_repository_change_invalidates_old_detail(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (view, cx) = cx.add_window_view(|w, cx| {

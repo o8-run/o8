@@ -302,8 +302,9 @@ impl PullRequests {
                 }
                 // Without a list, still show the requested pull request by its
                 // own repository, as classic PrPanel opens by repo and number.
-                if let Some((repo, number)) = s.pending.take()
-                    && !s.hosted
+                // A hosted list keeps the request until a list loads to check it.
+                if !s.hosted
+                    && let Some((repo, number)) = s.pending.take()
                 {
                     s.select_in(number, repo, cx);
                 }
@@ -321,9 +322,10 @@ impl PullRequests {
         if self.hosted {
             // Without a list (still loading, or it failed), the request names
             // its own repository, as classic PrPanel opens by repo and number.
-            // A list that lands later keeps the mark only for its repository.
+            // A list that lands later, even after a failed load and a retry,
+            // keeps the mark only for its own repository.
             let listed = !self.page.is_null();
-            if !listed && self.loading {
+            if !listed {
                 self.pending = Some((repo.to_owned(), number));
             }
             self.selected = (!listed || string(&self.page, "repo").eq_ignore_ascii_case(repo))
