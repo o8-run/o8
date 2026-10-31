@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { parse } from 'yaml';
 import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-download-packages-'));
@@ -48,6 +49,21 @@ beforeAll(() => {
   expect(staged.status, staged.stderr).toBe(0);
 }, 60_000);
 afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+it('initializes Next build telemetry with the workflow environment without creating compiler settings', () => {
+  const workflow = parse(readFileSync('.github/workflows/linux-downloads.yml', 'utf8'));
+  const env: NodeJS.ProcessEnv = { ...process.env, CI: 'true' };
+  delete env.NEXT_TELEMETRY_DISABLED;
+  Object.assign(env, workflow.jobs.build.env);
+  const output = join(root, 'next-build-output');
+  mkdirSync(output);
+  const initialized = run(process.execPath, ['-e',
+    "new (require('next/dist/telemetry/storage').Telemetry)({ distDir: process.argv[1] });", output], env);
+  expect(initialized.status, initialized.stderr).toBe(0);
+  // Next's telemetry settings use an atomic writer outside the compiler's
+  // receipt path. A build must not leave those settings in its reserved tree.
+  expect(readdirSync(join(output, 'cache'))).toEqual([]);
+});
 
 it.skipIf(process.platform !== 'linux' || process.env.O8_LINUX_PACKAGE_TESTS !== 'true')('builds and runs three real package formats; AppImage daemon survives runtime cleanup and relocation', () => {
   const output = join(root, 'packages');

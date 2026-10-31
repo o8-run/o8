@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: never
+      NEXT_TELEMETRY_DISABLED: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/next-linux-setup
