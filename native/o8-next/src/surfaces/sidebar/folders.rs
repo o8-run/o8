@@ -386,7 +386,10 @@ impl ThreadList {
                 .sessions
                 .iter()
                 .find(|s| {
-                    s.repo_path.as_deref() == Some(repo.as_str())
+                    // Only a chat New chat itself made: worker and runtime
+                    // sessions can also have no messages.
+                    s.id.starts_with("thoughts-next-")
+                        && s.repo_path.as_deref() == Some(repo.as_str())
                         && s.message_count == 0
                         && s.outcome.is_none()
                         && !self.failed_starts.contains(&s.id)
