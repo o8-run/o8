@@ -582,6 +582,11 @@ impl Render for Composer {
         }
         let input = cx.entity();
         let height = self.height;
+        // Classic's ComposerArea: max(52px, min(200px, 28vh)). A long draft
+        // grows the card, then scrolls; 52 is the floor, not the ceiling.
+        let card_max = (f32::from(window.viewport_size().height) * 0.28)
+            .min(200.)
+            .max(52.);
         div()
             .id("composer-input")
             .debug_selector(|| "composer-input".into())
@@ -589,7 +594,7 @@ impl Render for Composer {
             .key_context(self.context)
             .tab_stop(true)
             .cursor(CursorStyle::IBeam)
-            .max_h(px(if self.framed { 176. } else { 52. }))
+            .max_h(px(if self.framed { 176. } else { card_max }))
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .when(self.framed, |d| d.border_1())
