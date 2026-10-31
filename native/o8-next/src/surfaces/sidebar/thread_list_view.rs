@@ -367,7 +367,7 @@ impl ThreadList {
                                     .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
                                     .on_drag_move(cx.listener(
                                         move |this, event: &gpui::DragMoveEvent<pins::PinDrag>, _, cx| {
-                                            this.pin_drag_move(&over, event, cx);
+                                            this.pin_drag_move(&over, None, event, cx);
                                         },
                                     ))
                                     .on_drop(cx.listener(move |this, drag: &pins::PinDrag, _, cx| {
@@ -376,6 +376,17 @@ impl ThreadList {
                                     .children(this.pin_drop_line(&id))
                             },
                         )
+                        .when_some(this.pin_zone(i).filter(|_| !thread || !this.pinned(row.id.as_deref().unwrap_or_default())), |view, (target, after)| {
+                            // Header above / heading below the shelf: drop first or last.
+                            view.on_drag_move(cx.listener(
+                                move |this, event: &gpui::DragMoveEvent<pins::PinDrag>, _, cx| {
+                                    this.pin_drag_move(&target, Some(after), event, cx);
+                                },
+                            ))
+                            .on_drop(cx.listener(move |this, drag: &pins::PinDrag, _, cx| {
+                                this.drop_pin(&drag.id, cx);
+                            }))
+                        })
                         .when(thread, |view| {
                             let id = row.id.clone().unwrap_or_default();
                             view.on_mouse_down(
