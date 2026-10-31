@@ -341,7 +341,12 @@ impl ThreadList {
     /// the composer's lead picker does. Without a lead the server would save a
     /// runtime placeholder ("claude-code") as the model, and the first send
     /// would fail.
-    pub(super) fn new_thread(&mut self, repo: String, cx: &mut Context<Self>) {
+    pub(crate) fn new_thread(&mut self, repo: String, cx: &mut Context<Self>) {
+        self.start_thread(repo, true, cx);
+    }
+    /// Starts a conversation without opening it in the main pane when `open`
+    /// is false (a split pane shows it); returns its id.
+    pub(crate) fn start_thread(&mut self, repo: String, open: bool, cx: &mut Context<Self>) -> String {
         self.new_menu = false;
         let id = format!(
             "thoughts-next-{}",
@@ -350,6 +355,7 @@ impl ThreadList {
                 .unwrap_or_default()
                 .as_nanos()
         );
+        let started = id.clone();
         let client = self.client.clone();
         let (thread, name) = (id.clone(), label(&repo));
         let task = cx.background_executor().spawn(async move {
@@ -385,9 +391,11 @@ impl ThreadList {
                     Ok(()) => {
                         // The shell opens threads from the list it was sent,
                         // so the new thread opens after the next load.
-                        this.selected = Some(id.clone());
-                        this.follow_selection = true;
-                        this.pending_open = Some(id);
+                        if open {
+                            this.selected = Some(id.clone());
+                            this.follow_selection = true;
+                            this.pending_open = Some(id);
+                        }
                         this.load(cx);
                     }
                     Err(error) => {
@@ -407,6 +415,7 @@ impl ThreadList {
         })
         .detach();
         cx.notify();
+        started
     }
     /// A New thread whose POST has returned and whose load has not.
     #[cfg(test)]

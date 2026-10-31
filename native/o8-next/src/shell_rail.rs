@@ -568,25 +568,30 @@ impl Shell {
                     cx.notify();
                 })),
             )
+            // A click starts a chat on the lead; a drag drops one onto the workspace.
             .child(
-                // Opens the workspace orchestrator with its composer focused.
-                button("rail-orchestrator", Icon::Play, "Run orchestrator", false).on_click(
-                    cx.listener(|this, _, window, cx| {
+                button("rail-orchestrator", Icon::Play, "Run orchestrator", false)
+                    .on_click(cx.listener(|this, _, window, cx| {
                         this.capture(window, cx);
-                        match this.workspace_sessions().first().map(|s| s.id.clone()) {
-                            Some(id) => this.execute(Command::Message(id), window, cx),
-                            None => this.execute(Command::Setup, window, cx),
-                        }
+                        features::start_chat(this, window, cx);
+                    }))
+                    .on_drag(features::RailPane::Chat, |drag, _, _, cx| {
+                        cx.new(|_| *drag)
                     }),
-                ),
             )
-            .child(tab(
-                "rail-terminal",
-                Icon::Terminal,
-                "Run terminal",
-                Tab::Terminal,
-                || Command::Terminal,
-            ))
+            // A click opens a terminal; a drag drops one onto the workspace.
+            .child(
+                tab(
+                    "rail-terminal",
+                    Icon::Terminal,
+                    "Run terminal",
+                    Tab::Terminal,
+                    || Command::Terminal,
+                )
+                .on_drag(features::RailPane::Terminal, |drag, _, _, cx| {
+                    cx.new(|_| *drag)
+                }),
+            )
             .child(tab("rail-grid", Icon::Canvas, "Grid", Tab::Grid, || {
                 Command::Grid
             }))

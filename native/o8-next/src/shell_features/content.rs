@@ -35,6 +35,7 @@ fn render(
         .child(content.unwrap_or_else(|| div().p(px(24.)).child(frame.empty).into_any_element()))
         .children(super::activity_dock::element(s, window, cx))
         .into_any_element();
+    let content = super::panes::element(s, content, cx);
     // The right panel sits inside the sidebar decoration, beside the content.
     super::right_panel::settle_resize(s, cx);
     let content = match super::right_panel::element(s, window, cx) {
@@ -71,7 +72,8 @@ fn render(
                     .when(s.system_glass || super::right_panel::maximized(s), |v| {
                         v.rounded_bl(px(14.))
                     })
-                    .child(panel),
+                    .child(panel)
+                    .map(|v| super::rail_drag::panel_target(s, v, cx)),
             )
             // The edge only once the column has finished opening.
             .when(shown >= full && !super::right_panel::maximized(s), |row| {
@@ -80,6 +82,7 @@ fn render(
             .into_any_element(),
         None => content,
     };
+
     // The width saves once, when the edge is let go.
     if s.surfaces.sidebar.resizing && !cx.has_active_drag() {
         s.surfaces.sidebar.resizing = false;
