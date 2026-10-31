@@ -117,14 +117,10 @@ impl ThreadList {
         .detach();
         cx.notify();
     }
-    fn header_add_repository(&mut self, cx: &mut Context<Self>) {
-        if self.header_busy {
-            return;
-        }
-        self.header_busy = true;
-        self.header_menu = None;
-        let project = self
-            .header
+    /// The project a new repository joins: the active one, unless it is the
+    /// default or a single-repository placeholder.
+    fn header_project(&self) -> Option<String> {
+        self.header
             .ledger
             .projects
             .iter()
@@ -133,7 +129,34 @@ impl ThreadList {
                 p.sqlite_project_id.clone().or_else(|| {
                     (p.id != "default" && !p.id.starts_with("repo:")).then(|| p.id.clone())
                 })
-            });
+            })
+    }
+    /// ProjectsSwitcher's add button: a single folder dropped from Finder
+    /// registers like a picked one.
+    fn header_drop_repository(&mut self, paths: &gpui::ExternalPaths, cx: &mut Context<Self>) {
+        if self.header_busy {
+            return;
+        }
+        match paths.paths() {
+            [path] if path.is_dir() => {
+                let project = self.header_project();
+                self.header_menu = None;
+                self.header_select(
+                    Action::Register(path.to_string_lossy().into_owned(), project),
+                    cx,
+                );
+            }
+            _ => self.notice = "Drop one repository folder".into(),
+        }
+        cx.notify();
+    }
+    fn header_add_repository(&mut self, cx: &mut Context<Self>) {
+        if self.header_busy {
+            return;
+        }
+        self.header_busy = true;
+        self.header_menu = None;
+        let project = self.header_project();
         let prompt = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: false,
             directories: true,
@@ -372,7 +395,12 @@ impl ThreadList {
                             .flex_shrink_0()
                             .p(px(6.))
                             .cursor_pointer()
+                            .rounded(px(7.))
                             .child(glyph(true, 16., theme().text_muted))
+                            .drag_over::<gpui::ExternalPaths>(|v, _, _, _| v.bg(theme().hover))
+                            .on_drop(cx.listener(|this, paths: &gpui::ExternalPaths, _, cx| {
+                                this.header_drop_repository(paths, cx)
+                            }))
                             .on_click(cx.listener(|this, _, _, cx| this.header_add_repository(cx))),
                     ),
             )
