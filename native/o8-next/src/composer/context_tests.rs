@@ -215,6 +215,18 @@ fn warmth_uses_existing_clock_and_never_counts_below_zero() {
 }
 
 #[test]
+fn a_turn_without_usage_keeps_the_estimate_from_the_last_reported_turn() {
+    let now = 10_000_000.;
+    let rows = [
+        observation("warm", now - 660_000., now, Some(900.), Some(300_000.)),
+        // A failed resume reports no usage at all.
+        observation("warm", now + 10_000., now + 20_000., None, None),
+    ];
+    let status = estimate(&rows, "warm", "codex", "fixture", now + 60_000.);
+    assert_eq!(label("codex", status.as_ref(), false), "Warm ~4m");
+}
+
+#[test]
 fn observed_windows_are_bounded_by_large_cold_resumes_without_inventing_a_ttl() {
     let mut rows = vec![
         observation("a", 0., 1_000., Some(100.), None),

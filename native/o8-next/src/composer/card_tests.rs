@@ -158,12 +158,11 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
     let mut previous = gpui::px(0.);
     for selector in [
         "composer-mode",
-        "composer-access",
         "composer-attach",
         "composer-model",
         "composer-effort",
+        // Empty composer: the primary button is the dictation mic.
         "composer-microphone",
-        "send",
     ] {
         let bounds = cx.debug_bounds(selector).expect(selector);
         assert!(bounds.left() >= previous, "footer order: {selector}");
@@ -178,7 +177,8 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
     assert!(cx.debug_bounds("composer-hint").is_none());
     click("composer-mode", cx);
     click("mode-multitask", cx);
-    click("composer-access", cx);
+    click("composer-attach", cx);
+    click("attach-permission", cx);
     click("access-full", cx);
     click("composer-effort", cx);
     click("effort-high", cx);
@@ -322,18 +322,18 @@ fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut Te
 fn native_composer_review_escape_restores_chip_focus(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    click("composer-access", cx);
+    click("composer-attach", cx);
     cx.simulate_keystrokes("escape");
     surface.update_in(cx, |s, window, cx| {
         assert!(
-            s.composer.read(cx).controls.focus["composer-access"].is_focused(window),
+            s.composer.read(cx).controls.focus["composer-attach"].is_focused(window),
             "Escape returns to the control that opened the picker"
         );
     });
     cx.simulate_keystrokes("enter");
     draw(cx);
     assert!(
-        cx.debug_bounds("access-plan").is_some(),
+        cx.debug_bounds("attach-permission").is_some(),
         "the focused chip opens with Enter"
     );
 }

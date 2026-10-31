@@ -182,10 +182,12 @@ pub fn estimate(
     now: f64,
 ) -> Option<Estimate> {
     let rows = resumes(rows);
+    // A turn that reported no usage (a failed resume, an interrupted turn)
+    // says nothing about the cache; estimate from the newest turn that did.
     let last = rows
         .iter()
         .rev()
-        .find(|r| r.session == session && r.runtime == runtime)?;
+        .find(|r| r.session == session && r.runtime == runtime && r.read.is_some())?;
     if !supported(runtime) || model.is_empty() || last.model != model {
         return None;
     }

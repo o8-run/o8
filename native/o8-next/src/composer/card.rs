@@ -660,13 +660,7 @@ impl Surface {
                                         .get("composer-file-remove-0")
                                         .filter(|_| !input.controls.files.is_empty())
                                 })
-                                .or_else(|| {
-                                    input.controls.focus.get(if input.text.trim().is_empty() {
-                                        "composer-attach"
-                                    } else {
-                                        "composer-intent-repo"
-                                    })
-                                })
+                                .or_else(|| input.controls.focus.get("composer-attach"))
                             {
                                 focus.focus(window);
                             } else {

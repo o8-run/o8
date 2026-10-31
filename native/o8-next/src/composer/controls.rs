@@ -64,7 +64,8 @@ impl Default for State {
             catalogues: HashMap::new(),
             thumbs_pending: false,
             send_view: None,
-            send_morph: crate::motion::Transition::settled(180, false),
+            // Tests click Send right after typing; the morph is instant there.
+            send_morph: crate::motion::Transition::settled(if cfg!(test) { 0 } else { 180 }, false),
             effort_preview: None,
             tiers: HashMap::new(),
         }

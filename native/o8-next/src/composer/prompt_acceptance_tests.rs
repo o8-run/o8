@@ -114,15 +114,17 @@ fn native_composer_controls_intent_chips_apply_without_sending(cx: &mut TestAppC
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     focus(&surface, cx);
-    assert!(cx.debug_bounds("composer-intent-repo").is_none());
+    assert!(cx.debug_bounds("attach-repo").is_none());
     click("send-mode-steer", cx);
     focus(&surface, cx);
     cx.simulate_input("Check this change");
     draw(cx);
-    click("composer-intent-repo", cx);
+    click("composer-attach", cx);
+    click("attach-repo", cx);
     wait_selector(cx, "composer-prompt-item-0");
     click("composer-prompt-item-0", cx);
-    click("composer-intent-branch", cx);
+    click("composer-attach", cx);
+    click("attach-branch", cx);
     wait_selector(cx, "composer-prompt-item-0");
     // Filter real branches through the real search editor, then choose it.
     click("composer-command-query", cx);

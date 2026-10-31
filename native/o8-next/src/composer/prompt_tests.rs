@@ -197,7 +197,8 @@ fn native_composer_controls_save_prompt_and_create_branch_persist_without_send(
             .any(|p| p["body"] == "A saved composer prompt" && p["scope"] == "repo")
     );
     click("composer-prompt-close", cx);
-    click("composer-intent-branch", cx);
+    click("composer-attach", cx);
+    click("attach-branch", cx);
     wait_selector(cx, "composer-branch-new");
     click("composer-branch-new", cx);
     click("composer-prompt-field-0", cx);
