@@ -91,6 +91,21 @@ pub struct PullRequests {
     pub filter_field: Option<&'static str>,
     /// Set when the shell hosts this list: picks open in the right panel.
     pub hosted: bool,
+    /// PrPanel view state: description, composer ("" while closed, else
+    /// "comment" or "review") and review choice, open diffs.
+    pub description_open: bool,
+    pub composer: &'static str,
+    /// A copy or other local result, as PrPanelActions' notice line.
+    pub notice: String,
+    pub review_action: &'static str,
+    pub open_files: std::collections::HashSet<String>,
+    /// The Timeline tab's activity pages, read when the tab first shows.
+    pub timeline: Vec<Value>,
+    pub timeline_next: Option<u64>,
+    pub timeline_loading: bool,
+    pub timeline_error: String,
+    pub newest_first: bool,
+    timeline_epoch: u64,
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     pub painted_at: Rc<Cell<Option<Instant>>>,
@@ -112,7 +127,11 @@ impl PullRequests {
             search.placeholder = "Search pull requests, or label:bug".into();
             search
         });
-        let editor = cx.new(Composer::new);
+        let editor = cx.new(|cx| {
+            let mut editor = Composer::new(cx);
+            editor.placeholder = "Leave a comment".into();
+            editor
+        });
         let focus = cx.focus_handle();
         focus.focus(window);
         let subscriptions = vec![
@@ -155,6 +174,17 @@ impl PullRequests {
             menu: None,
             filter_field: None,
             hosted: false,
+            description_open: true,
+            composer: "",
+            notice: String::new(),
+            review_action: "review-comment",
+            open_files: Default::default(),
+            timeline: vec![],
+            timeline_next: None,
+            timeline_loading: false,
+            timeline_error: String::new(),
+            newest_first: false,
+            timeline_epoch: 0,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_at: Rc::new(Cell::new(None)),
@@ -311,6 +341,11 @@ impl PullRequests {
             self.detail = Value::Null;
             self.review_head.clear();
             self.tab = "summary".into();
+            self.timeline.clear();
+            self.timeline_next = None;
+            self.timeline_error.clear();
+            self.timeline_epoch += 1;
+            self.open_files.clear();
             self.editor.update(cx, |e, cx| e.clear(cx));
         }
         self.selected = Some(number);
@@ -359,6 +394,53 @@ impl PullRequests {
                         s.preview = preview;
                     }
                     Err(e) => s.governance_error = e,
+                }
+                s.changed(cx);
+            });
+        })
+        .detach();
+        self.changed(cx);
+    }
+    /// usePrTimeline: one page of activity at a time, oldest page first.
+    pub fn load_timeline(&mut self, more: bool, cx: &mut Context<Self>) {
+        let Some(number) = self.selected else {
+            return;
+        };
+        let page = if more { self.timeline_next.unwrap_or(1) } else { 1 };
+        self.timeline_epoch += 1;
+        let epoch = self.timeline_epoch;
+        self.timeline_loading = true;
+        self.timeline_error.clear();
+        let client = self.client.clone();
+        let repo = string(&self.page, "repo").to_owned();
+        let task = cx.background_executor().spawn(async move {
+            client.get::<Value>(
+                &format!("/api/panel/prs/{number}/timeline"),
+                &[("repo", &repo), ("page", &page.to_string())],
+            )
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |s, cx| {
+                if s.timeline_epoch != epoch {
+                    return;
+                }
+                s.timeline_loading = false;
+                match result {
+                    Ok(v) if v["events"].is_array() => {
+                        if !more {
+                            s.timeline.clear();
+                        }
+                        s.timeline.extend(array(&v, "events"));
+                        s.timeline_next = v["nextPage"].as_u64();
+                    }
+                    Ok(v) => {
+                        s.timeline_error = v["error"]
+                            .as_str()
+                            .unwrap_or("Activity could not be loaded.")
+                            .to_owned()
+                    }
+                    Err(e) => s.timeline_error = e,
                 }
                 s.changed(cx);
             });
