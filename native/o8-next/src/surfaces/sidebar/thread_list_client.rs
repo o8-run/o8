@@ -114,6 +114,7 @@ impl Client {
             }));
             sessions.push(Session {
                 repo_slug: None,
+                run_started_at: agent["startedAt"].as_str().map(str::to_owned),
                 branch: ["branch", "gitBranch"]
                     .iter()
                     .find_map(|k| agent[*k].as_str().filter(|b| !b.is_empty()))

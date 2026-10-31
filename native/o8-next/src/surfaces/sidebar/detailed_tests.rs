@@ -1,6 +1,6 @@
 //! Detailed rows and the Working section, opt-in from the view menu.
 use super::recents_tests::native_rows;
-use super::thread_list::detailed::{fold_working, status};
+use super::thread_list::detailed::{elapsed, fold_working, status};
 use super::thread_list::Row;
 use super::*;
 
@@ -183,4 +183,16 @@ fn sessions_read_repo_slug_and_branch_additively() {
     assert_eq!(s.repo_slug.as_deref(), Some("o8-run/o8"));
     assert_eq!(s.branch.as_deref(), Some("feature/rows"));
     assert_eq!(session("idle").branch, None);
+}
+
+#[test]
+fn run_timer_formats_elapsed_time() {
+    assert_eq!(elapsed(100, 142), "42s");
+    assert_eq!(elapsed(0, 12 * 60 + 5), "12m");
+    assert_eq!(elapsed(0, 3600 + 5 * 60), "1h 5m");
+    assert_eq!(elapsed(0, 2 * 86400), "2d");
+    assert_eq!(elapsed(10, 0), "0s");
+    let s: Session = serde_json::from_value(json!({"id": "t", "title": "T", "status": "running",
+        "runStartedAt": "2026-10-31T12:00:00.000Z"})).unwrap();
+    assert!(s.run_started_at.is_some());
 }

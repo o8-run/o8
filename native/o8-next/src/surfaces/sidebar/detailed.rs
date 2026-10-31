@@ -53,6 +53,16 @@ pub(crate) fn status(s: &Session, woken: bool, running: bool, age: &str) -> Stat
     };
     Status { key, label }
 }
+/// Elapsed run time: `42s`, `12m`, `1h 5m`, `2d`.
+pub(crate) fn elapsed(start: u64, now: u64) -> String {
+    let secs = now.saturating_sub(start);
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m", secs / 60),
+        3600..86400 => format!("{}h {}m", secs / 3600, secs % 3600 / 60),
+        _ => format!("{}d", secs / 86400),
+    }
+}
 fn status_look(key: &str) -> (Option<&'static str>, Rgba) {
     match key {
         "done" => (Some(DONE), theme().success),
@@ -163,7 +173,13 @@ impl ThreadList {
         let id = row.id.clone().unwrap_or_default();
         let session = self.sessions.iter().find(|s| s.id == id);
         let woken = self.snoozes.get(&id).is_some_and(|until| *until <= recents::now());
-        let st = session.map(|s| status(s, woken, row.running, &row.age));
+        // A real run timer when the host recorded the run start; else last activity.
+        let timer = session
+            .and_then(|s| s.run_started_at.as_deref())
+            .and_then(recents::timestamp)
+            .map(|start| elapsed(start, recents::now()))
+            .unwrap_or_else(|| row.age.clone());
+        let st = session.map(|s| status(s, woken, row.running, &timer));
         let faint = theme().text_faint;
         let mut first = div()
             .flex()
