@@ -493,6 +493,18 @@ fn brand() -> impl IntoElement {
 }
 
 impl Shell {
+    /// Closes Projects, Customize and an idle Setup, the overlays the rail
+    /// and its More menu open over the workspace.
+    pub(crate) fn close_rail_overlays(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.surfaces.projects.open = false;
+        if self.surfaces.customize.open {
+            self.close_customize(window, cx);
+        }
+        if self.surfaces.setup.view.as_ref().is_some_and(|v| !v.read(cx).busy()) {
+            self.surfaces.setup.view = None;
+            self.revision += 1;
+        }
+    }
     pub(super) fn render_rail(
         &mut self,
         window: &mut Window,
@@ -547,14 +559,7 @@ impl Shell {
                 .tooltip(|_, cx| cx.new(|_| Tip("o8 — Home".into())).into())
                 .child(brand())
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.surfaces.projects.open = false;
-                    if this.surfaces.customize.open {
-                        this.close_customize(window, cx);
-                    }
-                    if this.surfaces.setup.view.as_ref().is_some_and(|v| !v.read(cx).busy()) {
-                        this.surfaces.setup.view = None;
-                        this.revision += 1;
-                    }
+                    this.close_rail_overlays(window, cx);
                     this.restore_focus(window, cx);
                     cx.notify();
                 })),
