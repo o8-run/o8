@@ -559,7 +559,7 @@ impl Surface {
         };
         let key = event.keystroke.key.as_str();
         if open == "mode" && matches!(key, "up" | "down") {
-            let ids = ["mode-solo", "mode-fast", "mode-multitask"];
+            let ids = ["mode-fast", "mode-multitask"];
             let routing = self.composer_routing(cx).unwrap_or(Value::Null);
             let current = ids
                 .iter()
@@ -572,12 +572,12 @@ impl Surface {
                         .is_some_and(|f| f.is_focused(window))
                 })
                 .unwrap_or_else(|| {
-                    ["solo", "fast", "multitask"]
+                    ["fast", "multitask"]
                         .iter()
                         .position(|v| routing["pickedMode"] == *v)
                         .unwrap_or(0)
                 });
-            let next = (current + if key == "up" { 2 } else { 1 }) % 3;
+            let next = (current + 1) % ids.len();
             if let Some(focus) = self.composer.read(cx).controls.focus.get(ids[next]) {
                 focus.focus(window);
             }

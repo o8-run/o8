@@ -49,8 +49,19 @@ impl Default for State {
 pub(crate) fn mode_label(mode: &str) -> &'static str {
     match mode {
         "multitask" => "Worktrees",
-        "fast" => "Shared",
-        _ => "Solo",
+        _ => "Shared",
+    }
+}
+/// Classic shows only Shared and Worktrees (VISIBLE_COMPOSER_SELECTOR_MODES);
+/// Solo and the advanced modes are internal. Any other saved mode reads the way
+/// classic's cycleComposerSelectorMode maps it: Shared when the backend can
+/// share a checkout (composerSupportsFastMode), otherwise Worktrees.
+pub(crate) fn visible_mode(mode: Option<&str>, backend: Option<&str>) -> &'static str {
+    let shares = backend.is_none_or(|b| matches!(b, "codex" | "claude" | "fable" | "pi" | "o8"));
+    match mode {
+        Some("multitask") => "multitask",
+        _ if shares => "fast",
+        _ => "multitask",
     }
 }
 /// The desktop's model names (formatModelLabel): "gpt-6.1-sol" reads "GPT-6.1 Sol",

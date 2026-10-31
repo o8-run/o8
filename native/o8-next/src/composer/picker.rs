@@ -99,9 +99,8 @@ impl Surface {
         };
         match open {
             "mode" => {
-                let picked = routing["pickedMode"].as_str().unwrap_or("solo");
+                let picked = routing["pickedMode"].as_str().unwrap_or("fast");
                 for (value, label, detail) in [
-                    ("solo", "Solo", "Delegation off · works in this session"),
                     ("fast", "Shared", "Workers share this checkout"),
                     (
                         "multitask",

@@ -30,7 +30,7 @@ fn native_composer_controls_orchestrate_routes_one_fleet_turn_without_changing_t
         );
         assert_eq!(
             s.composer_routing(cx).unwrap()["pickedMode"],
-            "solo",
+            "fast",
             "the explicit route must not overwrite the operator's mode preference"
         );
     });

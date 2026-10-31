@@ -202,7 +202,7 @@ impl Client {
         let defaults: Value = self
             .get("/api/panel/operator-defaults", &[("include", "values")])
             .unwrap_or(Value::Null);
-        let mut routing = json!({"backend":backend,"model":model,"effort":"medium","permissionMode":permission,"mode":"single","pickedMode":"solo","collide":false});
+        let mut routing = json!({"backend":backend,"model":model,"effort":"medium","permissionMode":permission,"mode":"fleet","pickedMode":"fast","collide":false});
         if let Some(effort) = receipt
             .and_then(|r| r["effort"].as_str())
             .or(defaults["values"]["thinkingEffort"].as_str())

@@ -193,7 +193,7 @@ impl Surface {
         let id = format!("next-{voice}-{nonce:x}");
         let wire = crate::composer::controls::wire(
             &text,
-            routing["pickedMode"].as_str().unwrap_or("solo"),
+            routing["pickedMode"].as_str().unwrap_or("fast"),
         );
         let body = json!({"repoPath":repo,"threadId":session.id,"id":id,"intent":"send-next",
             "payload":{"text":text,"wireMessage":wire,"images":[],"routing":routing}});
@@ -324,7 +324,7 @@ impl Surface {
                 } else {
                     crate::composer::controls::wire(
                         &contextual,
-                        routing["pickedMode"].as_str().unwrap_or("solo"),
+                        routing["pickedMode"].as_str().unwrap_or("fast"),
                     )
                 };
                 let images = self.composer.read(cx).controls.images.clone();
