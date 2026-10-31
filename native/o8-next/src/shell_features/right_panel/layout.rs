@@ -108,13 +108,28 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
     p.motion = Transition::settled(260, saved.visible && viewport >= 1180.);
     p.morph = Transition::settled(200, saved.visible && viewport >= 1180.);
     p.content = Transition::settled(200, true);
+    p.lower_tabs = saved
+        .secondary_tabs
+        .get(&scope)
+        .into_iter()
+        .flatten()
+        .map(|v| Tool::parse(v))
+        .filter(|t| *t != p.selected)
+        .fold(vec![], |mut out, t| {
+            if !out.contains(&t) {
+                out.push(t);
+            }
+            out
+        });
     let (upper, lower) = (p.selected, p.lower);
     if saved.visible && viewport >= 1180. {
         show(s, upper, window, cx);
         if let Some(lower) = lower {
+            s.features.get::<Panel>().into_lower = true;
             show(s, lower, window, cx);
-            s.features.get::<Panel>().selected = upper;
-            s.features.get::<Panel>().lower = Some(lower);
+            let p = s.features.get::<Panel>();
+            p.into_lower = false;
+            p.selected = upper;
         }
         save(s);
     }
@@ -129,8 +144,10 @@ pub(super) fn save(s: &mut Shell) {
         p.selected.slug(),
         p.lower,
     );
+    let lower_tabs = p.lower_tabs.iter().map(|t| t.slug()).collect();
     let saved = &mut s.state.right_panel;
     saved.primary = primary;
+    saved.secondary_tabs.insert(scope.clone(), lower_tabs);
     saved.utility_tabs.insert(scope, tabs);
     saved.split = lower.is_some();
     if let Some(t) = lower {
@@ -141,8 +158,39 @@ pub(super) fn save(s: &mut Shell) {
 
 pub(super) fn select(s: &mut Shell, tool: Tool, _: &mut Window, cx: &mut Context<Shell>) {
     let p = s.features.get::<Panel>();
+    if std::mem::take(&mut p.into_lower) {
+        // The bottom half: its own tab, and never the top's view twice.
+        if p.selected == tool {
+            let fallback = p
+                .tabs
+                .iter()
+                .copied()
+                .find(|t| *t != tool && !p.lower_tabs.contains(t))
+                .unwrap_or(Tool::Launcher);
+            p.selected = fallback;
+            p.tabs.retain(|t| *t != tool);
+        }
+        if !p.lower_tabs.contains(&tool) {
+            p.lower_tabs.push(tool);
+        }
+        p.lower = Some(tool);
+        p.menu = None;
+        p.motion.set(true);
+        p.morph.set(true);
+        s.state.right_panel.visible = true;
+        save(s);
+        cx.notify();
+        return;
+    }
     if p.lower == Some(tool) {
-        p.lower = Some(p.selected);
+        // The top takes the bottom's view; the bottom shows the top's.
+        let upper = p.selected;
+        p.lower = Some(upper);
+        for t in &mut p.lower_tabs {
+            if *t == tool {
+                *t = upper;
+            }
+        }
     }
     if p.selected != tool || !p.motion.is_open() {
         p.content = Transition::new(200);
@@ -244,22 +292,9 @@ pub(super) fn menu(s: &mut Shell, lower: bool, window: &mut Window, cx: &mut Con
 }
 pub(super) fn choose(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
     let lower = s.features.get::<Panel>().menu_lower;
-    let upper = s.features.get::<Panel>().selected;
-    let previous = s.features.get::<Panel>().lower;
+    s.features.get::<Panel>().into_lower = lower;
     show(s, tool, window, cx);
-    if lower {
-        let p = s.features.get::<Panel>();
-        p.selected = if tool == upper {
-            previous.unwrap_or(if tool == Tool::Browser {
-                Tool::Spec
-            } else {
-                Tool::Browser
-            })
-        } else {
-            upper
-        };
-        p.lower = Some(tool);
-    }
+    s.features.get::<Panel>().into_lower = false;
     save(s);
     focus(
         s,
@@ -286,10 +321,11 @@ pub(super) fn split(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>)
         } else {
             lower
         };
+        s.features.get::<Panel>().into_lower = true;
         show(s, lower, window, cx);
         let p = s.features.get::<Panel>();
+        p.into_lower = false;
         p.selected = upper;
-        p.lower = Some(lower);
     }
     save(s);
     focus(s, "panel-split", window);
@@ -452,6 +488,12 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
         Tool::Compare => contextual::comparison(s, cx),
         Tool::Prs => contextual::pr(s, cx),
         tool if !tool.ready() => placeholder(tool).into_any_element(),
+        // The side chat opens once its new conversation is listed.
+        Tool::SideChat => s
+            .content
+            .get(&super::key(s, tool))
+            .map(Content::element)
+            .unwrap_or_else(|| div().child("Starting chat…").into_any_element()),
         tool => s
             .content
             .get(&super::key(s, tool))

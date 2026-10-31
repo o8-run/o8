@@ -539,6 +539,8 @@ impl Surface {
             .id("composer-card")
             .debug_selector(|| "composer-card".into())
             .relative()
+            .flex()
+            .flex_col()
             .border_1()
             .border_color(theme().border)
             .rounded(px(crate::theme::GEOMETRY.composer_radius))

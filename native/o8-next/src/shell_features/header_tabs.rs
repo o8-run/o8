@@ -64,31 +64,36 @@ pub(super) struct Dragged {
 }
 impl Render for Dragged {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let geometry = crate::theme::GEOMETRY;
-        div()
-            .h(px(geometry.tab_height))
-            .px(px(10.))
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .rounded(px(geometry.tab_radius))
-            .bg(crate::theme::popover_background())
-            .border_1()
-            .border_color(theme().border)
-            .shadow_md()
-            .text_size(px(12.))
-            .font_weight(gpui::FontWeight::LIGHT)
-            .text_color(theme().text)
-            .child(crate::icon::stroke(self.glyph, theme().text, 11., 2.))
-            .child(
-                div()
-                    .max_w(px(180.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(self.label.clone()),
-            )
+        pill(self.label.clone(), self.glyph)
     }
+}
+
+/// The floating pill a dragged tab, or the rail's Terminal, is drawn as.
+pub(super) fn pill(label: SharedString, glyph: &'static str) -> gpui::Div {
+    let geometry = crate::theme::GEOMETRY;
+    div()
+        .h(px(geometry.tab_height))
+        .px(px(10.))
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .rounded(px(geometry.tab_radius))
+        .bg(crate::theme::popover_background())
+        .border_1()
+        .border_color(theme().border)
+        .shadow_md()
+        .text_size(px(12.))
+        .font_weight(gpui::FontWeight::LIGHT)
+        .text_color(theme().text)
+        .child(crate::icon::stroke(glyph, theme().text, 11., 2.))
+        .child(
+            div()
+                .max_w(px(180.))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(label),
+        )
 }
 
 /// The name the person gave this tab, if any.

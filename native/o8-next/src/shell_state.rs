@@ -14,6 +14,9 @@ use std::{
 pub struct Workspace {
     pub tabs: Vec<Tab>,
     pub active: usize,
+    /// Split panes beside the main one; none until a drop splits it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panes: Option<crate::pane_tree::Node>,
     #[serde(flatten)]
     pub surfaces: crate::shell::WorkspaceState,
 }
@@ -40,6 +43,10 @@ pub struct PanelState {
     pub secondary: String,
     pub ratio: f32,
     pub tool_widths: BTreeMap<String, f32>,
+    /// The split's bottom-half tabs, per workspace, like utility_tabs.
+    pub secondary_tabs: BTreeMap<String, Vec<String>>,
+    /// Each workspace's side chat conversation.
+    pub side_chats: BTreeMap<String, String>,
 }
 impl Default for PanelState {
     fn default() -> Self {
@@ -51,6 +58,8 @@ impl Default for PanelState {
             secondary: "o8-md".into(),
             ratio: 50.,
             tool_widths: BTreeMap::new(),
+            secondary_tabs: BTreeMap::new(),
+            side_chats: BTreeMap::new(),
         }
     }
 }

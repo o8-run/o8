@@ -27,6 +27,7 @@ impl ShellFeature for RightPanel {
             order: 50,
             run: |s, _, window, cx| {
                 layout::sync(s, window, cx);
+                ensure_side_chat(s, window, cx);
                 move_inbox_tabs(s, window, cx)
             },
         }]
@@ -138,7 +139,7 @@ impl Tool {
     fn ready(self) -> bool {
         !matches!(
             self,
-            Tool::Threads | Tool::SideChat | Tool::Resources | Tool::Targeting
+            Tool::Threads | Tool::Resources | Tool::Targeting
         )
     }
     fn label(self) -> &'static str {
@@ -216,6 +217,10 @@ struct Panel {
     viewport: f32,
     scope: Option<String>,
     lower: Option<Tool>,
+    /// The split's bottom half keeps its own tabs, like the top's.
+    lower_tabs: Vec<Tool>,
+    /// The next selection opens in the bottom half.
+    into_lower: bool,
     maximized: bool,
     more: bool,
     menu_lower: bool,
@@ -253,6 +258,8 @@ impl Default for Panel {
             viewport: 1200.,
             scope: None,
             lower: None,
+            lower_tabs: vec![],
+            into_lower: false,
             maximized: false,
             more: false,
             menu_lower: false,
@@ -298,6 +305,38 @@ impl Shell {
             p.motion.is_open()
                 && (probe(&key(self, p.current())) || p.lower.is_some_and(|t| probe(&key(self, t))))
         })
+    }
+    /// Opens a dropped rail Terminal, or a new chat, in the panel's top view
+    /// or its bottom one, where it was let go.
+    pub(crate) fn panel_drop(
+        &mut self,
+        chat: bool,
+        lower: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let tool = if chat {
+            // A dropped chat is a new conversation, as on the workspace.
+            let Some(workspace) = self.state.selected.clone() else {
+                return;
+            };
+            let Some(id) = self.start_thread(false, cx) else {
+                return;
+            };
+            self.state.right_panel.side_chats.insert(workspace, id);
+            let key = key(self, Tool::SideChat);
+            self.content.remove(&key);
+            Tool::SideChat
+        } else {
+            Tool::Terminal
+        };
+        if !lower {
+            show(self, tool, window, cx);
+            return;
+        }
+        self.features.get::<Panel>().menu_lower = true;
+        layout::choose(self, tool, window, cx);
+        self.features.get::<Panel>().menu_lower = false;
     }
     pub(crate) fn panel_front_key(&self) -> Option<String> {
         let panel = self.features.read::<Panel>()?;
@@ -467,7 +506,46 @@ pub(super) fn edge(
 }
 
 /// Opens the panel on one tool, creating that tool's view the first time.
+/// The side chat's conversation in the open workspace: a chat of its own,
+/// started on the operator's lead the first time the view opens.
+fn side_chat(s: &mut Shell, cx: &mut Context<Shell>) -> Option<String> {
+    let workspace = s.state.selected.clone()?;
+    if let Some(id) = s.state.right_panel.side_chats.get(&workspace) {
+        return Some(id.clone());
+    }
+    let id = s.start_thread(false, cx)?;
+    s.state.right_panel.side_chats.insert(workspace, id.clone());
+    s.persist();
+    Some(id)
+}
+
+/// Opens the side chat once its conversation is listed.
+fn ensure_side_chat(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    let Some(p) = s.features.read::<Panel>() else {
+        return;
+    };
+    if !(p.selected == Tool::SideChat || p.lower == Some(Tool::SideChat)) {
+        return;
+    }
+    let key = key(s, Tool::SideChat);
+    let workspace = s.state.selected.clone().unwrap_or_default();
+    let Some(id) = s.state.right_panel.side_chats.get(&workspace).cloned() else {
+        return;
+    };
+    if s.content.contains_key(&key) || !s.sessions.iter().any(|x| x.id == id) {
+        return;
+    }
+    let tab = Tab::Session(id);
+    if let Some(content) = (tab.registration().create)(s, tab, workspace, window, cx) {
+        s.content.insert(key, content);
+        cx.notify();
+    }
+}
+
 fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
+    if tool == Tool::SideChat {
+        side_chat(s, cx);
+    }
     let workspace = s.state.selected.clone().unwrap_or_default();
     let key = key(s, tool);
     if let Some(tab) = tool.tab()
@@ -768,6 +846,27 @@ pub(super) fn devices_visible(s: &Shell) -> bool {
 }
 
 /// Closes one tab and focuses its neighbour, as a browser strip does.
+/// Closes a bottom-half tab; the last one closes the split.
+fn close_lower_tab(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
+    let p = s.features.get::<Panel>();
+    let Some(index) = p.lower_tabs.iter().position(|t| *t == tool) else {
+        return;
+    };
+    p.lower_tabs.remove(index);
+    if p.lower == Some(tool) {
+        match p.lower_tabs.get(index.min(p.lower_tabs.len().saturating_sub(1))).copied() {
+            Some(next) => {
+                p.into_lower = true;
+                show(s, next, window, cx);
+                s.features.get::<Panel>().into_lower = false;
+            }
+            None => p.lower = None,
+        }
+    }
+    layout::save(s);
+    cx.notify();
+}
+
 fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<Shell>) {
     let panel = s.features.get::<Panel>();
     if index >= panel.tabs.len() {
