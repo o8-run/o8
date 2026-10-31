@@ -48,7 +48,7 @@ fn panes(s: &Entity<Shell>, v: &VisualTestContext) -> Option<Node> {
 
 #[gpui::test]
 fn rail_drags_split_workspace_panes_like_classic(cx: &mut TestAppContext) {
-    let f = Fixture::new();
+    let f = Fixture::start(true);
     let (s, mut v) = open(
         f.client.clone(),
         f.root.join("rail-drag.json"),

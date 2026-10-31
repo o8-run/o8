@@ -399,6 +399,7 @@ impl ThreadList {
                         this.load(cx);
                     }
                     Err(error) => {
+                        this.failed_starts.insert(id.clone());
                         crate::shell::toasts::show(
                             crate::shell::toasts::Kind::SpawnError {
                                 detail: error.into(),
