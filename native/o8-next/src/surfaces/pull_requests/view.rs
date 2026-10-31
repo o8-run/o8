@@ -1,6 +1,6 @@
 use super::*;
 use crate::theme::current as theme;
-use gpui::{AnyElement, ClickEvent, IntoElement, Render, canvas, div, prelude::*, px};
+use gpui::{AnyElement, IntoElement, Render, canvas, div, prelude::*, px};
 
 pub(super) const ICON_PR: &str = "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M13 6h3a2 2 0 0 1 2 2v7 M6 9v12";
 pub(super) const ICON_MERGED: &str = "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 21V9a9 9 0 0 0 9 9";
@@ -183,36 +183,6 @@ impl PullRequests {
             .on_click(cx.listener(move |s, _, _, cx| s.pick(n, cx)))
             .into_any_element()
     }
-    fn button(
-        &self,
-        id: &str,
-        label: &str,
-        enabled: bool,
-        handler: impl Fn(&mut Self, &ClickEvent, &mut Window, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let selector = id.to_owned();
-        div()
-            .id(gpui::SharedString::from(id.to_owned()))
-            .debug_selector(move || selector.clone())
-            .px(px(8.))
-            .py(px(5.))
-            .rounded(px(7.))
-            .text_size(px(11.))
-            .font_weight(gpui::FontWeight::LIGHT)
-            .bg(theme().surface_raised)
-            .opacity(if enabled { 1. } else { 0.4 })
-            .when(enabled, |b| {
-                b.cursor_pointer().hover(|b| b.bg(theme().hover))
-            })
-            .child(label.to_owned())
-            .on_click(cx.listener(move |s, e, w, cx| {
-                if enabled {
-                    handler(s, e, w, cx);
-                }
-            }))
-            .into_any_element()
-    }
 }
 impl Render for PullRequests {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -231,34 +201,64 @@ impl Render for PullRequests {
             .flex()
             .flex_col()
             .gap(px(4.));
-        if self.page["unavailable"] == true {
-            list = list.child("This repository needs a GitHub origin to show pull requests.");
-        }
+        // The desktop list's states: error with Retry, no origin, and empty.
+        let note = |text: String| {
+            div()
+                .mx(px(12.))
+                .my(px(20.))
+                .text_size(px(13.))
+                .text_color(theme().text_secondary)
+                .child(text)
+        };
         if !self.error.is_empty() {
-            list = list
-                .child(div().text_color(theme().danger).child(self.error.clone()))
-                .child(self.button(
-                    "pr-retry",
-                    "Retry",
-                    !self.loading,
-                    |s, _, _, cx| s.load(false, cx),
-                    cx,
-                ));
-        }
-        if !self.loading && !self.page.is_null() && visible.is_empty() {
+            let loading = self.loading;
             list = list.child(
+                div()
+                    .mt(px(8.))
+                    .mx(px(12.))
+                    .mb(px(16.))
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap(px(8.))
+                    .text_size(px(13.))
+                    .child(self.error.clone())
+                    .child(
+                        controls::control("pr-retry".into())
+                            .opacity(if loading { 0.5 } else { 1. })
+                            .when(!loading, |c| c.cursor_pointer().hover(|c| c.bg(theme().hover)))
+                            .child("Retry")
+                            .on_click(cx.listener(move |s, _, _, cx| {
+                                if !loading {
+                                    s.load(false, cx)
+                                }
+                            })),
+                    ),
+            );
+        }
+        if self.page["unavailable"] == true {
+            list = list.child(note(
+                "This repository needs a GitHub origin to show pull requests.".into(),
+            ));
+        } else if !self.loading && self.page["prs"].is_array() && self.error.is_empty() && visible.is_empty() {
+            list = list.child(note(
                 if self.search.read(cx).text.is_empty()
                     && self.filters.values().all(String::is_empty)
                     && self.scope == "all"
                 {
-                    format!("No {} pull requests.", self.state)
+                    if self.state == "all" {
+                        "No pull requests.".into()
+                    } else {
+                        format!("No {} pull requests.", self.state)
+                    }
                 } else {
                     "No pull requests shown match these filters.".into()
                 },
-            );
+            ));
         }
         let now = crate::clock::now();
-        if self.layout == "stacks" {
+        let loaded = self.page["prs"].is_array() && self.page["unavailable"] != true;
+        if loaded && self.layout == "stacks" {
             for p in &visible {
                 let Some(n) = p["number"].as_u64() else {
                     continue;
@@ -278,7 +278,7 @@ impl Render for PullRequests {
                     )
                     .child(self.pr_row(p, n, now, cx));
             }
-        } else {
+        } else if loaded {
             // The desktop's author groups: the viewer's PRs, then everyone else's.
             let (mine, others): (Vec<_>, Vec<_>) = visible
                 .iter()
@@ -309,13 +309,19 @@ impl Render for PullRequests {
             }
         }
         if self.page["nextPage"].is_number() {
-            list = list.child(self.button(
-                "pr-more",
-                "Load more pull requests",
-                !self.loading,
-                |s, _, _, cx| s.load(true, cx),
-                cx,
-            ));
+            let loading = self.loading;
+            list = list.child(
+                div().mt(px(16.)).flex().justify_center().child(
+                    controls::control("pr-more".into())
+                        .when(!loading, |c| c.cursor_pointer().hover(|c| c.bg(theme().hover)))
+                        .child(if loading { "Loading…" } else { "Load more pull requests" })
+                        .on_click(cx.listener(move |s, _, _, cx| {
+                            if !loading {
+                                s.load(true, cx)
+                            }
+                        })),
+                ),
+            );
         }
         let muted = |text: &'static str| {
             div()
