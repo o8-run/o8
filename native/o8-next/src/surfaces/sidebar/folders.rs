@@ -337,8 +337,10 @@ impl ThreadList {
 }
 
 impl ThreadList {
-    /// Starts a conversation in `repo` and opens it, as the composer's lead
-    /// picker does; the server applies the operator's lead when it is sent.
+    /// Starts a conversation in `repo` on the operator's lead and opens it, as
+    /// the composer's lead picker does. Without a lead the server would save a
+    /// runtime placeholder ("claude-code") as the model, and the first send
+    /// would fail.
     pub(super) fn new_thread(&mut self, repo: String, cx: &mut Context<Self>) {
         self.new_menu = false;
         let id = format!(
@@ -351,15 +353,26 @@ impl ThreadList {
         let client = self.client.clone();
         let (thread, name) = (id.clone(), label(&repo));
         let task = cx.background_executor().spawn(async move {
+            let defaults: Value = client
+                .get("/api/panel/operator-defaults", &[("include", "values")])
+                .map_err(|e| e.to_string())?;
+            let mut body = json!({
+                "tabId": thread, "messages": [], "repoPath": repo,
+                "repoName": name, "title": "New conversation",
+            });
+            let lead = &defaults["values"];
+            if let Some(backend) = lead["orchestratorBackend"].as_str().filter(|b| *b != "auto") {
+                body["backend"] = json!(backend);
+            }
+            if let Some(model) = lead["orchestratorModel"].as_str().filter(|m| !m.is_empty()) {
+                body["model"] = json!(model);
+            }
             let url = client
                 .url("/api/v2/chat-history")
                 .map_err(|e| e.to_string())?;
             client
                 .request("POST", &url)
-                .send_json(json!({
-                    "tabId": thread, "messages": [], "repoPath": repo,
-                    "repoName": name, "title": "New conversation",
-                }))
+                .send_json(body)
                 .map(|_| ())
                 .map_err(|e| e.to_string())
         });

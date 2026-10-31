@@ -171,7 +171,13 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
         s.state.sidebar_closed_folders.is_empty()
     });
 
-    // A folder's New thread starts a conversation in that repository.
+    // A folder's New thread starts a conversation in that repository, on the
+    // operator's lead rather than the server's runtime placeholder.
+    fixture
+        .client
+        .request("POST", &fixture.client.url("/api/panel/operator-defaults").unwrap())
+        .send_json(json!({"orchestratorBackend": "codex", "orchestratorModel": "gpt-6.1-sol"}))
+        .unwrap();
     hover_click(
         &mut visual,
         &format!("sidebar-folder-{}", names[0]),
@@ -186,6 +192,8 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
         .get("/api/v2/chat-history", &[("tabId", &created)])
         .unwrap();
     assert_eq!(record["repoPath"], paths[0]);
+    assert_eq!(record["backend"], "codex");
+    assert_eq!(record["model"], "gpt-6.1-sol");
     // The shell opened it rather than putting the previous thread back.
     for _ in 0..3 {
         draw(&mut visual);
