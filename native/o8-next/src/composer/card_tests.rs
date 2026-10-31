@@ -167,8 +167,8 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
         assert!(bounds.left() >= previous, "footer order: {selector}");
         previous = bounds.right();
     }
-    // The fixture's chat is mid-turn, so the composer offers Steer; the
-    // checkout wording shows once nothing is steerable.
+    // A chat with turns offers fork in the placeholder once nothing is
+    // steerable; the checkout wording is for an empty chat.
     surface.update(cx, |s, cx| {
         s.queue["canSteer"] = json!(false);
         cx.notify();
@@ -177,7 +177,7 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
     surface.read_with(cx, |s, cx| {
         assert_eq!(
             s.composer.read(cx).placeholder,
-            "Ask anything · workers share this checkout"
+            "↵ to send, ⌥⌘↵ to fork into a new thread"
         );
     });
     assert!(cx.debug_bounds("composer-hint").is_none());
@@ -274,7 +274,7 @@ fn native_composer_modes_match_classic_and_saved_solo_sends_shared(cx: &mut Test
         assert_eq!(routing["mode"], "fleet");
         assert_eq!(
             s.composer.read(cx).placeholder,
-            "Ask anything · workers share this checkout"
+            "↵ to send, ⌥⌘↵ to fork into a new thread"
         );
     });
     surface.update_in(cx, |s, window, cx| {
@@ -313,8 +313,8 @@ fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut Te
     surface.update(cx, |s, cx| s.select("thoughts-composer-second".into(), cx));
     cx.run_until_parked();
     draw(cx);
-    // The fixture's chat is mid-turn, so the composer offers Steer; the
-    // checkout wording shows once nothing is steerable.
+    // A chat with turns offers fork in the placeholder once nothing is
+    // steerable; the checkout wording is for an empty chat.
     surface.update(cx, |s, cx| {
         s.queue["canSteer"] = json!(false);
         cx.notify();
@@ -323,14 +323,14 @@ fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut Te
     surface.read_with(cx, |s, cx| {
         assert_eq!(
             s.composer.read(cx).placeholder,
-            "Ask anything · workers share this checkout"
+            "↵ to send, ⌥⌘↵ to fork into a new thread"
         )
     });
     surface.update(cx, |s, cx| s.select("thoughts-composer-first".into(), cx));
     cx.run_until_parked();
     draw(cx);
-    // The fixture's chat is mid-turn, so the composer offers Steer; the
-    // checkout wording shows once nothing is steerable.
+    // A chat with turns offers fork in the placeholder once nothing is
+    // steerable; the checkout wording is for an empty chat.
     surface.update(cx, |s, cx| {
         s.queue["canSteer"] = json!(false);
         cx.notify();

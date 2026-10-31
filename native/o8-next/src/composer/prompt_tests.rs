@@ -7,10 +7,10 @@ fn native_composer_controls_orchestrate_routes_one_fleet_turn_without_changing_t
 ) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    click("send-mode-steer", cx);
     focus(&surface, cx);
     cx.simulate_input("/orchestrate Coordinate this task");
-    cx.simulate_keystrokes("enter");
+    // The fixture's chat is mid-turn; ⌘↵ queues instead of steering.
+    cx.simulate_keystrokes("cmd-enter");
     wait(&surface, cx, |s, _| {
         !s.saving
             && s.queue["items"]

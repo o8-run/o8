@@ -199,9 +199,8 @@ fn correction_composer_has_no_shortcut_or_mode_helper(cx: &mut TestAppContext) {
         );
     }
     assert!(
-        cx.debug_bounds("send-mode-steer").is_some()
-            || cx.debug_bounds("send-mode-queue").is_some(),
-        "mode selection remains available without helper text"
+        cx.debug_bounds("composer-microphone").is_some(),
+        "send and its menu remain available without helper text"
     );
 }
 

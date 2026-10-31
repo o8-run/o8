@@ -85,14 +85,14 @@ fn native_composer_controls_slash_escape_waits_for_an_edit(cx: &mut TestAppConte
 fn native_composer_controls_mode_arrows_change_the_next_real_send(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    click("send-mode-steer", cx);
     click("composer-attach", cx);
     click("attach-mode", cx);
     cx.simulate_keystrokes("down enter");
     cx.run_until_parked();
     focus(&surface, cx);
     cx.simulate_input("Keyboard selected mode");
-    cx.simulate_keystrokes("enter");
+    // The fixture's chat is mid-turn; ⌘↵ queues instead of steering.
+    cx.simulate_keystrokes("cmd-enter");
     wait(&surface, cx, |s, _| {
         !s.saving && s.queue["items"].as_array().is_some_and(|i| !i.is_empty())
     });
@@ -116,7 +116,6 @@ fn native_composer_controls_intent_chips_apply_without_sending(cx: &mut TestAppC
     let (surface, cx) = open(cx, &fixture);
     focus(&surface, cx);
     assert!(cx.debug_bounds("attach-repo").is_none());
-    click("send-mode-steer", cx);
     focus(&surface, cx);
     cx.simulate_input("Check this change");
     draw(cx);
@@ -137,7 +136,7 @@ fn native_composer_controls_intent_chips_apply_without_sending(cx: &mut TestAppC
         assert!(s.queue["items"].as_array().unwrap().is_empty());
     });
     focus(&surface, cx);
-    cx.simulate_keystrokes("enter");
+    cx.simulate_keystrokes("cmd-enter");
     wait(&surface, cx, |s, _| {
         !s.saving && s.queue["items"].as_array().is_some_and(|i| !i.is_empty())
     });

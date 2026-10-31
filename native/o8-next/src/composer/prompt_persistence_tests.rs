@@ -14,10 +14,9 @@ fn native_composer_retry_consumes_only_context_frozen_in_its_queue_item(app: &mu
     let first = surface.read_with(visual, |s, cx| {
         s.composer.read(cx).controls.prompt.prelude.clone()
     });
-    click("send-mode-steer", visual);
     focus(&surface, visual);
     visual.simulate_input("Fixture lose response");
-    visual.simulate_keystrokes("enter");
+    visual.simulate_keystrokes("cmd-enter");
     wait(&surface, visual, |s, _| {
         !s.saving && s.pending.contains_key("thoughts-composer-first")
     });
@@ -92,10 +91,9 @@ fn native_composer_recall_survives_reopen_and_is_consumed_by_a_confirmed_send(
     reopened.read_with(visual, |s, cx| {
         assert_eq!(s.composer.read(cx).controls.prompt.prelude, saved)
     });
-    click("send-mode-steer", visual);
     focus(&reopened, visual);
     visual.simulate_input("Use recalled context");
-    visual.simulate_keystrokes("enter");
+    visual.simulate_keystrokes("cmd-enter");
     wait(&reopened, visual, |s, _| {
         !s.saving
             && s.queue["items"]
@@ -136,10 +134,9 @@ fn native_composer_mode_survives_reopen_through_the_picker(app: &mut TestAppCont
     reopened.read_with(visual, |s, cx| {
         assert_eq!(s.composer_routing(cx).unwrap()["pickedMode"], "multitask")
     });
-    click("send-mode-steer", visual);
     reopened.update_in(visual, |s, w, cx| s.composer.read(cx).focus.focus(w));
     visual.simulate_input("Restored mode");
-    visual.simulate_keystrokes("enter");
+    visual.simulate_keystrokes("cmd-enter");
     visual.run_until_parked();
     reopened.read_with(visual, |s, _| {
         assert_eq!(
