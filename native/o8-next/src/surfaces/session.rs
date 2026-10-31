@@ -143,6 +143,12 @@ pub struct Session {
     pub settled_override: Option<String>,
     #[serde(default)]
     pub settled_at: Option<String>,
+    /// `owner/repo` from the repo's git remote, else its folder; older hosts omit it.
+    #[serde(default)]
+    pub repo_slug: Option<String>,
+    /// The worktree's current branch; older hosts omit it.
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 impl Session {
     pub fn settled(&self) -> bool {

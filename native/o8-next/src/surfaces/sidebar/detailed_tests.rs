@@ -175,3 +175,12 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
     .unwrap();
     assert!(saved.sidebar_detailed_rows && saved.sidebar_working_section);
 }
+
+#[test]
+fn sessions_read_repo_slug_and_branch_additively() {
+    let s: Session = serde_json::from_value(json!({"id": "t", "title": "T", "status": "idle",
+        "repoSlug": "o8-run/o8", "branch": "feature/rows"})).unwrap();
+    assert_eq!(s.repo_slug.as_deref(), Some("o8-run/o8"));
+    assert_eq!(s.branch.as_deref(), Some("feature/rows"));
+    assert_eq!(session("idle").branch, None);
+}

@@ -113,6 +113,11 @@ impl Client {
                 "enabled":true,"title":packet["title"],"branch":packet["branchTarget"],"runtime":packet["runtime"],"status":packet["status"],"repo":packet["workspaceTargetPath"].as_str().and_then(|path| path.rsplit('/').find(|part| !part.is_empty())),"launchContext":packet["launchContext"]
             }));
             sessions.push(Session {
+                repo_slug: None,
+                branch: ["branch", "gitBranch"]
+                    .iter()
+                    .find_map(|k| agent[*k].as_str().filter(|b| !b.is_empty()))
+                    .map(str::to_owned),
                 tmux_session: agent["tmuxSession"].as_str().map(str::to_owned),
                 id: key.into(),
                 title: crate::text::sanitize(agent["name"].as_str().unwrap_or(key)),
