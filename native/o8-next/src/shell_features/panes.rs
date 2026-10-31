@@ -157,7 +157,7 @@ fn split(s: &mut Shell, target: &str, zone: Zone, pane: super::RailPane, cx: &mu
         // placeThreadPane: a thread shows once. The main chat's own thread
         // stays put, and one already in a pane moves there.
         super::RailPane::Thread { id, .. } => {
-            if s.active() == Some(Tab::Session(id.clone())) {
+            if s.active().and_then(|tab| shown(s, &tab, cx)).as_ref() == Some(&id) {
                 return;
             }
             let open = tree(s).leaves().into_iter().find_map(|(leaf, content)| {
@@ -419,7 +419,7 @@ fn leaf(
         // as classic's header tabs do.
         .on_drag_move(cx.listener(
             move |s, event: &DragMoveEvent<super::header_tabs::Dragged>, _, cx| {
-                if thread_tab(s, event.drag(cx).index).is_some() {
+                if thread_tab(s, event.drag(cx).index, cx).is_some() {
                     track(s, &over, event.event.position, event.bounds, cx)
                 }
             },
@@ -439,7 +439,7 @@ fn leaf(
             let dropped = id.to_owned();
             cx.listener(move |s, tab: &super::header_tabs::Dragged, window, cx| {
                 let zone = s.features.get::<State>().hover.take();
-                let Some(thread) = thread_tab(s, tab.index) else {
+                let Some(thread) = thread_tab(s, tab.index, cx) else {
                     return;
                 };
                 let zone = zone
@@ -477,14 +477,23 @@ fn track(
     }
 }
 
-/// The thread behind header tab `index`, when it is a chat the main pane
-/// isn't showing.
-fn thread_tab(s: &Shell, index: usize) -> Option<super::RailPane> {
+/// The conversation a chat tab shows: its view's own pick, else its thread.
+fn shown(s: &Shell, tab: &Tab, cx: &gpui::App) -> Option<String> {
+    let Tab::Session(id) = tab else { return None };
+    match s.content.get(&s.key(tab)) {
+        Some(Content::Session(view)) => view.read(cx).shown_thread().or_else(|| Some(id.clone())),
+        _ => Some(id.clone()),
+    }
+}
+
+/// The conversation behind header tab `index`, when it is a chat the main
+/// pane isn't showing.
+fn thread_tab(s: &Shell, index: usize, cx: &gpui::App) -> Option<super::RailPane> {
     let tab = s.current()?.tabs.get(index)?.clone();
-    if s.active().as_ref() == Some(&tab) {
+    let id = shown(s, &tab, cx)?;
+    if s.active().and_then(|active| shown(s, &active, cx)).as_ref() == Some(&id) {
         return None;
     }
-    let Tab::Session(id) = tab else { return None };
     let title = s
         .sessions
         .iter()
