@@ -176,7 +176,7 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
     fixture
         .client
         .request("POST", &fixture.client.url("/api/panel/operator-defaults").unwrap())
-        .send_json(json!({"orchestratorBackend": "codex", "orchestratorModel": "gpt-6.1-sol"}))
+        .send_json(json!({"orchestratorBackend": "claude", "orchestratorModel": "claude-opus-5-5"}))
         .unwrap();
     hover_click(
         &mut visual,
@@ -192,8 +192,9 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
         .get("/api/v2/chat-history", &[("tabId", &created)])
         .unwrap();
     assert_eq!(record["repoPath"], paths[0]);
-    assert_eq!(record["backend"], "codex");
-    assert_eq!(record["model"], "gpt-6.1-sol");
+    assert_eq!(record["backend"], "claude");
+    // The lead's model, not the placeholder "claude-code" that failed to send.
+    assert_eq!(record["model"], "claude-opus-5-5");
     // The shell opened it rather than putting the previous thread back.
     for _ in 0..3 {
         draw(&mut visual);
