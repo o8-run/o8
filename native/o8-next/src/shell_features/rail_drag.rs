@@ -2,8 +2,8 @@ use super::*;
 use gpui::DragMoveEvent;
 // The rail's Run orchestrator and Run terminal buttons are also drag handles,
 // as in classic's CompactNavigationRail (startPaneDrag). Dropped on the
-// workspace they split the pane under the pointer (panes.rs); a terminal can
-// also go into the right panel, which stacks its views top and bottom.
+// workspace they split the pane under the pointer (panes.rs); either can also
+// go into the right panel, which stacks its views top and bottom.
 struct RailDrag;
 register_shell_feature!(RailDrag);
 impl ShellFeature for RailDrag {}
@@ -28,7 +28,7 @@ impl Render for Pane {
     }
 }
 
-/// Where a terminal dropped on the right panel goes: its top or bottom view.
+/// Where a drop on the right panel goes: its top or bottom view.
 #[derive(Default)]
 struct Target {
     lower: Option<bool>,
@@ -41,7 +41,7 @@ pub(crate) fn start_chat(s: &mut Shell, window: &mut Window, cx: &mut Context<Sh
     }
 }
 
-/// Makes the right panel a drop target for the rail's Terminal.
+/// Makes the right panel a drop target for the rail's chat and terminal.
 pub(super) fn panel_target(s: &Shell, panel: gpui::Div, cx: &mut Context<Shell>) -> gpui::Div {
     let lower = cx
         .has_active_drag()
@@ -51,7 +51,9 @@ pub(super) fn panel_target(s: &Shell, panel: gpui::Div, cx: &mut Context<Shell>)
         .relative()
         .on_drag_move(cx.listener(|s, event: &DragMoveEvent<Pane>, _, cx| {
             let position = event.event.position;
-            let next = (*event.drag(cx) == Pane::Terminal && event.bounds.contains(&position))
+            let next = event
+                .bounds
+                .contains(&position)
                 .then(|| position.y > event.bounds.center().y);
             let target = s.features.get::<Target>();
             if target.lower != next {
@@ -61,9 +63,9 @@ pub(super) fn panel_target(s: &Shell, panel: gpui::Div, cx: &mut Context<Shell>)
         }))
         .on_drop(cx.listener(|s, pane: &Pane, window, cx| {
             let lower = s.features.get::<Target>().lower.take();
-            if let (Pane::Terminal, Some(lower)) = (pane, lower) {
+            if let Some(lower) = lower {
                 s.capture(window, cx);
-                s.panel_terminal(lower, window, cx);
+                s.panel_drop(*pane == Pane::Chat, lower, window, cx);
             }
         }))
         .when_some(lower, |panel, lower| panel.child(overlay(lower)))

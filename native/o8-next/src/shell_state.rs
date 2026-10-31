@@ -43,6 +43,8 @@ pub struct PanelState {
     pub secondary: String,
     pub ratio: f32,
     pub tool_widths: BTreeMap<String, f32>,
+    /// Each workspace's side chat conversation.
+    pub side_chats: BTreeMap<String, String>,
 }
 impl Default for PanelState {
     fn default() -> Self {
@@ -54,6 +56,7 @@ impl Default for PanelState {
             secondary: "o8-md".into(),
             ratio: 50.,
             tool_widths: BTreeMap::new(),
+            side_chats: BTreeMap::new(),
         }
     }
 }
