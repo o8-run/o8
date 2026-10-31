@@ -245,4 +245,30 @@ fn sidebar_threads_and_pane_headers_drag_like_classic(cx: &mut TestAppContext) {
     let ids: Vec<_> = children.iter().map(|c| c.id().to_owned()).collect();
     assert_eq!(ids, [pane.clone(), "main".to_owned()]);
     assert_eq!(panes(&s, &v).unwrap().leaves().len(), 2);
+
+    // A header chat tab dropped near a pane's bottom opens its thread below
+    // it and stays in the header, as in classic.
+    let tabs = s.read_with(&v, |s, _| s.current().unwrap().tabs.clone());
+    let (index, session) = tabs
+        .iter()
+        .enumerate()
+        .find_map(|(i, t)| match t {
+            Tab::Session(id) => Some((i, id.clone())),
+            _ => None,
+        })
+        .expect("a chat tab");
+    let moved = bounds(&mut v, &format!("pane-{pane}"));
+    let below = gpui::point(moved.center().x, moved.bottom() - px(20.));
+    assert_eq!(
+        drag(&mut v, &format!("surface-tab-{index}"), below),
+        Some("pane-drop-below")
+    );
+    let tree = panes(&s, &v).unwrap();
+    let leaves = tree.leaves();
+    assert_eq!(leaves.len(), 3, "{tree:?}");
+    assert_eq!(leaves[1].1, &Leaf::Chat { session }, "{tree:?}");
+    assert_eq!(
+        s.read_with(&v, |s, _| s.current().unwrap().tabs.clone()),
+        tabs
+    );
 }

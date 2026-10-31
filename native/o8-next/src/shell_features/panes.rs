@@ -396,28 +396,21 @@ fn leaf(
                 .min_h_0()
                 .child(body),
         )
-        .on_drag_move(
+        .on_drag_move({
+            let over = over.clone();
             cx.listener(move |s, event: &DragMoveEvent<super::RailPane>, _, cx| {
-                let position = event.event.position;
-                let bounds = event.bounds;
-                let state = s.features.get::<State>();
-                let next = if bounds.contains(&position) {
-                    let x = f32::from(position.x - bounds.left())
-                        / f32::from(bounds.size.width).max(1.);
-                    let y = f32::from(position.y - bounds.top())
-                        / f32::from(bounds.size.height).max(1.);
-                    Some((over.clone(), Zone::at(x, y)))
-                } else if state.hover.as_ref().is_some_and(|(leaf, _)| *leaf == over) {
-                    None
-                } else {
-                    return;
-                };
-                if state.hover != next {
-                    state.hover = next;
-                    cx.notify();
+                track(s, &over, event.event.position, event.bounds, cx)
+            })
+        })
+        // A header chat tab dragged here opens its thread beside this pane,
+        // as classic's header tabs do.
+        .on_drag_move(cx.listener(
+            move |s, event: &DragMoveEvent<super::header_tabs::Dragged>, _, cx| {
+                if thread_tab(s, event.drag(cx).index).is_some() {
+                    track(s, &over, event.event.position, event.bounds, cx)
                 }
-            }),
-        )
+            },
+        ))
         .on_drop(cx.listener(move |s, pane: &super::RailPane, window, cx| {
             let zone = s
                 .features
@@ -429,8 +422,62 @@ fn leaf(
             s.capture(window, cx);
             split(s, &dropped, zone, pane.clone(), cx);
         }))
+        .on_drop({
+            let dropped = id.to_owned();
+            cx.listener(move |s, tab: &super::header_tabs::Dragged, window, cx| {
+                let zone = s.features.get::<State>().hover.take();
+                let Some(thread) = thread_tab(s, tab.index) else {
+                    return;
+                };
+                let zone = zone
+                    .filter(|(leaf, _)| *leaf == dropped)
+                    .map_or(Zone::Center, |(_, zone)| zone);
+                s.capture(window, cx);
+                split(s, &dropped, zone, thread, cx);
+            })
+        })
         .when_some(hover, |pane, zone| pane.child(overlay(zone)))
         .into_any_element()
+}
+
+/// Shows where a drag over pane `over` would land.
+fn track(
+    s: &mut Shell,
+    over: &str,
+    position: gpui::Point<gpui::Pixels>,
+    bounds: gpui::Bounds<gpui::Pixels>,
+    cx: &mut Context<Shell>,
+) {
+    let state = s.features.get::<State>();
+    let next = if bounds.contains(&position) {
+        let x = f32::from(position.x - bounds.left()) / f32::from(bounds.size.width).max(1.);
+        let y = f32::from(position.y - bounds.top()) / f32::from(bounds.size.height).max(1.);
+        Some((over.to_owned(), Zone::at(x, y)))
+    } else if state.hover.as_ref().is_some_and(|(leaf, _)| leaf == over) {
+        None
+    } else {
+        return;
+    };
+    if state.hover != next {
+        state.hover = next;
+        cx.notify();
+    }
+}
+
+/// The thread behind header tab `index`, when it is a chat.
+fn thread_tab(s: &Shell, index: usize) -> Option<super::RailPane> {
+    let tab = s.current()?.tabs.get(index)?.clone();
+    let Tab::Session(id) = tab else { return None };
+    let title = s
+        .sessions
+        .iter()
+        .find(|x| x.id == id)
+        .map(|x| crate::pane::title(&x.title))
+        .unwrap_or_else(|| "New chat".into());
+    Some(super::RailPane::Thread {
+        id,
+        title: title.into(),
+    })
 }
 
 /// TileContainer's pane header: the pane's name and its close. Dragging it
