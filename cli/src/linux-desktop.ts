@@ -1,10 +1,11 @@
 /** Linux desktop entry. CLI subcommands continue to use the ordinary CLI bundle. */
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { resolveCliDataDir } from './config.js';
+import { linuxWindowOwnerIsDead } from '../../src/lib/next/linux-window-startup.js';
 
 // The stage places this entry in <payload>/server/cli/ beside o8.mjs.
 const payload = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
@@ -15,9 +16,10 @@ const cli = join(payload, 'server/cli/o8.mjs');
 // Allow delayed bootstrap plus the server's 15-second first-paint deadline.
 // Expiry reports an error; it never starts a competing window.
 const SERVER_WINDOW_RESULT_TIMEOUT_MS = 60_000;
-// A claimed attempt has spawned or is about to; app-window reaps it within its
-// 15-second first-paint deadline and then publishes the result.
+// Bound this launcher's wait, while retaining a live claim for later launches.
+// A pause between claim and spawn precedes app-window's first-paint timer.
 const CLAIMED_ATTEMPT_GRACE_MS = 20_000;
+const WINDOW_STARTING = 'o8 is still opening its window. Try launching again shortly.';
 
 function record(text: string): Record<string, unknown> | undefined {
   try {
@@ -92,35 +94,54 @@ function cancelAttempt(attempt: string): boolean {
   } catch { return false; }
 }
 
-async function serverWindowResult(attempt: string, file: string): Promise<'ready' | 'failed'> {
+function windowResult(attempt: string): 'ready' | 'failed' | undefined {
+  try {
+    const result = record(readFileSync(join(attempt, 'result.json'), 'utf8'));
+    if (result?.status === 'ready' || result?.status === 'failed') return result.status;
+  } catch { /* No published result yet. */ }
+  return undefined;
+}
+
+function cleanFinishedAttempt(attempt: string): boolean {
+  if (!cancelAttempt(attempt) && !windowResult(attempt)) {
+    // Observe pending before claimed: the server can rename between probes.
+    if (existsSync(join(attempt, 'pending'))) return false;
+    if (existsSync(join(attempt, 'claimed')) && !linuxWindowOwnerIsDead(attempt)) return false;
+  }
+  rmSync(attempt, { recursive: true, force: true });
+  return true;
+}
+
+async function serverWindowResult(attempt: string): Promise<'ready' | 'failed'> {
   let deadline = Date.now() + SERVER_WINDOW_RESULT_TIMEOUT_MS;
   let claimed = false;
   let healthAt = 0;
   for (;;) {
+    const result = windowResult(attempt);
+    if (result) return result;
+    if (existsSync(join(attempt, 'claimed')) && linuxWindowOwnerIsDead(attempt)) {
+      throw new Error('The server exited before reporting its window startup result.');
+    }
     if (Date.now() >= deadline) {
-      if (claimed || cancelAttempt(attempt)) break;
-      // The server claimed the attempt and is spawning; its own first-paint
-      // deadline bounds the wait, so the window cannot arrive after we give up.
+      if (claimed) throw new Error(WINDOW_STARTING);
+      if (cancelAttempt(attempt) || !existsSync(join(attempt, 'claimed'))) {
+        throw new Error('The server did not report its window startup result within 60 seconds. Try launching o8 again.');
+      }
       claimed = true;
       deadline = Date.now() + CLAIMED_ATTEMPT_GRACE_MS;
     }
-    try {
-      const result = record(readFileSync(file, 'utf8'));
-      if (result?.status === 'ready' || result?.status === 'failed') return result.status;
-    } catch { /* The async server hook has not published its result yet. */ }
     if (Date.now() >= healthAt) {
-      const status = await runCli(['serve', 'status'], true, Math.max(1, deadline - Date.now()));
+      let status: CliResult | undefined;
+      try { status = await runCli(['serve', 'status'], true, Math.max(1, deadline - Date.now())); }
+      catch { /* A failed probe cannot revoke a server's claim. */ }
       if (Date.now() >= deadline) continue;
-      if (!healthy(status)) {
+      if ((!status || !healthy(status)) && !existsSync(join(attempt, 'claimed'))) {
         throw new Error('The server stopped being healthy before reporting its window startup result.');
       }
       healthAt = Date.now() + 1_000;
     }
     await delay(100);
   }
-  throw new Error(claimed
-    ? 'The server started a window but did not report its result. Try launching o8 again.'
-    : 'The server did not report its window startup result within 60 seconds. Try launching o8 again.');
 }
 
 async function openDesktop(): Promise<number> {
@@ -139,6 +160,10 @@ async function openDesktop(): Promise<number> {
     process.env.O8_NEXT_BIN = binary;
     process.env.O8_NEXT_MAIN_WINDOW = '1';
     process.env.O8_DATA_DIR = directory;
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name.startsWith('linux-window-startup-')
+        && !cleanFinishedAttempt(join(directory, entry.name))) throw new Error(WINDOW_STARTING);
+    }
     if (windowIsOpen()) {
       const status = await runCli(['serve', 'status'], true);
       if (healthy(status)) return 0;
@@ -164,7 +189,7 @@ async function openDesktop(): Promise<number> {
     if (started) {
       // The server owns the actual first-paint deadline and reaps failures.
       // Its hook can start arbitrarily later than serve's health response.
-      const result = await serverWindowResult(attempt, resultFile);
+      const result = await serverWindowResult(attempt);
       if (result === 'ready' && windowIsOpen()) return 0;
     } else if (windowIsOpen()) return 0;
     // A terminal daemon cannot inherit this launcher's packaged environment.
@@ -179,12 +204,9 @@ async function openDesktop(): Promise<number> {
     released = true;
     return (await next).code;
   } finally {
-    // Cancel an unclaimed server restore before allowing another launch in.
-    if (attempt) {
-      cancelAttempt(attempt);
-      rmSync(attempt, { recursive: true, force: true });
-    }
-    if (!released) closeSync(lock);
+    // Keep unresolved claims across launcher exits and failed health probes.
+    try { if (attempt) cleanFinishedAttempt(attempt); }
+    finally { if (!released) closeSync(lock); }
   }
 }
 
