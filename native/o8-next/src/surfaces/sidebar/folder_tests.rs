@@ -238,13 +238,27 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
     assert!(visual.debug_bounds("sidebar-new-thread-menu").is_some());
     click(
         &mut visual,
-        Box::leak(format!("sidebar-new-thread-in-{}", names[0]).into_boxed_str()),
+        Box::leak(format!("sidebar-new-thread-in-{}", names[1]).into_boxed_str()),
     );
     wait_for(&shell, &mut visual, |s, cx| {
         started(s, cx, Some(&created)).is_some()
     });
     draw(&mut visual);
     assert!(visual.debug_bounds("sidebar-new-thread-menu").is_none());
+
+    // New thread in a repository whose empty thread is still unused opens that
+    // one instead of piling up another untitled conversation.
+    let before = conversations(&fixture).len();
+    click(&mut visual, "sidebar-new-thread");
+    draw(&mut visual);
+    click(
+        &mut visual,
+        Box::leak(format!("sidebar-new-thread-in-{}", names[0]).into_boxed_str()),
+    );
+    wait_for(&shell, &mut visual, |s, cx| {
+        s.surfaces.sidebar.view.as_ref().unwrap().read(cx).selected.as_deref() == Some(created.as_str())
+    });
+    assert_eq!(conversations(&fixture).len(), before);
 
     // Choosing another thread before the list carries a new one keeps that
     // choice when the load lands.

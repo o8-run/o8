@@ -378,6 +378,27 @@ impl ThreadList {
     /// is false (a split pane shows it); returns its id.
     pub(crate) fn start_thread(&mut self, repo: String, open: bool, cx: &mut Context<Self>) -> String {
         self.new_menu = false;
+        // A new chat in the main pane reuses this repository's empty one, so
+        // repeated New chat does not pile up untitled threads. A split pane
+        // still gets its own.
+        if open
+            && let Some(id) = self
+                .sessions
+                .iter()
+                .find(|s| {
+                    s.repo_path.as_deref() == Some(repo.as_str())
+                        && s.message_count == 0
+                        && s.outcome.is_none()
+                        && !self.failed_starts.contains(&s.id)
+                })
+                .map(|s| s.id.clone())
+        {
+            self.selected = Some(id.clone());
+            self.follow_selection = true;
+            cx.emit(Event::Selected(id.clone()));
+            cx.notify();
+            return id;
+        }
         let id = format!(
             "thoughts-next-{}",
             std::time::SystemTime::now()
