@@ -151,6 +151,12 @@ fn browser_navigation_toolbar_enter_blurs_and_preserves_address_draft(cx: &mut T
         .collect();
     assert!(lefts.windows(2).all(|w| w[0] < w[1]));
     cx.simulate_keystrokes("shift-tab shift-tab");
+    // On non-macOS the Browser shows a "needs macOS for now" fallback whose
+    // "Open in browser" recover button is a keyboard stop after the toolbar, so
+    // Copy sits one tab earlier than on macOS; step past it to reach Copy.
+    if cfg!(not(target_os = "macos")) {
+        cx.simulate_keystrokes("shift-tab");
+    }
     draw(cx);
     cx.simulate_keystrokes("space");
     assert!(
