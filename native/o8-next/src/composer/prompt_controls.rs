@@ -559,8 +559,13 @@ impl Surface {
         };
         let key = event.keystroke.key.as_str();
         if open == "mode" && matches!(key, "up" | "down") {
-            let ids = ["mode-fast", "mode-multitask"];
             let routing = self.composer_routing(cx).unwrap_or(Value::Null);
+            // Arrows skip Shared where it is unavailable, as classic's cycle does.
+            let ids: &[&str] = if crate::composer::controls::shares_checkout(routing["backend"].as_str()) {
+                &["mode-fast", "mode-multitask"]
+            } else {
+                &["mode-multitask"]
+            };
             let current = ids
                 .iter()
                 .position(|id| {
