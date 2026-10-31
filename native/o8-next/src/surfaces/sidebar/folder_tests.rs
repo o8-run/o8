@@ -175,7 +175,10 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
     // operator's lead rather than the server's runtime placeholder.
     fixture
         .client
-        .request("POST", &fixture.client.url("/api/panel/operator-defaults").unwrap())
+        .request(
+            "POST",
+            &fixture.client.url("/api/panel/operator-defaults").unwrap(),
+        )
         .send_json(json!({"orchestratorBackend": "claude", "orchestratorModel": "claude-opus-5-5"}))
         .unwrap();
     hover_click(
@@ -232,37 +235,37 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
     draw(&mut visual);
     assert!(visual.debug_bounds("sidebar-view-menu").is_none());
 
-    // Outside By repo, with two repositories, New thread asks which one.
+    // Outside By repo, with two repositories, New thread asks which one. In a
+    // repository whose empty thread is still unused it opens that one instead
+    // of piling up another untitled conversation.
+    let sidebar = shell.read_with(&visual, |s, _| s.surfaces.sidebar.view.clone().unwrap());
+    sidebar.update(&mut visual, |s, cx| s.choose(first.into(), cx));
+    draw(&mut visual);
+    let before = conversations(&fixture).len();
     click(&mut visual, "sidebar-new-thread");
     draw(&mut visual);
     assert!(visual.debug_bounds("sidebar-new-thread-menu").is_some());
     click(
         &mut visual,
-        Box::leak(format!("sidebar-new-thread-in-{}", names[1]).into_boxed_str()),
-    );
-    wait_for(&shell, &mut visual, |s, cx| {
-        started(s, cx, Some(&created)).is_some()
-    });
-    draw(&mut visual);
-    assert!(visual.debug_bounds("sidebar-new-thread-menu").is_none());
-
-    // New thread in a repository whose empty thread is still unused opens that
-    // one instead of piling up another untitled conversation.
-    let before = conversations(&fixture).len();
-    click(&mut visual, "sidebar-new-thread");
-    draw(&mut visual);
-    click(
-        &mut visual,
         Box::leak(format!("sidebar-new-thread-in-{}", names[0]).into_boxed_str()),
     );
     wait_for(&shell, &mut visual, |s, cx| {
-        s.surfaces.sidebar.view.as_ref().unwrap().read(cx).selected.as_deref() == Some(created.as_str())
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .selected
+            .as_deref()
+            == Some(created.as_str())
     });
+    draw(&mut visual);
+    assert!(visual.debug_bounds("sidebar-new-thread-menu").is_none());
     assert_eq!(conversations(&fixture).len(), before);
 
     // Choosing another thread before the list carries a new one keeps that
     // choice when the load lands.
-    let sidebar = shell.read_with(&visual, |s, _| s.surfaces.sidebar.view.clone().unwrap());
     sidebar.update(&mut visual, |s, cx| {
         s.expect_open(&created);
         s.choose(first.into(), cx);

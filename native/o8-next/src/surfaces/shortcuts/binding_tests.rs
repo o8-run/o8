@@ -72,14 +72,19 @@ fn shortcuts_every_displayed_chord_has_a_live_binding(cx: &mut TestAppContext) {
             }
             visual.simulate_keystrokes(chord);
             shortcuts_draw(&mut visual);
-            // New chat lands once the server has the thread and the list loads.
+            // New chat lands once the server answers: the thread opens, or a
+            // repository that refuses it records the failed start; with no
+            // repository open it offers Setup.
             let started = |s: &Shell, cx: &App| {
-                s.surfaces.sidebar.view.as_ref().is_some_and(|list| {
-                    list.read(cx)
-                        .selected
-                        .as_deref()
-                        .is_some_and(|id| id.starts_with("thoughts-next-"))
-                })
+                s.surfaces.setup.view.is_some()
+                    || s.surfaces.sidebar.view.as_ref().is_some_and(|list| {
+                        let list = list.read(cx);
+                        !list.failed_starts.is_empty()
+                            || list
+                                .selected
+                                .as_deref()
+                                .is_some_and(|id| id.starts_with("thoughts-next-"))
+                    })
             };
             if *label == "New chat" {
                 let since = std::time::Instant::now();
