@@ -29,6 +29,10 @@ fn render(
     let back = adjacent(s, -1);
     let forward = adjacent(s, 1);
     let hidden = s.surfaces.sidebar.hidden;
+    // Redraw each frame while the sidebar column opens or closes.
+    if super::super::sidebar::travel(s).1 {
+        window.request_animation_frame();
+    }
     let panel = super::right_panel::width(s, window);
     let panel_open = super::right_panel::is_open(s);
     let shown = pill_list(s);
@@ -225,7 +229,7 @@ pub(super) fn icon_button(
 }
 
 pub(super) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
-    s.surfaces.sidebar.hidden = !s.surfaces.sidebar.hidden;
+    super::super::sidebar::toggle(s, cx);
     s.restore_focus(window, cx);
     cx.notify();
 }

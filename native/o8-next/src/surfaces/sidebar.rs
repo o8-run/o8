@@ -22,6 +22,8 @@ pub(super) struct Runtime {
     pub view: Option<Entity<ThreadList>>,
     /// The header's sidebar toggle (Cmd+B) hides the column.
     pub hidden: bool,
+    /// The column's open or close in flight; None at rest.
+    pub motion: Option<crate::motion::Transition>,
     /// The column's edge is being dragged; the width saves on release.
     pub resizing: bool,
     /// Where the press on the edge began and the width then (useColumnResize's
@@ -36,6 +38,33 @@ const MIN_WIDTH: f32 = 160.;
 const MAX_WIDTH: f32 = 500.;
 /// The edge's grab target reaches this far either side of the boundary.
 const EDGE_SLOP: f32 = 8.;
+
+/// Open and close travel for the column (Q 2026-10-31).
+const TRAVEL_MS: u64 = 220;
+
+/// Starts the column toward shown or hidden; opening fades its rows in.
+pub(super) fn toggle(shell: &mut Shell, cx: &mut gpui::App) {
+    let sidebar = &mut shell.surfaces.sidebar;
+    sidebar.hidden = !sidebar.hidden;
+    sidebar
+        .motion
+        .get_or_insert(crate::motion::Transition::settled(TRAVEL_MS, sidebar.hidden))
+        .set(!sidebar.hidden);
+    if !sidebar.hidden
+        && let Some(view) = &sidebar.view
+    {
+        view.update(cx, |list, cx| list.stagger_in(cx));
+    }
+}
+
+/// How open the column is now (0 hidden, 1 shown) and whether it is moving.
+pub(super) fn travel(shell: &Shell) -> (f32, bool) {
+    let sidebar = &shell.surfaces.sidebar;
+    match sidebar.motion.map(|motion| motion.value()) {
+        Some((open, true)) => (open, true),
+        _ => (if sidebar.hidden { 0. } else { 1. }, false),
+    }
+}
 
 /// The column's width: the dragged one, else the default.
 pub(super) fn width(shell: &Shell) -> f32 {
@@ -149,7 +178,8 @@ pub(super) const REGISTRATION: Registration = Registration {
             });
     },
     decorate: |shell, content| {
-        if shell.surfaces.sidebar.hidden {
+        let (open, moving) = travel(shell);
+        if shell.surfaces.sidebar.hidden && !moving {
             return div()
                 .flex()
                 .flex_col()
@@ -160,6 +190,13 @@ pub(super) const REGISTRATION: Registration = Registration {
                 .into_any_element();
         }
         let width = width(shell);
+        let list = gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone())
+            .cached(
+                gpui::StyleRefinement::default()
+                    .w(px(width))
+                    .h_full()
+                    .flex_shrink_0(),
+            );
         div()
             .relative()
             .flex()
@@ -168,21 +205,31 @@ pub(super) const REGISTRATION: Registration = Registration {
             // This row sits inside the panel and resize row; its automatic
             // minimum width must not widen the workspace past the window.
             .min_w_0()
-            .child(
-                gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
-                    gpui::StyleRefinement::default()
-                        .w(px(width))
+            .map(|row| {
+                if !moving {
+                    return row.child(list);
+                }
+                // In flight the column clips its full-width rows rather than
+                // reflowing them; closing fades them out together.
+                row.child(
+                    div()
+                        .w(px(width * open))
                         .h_full()
-                        .flex_shrink_0(),
-                ),
-            )
+                        .flex_shrink_0()
+                        .overflow_hidden()
+                        .when(shell.surfaces.sidebar.hidden, |column| column.opacity(open))
+                        .child(list),
+                )
+            })
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
-            .child(edge(
-                width,
-                shell.surfaces.sidebar.resizing,
-                shell.system_glass,
-                shell.surfaces.sidebar.press.clone(),
-            ))
+            .when(!moving, |row| {
+                row.child(edge(
+                    width,
+                    shell.surfaces.sidebar.resizing,
+                    shell.system_glass,
+                    shell.surfaces.sidebar.press.clone(),
+                ))
+            })
             .into_any_element()
     },
     key_down: |shell, event, window, cx| {

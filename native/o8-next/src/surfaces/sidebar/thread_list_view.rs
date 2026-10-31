@@ -1,11 +1,50 @@
 use super::*;
 use crate::theme::current as theme;
-use gpui::{Render, canvas, div, px, uniform_list};
+use gpui::{Render, Styled, canvas, div, px, uniform_list};
+use std::time::Duration;
 
 // Use the shared semantic tokens for the workspace sidebar.
 
+/// The open stagger (Q 2026-10-31, after a sidebar demo): each row starts
+/// this long after the one above, fades over ROW_FADE and settles from a few
+/// pixels left. Rows past STAGGER_ROWS start together.
+const STAGGER: Duration = Duration::from_millis(28);
+const ROW_FADE: Duration = Duration::from_millis(170);
+const STAGGER_ROWS: usize = 10;
+const SETTLE_PX: f32 = 6.;
+
+impl ThreadList {
+    /// Fades the rows in top-down, as the column opens.
+    pub(crate) fn stagger_in(&mut self, cx: &mut Context<Self>) {
+        self.reveal = Some(std::time::Instant::now());
+        cx.notify();
+    }
+
+    /// How far row `slot` (header 0, search 1, then the list) has arrived.
+    fn arrived(&self, slot: usize) -> f32 {
+        let Some(start) = self.reveal else {
+            return 1.;
+        };
+        let delay = STAGGER * slot.min(STAGGER_ROWS) as u32;
+        let t = start.elapsed().saturating_sub(delay).as_secs_f32() / ROW_FADE.as_secs_f32();
+        crate::motion::ease_out(t.min(1.))
+    }
+}
+
+/// A row on its way in: faded and a few pixels short of its place.
+fn arriving<E: Styled + gpui::ParentElement>(row: E, arrived: f32) -> E {
+    row.opacity(arrived).relative().left(px(-SETTLE_PX * (1. - arrived)))
+}
+
 impl Render for ThreadList {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(start) = self.reveal {
+            if start.elapsed() < STAGGER * STAGGER_ROWS as u32 + ROW_FADE {
+                cx.on_next_frame(window, |_, _, cx| cx.notify());
+            } else {
+                self.reveal = None;
+            }
+        }
         if !self.editing && self.editor.read(cx).focus.is_focused(window) {
             self.focus.focus(window);
         }
@@ -42,8 +81,11 @@ impl Render for ThreadList {
             .font_weight(gpui::FontWeight::LIGHT)
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key))
-            .child(self.project_header(window, cx))
-            .child(
+            .child(arriving(
+                div().child(self.project_header(window, cx)),
+                self.arrived(0),
+            ))
+            .child(arriving(
                 div()
                     .mx(px(6.))
                     .flex()
@@ -88,7 +130,8 @@ impl Render for ThreadList {
                         )
                         .child(self.new_thread_button(cx))
                     }),
-            )
+                self.arrived(1),
+            ))
             .when(self.editing || !self.query.is_empty(), |view| {
                 view.child(self.editor.clone())
             })
@@ -132,9 +175,13 @@ impl Render for ThreadList {
                                     .unwrap_or_else(|| {
                                         format!("{}:{}:{}", row.kind, row.workspace, row.title)
                                     });
+                                let arrived = this.arrived(i + 2);
                                 div()
                                     .id(gpui::ElementId::Name(identity.into()))
                                     .debug_selector(move || format!("thread-row-{i}"))
+                                    .opacity(arrived)
+                                    .relative()
+                                    .left(px(-SETTLE_PX * (1. - arrived)))
                                     .group("thread-row")
                                     .w_full()
                                     .min_w_0()

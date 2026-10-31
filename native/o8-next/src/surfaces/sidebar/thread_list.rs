@@ -128,6 +128,8 @@ pub struct ThreadList {
     notice: String,
     pub painted: Rc<Cell<usize>>,
     pub materialized: Rc<Cell<usize>>,
+    /// When the column last opened; rows fade in top-down from here.
+    reveal: Option<std::time::Instant>,
 }
 impl EventEmitter<Event> for ThreadList {}
 impl ThreadList {
@@ -208,6 +210,7 @@ impl ThreadList {
             notice: String::new(),
             painted: Rc::new(Cell::new(usize::MAX)),
             materialized: Rc::new(Cell::new(0)),
+            reveal: None,
         }
     }
     #[cfg(test)]
