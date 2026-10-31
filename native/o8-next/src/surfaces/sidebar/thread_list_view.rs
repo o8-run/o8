@@ -152,6 +152,16 @@ impl Render for ThreadList {
                                     .when(thread, |view| {
                                         view.cursor_pointer().hover(|style| style.bg(theme().hover))
                                     })
+                                    // Dragged onto the workspace, a thread opens as a split pane.
+                                    .when_some(row.id.clone(), |view, id| {
+                                        let dragged = crate::shell::features::RailPane::Thread {
+                                            id,
+                                            title: crate::text::sanitize(&row.title).into(),
+                                        };
+                                        view.on_drag(dragged, |drag, _, _, cx| {
+                                            cx.new(|_| drag.clone())
+                                        })
+                                    })
                                     .child(
                                         div()
                                             .flex()
