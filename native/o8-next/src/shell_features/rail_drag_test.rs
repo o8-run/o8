@@ -272,3 +272,46 @@ fn sidebar_threads_and_pane_headers_drag_like_classic(cx: &mut TestAppContext) {
         tabs
     );
 }
+
+#[gpui::test]
+fn header_play_menu_items_drag_onto_panes_like_classic(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    let (s, mut v) = open(
+        f.client.clone(),
+        f.root.join("play-drag.json"),
+        crate::shell_state::State::default(),
+        cx,
+    );
+    ready(&s, &mut v);
+    v.simulate_resize(size(px(1600.), px(1000.)));
+    settle(&mut v);
+    let play = bounds(&mut v, "header-play").center();
+    v.simulate_click(play, Modifiers::default());
+    settle(&mut v);
+    bounds(&mut v, "header-play-menu");
+
+    // Terminal leaves the menu for the main pane's bottom edge; the menu closes.
+    let main = bounds(&mut v, "pane-main");
+    let below = gpui::point(main.center().x, main.bottom() - px(20.));
+    assert_eq!(
+        drag(&mut v, "header-play-terminal", below),
+        Some("pane-drop-below")
+    );
+    assert!(
+        v.debug_bounds("header-play-menu").is_none(),
+        "the menu closes"
+    );
+    let Some(Node::Split {
+        vertical: false,
+        children,
+        ..
+    }) = panes(&s, &v)
+    else {
+        panic!("no stacked split: {:?}", panes(&s, &v));
+    };
+    let [Node::Leaf { id: first, .. }, Node::Leaf { content, .. }] = &*children else {
+        panic!("{children:?}");
+    };
+    assert_eq!(first, "main");
+    assert!(matches!(content, Leaf::Terminal { .. }), "{content:?}");
+}

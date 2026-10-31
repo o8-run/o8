@@ -64,28 +64,72 @@ pub(super) fn play(s: &mut Shell, window: &Window, cx: &mut Context<Shell>) -> i
                 appear,
                 div()
                     .py(px(4.))
-                    .child(item(
-                        "header-play-chat",
-                        "Chat",
-                        cx,
-                        |this, window, cx| match this
-                            .workspace_sessions()
-                            .first()
-                            .map(|s| s.id.clone())
-                        {
-                            Some(id) => this.execute(Command::Message(id), window, cx),
-                            None => this.execute(Command::Setup, window, cx),
-                        },
-                    ))
-                    .child(item(
-                        "header-play-terminal",
-                        "Terminal",
-                        cx,
-                        |this, window, cx| this.execute(Command::Terminal, window, cx),
-                    )),
+                    .child(
+                        item(
+                            "header-play-chat",
+                            "Chat",
+                            cx,
+                            |this, window, cx| match this
+                                .workspace_sessions()
+                                .first()
+                                .map(|s| s.id.clone())
+                            {
+                                Some(id) => this.execute(Command::Message(id), window, cx),
+                                None => this.execute(Command::Setup, window, cx),
+                            },
+                        )
+                        .on_drag(super::RailPane::Chat, drag_out(cx)),
+                    )
+                    .child(
+                        item(
+                            "header-play-terminal",
+                            "Terminal",
+                            cx,
+                            |this, window, cx| this.execute(Command::Terminal, window, cx),
+                        )
+                        .on_drag(super::RailPane::Terminal, drag_out(cx)),
+                    )
+                    .child(
+                        div()
+                            .mt(px(4.))
+                            .pt(px(7.))
+                            .pb(px(5.))
+                            .pl(px(12.))
+                            .border_t_1()
+                            .border_color(theme().border)
+                            .text_size(px(11.))
+                            .text_color(theme().text_muted)
+                            .child("Drag to place on a pane edge"),
+                    ),
                 cx,
             ))
         })
+}
+
+/// HeaderPlayMenuItem's drag: Chat and Terminal leave the menu to land on a
+/// pane edge, and the menu closes once they do.
+fn drag_out(
+    cx: &mut Context<Shell>,
+) -> impl Fn(
+    &super::RailPane,
+    gpui::Point<gpui::Pixels>,
+    &mut Window,
+    &mut gpui::App,
+) -> Entity<super::RailPane>
++ 'static {
+    let shell = cx.entity().downgrade();
+    move |pane, _, _, cx| {
+        let shell = shell.clone();
+        cx.defer(move |cx| {
+            shell
+                .update(cx, |s, cx| {
+                    s.features.get::<Menus>().play = false;
+                    cx.notify();
+                })
+                .ok();
+        });
+        cx.new(|_| pane.clone())
+    }
 }
 
 /// The open card's 150ms appearance (the desktop overlay's scale-in from its
@@ -166,7 +210,7 @@ fn item(
     label: &'static str,
     cx: &mut Context<Shell>,
     run: fn(&mut Shell, &mut Window, &mut Context<Shell>),
-) -> impl IntoElement {
+) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .debug_selector(move || id.into())
