@@ -19,7 +19,8 @@ import { randomUUID } from 'node:crypto';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { withProviderStoreLock } from './store-lock';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
-import { acpEnvironmentId, readAcpEnvironment, resolveAcpEnvironment, saveAcpEnvironment, type AcpEnvironmentInventory } from '@/lib/acp/connection-environment';
+import { acpEnvironmentId, deleteAcpEnvironment, readAcpEnvironment, resolveAcpEnvironment, saveAcpEnvironment, type AcpEnvironmentInventory } from '@/lib/acp/connection-environment';
+import { providerCredentialName } from './spawn-environment';
 import { parseLocalAcpConnection, readLocalAcpConnection, type LocalAcpConnection } from '@/lib/acp/local-connection';
 import type { ActiveProviderInstance } from './instance-context';
 
@@ -159,14 +160,13 @@ export function deleteProviderInstance(id: string): boolean {
   return withProviderStoreLock(() => {
     const store = readStore();
     if (!store.instances.some(i => i.id === id)) return false;
-    const environment = readAcpEnvironment(instanceEnvironmentId(id));
     const commit = () => {
       store.instances = store.instances.filter(i => i.id !== id);
       for (const [thread, bound] of Object.entries(store.threads)) if (bound === id) delete store.threads[thread];
       writeStore(store);
     };
-    if (environment.revision > 0) saveAcpEnvironment(environment, [], commit);
-    else commit();
+    // The configuration row and its credentials go with the instance.
+    deleteAcpEnvironment(instanceEnvironmentId(id), commit);
     return true;
   });
 }
@@ -184,10 +184,16 @@ export function readInstanceEnvironment(id: string): AcpEnvironmentInventory {
   return readAcpEnvironment(instanceEnvironmentId(id));
 }
 
-/** Same validation and encryption as the Local ACP env editor. */
+/**
+ * Same validation and encryption as the Local ACP env editor. Runtime
+ * instances (not ACP) may also hold provider API keys such as OPENAI_API_KEY,
+ * as secrets only, for their own sessions.
+ */
 export function saveInstanceEnvironment(id: string, revision: number, variables: unknown): AcpEnvironmentInventory {
-  if (!readProviderInstance(id)) throw new Error('That instance no longer exists.');
-  return saveAcpEnvironment({ connectionId: instanceEnvironmentId(id), revision }, variables);
+  const instance = readProviderInstance(id);
+  if (!instance) throw new Error('That instance no longer exists.');
+  return saveAcpEnvironment({ connectionId: instanceEnvironmentId(id), revision }, variables, undefined,
+    { allowProviderCredentials: instance.runtime !== 'acp' });
 }
 
 export function threadProviderInstance(threadId: string | null | undefined): string | null {
@@ -229,6 +235,8 @@ export function resolveProviderInstanceLaunch(threadId: string | null | undefine
     id: instance.id, runtime: instance.runtime,
     ...(instance.binaryPath ? { binaryPath: expandHome(instance.binaryPath) } : {}),
     home: selector && instance.homeDir ? { [selector]: expandHome(instance.homeDir) } : {},
-    env, ...(instance.acp ? { acp: instance.acp, localEnvironment } : {}),
+    env: Object.fromEntries(Object.entries(env).filter(([name]) => !providerCredentialName(name))),
+    credentials: instance.runtime === 'acp' ? {} : Object.fromEntries(Object.entries(env).filter(([name]) => providerCredentialName(name))),
+    ...(instance.acp ? { acp: instance.acp, localEnvironment } : {}),
   };
 }

@@ -14,6 +14,8 @@ export interface ActiveProviderInstance {
   /** Selector variable to value, e.g. `{ CODEX_HOME: '/home/me/.codex-work' }`. */
   home: Record<string, string>;
   env: Record<string, string>;
+  /** Provider API keys saved on this instance; they replace the shared keys for its sessions. */
+  credentials?: Record<string, string>;
   acp?: { name: string; command: string; args: string[]; useOpenRouter: boolean };
   localEnvironment?: { connectionId: string; revision: number };
 }
@@ -33,4 +35,10 @@ export function activeProviderInstance(runtimeId?: string): ActiveProviderInstan
 export function providerInstanceEnvironment(runtimeId: string | undefined): Record<string, string> {
   const active = runtimeId && runtimeId !== 'acp' ? activeProviderInstance(runtimeId) : null;
   return active ? { ...active.env, ...active.home } : {};
+}
+
+/** Provider API keys an instance sets; applied after the credential policy. */
+export function providerInstanceCredentials(runtimeId: string | undefined): Record<string, string> {
+  const active = runtimeId && runtimeId !== 'acp' ? activeProviderInstance(runtimeId) : null;
+  return active?.credentials ?? {};
 }

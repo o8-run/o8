@@ -80,3 +80,35 @@ it('runs a bound ACP instance with its own command and env', async () => {
   const launch = await runWithThreadProviderInstance('acp', 'acp-thread', async () => localAcpProcessLaunch());
   expect(launch).toMatchObject({ command: '/bin/second', args: ['--acp'], env: { SECOND_MODE: 'x' }, localEnvironment: { connectionId: `instance:${instance.id}` } });
 });
+
+it('deletes the instance env configuration row and its credentials', () => {
+  createProviderInstance({ runtime: 'codex', name: 'gone' });
+  saveInstanceEnvironment('codex-gone', readInstanceEnvironment('codex-gone').revision, [{ name: 'GONE_TOKEN', secret: true, value: 'fixture-gone' }]);
+  deleteProviderInstance('codex-gone');
+  const Database = require('better-sqlite3');
+  const db = new Database(join(state.dir, 'acp-environment.sqlite'), { readonly: true });
+  try {
+    expect(db.prepare('SELECT COUNT(*) AS n FROM configuration WHERE connection_id = ?').get('instance:codex-gone').n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM credentials WHERE connection_id = ?').get('instance:codex-gone').n).toBe(0);
+  } finally { db.close(); }
+  expect(readInstanceEnvironment('codex-gone').revision).toBe(0);
+});
+
+it('lets a runtime instance carry its own provider API keys as secrets only', async () => {
+  createProviderInstance({ runtime: 'codex', name: 'keys' });
+  expect(() => saveInstanceEnvironment('codex-keys', readInstanceEnvironment('codex-keys').revision, [{ name: 'OPENAI_API_KEY', secret: false, value: 'sk-plain' }])).toThrow();
+  saveInstanceEnvironment('codex-keys', readInstanceEnvironment('codex-keys').revision, [{ name: 'OPENAI_API_KEY', secret: true, value: 'sk-fixture-instance' }]);
+  expect(JSON.stringify(readInstanceEnvironment('codex-keys'))).not.toContain('sk-fixture-instance');
+  // The Local ACP env editor keeps the global name rules.
+  expect(() => saveAcpEnvironment({ connectionId: 'local-acp-fixture', revision: 0 }, [{ name: 'OPENAI_API_KEY', secret: true, value: 'x' }])).toThrow();
+  bindThreadProviderInstance('thread-keys', 'codex-keys');
+  const seen = await runWithThreadProviderInstance('codex', 'thread-keys', async () => ({
+    codex: childEnvironment({ runtimeId: 'codex', inherit: false }),
+    claude: childEnvironment({ runtimeId: 'claude-code', inherit: false }),
+  }));
+  expect(seen.codex.OPENAI_API_KEY).toBe('sk-fixture-instance');
+  expect(seen.claude.OPENAI_API_KEY).not.toBe('sk-fixture-instance');
+  const plain = await runWithThreadProviderInstance('codex', 'thread-other', async () => childEnvironment({ runtimeId: 'codex', inherit: false }));
+  expect(plain.OPENAI_API_KEY).not.toBe('sk-fixture-instance');
+  deleteProviderInstance('codex-keys');
+});

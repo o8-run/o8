@@ -1,5 +1,5 @@
 import { workerParentEnvironment } from './worker-environment';
-import { providerInstanceEnvironment } from './instance-context';
+import { providerInstanceCredentials, providerInstanceEnvironment } from './instance-context';
 import { deferredMcpArgumentsForCheck } from './deferred-mcp-arguments';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
@@ -115,7 +115,10 @@ export function childEnvironment(options: SpawnOptions & { env?: Record<string, 
   }
   // The active provider instance's home selector and env win (empty for the default instance).
   const input = { ...parent, ...options.env, ...providerInstanceEnvironment(options.runtimeId) };
-  return resolvedEnvironment(input, options.inject !== false && permitsApiCredentials(options.runtimeId), { ...options, deniedValues: [...((options as Context).deniedValues ?? []), ...(options.env ? contexts.get(options.env)?.deniedValues ?? [] : [])] });
+  const result = resolvedEnvironment(input, options.inject !== false && permitsApiCredentials(options.runtimeId), { ...options, deniedValues: [...((options as Context).deniedValues ?? []), ...(options.env ? contexts.get(options.env)?.deniedValues ?? [] : [])] });
+  // Keys saved on the instance itself are its own opt-in; they apply to its runtime only.
+  if (options.inject !== false) for (const [name, value] of Object.entries(providerInstanceCredentials(options.runtimeId))) result[name] = value;
+  return result;
 }
 
 export function childEnvironmentContext(env: Record<string, string | undefined> | undefined): Context | undefined {
