@@ -320,7 +320,10 @@ pub(crate) fn open_packet<T: 'static>(
                 if let Some(focus) = &return_focus {
                     focus.focus(window);
                 }
-                view.update(cx, |v, cx| v.inspect(Some(id), window, cx))
+                view.update(cx, |v, cx| v.inspect(Some(id), window, cx));
+                // Open is queued. Retain a new inspector until the panel's
+                // subscriber receives it and takes ownership.
+                cx.defer(move |_| drop(view));
             });
         });
     });
