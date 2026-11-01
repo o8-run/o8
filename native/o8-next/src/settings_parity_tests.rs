@@ -250,3 +250,32 @@ fn settings_parity_classic_fleet_presets_persist_and_recover(cx: &mut TestAppCon
     assert_eq!(error(&shell, input), None);
     assert_eq!(values(&fixture)["parallelCap"], 5);
 }
+
+#[gpui::test]
+fn settings_parity_classic_brain_model_presets_persist(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, _) = start(cx);
+    let cx = &mut visual;
+    search(cx, "brainCodexModel");
+    for (index, model) in [
+        "gpt-6-astra",
+        "gpt-6.1-sol",
+        "gpt-6-sol",
+        "gpt-6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.6-sol",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        click(cx, &format!("setting-brainCodexModel-preset-{index}"));
+        frame(&shell, cx);
+        assert_eq!(error(&shell, cx), None);
+        assert_eq!(values(&fixture)["brainCodexModel"], model);
+    }
+    assert!(
+        cx.debug_bounds("edit-brainCodexModel").is_some(),
+        "saved custom model values remain editable"
+    );
+}

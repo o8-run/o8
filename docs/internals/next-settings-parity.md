@@ -89,7 +89,7 @@ the existing operator-defaults route unless another owner is named.
 | Providers / Advanced orchestrator options | OpenCode fallback model; Combined answer provider; Existing setup uses Claude | missing | partial: combined answer and existing setup present; OpenCode live catalog remains |
 | Providers / Advanced worker setup | Codex launch method (Direct/Via Ori) | missing | skipped: credential carrier |
 | Providers / Advanced worker setup | Worker quota fallback | missing | present |
-| Providers / Engineering Brain | Answer routing; Codex model; Codex effort | present | partial: routing, free-text model and effort present; classic model presets remain |
+| Providers / Engineering Brain | Answer routing; Codex model; Codex effort | present | present: all eight frozen classic model presets, editable saved/custom model, routing and effort |
 | Providers / Codex app | Show chats in the Codex app | present | present |
 | Providers / Runtime routing | Orchestrate, Build, Review, Brain, Triage, Action; expand configured/effective/source/availability/why/change path/last run/fallbacks; refresh | missing | missing |
 | Providers / Judgment | Judgment referee choices; managed allowance and beta availability | missing | missing |
@@ -196,6 +196,8 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 - Indexing: `settings_parity_indexing_refresh_docs_and_independent_counts` passed in the latest combined run. Real controls refresh repository state and Brain totals independently, refresh one repository's documents with the exact path, show written/scanned counts, refuse unconfirmed success, and retry after failure.
 
 - Fleet presets: `settings_parity_classic_fleet_presets_persist_and_recover` failed first on the missing preset selector, then passed. It persists 2, 5 and 8 through the production settings route, refuses a failed write without changing the saved capacity, and recovers after Refresh.
+
+- Brain model presets: `settings_parity_classic_brain_model_presets_persist` failed first on the absent selector, then passed. It selects and persists all eight classic model values through the production route and preserves the custom-model editor.
 
 ## Host and security handoff
 

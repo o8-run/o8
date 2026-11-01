@@ -254,6 +254,19 @@ impl Settings {
                 ));
             }
         }
+        if field.id == "brainCodexModel" {
+            for (index, (model, label)) in crate::settings_fields::BRAIN_MODELS.iter().enumerate() {
+                controls = controls.child(self.button(
+                    format!("setting-brainCodexModel-preset-{index}"),
+                    (*label).into(),
+                    !locked,
+                    value == *model,
+                    window,
+                    cx,
+                    move |this, _, cx| this.set(field, Value::from(*model), cx),
+                ));
+            }
+        }
         div()
             .debug_selector(move || format!("settings-row-{}", field.id))
             .flex()

@@ -685,3 +685,15 @@ mod voice;
 pub fn fields() -> impl Iterator<Item = &'static Field> {
     FIELDS.iter().chain(voice::FIELDS)
 }
+
+// Keep the frozen classic model menu while retaining editable saved custom values.
+pub const BRAIN_MODELS: &[(&str, &str)] = &[
+    ("gpt-6-astra", "Astra"),
+    ("gpt-6.1-sol", "GPT-6.1 Sol"),
+    ("gpt-6-sol", "GPT-6 Sol"),
+    ("gpt-6-luna", "GPT-6 Luna"),
+    ("gpt-5.6-terra", "Terra"),
+    ("gpt-5.6-sol", "GPT-5.6 Sol"),
+    ("gpt-5.6-luna", "Luna"),
+    ("gpt-5.5", "GPT-5.5"),
+];
