@@ -871,7 +871,8 @@ fn seconds(ms: f64) -> String {
 fn title(steps: &[Step], trace: &Trace, now: f64) -> (String, Option<String>) {
     if trace.live {
         let elapsed = trace.started.map(|start| seconds(now - start));
-        return ("Thinking".into(), elapsed);
+        let working = steps.is_empty() && !trace.thinking;
+        return (if working { "Working" } else { "Thinking" }.into(), elapsed);
     }
     let elapsed = match (trace.started, trace.ended) {
         (Some(start), Some(end)) => end - start,

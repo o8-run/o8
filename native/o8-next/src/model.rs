@@ -110,6 +110,30 @@ impl Row {
     }
 }
 
+/// A running turn's indicator stays at the bottom of its reply, however many
+/// messages have come back.
+pub fn keep_working_row(rows: &mut Vec<Row>, entries: &[Entry]) {
+    if let Some(Row::Activity { trace, .. }) = rows.last_mut() {
+        trace.live = true;
+        return;
+    }
+    for row in rows.iter_mut() {
+        if let Row::Activity { steps, trace, .. } = row {
+            trace.live = steps.iter().any(|s| s.status == "running");
+        }
+    }
+    let turn = entries.iter().rfind(|entry| entry.role == "user");
+    rows.push(Row::Activity {
+        id: format!("{}:working", turn.map_or("turn", |entry| &entry.id)),
+        steps: vec![],
+        trace: Trace {
+            started: turn.and_then(stamp),
+            live: true,
+            ..Trace::default()
+        },
+    });
+}
+
 /// The ordering/deduplication boundary in workerTranscriptBlocks. Tools preceding
 /// prose form a block; a result with the same id updates its original step.
 pub fn render_tree(entries: &[Entry]) -> Vec<Row> {

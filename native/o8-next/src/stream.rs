@@ -1,5 +1,5 @@
 //! Desktop sequence/capture rules + the dashboard transcript merger.
-use crate::model::{Entry, History, Row, render_tree_cached};
+use crate::model::{Entry, History, Row, keep_working_row, render_tree_cached};
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -183,13 +183,25 @@ impl Transcript {
                 None => shown.push(live.clone()),
             }
         }
-        let rows = render_tree_cached(&shown, &self.shown, &self.rows);
+        let mut rows = render_tree_cached(&shown, &self.shown, &self.rows);
+        if self.context_busy {
+            keep_working_row(&mut rows, &shown);
+        }
         self.shown = shown;
         rows
     }
     /// Desktop socket.ts: thinking markers, tool calls and reply text for this
     /// thread's in-flight turn, de-duplicated by the stream's seq.
     fn orchestrator(&mut self, message: &Value) -> bool {
+        let was_running = self.context_busy;
+        let changed = self.orchestrator_event(message);
+        // The working row follows the turn, whichever event moved it.
+        if was_running != self.context_busy {
+            return self.refresh() || changed;
+        }
+        changed
+    }
+    fn orchestrator_event(&mut self, message: &Value) -> bool {
         let data = &message["data"];
         let thread = self.key.strip_prefix("llm-chat:").unwrap_or(&self.key);
         if data["threadId"].as_str().is_some_and(|id| id != thread) {
@@ -383,7 +395,7 @@ impl Transcript {
     /// it, so the turn settles here, as the desktop stop pill does.
     pub fn interrupted(&mut self) -> bool {
         let was_running = std::mem::replace(&mut self.context_busy, false);
-        self.settle("interrupted") || was_running
+        self.settle("interrupted") | self.refresh() || was_running
     }
     /// The turn ended: stop the marker, close open tools and record the outcome
     /// until saved history arrives.
@@ -557,6 +569,40 @@ mod tests {
         assert!(!transcript.context_snapshot().1, "Stop must not stay up");
         let live = transcript.live.as_ref().unwrap();
         assert_eq!(live.extra["receipt"]["terminal"]["outcome"], "interrupted");
+    }
+
+    #[test]
+    fn a_working_row_stays_under_every_message_of_the_turn() {
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:working","transcript":[]}),
+            )
+            .unwrap(),
+        );
+        let frame = |seq: u64, event: &str, mut data: Value| {
+            data["threadId"] = "working".into();
+            data["assistantMessageId"] = "reply".into();
+            serde_json::json!({"channel":"orchestrator","event":event,"seq":seq,"data":data})
+        };
+        let live_last = |transcript: &Transcript| {
+            matches!(transcript.rows.last(), Some(Row::Activity { trace, .. }) if trace.live)
+        };
+        transcript.apply(&frame(1, "status", serde_json::json!({"status":"busy"})));
+        assert!(live_last(&transcript), "shows before the first word");
+        transcript.apply(&frame(2, "output", serde_json::json!({"text":"First"})));
+        assert!(live_last(&transcript), "stays under the reply");
+        transcript.apply(&frame(3, "tool-use", serde_json::json!({"toolUseId":"t","name":"Read"})));
+        transcript.apply(&frame(4, "tool-result", serde_json::json!({"toolUseId":"t","status":"ok"})));
+        transcript.apply(&frame(5, "output", serde_json::json!({"text":"Second"})));
+        assert!(live_last(&transcript), "stays under the next message");
+        let live = transcript
+            .rows
+            .iter()
+            .filter(|row| matches!(row, Row::Activity { trace, .. } if trace.live))
+            .count();
+        assert_eq!(live, 1, "one indicator at a time");
+        transcript.apply(&frame(6, "status", serde_json::json!({"status":"stopped"})));
+        assert!(!live_last(&transcript), "the turn's end clears it");
     }
     #[test]
     fn saved_tail_keeps_older_rows_and_yields_to_newer_websocket_history() {
