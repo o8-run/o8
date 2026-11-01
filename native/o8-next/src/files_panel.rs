@@ -94,6 +94,7 @@ pub struct FilesPanel {
     _subscriptions: Vec<Subscription>,
     file_generation: u64,
     view_modes: HashMap<String, viewer::ViewMode>,
+    contents_hidden: bool,
     wrap_lines: bool,
     editor_subscription: Option<Subscription>,
     editing_path: Option<String>,
@@ -174,6 +175,7 @@ impl FilesPanel {
                 .collect(),
             file_generation: 0,
             view_modes: HashMap::new(),
+            contents_hidden: false,
             wrap_lines: true,
             editor_subscription: None,
             editing_path: None,
@@ -450,6 +452,7 @@ impl FilesPanel {
                     .when(previewable, |bar| bar.child(self.preview_toggle(cx)))
                     .when(self.mode==Mode::Files && matches!(self.file, File::Loaded {truncated:false,..}),|bar|bar.child(self.edit_toggle(cx)))
                     .when(!preview && matches!(&self.file, File::Loaded {truncated:false,buffer,..} if !buffer.editing), |bar| bar.child(self.wrap_toggle(cx)))
+                    .child(self.privacy_toggle(cx))
                     .when(self.mode == Mode::Files, |bar| {
                         let label = if self.tree_visible {
                             "Hide file tree"
@@ -498,7 +501,11 @@ impl FilesPanel {
             })
             .when_some(match &self.file {File::Failed(error)=>Some(error.clone()),_=>None},|d,error|d.child(div().min_h(px(34.)).flex_shrink_0().px(px(12.)).py(px(8.)).text_size(px(11.)).text_color(theme().danger).border_b_1().border_color(theme().border).child(error)))
             .child(self.edit_status(cx))
-            .child(body)
+            .child(if self.contents_hidden {
+                self.hidden_contents(cx)
+            } else {
+                body
+            })
     }
 }
 

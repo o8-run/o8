@@ -3,6 +3,9 @@ use super::*;
 use crate::{model::Row, retained::RowState};
 use std::{cell::RefCell, rc::Rc};
 
+const EYE: &str = "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z";
+const EYE_OFF: &str = "M9.9 5.2A9.7 9.7 0 0 1 12 5c6.4 0 10 7 10 7a18 18 0 0 1-2.2 3.2 M6.6 6.6A18 18 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6 M3 3l18 18 M9.9 9.9a3 3 0 0 0 4.2 4.2";
+
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum ViewMode {
     Preview,
@@ -90,6 +93,65 @@ impl FilesPanel {
                         }))
                 }),
             )
+    }
+    /// The viewer's privacy eye. It stays on across files, so a screen share
+    /// or stream never shows the next file opened.
+    pub(super) fn privacy_toggle(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let hidden = self.contents_hidden;
+        let label = if hidden {
+            "Show file contents"
+        } else {
+            "Hide file contents"
+        };
+        div()
+            .id("files-privacy-toggle")
+            .debug_selector(|| "files-privacy-toggle".into())
+            .size(px(28.))
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .justify_center()
+            .rounded(px(7.))
+            .cursor_pointer()
+            .hover(|button| button.bg(theme().hover))
+            .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(label.into())).into())
+            .child(crate::icon::stroke(
+                if hidden { EYE_OFF } else { EYE },
+                if hidden {
+                    theme().accent
+                } else {
+                    theme().text_secondary
+                },
+                16.,
+                1.6,
+            ))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.contents_hidden = !this.contents_hidden;
+                cx.notify();
+            }))
+    }
+    pub(super) fn hidden_contents(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        div()
+            .id("files-hidden")
+            .debug_selector(|| "files-hidden".into())
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(8.))
+            .cursor_pointer()
+            .text_size(px(12.))
+            .font_weight(gpui::FontWeight::LIGHT)
+            .text_color(theme().text_muted)
+            .child(crate::icon::stroke(EYE_OFF, theme().text_muted, 18., 1.6))
+            .child("Contents hidden")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.contents_hidden = false;
+                cx.notify();
+            }))
+            .into_any_element()
     }
     fn set_view_mode(&mut self, mode: ViewMode, cx: &mut Context<Self>) {
         if mode == ViewMode::Preview

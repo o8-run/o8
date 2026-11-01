@@ -293,8 +293,16 @@ fn subagents_grid_updated_trace_keeps_keyboard_return(cx: &mut TestAppContext) {
         matches!(&row.borrow().row, crate::model::Row::Activity { steps, .. }
             if steps.iter().any(|step| step.command.contains("updated.rs")))
     })));
-    click(&mut v, "subagents-close");
-    wait_gone(&s, &mut v, "subagents-inspector");
+    // A click can land while the inspector still slides in on a slow runner.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while v.debug_bounds("subagents-inspector").is_some() {
+        assert!(Instant::now() < deadline, "Still visible: subagents-inspector");
+        click(&mut v, "subagents-close");
+        s.update_in(&mut v, |s, w, cx| s.tick(false, w, cx));
+        v.run_until_parked();
+        draw(&mut v);
+        std::thread::sleep(Duration::from_millis(20));
+    }
     v.simulate_keystrokes("enter");
     wait(&s, &mut v, "subagents-detail-subagent-calculation");
 }
