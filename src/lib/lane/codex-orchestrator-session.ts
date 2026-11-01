@@ -381,7 +381,7 @@ async function sendToCodexOrchestratorAttempt(
     });
     codexBin = resolved.path;
     reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort, model, {
-      explicitModel: selectedOrchestratorModel(options.model, 'codex'), installedCliVersion: resolved.version ?? null, codexHome: userCodexHome(),
+      explicitModel: selectedOrchestratorModel(options.model), installedCliVersion: resolved.version ?? null, codexHome: userCodexHome(),
     });
   } catch (err) {
     if (settleBeforeSpawnIfAborted()) return;

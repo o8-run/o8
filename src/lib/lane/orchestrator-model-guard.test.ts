@@ -81,9 +81,11 @@ describe('resolveRuntimeOrchestratorModel (#1807)', () => {
     expect(resolveRuntimeOrchestratorModel('claude-code', 'claude-code', CLAUDE_DEFAULT, onReject)).toBe(CLAUDE_DEFAULT);
     // No selection is not a mismatch, and it is not an explicit model for an effort pin.
     expect(onReject).not.toHaveBeenCalled();
-    expect(selectedOrchestratorModel(' claude-code ', 'claude-code')).toBeUndefined();
-    expect(selectedOrchestratorModel('codex', 'codex')).toBeUndefined();
-    expect(selectedOrchestratorModel(MODEL_IDS.raw.anthropicClaudeOpus5, 'claude-code')).toBe(MODEL_IDS.raw.anthropicClaudeOpus5);
+    // Any house's id, in any casing: a thread can switch houses after saving one.
+    for (const placeholder of [' claude-code ', 'Claude-Code', 'codex', ' CODEX']) {
+      expect(selectedOrchestratorModel(placeholder)).toBeUndefined();
+    }
+    expect(selectedOrchestratorModel(MODEL_IDS.raw.anthropicClaudeOpus5)).toBe(MODEL_IDS.raw.anthropicClaudeOpus5);
   });
 
   it('falls back quietly when nothing was selected', () => {

@@ -31,7 +31,7 @@ pub(crate) fn paths(row: &Row) -> Vec<String> {
         })
         .collect()
 }
-fn read(client: &Client, path: &str) -> Result<Image, ()> {
+pub(crate) fn read(client: &Client, path: &str) -> Result<Image, ()> {
     let mut url = client.url("/api/mobile/media").map_err(|_| ())?;
     url.query_pairs_mut().append_pair("path", path);
     let response = client.request("GET", &url).call().map_err(|_| ())?;

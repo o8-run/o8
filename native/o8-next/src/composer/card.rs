@@ -301,7 +301,7 @@ impl Surface {
             )))
     }
 
-    pub(super) fn composer_routing(&self, cx: &App) -> Option<Value> {
+    pub(in crate::ui) fn composer_routing(&self, cx: &App) -> Option<Value> {
         let mut routing = self.routing.clone()?;
         if routing["source"] == "bot-network" {
             return Some(routing);

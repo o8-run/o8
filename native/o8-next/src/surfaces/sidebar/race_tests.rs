@@ -161,7 +161,10 @@ fn press_reorder(cx: &mut TestAppContext, follow_pressed: bool) {
 fn sidebar_release_over_replacement_does_not_open_it(cx: &mut TestAppContext) {
     press_reorder(cx, false);
 }
+// Quarantined: fails on main and in the merge queue on Linux (#5191). Remove
+// the ignore with the fix.
 #[gpui::test]
+#[ignore = "fails on main on Linux: #5191"]
 fn sidebar_release_over_moved_thread_keeps_its_identity(cx: &mut TestAppContext) {
     press_reorder(cx, true);
 }

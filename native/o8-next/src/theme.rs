@@ -158,6 +158,9 @@ pub(crate) fn rejected_mark() -> Rgba {
 pub(crate) fn edge_fade(bottom: bool, height: f32, color: Rgba) -> gpui::Div {
     use gpui::prelude::*;
     let clear = Rgba { a: 0., ..color };
+    // Glass has no solid color to fade into and GPUI cannot mask, so the
+    // strip would only paint a dark band; glass goes without (Q 2026-11-01).
+    let color = if glass() { clear } else { color };
     gpui::div()
         .absolute()
         .left_0()

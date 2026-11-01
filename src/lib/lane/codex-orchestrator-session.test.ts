@@ -91,4 +91,12 @@ describe('resolveOrchestratorModelSync — cross-backend bleed guard', () => {
     const { resolveOrchestratorModelSync } = await import('./codex-orchestrator-session');
     expect(resolveOrchestratorModelSync('gpt-5.5-codex')).toBe('gpt-5.5-codex');
   });
+
+  it('treats a saved runtime id as no model, not as a model named "codex" (#5199)', async () => {
+    const { resolveOrchestratorModelSync } = await import('./codex-orchestrator-session');
+    const fallback = resolveOrchestratorModelSync(undefined);
+    expect(resolveOrchestratorModelSync('codex')).toBe(fallback);
+    expect(resolveOrchestratorModelSync(' Codex ')).toBe(fallback);
+    expect(resolveOrchestratorModelSync('claude-code')).toBe(fallback);
+  });
 });
