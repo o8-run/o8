@@ -231,7 +231,7 @@ it('preserves packet-worker lane diff admission and authoritative ownership thro
       const ghostToken = 'o8pw_fixture-recognized-without-row';
       registerPacketWorkerTokenHash(createHash('sha256').update(ghostToken).digest('hex'));
       const response = await GET(new NextRequest('http://127.0.0.1/api/lanes/' + lane.id + '/diff', {
-        headers: { authorization: 'Bearer ' + token, 'x-o8-client-addr': '127.0.0.1' },
+        headers: { host: '127.0.0.1', authorization: 'Bearer ' + token, 'x-o8-client-addr': '127.0.0.1' },
       }), { params: Promise.resolve({ id: lane.id }) });
       console.log(JSON.stringify({ laneId: lane.id, foreignLaneId: foreign.id, token, ghostToken, status: response.status, body: await response.json() }));
       require('./src/lib/db/index.ts').closeDb();

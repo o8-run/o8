@@ -20,6 +20,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/v2/chat-history', 'GET POST PATCH', () => import('@/app/api/v2/chat-history/route')),
     route('/api/orchestrator/composer-queue', 'GET POST PATCH DELETE', () => import('@/app/api/orchestrator/composer-queue/route')),
     route('/api/panel/ws-info', 'GET', () => import('@/app/api/panel/ws-info/route')),
+    route('/api/panel/ports', 'GET', () => import('@/app/api/panel/ports/route')),
   ],
   brain: [route('/api/cortex/ask', 'POST', () => import('@/app/api/cortex/ask/route'))],
   activity: [
@@ -129,6 +130,7 @@ function parameters(pattern: string, pathname: string): Record<string, string> |
 }
 
 export function matchNativeHttpRoute(pathname: string, method?: string) {
-  const match = routes.map(route => ({ route, params: parameters(route.path, pathname) })).find(entry => entry.params !== null);
-  return match && (method === undefined || match.route.methods.includes(method)) ? match : undefined;
+  const matches = routes.map(route => ({ route, params: parameters(route.path, pathname) })).filter(entry => entry.params !== null);
+  // Surfaces can share a path with different methods, so match on both.
+  return method === undefined ? matches[0] : matches.find(entry => entry.route.methods.includes(method));
 }
