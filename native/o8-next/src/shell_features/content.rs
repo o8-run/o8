@@ -10,6 +10,9 @@ impl ShellFeature for ContentSlot {
         }]
     }
 }
+/// Classic's SHELL_EDGE_INSET and frame corner radius (shell-geometry.ts).
+const EDGE_INSET: f32 = 4.;
+const FRAME_RADIUS: f32 = 14.;
 fn render(
     s: &mut Shell,
     frame: &Frame,
@@ -100,13 +103,28 @@ fn render(
             .flex_1()
             .min_h_0()
             .min_w_0()
+            // Classic's frame (SHELL_EDGE_INSET, workspaceFrameCorners): the
+            // workspace sits inset from the window edge with rounded corners.
+            .pr(px(EDGE_INSET))
+            .pb(px(EDGE_INSET))
             .on_drag_move(cx.listener(
                 |s, event: &gpui::DragMoveEvent<super::super::sidebar::Resize>, _, cx| {
                     super::super::sidebar::resize(s, event);
                     cx.notify();
                 },
             ))
-            .child(content)
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .rounded(px(FRAME_RADIUS))
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(crate::theme::current().border)
+                    .child(content),
+            )
             .into_any_element(),
     )
 }

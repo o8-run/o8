@@ -8,8 +8,9 @@ use gpui::{AnyElement, Div, Image, ImageFormat, ObjectFit, Rgba, SharedString, S
 use serde_json::Value;
 use std::sync::{Arc, Mutex, Once, OnceLock};
 
-// NAVIGATION_RAIL_WIDTH and the 44px rail target in shell-geometry.ts.
-pub(super) const WIDTH: f32 = 60.;
+// The 44px rail target in shell-geometry.ts; the rail itself is narrower
+// than classic's 60 (Q 2026-10-31).
+pub(super) const WIDTH: f32 = 52.;
 pub(super) const TARGET: f32 = 44.;
 /// The rail's padding above its first target, the o8 mark.
 pub(super) const PAD: f32 = 8.;
