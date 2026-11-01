@@ -517,3 +517,89 @@ fn sidebar_row_menu_toggles_per_thread_auto_settle(cx: &mut TestAppContext) {
         assert_eq!(visual.debug_bounds(mark).is_some(), off);
     }
 }
+
+#[gpui::test]
+fn sidebar_auto_settle_undo_already_active_never_settles(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, project) =
+        start("--shell --composer --sidebar --sidebar-auto-settle", cx);
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-inbox");
+    wait_for(&shell, &mut visual, |s, _| {
+        s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
+    });
+    fixture
+        .client
+        .get::<Value>("/api/sidebar-fixture/auto-settle", &[("tabId", FIRST)])
+        .unwrap();
+    shell.update(&mut visual, |s, cx| {
+        s.surfaces
+            .sidebar
+            .view
+            .clone()
+            .unwrap()
+            .update(cx, |l, cx| l.load(cx));
+    });
+    wait_for(&shell, &mut visual, |s, cx| {
+        in_section(s, cx, FIRST, "Settled")
+    });
+    let toast = list(&shell, &visual, |l| l.undo_toast()).expect("automatic Undo");
+    // Another client restores the thread while the old automatic toast remains.
+    let workspace = list(&shell, &visual, |l| {
+        l.sessions
+            .iter()
+            .find(|s| s.id == FIRST)
+            .unwrap()
+            .repo_path
+            .clone()
+    })
+    .expect("fixture workspace");
+    fixture
+        .client
+        .inbox_action(Some(&workspace), FIRST, "unsettle")
+        .unwrap();
+    shell.update(&mut visual, |s, cx| {
+        s.surfaces
+            .sidebar
+            .view
+            .clone()
+            .unwrap()
+            .update(cx, |l, cx| l.load(cx));
+    });
+    wait_for(&shell, &mut visual, |s, cx| {
+        in_section(s, cx, FIRST, "Active")
+    });
+    let generation = list(&shell, &visual, |l| {
+        l.diagnostic()["generation"].as_u64().unwrap()
+    });
+    click(
+        &mut visual,
+        Box::leak(format!("toast-{toast}-action-0").into_boxed_str()),
+    );
+    wait_for(&shell, &mut visual, |s, cx| {
+        let state = s
+            .surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .diagnostic();
+        state["generation"]
+            .as_u64()
+            .is_some_and(|next| next > generation)
+            && state["loading"] == false
+    });
+    assert_eq!(
+        stored(&fixture, FIRST),
+        "active",
+        "Undo is idempotent after an independent restore"
+    );
+    let actions: Vec<String> = fixture
+        .client
+        .get("/api/sidebar-fixture/auto-settle-actions", &[])
+        .unwrap();
+    assert!(
+        !actions.iter().any(|action| action == "settle"),
+        "Undo must never send settle: {actions:?}"
+    );
+}

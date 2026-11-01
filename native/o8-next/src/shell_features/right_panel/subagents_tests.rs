@@ -1,6 +1,7 @@
 //! User paths through the shell, retained traces and persisted mission state.
 use super::*;
 use crate::shell::test_support::*;
+use crate::shell::test_support::open;
 
 fn click(v: &mut VisualTestContext, selector: &'static str) {
     draw(v);

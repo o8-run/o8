@@ -18,6 +18,7 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
   // --sidebar-auto-settle lets a test settle a thread the way the server's
   // sweep does (src/lib/inbox/auto-settle.ts), while the app is open.
   const autoSettle = process.argv.includes('--sidebar-auto-settle');
+  const autoSettleActions: string[] = [];
   const { GET: historyList } = await import('../../../src/app/api/v2/chat-history/list/route');
   if (!enabled) return { routes: { 'GET /api/v2/chat-history/list': historyList } };
   const fixture = await import('../sidebar-fixture');
@@ -53,7 +54,7 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
           }
           if (page.length < 500) return Response.json({ settled: false }, { status: 404 });
         }
-      } } : {}),
+      }, 'GET /api/sidebar-fixture/auto-settle-actions': async () => Response.json(autoSettleActions) } : {}),
     },
     admit: ({ route, url, body, method }) => {
       if (route === patchHistory && body && Object.hasOwn(JSON.parse(body), 'inboxAction')) {
@@ -75,6 +76,10 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
           || route === saveHistory && /^thoughts-next-\d+$/.test(target.tabId) && realpathSync(target.repoPath) === realpathSync(repo)) ? 200 : 400;
     },
     run: async (route, request) => {
+      if (autoSettle && route === patchHistory) {
+        const body = await request.clone().json();
+        if (body.inboxAction) autoSettleActions.push(body.inboxAction);
+      }
       if (beforeInbox && (route === sessions || route === inventory)) {
         const key = route === sessions ? 'threads' : 'agents';
         const response = await route(request);

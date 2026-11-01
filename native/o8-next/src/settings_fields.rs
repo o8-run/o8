@@ -53,7 +53,9 @@ impl Field {
     }
     pub fn group(&self) -> &'static str {
         match self.id {
-            "autoTitleInferenceEnabled" => "Conversations",
+            "autoTitleInferenceEnabled" | "autoSettleEnabled" | "autoSettleIdleDays" => {
+                "Conversations"
+            }
             "presentationQuietMode" | "notificationsReviewReady" => "Presentation",
             "productTelemetryEnabled" | "crashReportsEnabled" | "telemetryOptIn" => "Privacy",
             "parallelCap" | "overlapGate" => "Fleet",
@@ -94,6 +96,9 @@ impl Field {
         values: &std::collections::BTreeMap<String, Value>,
     ) -> Option<&'static str> {
         let value = |id: &str| values.get(id).unwrap_or(&Value::Null);
+        if self.id == "autoSettleIdleDays" && value("autoSettleEnabled") == &Value::Bool(false) {
+            return Some("Turn on Auto-settle finished threads to change the idle period.");
+        }
         if self.id == "notificationsReviewReady"
             && value("presentationQuietMode") == &Value::Bool(true)
         {
@@ -250,6 +255,20 @@ pub const FIELDS: &[Field] = &[
         "general",
         "Allow a background model call to title new conversations.",
         BOOL,
+    ),
+    field(
+        "autoSettleEnabled",
+        "Auto-settle finished threads",
+        "general",
+        "Settle finished threads with a PR or worker. Pinned threads and threads waiting on you stay active.",
+        BOOL,
+    ),
+    field(
+        "autoSettleIdleDays",
+        "Auto-settle after idle days",
+        "general",
+        "Days without activity before a thread with a PR or worker settles. 0 disables idle settlement.",
+        NUMBER,
     ),
     field(
         "presentationQuietMode",

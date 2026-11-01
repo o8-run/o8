@@ -216,14 +216,9 @@ impl ThreadList {
         self.undo_ids(undo.ids, cx);
         true
     }
-    /// Undo for one settle toggles it back; for an automatic batch it
-    /// un-settles each thread, which also keeps the server from settling it
-    /// again for the same merge.
-    fn undo_ids(&mut self, mut ids: Vec<String>, cx: &mut Context<Self>) {
-        if ids.len() == 1 {
-            self.settle_id(ids.remove(0), cx);
-            return;
-        }
+    /// Undo only un-settles still-settled threads. An old toast cannot settle
+    /// a thread restored by another client or a new run.
+    fn undo_ids(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {
         let targets: Vec<_> = ids
             .into_iter()
             .filter_map(|id| {
@@ -351,7 +346,7 @@ impl ThreadList {
             let undo = toasts::Action::new("Undo", move |_, cx| {
                 let _ = list.update(cx, |this, cx| {
                     this.undo = None;
-                    this.settle_id(target, cx);
+                    this.undo_ids(vec![target], cx);
                 });
             });
             let toast = toasts::show(

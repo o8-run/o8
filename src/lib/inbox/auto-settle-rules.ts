@@ -1,5 +1,5 @@
 /**
- * Auto-settle rules, after T3 Code's "settle when merged" (no code shared).
+ * Auto-settle rules for completed and idle threads.
  * Pure: the sweep in auto-settle.ts gathers the evidence and applies the
  * operator guards (pin, opt-out, needs input, running) under SQLite.
  *
@@ -11,9 +11,9 @@
  *  - cleaned:   the rest of its worker lanes were archived by auto-clean (the
  *               worktree reaper) or by hand, so nothing is left to look at.
  *  - idle:      after `[inbox] auto_settle_idle_days` (default 3, 0 = off) with no
- *               activity, as T3's idle settle; open PRs or workers do not block it.
+ *               activity; open PRs or workers do not block it.
  * A thread with no linked PR and no worker is never settled automatically, not
- * even when idle: it may hold unfinished work (Q, 2026-10-31).
+ * even when idle: it may hold unfinished work.
  */
 export type AutoSettleReason = 'pr-merged' | 'released' | 'cleaned' | 'idle';
 

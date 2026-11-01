@@ -155,7 +155,7 @@ preserve pins, manual order and the per-thread opt-out.
 ## Automatic settlement sweep
 
 `src/lib/inbox/auto-settle.ts` runs every 60s from `ws-server.ts`, gated by the
-operator default `autoSettleEnabled` (`[inbox] auto_settle`, default on; Settings →
+operator default `autoSettleEnabled` (`[inbox] auto_settle`, default on; native Settings →
 General → "Auto-settle finished threads"). Pure rules live in `auto-settle-rules.ts`.
 
 A conversation settles when all linked PRs are merged (`pr-merged`), every owned
@@ -169,14 +169,17 @@ queued, or anything `assertInboxCanSettle` rejects (approvals, waiting agents,
 awaiting_* lanes), or activity/unsettle newer than the evidence. Writes go through
 `mutateInboxAutoSettle` and record `autoSettledReason`/`autoSettledAt`; the reason
 is projected only while `settledAt === autoSettledAt`, so a manual settle shows no
-note. Undo is the ordinary unsettle (`settledOverride='active'`), which sticks.
+note. Undo uses explicit unsettle (`settledOverride='active'`), which sticks, and
+ignores rows already restored to Active. An old Undo cannot settle a thread again.
 The native sidebar toasts newly auto-settled rows with Undo / Mod+Z (12s toast;
 Mod+Z works whenever focus is in the sidebar or nothing is focused).
 
-Idle settle: `[inbox] auto_settle_idle_days` (default 3, 0 = off; Settings → General →
+Idle settle: `[inbox] auto_settle_idle_days` (default 3, 0 = off; native Settings → General →
 "Auto-settle after idle days") settles a thread with a linked PR or worker after N
 days without activity (`idle`, note "idle 3d"). Bare threads are never idle-settled,
-and every guard above still applies.
+and every guard above still applies. The idle period starts at the latest message
+or lane activity, persisted WS run completion, or observed runtime run. The same
+timestamp fences the mutation against newer activity.
 
 Per-thread opt-out in the native app: row context menu → "Don't auto-settle" /
 "Allow auto-settle" (the B02 `auto-settle` preference). Opted-out rows show a small
