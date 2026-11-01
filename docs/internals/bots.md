@@ -1,7 +1,13 @@
 # Bots in the rail
 
-Always-on bots from any house (Grok, Codex, Claude, o8 native, …) appear in the
-o8 next rail directly under PRs. One click opens the bot's main thread.
+Set up bots in **Settings → Bots** with **Add to rail**. Only explicitly selected bots
+appear directly under PRs; discovery, a mailbox file, or persistent membership alone never adds
+a rail entry. **Hide from rail** reverses the choice without deleting messages or membership.
+Choices persist as `[bots].rail_enabled` in Settings and survive restarts. A successful native
+Settings save refreshes each window's roster on its next tick without waiting 30 seconds.
+
+Always-on bots from any house (Grok, Codex, Claude, o8 native, …) can appear there.
+One click opens the bot's main thread.
 
 - `src/lib/bots/registry.ts`: `BotEntry {id, house, name, icon {key?, url?}, mainThread {kind, id?, url?} | null, status}`.
   `listBots()` merges the per-house `PROVIDERS` with static entries from `<dataDir>/bots.json` (`{"bots": [...]}`).
@@ -17,8 +23,9 @@ they use the shell's existing tab persistence alongside its other surfaces. An u
 bot id keeps its tab and shows the server's unavailable error instead of opening a different bot.
 
 The roster is owned by each shell window and fetched automatically at most once per 30 seconds,
-with one asynchronous roster request in flight. Explicit retry bypasses the interval. A failed fetch keeps the last known entries, removes their status
+with one asynchronous roster request in flight. Explicit retry bypasses the interval. Between Settings changes, a failed fetch keeps the last known entries, removes their status
 dots, and exposes a retry target directly in the bot region. Successful retry restores current status.
+An accepted Settings visibility change invalidates cached entries before fetching replacements, so a hidden bot cannot remain visible through a roster failure. Invalidation is scoped to the backend shared by its windows.
 There is no process-wide bot cache or permanent polling thread.
 
 The bot region scrolls directly below PRs. Its height yields to the existing rail controls and footer.
@@ -50,6 +57,10 @@ with a different session/context does not silently replace that binding. A membe
 bindings is online; expired or disconnected bindings are offline and remain stored. The existing agent
 bus six-minute liveness rule is unchanged. A member without bindings has unknown status, or retains its
 existing provider's status when represented by that provider. Discovery alone never creates membership.
+Membership also never selects a rail entry: choose it in Settings → Bots. Settings lists all candidates
+once, and `/api/bots` returns only explicit selections. A previously selected source id remains selected
+when explicitly associated with a durable member; hiding that member removes its source aliases from
+Settings choices without changing the stored source or author ids.
 
 The local maintenance command uses the checkout's Node/tsx dependencies and the existing data-directory
 resolvers. It reads one command object from stdin and prints the resulting member or member list, alongside

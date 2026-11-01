@@ -14,6 +14,7 @@ Object.assign(process.env, { O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root,
 
 const { getSqlite, closeDb, getDbPath, DB_SCHEMA_VERSION } = await import('@/lib/db');
 const { GET } = await import('@/app/api/bots/route');
+const { POST: SETTINGS } = await import('@/app/api/panel/operator-defaults/route');
 const bootTables = getSqlite().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('bot_members','bot_member_bindings','bot_member_sources') ORDER BY name").all();
 
 afterAll(() => { closeDb(); rmSync(root, { recursive: true, force: true }); });
@@ -46,6 +47,12 @@ it('GET /api/bots projects durable membership from an on-disk database across a 
   });
   const expected = { id: 'bot-durable', house: 'claude', name: 'Local build bot',
     icon: { key: 'claude-code' }, mainThread: { kind: 'o8-thread', id: 'thoughts-local-home' }, status: 'unknown' };
+  expect((await (await GET(request())).json()).bots).toEqual([]);
+  const revision = (await (await import('@/lib/operator/defaults')).getOperatorDefaultsTomlState()).revision;
+  expect((await SETTINGS(new Request('http://localhost/api/panel/operator-defaults?include=native', {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ botRailEnabledIds: ['bot-durable'], settingsTomlRevision: revision }),
+  }))).status).toBe(200);
   const response = await GET(request());
   expect(response.status).toBe(200);
   expect((await response.json()).bots).toEqual([expected]);

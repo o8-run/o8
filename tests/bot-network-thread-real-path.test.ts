@@ -330,6 +330,12 @@ it('the actual local configuration command creates a canonical network thread th
   expect(values).toHaveLength(1);
   const thread = values[0]; membership({ action: 'home', memberId: member.id, threadId: thread.threadId });
   const { GET: ROSTER } = await import('@/app/api/bots/route');
+  expect((await (await ROSTER(request('/api/bots'))).json()).bots).toEqual([]);
+  const settings = await import('@/app/api/panel/operator-defaults/route');
+  const snapshot = await (await settings.GET(request('/api/panel/operator-defaults?include=native'))).json();
+  expect((await settings.POST(request('/api/panel/operator-defaults?include=native', {
+    botRailEnabledIds: [member.id], settingsTomlRevision: snapshot.settingsToml.revision,
+  }))).status).toBe(200);
   const response = await ROSTER(request('/api/bots'));
   expect((await response.json()).bots.find((bot: { id: string }) => bot.id === member.id).mainThread).toEqual({ kind: 'o8-thread', id: thread.threadId });
   expect(readPersistedLlmChat(thread.threadId)!.history.source).toBe('bot-network');

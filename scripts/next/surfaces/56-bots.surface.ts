@@ -4,7 +4,14 @@ import { join } from 'node:path';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 
 export default async function register({ dataDir, repo, seeds }: SurfaceContext): Promise<SurfaceRoutes> {
-  if (!process.argv.includes('--bots')) return { routes: { 'GET /api/bots': async () => Response.json({ bots: [] }) } };
+  if (!process.argv.includes('--bots') && !process.argv.includes('--bot-settings')) return { routes: { 'GET /api/bots': async () => Response.json({ bots: [] }) } };
+  // Other bot fixture modes represent previously completed Settings setup.
+  // The Settings regression deliberately starts with no selections.
+  const enableFixtureBots = async (bots: unknown[]) => {
+    if (process.argv.includes('--bot-settings')) return;
+    const { updateOperatorDefaults } = await import('../../../src/lib/operator/defaults');
+    await updateOperatorDefaults({ botRailEnabledIds: bots.map(bot => (bot as { id: string }).id) });
+  };
   const profiles = join(dataDir, 'bot-profiles');
   const directory = join(dataDir, 'bots', 'grok', 'agent-1');
   mkdirSync(profiles, { recursive: true });
@@ -13,6 +20,7 @@ export default async function register({ dataDir, repo, seeds }: SurfaceContext)
   const bot = { id: 'grok:agent-1', house: 'grok', name: 'Fixture bot', icon: { key: 'grok' },
     mainThread: { kind: 'mailbox', id: 'agent-1' }, status: 'unknown' };
   writeFileSync(join(dataDir, 'bots.json'), JSON.stringify({ bots: [bot] }));
+  await enableFixtureBots([bot]);
   const mailbox = join(directory, 'thread.jsonl');
   const writeMessages = (messages: unknown[]) => writeFileSync(mailbox, messages.map(m => JSON.stringify(m)).join('\n') + '\n');
   writeMessages(Array.from({ length: 500 }, (_, n) => ({ id: `message-${n}`, role: 'bot',
@@ -46,7 +54,10 @@ export default async function register({ dataDir, repo, seeds }: SurfaceContext)
           } else writeMessages(messages);
           collisionCount = body.collisionCount!;
         }
-        if (Array.isArray(body.bots)) writeFileSync(join(dataDir, 'bots.json'), JSON.stringify({ bots: body.bots }));
+        if (Array.isArray(body.bots)) {
+          writeFileSync(join(dataDir, 'bots.json'), JSON.stringify({ bots: body.bots }));
+          await enableFixtureBots(body.bots);
+        }
         if (typeof body.failing === 'boolean') failing = body.failing;
         if (typeof body.rosterFailing === 'boolean') rosterFailing = body.rosterFailing;
         if (body.addNativeThread) {

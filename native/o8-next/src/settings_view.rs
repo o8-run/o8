@@ -3,7 +3,7 @@ use crate::{settings_fields::SECTIONS, theme::current as theme};
 use gpui::{AnyElement, Div, KeyDownEvent, Render, Stateful, canvas, div, prelude::*, px};
 
 impl Settings {
-    fn button(
+    pub(super) fn button(
         &mut self,
         id: String,
         label: String,
@@ -174,6 +174,17 @@ impl Settings {
                             ),
                     ),
                 );
+            }
+            Kind::Bots => {
+                controls = controls.child(self.button(
+                    "settings-setup-bots".into(),
+                    "Set up bots".into(),
+                    !locked,
+                    false,
+                    window,
+                    cx,
+                    |this, _, cx| this.select("bots", cx),
+                ));
             }
             Kind::Choice(options) => {
                 for (index, (key, label)) in options.iter().enumerate() {
@@ -532,6 +543,8 @@ impl Render for Settings {
             .gap(px(16.));
         if let Some(editor) = self.editor.clone() {
             content = content.child(self.editor_view(editor, window, cx));
+        } else if self.section == "bots" {
+            content = content.children(self.bot_rows(window, cx));
         } else if self.section == "keys" {
             content = content.child("Provider keys").child(div().text_size(px(11.)).text_color(theme().text_muted).child("Only presence and connection state are shown. Changes apply to new sessions."));
             if let Some(keys) = &self.keys {
