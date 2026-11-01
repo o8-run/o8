@@ -312,6 +312,28 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
             disabled={!values || busyField === 'autoSettleEnabled'}
             onToggle={(next) => { void updateField('autoSettleEnabled', next); }}
           />
+          <SettingsRow
+            icon={<ChatIcon />}
+            label="Auto-settle after idle days"
+            subtitle="Settle a thread with a PR or worker after this many days without activity. 0 turns it off; threads with no PR or worker stay put."
+            accessory={(
+              <input
+                type="number"
+                min={0}
+                max={365}
+                step={1}
+                aria-label="Auto-settle after idle days"
+                data-testid="auto-settle-idle-days"
+                value={values?.autoSettleIdleDays ?? 3}
+                disabled={!values || values.autoSettleEnabled === false || busyField === 'autoSettleIdleDays'}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  if (Number.isInteger(next) && next >= 0 && next <= 365) void updateField('autoSettleIdleDays', next);
+                }}
+                style={{ width: 56, textAlign: 'right', background: 'transparent', color: 'inherit', border: '1px solid currentColor', borderRadius: 6, padding: '2px 6px', opacity: 0.85 }}
+              />
+            )}
+          />
         </SettingsGroup>
       </section>
 

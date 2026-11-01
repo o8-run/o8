@@ -1,3 +1,4 @@
+import { isAutoSettleIdleDays } from '@/lib/operator/auto-settle-idle-days';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { parseKnowledgeSources } from '@/lib/operator/knowledge-source-defaults';
 import { NextResponse } from 'next/server';
@@ -325,6 +326,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('autoSettleEnabled must be boolean.');
     }
     update.autoSettleEnabled = body.autoSettleEnabled;
+  }
+  if (body.autoSettleIdleDays !== undefined) {
+    if (!isAutoSettleIdleDays(body.autoSettleIdleDays)) {
+      throw new Error('autoSettleIdleDays must be a whole number from 0 to 365.');
+    }
+    update.autoSettleIdleDays = body.autoSettleIdleDays;
   }
   if (body.autoTitleInferenceEnabled !== undefined) {
     if (typeof body.autoTitleInferenceEnabled !== 'boolean') {

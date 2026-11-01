@@ -1,3 +1,4 @@
+import { isAutoSettleIdleDays } from '@/lib/operator/auto-settle-idle-days';
 import { reconcileKnowledgeSources } from '@/lib/cortex/knowledge/reconcile';
 import { parseKnowledgeSources, type KnowledgeSourceDefaults } from './knowledge-source-defaults';
 import { parseOperatorDefaultsToml } from '@/lib/settings/toml';
@@ -142,6 +143,7 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   promptCachingEnabled: boolean;
   autoTitleInferenceEnabled: boolean; // Optional background inference; code fallback remains available.
   autoSettleEnabled: boolean; // Settle threads whose PRs merged or whose worktrees were cleaned up.
+  autoSettleIdleDays: number; // Settle a thread with a PR or worker after N idle days; 0 = off.
   /** Opt-in: replay the repo's test command against a rebased branch in the
    *  merge gate (in addition to typecheck). Default off — tests can be slow. */
   mergeTestReplayEnabled: boolean;
@@ -346,6 +348,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   promptCachingEnabled: true,
   autoTitleInferenceEnabled: true,
   autoSettleEnabled: true,
+  autoSettleIdleDays: 3,
   mergeTestReplayEnabled: false,
   requireApproval: 'high-risk',
   orchestratorModel: MODEL_IDS.orchestratorDefault,
@@ -451,6 +454,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.autoTitleInferenceEnabled === 'boolean') result.autoTitleInferenceEnabled = stored.autoTitleInferenceEnabled;
   if (typeof stored.autoSettleEnabled === 'boolean') result.autoSettleEnabled = stored.autoSettleEnabled;
+  if (isAutoSettleIdleDays(stored.autoSettleIdleDays)) result.autoSettleIdleDays = stored.autoSettleIdleDays;
   if (typeof stored.mergeTestReplayEnabled === 'boolean') {
     result.mergeTestReplayEnabled = stored.mergeTestReplayEnabled;
   }
@@ -664,6 +668,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
     autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled ?? OPERATOR_DEFAULTS_FALLBACK.autoTitleInferenceEnabled,
     autoSettleEnabled: fileValues.autoSettleEnabled ?? OPERATOR_DEFAULTS_FALLBACK.autoSettleEnabled,
+    autoSettleIdleDays: fileValues.autoSettleIdleDays ?? OPERATOR_DEFAULTS_FALLBACK.autoSettleIdleDays,
     mergeTestReplayEnabled:
       fileValues.mergeTestReplayEnabled ?? OPERATOR_DEFAULTS_FALLBACK.mergeTestReplayEnabled,
     requireApproval: fileValues.requireApproval ?? OPERATOR_DEFAULTS_FALLBACK.requireApproval,
@@ -745,6 +750,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
     autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled !== undefined ? 'file' : 'default',
     autoSettleEnabled: fileValues.autoSettleEnabled !== undefined ? 'file' : 'default',
+    autoSettleIdleDays: fileValues.autoSettleIdleDays !== undefined ? 'file' : 'default',
     mergeTestReplayEnabled: fileValues.mergeTestReplayEnabled !== undefined ? 'file' : 'default',
     requireApproval: fileValues.requireApproval !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
@@ -880,6 +886,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
   }
   if (update.autoTitleInferenceEnabled !== undefined) stored.autoTitleInferenceEnabled = Boolean(update.autoTitleInferenceEnabled);
   if (update.autoSettleEnabled !== undefined) stored.autoSettleEnabled = Boolean(update.autoSettleEnabled);
+  if (update.autoSettleIdleDays !== undefined) stored.autoSettleIdleDays = update.autoSettleIdleDays;
   if (update.mergeTestReplayEnabled !== undefined) {
     stored.mergeTestReplayEnabled = Boolean(update.mergeTestReplayEnabled);
   }

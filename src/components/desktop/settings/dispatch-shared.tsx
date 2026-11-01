@@ -82,6 +82,7 @@ export interface OperatorDefaults {
   promptCachingEnabled: boolean;
   autoTitleInferenceEnabled: boolean;
   autoSettleEnabled: boolean;
+  autoSettleIdleDays: number;
   orchestratorModel: string;
   /**
    * opencode ACP model pins. Null = unset, meaning the agent's own default.
