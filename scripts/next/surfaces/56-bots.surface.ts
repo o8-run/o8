@@ -27,7 +27,15 @@ export default async function register({ dataDir }: SurfaceContext): Promise<Sur
       'GET /api/bots': bots,
       'GET /__fixture/bots/requests': async () => Response.json({ requests }),
       'POST /__fixture/bots': async request => {
-        const body = await request.json() as { messages?: unknown[]; failing?: boolean; collisionCount?: number };
+        const body = await request.json() as { messages?: unknown[]; failing?: boolean; collisionCount?: number;
+          unicode?: { text?: string; name?: string } };
+        if (typeof body.unicode?.text === 'string') writeMessages([{ id: 'unicode-source', role: 'bot', text: body.unicode.text }]);
+        if (typeof body.unicode?.name === 'string') {
+          writeFileSync(join(dataDir, 'bots.json'), JSON.stringify({ bots: [{ ...bot, name: body.unicode.name }] }));
+          const profile = join(profiles, 'bf4d168a-f3a4-4625-9603-d43837e19abd');
+          mkdirSync(profile, { recursive: true });
+          writeFileSync(join(profile, 'profile.json'), JSON.stringify({ name: body.unicode.name }));
+        }
         if (Array.isArray(body.messages)) { writeMessages(body.messages); collisionCount = 0; }
         if ([42, 501, 502].includes(body.collisionCount ?? 0)) {
           const identical = { role: 'bot', text: 'Identical sender text\n'.repeat(20), at: '2026-10-31T12:00:00.000Z' };

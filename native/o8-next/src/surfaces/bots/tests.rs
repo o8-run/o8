@@ -3,6 +3,9 @@ use super::*;
 use crate::shell::test_support::*;
 use gpui::TestAppContext;
 
+#[path = "unicode_tests.rs"]
+mod unicode_tests;
+
 fn grok() -> BotEntry {
     BotEntry {
         id: "grok:agent-1".into(),

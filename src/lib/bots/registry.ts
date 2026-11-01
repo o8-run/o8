@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { grokProvider } from './grok';
+import { botTextPrefix } from './text';
 
 export type BotStatus = 'online' | 'offline' | 'unknown';
 
@@ -37,7 +38,7 @@ const ID = /^[a-zA-Z0-9:_-]{1,160}$/;
 export function sanitizeBot(value: unknown): BotEntry | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
-  const str = (v: unknown, n: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : undefined);
+  const str = (v: unknown, n: number) => (typeof v === 'string' && v.trim() ? botTextPrefix(v.trim(), n) : undefined);
   const id = str(raw.id, 160);
   const house = str(raw.house, 40);
   if (!id || !ID.test(id) || !house) return null;

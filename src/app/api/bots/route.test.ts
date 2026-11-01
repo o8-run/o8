@@ -156,3 +156,25 @@ it('thread route includes a complete record at the payload boundary using one bu
   writeFileSync(mailbox(), `{}\n${first}${filler}${last}`);
   expect((await threadMessages()).map(m => m.id)).toEqual(['first', 'last']);
 });
+
+it.each([
+  ['ASCII', 'x'.repeat(20_001), 'x'.repeat(20_000)],
+  ['complete emoji', 'x'.repeat(19_998) + '😀', 'x'.repeat(19_998) + '😀'],
+  ['emoji crossing the cap', 'x'.repeat(19_999) + '😀', 'x'.repeat(19_999)],
+])('thread route caps %s without introducing an unpaired surrogate', async (_, text, expected) => {
+  writeFileSync(mailbox(), `${message('source-id', undefined, text)}\n`);
+  expect(await threadMessages()).toMatchObject([{ id: 'source-id', key: 'id:source-id', text: expected }]);
+});
+
+it.each([
+  ['ASCII', 'x'.repeat(81), 'x'.repeat(80)],
+  ['complete emoji', 'x'.repeat(78) + '😀', 'x'.repeat(78) + '😀'],
+  ['emoji crossing the cap', 'x'.repeat(79) + '😀', 'x'.repeat(79)],
+])('roster route caps configured and provider %s names at Unicode boundaries', async (_, name, expected) => {
+  mkdirSync(dirs.data, { recursive: true });
+  writeFileSync(join(dirs.data, 'bots.json'), JSON.stringify({ bots: [{ id: 'o8:named', house: 'o8', name }] }));
+  writeFileSync(join(root, 'agents', AGENT, 'profile.json'), JSON.stringify({ name }));
+  const body = await (await GET(req('/api/bots'))).json();
+  expect(body.bots).toHaveLength(2);
+  expect(body.bots.map((bot: { name: string }) => bot.name)).toEqual([expected, expected]);
+});
