@@ -269,3 +269,34 @@ fn customize_plugins_review_link_run_remove(cx: &mut TestAppContext) {
     custom_click(cx, "plugin-remove-confirm-0");
     assert!(cx.debug_bounds("plugin-empty").is_some());
 }
+
+#[gpui::test]
+fn customize_closes_by_button_key_and_destination(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--customize");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("customize-close.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    let open_page = |cx: &mut VisualTestContext| {
+        custom_click(cx, "rail-more");
+        custom_click(cx, "rail-more-customize");
+        assert!(shell.read_with(cx, |s, _| s.surfaces.customize.open));
+    };
+    open_page(cx);
+    custom_click(cx, "custom-close");
+    assert!(!shell.read_with(cx, |s, _| s.surfaces.customize.open));
+    open_page(cx);
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    assert!(!shell.read_with(cx, |s, _| s.surfaces.customize.open));
+    open_page(cx);
+    custom_click(cx, "rail-scheduled");
+    assert!(
+        !shell.read_with(cx, |s, _| s.surfaces.customize.open),
+        "the page opens in front"
+    );
+}

@@ -205,6 +205,7 @@ fn gauge(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.features.get::<UsageCard>().open = false;
+                    this.close_rail_overlays(window, cx);
                     this.execute(Command::Usage, window, cx);
                 }))
                 .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
@@ -574,6 +575,8 @@ impl Shell {
                    command: fn() -> Command| {
             button(id, icon, label, active.as_ref() == Some(&tab)).on_click(cx.listener(
                 move |this, _, window, cx| {
+                    // A destination opens in front, not behind Customize or Settings.
+                    this.close_rail_overlays(window, cx);
                     this.capture(window, cx);
                     this.execute(command(), window, cx);
                 },
@@ -625,6 +628,7 @@ impl Shell {
             .child(
                 button("rail-orchestrator", Icon::Play, "Run orchestrator", false)
                     .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_rail_overlays(window, cx);
                         this.capture(window, cx);
                         features::start_chat(this, window, cx);
                     }))

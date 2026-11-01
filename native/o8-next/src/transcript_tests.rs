@@ -47,6 +47,41 @@ fn fixture() -> (Host, Client) {
 }
 
 #[gpui::test]
+fn issue_pills_in_different_rows_each_click(cx: &mut TestAppContext) {
+    let (_host, client) = fixture();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| {
+        let transcript = Transcript::new(
+            serde_json::from_value(serde_json::json!({"sessionKey":"llm-chat:pills","transcript":[
+                {"id":"a","role":"assistant","text":"Fixed in #5244","timestamp":1},
+                {"id":"b","role":"assistant","text":"Tracked in #5209","timestamp":2}
+            ]}))
+            .unwrap(),
+        );
+        let rows = transcript.rows.clone();
+        s.transcript = Some(transcript);
+        s.install_rows(rows, cx);
+    });
+    cx.run_until_parked();
+    for (selector, number) in [
+        ("transcript-link-1-0", "5209"),
+        ("transcript-link-0-0", "5244"),
+    ] {
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("missing pill: {selector}"));
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+        let opened = crate::ui::take_pending_link().expect("the pill opens");
+        assert!(opened.contains(number), "{selector} opened {opened}");
+    }
+}
+
+#[gpui::test]
 fn system_events_are_compact_and_expand_on_click(cx: &mut TestAppContext) {
     let (_host, client) = fixture();
     let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));

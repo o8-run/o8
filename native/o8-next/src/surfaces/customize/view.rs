@@ -29,6 +29,9 @@ struct Editor {
     body: Entity<Composer>,
     tags: Entity<Composer>,
 }
+/// The page's Close button.
+pub struct Close;
+impl gpui::EventEmitter<Close> for Customize {}
 pub struct Customize {
     client: Client,
     repo: Option<String>,
@@ -418,6 +421,10 @@ impl Render for Customize {
                                     control("custom-refresh", "Refresh", !busy).on_click(
                                         cx.listener(|this, _, _, cx| this.load(None, cx)),
                                     ),
+                                )
+                                .child(
+                                    control("custom-close", "Close", true)
+                                        .on_click(cx.listener(|_, _, _, cx| cx.emit(Close))),
                                 ),
                         ),
                 )
@@ -464,8 +471,10 @@ impl Render for Customize {
                     v.child(
                         div()
                             .debug_selector(|| "custom-search".into())
+                            .flex()
+                            .w_full()
                             .text_size(px(13.))
-                            .child(self.query.clone()),
+                            .child(div().flex_1().min_w_0().child(self.query.clone())),
                     )
                 })
                 .when(self.tab == "plugins", |v| v.child(self.plugins.clone()))

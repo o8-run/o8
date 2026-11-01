@@ -990,9 +990,13 @@ impl Element for RetainedRow {
             .into_iter()
             .chain(cache.links.iter().enumerate().map(|(index, link)| {
                 let url = link.url.clone();
+                // Unique across rows: elements sharing an id share click state,
+                // and one row's mouse-up then cancels another's press.
+                let selector = format!("transcript-link-{}-{index}", self.index);
+                let name = SharedString::from(selector.clone());
                 let mut child = div()
-                    .id(("transcript-link", index))
-                    .debug_selector(move || format!("transcript-link-{index}"))
+                    .id(name)
+                    .debug_selector(move || selector.clone())
                     .w(link.bounds.size.width)
                     .h(link.bounds.size.height)
                     .cursor_pointer()

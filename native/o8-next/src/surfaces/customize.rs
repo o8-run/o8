@@ -11,6 +11,7 @@ pub(super) type Slice = EmptyState;
 pub(super) struct Runtime {
     pub view: Option<Entity<view::Customize>>,
     pub open: bool,
+    closing: Option<gpui::Subscription>,
 }
 pub(super) const REGISTRATION: Registration = Registration {
     overlay_command: true,
@@ -27,7 +28,10 @@ pub(super) const REGISTRATION: Registration = Registration {
         if !s.surfaces.customize.open {
             return false;
         }
-        let _ = (window, cx);
+        if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
+            s.close_customize(window, cx);
+            return true;
+        }
         (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
             && ["k", "w", "tab"].contains(&event.keystroke.key.as_str())
     },
@@ -50,24 +54,23 @@ impl Shell {
             .as_ref()
             .is_some_and(|v| v.read(cx).belongs_to(self.state.selected.as_deref()))
         {
-            self.surfaces.customize.view = Some(cx.new(|cx| {
+            let view = cx.new(|cx| {
                 view::Customize::new(self.client.clone(), self.state.selected.clone(), cx)
-            }));
+            });
+            self.surfaces.customize.closing = Some(cx.subscribe_in(
+                &view,
+                window,
+                |this, _, _: &view::Close, window, cx| this.close_customize(window, cx),
+            ));
+            self.surfaces.customize.view = Some(view);
         }
         self.surfaces.customize.open = true;
+        // The menu that opened the page is gone; without this no key reaches it.
+        self.focus.focus(window);
         self.revision += 1;
         cx.notify();
     }
     pub(crate) fn close_customize(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self
-            .surfaces
-            .customize
-            .view
-            .as_ref()
-            .is_some_and(|v| v.read(cx).busy())
-        {
-            return;
-        }
         self.surfaces.customize.open = false;
         self.restore_focus(window, cx);
         self.revision += 1;
