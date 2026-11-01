@@ -89,7 +89,7 @@ the existing operator-defaults route unless another owner is named.
 | Providers / Advanced orchestrator options | OpenCode fallback model; Combined answer provider; Existing setup uses Claude | missing | partial: combined answer and existing setup present; OpenCode live catalog remains |
 | Providers / Advanced worker setup | Codex launch method (Direct/Via Ori) | missing | skipped: credential carrier |
 | Providers / Advanced worker setup | Worker quota fallback | missing | present |
-| Providers / Engineering Brain | Answer routing; Codex model; Codex effort | present | present |
+| Providers / Engineering Brain | Answer routing; Codex model; Codex effort | present | partial: routing, free-text model and effort present; classic model presets remain |
 | Providers / Codex app | Show chats in the Codex app | present | present |
 | Providers / Runtime routing | Orchestrate, Build, Review, Brain, Triage, Action; expand configured/effective/source/availability/why/change path/last run/fallbacks; refresh | missing | missing |
 | Providers / Judgment | Judgment referee choices; managed allowance and beta availability | missing | missing |
@@ -116,8 +116,8 @@ the existing operator-defaults route unless another owner is named.
 | Git & PRs / Branches | Branch prefix | present | present |
 | Git & PRs / Commits | Tag commits created by agents | present | present |
 | Git & PRs / Pull requests | Open pull requests (In o8/Browser) | present | present |
-| Indexing / Repositories | Every repository index status; Refresh docs; Retry | missing | missing |
-| Indexing / Engineering Brain | Saved instructions; Recorded task outcomes; Knowledge storage | missing | missing |
+| Indexing / Repositories | Every repository index status; Refresh docs; Retry | missing | present: repository status, per-repository refresh receipt, retry after error |
+| Indexing / Engineering Brain | Saved instructions; Recorded task outcomes; Knowledge storage | missing | partial: instruction/outcome totals present; knowledge storage details remain |
 | Indexing / Conversation history | Choose ZIP/JSON conversation export; Import conversation history; local profile/topic/unfinished-project summary | missing | skipped: account-export/profile ingestion review |
 | Indexing / Knowledge sources | Folder; include patterns; exclude patterns; add/refresh/remove source and facts | missing | missing: source ingestion/redaction behavior skipped |
 | MCP / Clients | Claude Desktop, Claude Code, Hermes Agent, OpenClaw status; Install/Update/Remove | missing | skipped: writes authenticated client configuration |
@@ -192,6 +192,8 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 - Diagnostics: `settings_parity_diagnostics_feature_audit_refresh_and_error` passed in two serial runs, including the latest combined run. It opens the page, refreshes typed release/lifecycle/source facts, shows unverified state and recovers from an HTTP error. Developer-gated diagnostics remain skipped.
 
 - Storage: `settings_parity_storage_refresh_keeps_unknown_accounting` passed in the latest combined run. It drives Refresh usage through complete, partial/503, unavailable, and recovery responses; even a 503 tagged observed remains visibly degraded. Missing measurements remain Unknown, with no cleanup or parking mutation.
+
+- Indexing: `settings_parity_indexing_refresh_docs_and_independent_counts` passed in the latest combined run. Real controls refresh repository state and Brain totals independently, refresh one repository's documents with the exact path, show written/scanned counts, refuse unconfirmed success, and retry after failure.
 
 ## Host and security handoff
 

@@ -133,6 +133,7 @@ pub(crate) struct Settings {
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     scroll: gpui::ScrollHandle,
+    indexing: indexing::State,
     storage: storage::State,
     diagnostics: diagnostics::State,
     connections: connections::State,
@@ -174,6 +175,7 @@ impl Settings {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             scroll: gpui::ScrollHandle::new(),
+            indexing: indexing::State::default(),
             storage: storage::State::default(),
             diagnostics: diagnostics::State::default(),
             connections: connections::State::default(),
@@ -319,6 +321,9 @@ impl Settings {
         }
         if self.section == "storage" {
             self.load_storage(force, cx);
+        }
+        if self.section == "indexing" {
+            self.load_indexing(force, cx);
         }
     }
     fn locked(&self, field: &Field) -> bool {
@@ -498,3 +503,6 @@ mod diagnostics;
 
 #[path = "settings_storage.rs"]
 mod storage;
+
+#[path = "settings_indexing.rs"]
+mod indexing;

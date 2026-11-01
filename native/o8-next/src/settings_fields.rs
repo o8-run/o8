@@ -229,6 +229,7 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("git", "Git & PRs"),
     ("storage", "Worktrees & storage"),
     ("keys", "API keys"),
+    ("indexing", "Indexing"),
     ("connections", "Connections"),
     ("diagnostics", "Diagnostics"),
     ("about", "About"),
