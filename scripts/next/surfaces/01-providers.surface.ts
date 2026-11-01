@@ -18,6 +18,7 @@ const catalog = {
 export async function prepare(_context: SurfaceContext): Promise<SurfaceRoutes> {
   if (!process.argv.includes('--settings')) return {};
   const connection = () => import('../../../src/app/api/runtime/acp-connection/route');
+  const instances = () => import('../../../src/app/api/runtime/provider-instances/route');
   return {
     priority: 1,
     routes: {
@@ -29,6 +30,8 @@ export async function prepare(_context: SurfaceContext): Promise<SurfaceRoutes> 
       },
       'GET /api/runtime/acp-connection': async request => (await connection()).GET(request),
       'POST /api/runtime/acp-connection': async request => (await connection()).POST(request),
+      'GET /api/runtime/provider-instances': async request => (await instances()).GET(request),
+      'POST /api/runtime/provider-instances': async request => (await instances()).POST(request),
     },
     admit: () => 200,
   };

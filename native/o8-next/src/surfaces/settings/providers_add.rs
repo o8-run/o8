@@ -1,12 +1,13 @@
 //! Settings › Providers › "+": the Add provider dialog, shaped like T3's.
 //!
 //! Built-in runtimes o8 knows sit in a grid at the top; below them is the ACP
-//! registry with search. Adding a registry agent reuses classic's endpoints:
-//! `POST /api/runtime/acp-registry/prepare` (pinned npm package, setup scripts
-//! off) then `POST /api/runtime/acp-connection`, which saves o8's one Local ACP
-//! connection. "Configure manually" saves the same connection from a name,
-//! executable and arguments. Nothing here starts an agent.
-use super::{call, icon};
+//! registry with search. A built-in tile creates a new provider instance of
+//! that runtime (`POST /api/runtime/provider-instances`). Adding a registry
+//! agent prepares its pinned npm package (`/api/runtime/acp-registry/prepare`,
+//! setup scripts off) and saves it as a new ACP instance; "Configure manually"
+//! does the same from a name, executable and arguments. Classic's Local ACP
+//! slot is never replaced. Nothing here starts an agent.
+use super::{call, icon, instance::INSTANCES};
 use crate::{client::Client, composer::Composer, theme::current as theme};
 use gpui::{
     div, prelude::*, px, AnyElement, Context, Div, Entity, EventEmitter, FocusHandle, IntoElement,
@@ -74,21 +75,26 @@ pub(crate) fn connection_body(name: &str, command: &str, args: &str) -> Value {
     let args: Vec<&str> = args.lines().filter(|l| !l.trim().is_empty()).collect();
     json!({"connection": {"name": name.trim(), "command": command.trim(), "args": args, "useOpenRouter": false}})
 }
-/// The one-slot notice. Multi-instance ACP is the next slice.
-pub(crate) fn slot_notice(current: Option<&Connection>) -> String {
-    match current {
-        Some(c) => format!(
-            "o8 has one Local ACP slot. Adding an agent replaces “{}”.",
-            c.name
-        ),
-        None => "o8 has one Local ACP slot. Adding an agent fills it.".into(),
-    }
+/// The `create` body for a new ACP instance.
+pub(crate) fn acp_instance_body(name: &str, command: &str, args: &str) -> Value {
+    let connection = connection_body(name, command, args)["connection"].clone();
+    json!({"action": "create", "instance": {"runtime": "acp", "name": connection["name"], "acp": connection}})
+}
+#[derive(Deserialize)]
+struct Created {
+    instance: CreatedInstance,
+}
+#[derive(Deserialize)]
+struct CreatedInstance {
+    id: String,
+    name: String,
 }
 
 pub(crate) enum AddEvent {
     Close,
-    Builtin(String),
     Saved,
+    /// A new instance was saved; the list selects it.
+    Created(String),
 }
 impl EventEmitter<AddEvent> for AddProvider {}
 
@@ -228,10 +234,7 @@ impl AddProvider {
         }
         self.busy = Some(agent.id.clone());
         self.error = None;
-        self.notice = format!(
-            "Preparing {}. Your current connection stays active until it is saved.",
-            agent.name
-        );
+        self.notice = format!("Preparing {}…", agent.name);
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let prepared: Prepared = call(
@@ -242,21 +245,14 @@ impl AddProvider {
                 PREPARE_TIMEOUT,
             )?;
             let c = prepared.connection;
-            let saved: ConnectionState = call(
-                &client,
-                "POST",
-                CONNECTION,
-                connection_body(&c.name, &c.command, &c.args.join("\n")),
-                READ_TIMEOUT,
-            )?;
-            Ok::<_, String>(saved.connection)
+            create(&client, acp_instance_body(&c.name, &c.command, &c.args.join("\n")))
         });
         self.finish(task, cx);
         self.changed(cx);
     }
     fn finish(
         &mut self,
-        task: gpui::Task<Result<Option<Connection>, String>>,
+        task: gpui::Task<Result<CreatedInstance, String>>,
         cx: &mut Context<Self>,
     ) {
         cx.spawn(async move |this, cx| {
@@ -264,12 +260,11 @@ impl AddProvider {
             let _ = this.update(cx, |this, cx| {
                 this.busy = None;
                 match result {
-                    Ok(connection) => {
-                        let name = connection.as_ref().map(|c| c.name.clone()).unwrap_or_default();
-                        this.current = connection;
+                    Ok(created) => {
                         this.manual = None;
-                        this.notice = format!("Saved “{name}” as the Local ACP connection. Choose Local ACP in the composer for a new conversation.");
+                        this.notice = format!("Added “{}” as a new ACP instance.", created.name);
                         cx.emit(AddEvent::Saved);
+                        cx.emit(AddEvent::Created(created.id));
                     }
                     Err(error) => {
                         this.notice.clear();
@@ -281,15 +276,36 @@ impl AddProvider {
         })
         .detach();
     }
+    /// A built-in tile: a new instance of that runtime, named "new" until
+    /// renamed in its detail panel.
+    pub fn add_builtin(&mut self, runtime: String, cx: &mut Context<Self>) {
+        if self.busy.is_some() {
+            return;
+        }
+        self.busy = Some(runtime.clone());
+        self.error = None;
+        self.notice = "Adding an instance…".into();
+        let client = self.client.clone();
+        let task = cx.background_executor().spawn(async move {
+            create(
+                &client,
+                json!({"action": "create", "instance": {"runtime": runtime, "name": "new"}}),
+            )
+        });
+        self.finish(task, cx);
+        self.changed(cx);
+    }
     pub fn open_manual(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.manual.is_some() {
             self.manual = None;
             return self.changed(cx);
         }
-        let current = self.current.clone().unwrap_or(Connection {
-            name: "Local ACP".into(),
+        // Always a new instance; classic's Local ACP slot is left alone.
+        let current = Connection {
+            name: "ACP agent".into(),
+            args: vec!["acp".into()],
             ..Default::default()
-        });
+        };
         let manual = Manual {
             name: field("Name", &current.name, false, window, cx),
             command: field(
@@ -327,14 +343,7 @@ impl AddProvider {
         self.notice = "Saving connection…".into();
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
-            let saved: ConnectionState = call(
-                &client,
-                "POST",
-                CONNECTION,
-                connection_body(&name, &command, &args),
-                READ_TIMEOUT,
-            )?;
-            Ok::<_, String>(saved.connection)
+            create(&client, acp_instance_body(&name, &command, &args))
         });
         self.finish(task, cx);
         self.changed(cx);
@@ -428,8 +437,6 @@ impl AddProvider {
         let can = agent.npm.is_some() && self.busy.is_none() && !self.locked && !self.stale;
         let label = if busy {
             "Adding…"
-        } else if self.current.is_some() {
-            "Replace"
         } else {
             "Add"
         };
@@ -517,11 +524,7 @@ impl AddProvider {
         let ready =
             !name.read(cx).text.trim().is_empty() && !command.read(cx).text.trim().is_empty();
         let enabled = ready && self.busy.is_none() && !self.locked;
-        let save_label = if self.current.is_some() {
-            "Replace connection"
-        } else {
-            "Save connection"
-        };
+        let save_label = "Add instance";
         let save = self.button(
             "provider-acp-save".into(),
             save_label.into(),
@@ -564,7 +567,7 @@ impl AddProvider {
                 .child(label("Arguments, one per line"))
                 .child(Self::input_box(&args, args.read(cx).focus.clone(), 64.).debug_selector(|| "provider-acp-args".into()))
                 .child(div().text_size(px(11.)).text_color(theme().text_muted).child(
-                    "Use one literal argument per line. Keep secrets out of arguments. Environment variables are still edited in classic Settings › Providers.",
+                    "Use one literal argument per line. Keep secrets out of arguments; add them as secret variables in the instance panel.",
                 ))
                 .child(div().flex().gap(px(8.)).child(save).child(cancel))
                 .into_any_element(),
@@ -599,7 +602,7 @@ impl Render for AddProvider {
                     true,
                     window,
                     cx,
-                    move |_, _, cx| cx.emit(AddEvent::Builtin(pick.clone())),
+                    move |this, _, cx| this.add_builtin(pick.clone(), cx),
                 )
                 .w(px(196.))
                 .h(px(36.))
@@ -749,13 +752,6 @@ impl Render for AddProvider {
                     )
                     .child(manual),
             )
-            .child(
-                div()
-                    .debug_selector(|| "provider-acp-slot".into())
-                    .text_size(px(11.))
-                    .text_color(theme().text_secondary)
-                    .child(slot_notice(self.current.as_ref())),
-            )
             .when(self.locked, |v| {
                 v.child(
                     div()
@@ -791,4 +787,11 @@ impl Render for AddProvider {
                 )
             })
     }
+}
+
+fn create(client: &Client, body: Value) -> Result<CreatedInstance, String> {
+    client
+        .settings_request::<Created>("POST", INSTANCES, body)
+        .map(|c| c.instance)
+        .map_err(|e| e.message)
 }

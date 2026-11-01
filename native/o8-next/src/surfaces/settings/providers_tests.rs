@@ -257,12 +257,49 @@ fn provider_paths_picker_and_registry_helpers() {
         add::connection_body(" Local ", " amp ", "acp\n\n--x"),
         json!({"connection": {"name": "Local", "command": "amp", "args": ["acp", "--x"], "useOpenRouter": false}})
     );
-    let current = add::Connection {
-        name: "Amp".into(),
-        ..Default::default()
-    };
-    assert!(add::slot_notice(Some(&current)).contains("replaces “Amp”"));
-    assert!(add::slot_notice(None).contains("one Local ACP slot"));
+    assert_eq!(
+        add::acp_instance_body("Amp", "amp", "acp"),
+        json!({"action": "create", "instance": {"runtime": "acp", "name": "Amp",
+            "acp": {"name": "Amp", "command": "amp", "args": ["acp"], "useOpenRouter": false}}})
+    );
+}
+
+#[test]
+fn provider_instance_bodies_never_resend_saved_secrets() {
+    let rows = vec![
+        ("WORK_TOKEN".to_string(), String::new(), true, true),
+        ("NEW_TOKEN".to_string(), "v".to_string(), true, false),
+        ("REGION".to_string(), "eu".to_string(), false, false),
+        ("  ".to_string(), "dropped".to_string(), false, false),
+    ];
+    assert_eq!(
+        instance::env_body(&rows),
+        json!([{"name": "WORK_TOKEN", "secret": true},
+            {"name": "NEW_TOKEN", "secret": true, "value": "v"},
+            {"name": "REGION", "secret": false, "value": "eu"}])
+    );
+    let codex: instance::Instance = serde_json::from_value(json!({
+        "id": "codex-work", "runtime": "codex", "name": "work", "enabled": true,
+        "environment": {"connectionId": "instance:codex-work", "revision": 2,
+            "variables": [{"name": "WORK_TOKEN", "secret": true, "configured": true}]}
+    }))
+    .unwrap();
+    assert_eq!(instance::label("Codex", &codex), "Codex · work");
+    assert_eq!(
+        instance::update_body(&codex, " Work ", "/opt/codex", "/tmp/h"),
+        json!({"action": "update", "id": "codex-work",
+            "instance": {"name": "Work", "binaryPath": "/opt/codex", "homeDir": "/tmp/h", "enabled": true}})
+    );
+    let acp: instance::Instance = serde_json::from_value(json!({
+        "id": "acp-amp", "runtime": "acp", "name": "Amp",
+        "acp": {"name": "Amp", "command": "amp", "args": ["acp"], "useOpenRouter": false}
+    }))
+    .unwrap();
+    assert_eq!(instance::binary(&acp), "amp");
+    assert_eq!(
+        instance::update_body(&acp, "Amp", "/bin/amp2", "")["instance"]["acp"],
+        json!({"name": "Amp", "command": "/bin/amp2", "args": ["acp"], "useOpenRouter": false})
+    );
 }
 
 #[gpui::test]
@@ -298,8 +335,8 @@ fn settings_providers_add_dialog_registry_and_manual_acp(cx: &mut TestAppContext
         "no package, no Add"
     );
     assert!(
-        cx.debug_bounds("provider-acp-slot").is_some(),
-        "one-slot notice"
+        cx.debug_bounds("provider-acp-slot").is_none(),
+        "no one-slot notice: adds create instances"
     );
     assert_eq!(saved_connection(&fixture), Value::Null);
 
@@ -317,41 +354,152 @@ fn settings_providers_add_dialog_registry_and_manual_acp(cx: &mut TestAppContext
     assert!(cx.debug_bounds("provider-acp-fixture-agent").is_some());
 
     click(cx, "provider-acp-add-fixture-agent");
-    wait_dialog(&shell, cx);
+    wait(&shell, cx);
     assert_eq!(
         saved_connection(&fixture),
-        json!({"name": "Fixture Agent", "command": "fixture-agent", "args": ["--acp"], "useOpenRouter": false}),
-        "Add saves through classic's Local ACP connection"
+        Value::Null,
+        "a registry add never replaces classic's Local ACP slot"
     );
+    let listed = instances(&fixture);
+    assert_eq!(listed[0]["runtime"], "acp");
+    assert_eq!(
+        listed[0]["acp"],
+        json!({"name": "Fixture Agent", "command": "fixture-agent", "args": ["--acp"], "useOpenRouter": false})
+    );
+    assert!(cx
+        .debug_bounds("provider-instance-row-acp-fixture-agent")
+        .is_some());
     assert!(
-        dialog(&shell, cx).read_with(cx, |d, _| d.current.as_ref().map(|c| c.name.clone()))
-            == Some("Fixture Agent".into())
+        cx.debug_bounds("provider-instance-detail").is_some(),
+        "the new instance opens"
     );
 
-    // Configure manually replaces the one slot through the same save path.
+    // Configure manually adds a second ACP instance through the same route.
+    click(cx, "provider-add-button");
+    wait_dialog(&shell, cx);
     click(cx, "provider-acp-manual");
     draw_all(cx);
     assert!(cx.debug_bounds("provider-acp-form").is_some());
     click(cx, "provider-acp-command");
-    for _ in 0.."fixture-agent".len() {
-        cx.simulate_keystrokes("backspace");
-    }
-    cx.simulate_input("my-agent");
+    cx.simulate_input("/bin/my-agent");
     draw_all(cx);
     click(cx, "provider-acp-save");
-    wait_dialog(&shell, cx);
-    let saved = saved_connection(&fixture);
-    assert_eq!(saved["command"], "my-agent", "{saved}");
-    assert_eq!(saved["name"], "Fixture Agent");
-    assert_eq!(saved["args"], json!(["--acp"]));
-    assert!(
-        cx.debug_bounds("provider-acp-form").is_none(),
-        "save closes the form"
-    );
+    wait(&shell, cx);
+    let listed = instances(&fixture);
+    assert_eq!(listed.as_array().unwrap().len(), 2, "{listed}");
+    assert_eq!(listed[1]["acp"]["command"], "/bin/my-agent");
+    assert_eq!(listed[1]["acp"]["args"], json!(["acp"]));
+    assert_eq!(saved_connection(&fixture), Value::Null);
+}
 
-    // A built-in tile opens that runtime's detail panel.
-    click(cx, "provider-add-builtin-codex");
+fn instances(fixture: &Fixture) -> Value {
+    fixture
+        .client
+        .get::<Value>("/api/runtime/provider-instances", &[])
+        .unwrap()["instances"]
+        .clone()
+}
+
+#[gpui::test]
+fn settings_providers_second_codex_instance_edit_env_and_delete(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("settings.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("s e t t i n g s");
+    cx.simulate_keystrokes("enter");
     draw_all(cx);
+    click(cx, "settings-nav-providers");
+    wait(&shell, cx);
+    click(cx, "provider-add-button");
+    wait_dialog(&shell, cx);
+    click(cx, "provider-add-builtin-codex");
+    wait(&shell, cx);
     assert!(cx.debug_bounds("provider-add").is_none());
-    assert!(cx.debug_bounds("provider-detail").is_some());
+    assert!(cx.debug_bounds("provider-instance-row-codex-new").is_some());
+    assert!(cx.debug_bounds("provider-instance-detail").is_some());
+    assert_eq!(instances(&fixture)[0]["runtime"], "codex");
+
+    click(cx, "provider-instance-name");
+    for _ in 0..3 {
+        cx.simulate_keystrokes("backspace");
+    }
+    cx.simulate_input("work");
+    click(cx, "provider-instance-home");
+    cx.simulate_input("/tmp/codex-work");
+    click(cx, "provider-instance-binary");
+    cx.simulate_input("/opt/codex-work/codex");
+    click(cx, "provider-env-add");
+    draw_all(cx);
+    click(cx, "provider-env-name-0");
+    cx.simulate_input("WORK_TOKEN");
+    click(cx, "provider-env-value-0");
+    cx.simulate_input("fixture-value");
+    click(cx, "provider-env-secret-0");
+    click(cx, "provider-instance-save");
+    for _ in 0..100 {
+        draw_all(cx);
+        if instances(&fixture)[0]["environment"]["revision"] == 1 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    wait(&shell, cx);
+    let saved = &instances(&fixture)[0];
+    assert_eq!(saved["name"], "work", "{saved}");
+    assert_eq!(saved["homeDir"], "/tmp/codex-work");
+    assert_eq!(saved["binaryPath"], "/opt/codex-work/codex");
+    assert_eq!(
+        saved["environment"]["variables"],
+        json!([{"name": "WORK_TOKEN", "secret": true, "configured": true}])
+    );
+    assert!(
+        !saved.to_string().contains("fixture-value"),
+        "secrets never come back"
+    );
+    let file = fs::read_to_string(
+        fixture
+            .root
+            .join("settings-profile/.o8/provider-instances.json"),
+    )
+    .or_else(|_| fs::read_to_string(fixture.root.join(".o8/provider-instances.json")))
+    .unwrap_or_default();
+    assert!(!file.contains("fixture-value"));
+    let detail =
+        panel(&shell, cx).read_with(cx, |p, _| p.instance.clone().expect("detail stays open"));
+    assert!(detail.read_with(cx, |d, _| d.env.len() == 1 && d.env[0].configured));
+
+    click(cx, "provider-instance-delete");
+    draw_all(cx);
+    assert!(
+        cx.debug_bounds("provider-instance-delete-prompt").is_some(),
+        "delete asks first"
+    );
+    assert_eq!(instances(&fixture).as_array().unwrap().len(), 1);
+    click(cx, "provider-instance-delete-confirm");
+    for _ in 0..100 {
+        draw_all(cx);
+        if instances(&fixture) == json!([])
+            && panel(&shell, cx).read_with(cx, |p, _| p.instance.is_none())
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    wait(&shell, cx);
+    let state = panel(&shell, cx).read_with(cx, |p, cx| {
+        p.instance.as_ref().map(|d| {
+            let d = d.read(cx);
+            (d.confirm_delete, d.busy, d.error.clone())
+        })
+    });
+    assert_eq!(instances(&fixture), json!([]), "{state:?}");
+    assert!(cx.debug_bounds("provider-instance-row-codex-new").is_none());
+    assert!(cx.debug_bounds("provider-instance-detail").is_none());
 }

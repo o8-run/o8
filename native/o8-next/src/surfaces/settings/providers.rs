@@ -17,6 +17,8 @@ use std::{cell::Cell, collections::BTreeMap, rc::Rc, time::Duration};
 
 #[path = "providers_add.rs"]
 pub(crate) mod add;
+#[path = "providers_instance.rs"]
+pub(crate) mod instance;
 
 const INVENTORY: &str = "/api/panel/operator-defaults";
 const NATIVE: &str = "/api/panel/operator-defaults?include=native";
@@ -81,6 +83,7 @@ struct Detect {
 
 pub(crate) struct Loaded {
     runtimes: Vec<Runtime>,
+    listing: instance::Listing,
     disabled: Vec<String>,
     revision: Option<String>,
 }
@@ -227,6 +230,13 @@ pub(crate) struct Providers {
     pub selected: Option<String>,
     pub add: Option<gpui::Entity<add::AddProvider>>,
     add_subscription: Option<gpui::Subscription>,
+    /// Saved provider instances (not the implicit default of each runtime).
+    pub instances: Vec<instance::Instance>,
+    selectors: BTreeMap<String, String>,
+    pub instance: Option<gpui::Entity<instance::InstanceDetail>>,
+    instance_subscription: Option<gpui::Subscription>,
+    /// Select this instance once the next read lists it (after Add).
+    pending: Option<String>,
     pub detecting: bool,
     pub busy: bool,
     pub loaded: bool,
@@ -249,6 +259,11 @@ impl Providers {
             selected: None,
             add: None,
             add_subscription: None,
+            instances: Vec::new(),
+            selectors: BTreeMap::new(),
+            instance: None,
+            instance_subscription: None,
+            pending: None,
             detecting: false,
             busy: false,
             loaded: false,
@@ -269,8 +284,10 @@ impl Providers {
     fn read(client: &Client) -> Result<Loaded, RequestError> {
         let inventory: Inventory = client.settings_request("GET", INVENTORY, Value::Null)?;
         let native: Native = client.settings_request("GET", NATIVE, Value::Null)?;
+        let listing = client.settings_request("GET", instance::INSTANCES, Value::Null)?;
         Ok(Loaded {
             runtimes: inventory.runtimes,
+            listing,
             disabled: native.values.disabled,
             revision: native.toml.map(|t| t.revision),
         })
@@ -285,6 +302,8 @@ impl Providers {
         match result {
             Ok(loaded) => {
                 self.runtimes = loaded.runtimes;
+                self.instances = loaded.listing.instances;
+                self.selectors = loaded.listing.home_selectors;
                 self.disabled = loaded.disabled;
                 self.revision = loaded.revision;
                 self.loaded = true;
@@ -300,7 +319,30 @@ impl Providers {
                 self.error = Some(error.message);
             }
         }
+        if let Some(id) = self.pending.take() {
+            self.select(Some(format!("i:{id}")), cx);
+        } else if let Some(id) = self.selected.clone().and_then(|s| s.strip_prefix("i:").map(str::to_owned)) {
+            if !self.instances.iter().any(|i| i.id == id) {
+                self.select(None, cx);
+            }
+        }
         self.changed(cx);
+    }
+    pub fn runtime_label(&self, id: &str) -> String {
+        if id == "acp" {
+            return "Local ACP".into();
+        }
+        self.runtimes
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.label.clone())
+            .unwrap_or_else(|| id.into())
+    }
+    /// Re-read after an instance change, then select `pending` when given.
+    pub fn reload(&mut self, pending: Option<String>, cx: &mut Context<Self>) {
+        self.pending = pending;
+        self.busy = false;
+        self.load(cx);
     }
     pub fn load(&mut self, cx: &mut Context<Self>) {
         if self.busy {
@@ -393,6 +435,36 @@ impl Providers {
         self.selected = id;
         self.add = None;
         self.add_subscription = None;
+        self.instance = None;
+        self.instance_subscription = None;
+        let picked = self
+            .selected
+            .as_deref()
+            .and_then(|s| s.strip_prefix("i:"))
+            .and_then(|id| self.instances.iter().find(|i| i.id == id))
+            .cloned();
+        if let Some(picked) = picked {
+            let label = self.runtime_label(&picked.runtime);
+            let selector = self.selectors.get(&picked.runtime).cloned();
+            let client = self.client.clone();
+            let detail =
+                cx.new(|cx| instance::InstanceDetail::new(client, picked, label, selector, cx));
+            self.instance_subscription = Some(cx.subscribe(
+                &detail,
+                |this, detail, event: &instance::InstanceEvent, cx| match event {
+                    instance::InstanceEvent::Saved => {
+                        let id = detail.read(cx).instance.id.clone();
+                        this.reload(Some(id), cx)
+                    }
+                    instance::InstanceEvent::Deleted => {
+                        this.selected = None;
+                        this.instance = None;
+                        this.reload(None, cx)
+                    }
+                },
+            ));
+            self.instance = Some(detail);
+        }
         self.changed(cx);
     }
     pub fn open_add(&mut self, cx: &mut Context<Self>) {
@@ -412,7 +484,11 @@ impl Providers {
             &dialog,
             |this, _, event: &add::AddEvent, cx| match event {
                 add::AddEvent::Close => this.open_add(cx),
-                add::AddEvent::Builtin(id) => this.select(Some(id.clone()), cx),
+                add::AddEvent::Created(id) => {
+                    this.add = None;
+                    this.add_subscription = None;
+                    this.reload(Some(id.clone()), cx)
+                }
                 add::AddEvent::Saved => this.changed(cx),
             },
         ));
@@ -579,6 +655,67 @@ impl Providers {
         .child(switch)
         .into_any_element()
     }
+    fn instance_row(
+        &mut self,
+        item: instance::Instance,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let key = format!("i:{}", item.id);
+        let selected = self.selected.as_deref() == Some(key.as_str());
+        let color = if item.enabled {
+            theme().text
+        } else {
+            theme().text_muted
+        };
+        let label = instance::label(&self.runtime_label(&item.runtime), &item);
+        let status = match (&item.home_dir, item.enabled) {
+            (_, false) => "Disabled".to_string(),
+            (Some(home), true) => format!("Home {home}"),
+            (None, true) if item.default => "Classic's Local ACP slot".into(),
+            (None, true) => "Runtime default home".into(),
+        };
+        self.control(
+            format!("provider-instance-row-{}", item.id),
+            true,
+            window,
+            cx,
+            move |this, cx| {
+                let next = (this.selected.as_deref() != Some(key.as_str())).then(|| key.clone());
+                this.select(next, cx)
+            },
+        )
+        .flex()
+        .items_center()
+        .gap(px(12.))
+        .px(px(12.))
+        .py(px(10.))
+        .rounded(px(8.))
+        .bg(if selected {
+            theme().selection
+        } else {
+            theme().surface_raised
+        })
+        .hover(|v| v.bg(theme().hover))
+        .child(icon(&item.runtime, color))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .child(div().truncate().text_color(color).child(label))
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(px(11.))
+                        .text_color(theme().text_muted)
+                        .child(status),
+                ),
+        )
+        .into_any_element()
+    }
     fn detail(&self, runtime: &Runtime) -> AnyElement {
         let tool = self.tools.as_ref().and_then(|t| t.get(&runtime.id));
         let home_dir = std::env::var("HOME").ok();
@@ -684,7 +821,7 @@ impl Providers {
                     .pt(px(10.))
                     .text_size(px(11.))
                     .text_color(theme().text_muted)
-                    .child("Read-only for now. Editing paths arrives with provider instances."),
+                    .child("The default instance. Add another from + to give it its own binary, home and env."),
             )
             .into_any_element()
     }
@@ -724,6 +861,18 @@ impl Render for Providers {
         for runtime in self.runtimes.clone() {
             list = list.child(self.row(runtime, window, cx));
         }
+        if !self.instances.is_empty() {
+            list = list.child(
+                div()
+                    .pt(px(8.))
+                    .text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child("Instances"),
+            );
+        }
+        for item in self.instances.clone() {
+            list = list.child(self.instance_row(item, window, cx));
+        }
         if self.loaded && self.runtimes.is_empty() {
             list = list.child(
                 div()
@@ -736,6 +885,8 @@ impl Render for Providers {
         let dialog = self.add.clone();
         let side = if dialog.is_some() {
             None
+        } else if let Some(detail) = self.instance.clone() {
+            Some(detail.into_any_element())
         } else {
             self.selected
                 .as_ref()
