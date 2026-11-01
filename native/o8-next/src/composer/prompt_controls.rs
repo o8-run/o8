@@ -234,7 +234,7 @@ impl Surface {
         let draft = editor.read(cx).text.clone();
         let mut fields = vec![];
         if open == "save-prompt" {
-            for text in [
+            for (index, text) in [
                 draft
                     .lines()
                     .find(|s| !s.trim().is_empty())
@@ -244,9 +244,13 @@ impl Surface {
                     .collect::<String>(),
                 String::new(),
                 draft,
-            ] {
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 fields.push(cx.new(|cx| {
                     let mut i = Composer::new(cx);
+                    i.newline_on_enter = index == 2;
                     i.set_text(&text, cx);
                     i
                 }));

@@ -239,6 +239,13 @@ impl Composer {
                 .unwrap_or(0)
     }
     fn index_at(&self, point: Point<Pixels>) -> usize {
+        if self
+            .layout
+            .first()
+            .is_some_and(|(_, _, origin)| point.y < origin.y)
+        {
+            return 0;
+        }
         for (offset, line, origin) in &self.layout {
             let height = px(crate::theme::TYPE.body_line)
                 * line.wrap_boundaries.len().saturating_add(1) as f32;

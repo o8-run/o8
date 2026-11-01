@@ -2,6 +2,37 @@ use super::*;
 use base64::Engine;
 use gpui::{ClipboardItem, ExternalPaths, FileDropEvent, Image, ImageFormat};
 
+#[gpui::test]
+fn native_composer_sent_images_clear_while_next_draft_changes(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    image_session(cx, &surface);
+    paste(png(), cx);
+    let sent = images(&surface, cx);
+    let later = json!({"name":"later.png", "dataUri":"data:image/png;base64,bGF0ZXI="});
+    cx.simulate_input("First draft");
+    let changed = Rc::new(Cell::new(false));
+    let observed = changed.clone();
+    let late_image = later.clone();
+    let _subscription = cx.update(|_, cx| {
+        cx.observe(&surface, move |surface, cx| {
+            if surface.read(cx).saving && !observed.replace(true) {
+                surface.read(cx).composer.clone().update(cx, |i, cx| {
+                    i.set_text("Next draft", cx);
+                    i.controls.images.push(late_image.clone());
+                });
+            }
+        })
+    });
+    click("send", cx);
+    assert!(changed.get());
+    surface.read_with(cx, |s, cx| {
+        assert_eq!(s.queue["items"][0]["payload"]["images"], json!(sent));
+        assert_eq!(s.composer.read(cx).text, "Next draft");
+        assert_eq!(s.composer.read(cx).controls.images, vec![later]);
+    });
+}
+
 fn png() -> Vec<u8> {
     base64::engine::general_purpose::STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAFAAAAAwCAIAAAAJh2qgAAAAVklEQVR4nO3PAQ3AIADAMEAOnlCOmbv4k71VsM197viT9XXA2wzXGa4zXGe4znCd4TrDdYbrDNcZrjNcZ7jOcJ3hOsN1husM1xmuM1xnuM5wneE6w3UPI0QBwum7oOkAAAAASUVORK5CYII=").unwrap()
 }

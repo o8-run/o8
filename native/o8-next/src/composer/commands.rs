@@ -207,7 +207,11 @@ impl Composer {
         let command = commands.get(self.controls.slash.index.min(last))?;
         let text = self.text.trim();
         let token = text.split_whitespace().next().unwrap_or("");
-        let exact = token == command.command || command.aliases.contains(&token);
+        let exact = token.eq_ignore_ascii_case(command.command)
+            || command
+                .aliases
+                .iter()
+                .any(|alias| token.eq_ignore_ascii_case(alias));
         (exact && !(command.argument && text == token)).then(|| text.to_owned())
     }
     pub(crate) fn slash_suggestions(&self) -> Vec<Command> {
@@ -240,15 +244,24 @@ impl Composer {
     ) {
         let text = self.text.trim();
         let token = text.split_whitespace().next().unwrap_or("");
-        let exact = token == command.command || command.aliases.contains(&token);
+        let exact = token.eq_ignore_ascii_case(command.command)
+            || command
+                .aliases
+                .iter()
+                .any(|alias| token.eq_ignore_ascii_case(alias));
         if (click && command.argument)
-            || (!click && ((!exact && text == token) || (command.argument && text == token)))
+            || (!click && (!exact || (command.argument && text == token)))
         {
+            let args = &text[token.len()..];
             self.set_text(
                 &format!(
                     "{}{}",
                     command.command,
-                    if command.argument { " " } else { "" }
+                    if args.is_empty() && command.argument {
+                        " "
+                    } else {
+                        args
+                    }
                 ),
                 cx,
             );

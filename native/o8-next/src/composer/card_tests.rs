@@ -124,6 +124,36 @@ if (composeComposerWireMessage(payload.text, payload.routing.pickedMode).wireMes
 }
 
 #[gpui::test]
+fn native_composer_remove_queue_while_attachment_loads(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    surface.update(cx, |s, _| s.send_next = true);
+    click("composer-input", cx);
+    cx.simulate_input("Remove this queued message");
+    click("send", cx);
+    let session = surface.read_with(cx, |s, _| {
+        assert_eq!(s.queue["items"].as_array().unwrap().len(), 1);
+        s.sessions
+            .iter()
+            .find(|s| s.id == "thoughts-composer-first")
+            .unwrap()
+            .clone()
+    });
+    surface.update(cx, |s, cx| {
+        s.composer.update(cx, |i, _| i.controls.pending_images = 1);
+        cx.notify();
+    });
+    click("remove-queued", cx);
+    assert!(
+        fixture.client.queue(&session).unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "a pending attachment in the next draft must not block Remove"
+    );
+}
+
+#[gpui::test]
 fn native_composer_idle_card_avoids_viewport_path_targets(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (_surface, cx) = open(cx, &fixture);

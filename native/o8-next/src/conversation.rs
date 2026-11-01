@@ -227,9 +227,10 @@ impl Surface {
     fn mutate_message(&mut self, promote: Option<String>, remove: bool, cx: &mut Context<Self>) {
         if self.saving
             || !self.queue_ready
-            || self.composer.read(cx).composing()
-            || self.composer.read(cx).controls.busy
-            || self.composer.read(cx).controls.pending_images > 0
+            || (promote.is_none()
+                && (self.composer.read(cx).composing()
+                    || self.composer.read(cx).controls.busy
+                    || self.composer.read(cx).controls.pending_images > 0))
         {
             return;
         }
@@ -438,15 +439,16 @@ impl Surface {
                                 i.controls.prompt.queued_prelude = None;
                                 i.controls.prompt.command_wire = None;
                             });
-                            if this.composer.read(cx).text == draft {
-                                this.composer.update(cx, |i, cx| {
+                            this.composer.update(cx, |i, cx| {
+                                if i.text == draft {
                                     i.clear(cx);
-                                    i.controls
-                                        .images
-                                        .retain(|image| !sent_images.contains(image));
-                                    i.controls.files.retain(|file| !files.contains(file));
-                                });
-                            }
+                                }
+                                i.controls
+                                    .images
+                                    .retain(|image| !sent_images.contains(image));
+                                i.controls.files.retain(|file| !files.contains(file));
+                                cx.notify();
+                            });
                         }
                         // The queue rows under the composer show delivery, as on
                         // the desktop; the transcript keeps no confirmation line.

@@ -30,6 +30,46 @@ pub(super) fn wait_selector(cx: &mut VisualTestContext, selector: &'static str) 
     panic!("Missing composer control {selector}");
 }
 #[gpui::test]
+fn native_composer_slash_click_keeps_typed_arguments(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-input", cx);
+    cx.simulate_input("/visualize compare these two plans");
+    click("slash-visualization", cx);
+    surface.update_in(cx, |s, window, cx| {
+        assert_eq!(
+            s.composer.read(cx).text,
+            "/visualization compare these two plans"
+        );
+        assert!(s.composer.read(cx).focus.is_focused(window));
+        assert!(s.queue["items"].as_array().unwrap().is_empty());
+    });
+}
+
+#[gpui::test]
+fn native_composer_up_reaches_start_of_first_line(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-input", cx);
+    cx.simulate_input("alpha beta\nsecond line");
+    draw(cx);
+    cx.simulate_keystrokes("ctrl-home right right right up");
+    surface.update_in(cx, |s, window, cx| {
+        s.composer.update(cx, |i, cx| {
+            assert_eq!(
+                gpui::EntityInputHandler::selected_text_range(i, false, window, cx)
+                    .unwrap()
+                    .range,
+                0..0,
+                "Up from the first visual line must reach the start of the draft"
+            );
+        });
+    });
+    cx.simulate_keystrokes("right right right shift-up ctrl-c");
+    assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), "alp");
+}
+
+#[gpui::test]
 fn native_composer_controls_slash_opens_arrows_and_enter_apply(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
