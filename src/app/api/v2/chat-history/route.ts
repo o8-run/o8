@@ -21,7 +21,7 @@ import {
   OrchestratorThreadProjectError,
   resolveOrchestratorThreadProjectId,
 } from '@/lib/mobile/orchestrator-thread-project';
-import { maybeQueueThreadAutoTitle } from '@/lib/llm/thread-auto-title';
+import { maybeQueueThreadAutoTitle, regenerateThreadTitle } from '@/lib/llm/thread-auto-title';
 import {
   deleteCanonicalChatHistoryRecord,
   getCanonicalChatHistoryPath,
@@ -405,6 +405,17 @@ export async function PATCH(request: NextRequest) {
     return patchInboxSettlement(request, body);
   }
   if (!body?.tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
+  if (body.regenerateTitle === true) {
+    // Runs the titler outside the history lock; it takes the lock to write.
+    const saved = readPersistedLlmChat(body.tabId);
+    if (!saved || !matchesMutationWorkspace(mutationWorkspace(request), saved.history.repoPath)) {
+      return NextResponse.json({ error: 'History was not found' }, { status: 404 });
+    }
+    const title = await regenerateThreadTitle(safePath(body.tabId));
+    return title
+      ? NextResponse.json({ ok: true, title })
+      : NextResponse.json({ ok: false, error: 'No title could be generated yet.' }, { status: 409 });
+  }
   if (body.pinned !== undefined && typeof body.pinned !== 'boolean') return NextResponse.json({ error: 'pinned must be boolean' }, { status: 400 });
   const recordPin = body.pinned === undefined ? null : (await import('@/lib/inbox/mutation')).recordLegacyInboxPin;
 

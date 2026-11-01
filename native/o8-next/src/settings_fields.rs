@@ -279,6 +279,7 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("indexing", "Indexing"),
     ("connections", "Connections"),
     ("diagnostics", "Diagnostics"),
+    ("limits", "Limits"),
     ("about", "About"),
 ];
 pub const FIELDS: &[Field] = &[
@@ -309,6 +310,20 @@ pub const FIELDS: &[Field] = &[
         "general",
         "Days without activity before a thread with a PR or worker settles. 0 disables idle settlement.",
         NUMBER,
+    ),
+    field(
+        "composerEnterQueues",
+        "Enter queues while running",
+        "general",
+        "While a thread runs, Enter queues the follow-up instead of steering. Cmd-Shift-Enter still swaps for one send.",
+        BOOL,
+    ),
+    field(
+        "textGenerationTitleModel",
+        "Title model",
+        "general",
+        "OpenRouter model tried first for thread titles ([text_generation] title_model). Empty uses the free chain.",
+        Kind::Text,
     ),
     field(
         "presentationQuietMode",

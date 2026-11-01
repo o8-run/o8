@@ -83,6 +83,8 @@ impl Shell {
             },
         );
         self.surfaces.settings.subscription = Some((close_subscription, action_subscription));
+        let limits = cx.new(|cx| limits::Limits::new(self.client.clone(), cx));
+        settings.update(cx, |s, _| s.limits = Some(limits.into()));
         self.surfaces.settings.view = Some(settings);
         self.revision += 1;
         cx.notify();
@@ -177,6 +179,9 @@ impl Client {
 // Settings › Providers lives with this surface; Settings only hosts its view.
 #[path = "settings/providers.rs"]
 pub(crate) mod providers;
+// Settings › Limits lives with this surface; Settings only hosts its view.
+#[path = "settings/limits.rs"]
+pub(crate) mod limits;
 
 #[cfg(test)]
 #[path = "settings_shell_tests.rs"]

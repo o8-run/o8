@@ -242,7 +242,8 @@ impl PullRequests {
         } else {
             self.state.clone()
         };
-        let sort = self.sort.clone();
+        // Merge readiness is ranked here from the updated-order page.
+        let sort = if self.sort == "ready" { "updated".to_string() } else { self.sort.clone() };
         let task = cx.background_executor().spawn(async move {
             let result = client.get::<Value>(
                 "/api/panel/prs",
@@ -286,6 +287,9 @@ impl PullRequests {
                                 s.rows.push(row);
                             }
                         }
+                        if s.sort == "ready" {
+                            super::readiness::sort_by_readiness(&mut s.rows);
+                        }
                         s.page = page;
                         if let Some((repo, number)) = s.pending.take() {
                             if s.hosted {
@@ -298,6 +302,9 @@ impl PullRequests {
                         }
                     }
                     Ok(_) => s.error = "Pull requests could not be loaded. Try again.".into(),
+                    Err(error) if !s.rows.is_empty() && crate::client::transient(&error) => {
+                        s.error = crate::client::stale_notice(&error)
+                    }
                     Err(error) => s.error = error,
                 }
                 // Without a list, still show the requested pull request by its

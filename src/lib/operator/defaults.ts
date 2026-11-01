@@ -190,6 +190,9 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   /** Chat model on the local endpoint for Brain compose/classify + dictation polish.
    *  Empty = cloud/managed path. Env: `O8_LOCAL_CHAT_MODEL`. */
   localChatModel: string;
+  /** [text_generation] title_model: OpenRouter model tried first for thread titles.
+   *  Empty = the free title chain only. */
+  textGenerationTitleModel: string;
   experimentalOpencode: boolean;
   experimentalGemini: boolean;
   /**
@@ -364,6 +367,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   localInferenceBaseUrl: '',
   localEmbedModel: '',
   localChatModel: '',
+  textGenerationTitleModel: '',
   experimentalOpencode: false,
   experimentalGemini: false,
   experimentalChat: false,
@@ -495,6 +499,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.localChatModel === 'string') {
     result.localChatModel = stored.localChatModel.trim();
+  }
+  if (typeof stored.textGenerationTitleModel === 'string') {
+    result.textGenerationTitleModel = stored.textGenerationTitleModel.trim();
   }
   if (typeof stored.experimentalOpencode === 'boolean') {
     result.experimentalOpencode = stored.experimentalOpencode;
@@ -690,6 +697,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     localInferenceBaseUrl: envLocalBaseUrl ?? fileValues.localInferenceBaseUrl ?? OPERATOR_DEFAULTS_FALLBACK.localInferenceBaseUrl,
     localEmbedModel: envLocalEmbed ?? fileValues.localEmbedModel ?? OPERATOR_DEFAULTS_FALLBACK.localEmbedModel,
     localChatModel: envLocalChat ?? fileValues.localChatModel ?? OPERATOR_DEFAULTS_FALLBACK.localChatModel,
+    textGenerationTitleModel: fileValues.textGenerationTitleModel ?? OPERATOR_DEFAULTS_FALLBACK.textGenerationTitleModel,
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
@@ -769,6 +777,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     localInferenceBaseUrl: envLocalBaseUrl !== null ? 'env' : fileValues.localInferenceBaseUrl !== undefined ? 'file' : 'default',
     localEmbedModel: envLocalEmbed !== null ? 'env' : fileValues.localEmbedModel !== undefined ? 'file' : 'default',
     localChatModel: envLocalChat !== null ? 'env' : fileValues.localChatModel !== undefined ? 'file' : 'default',
+    textGenerationTitleModel: fileValues.textGenerationTitleModel !== undefined ? 'file' : 'default',
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
@@ -960,6 +969,12 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
       throw new Error('localChatModel must be a string.');
     }
     stored.localChatModel = update.localChatModel.trim();
+  }
+  if (update.textGenerationTitleModel !== undefined) {
+    if (typeof update.textGenerationTitleModel !== 'string') {
+      throw new Error('textGenerationTitleModel must be a string.');
+    }
+    stored.textGenerationTitleModel = update.textGenerationTitleModel.trim();
   }
   if (update.experimentalOpencode !== undefined) {
     stored.experimentalOpencode = Boolean(update.experimentalOpencode);

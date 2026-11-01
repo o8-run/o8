@@ -477,6 +477,12 @@ impl ThreadList {
                             cx.emit(Event::Selected(id));
                         }
                     }
+                    // A slow server keeps the last good list, marked stale, and
+                    // retries on the next refresh instead of reporting it down.
+                    Err(error) if !this.sessions.is_empty() && crate::client::transient(&error) => {
+                        this.notice = crate::client::stale_notice(&error);
+                        this.dirty.get_or_insert_with(Instant::now);
+                    }
                     Err(error) => {
                         this.notice = error.clone();
                         cx.emit(Event::Error(error));
@@ -770,6 +776,13 @@ impl ThreadList {
             self.choose(id, cx);
         }
     }
+    /// Ask the server's titler for a fresh title (thread-auto-title.ts).
+    pub(super) fn regenerate_title(&mut self, id: String, cx: &mut Context<Self>) {
+        if id.contains(':') {
+            return;
+        }
+        self.mutate(id, json!({"regenerateTitle":true}), cx);
+    }
     fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_generation += 1;
         let Some(id) = self.choice.clone().filter(|id| !id.contains(':')) else {
@@ -915,6 +928,11 @@ impl ThreadList {
                 self.editing = false;
                 self.editor.update(cx, |e, cx| e.clear(cx));
                 self.focus.focus(window);
+            }
+            "f2" if event.keystroke.modifiers.shift => {
+                if let Some(id) = self.choice.clone() {
+                    self.regenerate_title(id, cx);
+                }
             }
             "f2" => self.start_rename(window, cx),
             "delete" if !self.editing => self.archive(cx),

@@ -62,7 +62,7 @@ export function compactTitleFromMessage(text: string): string | null {
 
 interface AutoTitleDecision {
   run: boolean;
-  reason?: 'first' | 'refresh' | 'legacy-upgrade';
+  reason?: 'first' | 'refresh' | 'legacy-upgrade' | 'regenerate';
 }
 
 const PLACEHOLDER_TITLES = new Set(['new conversation', 'new chat', 'untitled conversation']);
@@ -148,6 +148,12 @@ function recordTitleAttempt(input: {
   }
 }
 
+/** The configured `[text_generation] title_model` first, then the free chain. */
+export function titleModels(configured: string | undefined): string[] {
+  const first = configured?.trim();
+  return first ? [first, ...FREE_TITLE_MODELS.filter((model) => model !== first)] : [...FREE_TITLE_MODELS];
+}
+
 async function llmTitle(firstUser: string, lastAssistant: string, tabId: string): Promise<string | null> {
   // Free title models only; the resolver honours a disabled OpenRouter connection (#3583).
   const apiKey = (await resolveOpenRouterKey())?.trim();
@@ -162,7 +168,7 @@ async function llmTitle(firstUser: string, lastAssistant: string, tabId: string)
     lastAssistant ? `Latest reply excerpt: ${lastAssistant.slice(0, 300)}` : '',
   ].filter(Boolean).join('\n');
 
-  for (const [index, model] of FREE_TITLE_MODELS.entries()) {
+  for (const [index, model] of titleModels(getOperatorDefaultsSync().values.textGenerationTitleModel).entries()) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TITLE_TIMEOUT_MS);
     let outcome: 'success' | 'http-error' | 'invalid-response' | 'transport-error' = 'transport-error';
@@ -210,61 +216,74 @@ async function llmTitle(firstUser: string, lastAssistant: string, tabId: string)
  * Re-reads before write so a concurrent operator rename always wins.
  */
 export function maybeQueueThreadAutoTitle(filePath: string): void {
-  if (inFlight.has(filePath)) return;
+  void titleThread(filePath, false);
+}
+
+/**
+ * Operator-requested regenerate: the same titler, run now, replacing any title
+ * (an explicit request outranks an earlier rename). Resolves to the new title,
+ * or null when the thread has no user message yet or another title is running.
+ */
+export function regenerateThreadTitle(filePath: string): Promise<string | null> {
+  return titleThread(filePath, true);
+}
+
+async function titleThread(filePath: string, force: boolean): Promise<string | null> {
+  if (inFlight.has(filePath)) return null;
   inFlight.add(filePath);
-  void (async () => {
-    try {
-      if (!existsSync(filePath)) return;
-      const data = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
-      const messages = Array.isArray(data.messages) ? data.messages as ThreadMessage[] : [];
-      const decision = decideAutoTitle({
-        title: data.title,
-        titleSource: data.titleSource,
-        autoTitledAtCount: data.autoTitledAtCount,
-        messageCount: messages.length,
-      });
-      if (!decision.run) return;
+  try {
+    if (!existsSync(filePath)) return null;
+    const data = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+    const messages = Array.isArray(data.messages) ? data.messages as ThreadMessage[] : [];
+    const decision: AutoTitleDecision = force ? { run: true, reason: 'regenerate' } : decideAutoTitle({
+      title: data.title,
+      titleSource: data.titleSource,
+      autoTitledAtCount: data.autoTitledAtCount,
+      messageCount: messages.length,
+    });
+    if (!decision.run) return null;
 
-      const firstUser = messageText(messages.find((m) => m.role === 'user') ?? {});
-      if (!firstUser.trim()) return;
-      const lastAssistant = messageText([...messages].reverse().find((m) => m.role === 'assistant') ?? {});
+    const firstUser = messageText(messages.find((m) => m.role === 'user') ?? {});
+    if (!firstUser.trim()) return null;
+    const lastAssistant = messageText([...messages].reverse().find((m) => m.role === 'assistant') ?? {});
 
-      const tabId = filePath.split('/').pop()?.replace(/\.json$/, '');
-      if (!tabId) return;
-      const inferenceEnabled = getOperatorDefaultsSync().values.autoTitleInferenceEnabled;
-      const generated = inferenceEnabled ? await llmTitle(firstUser, lastAssistant, tabId) : null;
-      const fallback = compactTitleFromMessage(firstUser);
-      const nextTitle = generated ?? fallback;
-      if (!nextTitle) return;
-      // An LLM miss must not clobber an existing title with a same-quality
-      // code crop — only fill code titles into blank/legacy slots once. The
-      // refresh still counts as tried, or every streamed save would retry it.
-      const keepTitle = !generated && decision.reason === 'refresh';
+    const tabId = filePath.split('/').pop()?.replace(/\.json$/, '');
+    if (!tabId) return null;
+    const inferenceEnabled = getOperatorDefaultsSync().values.autoTitleInferenceEnabled;
+    const generated = inferenceEnabled ? await llmTitle(firstUser, lastAssistant, tabId) : null;
+    const fallback = compactTitleFromMessage(firstUser);
+    const nextTitle = generated ?? fallback;
+    if (!nextTitle) return null;
+    // An LLM miss must not clobber an existing title with a same-quality
+    // code crop — only fill code titles into blank/legacy slots once. The
+    // refresh still counts as tried, or every streamed save would retry it.
+    const keepTitle = !generated && decision.reason === 'refresh';
 
-      // The server's turn writer and the Next routes save this file from
-      // separate processes; re-read and write under the shared file lock.
-      const titled = withCanonicalChatHistoryLock(tabId, () => {
-        const fresh = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
-        // Another process may have titled or renamed it during the model call.
-        const freshMessages = Array.isArray(fresh.messages) ? fresh.messages.length : 0;
-        if (!decideAutoTitle({ ...fresh, messageCount: freshMessages }).run) return false;
-        if (!keepTitle) {
-          fresh.title = nextTitle;
-          fresh.titleSource = generated ? 'llm' : 'code';
-        }
-        fresh.autoTitledAtCount = messages.length;
-        persistCanonicalChatHistoryRecord(
-          tabId,
-          fresh as { messages: unknown[]; [key: string]: unknown },
-        );
-        return true;
-      });
-      if (!titled || keepTitle) return;
-      console.log(`[thread-auto-title] ${decision.reason}: "${nextTitle}" (${generated ? 'llm' : 'code'})`);
-    } catch {
-      // best-effort — never break the persist path
-    } finally {
-      inFlight.delete(filePath);
-    }
-  })();
+    // The server's turn writer and the Next routes save this file from
+    // separate processes; re-read and write under the shared file lock.
+    const titled = withCanonicalChatHistoryLock(tabId, () => {
+      const fresh = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+      // Another process may have titled or renamed it during the model call.
+      const freshMessages = Array.isArray(fresh.messages) ? fresh.messages.length : 0;
+      if (!force && !decideAutoTitle({ ...fresh, messageCount: freshMessages }).run) return false;
+      if (!keepTitle) {
+        fresh.title = nextTitle;
+        fresh.titleSource = generated ? 'llm' : 'code';
+      }
+      fresh.autoTitledAtCount = messages.length;
+      persistCanonicalChatHistoryRecord(
+        tabId,
+        fresh as { messages: unknown[]; [key: string]: unknown },
+      );
+      return true;
+    });
+    if (!titled || keepTitle) return null;
+    console.log(`[thread-auto-title] ${decision.reason}: "${nextTitle}" (${generated ? 'llm' : 'code'})`);
+    return nextTitle;
+  } catch {
+    // best-effort — never break the persist path
+    return null;
+  } finally {
+    inFlight.delete(filePath);
+  }
 }

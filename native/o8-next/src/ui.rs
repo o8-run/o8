@@ -176,6 +176,24 @@ impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
+        let defaults = client.clone();
+        let task = cx.background_executor().spawn(async move {
+            defaults
+                .get::<Value>("/api/panel/operator-defaults", &[("include", "values")])
+                .ok()
+        });
+        cx.spawn(async move |this, cx| {
+            if let Some(values) = task.await {
+                // Only lift the default; never undo a toggle made meanwhile.
+                if enter_queues(&values) {
+                    let _ = this.update(cx, |this, cx| {
+                        this.send_next = true;
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
         Self {
             client,
             embedded: false,
@@ -1153,3 +1171,19 @@ mod image_cache_tests;
 #[cfg(test)]
 #[path = "visualization_tests.rs"]
 mod visualization_tests;
+
+/// Operator default `composerEnterQueues`: Enter queues instead of steering.
+pub(crate) fn enter_queues(defaults: &Value) -> bool {
+    defaults["values"]["composerEnterQueues"] == true
+}
+
+#[cfg(test)]
+mod enter_default_tests {
+    #[test]
+    fn enter_steers_unless_the_operator_default_queues() {
+        use serde_json::json;
+        assert!(!super::enter_queues(&json!({"values":{}})));
+        assert!(!super::enter_queues(&json!(null)));
+        assert!(super::enter_queues(&json!({"values":{"composerEnterQueues":true}})));
+    }
+}

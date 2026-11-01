@@ -564,6 +564,24 @@ impl ThreadList {
                     this.set_scope(keys, cx);
                 }))
         });
+        let thread = menu.id.clone();
+        let regenerate = div()
+            .id("sidebar-row-regenerate-title")
+            .debug_selector(|| "sidebar-row-regenerate-title".into())
+            .h(px(28.))
+            .px(px(8.))
+            .flex()
+            .items_center()
+            .rounded(px(7.))
+            .text_size(px(12.5))
+            .cursor_pointer()
+            .hover(|s| s.bg(theme().hover))
+            .child("Regenerate title")
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.row_menu = None;
+                this.regenerate_title(thread.clone(), cx);
+            }));
         Some(
             deferred(
                 anchored()
@@ -591,6 +609,7 @@ impl ThreadList {
                             .children(workspace_restores)
                             .children(filter)
                             .children(snooze)
+                            .child(regenerate)
                             .children(copy)
                             .child(archive),
                     ),

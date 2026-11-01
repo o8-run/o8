@@ -288,6 +288,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update[field] = Number(value);
   }
 
+  if (body.composerEnterQueues !== undefined) {
+    if (typeof body.composerEnterQueues !== 'boolean') {
+      throw new Error('composerEnterQueues must be boolean.');
+    }
+    update.composerEnterQueues = body.composerEnterQueues;
+  }
   if (body.presentationQuietMode !== undefined) {
     if (typeof body.presentationQuietMode !== 'boolean') {
       throw new Error('presentationQuietMode must be boolean.');
@@ -452,6 +458,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('localChatModel must be a string.');
     }
     update.localChatModel = body.localChatModel.trim();
+  }
+
+  if (body.textGenerationTitleModel !== undefined) {
+    if (typeof body.textGenerationTitleModel !== 'string') {
+      throw new Error('textGenerationTitleModel must be a string.');
+    }
+    update.textGenerationTitleModel = body.textGenerationTitleModel.trim();
   }
 
   for (const field of ['experimentalOpencode', 'experimentalGemini', 'experimentalChat', 'experimentalCanvas', 'experimentalNext', 'nativeBrowserView'] as const) {

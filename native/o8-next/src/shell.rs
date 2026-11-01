@@ -194,6 +194,9 @@ impl Shell {
                         this.notice.clear();
                         this.persist();
                     }
+                    Err(error) if this.connected && crate::client::transient(&error) => {
+                        this.notice = crate::client::stale_notice(&error);
+                    }
                     Err(error) => {
                         this.connected = false;
                         this.notice = format!("Local server unavailable: {error}. Start the local o8 server, then Retry.");
