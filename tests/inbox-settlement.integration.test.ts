@@ -147,7 +147,7 @@ describe('inbox settlement through operator mutation and native listings', () =>
     expect((await mutate(tabId, 'unsettle')).status).toBe(200);
     expect(fixture.scans).toBe(0);
     const record = readPersistedLlmChat(tabId)!.history;
-    persistCanonicalChatHistoryRecord(tabId, { ...record, orchestratorSessionIds: { claude: 'bound-noscan' } } as typeof record);
+    persistCanonicalChatHistoryRecord(tabId, { ...record, orchestratorSessionIds: { claude: 'bound-noscan' } });
     fixture.agents = [{ sessionKey: 'claude-code:bound-noscan', status: 'running', runtime: 'claude-code' }];
     try {
       expect((await mutate(tabId, 'settle')).status).toBe(409);
