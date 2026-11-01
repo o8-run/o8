@@ -137,10 +137,7 @@ impl Tool {
     }
     /// Tools o8 next has not built yet open a placeholder tab.
     fn ready(self) -> bool {
-        !matches!(
-            self,
-            Tool::Threads | Tool::Resources | Tool::Targeting
-        )
+        !matches!(self, Tool::Threads | Tool::Resources | Tool::Targeting)
     }
     fn label(self) -> &'static str {
         match self {
@@ -562,7 +559,9 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         && !s.content.contains_key(&key)
     {
         // Workspace-scoped tools read their saved slice; Inbox also works before one exists.
-        if tab != Tab::Inbox && !s.state.workspaces.contains_key(&workspace) {
+        if !matches!(tab, Tab::Inbox | Tab::Activity)
+            && !s.state.workspaces.contains_key(&workspace)
+        {
             layout::select(s, tool, window, cx);
             return;
         }
@@ -891,7 +890,11 @@ fn close_lower_tab(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Cont
     };
     p.lower_tabs.remove(index);
     if p.lower == Some(tool) {
-        match p.lower_tabs.get(index.min(p.lower_tabs.len().saturating_sub(1))).copied() {
+        match p
+            .lower_tabs
+            .get(index.min(p.lower_tabs.len().saturating_sub(1)))
+            .copied()
+        {
             Some(next) => {
                 p.into_lower = true;
                 show(s, next, window, cx);

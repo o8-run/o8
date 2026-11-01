@@ -221,6 +221,12 @@ impl ActivityPane {
                                     .child(row.title.clone()),
                             ),
                     )
+                    .child(self.button(
+                        "activity-view-commit",
+                        "Show commit details",
+                        Action::Open(row.clone()),
+                        cx,
+                    ))
                     .child(self.link("activity-open-commit", "Open commit", row.url(), cx));
             }
             "issue" => {
@@ -493,7 +499,7 @@ impl ActivityPane {
                         let files = detail["files"].as_array().cloned().unwrap_or_default();
                         if !files.is_empty() {
                             let mut list = div().child(Self::detail_label("Changed files"));
-                            for (i, file) in files.iter().enumerate() {
+                            for (i, file) in files.iter().take(6).enumerate() {
                                 list = list.child(
                                     div()
                                         .debug_selector(move || format!("activity-pr-file-{i}"))
@@ -1036,6 +1042,45 @@ impl Render for ActivityPane {
         self.restore_scroll();
         let revision = self.revision;
         let painted = self.painted.clone();
+        if let Some((title, commit)) = self.commit.clone() {
+            let back = self.button(
+                "activity-commit-back",
+                "Back to Activity",
+                Action::BackToFeed,
+                cx,
+            );
+            return div()
+                .id("activity-commit-viewer")
+                .debug_selector(|| "activity-commit-viewer".into())
+                .size_full()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .track_focus(&self.focus)
+                .on_key_down(cx.listener(Self::key_down))
+                .bg(theme().background)
+                .text_color(theme().text)
+                .font_family(theme().font_ui)
+                .font_weight(FontWeight::LIGHT)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .p(px(12.))
+                        .child(back)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(px(13.5))
+                                .truncate()
+                                .child(title),
+                        ),
+                )
+                .child(div().flex_1().min_h_0().child(commit))
+                .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)));
+        }
         let now = crate::clock::now();
         // Repository scope and the mission controls share the first header row.
         let scope = self.scope_selector(cx);
