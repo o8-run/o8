@@ -71,3 +71,22 @@ process-stop policy.
 | Failure | Retains the last good snapshot for transport and structured collector errors, with a visible error and Retry. A successful empty snapshot replaces old rows. |
 | Stop | Hover or keyboard-revealed Stop, separate Kill confirmation, Cancel, one mutation at a time, explicit refusal feedback and a fresh read after success. The existing server decides whether a process can stop. |
 | Verification | `resources_opens_from_launcher_and_shows_live_metrics` drives the launcher, Retry, Stop, Kill, Cancel and panel toggle. Authored metrics and request receipts establish UI behavior, not host process attribution or actual termination. |
+
+## Inbox replies
+
+Reference: classic's `O8InboxPane.tsx`, `MaintainerReplyChat.tsx`, and
+`src/lib/inbox/maintainer-draft.ts`.
+
+| Parity check | Native behavior |
+| --- | --- |
+| GitHub reply | Explicit Draft reply in chat hands the thread URL, title and item context to the shared native composer, unsent. Open on GitHub remains available. |
+| Approvals | Existing in-place Approve/Reject behavior remains. Discuss in chat opens the linked conversation with approval context; discussing does not resolve it. |
+| Destination | Prefer the linked writable conversation, then an existing conversation in the item's repository. Create through the existing New chat path when none is available. Do not choose an unrelated workspace. Missing repository context and failed startup have visible feedback. |
+| Drafts | Prepend context without replacing existing draft text. Reopening the same item in the same conversation does not duplicate identical context. Runtime history and Side chat are not chosen as writable main chats. |
+| Controls | Named actions and keyboard focus accompany existing native card/decision controls. No direct GitHub posting, new composer, server route or authorization policy is added. |
+
+The GPUI regression is
+`inbox_reply_and_approval_seed_the_matching_chat_without_sending`. It exercises
+reply and approval handoffs, draft preservation, repeated opening, linked session
+selection, new-chat creation, and absence of sends. Existing in-place approval
+coverage is `inbox_cards_counts_statuses_and_approval_match_desktop_routes`.

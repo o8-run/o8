@@ -1,7 +1,7 @@
 use super::*;
 use serde_json::{Value, json};
 
-use crate::inbox::{Inbox, OpenSession};
+use crate::inbox::{Inbox, OpenSession, ReplyContext};
 pub(super) type Slice = EmptyState;
 pub(super) type Runtime = ();
 pub(super) type View = Inbox;
@@ -57,6 +57,13 @@ fn create(
             }
         },
     ));
+    shell.subscriptions.push(cx.subscribe_in(
+        &inbox,
+        window,
+        |this, _, request: &ReplyContext, window, cx| {
+            this.inbox_prepare_reply(request.clone(), window, cx)
+        },
+    ));
     Some(Content::Inbox(inbox))
 }
 impl ShellView for Inbox {
@@ -104,3 +111,7 @@ mod tests;
 #[cfg(test)]
 #[path = "../inbox_tests.rs"]
 mod tests1;
+
+#[cfg(test)]
+#[path = "inbox_reply_tests.rs"]
+mod reply_tests;
