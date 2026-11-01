@@ -351,6 +351,10 @@ impl Issues {
     }
     fn detail_view(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let Some(issue) = &self.detail else {
+            // The status line above already says it is loading.
+            if self.single && self.busy {
+                return div().into_any_element();
+            }
             return div()
                 .p(px(20.))
                 .child(format!(
