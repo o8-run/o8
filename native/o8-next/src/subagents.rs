@@ -94,7 +94,7 @@ impl Inspector {
                 .find(|a| a.id == id || a.session.as_ref() == Some(&id))
                 .map_or(id, |a| a.id.clone())
         });
-        if !self.open {
+        if !self.open || !self.focus.contains_focused(window, cx) {
             self.return_focus = window.focused(cx);
         }
         self.open = true;
@@ -311,9 +311,17 @@ pub(crate) fn open_packet<T: 'static>(
 ) {
     let view = cx.new(|cx| Inspector::new(client, Scope { repo, parent: None }, cx));
     let handle = window.window_handle();
+    let return_focus = window.focused(cx);
     cx.defer(move |cx| {
-        let _ = handle.update(cx, |_, window, cx| {
-            view.update(cx, |v, cx| v.inspect(Some(id), window, cx))
+        // EntityCreated observers install their subscriptions in a deferred
+        // effect. Wait through that effect before emitting the initial Open.
+        cx.defer(move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                if let Some(focus) = &return_focus {
+                    focus.focus(window);
+                }
+                view.update(cx, |v, cx| v.inspect(Some(id), window, cx))
+            });
         });
     });
 }

@@ -33,6 +33,7 @@ impl Surface {
             {
                 continue;
             }
+            row.bind_subagent_focus(cx);
             if row.subagents.as_ref() != Some(&view) || *row.subagent_agents != *agents {
                 row.subagents = Some(view.clone());
                 row.subagent_agents = agents.clone();

@@ -3,6 +3,7 @@ use super::*;
 use crate::shell::test_support::open;
 use crate::shell::test_support::*;
 
+#[track_caller]
 fn click(v: &mut VisualTestContext, selector: &'static str) {
     draw(v);
     let bounds = v
@@ -12,6 +13,7 @@ fn click(v: &mut VisualTestContext, selector: &'static str) {
     v.run_until_parked();
     draw(v);
 }
+#[track_caller]
 fn wait(s: &Entity<Shell>, v: &mut VisualTestContext, selector: &'static str) {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
@@ -120,44 +122,43 @@ fn wait_probe(s: &Entity<Shell>, v: &mut VisualTestContext, ready: impl Fn(&Valu
 }
 
 #[gpui::test]
-fn subagents_late_history_cannot_replace_the_selected_agent(cx: &mut TestAppContext) {
+fn subagents_late_history_cannot_restore_cleared_detail(cx: &mut TestAppContext) {
     let (f, s, mut v) = setup(cx);
-    let _: Value = f
-        .client
-        .get("/api/subagents-fixture", &[("mode", "slow-history")])
-        .unwrap();
-    wait(&s, &mut v, "subagent-trace-subagent-calculation");
-    click(&mut v, "subagent-trace-subagent-calculation");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let state: Value = f.client.get("/api/subagents-fixture", &[]).unwrap();
-        if state["delayedHistory"] == 1 {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the history read must be in flight"
-        );
-        v.run_until_parked();
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    click(&mut v, "subagents-back");
-    click(&mut v, "subagent-row-subagent-fruit");
-    wait_probe(&s, &mut v, |p| p["rows"] == 2);
-    let _: Value = f
-        .client
-        .get("/api/subagents-fixture", &[("mode", "release-history")])
-        .unwrap();
-    std::thread::sleep(Duration::from_millis(600));
+    click(&mut v, "header-subagents");
+    wait(&s, &mut v, "subagent-row-subagent-calculation");
+    let inspector = s.read_with(&v, |s, cx| {
+        let tab = s.active().unwrap();
+        let Content::Session(view) = &s.content[&s.key(&tab)] else {
+            panic!("chat")
+        };
+        view.read(cx).shell_subagents().unwrap()
+    });
+    // Queue the production read, then leave detail before its completion can
+    // run on the foreground executor. Blocking HTTP cannot be held across
+    // run_until_parked in GPUI's deterministic test executor.
+    inspector.update_in(&mut v, |i, w, cx| {
+        i.inspect(Some("subagent-calculation".into()), w, cx);
+        i.inspect(None, w, cx);
+    });
     v.run_until_parked();
-    draw(&mut v);
+    wait(&s, &mut v, "subagent-row-subagent-calculation");
     let detail = s.read_with(&v, |s, cx| subagents::probe(s, cx));
-    assert_eq!(detail["selected"], "subagent-fruit");
+    assert!(detail["selected"].is_null());
     assert_eq!(
-        detail["rows"], 2,
-        "an old read cannot install another agent's rows"
+        detail["rows"],
+        Value::Null,
+        "an old read cannot restore a cleared transcript"
     );
-    assert_eq!(detail["readyImages"], 0);
+    assert!(detail["readyImages"].is_null());
+    let snapshot: Value = f.client.get("/api/subagents-fixture", &[]).unwrap();
+    assert!(
+        snapshot["calls"].as_array().unwrap().iter().any(|call| {
+            let call = call.as_str().unwrap();
+            call.starts_with("GET /api/mobile/history")
+                && call.contains("thoughts-subagent-calculation")
+        }),
+        "the cleared selection must still exercise a real history read"
+    );
 }
 
 #[gpui::test]
@@ -280,8 +281,8 @@ fn subagents_side_chat_returns_to_its_parent_and_split(cx: &mut TestAppContext) 
 fn subagents_workers_action_returns_keyboard_focus_to_its_card(cx: &mut TestAppContext) {
     let (_f, s, mut v) = setup(cx);
     s.update_in(&mut v, |s, w, cx| s.execute(Command::Workers, w, cx));
-    wait(&s, &mut v, "worker-inspect-subagent-calculation");
-    click(&mut v, "worker-inspect-subagent-calculation");
+    wait(&s, &mut v, "worker-inspect-agent-subagent-calculation");
+    click(&mut v, "worker-inspect-agent-subagent-calculation");
     wait(&s, &mut v, "subagents-detail-subagent-calculation");
     assert_eq!(s.read_with(&v, |s, _| s.active()), Some(Tab::Workers));
     v.simulate_keystrokes("escape");

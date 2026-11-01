@@ -28,7 +28,12 @@ pub(crate) fn element(state: Rc<RefCell<RowState>>, steps: &[Step]) -> AnyElemen
             let id = reference.id.clone();
             let selector = format!("subagent-trace-{id}");
             let inspector = inspector.clone();
+            let focus = state.subagent_focus.get(&reference.id).cloned();
+            let return_focus = focus.clone();
             let activate = move |w: &mut Window, cx: &mut App| {
+                if let Some(focus) = &return_focus {
+                    focus.focus(w);
+                }
                 inspector.update(cx, |s, cx| s.inspect(Some(id.clone()), w, cx))
             };
             let activate = Rc::new(activate);
@@ -37,6 +42,7 @@ pub(crate) fn element(state: Rc<RefCell<RowState>>, steps: &[Step]) -> AnyElemen
                 .id(SharedString::from(selector.clone()))
                 .debug_selector(move || selector.clone())
                 .focusable()
+                .when_some(focus, |v, focus| v.track_focus(&focus))
                 .cursor_pointer()
                 .rounded(px(6.))
                 .px(px(7.))

@@ -153,6 +153,7 @@ impl Pane {
         &mut self,
         view: gpui::Entity<crate::subagents::Inspector>,
         agents: Rc<Vec<crate::subagents::model::Agent>>,
+        cx: &gpui::App,
     ) {
         let anchor = self.list.logical_scroll_top();
         for (index, row) in self.rows.iter().enumerate() {
@@ -161,6 +162,7 @@ impl Pane {
             {
                 continue;
             }
+            row.bind_subagent_focus(cx);
             if row.subagents.as_ref() != Some(&view) || *row.subagent_agents != *agents {
                 row.subagents = Some(view.clone());
                 row.subagent_agents = agents.clone();

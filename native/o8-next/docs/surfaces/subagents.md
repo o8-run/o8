@@ -53,8 +53,8 @@ The side-chat path also checks its split companion, unchanged draft and keyboard
 return to the originating trace action.
 Workers inspection checks keyboard return to the same card. A lower-split check
 keeps detail in its existing slot and restores the tools that preceded inspection.
-A delayed production history read also proves that an earlier selection cannot
-replace the newly selected agent's transcript or images.
+A production history read whose selection is cleared before completion also
+proves that a late reply cannot restore the old transcript or images.
 `tests/o8d-next-surfaces-real-path.test.ts` covers the Shared read through the
 production native bridge with Next stopped.
 

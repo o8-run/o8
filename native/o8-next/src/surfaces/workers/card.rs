@@ -207,7 +207,7 @@ impl Render for Card {
             1 => theme().warning,
             _ => theme().danger,
         };
-        let inspect_id = format!("worker-inspect-{}", self.task.id);
+        let inspect_id = format!("worker-inspect-agent-{}", self.task.id);
         let inspect = div()
             .id(SharedString::from(inspect_id.clone()))
             .debug_selector(move || inspect_id.clone())

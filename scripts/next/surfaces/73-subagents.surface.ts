@@ -108,9 +108,6 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
   let fail = false;
   let delay = 0;
   let failPage = false;
-  let slowHistory = false;
-  let releaseHistory: (() => void) | undefined;
-  let delayedHistory = 0;
   const history = await import('../../../src/app/api/mobile/history/route');
   const calls: string[] = [];
   return {
@@ -124,15 +121,6 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
       },
       'GET /api/orchestrator/shared-team/active': shared.GET,
       'GET /api/mobile/history': async request => {
-        if (slowHistory && request.nextUrl.searchParams.get('sessionKey') === 'llm-chat:thoughts-subagent-calculation') {
-          delayedHistory++;
-          await new Promise<void>(resolve => {
-            const finish = () => { clearTimeout(timer); releaseHistory = undefined; resolve(); };
-            const timer = setTimeout(finish, 5_000);
-            releaseHistory = finish;
-          });
-          delayedHistory--;
-        }
         if (failPage && request.nextUrl.searchParams.has('before')) return Response.json({ error: 'Earlier history unavailable' }, { status: 503 });
         return history.GET(request);
       },
@@ -151,8 +139,6 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
         if (mode === 'fast') delay = 0;
         if (mode === 'fail-page') failPage = true;
         if (mode === 'ready-page') failPage = false;
-        if (mode === 'slow-history') slowHistory = true;
-        if (mode === 'release-history') { slowHistory = false; releaseHistory?.(); }
         if (mode === 'held' && process.argv.includes('--subagents-shared')) {
           const { getSqlite } = await import('../../../src/lib/db');
           getSqlite().prepare(`INSERT OR REPLACE INTO shared_worker_returns
@@ -160,7 +146,7 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
             VALUES ('shared-return', 'opencode-owned:subagent-shared', 'shared-run', 'finished', 'Shared worker result', 'held', 'Parent delivery needs review', ?, ?)`)
             .run(Date.now(), Date.now());
         }
-        return Response.json({ repo, parent, packets, calls, delayedHistory });
+        return Response.json({ repo, parent, packets, calls });
       },
     },
   };

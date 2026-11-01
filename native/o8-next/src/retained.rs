@@ -42,6 +42,7 @@ pub struct RowState {
     pub cards: crate::visualizations::Cards,
     pub(crate) subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
     pub(crate) subagent_agents: Rc<Vec<crate::subagents::model::Agent>>,
+    pub(crate) subagent_focus: std::collections::HashMap<String, gpui::FocusHandle>,
 }
 impl RowState {
     #[cfg(test)]
@@ -75,11 +76,13 @@ impl RowState {
             cards: Default::default(),
             subagents: None,
             subagent_agents: Default::default(),
+            subagent_focus: Default::default(),
         }
     }
     /// A row that changed in place (a tool step finished) keeps its disclosure;
     /// a trace watched while live stays open once it finishes.
     pub fn keep_disclosure(&mut self, previous: &RowState) {
+        self.subagent_focus = previous.subagent_focus.clone();
         if self.expanded.is_some() && previous.expanded.is_some() {
             self.expanded = previous.expanded;
         }
@@ -87,6 +90,15 @@ impl RowState {
             && trace.live
         {
             self.expanded = Some(true);
+        }
+    }
+    pub(crate) fn bind_subagent_focus(&mut self, cx: &App) {
+        if let Row::Activity { steps, .. } = &self.row {
+            for reference in steps.iter().flat_map(|step| &step.delegations) {
+                self.subagent_focus
+                    .entry(reference.id.clone())
+                    .or_insert_with(|| cx.focus_handle());
+            }
         }
     }
     pub(crate) fn disclosure(&self) -> bool {

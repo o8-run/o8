@@ -31,7 +31,7 @@ impl Grid {
                         .iter_mut()
                         .filter(|p| p.key.as_ref() == Some(&target))
                     {
-                        pane.attach_subagents(view.clone(), agents.clone());
+                        pane.attach_subagents(view.clone(), agents.clone(), cx);
                     }
                     cx.notify();
                 });
@@ -44,7 +44,7 @@ impl Grid {
                 .iter_mut()
                 .filter(|p| p.key.as_ref() == Some(&key))
             {
-                pane.attach_subagents(view.clone(), agents.clone());
+                pane.attach_subagents(view.clone(), agents.clone(), cx);
             }
         }
     }
