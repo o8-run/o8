@@ -227,9 +227,10 @@ impl Surface {
     fn mutate_message(&mut self, promote: Option<String>, remove: bool, cx: &mut Context<Self>) {
         if self.saving
             || !self.queue_ready
-            || self.composer.read(cx).composing()
-            || self.composer.read(cx).controls.busy
-            || self.composer.read(cx).controls.pending_images > 0
+            || (promote.is_none()
+                && (self.composer.read(cx).composing()
+                    || self.composer.read(cx).controls.busy
+                    || self.composer.read(cx).controls.pending_images > 0))
         {
             return;
         }
