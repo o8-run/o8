@@ -9,6 +9,10 @@ use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
+#[path = "http_tests.rs"]
+mod http_tests;
+
 /// Classic's owner for the operator's own automations.
 pub(super) const OWNER: &str = "operator";
 const REFRESH: Duration = Duration::from_secs(15);
