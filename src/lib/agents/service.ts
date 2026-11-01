@@ -6,6 +6,7 @@ import type { RequestPrincipalContext } from '@/lib/auth/principal';
 import { codename } from '@/lib/agents/codename';
 import { isAgentInboxWakePending } from '@/lib/agents/inbox-wake';
 import { getSqlite } from '@/lib/db';
+import { projectNetworkConversation } from '@/lib/bots/network-projection';
 import { findLaneByPacket, getLane } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import {
@@ -173,12 +174,39 @@ function resolveAgentTarget(
   return exact;
 }
 
+function projectNetworkMessage(message: import('./types').AgentMessage, sqlite: Database.Database) {
+  try {
+    if (message.conversation) projectNetworkConversation(message.conversation.id, sqlite);
+  } catch (error) {
+    // Acceptance belongs to the bus. A later history read repairs this projection.
+    console.warn('[bot-network] Accepted message awaits transcript projection:', error instanceof Error ? error.message : String(error));
+  }
+  return message;
+}
+
+/** Internal admission fence for a saved local delivery context; never read from the wire. */
+export interface AgentMessageAdmission {
+  /** Only the local durable ask_user handler admits an initial message to the human. */
+  operatorQuestion?: true;
+  expectedTarget?: Pick<AgentPresence, 'agentId' | 'name' | 'repo' | 'runtime' | 'sessionKey'>;
+  beforePersist?: () => void;
+  /** Local routing metadata in the same SQLite transaction; never file projection. */
+  afterPersist?: (message: import('./types').AgentMessage) => void;
+}
+function assertExpectedTarget(target: AgentPresence | null, expected: NonNullable<AgentMessageAdmission['expectedTarget']>) {
+  if (!target || target.agentId !== expected.agentId || target.name !== expected.name || target.repo !== expected.repo
+    || target.runtime !== expected.runtime || target.sessionKey !== expected.sessionKey) {
+    throw new AgentBusError('The recorded recipient session is unavailable or changed.', 'agent_target_context_changed', 409);
+  }
+}
+
 export async function postAgentMessage(
   input: unknown,
   principal: RequestPrincipalContext,
   seams: AgentMessageDeliverySeams = defaultAgentMessageDeliverySeams,
   sqlite: Database.Database = getSqlite(),
   presenceSeams: LiveAgentPresenceSeams = defaultLiveAgentPresenceSeams,
+  admission?: AgentMessageAdmission,
 ) {
   requireBusPrincipal(principal);
   const body = objectInput(input, 'invalid_agent_message');
@@ -207,7 +235,7 @@ export async function postAgentMessage(
     repo = sender.repo;
   }
   if (repo) await reconcileLiveAgentPresence(repo, presenceSeams, sqlite);
-  const target = replyToId && to.toLowerCase() === 'operator' && repo ? {
+  const target = admission?.expectedTarget ? findAgentPresence({ agentId: admission.expectedTarget.agentId }, sqlite) : (replyToId || admission?.operatorQuestion) && to.toLowerCase() === 'operator' && repo ? {
     agentId: 'operator',
     name: 'operator',
     repo: normalizeAgentBusRepoPath(repo),
@@ -218,6 +246,10 @@ export async function postAgentMessage(
     packetId: null,
     lastSeen: new Date().toISOString(),
   } satisfies AgentPresence : resolveAgentTarget(to, repo, sqlite);
+  if (admission?.expectedTarget) {
+    assertExpectedTarget(target, admission.expectedTarget);
+    if (target!.name !== to || target!.repo !== normalizeAgentBusRepoPath(repo!)) throw new AgentBusError('The expected target does not match the send address.', 'agent_target_context_changed', 409);
+  }
   if (!target) {
     throw new AgentBusError(
       repo ? `No agent named ${to} is registered in that repository.` : `Agent name ${to} is absent or ambiguous.`,
@@ -238,7 +270,7 @@ export async function postAgentMessage(
   }
   let persisted;
   try {
-    persisted = persistAgentMessage({
+    const persist = () => persistAgentMessage({
       from: sender?.name ?? (replyToId ? 'operator' : optionalString(body.from, 'from') ?? 'operator'),
       to: target.name,
       repo: target.repo,
@@ -254,6 +286,13 @@ export async function postAgentMessage(
       requestId,
       close: body.close === true,
     }, sqlite);
+    persisted = admission ? sqlite.transaction(() => {
+      admission.beforePersist?.();
+      if (admission.expectedTarget) assertExpectedTarget(findAgentPresence({ agentId: admission.expectedTarget.agentId }, sqlite), admission.expectedTarget);
+      const accepted = persist();
+      admission.afterPersist?.(accepted.message);
+      return accepted;
+    }).immediate() : persist();
   } catch (error) {
     if (error instanceof AgentConversationError) {
       throw new AgentBusError(error.message, error.code, error.status);
@@ -261,11 +300,11 @@ export async function postAgentMessage(
     throw error;
   }
   let { message } = persisted;
-  if (!persisted.created) return message;
+  if (!persisted.created) return projectNetworkMessage(message, sqlite);
   if (target.runtime === 'operator') {
-    return updateAgentMessageDelivery(message.id, 'poll', 'Available in the operator Handoffs view.', sqlite);
+    return projectNetworkMessage(updateAgentMessageDelivery(message.id, 'poll', admission?.operatorQuestion ? 'Durably queued for the operator.' : 'Available in the operator Handoffs view.', sqlite), sqlite);
   }
-  if (!isPresenceLive(target)) return message;
+  if (!isPresenceLive(target)) return projectNetworkMessage(message, sqlite);
   const wakeSeams: AgentInboxWakeSeams = {
     claimCodexInboxWake: ({ target: wakeTarget, throughSequence }) => (
       claimAgentInboxWake({ agent: wakeTarget, throughSequence }, sqlite)
@@ -284,7 +323,7 @@ export async function postAgentMessage(
       sqlite,
     );
   }
-  return message;
+  return projectNetworkMessage(message, sqlite);
 }
 
 export function readAgentConversations(

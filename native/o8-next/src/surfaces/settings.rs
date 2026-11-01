@@ -91,6 +91,7 @@ impl Shell {
         self.surfaces.settings.view = None;
         self.surfaces.settings.subscription = None;
         self.restore_focus(window, cx);
+        self.tick(false, window, cx);
         self.revision += 1;
         cx.notify();
     }

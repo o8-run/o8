@@ -32,7 +32,7 @@ import {
   isBroadcastVoiceClockTime,
   isBroadcastVoiceQuietHoursMode,
 } from '@/lib/operator/broadcast-commentary-defaults';
-import { isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
+import { botRailUpdate, isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
 import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/operator/judgment-default';
 import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED, JUDGMENT_BETA_END_DATE_EXPECTED } from '@/lib/operator/judgment-allowance-default';
 import { resolveJudgmentPath } from '@/lib/judgment/route';
@@ -152,7 +152,7 @@ function workspaceStorageValidationError(body: Record<string, unknown>): string 
 }
 
 function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefaults> {
-  const update: Partial<OperatorDefaults> = {};
+  const update: Partial<OperatorDefaults> = botRailUpdate(body);
 
   if (body.subscriptionProfile !== undefined) {
     if (!isSubscriptionProfile(body.subscriptionProfile)) {

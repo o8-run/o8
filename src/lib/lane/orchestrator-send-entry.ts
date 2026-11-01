@@ -1,4 +1,5 @@
 import { observeSteerTranscript } from '@/lib/ws-server/steer-transcript-anchor';
+import { assertLlmThread } from '@/lib/bots/network-kind';
 import { observeOrchestratorToolHistory } from '@/lib/orchestrator/tool-history';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { createBackendRoleRouteChoice } from '@/lib/operator/role-routing';
@@ -46,6 +47,7 @@ export async function sendOrchestratorBackendTurn(
   rawOrchestrationMode: unknown,
   leadingEvents: readonly OrchestratorEvent[] = [],
 ): Promise<void> {
+  assertLlmThread(options.threadId);
   try {
     assertOrchestratorPermissionMode(backend.id, options.permissionMode, options.toolProfile);
   } catch (error) {

@@ -29,6 +29,9 @@ export interface PersistedLlmChatMessage {
 
   id: string;
   role: MobileTranscriptEntry['role'];
+  author?: MobileTranscriptEntry['author'];
+  network?: MobileTranscriptEntry['network'];
+  runtime?: string;
   content: string;
   type?: MobileTranscriptEntry['type'];
   media?: MobileTranscriptMedia[];
@@ -57,6 +60,8 @@ export interface PersistedLlmChatMessage {
 }
 
 export interface PersistedLlmChatHistory {
+  source?: 'bot-network';
+  network?: { conversationId: string | null; memberIds: string[]; canReply: boolean; closed?: boolean; question?: import('@/lib/bots/network-types').NetworkQuestionSummary };
   messages: PersistedLlmChatMessage[];
   model?: string;
   savedAt?: string;
@@ -89,12 +94,12 @@ export type CanonicalChatHistoryRecord = SearchableChatHistoryRecord & {
 };
 
 /** Serialize chat-history read/modify/write cycles across the WS and API processes. */
-export function withCanonicalChatHistoryLock<T>(tabId: string, task: () => T): T {
+export function withCanonicalChatHistoryLock<T>(tabId: string, task: () => T, options: { timeoutMs?: number } = {}): T {
   ensureDir();
   const lockPath = `${getCanonicalChatHistoryPath(tabId)}.lock`;
   if (heldHistoryLocks.has(lockPath)) return task();
 
-  const deadline = Date.now() + HISTORY_LOCK_TIMEOUT_MS;
+  const deadline = Date.now() + (options.timeoutMs ?? HISTORY_LOCK_TIMEOUT_MS);
   while (true) {
     try {
       writeFileSync(lockPath, `${process.pid}\n`, { flag: 'wx', mode: 0o600 });
@@ -293,6 +298,9 @@ export function mapLlmHistoryToMobileTranscript(
   return filtered.map((message) => ({
     id: message.id,
     role: message.role,
+    author: message.author,
+    network: message.network,
+    runtime: message.runtime,
     text: message.content,
     persistedVersion: message.persistedVersion,
     type: message.type ?? (message.compaction || message.isCompaction ? 'compaction' : 'message'),

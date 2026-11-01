@@ -25,6 +25,7 @@ import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry'
 import { inboxListingProjection, inboxReadStatement, inboxSubject, observeInboxRuntimeRun, readInboxState, type InboxReadContext } from './store';
 import { legacyInboxPin } from './preferences';
 import { hasQueuedTurnStart, type InboxSubject } from './settlement-state';
+import { listNetworkSendIntents } from '@/lib/bots/network-store';
 
 export class InboxMutationError extends Error {
   constructor(message: string, public readonly status: number) { super(message); }
@@ -193,6 +194,9 @@ export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary
     throw new InboxMutationError('Thread is still running. Stop it before settling.', 409);
   }
   const messages = history?.messages ?? [];
+  if (subject.kind === 'conversation' && listNetworkSendIntents(subject.id).some(send => send.status === 'pending' && !send.messageId)) {
+    throw new InboxMutationError('Thread has an unconfirmed network send. Retry or remove it before settling.', 409);
+  }
   const latestUserMessageAt = runtimeActivity?.latestUserMessageAt ?? messages.filter(message => message.role === 'user').reduce<number | undefined>(
     (max, message) => Number.isFinite(message.timestamp) ? Math.max(max ?? -Infinity, message.timestamp) : max, undefined);
   const latestRunAt = runtimeActivity?.latestRunAt ?? messages.filter(message => message.role === 'assistant' && message.content?.trim()).reduce<number | undefined>(
@@ -201,7 +205,7 @@ export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary
   const latestKnownRunAt = Number.isFinite(recordedRunAt) ? Math.max(latestRunAt ?? -Infinity, recordedRunAt) : latestRunAt;
   const failed = runtimeActivity?.failed || (history as { orchestratorTerminalStatus?: string } | null)?.orchestratorTerminalStatus === 'failed';
   if ((subject.kind === 'conversation' && subject.workspace && listQueuedComposerSends({ repoPath: subject.workspace, threadId: subject.id }).length > 0)
-    || hasQueuedTurnStart({ latestUserMessageAt, latestRunAt: latestKnownRunAt, failed }, Date.now())) {
+    || (history?.source !== 'bot-network' && hasQueuedTurnStart({ latestUserMessageAt, latestRunAt: latestKnownRunAt, failed }, Date.now()))) {
     throw new InboxMutationError('Thread has a queued message. Send it or remove it before settling.', 409);
   }
   // Keep the synchronous guard in the mutation's SQLite transaction so a

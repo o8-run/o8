@@ -19,6 +19,7 @@ pub(super) fn markdown(source: &str) -> Rc<RefCell<RowState>> {
     Rc::new(RefCell::new(RowState::new(Row::Message {
         id: "file-markdown".into(),
         role: "assistant".into(),
+        author: None,
         nodes: super::markdown::parse(source),
     })))
 }

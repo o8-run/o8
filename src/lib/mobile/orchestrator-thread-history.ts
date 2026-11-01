@@ -1,4 +1,5 @@
 import { projectModelContext } from '@/lib/transcripts/model-context';
+import { projectAllNetworkThreads, projectNetworkThread } from '@/lib/bots/network-projection';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -172,6 +173,7 @@ export function repairComposerPreamblePollution(): void {
 }
 
 export function readProjectedThread(tabId: string): MobileOrchestratorThread | null {
+  try { projectNetworkThread(tabId, undefined, { waitForLock: false }); } catch { /* Keep readable history and its projection health. */ }
   const record = readHistoryRecord(tabId);
   if (!record) return null;
   try {
@@ -183,6 +185,7 @@ export function readProjectedThread(tabId: string): MobileOrchestratorThread | n
 }
 
 function listThoughtHistoryFileStats(): OrchestratorHistoryFileStat[] {
+  projectAllNetworkThreads();
   ensureHistoryReady();
   if (!existsSync(ORCHESTRATOR_HISTORY_DIR)) {
     threadSummaryCache.clear();

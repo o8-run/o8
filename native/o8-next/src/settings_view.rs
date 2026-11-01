@@ -208,6 +208,17 @@ impl Settings {
                     ));
                 }
             }
+            Kind::Bots => {
+                controls = controls.child(self.button(
+                    "settings-setup-bots".into(),
+                    "Set up bots".into(),
+                    !locked,
+                    false,
+                    window,
+                    cx,
+                    |this, _, cx| this.select("bots", cx),
+                ));
+            }
             Kind::Choice(options) => {
                 for (index, (key, label)) in options.iter().enumerate() {
                     controls = controls.child(self.button(

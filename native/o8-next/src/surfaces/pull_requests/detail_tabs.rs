@@ -16,6 +16,7 @@ fn markdown(id: &str, body: &str) -> AnyElement {
     let state = Rc::new(RefCell::new(RowState::new(Row::Message {
         id: id.to_owned(),
         role: "assistant".into(),
+        author: None,
         nodes: crate::text::markdown(body),
     })));
     RetainedRow {

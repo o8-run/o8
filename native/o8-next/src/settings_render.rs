@@ -115,6 +115,8 @@ impl Render for Settings {
             .filter(|_| self.section == "providers" && query.len() < 2)
         {
             content = content.child(providers);
+        } else if self.section == "bots" {
+            content = content.children(self.bot_rows(window, cx));
         } else if self.section == "keys" {
             content = content.child("Provider keys").child(div().text_size(px(11.)).text_color(theme().text_muted).child("Only presence and connection state are shown. Changes apply to new sessions."));
             if let Some(keys) = &self.keys {

@@ -526,7 +526,7 @@ impl Shell {
             );
         }
     }
-    fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(workspace) = self
             .sessions
             .iter()

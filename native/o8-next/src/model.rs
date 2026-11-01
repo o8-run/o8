@@ -46,6 +46,8 @@ pub enum Row {
     Message {
         id: String,
         role: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        author: Option<Value>,
         nodes: Vec<Node>,
     },
     Activity {
@@ -240,6 +242,7 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
             }
             if entry_index == 0
                 && entry.role == "user"
+                && entry.extra.get("author").is_none_or(|a| a["kind"] != "bot")
                 && (crate::rich::packet_prompt(&entry.text)
                     || entry
                         .extra
@@ -274,6 +277,7 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
             rows.push(Row::Message {
                 id: entry.id.clone(),
                 role: entry.role.clone(),
+                author: entry.extra.get("author").cloned(),
                 nodes,
             });
         }

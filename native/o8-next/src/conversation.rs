@@ -9,12 +9,10 @@ mod composer_card;
 mod composer_picker;
 #[path = "composer/screenshots.rs"]
 mod composer_screenshots;
-#[path = "composer/send_menu.rs"]
-mod send_menu;
-#[path = "composer/dictation_wave.rs"]
-pub(super) mod dictation_wave;
 #[path = "composer/selector.rs"]
 mod composer_selector;
+#[path = "composer/dictation_wave.rs"]
+pub(super) mod dictation_wave;
 #[path = "composer/prompt_actions.rs"]
 mod prompt_actions;
 #[path = "composer/prompt_controls.rs"]
@@ -23,10 +21,18 @@ mod prompt_controls;
 mod prompt_rules;
 #[path = "composer/prompt_view.rs"]
 mod prompt_view;
+#[path = "composer/send_menu.rs"]
+mod send_menu;
 
 #[cfg(test)]
 #[path = "composer/card_tests.rs"]
 mod card_tests;
+#[cfg(test)]
+#[path = "composer/network_tests.rs"]
+mod network_tests;
+#[path = "composer/queue_tail.rs"]
+mod queue_rows;
+pub(super) use queue_rows::queue_tail;
 
 // The queue returns realpath(repoPath), while saved histories can retain a
 // symlink spelling (notably /var versus /private/var on macOS). Keep the frozen
@@ -50,8 +56,22 @@ fn receipt_matches(method: &str, body: &Value, response: &Value) -> bool {
         && item["status"] != "cancelled"
 }
 impl Surface {
+    fn retire_pending_send(&mut self, thread: &str, id: &Value) {
+        if self
+            .pending
+            .get(thread)
+            .is_some_and(|pending| pending["id"] == *id)
+        {
+            self.pending.remove(thread);
+        }
+    }
     pub(super) fn send(&mut self, promote: Option<String>, cx: &mut Context<Self>) {
-        if promote.is_none() {
+        if promote.is_none()
+            && self
+                .routing
+                .as_ref()
+                .is_none_or(|r| r["source"] != "bot-network")
+        {
             let editor = self.composer.clone();
             let input = editor.read(cx);
             let raw = input.text.trim().to_owned();
@@ -130,6 +150,13 @@ impl Surface {
     /// identity): who, which repository and thread, and how it runs. A change
     /// closes the voice session it pinned.
     pub(crate) fn voice_binding(&self, cx: &App) -> Option<VoiceTarget> {
+        if self
+            .routing
+            .as_ref()
+            .is_some_and(|r| r["source"] == "bot-network")
+        {
+            return None;
+        }
         let session = self
             .sessions
             .iter()
@@ -225,6 +252,13 @@ impl Surface {
         }))
     }
     fn mutate_message(&mut self, promote: Option<String>, remove: bool, cx: &mut Context<Self>) {
+        if !remove && !self.network_can_reply() {
+            self.notice =
+                "This exchange is read only or closed. Open an operator conversation to reply."
+                    .into();
+            cx.notify();
+            return;
+        }
         if self.saving
             || !self.queue_ready
             || (promote.is_none()
@@ -324,7 +358,9 @@ impl Surface {
                 } else {
                     format!("{}\n\n{contextual}", advice.prelude)
                 };
-                let wire = if let Some((_, wire)) =
+                let wire = if routing["source"] == "bot-network" {
+                    text.clone()
+                } else if let Some((_, wire)) =
                     advice.command_wire.as_ref().filter(|(raw, _)| raw == &text)
                 {
                     if explicit_fleet {
@@ -344,12 +380,15 @@ impl Surface {
                 let body = json!({"repoPath":repo,"threadId":session.id,"id":format!("next-{nonce:x}-{:x}", std::process::id()),
                     "intent":if !self.send_next && self.queue["canSteer"] == true { "steer-now" } else { "send-next" },
                     "payload":{"text":text,"wireMessage":wire,"images":images,"routing":routing}});
+                let network_send = routing["source"] == "bot-network";
                 let frozen_prelude = advice.prelude.clone();
-                self.composer.update(cx, |i, _| {
-                    i.controls.prompt.queued_prelude = body["id"]
-                        .as_str()
-                        .map(|id| (id.to_owned(), frozen_prelude));
-                });
+                if !network_send {
+                    self.composer.update(cx, |i, _| {
+                        i.controls.prompt.queued_prelude = body["id"]
+                            .as_str()
+                            .map(|id| (id.to_owned(), frozen_prelude));
+                    });
+                }
                 self.pending.insert(session.id.clone(), body.clone());
                 ("POST", body)
             }
@@ -381,11 +420,22 @@ impl Surface {
             .as_array()
             .cloned()
             .unwrap_or_default();
+        let network_send = body["payload"]["routing"]["source"] == "bot-network";
+        let request_identity = (session.id.clone(), body["id"].clone());
         let task = cx.background_executor().spawn(async move {
             let response = client.mutate_queue(method, &body).map_err(|error| {
+                let terminal = error.network_send.as_ref().is_some_and(|receipt| {
+                    receipt["id"] == body["id"]
+                        && receipt["threadId"] == session.id
+                        && matches!(
+                            receipt["status"].as_str(),
+                            Some("accepted" | "cancelled" | "rejected")
+                        )
+                });
                 (
                     error.message,
                     error.status.is_some_and(|code| (400..500).contains(&code)),
+                    terminal,
                 )
             })?;
             let matches = if method == "DELETE" {
@@ -398,15 +448,26 @@ impl Surface {
                     "Message receipt did not match. Draft retained; inspect the shared queue."
                         .into(),
                     false,
+                    false,
                 ));
             }
             let queue = client.queue(&session);
             let history = client.history(&session.id);
-            Ok::<_, (String, bool)>((method, session, queue, history))
+            Ok::<_, (String, bool, bool)>((method, session, queue, history))
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
+                if result.is_ok()
+                    || result
+                        .as_ref()
+                        .err()
+                        .is_some_and(|(_, rejected, terminal)| {
+                            *terminal || (method == "POST" && fresh && *rejected)
+                        })
+                {
+                    this.retire_pending_send(&request_identity.0, &request_identity.1);
+                }
                 if this.generation != generation {
                     return;
                 }
@@ -414,31 +475,34 @@ impl Surface {
                 match result {
                     Ok((method, session, queue, history)) => {
                         if method == "POST" {
-                            this.pending.remove(&session.id);
-                            this.composer.update(cx, |i, _| {
-                                if let Some(sent) =
-                                    sent_prelude.as_ref().filter(|sent| !sent.is_empty())
-                                {
-                                    if i.controls.prompt.prelude == *sent {
-                                        i.controls.prompt.prelude.clear();
-                                    } else if let Some(remaining) = i
-                                        .controls
-                                        .prompt
-                                        .prelude
-                                        .strip_prefix(&format!("{sent}\n\n"))
+                            if !network_send {
+                                this.composer.update(cx, |i, _| {
+                                    if let Some(sent) =
+                                        sent_prelude.as_ref().filter(|sent| !sent.is_empty())
                                     {
-                                        i.controls.prompt.prelude = remaining.to_owned();
+                                        if i.controls.prompt.prelude == *sent {
+                                            i.controls.prompt.prelude.clear();
+                                        } else if let Some(remaining) = i
+                                            .controls
+                                            .prompt
+                                            .prelude
+                                            .strip_prefix(&format!("{sent}\n\n"))
+                                        {
+                                            i.controls.prompt.prelude = remaining.to_owned();
+                                        }
+                                        if let Err(error) =
+                                            crate::composer::mode_store::save_prelude(
+                                                i.controls.prompt.store.as_deref(),
+                                                &i.controls.prompt.prelude,
+                                            )
+                                        {
+                                            i.controls.error = error;
+                                        }
                                     }
-                                    if let Err(error) = crate::composer::mode_store::save_prelude(
-                                        i.controls.prompt.store.as_deref(),
-                                        &i.controls.prompt.prelude,
-                                    ) {
-                                        i.controls.error = error;
-                                    }
-                                }
-                                i.controls.prompt.queued_prelude = None;
-                                i.controls.prompt.command_wire = None;
-                            });
+                                    i.controls.prompt.queued_prelude = None;
+                                    i.controls.prompt.command_wire = None;
+                                });
+                            }
                             this.composer.update(cx, |i, cx| {
                                 if i.text == draft {
                                     i.clear(cx);
@@ -468,12 +532,7 @@ impl Surface {
                             Err(error) => this.notice = error,
                         }
                     }
-                    Err((error, rejected)) => {
-                        if method == "POST" && fresh && rejected {
-                            if let Some(id) = &this.selected {
-                                this.pending.remove(id);
-                            }
-                        }
+                    Err((error, _, _)) => {
                         this.notice = error;
                     }
                 }
@@ -586,7 +645,11 @@ impl Surface {
                     || admitted
                         && entry.role == "user"
                         && item["payload"]["text"] == entry.text.as_str()
-                        && entry.extra.get("timestamp").and_then(Value::as_f64).unwrap_or(0.)
+                        && entry
+                            .extra
+                            .get("timestamp")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(0.)
                             >= created
             })
         };
@@ -612,167 +675,6 @@ impl Surface {
             })
             .unwrap_or_default()
     }
-}
-
-/// The transcript's last item while messages wait (Q 2026-10-31): classic
-/// shows each queued message inside the transcript as the user bubble it will
-/// become, with a quiet caption (its state, why it waits, Steer now / Remove),
-/// not in a band above the composer.
-pub(super) fn queue_tail(
-    items: &[Value],
-    enabled: bool,
-    steerable_ids: &Value,
-    view: gpui::Entity<Surface>,
-) -> gpui::AnyElement {
-    let link = |id: String, selector: &'static str, label: &'static str| {
-        div()
-            .id(gpui::ElementId::Name(id.into()))
-            .debug_selector(move || selector.into())
-            .cursor_pointer()
-            .text_color(theme().text_muted)
-            .hover(|d| d.text_color(theme().text))
-            .child(label)
-    };
-    div()
-        .w_full()
-        .flex()
-        .justify_center()
-        .child(
-            div()
-                .id("composer-queue")
-                .debug_selector(|| "composer-queue".into())
-                .w_full()
-                .max_w(px(crate::retained::COLUMN))
-                .pl(px(18.))
-                .pr(px(23.))
-                .pb(px(12.))
-                .flex()
-                .flex_col()
-                .gap(px(10.))
-                .children(items.iter().cloned().map(|item| {
-                    let (send, remove) = (view.clone(), view.clone());
-                    let id = item["id"].as_str().unwrap_or("").to_owned();
-                    let remove_id = id.clone();
-                    let cancellable = enabled
-                        && (item["status"] == "queued"
-                            || item["status"] == "held"
-                            || (item["status"] == "dispatching" && item["admittedAt"].is_null()));
-                    let steerable = enabled
-                        && item["status"] == "queued"
-                        && item["intent"] == "send-next"
-                        && item["admittedAt"].is_null()
-                        && item["payload"]["afterTaskId"].is_null()
-                        && steerable_ids
-                            .as_array()
-                            .is_some_and(|ids| ids.iter().any(|v| v == &id));
-                    let text =
-                        crate::text::sanitize(item["payload"]["text"].as_str().unwrap_or(""));
-                    let caption_only = item["captionOnly"] == true;
-                    div()
-                        .flex()
-                        .flex_col()
-                        .items_end()
-                        .min_w_0()
-                        .gap(px(4.))
-                        .when(!caption_only, |row| row.child(
-                            div()
-                                .max_w(gpui::relative(0.8))
-                                .px(px(12.))
-                                .py(px(8.))
-                                .rounded(px(14.))
-                                .bg(theme().selection)
-                                .text_size(px(14.))
-                                .line_height(px(22.))
-                                // Wrapped then clamped: a long draft stays three lines.
-                                .child(
-                                    div()
-                                        .overflow_hidden()
-                                        .text_ellipsis()
-                                        .line_clamp(3)
-                                        .child(text),
-                                ),
-                        ))
-                        .child(
-                            div()
-                                .w_full()
-                                .flex()
-                                .justify_end()
-                                .items_center()
-                                .gap(px(8.))
-                                .text_size(px(11.))
-                                .text_color(theme().text_muted)
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .text_right()
-                                        // A held earlier message explains itself in
-                                        // full; it is why everything after it waits.
-                                        .when(!caption_only, |d| {
-                                            d.whitespace_nowrap().overflow_hidden().text_ellipsis()
-                                        })
-                                        .child(if caption_only {
-                                            format!("Earlier message · {}", queue_caption(&item))
-                                        } else {
-                                            queue_caption(&item)
-                                        }),
-                                )
-                                .when(steerable, |d| {
-                                    d.child(
-                                        link(format!("steer-{id}"), "steer-now", "Steer now")
-                                            .on_click(move |_, _, cx| {
-                                                send.update(cx, |this, cx| {
-                                                    this.send(Some(id.clone()), cx)
-                                                })
-                                            }),
-                                    )
-                                })
-                                .when(cancellable, |d| {
-                                    d.child(
-                                        link(
-                                            format!("remove-{remove_id}"),
-                                            "remove-queued",
-                                            "Remove",
-                                        )
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                remove.update(cx, |this, cx| {
-                                                    this.remove_queued(remove_id.clone(), cx)
-                                                })
-                                            },
-                                        ),
-                                    )
-                                }),
-                        )
-                })),
-        )
-        .into_any_element()
-}
-
-/// A queued message's caption, in words: classic's "Queued" and "Needs
-/// attention", with the reason trimmed of transport prefixes.
-fn queue_caption(item: &Value) -> String {
-    let state = match item["status"].as_str().unwrap_or("queued") {
-        "held" => "Needs attention",
-        "dispatching" => "Sending",
-        _ => "Queued",
-    };
-    let Some(reason) = item["reason"].as_str().filter(|r| !r.trim().is_empty()) else {
-        return state.into();
-    };
-    let reason = if reason.contains("no rollout found") {
-        "this thread's Codex session can't be resumed. Remove it and send again.".to_owned()
-    } else {
-        let mut text = reason.trim();
-        while let Some(rest) = text
-            .strip_prefix("Error:")
-            .or_else(|| text.strip_prefix("error:"))
-        {
-            text = rest.trim_start();
-        }
-        crate::text::sanitize(text)
-    };
-    format!("{state} · {reason}")
 }
 
 #[cfg(all(test, unix))]
