@@ -61,6 +61,67 @@ fn setup_mode(cx: &mut TestAppContext, mode: &str) -> (Fixture, Entity<Shell>, V
 }
 
 #[gpui::test]
+fn subagents_default_trace_click_opens_workspace_worker_chat_and_keeps_drafts(
+    cx: &mut TestAppContext,
+) {
+    let (f, s, mut v) = setup(cx);
+    let (tab, parent) = s.read_with(&v, |s, _| {
+        let tab = s.active().unwrap();
+        let Content::Session(view) = &s.content[&s.key(&tab)] else {
+            panic!("parent chat")
+        };
+        (tab, view.clone())
+    });
+    wait(&s, &mut v, "subagent-trace-subagent-calculation");
+    assert!(v.debug_bounds("subagent-workspace-split").is_none());
+    assert!(
+        !s.read_with(&v, |s, _| s.state.right_panel.visible),
+        "a recorded worker must not open a panel before the operator clicks"
+    );
+    parent.update_in(&mut v, |view, w, cx| view.shell_focus(true, w, cx));
+    draw(&mut v);
+    v.simulate_input("Unsent parent instruction");
+    click(&mut v, "subagent-trace-subagent-calculation");
+    wait(&s, &mut v, "subagent-worker-composer-subagent-calculation");
+    assert!(v.debug_bounds("subagent-workspace-split").is_some());
+    assert_eq!(s.read_with(&v, |s, _| s.active()), Some(tab));
+    assert!(
+        !s.read_with(&v, |s, _| s.state.right_panel.visible),
+        "the default opens in the workspace, independently of the right panel"
+    );
+    assert_eq!(
+        parent.read_with(&v, |p, cx| p.shell_issue_state(cx)["draft"].clone()),
+        "Unsent parent instruction"
+    );
+    click(&mut v, "subagent-worker-composer-subagent-calculation");
+    v.simulate_input("Unsent instruction for the calculation worker");
+    click(&mut v, "subagent-workspace-close-subagent-calculation");
+    wait_gone(&s, &mut v, "subagent-workspace-split");
+    assert_eq!(
+        parent.read_with(&v, |p, cx| p.shell_issue_state(cx)["draft"].clone()),
+        "Unsent parent instruction"
+    );
+    click(&mut v, "subagent-trace-subagent-calculation");
+    wait(&s, &mut v, "subagent-worker-composer-subagent-calculation");
+    click(&mut v, "subagent-worker-composer-subagent-calculation");
+    v.simulate_keystrokes("ctrl-a ctrl-c");
+    assert_eq!(
+        v.read_from_clipboard().unwrap().text().unwrap(),
+        "Unsent instruction for the calculation worker",
+        "the reopened composer must retain this worker's own draft"
+    );
+    let snapshot: Value = f.client.get("/api/subagents-fixture", &[]).unwrap();
+    assert!(
+        snapshot["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|call| { call.as_str().unwrap().starts_with("GET ") }),
+        "opening and drafting must not launch, resume or message a worker"
+    );
+}
+
+#[gpui::test]
 fn subagents_trace_opens_detail_without_replacing_steps_or_parent(cx: &mut TestAppContext) {
     let (f, s, mut v) = setup(cx);
     let (tab, main) = s.read_with(&v, |s, _| {
