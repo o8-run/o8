@@ -144,6 +144,33 @@ pub fn current() -> &'static Theme {
 pub fn glass() -> bool {
     matches!(selected(), Appearance::Glass)
 }
+/// Classic AgentStatusDot colours with no semantic token: the grey of a
+/// thread waiting on review and the amber of a rejected one.
+pub(crate) fn review_mark() -> Rgba {
+    rgb(0x94a3b8)
+}
+pub(crate) fn rejected_mark() -> Rgba {
+    rgb(0xf97316)
+}
+/// Classic's `.scroll-fade-y` mask (globals.css): content fades into `color`
+/// at a scroll edge. GPUI has no masks, so this strip paints over the content;
+/// it has no hitbox, so clicks and scrolling reach what is under it.
+pub(crate) fn edge_fade(bottom: bool, height: f32, color: Rgba) -> gpui::Div {
+    use gpui::prelude::*;
+    let clear = Rgba { a: 0., ..color };
+    gpui::div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .h(gpui::px(height))
+        .when(bottom, |strip| strip.bottom_0())
+        .when(!bottom, |strip| strip.top_0())
+        .bg(gpui::linear_gradient(
+            if bottom { 180. } else { 0. },
+            gpui::linear_color_stop(clear, 0.),
+            gpui::linear_color_stop(color, 1.),
+        ))
+}
 pub fn plain_background() -> Rgba {
     Theme::for_appearance(if matches!(selected(), Appearance::Light) {
         Appearance::Light

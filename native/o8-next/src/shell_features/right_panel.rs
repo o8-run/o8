@@ -399,7 +399,7 @@ fn width_bounds(s: &Shell, viewport: f32) -> (f32, f32) {
     } else {
         super::super::sidebar::width(s)
     };
-    let available = viewport - super::super::rail::WIDTH - sidebar;
+    let available = viewport - super::super::rail::WIDTH - super::content::FRAME_SPACE - sidebar;
     let max = MAX_WIDTH.min(
         (available - WORKSPACE_RESERVE - if s.system_glass { COLUMN_CHROME } else { 1. }).max(0.),
     );
@@ -411,6 +411,7 @@ fn width_bounds(s: &Shell, viewport: f32) -> (f32, f32) {
 fn full_width(s: &Shell, viewport: f32) -> f32 {
     let available = viewport
         - super::super::rail::WIDTH
+        - super::content::FRAME_SPACE
         - if s.surfaces.sidebar.hidden {
             0.
         } else {

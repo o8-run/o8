@@ -50,8 +50,8 @@ impl State {
     pub(crate) fn color(self) -> Rgba {
         match self {
             Self::Running => theme().accent,
-            Self::Review => gpui::rgb(0x94a3b8),
-            Self::Rejected => gpui::rgb(0xf97316),
+            Self::Review => crate::theme::review_mark(),
+            Self::Rejected => crate::theme::rejected_mark(),
             Self::Blocked => theme().danger,
             Self::Stopped => theme().text_muted,
             Self::Merged => theme().success,

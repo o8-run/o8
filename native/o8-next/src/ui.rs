@@ -777,7 +777,29 @@ impl Render for Surface {
                                 })
                                 .child(self.history_control(cx))
                             })
-                            .when(!empty, |view| view.child(transcript))
+                            // The transcript fades out at its edges, as classic's
+                            // did into the composer below it.
+                            .when(!empty, |view| {
+                                view.child(
+                                    div()
+                                        .relative()
+                                        .flex()
+                                        .flex_col()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .child(transcript)
+                                        .child(crate::theme::edge_fade(
+                                            false,
+                                            16.,
+                                            theme().background,
+                                        ))
+                                        .child(crate::theme::edge_fade(
+                                            true,
+                                            24.,
+                                            theme().background,
+                                        )),
+                                )
+                            })
                             .child(
                                 div()
                                     .debug_selector(|| "composer-space".into())

@@ -13,6 +13,8 @@ impl ShellFeature for ContentSlot {
 /// Classic's SHELL_EDGE_INSET and frame corner radius (shell-geometry.ts).
 const EDGE_INSET: f32 = 4.;
 const FRAME_RADIUS: f32 = 14.;
+/// Width the frame takes from the panel row: the inset and its two borders.
+pub(super) const FRAME_SPACE: f32 = EDGE_INSET + 2.;
 fn render(
     s: &mut Shell,
     frame: &Frame,
