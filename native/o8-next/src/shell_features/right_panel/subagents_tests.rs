@@ -267,12 +267,13 @@ fn subagents_side_chat_returns_to_its_parent_and_split(cx: &mut TestAppContext) 
         let p = s.features.read::<Panel>().unwrap();
         p.selected == Tool::SideChat && p.lower == Some(Tool::Targeting)
     }));
-    v.simulate_input(" continues");
     assert_eq!(
         side.read_with(&v, |side, cx| side.shell_issue_state(cx)["draft"].clone()),
-        "Side draft continues",
-        "closing the inspector must restore the visible parent composer focus"
+        "Side draft",
+        "inspection must preserve the side chat's draft"
     );
+    v.simulate_keystrokes("enter");
+    wait(&s, &mut v, "subagents-detail-subagent-calculation");
 }
 
 #[gpui::test]

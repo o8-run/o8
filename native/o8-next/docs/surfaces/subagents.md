@@ -49,7 +49,8 @@ the disposable `--subagents` host and production persisted mission, Shared-team,
 history and media routes. It covers named trace links, preserved parent drafts
 and original steps, grouped counts, copy, search, refresh recovery, earlier-history
 retry, image loading, grid parent changes, compact fit and held Shared results.
-The side-chat path also checks restoration of its split companion and composer focus.
+The side-chat path also checks its split companion, unchanged draft and keyboard
+return to the originating trace action.
 Workers inspection checks keyboard return to the same card. A lower-split check
 keeps detail in its existing slot and restores the tools that preceded inspection.
 A delayed production history read also proves that an earlier selection cannot
