@@ -57,6 +57,11 @@ fn create(
             }
         },
     ));
+    shell.subscriptions.push(cx.subscribe(&inbox, |shell, _, _: &crate::inbox::ExchangeChanged, cx| {
+        if let Some(sidebar) = shell.surfaces.sidebar.view.clone() {
+            sidebar.update(cx, |sidebar, cx| { sidebar.catalog_changed(); sidebar.load(cx); });
+        }
+    }));
     shell.subscriptions.push(cx.subscribe_in(
         &inbox,
         window,

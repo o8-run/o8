@@ -158,7 +158,7 @@ impl ThreadList {
     }
     /// Older hosts project no inbox fields, and the menu offers no Inbox.
     pub(super) fn inbox_ready(&self) -> bool {
-        self.sessions.iter().any(|s| s.inbox_subject.is_some())
+        self.sessions.iter().any(|s| s.inbox_subject.is_some()) || !self.exchanges.is_empty()
     }
     /// Mod+Shift+S settles the current thread, or un-settles a settled one.
     pub(crate) fn settle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {

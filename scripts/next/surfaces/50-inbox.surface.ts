@@ -8,7 +8,10 @@ export default async function register({ dataDir, repo, fixtureToken }: SurfaceC
   const proxy = plan ? await import('../../../src/app/api/v2/proxy/llm/route') : null;
   const inboxRoutes = inbox ? await import('../../../src/app/api/panel/supervisor-inbox/route') : null;
   const approvalRoutes = inbox ? await import('../../../src/app/api/panel/approvals/route') : null;
-  if (inbox && process.env.O8_NEXT_INBOX_ORACLE) await (await import('../inbox-fixture')).writeInboxOracle(process.env.O8_NEXT_INBOX_ORACLE);
+  const conversationRoutes = inbox ? await import('../../../src/app/api/agents/conversation/route') : null;
+  const exchanges = inbox ? (await import('../../../src/lib/agents/store')).listAgentConversations(repo, 100) : [];
+  const exchangeIds = new Set(exchanges.map(exchange => exchange.id));
+  if (inbox && process.env.O8_NEXT_INBOX_ORACLE) await (await import('../inbox-fixture')).writeInboxOracle(process.env.O8_NEXT_INBOX_ORACLE, repo, fixtureToken);
   return {
     routes: {
       ...(inboxRoutes && approvalRoutes ? {
@@ -16,11 +19,17 @@ export default async function register({ dataDir, repo, fixtureToken }: SurfaceC
         'POST /api/panel/approvals': approvalRoutes.POST,
       } : {}),
       ...(proxy ? { 'POST /api/v2/proxy/llm': proxy.POST } : {}),
+      // Mount the production bus handlers; the fixture adds no substitute bus or transport.
+      ...(conversationRoutes ? {
+        'GET /api/agents/conversation': conversationRoutes.GET,
+        'POST /api/agents/conversation': conversationRoutes.POST,
+      } : {}),
     },
     admit: ({ route, body, headers }) => {
       if (!body) return 200;
       const target = JSON.parse(body);
-      const owned = route === approvalRoutes?.POST ? approvals.some(approval => approval.id === target.id) && ['approve', 'reject'].includes(target.action)
+      const owned = route === conversationRoutes?.POST ? target.repo === repo && exchangeIds.has(target.id) && ['close', 'undo-close'].includes(target.action)
+        : route === approvalRoutes?.POST ? approvals.some(approval => approval.id === target.id) && ['approve', 'reject'].includes(target.action)
         : route === proxy?.POST && ['inbox-plan-native', 'inbox-plan-desktop'].includes(String(headers['x-tab-id'])) && target.repoPath === repo;
       return owned ? 200 : 400;
     },

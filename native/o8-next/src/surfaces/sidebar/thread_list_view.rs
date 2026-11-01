@@ -259,9 +259,11 @@ impl ThreadList {
                         });
                     // The open stagger: rows fade in top-down after the header.
                     let arrived = this.arrived(i + 2);
+                    let exchange = row.kind == "exchange";
+                    let selector = if exchange { format!("sidebar-agent-exchange-{}", row.id.as_deref().unwrap_or_default()) } else { format!("thread-row-{i}") };
                     div()
                         .id(gpui::ElementId::Name(identity.into()))
-                        .debug_selector(move || format!("thread-row-{i}"))
+                        .debug_selector(move || selector.clone())
                         .opacity(arrived)
                         .relative()
                         .left(px(-SETTLE_PX * (1. - arrived)))
@@ -286,11 +288,11 @@ impl ThreadList {
                         } else {
                             theme().surface
                         })
-                        .when(thread, |view| {
+                        .when(thread || exchange, |view| {
                             view.cursor_pointer().hover(|style| style.bg(theme().hover))
                         })
                         // Dragged onto the workspace, a thread opens as a split pane.
-                        .when_some(row.id.clone(), |view, id| {
+                        .when_some(row.id.clone().filter(|_| !exchange), |view, id| {
                             let dragged = crate::shell::features::RailPane::Thread {
                                 id,
                                 title: crate::text::sanitize(&row.title).into(),
@@ -457,7 +459,7 @@ impl ThreadList {
                                 ),
                             )
                         })
-                        .when(thread, |view| {
+                        .when(thread || exchange, |view| {
                             view.on_click(cx.listener(move |this, _, window, cx| {
                                 let id = row.id.clone().unwrap();
                                 if this.rows.iter().any(|r| r.id.as_ref() == Some(&id))

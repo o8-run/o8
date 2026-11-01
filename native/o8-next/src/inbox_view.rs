@@ -4,6 +4,7 @@ use gpui::{FontWeight, IntoElement, KeyDownEvent, Render, div, prelude::*, px};
 
 impl Inbox {
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.exchange_undo_key(event, window, cx) { return; }
         if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
             return;
         }
@@ -387,6 +388,7 @@ impl Render for Inbox {
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .p(px(12.))
+                    .child(self.exchange_group(cx))
                     .children(
                         self.cards[self.lane]
                             .clone()

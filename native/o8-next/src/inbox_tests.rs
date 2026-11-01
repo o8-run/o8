@@ -1,4 +1,7 @@
 //! Production fixture routes -> shell palette -> GPUI controls -> persisted approvals.
+#[path = "inbox_exchange_tests.rs"]
+mod exchange_tests;
+
 use super::*;
 use crate::shell::test_support::{draw, inbox_panel, open};
 use gpui::TestAppContext;

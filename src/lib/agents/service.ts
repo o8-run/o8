@@ -6,6 +6,9 @@ import type { RequestPrincipalContext } from '@/lib/auth/principal';
 import { codename } from '@/lib/agents/codename';
 import { isAgentInboxWakePending } from '@/lib/agents/inbox-wake';
 import { getSqlite } from '@/lib/db';
+import { changeInboxAgentConversation, listInboxAgentConversations } from './conversation-inbox';
+import { readAgentConversationMessages } from './message-history';
+import { getAgentConversation } from './store';
 import { findLaneByPacket, getLane } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import {
@@ -288,15 +291,33 @@ export async function postAgentMessage(
 }
 
 export function readAgentConversations(
-  input: { repo: string | null; limit: number },
+  input: { repo: string | null; limit: number; scope?: string | null; status?: 'open' | 'closed'; cursor?: string | null; id?: string | null },
   principal: RequestPrincipalContext,
   sqlite: Database.Database = getSqlite(),
 ) {
   if (principal.role !== 'operator') {
     throw new AgentBusError('Conversation history requires an operator credential.', 'agent_conversations_forbidden', 403);
   }
-  const repo = requiredString(input.repo, 'repo', 2_000);
-  return { repo: normalizeAgentBusRepoPath(repo), conversations: listAgentConversations(repo, input.limit, sqlite) };
+  const repo = input.scope === 'all' && !input.id ? null : requiredString(input.repo, 'repo', 2_000);
+  try {
+    if (input.id !== undefined && input.id !== null) {
+      const id = requiredString(input.id, 'id', 200);
+      const conversation = getAgentConversation(id, sqlite);
+      if (!conversation || conversation.repo !== normalizeAgentBusRepoPath(repo!)) {
+        throw new AgentConversationError('Conversation was not found in this repository.', 'agent_conversation_not_found', 404);
+      }
+      return { conversation, messages: readAgentConversationMessages(id, sqlite) };
+    }
+    if (input.status || input.scope === 'all' || input.cursor !== undefined && input.cursor !== null) {
+      return { repo: repo ? normalizeAgentBusRepoPath(repo) : null, ...listInboxAgentConversations({
+        repo, status: input.status, limit: input.limit, cursor: input.cursor,
+      }, sqlite) };
+    }
+    return { repo: normalizeAgentBusRepoPath(repo!), conversations: listAgentConversations(repo!, input.limit, sqlite) };
+  } catch (error) {
+    if (error instanceof AgentConversationError) throw new AgentBusError(error.message, error.code, error.status);
+    throw error;
+  }
 }
 
 export function changeAgentConversation(
@@ -310,11 +331,20 @@ export function changeAgentConversation(
   const body = objectInput(input, 'invalid_agent_conversation');
   const id = requiredString(body.id, 'id', 200);
   const repo = requiredString(body.repo, 'repo', 2_000);
-  if (body.action !== 'close' && body.action !== 'extend') {
-    throw new AgentBusError('action must be close or extend.', 'invalid_agent_conversation_action', 400);
+  if (body.action !== 'close' && body.action !== 'extend' && body.action !== 'undo-close') {
+    throw new AgentBusError('action must be close, extend or undo-close.', 'invalid_agent_conversation_action', 400);
   }
   const summary = optionalString(body.summary, 'summary', AGENT_MESSAGE_TEXT_MAX_LENGTH);
   try {
+    if (body.action === 'undo-close' || body.action === 'close' && body.undoable === true) {
+      const clientMutationId = body.action === 'close' ? requiredString(body.clientMutationId, 'clientMutationId', 200) : undefined;
+      if (body.action === 'close' && body.expectedRevision !== undefined
+        && (!Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 0)) {
+        throw new AgentBusError('A current conversation revision is required.', 'invalid_agent_conversation_revision', 400);
+      }
+      return changeInboxAgentConversation({ id, repo, action: body.action, clientMutationId,
+        expectedRevision: body.expectedRevision as number | undefined, undo: body.undo }, sqlite);
+    }
     return updateAgentConversation({ id, repo, action: body.action, summary }, sqlite);
   } catch (error) {
     if (error instanceof AgentConversationError) {
