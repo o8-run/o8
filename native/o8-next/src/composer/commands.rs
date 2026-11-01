@@ -242,13 +242,18 @@ impl Composer {
         let token = text.split_whitespace().next().unwrap_or("");
         let exact = token == command.command || command.aliases.contains(&token);
         if (click && command.argument)
-            || (!click && ((!exact && text == token) || (command.argument && text == token)))
+            || (!click && (!exact || (command.argument && text == token)))
         {
+            let args = &text[token.len()..];
             self.set_text(
                 &format!(
                     "{}{}",
                     command.command,
-                    if command.argument { " " } else { "" }
+                    if args.is_empty() && command.argument {
+                        " "
+                    } else {
+                        args
+                    }
                 ),
                 cx,
             );

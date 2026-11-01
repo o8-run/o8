@@ -30,6 +30,23 @@ pub(super) fn wait_selector(cx: &mut VisualTestContext, selector: &'static str) 
     panic!("Missing composer control {selector}");
 }
 #[gpui::test]
+fn native_composer_slash_click_keeps_typed_arguments(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-input", cx);
+    cx.simulate_input("/visualize compare these two plans");
+    click("slash-visualization", cx);
+    surface.update_in(cx, |s, window, cx| {
+        assert_eq!(
+            s.composer.read(cx).text,
+            "/visualization compare these two plans"
+        );
+        assert!(s.composer.read(cx).focus.is_focused(window));
+        assert!(s.queue["items"].as_array().unwrap().is_empty());
+    });
+}
+
+#[gpui::test]
 fn native_composer_controls_slash_opens_arrows_and_enter_apply(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
