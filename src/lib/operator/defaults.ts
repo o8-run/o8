@@ -1,3 +1,4 @@
+import * as conversationDefaults from './conversation-defaults';
 import { reconcileKnowledgeSources } from '@/lib/cortex/knowledge/reconcile';
 import { parseKnowledgeSources, type KnowledgeSourceDefaults } from './knowledge-source-defaults';
 import { parseOperatorDefaultsToml } from '@/lib/settings/toml';
@@ -132,7 +133,7 @@ export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, CodexAppThreadsDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults {
+export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, CodexAppThreadsDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults, conversationDefaults.ConversationDefaults {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -140,7 +141,6 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   supervisorAutoEscalate: boolean;
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
-  autoTitleInferenceEnabled: boolean; // Optional background inference; code fallback remains available.
   /** Opt-in: replay the repo's test command against a rebased branch in the
    *  merge gate (in addition to typecheck). Default off — tests can be slow. */
   mergeTestReplayEnabled: boolean;
@@ -343,7 +343,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // Operator-pinned subscription model; not a per-token API charge.
   thinkingEffort: 'max',
   promptCachingEnabled: true,
-  autoTitleInferenceEnabled: true,
+  ...conversationDefaults.FALLBACK,
   mergeTestReplayEnabled: false,
   requireApproval: 'high-risk',
   orchestratorModel: MODEL_IDS.orchestratorDefault,
@@ -447,7 +447,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.promptCachingEnabled === 'boolean') {
     result.promptCachingEnabled = stored.promptCachingEnabled;
   }
-  if (typeof stored.autoTitleInferenceEnabled === 'boolean') result.autoTitleInferenceEnabled = stored.autoTitleInferenceEnabled;
+  Object.assign(result, conversationDefaults.fromFile(stored));
   if (typeof stored.mergeTestReplayEnabled === 'boolean') {
     result.mergeTestReplayEnabled = stored.mergeTestReplayEnabled;
   }
@@ -659,7 +659,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     thinkingEffort: envThink ?? fileValues.thinkingEffort ?? OPERATOR_DEFAULTS_FALLBACK.thinkingEffort,
     promptCachingEnabled:
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
-    autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled ?? OPERATOR_DEFAULTS_FALLBACK.autoTitleInferenceEnabled,
+    ...conversationDefaults.resolve(fileValues),
     mergeTestReplayEnabled:
       fileValues.mergeTestReplayEnabled ?? OPERATOR_DEFAULTS_FALLBACK.mergeTestReplayEnabled,
     requireApproval: fileValues.requireApproval ?? OPERATOR_DEFAULTS_FALLBACK.requireApproval,
@@ -739,7 +739,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     thinkingEffort: envThink !== null ? 'env' : fileValues.thinkingEffort !== undefined ? 'file' : 'default',
     promptCachingEnabled:
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
-    autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled !== undefined ? 'file' : 'default',
+    ...conversationDefaults.sources(fileValues),
     mergeTestReplayEnabled: fileValues.mergeTestReplayEnabled !== undefined ? 'file' : 'default',
     requireApproval: fileValues.requireApproval !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
@@ -873,7 +873,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
   if (update.promptCachingEnabled !== undefined) {
     stored.promptCachingEnabled = Boolean(update.promptCachingEnabled);
   }
-  if (update.autoTitleInferenceEnabled !== undefined) stored.autoTitleInferenceEnabled = Boolean(update.autoTitleInferenceEnabled);
+  Object.assign(stored, conversationDefaults.forUpdate(update));
   if (update.mergeTestReplayEnabled !== undefined) {
     stored.mergeTestReplayEnabled = Boolean(update.mergeTestReplayEnabled);
   }

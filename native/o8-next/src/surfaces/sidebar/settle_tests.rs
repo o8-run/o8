@@ -478,3 +478,204 @@ fn sidebar_inbox_vocabulary_keeps_merge_outcome_separate_from_attention(cx: &mut
         session.id == MERGED && session.outcome.as_deref() == Some("merged")
     })));
 }
+
+/// What the server settles on its own while the app is open: the toast with
+/// Undo, the "merged · age" note on the Settled row, and Mod+Z from a click
+/// on the list's own surface, with no row opened first.
+#[gpui::test]
+fn sidebar_announces_server_auto_settle_with_note_and_mod_z(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, project) =
+        start("--shell --composer --sidebar --sidebar-auto-settle", cx);
+    // Detailed rows, the app's usual look, show the note beside the badge.
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-detailed");
+    wait_for(&shell, &mut visual, |s, _| s.state.sidebar_detailed_rows);
+    draw(&mut visual);
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-inbox");
+    wait_for(&shell, &mut visual, |s, _| {
+        s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
+    });
+    draw(&mut visual);
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Active"));
+    let settled: Value = fixture
+        .client
+        .get("/api/sidebar-fixture/auto-settle", &[("tabId", FIRST)])
+        .unwrap();
+    assert_eq!(settled["settled"], true);
+    shell.update(&mut visual, |s, cx| {
+        let sidebar = s.surfaces.sidebar.view.clone().unwrap();
+        sidebar.update(cx, |l, cx| l.load(cx));
+    });
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Settled"));
+    assert_eq!(stored(&fixture, FIRST), "settled");
+    let toast = shell.read_with(&visual, |_, cx| {
+        crate::shell::toasts::texts(cx)
+            .iter()
+            .any(|text| text.starts_with("Auto-settled"))
+    });
+    assert!(toast, "the server's settle is announced");
+    let age = list(&shell, &visual, |l| {
+        l.rows
+            .iter()
+            .find(|r| r.id.as_deref() == Some(FIRST))
+            .map(|r| r.age.clone())
+    })
+    .unwrap();
+    assert!(age.starts_with("merged · "), "{age}");
+    let index = list(&shell, &visual, |l| {
+        l.rows.iter().position(|r| r.id.as_deref() == Some(FIRST))
+    })
+    .unwrap();
+    shell.update(&mut visual, |s, cx| {
+        let sidebar = s.surfaces.sidebar.view.clone().unwrap();
+        sidebar.update(cx, |l, cx| {
+            l.scroll_row(index, ScrollStrategy::Center, false);
+            cx.notify();
+        });
+    });
+    draw(&mut visual);
+    draw(&mut visual);
+    assert!(
+        visual
+            .debug_bounds(Box::leak(format!("thread-auto-note-{FIRST}").into_boxed_str()))
+            .is_some(),
+        "the detailed row renders the note"
+    );
+    // A click on the list's surface, not a row, then Mod+Z.
+    let bounds = visual.debug_bounds("thread-sidebar").unwrap();
+    let at = gpui::point(bounds.origin.x + gpui::px(2.), bounds.origin.y + gpui::px(2.));
+    visual.simulate_mouse_down(at, gpui::MouseButton::Left, gpui::Modifiers::default());
+    visual.simulate_mouse_up(at, gpui::MouseButton::Left, gpui::Modifiers::default());
+    draw(&mut visual);
+    let undo = if cfg!(target_os = "macos") { "cmd-z" } else { "ctrl-z" };
+    visual.simulate_keystrokes(undo);
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Active"));
+    assert_eq!(stored(&fixture, FIRST), "active");
+}
+
+/// The row menu turns this thread's auto-settle off (the server records the
+/// opt-out) and back on; a thread with it off carries a mark.
+#[gpui::test]
+fn sidebar_row_menu_toggles_per_thread_auto_settle(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, _project) = start("--shell --composer --sidebar", cx);
+    let opted_out = |fixture: &Fixture| {
+        for offset in (0..).step_by(500) {
+            let listed: Value = fixture
+                .client
+                .get(
+                    "/api/mobile/orchestrator/threads",
+                    &[("limit", "500"), ("offset", &offset.to_string())],
+                )
+                .unwrap();
+            let page = listed["threads"].as_array().unwrap();
+            if let Some(thread) = page.iter().find(|t| t["id"] == FIRST) {
+                return thread["autoSettleDisabledAt"].is_string();
+            }
+            assert_eq!(page.len(), 500);
+        }
+        unreachable!()
+    };
+    let mark: &'static str = Box::leak(format!("thread-auto-off-{FIRST}").into_boxed_str());
+    for off in [true, false] {
+        let target = row(&shell, &mut visual, FIRST);
+        let at = visual.debug_bounds(target).unwrap().center();
+        visual.simulate_mouse_down(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+        visual.simulate_mouse_up(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+        draw(&mut visual);
+        click(&mut visual, "sidebar-row-auto-settle");
+        wait_for(&shell, &mut visual, |s, cx| {
+            s.surfaces.sidebar.view.as_ref().unwrap().read(cx).auto_settle_off(FIRST) == off
+        });
+        assert_eq!(opted_out(&fixture), off);
+        row(&shell, &mut visual, FIRST);
+        draw(&mut visual);
+        assert_eq!(visual.debug_bounds(mark).is_some(), off);
+    }
+}
+
+#[gpui::test]
+fn sidebar_auto_settle_undo_already_active_never_settles(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, project) =
+        start("--shell --composer --sidebar --sidebar-auto-settle", cx);
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-inbox");
+    wait_for(&shell, &mut visual, |s, _| {
+        s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
+    });
+    fixture
+        .client
+        .get::<Value>("/api/sidebar-fixture/auto-settle", &[("tabId", FIRST)])
+        .unwrap();
+    shell.update(&mut visual, |s, cx| {
+        s.surfaces
+            .sidebar
+            .view
+            .clone()
+            .unwrap()
+            .update(cx, |l, cx| l.load(cx));
+    });
+    wait_for(&shell, &mut visual, |s, cx| {
+        in_section(s, cx, FIRST, "Settled")
+    });
+    let toast = list(&shell, &visual, |l| l.undo_toast()).expect("automatic Undo");
+    // Another client restores the thread while the old automatic toast remains.
+    let workspace = list(&shell, &visual, |l| {
+        l.sessions
+            .iter()
+            .find(|s| s.id == FIRST)
+            .unwrap()
+            .repo_path
+            .clone()
+    })
+    .expect("fixture workspace");
+    fixture
+        .client
+        .inbox_action(Some(&workspace), FIRST, "unsettle")
+        .unwrap();
+    shell.update(&mut visual, |s, cx| {
+        s.surfaces
+            .sidebar
+            .view
+            .clone()
+            .unwrap()
+            .update(cx, |l, cx| l.load(cx));
+    });
+    wait_for(&shell, &mut visual, |s, cx| {
+        in_section(s, cx, FIRST, "Active")
+    });
+    let generation = list(&shell, &visual, |l| {
+        l.diagnostic()["generation"].as_u64().unwrap()
+    });
+    click(
+        &mut visual,
+        Box::leak(format!("toast-{toast}-action-0").into_boxed_str()),
+    );
+    wait_for(&shell, &mut visual, |s, cx| {
+        let state = s
+            .surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .diagnostic();
+        state["generation"]
+            .as_u64()
+            .is_some_and(|next| next > generation)
+            && state["loading"] == false
+    });
+    assert_eq!(
+        stored(&fixture, FIRST),
+        "active",
+        "Undo is idempotent after an independent restore"
+    );
+    let actions: Vec<String> = fixture
+        .client
+        .get("/api/sidebar-fixture/auto-settle-actions", &[])
+        .unwrap();
+    assert!(
+        !actions.iter().any(|action| action == "settle"),
+        "Undo must never send settle: {actions:?}"
+    );
+}
