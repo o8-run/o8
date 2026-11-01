@@ -6,6 +6,17 @@ use gpui::{Entity, Modifiers};
 use std::time::Duration;
 
 #[test]
+fn provider_instance_writes_use_the_settings_timeout_not_the_shared_5s() {
+    use super::super::settings_timeout;
+    let long = Some(Duration::from_secs(15));
+    // The Add tile's first create outlasted 5s on a cold dev server.
+    assert_eq!(settings_timeout("POST", instance::INSTANCES), long);
+    assert_eq!(settings_timeout("DELETE", instance::INSTANCES), long);
+    assert_eq!(settings_timeout("GET", "/api/settings/operator-defaults"), long);
+    assert_eq!(settings_timeout("POST", "/api/settings/operator-defaults"), None);
+}
+
+#[test]
 fn provider_version_status_and_home_are_display_only() {
     assert_eq!(version("codex-cli 0.162.1").as_deref(), Some("v0.162.1"));
     assert_eq!(
