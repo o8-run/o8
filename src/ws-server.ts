@@ -10007,6 +10007,8 @@ async function bootstrapWsServer() {
     stopHeadlessLoop = startHeadlessTickBridge(10_000);
     startWorktreeReaper();
     startLaneZombieReaper();
+    // Auto-settle threads whose PRs merged or whose worktrees were cleaned up.
+    void import('@/lib/inbox/auto-settle').then((m) => m.startInboxAutoSettle()).catch(() => {});
     // #6 persistent terminals — bounded GC for orphan dash tmux sessions, only
     // when persistence is on (off-path leaves no sessions to reap).
     if (dashPersistentTerminalsEnabled()) startDashSessionGc();

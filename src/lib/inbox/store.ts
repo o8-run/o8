@@ -11,6 +11,7 @@ import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getSqlite } from '@/lib/db';
 import { type InboxPreferences, type InboxPreferenceCommand, transitionInboxPreferences } from './preferences';
+import type { AutoSettleReason } from './auto-settle-rules';
 import { emptySettlement, transitionSettlement, type InboxSettlement, type InboxSubject } from './settlement';
 
 interface StoredInboxState extends InboxSettlement, InboxPreferences {
@@ -21,6 +22,9 @@ interface StoredInboxState extends InboxSettlement, InboxPreferences {
   ownerPid?: number;
   observedRunAt?: string;
   overrideAt?: string;
+  /** Why the server settled this subject on its own (auto-settle.ts). */
+  autoSettledReason?: AutoSettleReason;
+  autoSettledAt?: string;
 }
 type InboxReadStatement = Database.Statement<unknown[]>;
 const readStatements = new WeakMap<ReturnType<typeof getSqlite>, Map<string, InboxReadStatement>>();
@@ -118,6 +122,30 @@ export function mutateInboxSettlement(subject: InboxSubject, action: 'settle' | 
     return next;
   }).immediate();
 }
+/**
+ * Settle on the server's own evidence, never over the operator: only a subject
+ * with no explicit override, no pin, no per-thread opt-out and no run since the
+ * evidence. `guard` throws to refuse (needs input, still running, queued).
+ */
+export function mutateInboxAutoSettle(subject: InboxSubject, reason: AutoSettleReason, evidenceAt: string,
+  guard: () => void, legacyPinned = false): boolean {
+  return getSqlite().transaction(() => {
+    const state = readInboxState(subject);
+    if (!autoSettleEligible(state, evidenceAt, legacyPinned)) return false;
+    guard();
+    const now = new Date().toISOString();
+    write(subject, { ...state, ...transitionSettlement(state, 'settle', now), pinOrderKey: null, activeOrderKey: null,
+      overrideAt: now, autoSettledReason: reason, autoSettledAt: now });
+    return true;
+  }).immediate();
+}
+export function autoSettleEligible(state: StoredInboxState, evidenceAt: string, legacyPinned = false): boolean {
+  const evidence = Date.parse(evidenceAt);
+  if (!Number.isFinite(evidence) || state.settledOverride !== null || state.autoSettleDisabledAt) return false;
+  if (state.pinnedAt || (state.pinnedAt === undefined && legacyPinned) || state.runStatus === 'running') return false;
+  // Work after the merge or cleanup is new work: the thread stays active.
+  return ![state.runAt, state.observedRunAt, state.unsettledAt].some(at => at && Date.parse(at) > evidence);
+}
 /** The caller validates revision and eligibility under the same SQLite write lock. */
 export function mutateInboxPreferences(subject: InboxSubject, command: InboxPreferenceCommand,
   guard: (state: StoredInboxState) => void, legacyPin: string | null = null): void {
@@ -132,13 +160,14 @@ export function mutateInboxPreferences(subject: InboxSubject, command: InboxPref
     write(subject, { ...state, ...patch, ...(state.settledOverride === 'settled' && command.action === 'pin' ? { overrideAt: now } : {}) });
   }).immediate();
 }
-type InboxProjection = InboxSettlement & InboxPreferences & { inboxSubject: InboxSubject; parentInboxSubject: InboxSubject | null };
+type InboxProjection = InboxSettlement & InboxPreferences & { autoSettledReason: AutoSettleReason | null; inboxSubject: InboxSubject; parentInboxSubject: InboxSubject | null };
 export interface InboxListingProjection extends InboxPreferences {
   inboxSubject: InboxSubject;
   parentInboxSubject?: InboxSubject;
   settledOverride?: NonNullable<InboxSettlement['settledOverride']>;
   settledAt?: string;
   unsettledAt?: string;
+  autoSettledReason?: AutoSettleReason;
 }
 /** Add only present preferences to a fresh row; default rows retain the B01 shape. */
 export function appendInboxPreferences<T extends object>(row: T, state: InboxPreferences | undefined,
@@ -155,6 +184,9 @@ export function appendInboxPreferences<T extends object>(row: T, state: InboxPre
   else delete result.autoSettleDisabledAt;
   if (state?.inboxRevision !== undefined) result.inboxRevision = state.inboxRevision;
   else delete result.inboxRevision;
+  const note = autoSettleNote(state as StoredInboxState | undefined);
+  if (note) (result as T & { autoSettledReason?: AutoSettleReason }).autoSettledReason = note;
+  else delete (result as T & { autoSettledReason?: AutoSettleReason }).autoSettledReason;
   return result;
 }
 /** Listing rows omit null fields on the wire; inboxSubject is always the capability flag. */
@@ -165,13 +197,19 @@ export function inboxListingProjection<T extends object>(subject: InboxSubject, 
     settledOverride: state?.settledOverride ?? undefined, settledAt: state?.settledAt ?? undefined,
     unsettledAt: state?.unsettledAt ?? undefined }), state, legacyPin);
 }
+/** The reason shows only while the automatic settle is the current one. */
+export function autoSettleNote(state: StoredInboxState | undefined): AutoSettleReason | null {
+  return state?.settledOverride === 'settled' && state.autoSettledReason && state.autoSettledAt
+    && state.settledAt === state.autoSettledAt ? state.autoSettledReason : null;
+}
 /** Mutation and mobile responses retain the full nullable shape. */
 export function inboxProjection(subject: InboxSubject, parentInboxSubject: InboxSubject | null = null, context?: InboxReadContext, legacyPin: string | null = null): InboxProjection {
   const state = context ? inboxListingState(subject, context) : readInboxState(subject);
   return { inboxSubject: subject, parentInboxSubject, settledOverride: state?.settledOverride ?? null,
     settledAt: state?.settledAt ?? null, unsettledAt: state?.unsettledAt ?? null, pinnedAt: state?.pinnedAt === undefined ? legacyPin : state.pinnedAt,
     pinOrderKey: state?.pinOrderKey ?? null, activeOrderKey: state?.activeOrderKey ?? null,
-    autoSettleDisabledAt: state?.autoSettleDisabledAt ?? null, inboxRevision: state?.inboxRevision ?? 0 };
+    autoSettleDisabledAt: state?.autoSettleDisabledAt ?? null, inboxRevision: state?.inboxRevision ?? 0,
+    autoSettledReason: autoSettleNote(state) };
 }
 
 /** Called by the WS broadcast chokepoint, never by a client history save. */
