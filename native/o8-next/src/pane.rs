@@ -197,11 +197,14 @@ impl Pane {
                     .unwrap_or_else(|| {
                         let mut state = RowState::new(row.clone());
                         state.images = self.images.clone();
-                        state.cards = old
+                        if let Some(previous) = old
                             .iter()
-                            .find(|state| state.borrow().row.id() == row.id())
-                            .map(|state| state.borrow().cards.clone())
-                            .unwrap_or_default();
+                            .find(|previous| previous.borrow().row.id() == row.id())
+                        {
+                            let previous = previous.borrow();
+                            state.cards = previous.cards.clone();
+                            state.keep_disclosure(&previous);
+                        }
                         if let Some(client) = &self.client {
                             state.attach_visualizations(client);
                         }
