@@ -14,6 +14,7 @@ Object.assign(process.env, { O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root,
   CORTEX_IDE_DB_PATH: join(root, 'membership.db'), O8_GROK_AGENT_DATA: join(root, 'profiles') });
 const { getSqlite, closeDb } = await import('@/lib/db');
 const { GET } = await import('@/app/api/bots/route');
+const { GET: SETTINGS, POST: SAVE_SETTINGS } = await import('@/app/api/panel/operator-defaults/route');
 const { GET: THREAD } = await import('@/app/api/bots/[id]/thread/route');
 const { POST: PRESENCE } = await import('@/app/api/agents/presence/route');
 afterAll(() => { closeDb(); rmSync(root, { recursive: true, force: true }); });
@@ -70,6 +71,12 @@ it('local commands persist membership and existing session bindings into the pro
     { id: 'claude:configured', house: 'claude', name: 'Old adapter name' },
     { id: member.id, house: 'claude', name: 'Second adapter' },
   ] }));
+  const settings = await (await SETTINGS(request('/api/panel/operator-defaults?include=native'))).json();
+  expect(settings.bots).toContainEqual({ id: member.id, name: 'Renamed build bot',
+    house: 'claude', selectionIds: [member.id, 'claude:configured'] });
+  expect((await SAVE_SETTINGS(request('/api/panel/operator-defaults?include=native', {
+    botRailEnabledIds: [member.id], settingsTomlRevision: settings.settingsToml.revision,
+  }))).status).toBe(200);
   const bots = (await (await GET(request('/api/bots'))).json()).bots;
   expect(bots).toHaveLength(1);
   expect(bots[0]).toMatchObject({ id: member.id, name: 'Renamed build bot', status: 'online', mainThread: { kind: 'o8-thread', id: home } });
@@ -103,6 +110,34 @@ it('canonical and legacy source routes keep the provider mailbox context when th
     expect(body.bot).toMatchObject({ id: member.id, house: 'grok', name: member.name });
     expect(body.messages).toEqual([{ id: 'original-source-id', key: 'id:original-source-id', role: 'bot', text: 'From the provider mailbox', at: null }]);
   }
+  const settings = await (await SETTINGS(request('/api/panel/operator-defaults?include=native'))).json();
+  expect(settings.bots).toContainEqual({ id: member.id, name: member.name,
+    house: 'grok', selectionIds: [member.id, sourceId] });
+  expect((await SAVE_SETTINGS(request('/api/panel/operator-defaults?include=native', {
+    botRailEnabledIds: [member.id], settingsTomlRevision: settings.settingsToml.revision,
+  }))).status).toBe(200);
   const bots = (await (await GET(request('/api/bots'))).json()).bots;
   expect(bots.filter((bot: { id: string }) => bot.id === member.id)).toHaveLength(1);
+}, 30_000);
+
+it('retains a Settings-selected source through explicit member association and rename until Settings hides it', async () => {
+  const sourceId = 'grok:adopted-source';
+  writeFileSync(join(root, 'bots.json'), JSON.stringify({ bots: [{ id: sourceId, house: 'grok', name: 'Existing source' }] }));
+  const select = async (ids: string[]) => {
+    const settings = await (await SETTINGS(request('/api/panel/operator-defaults?include=native'))).json();
+    expect((await SAVE_SETTINGS(request('/api/panel/operator-defaults?include=native', {
+      botRailEnabledIds: ids, settingsTomlRevision: settings.settingsToml.revision,
+    }))).status).toBe(200);
+  };
+  await select([sourceId]);
+  const member = local({ action: 'create', id: 'bot-adopted', house: 'grok', name: 'Adopted member' });
+  local({ action: 'source', memberId: member.id, sourceId });
+  local({ action: 'rename', memberId: member.id, name: 'Renamed adopted member' });
+  const settings = await (await SETTINGS(request('/api/panel/operator-defaults?include=native'))).json();
+  expect(settings.values.botRailEnabledIds).toEqual([sourceId]);
+  expect(settings.bots).toContainEqual({ id: member.id, name: 'Renamed adopted member', house: 'grok', selectionIds: [member.id, sourceId] });
+  expect((await (await GET(request('/api/bots'))).json()).bots.map((b: { id: string }) => b.id)).toEqual([member.id]);
+  await select([]);
+  closeDb();
+  expect((await (await GET(request('/api/bots'))).json()).bots).toEqual([]);
 }, 30_000);

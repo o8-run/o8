@@ -48,3 +48,17 @@ export function findRosterBot(id: string, providers: BotProvider[] = PROVIDERS, 
   const canonical = snapshot.bySource.get(id)?.id ?? id;
   return snapshot.entries.find(b => b.id === canonical) ?? null;
 }
+
+/** Eligibility belongs to Settings; provider/source aliases retain a prior explicit choice. */
+export function listConfiguredRosterBots(enabledIds: string[], providers: BotProvider[] = PROVIDERS, dataDir = getDataDir(), sqlite?: Database.Database): BotEntry[] {
+  const snapshot = roster(providers, dataDir, sqlite);
+  const enabled = new Set(enabledIds.map(id => snapshot.bySource.get(id)?.id ?? id));
+  return snapshot.entries.filter(bot => enabled.has(bot.id));
+}
+
+/** Settings lists candidates independently of rail eligibility, using the same canonical projection. */
+export function listRosterBotSettingsCandidates(providers: BotProvider[] = PROVIDERS, dataDir = getDataDir(), sqlite?: Database.Database) {
+  const snapshot = roster(providers, dataDir, sqlite);
+  return snapshot.entries.map(({ id, name, house }) => ({ id, name, house,
+    selectionIds: [...new Set([id, ...(snapshot.bySource.get(id)?.sourceIds ?? [])])] }));
+}

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { applyLocalBotMembershipCommand as command } from '@/lib/agents/bot-membership-commands';
 import { upsertAgentPresence, AGENT_PRESENCE_TTL_MS } from '@/lib/agents/store';
-import { findRosterBot, listRosterBots } from './roster';
+import { findRosterBot, listConfiguredRosterBots, listRosterBots, listRosterBotSettingsCandidates } from './roster';
 import type { BotEntry, BotProvider } from './registry';
 
 let db: Database.Database;
@@ -44,4 +44,18 @@ it('keeps a full explicit home reference and derives liveness only from matching
   expect(listRosterBots([], root, db).map(b => b.status)).toEqual(['offline', 'unknown']);
   db.exec('DELETE FROM agent_presence');
   expect(listRosterBots([], root, db)).toHaveLength(2);
+});
+
+it('preserves explicit Settings choices across aliases and renames without enrolling other members', () => {
+  const provider: BotProvider = { house: 'grok', list: () => [entry('provider:one', 'Source')] };
+  command({ action: 'create', id: 'bot-main', house: 'grok', name: 'Durable' }, db);
+  command({ action: 'create', id: 'bot-other', house: 'o8', name: 'Not selected' }, db);
+  command({ action: 'source', memberId: 'bot-main', sourceId: 'provider:one' }, db);
+  expect(listConfiguredRosterBots([], [provider], root, db)).toEqual([]);
+  expect(listConfiguredRosterBots(['provider:one', 'bot-main'], [provider], root, db).map(b => b.id)).toEqual(['bot-main']);
+  expect(listRosterBotSettingsCandidates([provider], root, db)).toContainEqual({
+    id: 'bot-main', name: 'Durable', house: 'grok', selectionIds: ['bot-main', 'provider:one'],
+  });
+  command({ action: 'rename', memberId: 'bot-main', name: 'Renamed' }, db);
+  expect(listConfiguredRosterBots(['provider:one'], [], root, db).map(b => [b.id, b.name])).toEqual([['bot-main', 'Renamed']]);
 });

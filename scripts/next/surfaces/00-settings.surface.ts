@@ -2,7 +2,7 @@ import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 
 // Profile/process isolation must happen before any production module caches it.
 export async function prepare({ root }: SurfaceContext): Promise<SurfaceRoutes> {
-  if (!process.argv.includes('--settings')) return {};
+  if (!process.argv.includes('--settings') && !process.argv.includes('--bot-settings')) return {};
   const settings = await (await import('../settings-fixture')).settingsFixture(root);
   return {
     priority: 0,
