@@ -57,3 +57,17 @@ tool and retry controls, types into the native composer, checks the production
 queue and persisted history, preserves the main draft, and reopens the shell.
 The fixture authors only its local lead and backend admission; history and queue
 handlers are the existing production routes.
+
+## Resources
+
+Reference: classic's `O8ResourcesPane.tsx`. Uses the existing
+`GET/POST /api/panel/resource-usage` routes without changing the collector or its
+process-stop policy.
+
+| Parity check | Native behavior |
+| --- | --- |
+| Metrics | Host totals, session and process sections, runtime/repository/PID labels, memory-sorted rows, proportional memory bars, monospace CPU/RAM values. Unknown readings remain em dashes. |
+| Polling | One read at a time, at least 2.5 seconds after the previous completion, driven by existing shell maintenance. Covered tools pause; reopening reads again. No animation timer. Identical readings do not notify the window. |
+| Failure | Retains the last good snapshot for transport and structured collector errors, with a visible error and Retry. A successful empty snapshot replaces old rows. |
+| Stop | Hover or keyboard-revealed Stop, separate Kill confirmation, Cancel, one mutation at a time, explicit refusal feedback and a fresh read after success. The existing server decides whether a process can stop. |
+| Verification | `resources_opens_from_launcher_and_shows_live_metrics` drives the launcher, Retry, Stop, Kill, Cancel and panel toggle. Authored metrics and request receipts establish UI behavior, not host process attribution or actual termination. |

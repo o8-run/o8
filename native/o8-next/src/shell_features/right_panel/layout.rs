@@ -509,6 +509,7 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
         tool if !tool.ready() => placeholder(tool).into_any_element(),
         // The side chat opens once its new conversation is listed.
         Tool::SideChat => side::element(s, cx),
+        Tool::Resources => resources::element(s, cx),
         tool => s
             .content
             .get(&super::key(s, tool))

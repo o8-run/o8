@@ -9,11 +9,16 @@ mod contextual;
 mod layout;
 #[path = "../files_panel/spec_shell.rs"]
 mod notes;
+#[path = "right_panel/resources.rs"]
+mod resources;
 #[path = "right_panel/side_chat.rs"]
 mod side;
 #[cfg(test)]
 #[path = "right_panel/side_chat_tests.rs"]
 mod side_chat_tests;
+#[cfg(test)]
+#[path = "right_panel/resources_tests.rs"]
+mod resources_tests;
 // The desktop's right panel (O8Panel). Its tools open as tabs in the panel's
 // own strip; "+" lists every desktop panel tool (o8-panel/panel-tools.tsx),
 // including the ones o8 next does not have yet, which open a placeholder.
@@ -33,7 +38,8 @@ impl ShellFeature for RightPanel {
             run: |s, _, window, cx| {
                 layout::sync(s, window, cx);
                 ensure_side_chat(s, window, cx);
-                move_inbox_tabs(s, window, cx)
+                move_inbox_tabs(s, window, cx);
+                resources::tick(s, cx);
             },
         }]
     }
@@ -142,7 +148,7 @@ impl Tool {
     }
     /// Tools o8 next has not built yet open a placeholder tab.
     fn ready(self) -> bool {
-        !matches!(self, Tool::Threads | Tool::Resources | Tool::Targeting)
+        !matches!(self, Tool::Threads | Tool::Targeting)
     }
     fn label(self) -> &'static str {
         match self {
