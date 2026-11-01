@@ -453,7 +453,9 @@ impl ThreadList {
                                     && (old.unread || s.last_message_at > old.last_message_at);
                             }
                         }
+                        let auto = inbox::newly_auto_settled(&this.sessions, &sessions);
                         this.sessions = sessions;
+                        this.announce_auto_settled(auto, cx);
                         if !this.query.trim().is_empty() {
                             this.search_pending = Some(Instant::now());
                         }
@@ -528,6 +530,7 @@ impl ThreadList {
                             incoming.parent_inbox_subject = old.parent_inbox_subject.clone();
                             incoming.settled_override = old.settled_override.clone();
                             incoming.settled_at = old.settled_at.clone();
+                            incoming.auto_settled_reason = old.auto_settled_reason.clone();
                             incoming.pinned_at = old.pinned_at.clone();
                             incoming.pin_order_key = old.pin_order_key.clone();
                             incoming.inbox_revision = old.inbox_revision;

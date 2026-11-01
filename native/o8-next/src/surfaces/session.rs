@@ -5,11 +5,11 @@ use serde_json::{Value, json};
 
 use crate::ui::Surface;
 #[cfg(test)]
-#[path = "../composer/loaded_shell_tests.rs"]
-mod loaded_shell_tests;
-#[cfg(test)]
 #[path = "../composer/image_loaded_shell_tests.rs"]
 mod image_loaded_shell_tests;
+#[cfg(test)]
+#[path = "../composer/loaded_shell_tests.rs"]
+mod loaded_shell_tests;
 pub(super) type Runtime = ();
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Slice {
@@ -143,6 +143,10 @@ pub struct Session {
     pub settled_override: Option<String>,
     #[serde(default)]
     pub settled_at: Option<String>,
+    /// Why the server settled it on its own ("pr-merged", "released",
+    /// "cleaned"), while that automatic settle is the current one.
+    #[serde(default)]
+    pub auto_settled_reason: Option<String>,
     /// `owner/repo` from the repo's git remote, else its folder; older hosts omit it.
     #[serde(default)]
     pub repo_slug: Option<String>,
