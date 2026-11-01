@@ -329,6 +329,7 @@ fn round1_reconnect_keeps_composer_focus_draft_and_queue(cx: &mut TestAppContext
         }
     }
     let resume = ResumeHost(fixture.server.id());
+    let short_timeout = crate::client::ShortLoadTimeout::start();
     assert!(
         Process::new("kill")
             .arg("-STOP")
@@ -354,6 +355,7 @@ fn round1_reconnect_keeps_composer_focus_draft_and_queue(cx: &mut TestAppContext
     // Resume before draining Settings HTTP work against the stopped host.
     let overlay_focus = cx.update(|window, cx| window.focused(cx).unwrap());
     drop(resume);
+    drop(short_timeout);
     // A request already in flight when the host resumes can still report its
     // old timeout. Drive the production refresh cadence until recovery is real,
     // rather than treating an already-painted retained view as connected.

@@ -297,7 +297,10 @@ fn subagents_grid_updated_trace_keeps_keyboard_return(cx: &mut TestAppContext) {
     let deadline = Instant::now() + Duration::from_secs(20);
     while v.debug_bounds("subagents-inspector").is_some() {
         assert!(Instant::now() < deadline, "Still visible: subagents-inspector");
-        click(&mut v, "subagents-close");
+        // The sliding panel outlives its close button by a frame.
+        if let Some(close) = v.debug_bounds("subagents-close") {
+            v.simulate_click(close.center(), gpui::Modifiers::default());
+        }
         s.update_in(&mut v, |s, w, cx| s.tick(false, w, cx));
         v.run_until_parked();
         draw(&mut v);
