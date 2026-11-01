@@ -89,6 +89,18 @@ impl Render for ThreadList {
             .text_color(theme().text)
             .font_weight(gpui::FontWeight::LIGHT)
             .track_focus(&self.focus)
+            // A click on the list's own surface gives it the keyboard, so
+            // Mod+Z reaches the last settle without first opening a row.
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    if !this.focus.contains_focused(window, cx)
+                        && !this.archived_focus.contains_focused(window, cx)
+                    {
+                        this.focus.focus(window);
+                    }
+                }),
+            )
             .capture_key_down(cx.listener(Self::key))
             .child(arriving(
                 div().child(self.project_header(window, cx)),

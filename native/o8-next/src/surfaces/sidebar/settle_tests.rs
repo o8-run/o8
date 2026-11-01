@@ -402,3 +402,78 @@ fn sidebar_inbox_mod_z_undoes_the_last_settle(cx: &mut TestAppContext) {
     settle(&shell, &mut visual);
     assert_eq!(stored(&fixture, FIRST), "active");
 }
+
+/// What the server settles on its own while the app is open: the toast with
+/// Undo, the "merged · age" note on the Settled row, and Mod+Z from a click
+/// on the list's own surface, with no row opened first.
+#[gpui::test]
+fn sidebar_announces_server_auto_settle_with_note_and_mod_z(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, project) =
+        start("--shell --composer --sidebar --sidebar-auto-settle", cx);
+    // Detailed rows, the app's usual look, show the note beside the badge.
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-detailed");
+    wait_for(&shell, &mut visual, |s, _| s.state.sidebar_detailed_rows);
+    draw(&mut visual);
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-inbox");
+    wait_for(&shell, &mut visual, |s, _| {
+        s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
+    });
+    draw(&mut visual);
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Active"));
+    let settled: Value = fixture
+        .client
+        .get("/api/sidebar-fixture/auto-settle", &[("tabId", FIRST)])
+        .unwrap();
+    assert_eq!(settled["settled"], true);
+    shell.update(&mut visual, |s, cx| {
+        let sidebar = s.surfaces.sidebar.view.clone().unwrap();
+        sidebar.update(cx, |l, cx| l.load(cx));
+    });
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Settled"));
+    assert_eq!(stored(&fixture, FIRST), "settled");
+    let toast = shell.read_with(&visual, |_, cx| {
+        crate::shell::toasts::texts(cx)
+            .iter()
+            .any(|text| text.starts_with("Auto-settled"))
+    });
+    assert!(toast, "the server's settle is announced");
+    let age = list(&shell, &visual, |l| {
+        l.rows
+            .iter()
+            .find(|r| r.id.as_deref() == Some(FIRST))
+            .map(|r| r.age.clone())
+    })
+    .unwrap();
+    assert!(age.starts_with("merged · "), "{age}");
+    let index = list(&shell, &visual, |l| {
+        l.rows.iter().position(|r| r.id.as_deref() == Some(FIRST))
+    })
+    .unwrap();
+    shell.update(&mut visual, |s, cx| {
+        let sidebar = s.surfaces.sidebar.view.clone().unwrap();
+        sidebar.update(cx, |l, cx| {
+            l.scroll_row(index, ScrollStrategy::Center, false);
+            cx.notify();
+        });
+    });
+    draw(&mut visual);
+    draw(&mut visual);
+    assert!(
+        visual
+            .debug_bounds(Box::leak(format!("thread-auto-note-{FIRST}").into_boxed_str()))
+            .is_some(),
+        "the detailed row renders the note"
+    );
+    // A click on the list's surface, not a row, then Mod+Z.
+    let bounds = visual.debug_bounds("thread-sidebar").unwrap();
+    let at = gpui::point(bounds.origin.x + gpui::px(2.), bounds.origin.y + gpui::px(2.));
+    visual.simulate_mouse_down(at, gpui::MouseButton::Left, gpui::Modifiers::default());
+    visual.simulate_mouse_up(at, gpui::MouseButton::Left, gpui::Modifiers::default());
+    draw(&mut visual);
+    let undo = if cfg!(target_os = "macos") { "cmd-z" } else { "ctrl-z" };
+    visual.simulate_keystrokes(undo);
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Active"));
+    assert_eq!(stored(&fixture, FIRST), "active");
+}

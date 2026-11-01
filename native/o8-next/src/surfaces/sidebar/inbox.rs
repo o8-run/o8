@@ -34,6 +34,10 @@ pub(super) fn newly_auto_settled(before: &[Session], after: &[Session]) -> Vec<(
         .collect()
 }
 
+/// An automatic settle was not the user's doing, so its Undo stays up
+/// longer than a manual Settle's notice.
+pub(super) const AUTO_SETTLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+
 /// The short note a Settled row shows in front of its age.
 pub(super) fn auto_note(reason: &str) -> &'static str {
     match reason {
@@ -191,9 +195,10 @@ impl ThreadList {
         {
             return false;
         }
-        let sidebar = window
-            .focused(cx)
-            .is_none_or(|focused| focused == self.focus || focused == self.archived_focus);
+        // Anywhere in the list counts: its own focus, a row's, the archive's.
+        let sidebar = window.focused(cx).is_none()
+            || self.focus.contains_focused(window, cx)
+            || self.archived_focus.contains_focused(window, cx);
         let Some(undo) = self.undo.take_if(|_| sidebar) else {
             return false;
         };
@@ -268,7 +273,7 @@ impl ThreadList {
             toasts::Kind::Info,
             message,
             vec![undo],
-            Some(toasts::NOTICE_TIMEOUT),
+            Some(AUTO_SETTLE_TIMEOUT),
             cx,
         );
         self.undo = Some(Undo { ids, toast });

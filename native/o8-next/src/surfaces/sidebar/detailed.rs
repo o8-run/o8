@@ -182,7 +182,11 @@ impl ThreadList {
                     )),
             );
         first = first.children(self.pin_mark(&id));
-        if let Some(st) = st {
+        let auto_reason = session
+            .filter(|s| s.settled())
+            .and_then(|s| s.auto_settled_reason.as_deref());
+        // The note carries the age; a bare age would repeat it.
+        if let Some(st) = st.filter(|_| state.is_some() || auto_reason.is_none()) {
             // An idle thread shows only its age; a state brings its mark.
             let color = state.map_or(faint, State::color);
             let key = st.key;
@@ -197,6 +201,24 @@ impl ThreadList {
                     .text_color(color)
                     .children(state.map(status_mark::mark))
                     .child(st.label),
+            );
+        }
+        // An automatic settle says why ("merged · 2h") beside any badge.
+        if let Some(reason) = auto_reason {
+            let sid = id.clone();
+            let age = row.age.clone();
+            let note = if age.starts_with(super::inbox::auto_note(reason)) {
+                age
+            } else {
+                format!("{} · {}", super::inbox::auto_note(reason), age)
+            };
+            first = first.child(
+                div()
+                    .debug_selector(move || format!("thread-auto-note-{sid}"))
+                    .flex_shrink_0()
+                    .whitespace_nowrap()
+                    .text_color(faint)
+                    .child(note),
             );
         }
         let title = div()
