@@ -241,6 +241,19 @@ impl Settings {
                     ));
             }
         }
+        if field.id == "parallelCap" {
+            for cap in [2, 5, 8] {
+                controls = controls.child(self.button(
+                    format!("setting-parallelCap-preset-{cap}"),
+                    cap.to_string(),
+                    !locked,
+                    value == cap,
+                    window,
+                    cx,
+                    move |this, _, cx| this.set(field, Value::from(cap), cx),
+                ));
+            }
+        }
         div()
             .debug_selector(move || format!("settings-row-{}", field.id))
             .flex()

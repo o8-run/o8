@@ -221,3 +221,32 @@ fn settings_parity_actions_follow_shell_settings_lifecycle(cx: &mut TestAppConte
     );
     assert!(shell.read_with(&mut visual, |s, _| s.surfaces.projects.open));
 }
+
+#[gpui::test]
+fn settings_parity_classic_fleet_presets_persist_and_recover(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, _) = start(cx);
+    let input = &mut visual;
+    search(input, "parallelCap");
+    for cap in [2, 5, 8] {
+        click(input, &format!("setting-parallelCap-preset-{cap}"));
+        frame(&shell, input);
+        assert_eq!(error(&shell, input), None);
+        assert_eq!(values(&fixture)["parallelCap"], cap);
+    }
+    request(
+        &fixture,
+        "POST",
+        "/__fixture/settings",
+        json!({"nextStatus":503}),
+    );
+    click(input, "setting-parallelCap-preset-2");
+    frame(&shell, input);
+    assert!(error(&shell, input).is_some());
+    assert_eq!(values(&fixture)["parallelCap"], 8);
+    click(input, "settings-refresh");
+    frame(&shell, input);
+    click(input, "setting-parallelCap-preset-5");
+    frame(&shell, input);
+    assert_eq!(error(&shell, input), None);
+    assert_eq!(values(&fixture)["parallelCap"], 5);
+}

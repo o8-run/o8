@@ -60,7 +60,7 @@ the existing operator-defaults route unless another owner is named.
 | Voice / iMessage bridge access | Allow Symon on iMessage; Use OpenClaw for iMessage; connection setup | missing | skipped: access and authentication |
 | Voice / Native Messages receiver | Enabled; authorized senders; Save; confirm native receiver; status | missing | skipped: sender authorization |
 | Permissions / macOS permissions | Microphone, Accessibility, Input Monitoring, Screen Recording; check/request/open settings; relaunch | missing | skipped: permission/security reviewer |
-| Dispatch / Fleet | Capacity presets (2, 5, 8); Concurrent agents | partial | partial: numeric concurrency exists, preset controls missing |
+| Dispatch / Fleet | Capacity presets (2, 5, 8); Concurrent agents | partial | present: native numeric editor plus classic 2/5/8 presets, saved selection and shared environment/busy locks |
 | Dispatch / Fleet | Overlapping work: Warn/Block | present | present |
 | Dispatch / Supervision | Automatically fix failed checks; Investigate failures in chat; Automatically review completed work; Merge approval | present | present |
 | Dispatch / Supervision | Install app updates automatically: Off/When idle | present | present |
@@ -194,6 +194,8 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 - Storage: `settings_parity_storage_refresh_keeps_unknown_accounting` passed in the fresh serial run. Real Refresh clicks cover complete data, negative task headroom, a 503 tagged observed, partial/null accounting, malformed/unavailable responses and recovery to measured zero. Signed headroom is retained; available task space displays zero during a reserve shortfall, matching classic. Known measurements survive a shortfall. The new case was written first; disk-full and cache-link failures prevented its initial red execution.
 
 - Indexing: `settings_parity_indexing_refresh_docs_and_independent_counts` passed in the latest combined run. Real controls refresh repository state and Brain totals independently, refresh one repository's documents with the exact path, show written/scanned counts, refuse unconfirmed success, and retry after failure.
+
+- Fleet presets: `settings_parity_classic_fleet_presets_persist_and_recover` failed first on the missing preset selector, then passed. It persists 2, 5 and 8 through the production settings route, refuses a failed write without changing the saved capacity, and recovers after Refresh.
 
 ## Host and security handoff
 
