@@ -793,7 +793,10 @@ fn native_composer_loaded_wrapping_keeps_transcript_geometry(cx: &mut TestAppCon
     // Classic's composer grows with a long draft, up to its cap, by rising
     // over the transcript; the conversation keeps its size.
     let after = cx.debug_bounds("composer-card").unwrap();
-    assert!(after.size.height > before.size.height, "a long draft grows the card");
+    assert!(
+        after.size.height > before.size.height,
+        "a long draft grows the card"
+    );
     assert_eq!(after.bottom(), before.bottom(), "the card grows upward");
     assert_eq!(
         cx.debug_bounds("composer-space").unwrap(),
