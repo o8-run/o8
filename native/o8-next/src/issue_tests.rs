@@ -294,6 +294,16 @@ fn issues_view_search_link_clear_and_worker_task(cx: &mut TestAppContext) {
     wait(cx, "issue-unlinked");
     click(cx, "issue-view-7");
     wait(cx, "issue-detail-7");
+    // The page carries the whole conversation and the work that answers it.
+    for part in [
+        "issue-body",
+        "issue-comment-0",
+        "issue-comment-1",
+        "issue-linked-item-12",
+    ] {
+        wait(cx, part);
+    }
+    assert!(cx.debug_bounds("issue-discussion-incomplete").is_none());
     click(cx, "issue-github");
     assert_eq!(
         cx.opened_url().as_deref(),

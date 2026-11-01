@@ -33,6 +33,34 @@ pub struct Issue {
     pub comments: u64,
     #[serde(default)]
     pub url: String,
+    #[serde(default)]
+    pub assignees: Vec<String>,
+    #[serde(default)]
+    pub discussion: Vec<IssueComment>,
+    #[serde(default)]
+    pub linked: Vec<LinkedItem>,
+    #[serde(default)]
+    pub discussion_incomplete: bool,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueComment {
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub created_at: String,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct LinkedItem {
+    pub kind: String,
+    pub number: u64,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub state: String,
+    pub url: String,
 }
 #[derive(Clone)]
 pub struct LinkedIssue {
@@ -172,6 +200,7 @@ pub struct Issues {
     revision: u64,
     painted: Rc<Cell<u64>>,
     painted_controls: Rc<RefCell<BTreeSet<String>>>,
+    rendered: RefCell<HashMap<String, Rc<RefCell<crate::retained::RowState>>>>,
 }
 impl Issues {
     #[cfg(test)]
@@ -230,6 +259,7 @@ impl Issues {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_controls: Rc::new(RefCell::new(BTreeSet::new())),
+            rendered: RefCell::default(),
         };
         this.watch_label(cx);
         this.subscriptions
