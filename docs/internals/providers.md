@@ -40,9 +40,44 @@ So slice 1 adds one declared operator default:
 - Like Q's Settings switches, the switch moves only after the server read-back,
   and it is a fixed 34×20 track, so a save never shifts the row.
 
-**Not yet enforced.** Slice 1 stores the preference only. Classic's
-picker, the o8 next composer selector and dispatch do not read it yet. Wiring
-those consumers is slice 2 work.
+**Enforcement (slice 2).**
+- Server: `src/lib/providers/disabled-runtimes.ts` checks `disabledRuntimes`
+  (where `claude` means `claude-code`). `handleOrchestratorSendMsgAdmitted` in
+  `ws-server.ts` refuses a turn on a disabled runtime only when the thread has
+  no persisted messages, so it is a new session. Running sessions and persistent
+  lead threads keep their runtime.
+- Classic picker: `useRuntimeInventory` exposes `disabled`, and `ComposerPicker`
+  filters with `enabledRuntimeInventory`. The current lead group stays visible.
+- o8 next picker: `composer/selector.rs` is a shared file with two small edits.
+  The inventory goes through `providers::picker_inventory`, which marks entries
+  `disabled`. `rail_houses` then skips them, unless the entry is the current lead.
+
+## Detail panel: binary path
+
+The binary path and version come from `GET /api/setup/detect`, which returns
+`tools[].id/version/path`. That route takes about 9 s cold and about 2 s warm,
+against a 10 s route deadline. The shared o8 next ureq agent has a 5 s timeout,
+so in slice 1 the request timed out and the panel always showed "Detection
+unavailable". Detection is now a separate request with a 15 s timeout, sent
+after the list loads, and the panel shows "Detecting…" while it waits. Paths
+under `$HOME` are shown with `~`.
+
+## Add provider (ACP)
+
+"+" next to the heading opens `providers_add.rs`. The dialog has these parts:
+- A grid of built-in runtimes. Clicking a tile opens that runtime's detail.
+- "Or choose from ACP Registry", with search, from `GET /api/runtime/acp-registry`.
+- The Add button calls `POST …/acp-registry/prepare` and then
+  `POST /api/runtime/acp-connection`. Registry entries with no npm package only
+  show "Setup guide only".
+- "Configure manually" opens a name, executable and arguments form, which saves
+  through the same `acp-connection` path.
+
+No new endpoints. o8 has **one Local ACP slot** (`~/.o8/local-acp.json`), so adding
+an agent replaces the current one, and the dialog says so. Saving also clears
+`~/.o8/acp-models/acp.json`. The env editor has not been ported; the form points
+to classic Settings for it. `scripts/next/surfaces/01-providers.surface.ts` serves
+a synthetic registry and prepare for `--settings` fixtures.
 
 ## Surface boundary
 
@@ -54,9 +89,8 @@ the `shell-work` label, the same as #5224's Settings work.
 
 ## Next slices
 
-1. Honour `disabledRuntimes` in the composer selector, classic `ProvidersTab`, and
-   `assertRuntimeDispatchable`.
-2. Port `AcpRegistryPicker.tsx` behind **+**, reusing `/api/runtime/acp-registry`
-   and `/prepare`.
-3. Manual / Local ACP form (`/api/runtime/acp-connection`), then per-instance
-   binary/home overrides.
+1. Multiple ACP instances (more than the single Local ACP slot), plus per-instance
+   binary and home overrides.
+2. Env editor for ACP connections in o8 next.
+3. Hide disabled runtimes even when they are the current or default lead, which
+   needs a lead fallback.
