@@ -18,8 +18,13 @@ fn re(pattern: &str) -> Regex {
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Run {
+    #[serde(serialize_with = "wire_style")]
     pub style: String,
     pub text: String,
+}
+/// A link's target is native-only; the recorded tree keeps the web's style name.
+fn wire_style<S: serde::Serializer>(style: &str, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(if style.starts_with("link") { "link" } else { style })
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Node {

@@ -18,13 +18,14 @@ fn timed_out(error: &(dyn std::error::Error + 'static)) -> bool {
 /// Backoff before the one retry of an idempotent GET.
 pub(crate) const GET_RETRY_BACKOFF: Duration = Duration::from_millis(250);
 
-/// Idempotent reads retry once after a transport failure (timeout, refused or
-/// reset connection), so a slow or briefly busy server does not surface as an
-/// error row. HTTP status answers are final and never retried.
+/// Idempotent reads retry once after a refused or reset connection, so a briefly
+/// busy server does not surface as an error row. HTTP status answers are final,
+/// and a timeout has already spent the whole deadline, so neither is retried.
 pub(crate) fn get_with_retry(
     mut call: impl FnMut() -> Result<ureq::Response, ureq::Error>,
 ) -> Result<ureq::Response, ureq::Error> {
     match call() {
+        Err(error @ ureq::Error::Transport(_)) if timed_out(&error) => Err(error),
         Err(ureq::Error::Transport(_)) => {
             std::thread::sleep(GET_RETRY_BACKOFF);
             call()
@@ -33,11 +34,10 @@ pub(crate) fn get_with_retry(
     }
 }
 
-/// A read failed because the server was slow, busy or briefly unreachable,
-/// not because it refused the request. Surfaces keep their last good data.
+/// A read failed because the server was slow or busy, not because it refused
+/// the request or is gone. Surfaces keep their last good data.
 pub(crate) fn transient(error: &str) -> bool {
     error.ends_with("Request timed out")
-        || error.ends_with("Could not reach the selected server")
         || ["502", "503", "504"]
             .iter()
             .any(|code| error.ends_with(&format!("Server returned HTTP {code}")))
@@ -225,11 +225,11 @@ impl Client {
 mod tests {
     #[test]
     fn transient_errors_are_stale_not_fatal() {
-        assert!(super::transient("/api/x: Request timed out"));
-        assert!(super::transient("/api/x: Server returned HTTP 503"));
-        assert!(!super::transient("/api/x: Server returned HTTP 401"));
+        assert!(super::transient("/api/panel/repos: Request timed out"));
+        assert!(super::transient("/api/panel/repos: Server returned HTTP 503"));
+        assert!(!super::transient("/api/panel/repos: Server returned HTTP 401"));
         assert_eq!(
-            super::stale_notice("/api/x: Request timed out"),
+            super::stale_notice("/api/panel/repos: Request timed out"),
             "Showing last loaded data · stale (Request timed out)"
         );
     }
@@ -256,9 +256,9 @@ mod tests {
             listener.accept().is_err()
         });
         let client = super::Client::new(&format!("http://127.0.0.1:{port}")).unwrap();
-        let ok: serde_json::Value = client.get("/api/x", &[]).unwrap();
+        let ok: serde_json::Value = client.get("/api/panel/repos", &[]).unwrap();
         assert_eq!(ok["ok"], true);
-        assert!(client.get::<serde_json::Value>("/api/x", &[]).unwrap_err().contains("HTTP 503"));
+        assert!(client.get::<serde_json::Value>("/api/panel/repos", &[]).unwrap_err().contains("HTTP 503"));
         assert!(server.join().unwrap(), "a status answer was retried");
     }
 

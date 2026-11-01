@@ -194,7 +194,12 @@ impl Shell {
                         this.notice.clear();
                         this.persist();
                     }
-                    Err(error) if this.connected && crate::client::transient(&error) => {
+                    // A busy server keeps the shell connected; a hung one is down.
+                    Err(error)
+                        if this.connected
+                            && crate::client::transient(&error)
+                            && !error.ends_with("Request timed out") =>
+                    {
                         this.notice = crate::client::stale_notice(&error);
                     }
                     Err(error) => {
