@@ -223,13 +223,15 @@ impl Render for Card {
             .focus(|v| v.bg(theme().selection))
             .child("Inspect agent")
             .on_click(cx.listener(|s, _, w, cx| {
+                s.action_focus[4].focus(w);
                 crate::subagents::open_packet(
                     s.client.clone(),
                     s.task.text("workspaceTargetPath"),
                     s.task.id.clone(),
                     w,
                     cx,
-                )
+                );
+                cx.stop_propagation();
             }))
             .on_key_down(cx.listener(|s, e: &KeyDownEvent, w, cx| {
                 if matches!(e.keystroke.key.as_str(), "enter" | "space") {

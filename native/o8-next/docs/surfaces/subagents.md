@@ -49,6 +49,8 @@ history and media routes. It covers named trace links, preserved parent drafts
 and original steps, grouped counts, copy, search, refresh recovery, earlier-history
 retry, image loading, grid parent changes, compact fit and held Shared results.
 The side-chat path also checks restoration of its split companion and composer focus.
+Workers inspection checks keyboard return to the same card. A lower-split check
+keeps detail in its existing slot and restores the tools that preceded inspection.
 
 The initial native regressions fail on the absent `header-subagents` and
 `subagent-trace-subagent-calculation` controls. Final green receipts and live

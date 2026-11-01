@@ -56,13 +56,20 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         p.split_drag = false;
     }
     if !fresh {
-        if viewport < 1180. && p.motion.is_open() && p.selected != Tool::Subagents {
+        if viewport < 1180. && (p.selected == Tool::Subagents || p.lower == Some(Tool::Subagents)) {
+            p.maximized = true;
+        }
+        if viewport < 1180.
+            && p.motion.is_open()
+            && p.selected != Tool::Subagents
+            && p.lower != Some(Tool::Subagents)
+        {
             p.motion.set(false);
             p.morph.set(false);
             p.maximized = false;
             cx.notify();
         }
-        if (viewport >= 1180. || s.features.get::<Panel>().selected == Tool::Subagents)
+        if (viewport >= 1180. || subagents::in_panel(s))
             && s.state.right_panel.visible
             && !s.features.get::<Panel>().motion.is_open()
         {

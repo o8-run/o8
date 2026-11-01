@@ -45,7 +45,11 @@ pub(super) fn watch(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>)
                                             s.active(),
                                             primary.map(|v| v.entity_id()),
                                         ));
-                                        show(s, Tool::Subagents, w, cx);
+                                        if is_open(s) && in_panel(s) {
+                                            focus(s, w, cx);
+                                        } else {
+                                            show(s, Tool::Subagents, w, cx);
+                                        }
                                     });
                                 });
                             });
@@ -111,7 +115,9 @@ pub(super) fn current(s: &mut Shell, cx: &mut Context<Shell>) -> Option<Entity<I
 }
 pub(super) fn prepare(s: &mut Shell, cx: &mut Context<Shell>) {
     let panel = s.features.get::<Panel>();
-    if panel.selected != Tool::Subagents || !panel.motion.is_open() {
+    if (panel.selected != Tool::Subagents && panel.lower != Some(Tool::Subagents))
+        || !panel.motion.is_open()
+    {
         let return_panel = panel.motion.is_open().then(|| ReturnPanel {
             workspace: s.state.selected.clone(),
             selected: panel.selected,
@@ -127,6 +133,11 @@ pub(super) fn prepare(s: &mut Shell, cx: &mut Context<Shell>) {
         let view = current(s, cx);
         s.features.get::<Inspectors>().current = view;
     }
+}
+pub(super) fn in_panel(s: &Shell) -> bool {
+    s.features.read::<Panel>().is_some_and(|panel| {
+        panel.selected == Tool::Subagents || panel.lower == Some(Tool::Subagents)
+    })
 }
 fn restore_panel(s: &mut Shell, cx: &mut Context<Shell>) -> bool {
     let Some(saved) = s.features.get::<Inspectors>().return_panel.take() else {
