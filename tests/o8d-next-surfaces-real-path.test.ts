@@ -50,6 +50,15 @@ it('reads saved fixture sessions with Next stopped', async () => {
   expect(await response.text()).toContain('Fixture saved history');
 });
 
+it('reads parent subagents through the native bridge with Next stopped', async () => {
+  const query = new URLSearchParams({ repoPath: server.directory, threadId: 'thoughts-native-surface' });
+  const response = await fetch(`${origin}/api/orchestrator/shared-team/active?${query}`, {
+    headers: { authorization: `Bearer ${server.token}` },
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ threadId: 'thoughts-native-surface', workers: [] });
+});
+
 it('persists Setup conversation creation through its existing handler with Next stopped', async () => {
   const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
   const created = await fetch(`${origin}/api/v2/chat-history`, { method: 'POST', headers, body: JSON.stringify({
