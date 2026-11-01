@@ -139,11 +139,11 @@ the existing operator-defaults route unless another owner is named.
 | Diagnostics / Recall health | Outcomes/directives; recall p50/p95/p99 24h/p95 7d; substrate health; Refresh | missing | missing |
 | Diagnostics / Loop status | Cron; prompt; open PRs; active lanes; recent merges disclosure; refresh | missing | missing |
 | Diagnostics / Demo sequence | Run demo; confirm/cancel; live trace | missing | skipped: diagnostic authorization |
-| About / Version | Version; Platform; Mode; Check for updates and result | missing | missing |
-| About / Links | GitHub; Documentation; Releases | missing | missing |
+| About / Version | Version; Platform; Mode; Check for updates and result | missing | present: connected version, native platform/mode, verified check-only update result |
+| About / Links | GitHub; Documentation; Releases | missing | present: native link controls |
 | About / Onboarding | Replay onboarding | missing | missing: native onboarding surface not present |
 | About / Report an issue | Enable sharing; Bug/Request; Message; attach/paste/drop/remove image; Send; status | missing | skipped: upload/redaction and outbound report review |
-| About / Credits | Framework/runtime and design credits | missing | missing |
+| About / Credits | Framework/runtime and design credits | missing | present: native GPUI/runtime credits |
 | About / Developer | Reset + run onboarding; Preview onboarding; View detection | missing | missing: classic host onboarding |
 | Legacy Workers / tokens and fleet | Label; Scope; Max workers; create/copy/revoke token; remote runtime flag; fleet status | missing | skipped: credentials and remote access; not routed by current SettingsPage |
 | Legacy Cloud workers / team | Label; Team ID; create/connect/revoke/refresh | missing | skipped: credentials and account; not routed by current SettingsPage |
@@ -183,3 +183,5 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 - Voice notifications: `settings_parity_spoken_notifications_persist_and_gate_controls` passed (1/1). It clicks all notification switches, verifies saved values, checks disabled dependencies, saves the hourly budget and quiet-window start, and refuses an invalid time without changing the saved end.
 
 - Keyboard: `settings_parity_keyboard_opens_help_and_returns_to_settings` passed (1/1), opening the real shell help modal, closing back to Settings, then reopening it with Enter from the restored focus. The page renderer moved to `settings_render.rs` to keep the existing row-controls file below its size limit; internal Settings navigation scrolls without visible bars.
+
+- About: `settings_parity_about_links_version_and_verified_update_check` passed (1/1). A disposable HTTP peer proves current/available results, rejection of unverified replies, HTTP failure and recovery, the exact check-only request, version display and external-link destinations. Its first run exposed a test-peer paint-settling gap; it now uses the shell tests' two-paint pattern. No installed-app update acceptance is claimed.

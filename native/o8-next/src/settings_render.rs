@@ -52,7 +52,10 @@ impl Render for Settings {
             false,
             window,
             cx,
-            |this, _, cx| this.load(false, cx),
+            |this, _, cx| {
+                this.load(false, cx);
+                this.load_panel(true, cx);
+            },
         );
         let file = self.button(
             "settings-file-open".into(),
@@ -143,13 +146,22 @@ impl Render for Settings {
                 &query,
                 "keyboard shortcuts help keybindings hotkeys",
             );
+            let about = panels::matches(
+                "about",
+                self.section,
+                &query,
+                "about version platform mode updates github documentation releases credits",
+            );
+            if about {
+                content = content.child(self.about_view(window, cx));
+            }
             if keyboard {
                 content = content.child(self.keyboard_view(window, cx));
             }
             if appearance {
                 content = content.child(self.appearance_view(window, cx));
             }
-            if fields.is_empty() && !appearance && !keyboard {
+            if fields.is_empty() && !appearance && !keyboard && !about {
                 content = content.child(empty("No settings match this search."));
             }
             let mut previous = None;

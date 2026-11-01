@@ -89,3 +89,22 @@ pub(super) fn matches(section: &str, active: &str, query: &str, keywords: &str) 
         query.split_whitespace().all(|word| keywords.contains(word))
     }
 }
+
+pub(super) fn fact(id: &str, label: &str, value: &str) -> gpui::Div {
+    let selector = id.to_owned();
+    div()
+        .debug_selector(move || selector.clone())
+        .flex()
+        .flex_wrap()
+        .justify_between()
+        .gap(px(16.))
+        .py(px(12.))
+        .border_b_1()
+        .border_color(theme().border)
+        .child(label.to_owned())
+        .child(
+            div()
+                .text_color(theme().text_secondary)
+                .child(value.to_owned()),
+        )
+}

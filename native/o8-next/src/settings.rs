@@ -133,6 +133,10 @@ pub(crate) struct Settings {
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     scroll: gpui::ScrollHandle,
+    about_version: Option<String>,
+    about_busy: bool,
+    about_status: String,
+    about_error: Option<String>,
 }
 impl EventEmitter<Close> for Settings {}
 impl Settings {
@@ -142,7 +146,20 @@ impl Settings {
             input.placeholder = "Search settings".into();
             input
         });
-        let subscription = cx.observe(&search, |this, _, cx| this.changed(cx));
+        let subscription = cx.observe(&search, |this, _, cx| {
+            let query = this.search.read(cx).text.trim().to_lowercase();
+            if query.len() >= 2
+                && panels::matches(
+                    "about",
+                    this.section,
+                    &query,
+                    "about version platform mode updates github documentation releases credits",
+                )
+            {
+                this.load_about(false, cx);
+            }
+            this.changed(cx);
+        });
         let focus = cx.focus_handle();
         focus.focus(window);
         let mut view = Self {
@@ -167,6 +184,10 @@ impl Settings {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             scroll: gpui::ScrollHandle::new(),
+            about_version: None,
+            about_busy: false,
+            about_status: String::new(),
+            about_error: None,
         };
         view.load(false, cx);
         view
@@ -290,6 +311,12 @@ impl Settings {
         self.scroll
             .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
         self.load(false, cx);
+        self.load_panel(false, cx);
+    }
+    fn load_panel(&mut self, force: bool, cx: &mut Context<Self>) {
+        if self.section == "about" {
+            self.load_about(force, cx);
+        }
     }
     fn locked(&self, field: &Field) -> bool {
         self.busy
@@ -453,3 +480,9 @@ mod panels;
 
 #[path = "settings_render.rs"]
 mod render;
+
+#[path = "settings_about.rs"]
+mod about;
+#[cfg(test)]
+#[path = "settings_test_peer.rs"]
+mod test_peer;
