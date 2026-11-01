@@ -44,6 +44,7 @@ import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
 import { serviceTierForTurn, type OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
 import { recoverRuntimeSessionMessage, SESSION_CONTEXT_UNAVAILABLE } from './runtime-session-recovery';
 import { readRuntimeSessionHandoff, persistRuntimeSessionHandoff, noteRuntimeSessionHandoff, clearRuntimeSessionHandoff, type RuntimeSessionHandoff } from './runtime-session-handoff';
+import { selectedOrchestratorModel } from './orchestrator-model-guard';
 import {
   ensureRegisteredSession,
   getRegisteredSession,
@@ -380,7 +381,7 @@ async function sendToCodexOrchestratorAttempt(
     });
     codexBin = resolved.path;
     reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort, model, {
-      explicitModel: options.model, installedCliVersion: resolved.version ?? null, codexHome: userCodexHome(),
+      explicitModel: selectedOrchestratorModel(options.model), installedCliVersion: resolved.version ?? null, codexHome: userCodexHome(),
     });
   } catch (err) {
     if (settleBeforeSpawnIfAborted()) return;
