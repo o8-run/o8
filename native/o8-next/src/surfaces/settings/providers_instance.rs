@@ -215,6 +215,7 @@ impl InstanceDetail {
             "value"
         };
         let value = input(placeholder, var.value.as_deref().unwrap_or(""), cx);
+        value.update(cx, |field, _| field.masked = var.secret);
         for field in [&name, &value] {
             self.subscriptions
                 .push(cx.observe(field, |this, _, cx| this.changed(cx)));
@@ -464,6 +465,11 @@ impl Render for InstanceDetail {
                         if !row.secret {
                             row.configured = false;
                         }
+                        let masked = row.secret;
+                        row.value.update(cx, |field, cx| {
+                            field.masked = masked;
+                            cx.notify();
+                        });
                         this.changed(cx);
                     },
                 )
@@ -647,7 +653,7 @@ impl Render for InstanceDetail {
             })
             .child(section(
                 "Environment",
-                "Added to this instance's sessions only. Secrets are encrypted and never shown again; provider API key names stay with Settings › API keys.".into(),
+                "Added to this instance's sessions only. Secrets are encrypted and never shown again. Provider API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, …) may be set here as secrets; they replace the shared Settings › API keys for this instance's sessions only.".into(),
             ))
             .child(env)
             .child(div().pt(px(6.)).flex().child(add_var))

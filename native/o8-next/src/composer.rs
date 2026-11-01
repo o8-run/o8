@@ -54,6 +54,8 @@ pub struct Composer {
     /// The chat composer: ⌘↵ and ⌥⌘↵ emit [`SendAs`] instead of Submit.
     pub(crate) send_intents: bool,
     pub(crate) controls: controls::State,
+    /// Paints `*` for every byte (offsets stay valid) and refuses copy/cut.
+    pub(crate) masked: bool,
 }
 impl Composer {
     /// Read-only input viewport for floating previews; layout and input stay here.
@@ -85,6 +87,7 @@ impl Composer {
             newline_on_enter: false,
             send_intents: false,
             controls: controls::State::default(),
+            masked: false,
         }
     }
     pub(crate) fn select_all(&mut self, cx: &mut Context<Self>) {
@@ -321,7 +324,7 @@ impl Composer {
                 self.changed(cx);
             }
             "c" | "x" if command => {
-                if self.selection.is_empty() {
+                if self.selection.is_empty() || self.masked {
                     cx.stop_propagation();
                     return;
                 }
@@ -684,7 +687,11 @@ impl Render for Composer {
                         let (text, marked, selection, cursor, focus, placeholder) = {
                             let i = input.read(cx);
                             (
-                                i.text.clone(),
+                                if i.masked {
+                                    "*".repeat(i.text.len())
+                                } else {
+                                    i.text.clone()
+                                },
                                 i.marked.clone(),
                                 i.selection.clone(),
                                 i.cursor(),
