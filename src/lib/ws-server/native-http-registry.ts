@@ -50,6 +50,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/automations/connected', 'GET POST PATCH', () => import('@/app/api/automations/connected/route')),
     route('/api/panel/repos', 'GET', () => import('@/app/api/panel/repos/route')),
   ],
+  usage: [route('/api/runtime/usage', 'GET', () => import('@/app/api/runtime/usage/route'))],
   palette: [], // Local commands and workspace navigation reuse the selected surface's transport.
   sidebar: [
     route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),

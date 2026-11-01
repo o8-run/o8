@@ -202,6 +202,11 @@ fn gauge(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
             target("rail-usage")
                 .relative()
                 .when(open, |view| view.bg(theme().hover))
+                .cursor_pointer()
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.features.get::<UsageCard>().open = false;
+                    this.execute(Command::Usage, window, cx);
+                }))
                 .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                     if *hovered {
                         let card = this.features.get::<UsageCard>();

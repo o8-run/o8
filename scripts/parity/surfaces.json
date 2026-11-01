@@ -250,6 +250,17 @@
       ]
     },
     {
+      "id": "usage",
+      "flags": [
+        "--usage"
+      ],
+      "nativeCommand": "Open usage",
+      "webRoute": "/dashboard",
+      "nativeSelectors": [
+        "usage-page"
+      ]
+    },
+    {
       "id": "bots",
       "flags": [
         "--bots"
