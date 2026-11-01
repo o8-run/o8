@@ -14,10 +14,10 @@ afterEach(() => {
 });
 
 describe('workspace parking operator defaults', () => {
-  it('defaults to manual and preserves env over file source truth', () => {
+  it('defaults to on-settle parking and preserves env over file source truth', () => {
     delete process.env.O8_WORKSPACE_PARKING_MODE;
     expect(resolveWorkspaceParkingSettings({})).toEqual({
-      values: { workspaceParkingMode: 'manual' },
+      values: { workspaceParkingMode: 'settled' },
       sources: { workspaceParkingMode: 'default' },
     });
     expect(resolveWorkspaceParkingSettings({ workspaceParkingMode: 'pressure' })).toEqual({
@@ -34,7 +34,7 @@ describe('workspace parking operator defaults', () => {
   it('rejects unknown stored, environment, and update values', () => {
     expect(resolveStoredWorkspaceParking({ workspaceParkingMode: 'other' as 'manual' })).toEqual({});
     process.env.O8_WORKSPACE_PARKING_MODE = 'other';
-    expect(resolveWorkspaceParkingSettings({}).values.workspaceParkingMode).toBe('manual');
+    expect(resolveWorkspaceParkingSettings({}).values.workspaceParkingMode).toBe('settled');
     expect(() => applyWorkspaceParkingUpdate({}, { workspaceParkingMode: 'other' as 'manual' }))
       .toThrow(/manual.*pressure/);
   });

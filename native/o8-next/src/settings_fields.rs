@@ -554,7 +554,7 @@ pub const FIELDS: &[Field] = &[
         "Parking mode",
         "storage",
         "Reclaim eligible workspaces with restoration information preserved.",
-        Kind::Choice(&[("manual", "Manual"), ("pressure", "Pressure")]),
+        Kind::Choice(&[("manual", "Manual"), ("pressure", "Pressure"), ("settled", "On settle")]),
     ),
     field(
         "storageReserveRatio",

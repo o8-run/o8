@@ -144,8 +144,9 @@ function workspaceStorageValidationError(body: Record<string, unknown>): string 
   }
   if (body.workspaceParkingMode !== undefined
     && body.workspaceParkingMode !== 'manual'
-    && body.workspaceParkingMode !== 'pressure') {
-    return 'workspaceParkingMode must be "manual" or "pressure".';
+    && body.workspaceParkingMode !== 'pressure'
+    && body.workspaceParkingMode !== 'settled') {
+    return 'workspaceParkingMode must be "manual", "pressure" or "settled".';
   }
   return null;
 }
@@ -681,7 +682,8 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     if (Number.isFinite(parsed) && parsed > 0 && parsed <= 10000) update.storageReserveFloorGb = parsed;
   }
 
-  if (body.workspaceParkingMode === 'manual' || body.workspaceParkingMode === 'pressure') {
+  if (body.workspaceParkingMode === 'manual' || body.workspaceParkingMode === 'pressure'
+    || body.workspaceParkingMode === 'settled') {
     update.workspaceParkingMode = body.workspaceParkingMode;
   }
 

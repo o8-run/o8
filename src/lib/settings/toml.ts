@@ -353,7 +353,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   worktreeMaxTotalGb: numberField('git', 'worktree_max_total_gb', 'a number between 0 and 10000', (value) => value >= 0 && value <= 10000),
   storageReserveRatio: numberField('git', 'storage_reserve_ratio', 'a number between 0 and 1', (value) => value >= 0 && value <= 1),
   storageReserveFloorGb: numberField('git', 'storage_reserve_floor_gb', 'a number greater than 0 and no more than 10000', (value) => value > 0 && value <= 10000),
-  workspaceParkingMode: enumField('git', 'workspace_parking_mode', '"manual" or "pressure"', (value): value is OperatorDefaults['workspaceParkingMode'] => value === 'manual' || value === 'pressure'),
+  workspaceParkingMode: enumField('git', 'workspace_parking_mode', '"manual", "pressure" or "settled"', (value): value is OperatorDefaults['workspaceParkingMode'] => value === 'manual' || value === 'pressure' || value === 'settled'),
 } satisfies { [K in keyof OperatorDefaults]: TomlField<OperatorDefaults[K]> };
 
 export const OPERATOR_DEFAULTS_TOML_KEYS = Object.freeze(

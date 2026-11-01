@@ -1,4 +1,5 @@
 import 'server-only';
+import type { WorkspaceParkingMode } from '@/lib/operator/workspace-parking-defaults';
 
 import path from 'node:path';
 
@@ -34,7 +35,7 @@ import { assertSettledCompletedWorkspace } from '@/lib/workspace/completed-packe
 import { withStoragePressurePolicyLock } from './storage-pressure-policy-lock';
 
 export interface StoragePressureProjection {
-  mode: 'manual' | 'pressure';
+  mode: WorkspaceParkingMode;
   automaticParkingEnabled: boolean;
   eligibleRepositories: number;
   optedOutRepositories: number;
@@ -136,7 +137,7 @@ function candidateReceipt(
 export async function parkWithFreshPolicy(
   candidate: PressureCandidate,
   heldVolumeId: string | null,
-  mode: () => 'manual' | 'pressure',
+  mode: () => WorkspaceParkingMode,
   readRepos: () => Promise<RepoRegistryEntry[]>,
   observeVolume: NonNullable<StoragePressureDependencies['observeVolume']>,
   park: (input: ParkWorkspaceInput) => Promise<ParkWorkspaceResult>,
@@ -151,7 +152,7 @@ export async function parkWithFreshPolicy(
         return 'repository_policy_unknown';
       }
       try {
-        if (mode() !== 'pressure') return 'pressure_mode_disabled';
+        if (mode() === 'manual') return 'pressure_mode_disabled';
       } catch {
         return 'pressure_mode_unknown';
       }
@@ -301,7 +302,7 @@ export function projectStoragePressurePolicy(
   const optedOutRepositories = repos.filter((repo) => repo.storagePressureParkingDisabled).length;
   return {
     mode,
-    automaticParkingEnabled: mode === 'pressure',
+    automaticParkingEnabled: mode !== 'manual',
     eligibleRepositories: repos.length - optedOutRepositories,
     optedOutRepositories,
   };
@@ -312,7 +313,10 @@ export function createStoragePressureAdmissionCoordinator(
   overrides: StoragePressureDependencies = {},
 ): PacketStorageAdmissionCoordinator {
   const now = overrides.now ?? Date.now;
-  const mode = overrides.mode ?? (() => getOperatorDefaultsSync().values.workspaceParkingMode);
+  // On-settle parking also answers dispatch pressure; receipts stay manual or pressure.
+  const mode = overrides.mode ?? (() => (
+    getOperatorDefaultsSync().values.workspaceParkingMode === 'manual' ? 'manual' : 'pressure'
+  ));
   const dependencies = {
     listLanes: overrides.listLanes ?? listLanes,
     listRepos: overrides.listRepos ?? listReposFresh,

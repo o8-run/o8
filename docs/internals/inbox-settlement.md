@@ -197,8 +197,10 @@ step after the metadata and history locks are released. The response does not
 wait for process or filesystem checks. Parking failures leave settlement durable.
 The metadata mutation itself never changes a worker or its release receipt.
 
-The existing workspace parking mode keeps its meaning: `manual` (the default)
-requires an explicit workspace Park request. Settling is not that request.
+The workspace parking mode decides what a settle does. `settled` (the default)
+parks a completed managed workspace as soon as its thread settles, with or
+without storage pressure, and also answers dispatch pressure. `manual` requires
+an explicit workspace Park request; settling is not that request.
 `pressure` can park a completed managed workspace only while a real durable
 `reserve_breached` admission hold remains current and a fresh measurement still
 shows pressure on the same volume. Repository opt-out is read fresh under the

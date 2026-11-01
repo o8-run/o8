@@ -52,7 +52,7 @@ async function assertCurrentPressure(packetId: string, mutationId: string): Prom
   const reserve = Math.max(Math.round(policy.storageReserveFloorGb * 1_073_741_824),
     Math.ceil(volume.totalBytes! * policy.storageReserveRatio));
   const headroom = volume.availableBytes! - reserve - reserved;
-  if (policy.workspaceParkingMode !== 'pressure' || !Number.isSafeInteger(reserved) || reserved < 0
+  if (policy.workspaceParkingMode === 'manual' || !Number.isSafeInteger(reserved) || reserved < 0
     || !Number.isSafeInteger(headroom) || held.estimateBytes <= headroom) {
     throw new Error('The current volume does not have an authoritative reserve breach.');
   }
@@ -63,10 +63,11 @@ async function assertCurrentPressure(packetId: string, mutationId: string): Prom
 }
 
 async function parkSettledWorkspaces(subject: InboxSubject, settledAt: string): Promise<void> {
-  if (getOperatorDefaultsSync().values.workspaceParkingMode !== 'pressure') return;
+  const mode = getOperatorDefaultsSync().values.workspaceParkingMode;
+  if (mode === 'manual') return;
   const scope = settleScope(subject);
   const demands = scope.packets.filter(packet => heldBreach(packet));
-  if (!demands.length) return;
+  if (mode === 'pressure' && !demands.length) return;
   const repos = await listReposFresh();
   for (const lane of scope.relevantLanes) {
     if (lane.status !== 'completed' || !lane.packetId || !lane.worktreePath) continue;
@@ -82,22 +83,30 @@ async function parkSettledWorkspaces(subject: InboxSubject, settledAt: string): 
     const workspaceVolume = await observeStorageVolume(lane.worktreePath);
     if (storageObservationFailureReason(workspaceVolume, probeStarted, Date.now(), DEFAULT_STORAGE_OBSERVATION_MAX_AGE_MS)) continue;
     const demand = demands.find(packet => heldBreach(packet)?.volumeId === workspaceVolume.volumeId);
-    if (!demand?.storageAdmission) continue;
-    let volumeId: string;
-    try { volumeId = await assertCurrentPressure(demand.id, demand.storageAdmission.mutationId); }
-    catch { continue; }
+    // On-settle parking needs no storage hold, so it re-proves ownership only.
+    const onSettle = mode === 'settled';
+    if (!onSettle && !demand?.storageAdmission) continue;
+    let volumeId = workspaceVolume.volumeId;
+    if (!volumeId) continue;
+    if (!onSettle) {
+      try { volumeId = await assertCurrentPressure(demand!.id, demand!.storageAdmission!.mutationId); }
+      catch { continue; }
+    }
+    const assertDemand = async () => {
+      if (!onSettle) await assertCurrentPressure(demand!.id, demand!.storageAdmission!.mutationId);
+    };
     const operationId = `inbox-settle:${createHash('sha256').update(JSON.stringify([subject, settledAt, lane.packetId])).digest('hex')}`;
     const candidate: PressureCandidate = { lane, repo, operationId, ordinal: 1, measuredAllocatedBytes: null,
       refusal: null, exactParkReplay: false, volumePath: lane.worktreePath };
     const parked = await parkWithFreshPolicy(candidate, volumeId,
       () => getOperatorDefaultsSync().values.workspaceParkingMode, listReposFresh, observeStorageVolume,
       async input => {
-        await assertCurrentPressure(demand.id, demand.storageAdmission!.mutationId);
+        await assertDemand();
         assertSettledCompletedWorkspace(lane, proof);
         return parkWorkspace({ ...input,
           assertPolicyCurrent: async () => {
             await input.assertPolicyCurrent?.();
-            await assertCurrentPressure(demand.id, demand.storageAdmission!.mutationId);
+            await assertDemand();
           },
         });
       });
