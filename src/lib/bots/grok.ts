@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { BotEntry, BotProvider } from './registry';
 import { mailboxPath, mailboxUpdatedAt } from './mailbox';
+import { botTextPrefix } from './text';
 
 const AGENT_ID = /^[a-f0-9-]{8,64}$/;
 const ONLINE_MS = 15 * 60_000;
@@ -31,7 +32,7 @@ export function listGrokBots(root = grokAgentRoot(), dataDir?: string, now = Dat
     let name = 'Grok bot';
     try {
       const parsed = JSON.parse(readFileSync(profile, 'utf8')) as { name?: unknown };
-      if (typeof parsed.name === 'string' && parsed.name.trim()) name = parsed.name.trim().slice(0, 80);
+      if (typeof parsed.name === 'string' && parsed.name.trim()) name = botTextPrefix(parsed.name.trim(), 80);
     } catch {
       return [];
     }
