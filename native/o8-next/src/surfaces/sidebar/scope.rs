@@ -20,6 +20,7 @@ pub(in crate::shell::sidebar) struct Menu {
 /// A thread row's right-click menu, where it opened.
 pub(in crate::shell::sidebar) struct RowMenu {
     pub repo: String,
+    pub id: String,
     pub position: Point<Pixels>,
 }
 
@@ -454,7 +455,7 @@ impl ThreadList {
             .find(|s| s.id == id)
             .and_then(|s| s.repo_path.clone())
             .filter(|repo| repos.iter().any(|(path, _)| path == repo))
-            .map(|repo| RowMenu { repo, position });
+            .map(|repo| RowMenu { repo, id: id.to_owned(), position });
         cx.notify();
     }
     /// The row menu's Filter by <repository> / Show all repositories.
@@ -464,6 +465,7 @@ impl ThreadList {
     ) -> Option<AnyElement> {
         let menu = self.row_menu.as_ref()?;
         let repo = menu.repo.clone();
+        let thread = menu.id.clone();
         let active = self.scope_keys().contains(&repo);
         let name = self
             .scope_repos()
@@ -525,6 +527,27 @@ impl ThreadList {
                                         this.row_menu = None;
                                         let keys = if active { vec![] } else { vec![repo.clone()] };
                                         this.set_scope(keys, cx);
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .id("sidebar-row-regenerate-title")
+                                    .debug_selector(|| "sidebar-row-regenerate-title".into())
+                                    .h(px(28.))
+                                    .px(px(8.))
+                                    .flex()
+                                    .items_center()
+                                    .rounded(px(7.))
+                                    .text_size(px(12.5))
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(theme().hover))
+                                    .child("Regenerate title")
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.row_menu = None;
+                                        this.regenerate_title(thread.clone(), cx);
                                     })),
                             ),
                     ),

@@ -310,6 +310,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   localInferenceBaseUrl: credentialSafeUrlField('local_models', 'inference_base_url'),
   localEmbedModel: stringField('local_models', 'embed_model'),
   localChatModel: stringField('local_models', 'chat_model'),
+  textGenerationTitleModel: stringField('text_generation', 'title_model'),
   experimentalOpencode: booleanField('experimental', 'opencode_enabled'),
   experimentalGemini: booleanField('experimental', 'gemini_enabled'),
   experimentalChat: booleanField('experimental', 'chat_enabled'),

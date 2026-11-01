@@ -456,6 +456,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.localChatModel = body.localChatModel.trim();
   }
 
+  if (body.textGenerationTitleModel !== undefined) {
+    if (typeof body.textGenerationTitleModel !== 'string') {
+      throw new Error('textGenerationTitleModel must be a string.');
+    }
+    update.textGenerationTitleModel = body.textGenerationTitleModel.trim();
+  }
+
   for (const field of ['experimentalOpencode', 'experimentalGemini', 'experimentalChat', 'experimentalCanvas', 'experimentalNext', 'nativeBrowserView'] as const) {
     const value = body[field];
     if (value === undefined) continue;

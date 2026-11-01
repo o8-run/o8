@@ -110,6 +110,13 @@ pub const FIELDS: &[Field] = &[
         BOOL,
     ),
     field(
+        "textGenerationTitleModel",
+        "Title model",
+        "general",
+        "OpenRouter model tried first for thread titles ([text_generation] title_model). Empty uses the free chain.",
+        Kind::Text,
+    ),
+    field(
         "presentationQuietMode",
         "Quiet mode",
         "general",
