@@ -46,6 +46,7 @@ import {
 } from './dependency-materializer';
 import { inspectExactWorktreeQuarantine, parkExactWorktree } from './worktree-exact';
 import { assertManagedWorkspaceMaterialization } from './managed-materialization-identity';
+import { assertSettledCompletedWorkspace, sameWorkspaceSnapshot } from './completed-packet';
 
 const execFileAsync = promisify(execFile);
 const ZERO_OID = '0000000000000000000000000000000000000000';
@@ -76,6 +77,8 @@ export interface ParkWorkspaceInput {
   packetId: string;
   operationId: string;
   allowedIgnoredPaths?: string[];
+  /** Additional fresh policy guard; never relaxes workspace eligibility. */
+  assertPolicyCurrent?: () => Promise<void>;
 }
 
 export interface HibernateDependencies {
@@ -338,7 +341,7 @@ async function recordParkFailure(
   return transition(current, operationId, 'failed-before-remove', target, undefined, receipt);
 }
 
-/** Manually park one reviewing packet after immutable Git and process proof. */
+/** Park a reviewing packet, or a proven settled completed owner, with exact Git and process proof. */
 export async function parkWorkspace(
   input: ParkWorkspaceInput,
   overrides: Partial<HibernateDependencies> = {},
@@ -354,8 +357,8 @@ export async function parkWorkspace(
       if (!repo) throw new Error('Registered repository UUID was not found.');
       const registeredRepo = repo;
       const lane = deps.findLaneByPacket(input.packetId);
-      if (!lane || lane.packetId !== input.packetId || lane.status !== 'reviewing') {
-        throw new Error('Only a reviewing packet lane can be parked.');
+      if (!lane || lane.packetId !== input.packetId || !['reviewing', 'completed'].includes(lane.status)) {
+        throw new Error('Only a reviewing or proven settled completed packet lane can be parked.');
       }
       if (lane.ownership !== 'managed' || !lane.worktreePath || !lane.sessionKey) {
         throw new Error('Parking requires a managed lane, exact worktree path, and owned session.');
@@ -365,6 +368,29 @@ export async function parkWorkspace(
         throw new Error('Lane repository or isolated worktree identity does not match the registry.');
       }
       const existing = getWorkspaceSnapshot(repo.id, input.packetId);
+      let pinnedSnapshot = existing;
+      const completed = lane.status === 'completed'
+        ? assertSettledCompletedWorkspace(lane, undefined, existing) : null;
+      const assertBoundaryCurrent = async () => {
+        await input.assertPolicyCurrent?.();
+        if (!completed) return;
+        const current = deps.findLaneByPacket(input.packetId);
+        if (!current || current.id !== lane.id || current.sessionKey !== lane.sessionKey
+          || current.branch !== lane.branch || current.worktreePath !== lane.worktreePath
+          || current.repoPath !== lane.repoPath) throw new Error('Completed workspace owner changed at the parking boundary.');
+        const currentSnapshot = getWorkspaceSnapshot(registeredRepo.id, input.packetId);
+        if (pinnedSnapshot && (!currentSnapshot || !sameWorkspaceSnapshot(currentSnapshot, pinnedSnapshot))) {
+          throw new Error('Completed workspace snapshot generation changed at the parking boundary.');
+        }
+        assertSettledCompletedWorkspace(current, completed, pinnedSnapshot);
+      };
+      const boundaryGuards = completed || input.assertPolicyCurrent ? {
+        beforeQuarantineRename: assertBoundaryCurrent,
+        beforeQuarantineClaim: assertBoundaryCurrent,
+        beforeQuarantinePurgeRename: assertBoundaryCurrent,
+        beforeClaimedPurge: assertBoundaryCurrent,
+        afterClaimedTreeCapture: assertBoundaryCurrent,
+      } : {};
       const currentPathExists = await pathExists(lane.worktreePath);
       if (existing?.state === 'parked' && !currentPathExists) {
         if (existing.laneId === lane.id
@@ -436,6 +462,10 @@ export async function parkWorkspace(
         lane.worktreePath,
       );
       let truth = await readImmutableWorkspaceTruth(repo, lane, existing?.snapshotGeneration ?? 1);
+      if (completed?.packet.releaseStatePayload?.headSha
+        && completed.packet.releaseStatePayload.headSha !== truth.headCommit) {
+        throw new Error('Completed workspace HEAD differs from its canonical release proof.');
+      }
       const beforeStorage = await deps.measureStorage(lane.worktreePath);
       const sessionIdentities = [
         {
@@ -469,6 +499,9 @@ export async function parkWorkspace(
         || existing.dependencyRecipeKey !== dependencyRecipeKey
         || JSON.stringify(existing.sessionIdentities) !== JSON.stringify(sessionIdentities)
       );
+      if (completed && existingDiffers) {
+        throw new Error('Completed workspace changed from its existing managed snapshot.');
+      }
       let snapshot: WorkspaceSnapshotRecord;
       if (!existing) {
         await ensureWorkspaceRecoveryRef(repo.localPath, lane.worktreePath, truth);
@@ -542,6 +575,7 @@ export async function parkWorkspace(
         }
         snapshot = generation.record;
       }
+      pinnedSnapshot = snapshot;
       const second = await deps.secondScan(lane.worktreePath, {
         allowedIgnoredPaths,
         allowedExternalSymlinks,
@@ -575,6 +609,7 @@ export async function parkWorkspace(
       let dependencyRemountRequired = false;
       let preparedFingerprint = second.fingerprint;
       try {
+        await assertBoundaryCurrent();
         await deps.parkExact({
           repoPath: repo.localPath,
           worktreeId,
@@ -583,6 +618,7 @@ export async function parkWorkspace(
           expectedHead: truth.headCommit,
           expectedSessionKey: lane.sessionKey,
           probeProcessQuiescence: deps.processProbe,
+          ...boundaryGuards,
           prepareQuarantineSource: async (workspacePath) => {
             const boundaryScan = await deps.secondScan(workspacePath, {
               allowedIgnoredPaths,
@@ -614,6 +650,7 @@ export async function parkWorkspace(
               }
               preparedFingerprint = detachedScan.fingerprint;
             }
+            await assertBoundaryCurrent();
           },
           quarantine: {
             snapshotFingerprint: snapshot.snapshotFingerprint,

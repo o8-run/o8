@@ -1,6 +1,7 @@
 /** Replay peer for the existing global and session wire schemas. */
 import type { Server } from 'node:http';
 import { WebSocketServer } from 'ws';
+import type { RealtimeMutationRecord } from '../../src/lib/realtime/types';
 
 export function attachSidebarSocket(server: Server, token: string, requests: string[]) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 });
@@ -29,6 +30,12 @@ export function attachSidebarSocket(server: Server, token: string, requests: str
     });
   });
   return {
+    completed: (mutation: RealtimeMutationRecord) => {
+      const frame = { channel: 'realtime', event: 'batch', data: { events: [{
+        stream: 'global', channel: 'mutation', event: 'mutation.settled', data: { mutation },
+      }] } };
+      for (const ws of wss.clients) ws.send(JSON.stringify(frame));
+    },
     changed: async (id: string) => {
       // Setup mutations run before the native window subscribes. Do not hold
       // their HTTP acknowledgements behind a 2,000-record broadcast to nobody.

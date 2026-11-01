@@ -189,3 +189,44 @@ after that work has been idle for N days. The same guards apply to that fallback
 Per-thread opt-out in the native app: row context menu → "Don't auto-settle" /
 "Allow auto-settle" (the B02 `auto-settle` preference). Opted-out rows show a small
 crossed mark with the tooltip "Auto-settle is off".
+
+## Parking a settled workspace
+
+Manual and automatic settlement start a separate, bounded post-commit parking
+step after the metadata and history locks are released. The response does not
+wait for process or filesystem checks. Parking failures leave settlement durable.
+The metadata mutation itself never changes a worker or its release receipt.
+
+The existing workspace parking mode keeps its meaning: `manual` (the default)
+requires an explicit workspace Park request. Settling is not that request.
+`pressure` can park a completed managed workspace only while a real durable
+`reserve_breached` admission hold remains current and a fresh measurement still
+shows pressure on the same volume. Repository opt-out is read fresh under the
+existing policy lock. This step never retries admission or dispatches a worker.
+
+Completed eligibility requires the exact canonical packet and lane binding,
+canonical completion evidence (including read-only completion), a still-settled
+subject, managed materialization, clean Git and storage scans, owned-session
+quiescence and protected recovery truth. A first park creates its snapshot through
+the existing parker. Existing snapshots must match exactly, including their generation, HEAD and session
+proof. The current canonical release HEAD is pinned across parking and Restore;
+read-only completion without a HEAD remains valid. These checks are
+repeated at the existing destructive boundaries; new work or Unsettle refuses
+parking. All automatic parking, including dispatch pressure remediation, requires completed
+and settled ownership. Reviewing behavior for existing explicit parking remains unchanged.
+
+Listings attach `parkedWorkspaces` only for proven current parked membership.
+Each entry contains `packetId`, `repositoryUuid` and `reclaimedAvailableBytes`
+from the current generation's actual parked transition. Zero is known zero;
+null means the actual freed space is unknown. Signed values preserve net loss
+of available space during the measurement interval. Snapshot and receipt reads are
+batched once per listing, without scanning checkout directories.
+
+Unsettle changes inbox metadata only. Explicit workspace Restore uses the saved
+matching snapshot and original session identity, including for a completed lane,
+and leaves the lane completed. If maintenance cleared an absent lane path, only
+the matching parked generation and canonical packet binding can establish Restore
+ownership. A non-null conflicting path refuses. Exact successful Restore republishes
+the original path after setup and verification, under the existing locks. A held
+restore remains parked. The native detailed row shows Parked and the measured
+space; its Restore workspace menu action is separate from thread unarchive.

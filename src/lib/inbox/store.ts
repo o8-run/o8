@@ -7,6 +7,7 @@
  * separate from transcripts; shared WS/API activity and native read projection.
  */
 import type Database from 'better-sqlite3';
+import type { ParkedInboxWorkspace } from './parked-workspaces';
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getSqlite } from '@/lib/db';
@@ -162,6 +163,7 @@ export function mutateInboxPreferences(subject: InboxSubject, command: InboxPref
 }
 type InboxProjection = InboxSettlement & InboxPreferences & { autoSettledReason: AutoSettleReason | null; inboxSubject: InboxSubject; parentInboxSubject: InboxSubject | null };
 export interface InboxListingProjection extends InboxPreferences {
+  parkedWorkspaces?: ParkedInboxWorkspace[];
   inboxSubject: InboxSubject;
   parentInboxSubject?: InboxSubject;
   settledOverride?: NonNullable<InboxSettlement['settledOverride']>;

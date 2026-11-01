@@ -11,7 +11,9 @@ import { persistCanonicalChatHistoryRecord, readPersistedLlmChat, withCanonicalC
 import { matchesMutationWorkspace, mutationWorkspace } from '@/lib/repos/mutation-workspace';
 import { assertInboxCanSettle, inboxSettleInventoryKeys, InboxMutationError, runtimeInboxIdentity, observeAgentInboxRun } from './subjects';
 import { isInboxPreferenceAction, legacyInboxPin, validInboxOrderKey, type InboxPreferenceCommand } from './preferences';
-import { inboxProjection, inboxSubject, mutateInboxPreferences, mutateInboxSettlement } from './store';
+import { inboxProjection, inboxSubject, mutateInboxPreferences, mutateInboxSettlement, readInboxState } from './store';
+import { startSettledWorkspaceParking } from './workspace-parking';
+import type { InboxSubject } from './settlement-state';
 
 export async function patchInboxSettlement(request: NextRequest, body: Record<string, unknown>) {
   const action = body.inboxAction;
@@ -40,6 +42,7 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
       if (!matchesMutationWorkspace(workspace, identity.inboxSubject.workspace)) throw new InboxMutationError('Subject was not found.', 404);
       if (identity.parentInboxSubject) throw new InboxMutationError('Worker is a child of a conversation. Organize its parent conversation.', 409);
       const activity = await observeAgentInboxRun(agent, identity.inboxSubject, true);
+      const beforeSettlement = readInboxState(identity.inboxSubject);
       if (preference) {
         mutateInboxPreferences(identity.inboxSubject, { action, orderKey: body.orderKey, enabled: body.enabled } as InboxPreferenceCommand, state => {
           assertPreferenceRevision(state, body);
@@ -55,6 +58,9 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
         }
         if (action === 'settle') assertInboxCanSettle(identity.inboxSubject, inventory.agents, activity);
       });
+      if (action === 'settle' && readInboxState(identity.inboxSubject).settledAt !== beforeSettlement.settledAt) {
+        startSettledWorkspaceParking(identity.inboxSubject);
+      }
       return NextResponse.json({ ok: true, ...inboxProjection(identity.inboxSubject) });
     }
     const tabId = body.tabId as string;
@@ -65,11 +71,13 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
     const needsInventory = action === 'settle' && (!preflight
       || inboxSettleInventoryKeys(inboxSubject('conversation', tabId, preflight.repoPath, preflight.projectId)).length > 0);
     const inventory = needsInventory ? await getRuntimeInventorySnapshot({ fresh: true }) : { agents: [] };
-    return withCanonicalChatHistoryLock(tabId, () => {
+    let settledSubject: InboxSubject | undefined;
+    const response = await withCanonicalChatHistoryLock(tabId, () => {
       const saved = readPersistedLlmChat(tabId);
       const record = saved?.history as (NonNullable<typeof saved>['history'] & { projectId?: string; pinned?: boolean; archivedAt?: string | null }) | undefined;
       if (!record || !matchesMutationWorkspace(workspace, record.repoPath)) throw new InboxMutationError('History was not found.', 404);
       const subject = inboxSubject('conversation', tabId, record.repoPath, record.projectId);
+      const beforeSettlement = readInboxState(subject);
       if (preference) {
         mutateInboxPreferences(subject, { action, orderKey: body.orderKey, enabled: body.enabled } as InboxPreferenceCommand, state => {
           assertPreferenceRevision(state, body);
@@ -88,8 +96,11 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
           if (record.pinned) persistCanonicalChatHistoryRecord(tabId, { ...record, pinned: false });
         }
       }, record.pinned === true);
+      if (action === 'settle' && readInboxState(subject).settledAt !== beforeSettlement.settledAt) settledSubject = subject;
       return NextResponse.json({ ok: true, ...inboxProjection(subject, null, undefined, legacyInboxPin(record)) });
     });
+    if (settledSubject) startSettledWorkspaceParking(settledSubject);
+    return response;
   } catch (error) {
     if (error instanceof InboxMutationError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error('[inbox] Mutation failed', error);

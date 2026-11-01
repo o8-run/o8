@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Lane } from '@/lib/lane/types';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type {
   OwnedRuntimeAdapter,
@@ -39,6 +40,13 @@ const {
   transitionWorkspaceSnapshot,
 } = await import('@/lib/worktree/snapshot-state');
 const { closeDb } = await import('@/lib/db');
+const { inboxSubject, mutateInboxSettlement } = await import('@/lib/inbox/store');
+const { persistCanonicalChatHistoryRecord } = await import('@/lib/llm/chat-history-store');
+const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { markPacketReleased } = await import('@/lib/orchestrator/packet-release-truth');
+const { createLane, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
+const { waitForTerminalLaneWork } = await import('@/lib/lane/terminal-work');
 const {
   managedWorkspaceSafetyHooksContent,
   resolveManagedWorkspaceSafetyHookRuntime,
@@ -254,11 +262,60 @@ function dependencies(f: ReturnType<typeof fixture>, processState: 'quiescent' |
   };
 }
 
+function completedFixture(label: string) {
+  const f = fixture(label);
+  const lane = createLane({ repoPath: f.repo.localPath, worktreePath: f.lane.worktreePath!,
+    branch: f.lane.branch, baseBranch: f.lane.baseBranch, runtime: 'codex', sessionKey: f.surfaceId,
+    packetId: f.lane.packetId!, ownership: 'managed', baseCommit: git(f.repo.localPath, 'rev-parse', 'main') });
+  Object.assign(f.lane, lane, { status: 'reviewing' });
+  setLaneStatus(f.lane.id, 'reviewing');
+  return f;
+}
+
+function settleCompletedPacket(f: ReturnType<typeof fixture>, readOnly = false) {
+  const tabId = `thoughts-completed-park-${sequence}`;
+  persistCanonicalChatHistoryRecord(tabId, { repoPath: f.repo.localPath, messages: [
+    { id: 'completed-answer', role: 'assistant', content: 'Work is merged.', timestamp: 100 },
+  ] });
+  const packet: OrchestratorPacket = {
+    id: f.lane.packetId!, referenceLabel: 'P1', title: 'Completed workspace', summary: '',
+    workspaceTargetPath: f.repo.localPath, branchTarget: f.lane.branch, runtime: 'codex',
+    dependencyLabels: [], dependencyPacketIds: [], queueState: 'held', releaseState: 'pending',
+    status: 'awaiting_review', blockedReason: null, review: null, attemptCount: 1,
+    orchestratorThreadId: tabId,
+    lane: { tileId: 'fixture', tabId: f.surfaceId, repoPath: f.repo.localPath,
+      worktreePath: f.lane.worktreePath, runtime: 'codex', sessionKey: f.surfaceId, laneId: f.lane.id },
+  };
+  markPacketReleased(packet, { source: readOnly ? 'read_only_completed' : 'approve_and_merge',
+    headSha: readOnly ? null : git(f.lane.worktreePath!, 'rev-parse', 'HEAD'),
+    mergeCommit: readOnly ? null : git(f.lane.worktreePath!, 'rev-parse', 'HEAD') });
+  writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(),
+    missionId: `completed-park-${sequence}`, repoPath: f.repo.localPath, packets: [packet] });
+  const subject = inboxSubject('conversation', tabId, f.repo.localPath);
+  mutateInboxSettlement(subject, 'settle', () => {});
+  setLaneStatus(f.lane.id, 'completed');
+  f.lane.status = 'completed';
+  return subject;
+}
+
+async function materializedSnapshot(f: ReturnType<typeof fixture>) {
+  expect(getLane(f.lane.id)).toMatchObject({ status: 'reviewing', worktreePath: f.lane.worktreePath, sessionKey: f.surfaceId });
+  const parked = await parkWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+    operationId: 'completed-snapshot-prepare-park' }, dependencies(f));
+  expect(parked, JSON.stringify(parked)).toMatchObject({ status: 'parked' });
+  expect(getLane(f.lane.id)).toMatchObject({ status: 'reviewing', worktreePath: f.lane.worktreePath, sessionKey: f.surfaceId });
+  const restored = await restoreWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+    operationId: 'completed-snapshot-prepare-restore' }, dependencies(f));
+  expect(restored, JSON.stringify(restored)).toMatchObject({ status: 'restored' });
+}
+
 beforeEach(() => {
   priorWorktreeRoot = process.env.O8_WORKTREE_ROOT;
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Finish owned terminal callbacks before changing their root environment or removing fixtures.
+  await waitForTerminalLaneWork();
   if (priorWorktreeRoot === undefined) delete process.env.O8_WORKTREE_ROOT;
   else process.env.O8_WORKTREE_ROOT = priorWorktreeRoot;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -270,6 +327,140 @@ afterAll(() => {
 });
 
 describe('workspace hibernate and restore services', { timeout: 60_000 }, () => {
+  it.each([false, true])('parks a settled completed packet (previous snapshot %s) and explicitly restores after Unsettle', async previousSnapshot => {
+    const f = completedFixture(`settled-completed-roundtrip-${previousSnapshot}`);
+    if (previousSnapshot) await materializedSnapshot(f);
+    const subject = settleCompletedPacket(f);
+    const before = getWorkspaceSnapshot(f.repo.id, f.lane.packetId!);
+    if (!previousSnapshot) expect(before).toBeNull();
+    const head = git(f.lane.worktreePath!, 'rev-parse', 'HEAD');
+    const parked = await parkWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+      operationId: 'settled-completed-park' }, dependencies(f));
+    expect(parked, JSON.stringify(parked)).toMatchObject({ status: 'parked', snapshot: {
+      laneId: f.lane.id, snapshotGeneration: before?.snapshotGeneration ?? 1, headCommit: head,
+    } });
+    const protectedSnapshot = getWorkspaceSnapshot(f.repo.id, f.lane.packetId!)!;
+    expect(git(f.repo.localPath, 'rev-parse', protectedSnapshot.recoveryRef)).toBe(head);
+    expect(existsSync(f.lane.worktreePath!)).toBe(false);
+    expect(f.lane.status).toBe('completed');
+    mutateInboxSettlement(subject, 'unsettle', () => {});
+    expect(existsSync(f.lane.worktreePath!)).toBe(false);
+    expect(getWorkspaceSnapshot(f.repo.id, f.lane.packetId!)?.state).toBe('parked');
+    const restored = await restoreWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+      operationId: 'settled-completed-explicit-restore' }, dependencies(f));
+    expect(restored, JSON.stringify(restored)).toMatchObject({ status: 'restored' });
+    expect(git(f.lane.worktreePath!, 'rev-parse', 'HEAD')).toBe(head);
+    expect(f.lane.status).toBe('completed');
+  });
+
+  it('parks a canonically completed read-only packet without requiring a merge', async () => {
+    const f = completedFixture('settled-completed-read-only');
+    settleCompletedPacket(f, true);
+    const result = await parkWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+      operationId: 'settled-read-only-park' }, dependencies(f));
+    expect(result, JSON.stringify(result)).toMatchObject({ status: 'parked' });
+    expect(f.lane.status).toBe('completed');
+    expect(existsSync(f.lane.worktreePath!)).toBe(false);
+  });
+
+  it('restores the exact completed parked generation after maintenance clears its lane path', async () => {
+    const f = completedFixture('completed-null-path-restore');
+    const originalPath = f.lane.worktreePath!;
+    const subject = settleCompletedPacket(f);
+    const parked = await parkWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+      operationId: 'completed-null-path-park' }, dependencies(f));
+    expect(parked, JSON.stringify(parked)).toMatchObject({ status: 'parked' });
+    const saved = getWorkspaceSnapshot(f.repo.id, f.lane.packetId!)!;
+    updateLane(f.lane.id, { worktreePath: null }, 'system', { phase: 'bounded_maintenance', worktreeRemoved: true });
+    f.lane.worktreePath = null;
+    mutateInboxSettlement(subject, 'unsettle', () => {});
+    const restored = await restoreWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+      operationId: 'completed-null-path-restore' }, dependencies(f));
+    expect(restored, JSON.stringify(restored)).toMatchObject({ status: 'restored' });
+    expect(git(originalPath, 'rev-parse', 'HEAD')).toBe(saved.headCommit);
+    expect(f.getBinding().binding.cwd).toBe(originalPath);
+    expect(getLane(f.lane.id)).toMatchObject({ status: 'completed', worktreePath: originalPath, sessionKey: f.surfaceId });
+  });
+
+  it('refuses the first completed park if current release HEAD changes at its final boundary', async () => {
+    const f = completedFixture('completed-head-race');
+    settleCompletedPacket(f);
+    expect(getWorkspaceSnapshot(f.repo.id, f.lane.packetId!)).toBeNull();
+    let scans = 0;
+    const result = await parkWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+      operationId: 'completed-head-race' }, { ...dependencies(f), secondScan: async (...args) => {
+        const scan = await scanWorkspaceStorageState(...args);
+        if (++scans === 2) {
+          const state = readOrchestratorControlPlaneState({ strict: true });
+          const packet = state.packets.find(candidate => candidate.id === f.lane.packetId)!;
+          markPacketReleased(packet, { source: 'approve_and_merge', headSha: 'd'.repeat(40), mergeCommit: packet.releaseStatePayload!.mergeCommit });
+          writeOrchestratorControlPlaneState(state);
+        }
+        return scan;
+      } });
+    expect(scans).toBeGreaterThanOrEqual(2);
+    expect(result, JSON.stringify(result)).toMatchObject({ status: 'refused' });
+    expect(existsSync(f.lane.worktreePath!)).toBe(true);
+  });
+
+  it('refuses completed Restore when current canonical release HEAD differs from its parked snapshot', async () => {
+    const f = completedFixture('completed-stale-head-restore');
+    settleCompletedPacket(f);
+    const parked = await parkWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+      operationId: 'completed-stale-head-park' }, dependencies(f));
+    expect(parked, JSON.stringify(parked)).toMatchObject({ status: 'parked' });
+    const state = readOrchestratorControlPlaneState({ strict: true });
+    const packet = state.packets.find(candidate => candidate.id === f.lane.packetId)!;
+    markPacketReleased(packet, { source: 'approve_and_merge', headSha: 'd'.repeat(40), mergeCommit: packet.releaseStatePayload!.mergeCommit });
+    writeOrchestratorControlPlaneState(state);
+    const restored = await restoreWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+      operationId: 'completed-stale-head-restore' }, dependencies(f));
+    expect(restored, JSON.stringify(restored)).toMatchObject({ status: 'refused' });
+    expect(existsSync(f.lane.worktreePath!)).toBe(false);
+    expect(getWorkspaceSnapshot(f.repo.id, f.lane.packetId!)?.state).toBe('parked');
+  });
+
+  it.each(['unmanaged', 'active-subject', 'wrong-lane', 'dirty', 'live', 'unknown-process'] as const)(
+    'refuses settled-completed parking for %s without touching its checkout', async refusal => {
+      const f = completedFixture(`settled-completed-${refusal}`);
+      await materializedSnapshot(f);
+      const subject = settleCompletedPacket(f);
+      if (refusal === 'unmanaged') f.lane.ownership = 'attached';
+      if (refusal === 'active-subject') mutateInboxSettlement(subject, 'unsettle', () => {});
+      if (refusal === 'wrong-lane') f.lane.id += '-replacement';
+      if (refusal === 'dirty') writeFileSync(path.join(f.lane.worktreePath!, 'tracked.txt'), 'unsaved work\n');
+      const result = await parkWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+        operationId: `settled-completed-refuse-${refusal}` }, dependencies(f,
+        refusal === 'live' ? 'live' : refusal === 'unknown-process' ? 'unknown' : 'quiescent'));
+      expect(result).toMatchObject({ status: 'refused' });
+      expect(existsSync(f.lane.worktreePath!)).toBe(true);
+      expect(f.lane.status).toBe('completed');
+    },
+  );
+
+  it.each(['unsettle', 'new-work'] as const)('rechecks completed ownership at the final park boundary after %s', async action => {
+    const f = completedFixture(`settled-completed-${action}-race`);
+    await materializedSnapshot(f);
+    const subject = settleCompletedPacket(f);
+    let scans = 0;
+    const result = await parkWorkspace({ repositoryUuid: f.repo.id, packetId: f.lane.packetId!,
+      operationId: `settled-completed-${action}-race` }, {
+      ...dependencies(f),
+      secondScan: async (...args) => {
+        const scan = await scanWorkspaceStorageState(...args);
+        if (++scans === 2) {
+          if (action === 'unsettle') mutateInboxSettlement(subject, 'unsettle', () => {});
+          else { setLaneStatus(f.lane.id, 'running'); f.lane.status = 'running'; }
+        }
+        return scan;
+      },
+    });
+    expect(scans, 'the race must reach the existing final boundary').toBeGreaterThanOrEqual(2);
+    expect(result).toMatchObject({ status: 'refused' });
+    expect(existsSync(f.lane.worktreePath!)).toBe(true);
+    expect(f.lane.status).toBe(action === 'new-work' ? 'running' : 'completed');
+  });
+
   it('parks and restores an unchanged copied environment binding', async () => {
     const f = fixture('copy-env-roundtrip');
     const contents = 'TOKEN=registered-source\n';
