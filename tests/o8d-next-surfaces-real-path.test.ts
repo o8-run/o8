@@ -7,6 +7,61 @@ import { startParityReference } from './fixtures/ws-parity-server';
 import { cutoverClient } from './fixtures/ws-cutover-client';
 
 const binary = process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
+// Native paths that still need Next (#5243). Remove a path when it is registered.
+const NEXT_ONLY_NATIVE_PATHS = new Set([
+  '/api/cortex/codebase-memory',
+  '/api/cortex/cross-repo-proposals',
+  '/api/cortex/diagnostics',
+  '/api/cortex/proposals',
+  '/api/cortex/reingest',
+  '/api/mobile/media',
+  '/api/next/voice-host',
+  '/api/orchestrator/archive',
+  '/api/orchestrator/backend-models',
+  '/api/orchestrator/compact',
+  '/api/orchestrator/comparison-diff',
+  '/api/orchestrator/comparison-pick',
+  '/api/orchestrator/delegate',
+  '/api/orchestrator/discard-packet',
+  '/api/orchestrator/handoff',
+  '/api/orchestrator/pull-request-context',
+  '/api/orchestrator/reset-session',
+  '/api/orchestrator/session-rules',
+  '/api/orchestrator/status',
+  '/api/orchestrator/steer-packet',
+  '/api/panel/branches',
+  '/api/panel/browse-folder',
+  '/api/panel/commits/[id]',
+  '/api/panel/devices',
+  '/api/panel/file-asset',
+  '/api/panel/file-diff',
+  '/api/panel/file-io',
+  '/api/panel/files',
+  '/api/panel/o8-update-summary',
+  '/api/panel/problem-dossiers',
+  '/api/panel/prs/[id]/timeline',
+  '/api/panel/resource-usage',
+  '/api/panel/serve-image',
+  '/api/panel/status',
+  '/api/panel/update/apply',
+  '/api/repo-spec',
+  '/api/repo-spec/asset',
+  '/api/review/workspace',
+  '/api/runtime/capabilities',
+  '/api/runtime/capacity',
+  '/api/runtime/service-tiers',
+  '/api/runtime/telemetry',
+  '/api/setup/cli-updates',
+  '/api/setup/identity',
+  '/api/tasks',
+  '/api/tasks/[id]/preview',
+  '/api/tts',
+  '/api/v2/files',
+  '/api/v2/files/quick-docs',
+  '/api/visualizations',
+  '/api/visualizations/[id]',
+  '/api/worktrees/retention-usage',
+]);
 let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;
 beforeAll(async () => {
@@ -99,6 +154,7 @@ it('walks every production surface registration and its HTTP routes', async () =
   const files = readdirSync('native/o8-next/src', { recursive: true }).map(String)
     .filter(file => file.endsWith('.rs') && !file.includes('test') && !file.endsWith('fake.rs'));
   const paths = new Set(Object.values(nativeSurfaceRoutes).flat().map(route => route.path));
+  for (const path of NEXT_ONLY_NATIVE_PATHS) expect(paths.has(path), `${path} is registered`).toBe(false);
   for (const file of files) {
     const source = readFileSync(join('native/o8-next/src', file), 'utf8');
     for (const match of source.matchAll(/"(\/api\/[^"\s]+)"/g)) {
@@ -110,6 +166,7 @@ it('walks every production surface registration and its HTTP routes', async () =
       }
       const path = match[1].split('?')[0].replace(/\{[^}]*\}/g, '[id]');
       if (path.endsWith('/')) continue; // Prefix used for error policy or route construction.
+      if (NEXT_ONLY_NATIVE_PATHS.has(path)) continue;
       const normalized = (value: string) => value.replace(/\[\w+\]/g, '[]');
       expect([...paths].some(known => normalized(known) === normalized(path)), `${file}: ${path}`).toBe(true);
     }
