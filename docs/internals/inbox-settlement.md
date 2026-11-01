@@ -170,4 +170,14 @@ awaiting_* lanes), or activity/unsettle newer than the evidence. Writes go throu
 `mutateInboxAutoSettle` and record `autoSettledReason`/`autoSettledAt`; the reason
 is projected only while `settledAt === autoSettledAt`, so a manual settle shows no
 note. Undo is the ordinary unsettle (`settledOverride='active'`), which sticks.
-The native sidebar toasts newly auto-settled rows with Undo / Mod+Z.
+The native sidebar toasts newly auto-settled rows with Undo / Mod+Z (12s toast;
+Mod+Z works whenever focus is in the sidebar or nothing is focused).
+
+Idle settle: `[inbox] auto_settle_idle_days` (default 3, 0 = off; Settings → General →
+"Auto-settle after idle days") settles a thread with a linked PR or worker after N
+days without activity (`idle`, note "idle 3d"). Bare threads are never idle-settled,
+and every guard above still applies.
+
+Per-thread opt-out in the native app: row context menu → "Don't auto-settle" /
+"Allow auto-settle" (the B02 `auto-settle` preference). Opted-out rows show a small
+crossed mark with the tooltip "Auto-settle is off".
