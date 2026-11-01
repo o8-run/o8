@@ -21,6 +21,34 @@ fn render(
     window: &mut Window,
     cx: &mut Context<Shell>,
 ) -> Option<AnyElement> {
+    // Settings takes over the window: only the rail stays, as in classic.
+    if let Some(view) = s.surfaces.settings.view.clone() {
+        // The panel's native pages draw above the window, so they still get covered.
+        let _ = super::right_panel::element(s, window, cx);
+        return Some(
+            div()
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .pt(px(EDGE_INSET))
+                .pr(px(EDGE_INSET))
+                .pb(px(EDGE_INSET))
+                .child(
+                    div()
+                        .flex()
+                        .flex_1()
+                        .min_h_0()
+                        .min_w_0()
+                        .rounded(px(FRAME_RADIUS))
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(crate::theme::current().border)
+                        .child(view),
+                )
+                .into_any_element(),
+        );
+    }
     let active = s.active();
     let content = registrations()
         .iter()

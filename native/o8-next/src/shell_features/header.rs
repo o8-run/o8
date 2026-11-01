@@ -24,6 +24,10 @@ fn render(
     // at the sidebar's right edge and back/forward start the workspace header;
     // with it closed, toggle, search, back and forward share one row.
     super::right_panel::sync(s, window, cx);
+    // Settings is its own page with its own header, as in classic.
+    if s.surfaces.settings.view.is_some() {
+        return None;
+    }
     record_visit(s);
     super::header_tabs::settle(s, cx);
     let back = adjacent(s, -1);

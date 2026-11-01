@@ -3,6 +3,9 @@ use super::*;
 use crate::{settings_fields::SECTIONS, theme::current as theme};
 use gpui::{Div, Render, canvas, div, prelude::*, px};
 
+/// The page reads as one column on a wide window, not two far-apart edges.
+const PAGE_WIDTH: f32 = 1040.;
+
 impl Render for Settings {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.open_file && !self.busy {
@@ -38,7 +41,7 @@ impl Render for Settings {
         let painted = self.painted.clone();
         let close = self.button(
             "settings-close".into(),
-            "Close settings (Esc)".into(),
+            "Back to app".into(),
             !self.busy,
             false,
             window,
@@ -277,15 +280,13 @@ impl Render for Settings {
                 child_index += 1;
             }
         }
-        let history = self.history_view(window, cx);
+        let history = self.history_view(cx);
         div()
             .id("settings-page")
             .debug_selector(|| "settings-page".into())
             .size_full()
             .flex()
             .flex_col()
-            .p(px(24.))
-            .gap(px(16.))
             .bg(theme().background)
             .text_color(theme().text)
             .font_family(theme().font_ui)
@@ -294,12 +295,18 @@ impl Render for Settings {
             .track_focus(&self.focus)
             .tab_stop(false)
             .capture_key_down(cx.listener(Self::key))
+            // Classic's takeover header: the bare strip moves the window.
             .child(
                 div()
+                    .h(px(crate::theme::GEOMETRY.header))
+                    .flex_shrink_0()
                     .flex()
-                    .flex_wrap()
-                    .gap(px(8.))
                     .items_center()
+                    .gap(px(8.))
+                    .px(px(10.))
+                    .text_size(px(12.))
+                    .window_control_area(gpui::WindowControlArea::Drag)
+                    .child(history)
                     // Status sits beside the title: a line above the list
                     // pushed every row down mid-click, so a second click on a
                     // switch landed in the gap.
@@ -324,17 +331,16 @@ impl Render for Settings {
                                 )
                             }),
                     )
-                    .child(file)
                     .child(
                         div()
                             .text_size(px(11.))
                             .text_color(theme().text_muted)
                             .child(additional),
                     )
+                    .child(file)
                     .child(refresh)
                     .child(close),
             )
-            .child(history)
             .child(
                 div()
                     .id("settings-search")
@@ -343,7 +349,12 @@ impl Render for Settings {
                     .items_center()
                     .gap(px(8.))
                     .w_full()
+                    .max_w(px(PAGE_WIDTH))
+                    .mx_auto()
                     .min_w_0()
+                    .px(px(24.))
+                    .pt(px(12.))
+                    .pb(px(16.))
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(|this, _, window, cx| this.search.read(cx).focus.focus(window)),
@@ -377,7 +388,17 @@ impl Render for Settings {
                 )
             })
             .child(
-                div().flex().flex_1().min_h_0().child(navigation).child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .max_w(px(PAGE_WIDTH))
+                    .mx_auto()
+                    .px(px(24.))
+                    .pb(px(16.))
+                    .child(navigation)
+                    .child(
                     div()
                         .id("settings-scroll")
                         .debug_selector(|| "settings-scroll".into())
