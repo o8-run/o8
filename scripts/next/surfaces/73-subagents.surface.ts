@@ -85,8 +85,8 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
     { id: 'subagent-ask', role: 'user', content: 'Inspect these tasks.', timestamp: started - 2_000 },
     { id: 'subagent-trace', role: 'assistant', content: '', timestamp: started, toolCalls: [
       { id: 'existing-read', name: 'exec_command', args: { command: 'cat preserved.rs' }, status: 'done', result: 'Preserved trace output' },
-      ...tasks.slice(0, 3).map(([id, title]) => ({ id: `launch-${id}`, name: 'dispatch_mission',
-        args: { tasks: [{ title }] }, status: 'done',
+      ...tasks.slice(0, 3).map(([id, title]) => ({ id: `launch-${id}`, name: 'create_mission',
+        args: { issues_inline: [{ title }] }, status: 'done',
         result: JSON.stringify({ packets: [{ id: `subagent-${id}`, title }] }) })),
       ...(process.argv.includes('--subagents-shared') ? [{ id: 'launch-shared', name: 'cortex_launch_agent',
         args: { taskName: 'Shared verification' }, status: 'done', result: JSON.stringify({ ok: true, surfaceId: 'opencode-owned:subagent-shared' }) }] : []),

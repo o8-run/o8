@@ -6,6 +6,16 @@ struct Inspectors {
     workspace: std::collections::HashMap<String, Entity<Inspector>>,
     current: Option<Entity<Inspector>>,
     anchor: Option<(Option<String>, Option<Tab>, Option<gpui::EntityId>)>,
+    return_panel: Option<ReturnPanel>,
+}
+struct ReturnPanel {
+    workspace: Option<String>,
+    selected: Tool,
+    active: usize,
+    tabs: Vec<Tool>,
+    lower: Option<Tool>,
+    lower_tabs: Vec<Tool>,
+    maximized: bool,
 }
 pub(super) fn watch(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     let owner = cx.weak_entity();
@@ -52,7 +62,7 @@ pub(super) fn watch(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>)
                             cx.defer(move |cx| {
                                 let _ = handle.update(cx, |_, w, cx| {
                                     let _ = owner.update(cx, |s, cx| {
-                                        if is_open(s) {
+                                        if !restore_panel(s, cx) && is_open(s) {
                                             toggle(s, w, cx);
                                         }
                                         if let Some(focus) = restore {
@@ -100,10 +110,47 @@ pub(super) fn current(s: &mut Shell, cx: &mut Context<Shell>) -> Option<Entity<I
     Some(view)
 }
 pub(super) fn prepare(s: &mut Shell, cx: &mut Context<Shell>) {
+    let panel = s.features.get::<Panel>();
+    if panel.selected != Tool::Subagents || !panel.motion.is_open() {
+        let return_panel = panel.motion.is_open().then(|| ReturnPanel {
+            workspace: s.state.selected.clone(),
+            selected: panel.selected,
+            active: panel.active,
+            tabs: panel.tabs.clone(),
+            lower: panel.lower,
+            lower_tabs: panel.lower_tabs.clone(),
+            maximized: panel.maximized,
+        });
+        s.features.get::<Inspectors>().return_panel = return_panel;
+    }
     if s.features.get::<Inspectors>().current.is_none() {
         let view = current(s, cx);
         s.features.get::<Inspectors>().current = view;
     }
+}
+fn restore_panel(s: &mut Shell, cx: &mut Context<Shell>) -> bool {
+    let Some(saved) = s.features.get::<Inspectors>().return_panel.take() else {
+        return false;
+    };
+    if saved.workspace != s.state.selected {
+        return false;
+    }
+    let panel = s.features.get::<Panel>();
+    panel.selected = saved.selected;
+    panel.active = saved.active;
+    panel.tabs = saved.tabs;
+    panel.lower = saved.lower;
+    panel.lower_tabs = saved.lower_tabs;
+    panel.maximized = saved.maximized;
+    panel.into_lower = false;
+    panel.menu = None;
+    panel.motion.set(true);
+    panel.morph.set(true);
+    panel.content = Transition::settled(200, true);
+    s.state.right_panel.visible = true;
+    layout::save(s);
+    cx.notify();
+    true
 }
 pub(super) fn focus(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
     if let Some(view) = s.features.get::<Inspectors>().current.clone() {

@@ -15,7 +15,8 @@ Review, blocked, failed, queued, idle and held-result states remain explicit.
 Search filters names, runtimes and statuses. Selecting a row opens its recorded
 runtime, model, effort, progress and transcript. Back preserves the index scroll;
 close returns to the parent. The parent conversation, draft and scroll remain in
-place. At compact widths the inspector uses the panel's full-width mode.
+place. Closing restores an existing panel's tools and split layout before returning
+focus to its parent. At compact widths the inspector uses the panel's full-width mode.
 
 Details reuse the native transcript merger, retained renderer and bounded image
 loader. Live history uses the existing session subscription. Earlier messages
@@ -47,6 +48,7 @@ the disposable `--subagents` host and production persisted mission, Shared-team,
 history and media routes. It covers named trace links, preserved parent drafts
 and original steps, grouped counts, copy, search, refresh recovery, earlier-history
 retry, image loading, grid parent changes, compact fit and held Shared results.
+The side-chat path also checks restoration of its split companion and composer focus.
 
 The initial native regressions fail on the absent `header-subagents` and
 `subagent-trace-subagent-calculation` controls. Final green receipts and live
