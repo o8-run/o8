@@ -6,6 +6,13 @@ describe('decideAutoTitle', () => {
     expect(decideAutoTitle({ title: undefined, messageCount: 2 })).toEqual({ run: true, reason: 'first' });
   });
 
+  it('titles a thread created with a client placeholder title', () => {
+    expect(decideAutoTitle({ title: 'New conversation', messageCount: 2 })).toEqual({ run: true, reason: 'first' });
+    expect(decideAutoTitle({ title: 'Untitled conversation', messageCount: 2 }).run).toBe(true);
+    // An operator who names a thread "New conversation" keeps it.
+    expect(decideAutoTitle({ title: 'New conversation', titleSource: 'operator', messageCount: 2 }).run).toBe(false);
+  });
+
   it('waits for a real exchange', () => {
     expect(decideAutoTitle({ title: undefined, messageCount: 1 }).run).toBe(false);
   });

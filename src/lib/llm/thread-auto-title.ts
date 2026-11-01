@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'fs';
 import { randomUUID } from 'node:crypto';
-import { persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
+import { persistCanonicalChatHistoryRecord, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { logUsage } from '@/lib/db/usage';
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
@@ -65,6 +65,8 @@ interface AutoTitleDecision {
   reason?: 'first' | 'refresh' | 'legacy-upgrade';
 }
 
+const PLACEHOLDER_TITLES = new Set(['new conversation', 'untitled conversation']);
+
 /** Pure decision logic — exported for the real-path test. */
 export function decideAutoTitle(record: {
   title?: unknown;
@@ -78,7 +80,11 @@ export function decideAutoTitle(record: {
   const titledAt = typeof record.autoTitledAtCount === 'number' ? record.autoTitledAtCount : 0;
   const isAuto = record.titleSource === 'code' || record.titleSource === 'llm';
 
-  if (!title) return { run: true, reason: 'first' };
+  // Clients create threads as "New conversation" before anything is said
+  // (o8 next, mobile); that placeholder is no title.
+  if (!title || (!record.titleSource && PLACEHOLDER_TITLES.has(title.toLowerCase()))) {
+    return { run: true, reason: 'first' };
+  }
   // Legacy raw-crop first-message titles (pre-titler threads) upgrade once.
   if (!record.titleSource && title.length > LEGACY_RAW_TITLE_LENGTH) {
     return { run: true, reason: 'legacy-upgrade' };
@@ -234,15 +240,21 @@ export function maybeQueueThreadAutoTitle(filePath: string): void {
       // code crop — only fill code titles into blank/legacy slots once.
       if (!generated && decision.reason === 'refresh') return;
 
-      const fresh = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
-      if (fresh.titleSource === 'operator') return;
-      fresh.title = nextTitle;
-      fresh.titleSource = generated ? 'llm' : 'code';
-      fresh.autoTitledAtCount = messages.length;
-      persistCanonicalChatHistoryRecord(
-        tabId,
-        fresh as { messages: unknown[]; [key: string]: unknown },
-      );
+      // The server's turn writer and the Next routes save this file from
+      // separate processes; re-read and write under the shared file lock.
+      const titled = withCanonicalChatHistoryLock(tabId, () => {
+        const fresh = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+        if (fresh.titleSource === 'operator') return false;
+        fresh.title = nextTitle;
+        fresh.titleSource = generated ? 'llm' : 'code';
+        fresh.autoTitledAtCount = messages.length;
+        persistCanonicalChatHistoryRecord(
+          tabId,
+          fresh as { messages: unknown[]; [key: string]: unknown },
+        );
+        return true;
+      });
+      if (!titled) return;
       console.log(`[thread-auto-title] ${decision.reason}: "${nextTitle}" (${generated ? 'llm' : 'code'})`);
     } catch {
       // best-effort — never break the persist path
