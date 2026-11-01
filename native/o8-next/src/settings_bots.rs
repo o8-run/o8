@@ -26,7 +26,9 @@ impl Settings {
             .and_then(|s| s.values.get("botRailEnabledIds"))
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
-        let field = FIELDS.iter().find(|f| f.id == "botRailEnabledIds").unwrap();
+        let field = crate::settings_fields::fields()
+            .find(|f| f.id == "botRailEnabledIds")
+            .unwrap();
         if candidates.is_empty() && !self.busy {
             rows.push(
                 div()
