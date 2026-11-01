@@ -302,6 +302,9 @@ impl PullRequests {
                         }
                     }
                     Ok(_) => s.error = "Pull requests could not be loaded. Try again.".into(),
+                    Err(error) if !s.rows.is_empty() && crate::client::transient(&error) => {
+                        s.error = crate::client::stale_notice(&error)
+                    }
                     Err(error) => s.error = error,
                 }
                 // Without a list, still show the requested pull request by its

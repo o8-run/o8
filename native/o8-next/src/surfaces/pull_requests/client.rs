@@ -6,8 +6,11 @@ impl Client {
     pub fn pr_preview(&self, packet: &str) -> Result<Value, String> {
         let mut url = self.url("/api/orchestrator/merge-preview").unwrap();
         url.query_pairs_mut().append_pair("packetId", packet);
-        let request = self.request("GET", &url);
-        let (value, refused): (Value, bool) = match request.call() {
+        let (value, refused): (Value, bool) = match crate::client::get_with_retry(|| {
+            self.request("GET", &url)
+                .timeout(crate::client::LOAD_REQUEST_TIMEOUT)
+                .call()
+        }) {
             Ok(response) => (Self::read(response)?, false),
             Err(ureq::Error::Status(409, response)) => (Self::read(response)?, true),
             Err(ureq::Error::Status(code, _)) => {

@@ -33,6 +33,22 @@ pub(crate) fn get_with_retry(
     }
 }
 
+/// A read failed because the server was slow, busy or briefly unreachable,
+/// not because it refused the request. Surfaces keep their last good data.
+pub(crate) fn transient(error: &str) -> bool {
+    error.ends_with("Request timed out")
+        || error.ends_with("Could not reach the selected server")
+        || ["502", "503", "504"]
+            .iter()
+            .any(|code| error.ends_with(&format!("Server returned HTTP {code}")))
+}
+
+/// The stale line shown over last good data (classic AgentPanel's stale strip).
+pub(crate) fn stale_notice(error: &str) -> String {
+    let reason = error.rsplit(": ").next().unwrap_or(error);
+    format!("Showing last loaded data · stale ({reason})")
+}
+
 pub(crate) fn same_workspace(a: &str, b: &str) -> bool {
     a == b
         || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
@@ -207,6 +223,17 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transient_errors_are_stale_not_fatal() {
+        assert!(super::transient("/api/x: Request timed out"));
+        assert!(super::transient("/api/x: Server returned HTTP 503"));
+        assert!(!super::transient("/api/x: Server returned HTTP 401"));
+        assert_eq!(
+            super::stale_notice("/api/x: Request timed out"),
+            "Showing last loaded data · stale (Request timed out)"
+        );
+    }
+
     #[test]
     fn get_retries_once_after_a_dropped_connection_and_never_on_status() {
         use std::io::{Read, Write};
