@@ -123,6 +123,55 @@ fn prompt_toolbar_copies_original_and_exposes_metadata(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn prompt_toolbar_keeps_scroll_position_when_confirmation_changes(cx: &mut TestAppContext) {
+    let (_host, client) = fixture();
+    let session = seed(&client, 20, cx);
+    let saved_client = client.clone();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| {
+        s.sessions = saved_client.sessions().unwrap();
+        s.select(session.id, cx);
+    });
+    settle(&view, cx, |s, _| s.queue_ready);
+    show(&view, "ask-8", cx);
+    let index = view.read_with(cx, |s, _| {
+        s.rows
+            .iter()
+            .position(|r| r.borrow().row.id() == "ask-8")
+            .unwrap()
+    });
+    view.update(cx, |s, cx| {
+        s.list.scroll_to(ListOffset {
+            item_ix: index,
+            offset_in_item: px(7.),
+        });
+        cx.notify();
+    });
+    paint(cx);
+    let anchor = view.read_with(cx, |s, _| s.list.logical_scroll_top());
+    assert_eq!(anchor.item_ix, index);
+    assert_eq!(anchor.offset_in_item, px(7.));
+    click(cx, "prompt-rewind-ask-8");
+    view.read_with(cx, |s, _| {
+        let after = s.list.logical_scroll_top();
+        assert_eq!(after.item_ix, anchor.item_ix);
+        assert_eq!(
+            after.offset_in_item, anchor.offset_in_item,
+            "showing confirmation must keep the reader's position"
+        );
+    });
+    click(cx, "prompt-rewind-cancel-ask-8");
+    view.read_with(cx, |s, _| {
+        let after = s.list.logical_scroll_top();
+        assert_eq!(after.item_ix, anchor.item_ix);
+        assert_eq!(
+            after.offset_in_item, anchor.offset_in_item,
+            "cancelling confirmation must keep the reader's position"
+        );
+    });
+}
+
+#[gpui::test]
 fn prompt_toolbar_forks_full_prefix_without_future_context(cx: &mut TestAppContext) {
     let (_host, client) = fixture();
     let session = seed(&client, 62, cx);

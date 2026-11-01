@@ -89,7 +89,7 @@ impl Surface {
         let marked: BTreeSet<usize> = ends.keys().chain(prompts.keys()).copied().collect();
         for index in marked.symmetric_difference(&self.action_rows) {
             if *index < rows.len() {
-                self.list.splice(*index..*index + 1, 1);
+                self.remeasure_action_row(*index);
             }
         }
         self.action_rows = marked;

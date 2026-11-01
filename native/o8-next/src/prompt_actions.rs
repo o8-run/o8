@@ -177,7 +177,18 @@ impl Surface {
 
     fn remeasure_prompt(&self, id: &str) {
         if let Some(index) = self.rows.iter().position(|r| r.borrow().row.id() == id) {
-            self.list.splice(index..index + 1, 1);
+            self.remeasure_action_row(index);
+        }
+    }
+
+    pub(super) fn remeasure_action_row(&self, index: usize) {
+        let anchor = self.list.logical_scroll_top();
+        self.list.splice(index..index + 1, 1);
+        // This is the same row with changed controls, not a replacement. GPUI's
+        // splice resets an anchor inside its range, including on first paint.
+        let after = self.list.logical_scroll_top();
+        if after.item_ix != anchor.item_ix || after.offset_in_item != anchor.offset_in_item {
+            self.list.scroll_to(anchor);
         }
     }
 
