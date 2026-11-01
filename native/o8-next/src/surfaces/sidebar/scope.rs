@@ -28,6 +28,8 @@ pub(in crate::shell::sidebar) struct RowMenu {
 const FILTER: &str = "M3 6h18M7 12h10M10 18h4";
 /// Lucide folder: the All repositories item.
 const FOLDER: &str = "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z";
+/// Lucide "archive".
+const ARCHIVE: &str = "M3 3h18v5H3z M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8 M10 12h4";
 /// Lucide check, drawn in the selection badge.
 const CHECK: &str = "M20 6 9 17l-5-5";
 
@@ -471,6 +473,28 @@ impl ThreadList {
         let id = self.row_menu.as_ref()?.id.clone();
         let snooze = self.snooze_items(&id, cx);
         let pin = self.pin_item(&id, cx);
+        // Archive left the row's hover strip for the state mark (Q 2026-10-31).
+        let archived = self.sessions.iter().any(|s| s.id == id && s.status == "archived");
+        let archive_id = id.clone();
+        let archive = div()
+            .id("sidebar-row-archive")
+            .debug_selector(|| "sidebar-row-archive".into())
+            .h(px(28.))
+            .px(px(8.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .rounded(px(7.))
+            .text_size(px(12.5))
+            .cursor_pointer()
+            .hover(|s| s.bg(theme().hover))
+            .child(crate::icon::stroke(ARCHIVE, theme().text_muted, 14., 1.7))
+            .child(if archived { "Restore" } else { "Archive" })
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.row_menu = None;
+                this.archive_id(archive_id.clone(), cx);
+            }));
         let menu = self.row_menu.as_ref()?;
         let filter = menu.repo.clone().map(|repo| {
             let active = self.scope_keys().contains(&repo);
@@ -530,7 +554,8 @@ impl ThreadList {
                             }))
                             .children(pin)
                             .children(filter)
-                            .children(snooze),
+                            .children(snooze)
+                            .child(archive),
                     ),
             )
             .with_priority(1)

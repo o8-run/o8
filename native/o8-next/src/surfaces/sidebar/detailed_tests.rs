@@ -1,6 +1,6 @@
 //! Detailed rows and the Working section, opt-in from the view menu.
 use super::recents_tests::native_rows;
-use super::thread_list::detailed::{elapsed, fold_working, status};
+use super::thread_list::detailed::{Status, elapsed, fold_working, status};
 use super::thread_list::pins;
 use super::thread_list::Row;
 use super::*;
@@ -32,18 +32,22 @@ fn thread(id: &str, running: bool) -> Row {
 }
 
 #[test]
-fn detailed_status_names_input_woke_running_and_done() {
-    assert_eq!(status(&session("awaiting_input"), false, false, "2m").label, "Input");
-    assert_eq!(status(&session("idle"), true, false, "2m").label, "Woke");
-    assert_eq!(status(&session("running"), false, true, "38m").label, "38m");
-    assert_eq!(status(&session("queued"), false, false, "1m").label, "Waiting");
-    assert_eq!(status(&session("idle"), false, false, "2d").label, "Done");
-    assert_eq!(status(&session("failed"), false, false, "2d").label, "Error");
-    // A thread with no messages yet is new, not done.
-    let fresh: Session = serde_json::from_value(json!({"id": "n", "title": "New conversation", "status": "idle"})).unwrap();
-    assert_eq!(status(&fresh, false, false, "now").label, "New");
-    // An unknown status shows its age, not a guessed state.
-    assert_eq!(status(&session("mystery"), false, false, "4d").label, "4d");
+fn detailed_status_uses_the_classic_names_and_idle_shows_only_age() {
+    assert_eq!(status(&session("awaiting_input"), false, "2m").label, "Review");
+    assert_eq!(status(&session("running"), true, "38m").label, "38m");
+    assert_eq!(status(&session("failed"), false, "2d").label, "Blocked");
+    assert_eq!(status(&session("rejected"), false, "2d").label, "Rejected");
+    assert_eq!(status(&session("stopped"), false, "2d").label, "Stopped");
+    assert_eq!(status(&session("merged"), false, "2d").label, "Merged");
+    // Finished talking is idle, not merged: only a real merge reads as merged.
+    for idle in ["idle", "ready", "completed", "done", "queued", "mystery"] {
+        assert_eq!(status(&session(idle), false, "4d"), Status { key: "age", label: "4d".into() }, "{idle}");
+    }
+    let mut no_change = session("idle");
+    no_change.outcome = Some("no_changes".into());
+    assert_eq!(status(&no_change, false, "4d").key, "age");
+    no_change.outcome = Some("merged".into());
+    assert_eq!(status(&no_change, false, "4d").label, "Merged");
 }
 
 #[test]
@@ -107,7 +111,7 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
             .unwrap();
         let session = list.sessions.iter().find(|s| s.id == id).unwrap().clone();
         let row = list.rows.iter().find(|r| r.id.as_ref() == Some(&id)).unwrap();
-        let key = status(&session, false, row.running, &row.age).key;
+        let key = status(&session, row.running, &row.age).key;
         (id, key)
     });
     let first_index = shell.read_with(&visual, |s, cx| {

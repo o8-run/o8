@@ -8,53 +8,35 @@
 //!
 //! Dev only: O8_DEV_SIDEBAR_WORKING may list thread ids (comma separated)
 //! drawn as running, to show the Working section without starting an agent.
+use super::status_mark::{self, State};
 use super::*;
 use crate::theme::current as theme;
-use gpui::{AnyElement, Rgba, div, px};
+use gpui::{AnyElement, div, px};
 use std::sync::OnceLock;
 
 pub(crate) const ROW_HEIGHT: f32 = 66.;
 pub(super) const DEV_WORKING_ENV: &str = "O8_DEV_SIDEBAR_WORKING";
 /// Lucide icons.
-const DONE: &str = "M21.8 10A10 10 0 1 1 17 3.3 M9 11l3 3L22 4";
-const INPUT: &str = "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3 M12 17h.01";
-const WOKE: &str = "M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16z M12 9v4l2 2 M5 3 2 6 M22 6l-3-3";
-const ERROR: &str = "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z M12 8v4 M12 16h.01";
 const REPO: &str = "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z";
 const BRANCH: &str = "M6 3v12 M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M18 9a9 9 0 0 1-9 9";
 const TERMINAL: &str = "M4 17l6-6-6-6 M12 19h8";
-const AGENT: &str = "M12 8V4H8 M4 8h16v12H4z M2 14h2 M20 14h2 M15 13v2 M9 13v2";
 
-/// The right-aligned status on a detailed row's first line.
+/// The right-aligned status on a detailed row's first line: classic's state
+/// and label (status_mark), the run time while it runs, else just its age.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Status {
     pub key: &'static str,
     pub label: String,
 }
-pub(crate) fn status(s: &Session, woken: bool, running: bool, age: &str) -> Status {
-    let st = s.status.trim().to_lowercase();
-    let (key, label) = if inbox::needs_input(s) {
-        ("input", "Input".to_owned())
-    } else if woken {
-        ("woke", "Woke".into())
-    } else if sidebar::rank(s) == 5 {
-        ("error", "Error".into())
-    } else if matches!(st.as_str(), "queued" | "pending" | "launching" | "recovering") {
-        ("waiting", "Waiting".into())
-    } else if running {
-        // Time since the thread's last activity: o8 records no run start.
-        ("running", age.to_owned())
-    } else if s.outcome.is_none() && s.message_count == 0 {
-        // A thread nobody has written in yet has nothing to be done with.
-        ("new", "New".into())
-    } else if s.outcome.is_some()
-        || matches!(st.as_str(), "idle" | "ready" | "completed" | "done" | "merged" | "released")
-    {
-        ("done", "Done".into())
-    } else {
-        ("age", age.to_owned())
-    };
-    Status { key, label }
+pub(crate) fn status(s: &Session, running: bool, age: &str) -> Status {
+    status_of(status_mark::state(s, running), age)
+}
+fn status_of(state: Option<State>, age: &str) -> Status {
+    match state {
+        Some(State::Running) => Status { key: "running", label: age.to_owned() },
+        Some(state) => Status { key: state.key(), label: state.label().into() },
+        None => Status { key: "age", label: age.to_owned() },
+    }
 }
 /// Elapsed run time: `42s`, `12m`, `1h 5m`, `2d`.
 pub(crate) fn elapsed(start: u64, now: u64) -> String {
@@ -64,16 +46,6 @@ pub(crate) fn elapsed(start: u64, now: u64) -> String {
         60..3600 => format!("{}m", secs / 60),
         3600..86400 => format!("{}h {}m", secs / 3600, secs % 3600 / 60),
         _ => format!("{}d", secs / 86400),
-    }
-}
-fn status_look(key: &str) -> (Option<&'static str>, Rgba) {
-    match key {
-        "done" => (Some(DONE), theme().success),
-        "input" => (Some(INPUT), theme().accent),
-        "woke" => (Some(WOKE), crate::theme::brand_orange()),
-        "error" => (Some(ERROR), theme().danger),
-        "waiting" => (None, theme().text_muted),
-        _ => (None, theme().text_faint),
     }
 }
 fn dev_working() -> &'static HashSet<String> {
@@ -175,14 +147,14 @@ impl ThreadList {
     ) -> AnyElement {
         let id = row.id.clone().unwrap_or_default();
         let session = self.sessions.iter().find(|s| s.id == id);
-        let woken = self.snoozes.get(&id).is_some_and(|until| *until <= recents::now());
         // A real run timer when the host recorded the run start; else last activity.
         let timer = session
             .and_then(|s| s.run_started_at.as_deref())
             .and_then(recents::timestamp)
             .map(|start| elapsed(start, recents::now()))
             .unwrap_or_else(|| row.age.clone());
-        let st = session.map(|s| status(s, woken, row.running, &timer));
+        let state = self.row_state(row);
+        let st = session.map(|_| status_of(state, &timer));
         let faint = theme().text_faint;
         let mut first = div()
             .flex()
@@ -207,7 +179,8 @@ impl ThreadList {
             );
         first = first.children(self.pin_mark(&id));
         if let Some(st) = st {
-            let (icon, color) = status_look(st.key);
+            // An idle thread shows only its age; a state brings its mark.
+            let color = state.map_or(faint, State::color);
             let key = st.key;
             let sid = id.clone();
             first = first.child(
@@ -216,9 +189,9 @@ impl ThreadList {
                     .flex_shrink_0()
                     .flex()
                     .items_center()
-                    .gap(px(3.))
+                    .gap(px(5.))
                     .text_color(color)
-                    .children(icon.map(|i| crate::icon::stroke(i, color, 11., 2.2)))
+                    .children(state.map(|state| status_mark::mark(state, &id)))
                     .child(st.label),
             );
         }
@@ -226,8 +199,8 @@ impl ThreadList {
             .whitespace_nowrap()
             .overflow_hidden()
             .text_ellipsis()
+            // The sidebar's own face and weight, as the compact rows.
             .text_size(px(13.5))
-            .font_weight(gpui::FontWeight::SEMIBOLD)
             .text_color(theme().text)
             .child(crate::text::sanitize(&row.title));
         let mut third = div()
@@ -274,27 +247,8 @@ impl ThreadList {
                         .child(crate::icon::stroke(TERMINAL, faint, 11., 2.)),
                 );
             }
-            let runtime = s.runtime.trim().to_owned();
-            if !runtime.is_empty() {
-                let color = match runtime.as_str() {
-                    "claude-code" => crate::theme::brand_orange(),
-                    "codex" => theme().accent,
-                    _ => theme().text_muted,
-                };
-                let sid = id.clone();
-                let tip: gpui::SharedString = runtime.into();
-                third = third.child(
-                    div()
-                        .id(gpui::ElementId::Name(format!("thread-runtime-{sid}").into()))
-                        .debug_selector(move || format!("thread-runtime-{sid}"))
-                        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.clone())).into())
-                        .child(crate::icon::stroke(AGENT, color, 11., 2.)),
-                );
-            }
         }
-        third = third
-            .children(self.row_settle_control(row, keyboard, cx))
-            .child(self.row_archive_control(row, keyboard, cx));
+        third = third.children(self.row_settle_control(row, keyboard, cx));
         div()
             .flex()
             .flex_col()

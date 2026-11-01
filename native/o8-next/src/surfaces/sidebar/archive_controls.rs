@@ -106,38 +106,4 @@ impl ThreadList {
             }))
             .into_any_element()
     }
-    pub(super) fn row_archive_control(
-        &self,
-        row: &Row,
-        keyboard: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let id = row.id.clone().unwrap();
-        let selector = id.clone();
-        div()
-            .id(gpui::ElementId::Name(format!("archive:{id}").into()))
-            .debug_selector(move || format!("thread-archive-{selector}"))
-            .w(px(38.))
-            .h(px(20.))
-            .flex()
-            .items_center()
-            .text_size(px(9.5))
-            .flex_shrink_0()
-            .text_color(theme().text_muted)
-            .when(!keyboard || self.choice.as_ref() != Some(&id), |v| {
-                v.invisible().group_hover("thread-row", |s| s.visible())
-            })
-            .opacity(if self.saving { 0.5 } else { 1. })
-            .cursor_pointer()
-            .child(if row.status == "archived" {
-                "Restore"
-            } else {
-                "Archive"
-            })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                this.archive_id(id.clone(), cx);
-            }))
-            .into_any_element()
-    }
 }

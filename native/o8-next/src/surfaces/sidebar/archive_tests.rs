@@ -39,20 +39,11 @@ fn archive_fixture(cx: &mut TestAppContext, restore: bool) {
     let bounds = visual
         .debug_bounds(Box::leak(format!("thread-row-{index}").into_boxed_str()))
         .unwrap();
-    visual.simulate_mouse_move(bounds.center(), None, gpui::Modifiers::default());
+    // Archive lives in the row menu; the row's right edge shows its state.
+    visual.simulate_mouse_down(bounds.center(), gpui::MouseButton::Right, gpui::Modifiers::default());
+    visual.simulate_mouse_up(bounds.center(), gpui::MouseButton::Right, gpui::Modifiers::default());
     draw(&mut visual);
-    let action = visual
-        .debug_bounds(Box::leak(format!("thread-archive-{id}").into_boxed_str()))
-        .unwrap();
-    let rail = visual.debug_bounds("thread-sidebar").unwrap();
-    assert!(
-        action.right() <= rail.right(),
-        "row actions must stay inside the sidebar"
-    );
-    click(
-        &mut visual,
-        Box::leak(format!("thread-archive-{id}").into_boxed_str()),
-    );
+    click(&mut visual, "sidebar-row-archive");
     wait_for(&shell, &mut visual, |s, cx| {
         s.surfaces
             .sidebar
@@ -260,7 +251,7 @@ fn sidebar_titles_ellipsize_with_visible_archive_and_restore_at_280(cx: &mut Tes
         let rail = visual.debug_bounds("thread-sidebar").unwrap();
         assert_eq!(rail.size.width, px(280.));
         let action = visual
-            .debug_bounds(Box::leak(format!("thread-archive-{id}").into_boxed_str()))
+            .debug_bounds(Box::leak(format!("thread-mark-slot-{id}").into_boxed_str()))
             .unwrap();
         sidebar.read_with(&visual, |s, _| {
             let layout = &s.title_layouts[id];
@@ -278,7 +269,7 @@ fn sidebar_titles_ellipsize_with_visible_archive_and_restore_at_280(cx: &mut Tes
                 "title must not overlap the action"
             );
             assert!(action.right() <= rail.right());
-            assert_eq!(action.size.width, px(38.));
+            assert_eq!(action.size.width, px(11.));
         });
     }
 }

@@ -999,6 +999,8 @@ pub(crate) mod pr_links;
 pub(crate) mod detailed;
 #[path = "pins.rs"]
 pub(crate) mod pins;
+#[path = "status_mark.rs"]
+pub(crate) mod status_mark;
 
 impl ThreadList {
     /// Scroll either list to a row; detailed mode reveals it in its list.

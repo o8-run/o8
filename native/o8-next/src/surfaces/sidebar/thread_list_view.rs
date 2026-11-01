@@ -306,28 +306,6 @@ impl ThreadList {
                                         })
                                         .child(title),
                                 )
-                                .when(!row.marker.is_empty(), |view| {
-                                    let (text, color) = if row.marker == "input" {
-                                        ("Needs input", theme().warning)
-                                    } else {
-                                        ("Back", theme().accent)
-                                    };
-                                    let marker = row.marker;
-                                    view.child(
-                                        div()
-                                            .debug_selector(move || {
-                                                format!("sidebar-marker-{marker}")
-                                            })
-                                            .flex_shrink_0()
-                                            .px(px(5.))
-                                            .rounded(px(4.))
-                                            .border_1()
-                                            .border_color(color)
-                                            .text_size(px(9.5))
-                                            .text_color(color)
-                                            .child(text),
-                                    )
-                                })
                                 .when(!thread && i == 0, |view| {
                                     view.child(this.view_picker(cx))
                                 })
@@ -356,19 +334,7 @@ impl ThreadList {
                                             .text_color(theme().text_faint)
                                             .children(row.id.as_deref().and_then(|id| this.pin_mark(id)))
                                             .child(row.age.clone())
-                                            .when(row.branch, |v| v.child("⑂"))
-                                            .when(row.attention || row.running, |v| {
-                                                v.child(
-                                                    div()
-                                                        .size(px(6.))
-                                                        .rounded_full()
-                                                        .bg(if row.attention {
-                                                            theme().warning
-                                                        } else {
-                                                            theme().success
-                                                        }),
-                                                )
-                                            }),
+                                            .when(row.branch, |v| v.child("⑂")),
                                     )
                                     .children(row.id.as_deref().and_then(|id| {
                                         this.pr_badge(id, cx)
@@ -376,7 +342,22 @@ impl ThreadList {
                                     .children(
                                         this.row_settle_control(&row, keyboard, cx),
                                     )
-                                    .child(this.row_archive_control(&row, keyboard, cx))
+                                    // Classic's state mark where the hover
+                                    // Archive was (Q 2026-10-31); archive is
+                                    // in the row menu.
+                                    // The slot holds its width when idle,
+                                    // so ages line up down the list.
+                                    .child({
+                                        let slot = format!(
+                                            "thread-mark-slot-{}",
+                                            row.id.as_deref().unwrap_or_default()
+                                        );
+                                        div()
+                                            .debug_selector(move || slot.clone())
+                                            .w(px(super::status_mark::SIZE))
+                                            .flex_shrink_0()
+                                            .children(this.row_mark(&row))
+                                    })
                                 }),
                         ))
                         .when(row.kind == "section" && row.status == "working", |view| {

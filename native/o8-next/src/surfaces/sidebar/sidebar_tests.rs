@@ -572,10 +572,10 @@ fn sidebar_worker_archive_real_path(cx: &mut TestAppContext) {
     click(cx, "thread-row-2");
     ready(&shell, cx);
     // Opening the worker focuses its content. Focus the sidebar through its
-    // real shortcut, which shows the chosen row's Archive.
+    // real shortcut; Delete archives the chosen row.
     cx.simulate_keystrokes("f8");
     settle(&shell, cx);
-    click(cx, "thread-archive-pi-builtin-owned:grid-runtime");
+    cx.simulate_keystrokes("delete");
     wait_for(&shell, cx, |s, cx| {
         !s.surfaces
             .sidebar
