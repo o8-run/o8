@@ -2,6 +2,7 @@ import { parseLocalModel } from '@/lib/codex/local-model';
 import { EffortPinRejectionError, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { MODEL_IDS } from '@/lib/models';
+import { selectedOrchestratorModel } from './orchestrator-model-guard';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
 import { buildOrchestratorSystemPrompt } from './orchestrator-system-prompt';
 import { CODEX_USER_MESSAGE_MARKER } from '@/lib/codex/app-bridge-spec';
@@ -48,7 +49,8 @@ export function reasoningEffortFromThinkingEffort(
  * Codex flagship default is preserved exactly.
  */
 export function resolveOrchestratorModelSync(explicit?: string): string {
-  const trimmed = explicit?.trim();
+  // A runtime id saved as the thread's model ("codex") is no selection.
+  const trimmed = selectedOrchestratorModel(explicit);
   // Cross-backend bleed guard (live-hit 2026-07-05): the chat surface passes
   // the UI-selected CLAUDE model (e.g. claude-opus-4-8) as the explicit model
   // when the operator flips orchestratorBackend to codex — codex exec can't
