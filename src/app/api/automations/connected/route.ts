@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { readLocalSchedules } from '@/lib/automations/local-schedules';
 
 const execFileAsync = promisify(execFile);
 const JOB_ID = /^[a-zA-Z0-9_-]{1,128}$/;
@@ -75,12 +76,17 @@ async function sourceJobs(binary: string) {
 export async function GET(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
+  const local = await readLocalSchedules();
   try {
-    const jobs = await sourceJobs(await openclawBinary());
+    const jobs = [...await sourceJobs(await openclawBinary()), ...local];
     return NextResponse.json({ ok: true, available: true, jobs }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
+    // Local rows still show when the optional agent scheduler is missing or down.
+    if (local.length) return NextResponse.json({ ok: true, available: true, jobs: local }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
     if (error instanceof CliNotFoundError) {
       return NextResponse.json({ ok: true, installed: false, available: false, jobs: [] });
     }

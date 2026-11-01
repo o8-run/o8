@@ -9,9 +9,14 @@ use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
+#[path = "http_tests.rs"]
+mod http_tests;
+
 /// Classic's owner for the operator's own automations.
 pub(super) const OWNER: &str = "operator";
 const REFRESH: Duration = Duration::from_secs(15);
+const CONNECTED_STALE: Duration = Duration::from_secs(300);
 const PAGE_WIDTH: f32 = 1040.;
 const ADD: &str = "M12 5v14M5 12h14";
 
@@ -23,6 +28,7 @@ pub(crate) struct Scheduled {
     pub(crate) loading: bool,
     error: Option<String>,
     connected: Option<Result<Value, String>>,
+    connected_at: Option<Instant>,
     /// Registered repositories as (local path, default branch).
     pub(super) repos: Vec<(String, String)>,
     fetched: Option<Instant>,
@@ -45,6 +51,7 @@ impl Scheduled {
             loading: true,
             error: None,
             connected: None,
+            connected_at: None,
             repos: vec![],
             fetched: None,
             in_flight: false,
@@ -60,13 +67,13 @@ impl Scheduled {
     }
 
     /// Classic refreshes every 15 seconds while the page is open.
-    pub(crate) fn tick(&mut self, refresh: bool, cx: &mut Context<Self>) {
-        if refresh || self.fetched.is_none_or(|at| at.elapsed() >= REFRESH) {
+    pub(crate) fn tick(&mut self, _refresh: bool, cx: &mut Context<Self>) {
+        if self.fetched.is_none_or(|at| at.elapsed() >= REFRESH) {
             self.load(cx);
         }
     }
 
-    fn load(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
         if self.in_flight {
             return;
         }
@@ -113,7 +120,17 @@ impl Scheduled {
                         this.error = Some(error);
                     }
                 }
-                this.connected = Some(connected);
+                // A failed refresh keeps a recent snapshot, as classic's cache does.
+                let recent = matches!(this.connected, Some(Ok(_)))
+                    && this
+                        .connected_at
+                        .is_some_and(|at| at.elapsed() < CONNECTED_STALE);
+                if connected.is_ok() {
+                    this.connected_at = Some(Instant::now());
+                }
+                if connected.is_ok() || !recent {
+                    this.connected = Some(connected);
+                }
                 if !repos.is_empty() {
                     this.repos = repos;
                 }
@@ -656,7 +673,10 @@ impl Scheduled {
                     let enabled = job["enabled"] == true;
                     let busy = self.busy.contains_key(&format!("connected:{id}"));
                     let toggle_id = id.clone();
+                    let read_only = job["readOnly"] == true;
+                    let row = format!("scheduled-job-{id}");
                     div()
+                        .debug_selector(move || row)
                         .min_h(px(52.))
                         .flex()
                         .items_center()
@@ -683,35 +703,45 @@ impl Scheduled {
                                         .whitespace_nowrap()
                                         .overflow_hidden()
                                         .text_ellipsis()
-                                        .child(format!(
-                                            "{} · {} · Next {} · Last {} ({})",
-                                            schedule_label(&job["schedule"]),
-                                            job["agentId"].as_str().unwrap_or(""),
-                                            relative(job["nextRunAt"].as_f64(), "unscheduled"),
-                                            relative(job["lastRunAt"].as_f64(), "never"),
-                                            job["lastRunStatus"].as_str().unwrap_or("idle"),
-                                        )),
+                                        .child(if read_only {
+                                            format!(
+                                                "{} · {}",
+                                                schedule_label(&job["schedule"]),
+                                                job["agentId"].as_str().unwrap_or(""),
+                                            )
+                                        } else {
+                                            format!(
+                                                "{} · {} · Next {} · Last {} ({})",
+                                                schedule_label(&job["schedule"]),
+                                                job["agentId"].as_str().unwrap_or(""),
+                                                relative(job["nextRunAt"].as_f64(), "unscheduled"),
+                                                relative(job["lastRunAt"].as_f64(), "never"),
+                                                job["lastRunStatus"].as_str().unwrap_or("idle"),
+                                            )
+                                        }),
                                 ),
                         )
-                        .child(
-                            action(
-                                format!("scheduled-connected-{id}"),
-                                if busy {
-                                    "Updating…"
-                                } else if enabled {
-                                    "Pause"
-                                } else {
-                                    "Resume"
-                                },
-                                false,
-                                busy,
+                        .when(!read_only, |row| {
+                            row.child(
+                                action(
+                                    format!("scheduled-connected-{id}"),
+                                    if busy {
+                                        "Updating…"
+                                    } else if enabled {
+                                        "Pause"
+                                    } else {
+                                        "Resume"
+                                    },
+                                    false,
+                                    busy,
+                                )
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        this.toggle_connected(toggle_id.clone(), !enabled, cx)
+                                    },
+                                )),
                             )
-                            .on_click(cx.listener(
-                                move |this, _, _, cx| {
-                                    this.toggle_connected(toggle_id.clone(), !enabled, cx)
-                                },
-                            )),
-                        )
+                        })
                 }))
                 .into_any_element(),
         )
@@ -1063,6 +1093,9 @@ pub(super) fn explain(fire: &Value) -> String {
 
 /// ConnectedAgentAutomations' scheduleLabel.
 pub(super) fn schedule_label(schedule: &Value) -> String {
+    if let Some(label) = schedule["label"].as_str() {
+        return label.to_owned();
+    }
     let tz = schedule["tz"]
         .as_str()
         .map(|tz| format!(" · {tz}"))

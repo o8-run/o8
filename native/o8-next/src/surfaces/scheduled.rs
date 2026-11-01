@@ -28,6 +28,9 @@ impl ShellView for View {
     fn tick(view: &Entity<Self>, refresh: bool, cx: &mut Context<Shell>) {
         view.update(cx, |s, cx| s.tick(refresh, cx));
     }
+    fn refresh(view: &Entity<Self>, cx: &mut Context<Shell>) {
+        view.update(cx, |s, cx| s.load(cx));
+    }
     #[cfg(test)]
     fn ready(view: &Entity<Self>, cx: &App) -> bool {
         !view.read(cx).loading

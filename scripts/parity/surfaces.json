@@ -238,6 +238,18 @@
       ]
     },
     {
+      "id": "scheduled",
+      "flags": [
+        "--scheduled"
+      ],
+      "nativeCommand": "Open scheduled automations",
+      "webRoute": "/dashboard",
+      "webEvent": "o8:open-automations",
+      "nativeSelectors": [
+        "scheduled-page"
+      ]
+    },
+    {
       "id": "setup",
       "flags": [
         "--onboarding"

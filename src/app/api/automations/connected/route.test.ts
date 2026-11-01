@@ -6,6 +6,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { invalidateCliCache } from '@/lib/runtimes/shared/cli-resolver';
 
 const auth = vi.hoisted(() => ({ denied: false }));
+const local = vi.hoisted(() => ({ jobs: [] as Array<Record<string, unknown>> }));
+vi.mock('@/lib/automations/local-schedules', () => ({ readLocalSchedules: async () => local.jobs }));
 vi.mock('@/lib/panel/auth', () => ({
   requirePanelAuth: () => auth.denied ? Response.json({ error: 'Unauthorized' }, { status: 401 }) : null,
 }));
@@ -23,7 +25,7 @@ beforeEach(() => {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args[0] === '--version') { process.stdout.write('OpenClaw 2026.9.2'); process.exit(0); }
-const path = process.env.O8_TEST_CONNECTED_JOBS_PATH;
+const path = ${JSON.stringify(statePath)};
 const jobs = JSON.parse(fs.readFileSync(path, 'utf8'));
 if (args[0] !== 'cron') process.exit(2);
 if (args[1] === 'list') { process.stdout.write(JSON.stringify({ jobs: args.includes('--all') ? jobs : jobs.filter((job) => job.enabled) })); process.exit(0); }
@@ -48,14 +50,13 @@ process.exit(4);
     payload: { message: 'private prompt must never leave this process' },
   }]));
   process.env.O8_OPENCLAW_BIN = binary;
-  process.env.O8_TEST_CONNECTED_JOBS_PATH = statePath;
   invalidateCliCache('openclaw-cron');
   auth.denied = false;
+  local.jobs = [];
 });
 
 afterEach(() => {
   delete process.env.O8_OPENCLAW_BIN;
-  delete process.env.O8_TEST_CONNECTED_JOBS_PATH;
   invalidateCliCache('openclaw-cron');
   rmSync(root, { recursive: true, force: true });
 });
@@ -77,6 +78,17 @@ it('lists the actual schedule and status without leaking the private prompt', as
     nextRunAt: 1790175600000, lastRunStatus: 'ok',
   });
   expect(JSON.stringify(result)).not.toContain('private prompt');
+});
+
+it('shows local rows beside the agent scheduler and without it', async () => {
+  local.jobs = [{ id: 'launchd-a', name: 'com.example.nightly', readOnly: true }];
+  const beside = await (await GET(request('GET'))).json() as { jobs: Array<{ id: string }> };
+  expect(beside.jobs.map(job => job.id)).toEqual(['82ac2f70-5549-4827-8974-adf5519decf5', 'launchd-a']);
+  process.env.O8_OPENCLAW_BIN = join(root, 'missing');
+  invalidateCliCache('openclaw-cron');
+  const alone = await GET(request('GET'));
+  expect(alone.status).toBe(200);
+  expect(await alone.json()).toMatchObject({ ok: true, available: true, jobs: local.jobs });
 });
 
 it('changes the source job and reads the persisted state back', async () => {
