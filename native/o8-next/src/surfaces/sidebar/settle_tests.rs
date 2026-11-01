@@ -402,3 +402,79 @@ fn sidebar_inbox_mod_z_undoes_the_last_settle(cx: &mut TestAppContext) {
     settle(&shell, &mut visual);
     assert_eq!(stored(&fixture, FIRST), "active");
 }
+
+#[gpui::test]
+fn sidebar_inbox_vocabulary_keeps_merge_outcome_separate_from_attention(cx: &mut TestAppContext) {
+    const MERGED: &str = "thoughts-sidebar-0019";
+    let (fixture, shell, mut visual, project) = start(
+        "--shell --composer --sidebar --sidebar-markers --sidebar-merged",
+        cx,
+    );
+    wait_for(&shell, &mut visual, |s, cx| {
+        s.surfaces.sidebar.view.as_ref().unwrap().read(cx).sessions.iter().any(|session| {
+            session.id == MERGED && session.outcome.as_deref() == Some("merged") && !session.settled()
+        })
+    });
+    let before: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
+    let packets = before["mission"]["packets"].as_array().expect("persisted packet array");
+    assert!(!packets.is_empty(), "the fixture has a real packet to preserve");
+    let packet = packets.iter().find(|packet| packet["id"] == "sidebar-branch").unwrap();
+    assert_eq!(packet["status"], "released");
+    assert_eq!(packet["releaseState"], "released");
+    assert_eq!(packet["releaseStatePayload"]["source"], "approve_and_merge");
+    let history: Value = fixture.client.get("/api/v2/chat-history", &[("tabId", MERGED)]).unwrap();
+    let messages = history["messages"].as_array().expect("persisted history message array");
+    assert_eq!(messages.len(), 2, "the fixture history must exist before Settle");
+
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-inbox");
+    wait_for(&shell, &mut visual, |s, _| {
+        s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
+    });
+    // Searching opens every shelf and exposes this older row through the real editor.
+    click(&mut visual, "thread-search");
+    visual.simulate_input("Sidebar thread 19");
+    wait_for(&shell, &mut visual, |s, cx| {
+        s.surfaces.sidebar.view.as_ref().unwrap().read(cx).rows.iter()
+            .any(|row| row.id.as_deref() == Some(MERGED))
+    });
+    draw(&mut visual);
+    assert_eq!(
+        list(&shell, &visual, |list| section(list, MERGED)).as_deref(),
+        Some("Active"),
+        "a merge outcome must not create a fifth thread attention state"
+    );
+    assert!(list(&shell, &visual, |list| list.rows.iter()
+        .filter(|row| row.kind == "section")
+        .all(|row| matches!(row.title.as_str(), "Active" | "Snoozed" | "Settled" | "Archived"))));
+
+    let target = row(&shell, &mut visual, MERGED);
+    let at = visual.debug_bounds(target).unwrap().center();
+    visual.simulate_mouse_move(at, None, gpui::Modifiers::default());
+    click(&mut visual, Box::leak(format!("thread-settle-{MERGED}").into_boxed_str()));
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, MERGED, "Settled"));
+    assert_eq!(stored(&fixture, MERGED), "settled");
+    let after: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
+    let mut after_packets = after["mission"]["packets"].as_array().expect("persisted packets after Settle").clone();
+    let after_packet = after_packets.iter_mut().find(|packet| packet["id"] == "sidebar-branch")
+        .expect("the same merged packet after Settle");
+    // The state read normalizer regenerates only this routing timestamp.
+    assert!(packet["workerRouting"]["decidedAt"].is_string());
+    assert!(after_packet["workerRouting"]["decidedAt"].is_string());
+    after_packet["workerRouting"]["decidedAt"] = packet["workerRouting"]["decidedAt"].clone();
+    assert_eq!(&after_packets, packets,
+        "settling attention must preserve packet execution and release state");
+    let settled: Value = fixture.client.get("/api/v2/chat-history", &[("tabId", MERGED)]).unwrap();
+    assert_eq!(settled["archivedAt"], history["archivedAt"]);
+    assert_eq!(settled["messages"].as_array().expect("persisted history after Settle"), messages);
+
+    // F8 uses the real list-focus action, leaving the search editor's own Undo.
+    visual.simulate_keystrokes("f8");
+    let undo = if cfg!(target_os = "macos") { "cmd-z" } else { "ctrl-z" };
+    visual.simulate_keystrokes(undo);
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, MERGED, "Active"));
+    assert_eq!(stored(&fixture, MERGED), "active");
+    assert!(list(&shell, &visual, |list| list.sessions.iter().any(|session| {
+        session.id == MERGED && session.outcome.as_deref() == Some("merged")
+    })));
+}
