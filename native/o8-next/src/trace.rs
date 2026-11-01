@@ -1354,6 +1354,12 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
     }
 
     let card = subagent_card(&id, &steps, &timed, now, index, list);
+    let bubbles: Vec<AnyElement> = steps
+        .iter()
+        .flat_map(|step| step.messages.iter())
+        .enumerate()
+        .map(|(n, bubble)| crate::thread_messages::element(bubble, format!("trace-message-{index}-{n}")))
+        .collect();
     // Reading column and insets match the transcript's message rows.
     let column = crate::theme::GEOMETRY.composer_width + 48.;
     div()
@@ -1380,6 +1386,7 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
                 .child(header)
                 .child(body)
                 .children(card)
+                .children(bubbles)
                 .when(animating, |column| {
                     // Redraw while anything moves: the shimmer, arc, clock and fades.
                     column.child(

@@ -41,6 +41,9 @@ pub struct Step {
     /// The thread a launch or delegate call created, read from its result.
     #[serde(skip)]
     pub thread: Option<String>,
+    /// Messages this call sent to or read from other threads.
+    #[serde(skip)]
+    pub messages: Vec<crate::thread_messages::Bubble>,
     #[serde(skip)]
     rollup_kind: RollupKind,
 }
@@ -729,6 +732,7 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
         started: tool["startedAt"].as_f64(),
         finished: tool["finishedAt"].as_f64(),
         todos: todos(args),
+        messages: crate::thread_messages::parse(&name, args, output),
         delegate,
         thread: if delegate {
             crate::lineage::created_thread(output)
@@ -899,6 +903,7 @@ mod tests {
             finished: None,
             delegate: false,
             thread: None,
+            messages: vec![],
             todos: vec![],
         }
     }
