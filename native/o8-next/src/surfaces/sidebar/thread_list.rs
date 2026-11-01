@@ -336,6 +336,11 @@ impl ThreadList {
             folders::View::Repo => "",
             folders::View::Inbox if session.settled() => "Settled",
             folders::View::Inbox if self.snoozed(&session.id) => "Snoozed",
+            folders::View::Inbox
+                if status_mark::state(session, false) == Some(status_mark::State::Merged) =>
+            {
+                "Merged"
+            }
             folders::View::Inbox => "Active",
         }
     }

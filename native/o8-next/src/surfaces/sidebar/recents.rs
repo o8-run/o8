@@ -32,6 +32,14 @@ pub(super) fn now() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+/// The date groups, newest first.
+pub(super) const DAYS: [&str; 5] = [
+    "Today",
+    "Yesterday",
+    "Previous 7 days",
+    "Previous 30 days",
+    "Older",
+];
 pub(super) fn group(s: &Session, now: u64) -> &'static str {
     if s.status == "archived" {
         return "Archived";
@@ -42,6 +50,8 @@ pub(super) fn group(s: &Session, now: u64) -> &'static str {
     let midnight = calendar::midnight(now);
     if time >= midnight {
         "Today"
+    } else if midnight.saturating_sub(time) < 86400 {
+        "Yesterday"
     } else if midnight.saturating_sub(time) < 7 * 86400 {
         "Previous 7 days"
     } else if midnight.saturating_sub(time) < 30 * 86400 {
@@ -151,13 +161,7 @@ pub(super) fn rows(
     let now = now();
     let visible = visible(sessions, query, matches);
     let mut rows = vec![header("section", "Recents", "")];
-    for name in [
-        "Today",
-        "Previous 7 days",
-        "Previous 30 days",
-        "Older",
-        "Archived",
-    ] {
+    for name in DAYS.into_iter().chain(["Archived"]) {
         let group: Vec<_> = visible
             .iter()
             .copied()

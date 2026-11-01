@@ -1,4 +1,4 @@
-//! The Inbox view: Active and Settled sections over the server's inbox
+//! The Inbox view: Active, Merged, Snoozed and Settled sections over the server's inbox
 //! settlement (docs/internals/inbox-settlement.md), with Settle and Un-settle
 //! on the row and on Mod+Shift+S, park-and-advance and an Undo toast.
 //!
@@ -46,6 +46,10 @@ pub(super) fn rows(
         .into_iter()
         .partition(|s| snoozes.get(&s.id).is_some_and(|until| *until > now));
     snoozed.sort_by_key(|s| snoozes[&s.id]);
+    // Merged work is done and waits only for cleanup (Q 2026-10-31).
+    let (merged, mut active): (Vec<_>, Vec<_>) = active.into_iter().partition(|s| {
+        super::status_mark::state(s, false) == Some(super::status_mark::State::Merged)
+    });
     let woken = |s: &Session| snoozes.contains_key(&s.id);
     active.sort_by_key(|s| (!needs_input(s), !woken(s)));
     // Active always heads the list; its row carries the view picker.
@@ -74,6 +78,8 @@ pub(super) fn rows(
             "Active",
         ));
     }
+    let open = searching || expanded.contains("Merged");
+    recents::group_rows(&mut rows, "Merged", &merged, 10, open, now, branches);
     let open = searching || expanded.contains("Snoozed");
     let at = rows.len();
     recents::group_rows(&mut rows, "Snoozed", &snoozed, 10, open, now, branches);

@@ -71,13 +71,14 @@ pub(super) fn mark_dev_working(rows: &mut [Row]) {
     }
 }
 /// Running threads (not those waiting on you) leave their groups for a
-/// Working section, placed before Snoozed, Settled and Archived. o8 has no
+/// Working section, placed before Merged, Snoozed, Settled and Archived. o8 has no
 /// pinned threads yet, so none stay behind.
 pub(crate) fn fold_working(rows: Vec<Row>, closed: bool) -> Vec<Row> {
     let end = rows
         .iter()
         .position(|r| {
-            r.kind == "section" && matches!(r.title.as_str(), "Snoozed" | "Settled" | "Archived")
+            r.kind == "section"
+                && matches!(r.title.as_str(), "Merged" | "Snoozed" | "Settled" | "Archived")
         })
         .unwrap_or(rows.len());
     let mut rows = rows;

@@ -89,11 +89,16 @@ pub(super) fn chronological(
     let mut rows = vec![recents::header("section", "Recents", "")];
     let open = searching || expanded.contains("Chronological");
     let count = if open { live.len() } else { live.len().min(50) };
-    rows.extend(
-        live.iter()
-            .take(count)
-            .map(|s| recents::thread_row(s, now, branches)),
-    );
+    // One list, newest first, with a heading where the day changes.
+    let mut day = "";
+    for session in live.iter().take(count) {
+        let group = recents::group(session, now);
+        if group != day {
+            day = group;
+            rows.push(recents::header("section", group, ""));
+        }
+        rows.push(recents::thread_row(session, now, branches));
+    }
     if count < live.len() {
         rows.push(recents::header(
             "more",

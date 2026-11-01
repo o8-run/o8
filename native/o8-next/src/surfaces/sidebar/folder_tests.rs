@@ -208,7 +208,7 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
         Some(created.clone())
     );
 
-    // Chronological: one list, no date headings.
+    // Chronological: one list, headed where the day changes (Q 2026-10-31).
     click(&mut visual, "sidebar-view");
     click(&mut visual, "sidebar-view-chronological");
     wait_for(&shell, &mut visual, |s, _| {
@@ -219,11 +219,7 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
         .filter(|r| r.kind == "section")
         .map(|r| r.title)
         .collect();
-    assert!(
-        !sections
-            .iter()
-            .any(|t| t == "Today" || t.starts_with("Previous"))
-    );
+    assert!(sections.iter().any(|t| t == "Today"), "{sections:?}");
     let all = listed(&shell, &visual);
     assert!(all.iter().any(|t| t == first) && all.iter().any(|t| t == second));
 

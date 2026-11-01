@@ -263,9 +263,9 @@ impl ThreadList {
                         }))
                         .flex()
                         .items_center()
-                        // Detailed headings keep the compact height, with a
-                        // little air above so they read as section breaks.
-                        .when(detailed && !thread && i > 0, |v| v.items_end().pb(px(2.)))
+                        // Headings keep the row height but sit low in it, so
+                        // the air goes above them and they read as breaks.
+                        .when(row.kind == "section" && i > 0, |v| v.items_end().pb(px(3.)))
                         .px(px(12.))
                         .rounded(px(8.))
                         .overflow_hidden()
@@ -303,6 +303,9 @@ impl ThreadList {
                                         .line_clamp(1)
                                         .text_ellipsis()
                                         .text_size(px(if thread { 13.5 } else { 12. }))
+                                        .when(row.kind == "section", |v| {
+                                            v.font_weight(gpui::FontWeight::SEMIBOLD)
+                                        })
                                         .text_color(if thread {
                                             theme().text
                                         } else {
