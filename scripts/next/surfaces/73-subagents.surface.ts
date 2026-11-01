@@ -15,6 +15,7 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
   const { createEmptyOrchestratorMissionState } = await import('../../../src/lib/orchestrator/store');
   const { writeOrchestratorControlPlaneState } = await import('../../../src/lib/orchestrator/control-plane');
   const state = await import('../../../src/app/api/orchestrator/state/route');
+  const lanes = await import('../../../src/app/api/lanes/route');
   const shared = await import('../../../src/app/api/orchestrator/shared-team/active/route');
   const { createLane, setLaneStatus } = await import('../../../src/lib/lane/registry');
   const { markPacketReleased } = await import('../../../src/lib/orchestrator/packet-release-truth');
@@ -113,6 +114,7 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
     priority: 9,
     before: ({ method, url }) => { calls.push(`${method} ${url.pathname}${url.search}`); },
     routes: {
+      'GET /api/lanes': lanes.GET,
       'GET /api/orchestrator/state': async request => {
         if (delay) await new Promise(resolve => setTimeout(resolve, delay));
         return fail ? Response.json({ error: 'Fixture unavailable' }, { status: 503 }) : state.GET(request);

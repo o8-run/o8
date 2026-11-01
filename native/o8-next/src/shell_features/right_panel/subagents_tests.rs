@@ -235,6 +235,52 @@ fn subagents_side_chat_returns_to_its_parent_and_split(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn subagents_workers_action_returns_keyboard_focus_to_its_card(cx: &mut TestAppContext) {
+    let (_f, s, mut v) = setup(cx);
+    s.update_in(&mut v, |s, w, cx| s.execute(Command::Workers, w, cx));
+    wait(&s, &mut v, "worker-inspect-subagent-calculation");
+    click(&mut v, "worker-inspect-subagent-calculation");
+    wait(&s, &mut v, "subagents-detail-subagent-calculation");
+    assert_eq!(s.read_with(&v, |s, _| s.active()), Some(Tab::Workers));
+    v.simulate_keystrokes("escape");
+    wait(&s, &mut v, "subagent-row-subagent-calculation");
+    v.simulate_keystrokes("escape");
+    s.update_in(&mut v, |s, w, cx| s.tick(false, w, cx));
+    assert!(!s.read_with(&v, |s, _| s.state.right_panel.visible));
+    v.simulate_keystrokes("enter");
+    wait(&s, &mut v, "subagents-detail-subagent-calculation");
+}
+
+#[gpui::test]
+fn subagents_lower_split_keeps_its_slot_and_original_return_layout(cx: &mut TestAppContext) {
+    let (_f, s, mut v) = setup(cx);
+    s.update_in(&mut v, |s, w, cx| {
+        show(s, Tool::Targeting, w, cx);
+        s.features.get::<Panel>().into_lower = true;
+        show(s, Tool::Subagents, w, cx);
+    });
+    wait(&s, &mut v, "subagent-row-subagent-calculation");
+    click(&mut v, "subagent-row-subagent-calculation");
+    wait(&s, &mut v, "subagents-detail-subagent-calculation");
+    assert!(
+        s.read_with(&v, |s, _| {
+            let panel = s.features.read::<Panel>().unwrap();
+            panel.selected == Tool::Targeting && panel.lower == Some(Tool::Subagents)
+        }),
+        "detail must stay in the lower inspector slot"
+    );
+    click(&mut v, "subagents-close");
+    s.update_in(&mut v, |s, w, cx| s.tick(false, w, cx));
+    assert!(
+        s.read_with(&v, |s, _| {
+            let panel = s.features.read::<Panel>().unwrap();
+            panel.selected == Tool::Targeting && panel.lower.is_none() && panel.motion.is_open()
+        }),
+        "close must restore the tools from before inspection"
+    );
+}
+
+#[gpui::test]
 fn subagents_shared_results_keep_held_delivery_in_attention(cx: &mut TestAppContext) {
     let (f, s, mut v) = setup_mode(cx, "--subagents --subagents-shared");
     wait(&s, &mut v, "subagent-trace-opencode-owned:subagent-shared");
