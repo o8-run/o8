@@ -4,7 +4,9 @@
 //! Display only; nothing here starts or stops work.
 use crate::{activity::Step, client::Session};
 use serde_json::Value;
-use std::cell::RefCell;
+use crate::theme::current as theme;
+use gpui::{AnyElement, SharedString, div, prelude::*, px};
+use std::{cell::RefCell, collections::HashSet};
 
 pub const SCHEME: &str = "o8://thread/";
 
@@ -21,6 +23,102 @@ thread_local! {
     static PENDING: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The open thread's helpers as last drawn, for the trace's subagent card.
     static SHOWN: RefCell<Vec<Child>> = const { RefCell::new(Vec::new()) };
+    /// Disclosures the reader opened: "card:<trace>" and "strip:<thread>".
+    static OPEN: RefCell<HashSet<String>> = RefCell::default();
+}
+
+pub fn is_open(key: &str) -> bool {
+    OPEN.with(|o| o.borrow().contains(key))
+}
+
+pub fn toggle(key: &str) {
+    OPEN.with(|o| {
+        let mut o = o.borrow_mut();
+        if !o.remove(key) {
+            o.insert(key.to_owned());
+        }
+    });
+}
+
+/// Live status for trace helpers the server also lists.
+pub fn with_live_status(children: Vec<Child>) -> Vec<Child> {
+    let shown = shown();
+    children
+        .into_iter()
+        .map(|mut child| {
+            if let Some(live) = shown
+                .iter()
+                .find(|s| s.thread.is_some() && s.thread == child.thread)
+            {
+                child.working = live.working;
+                child.failed = live.failed;
+            }
+            child
+        })
+        .collect()
+}
+
+pub fn now_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0., |d| d.as_millis() as f64)
+}
+
+const OPEN_ARROW: &str = "M8 16 16 8M10 8h6v6";
+
+/// One lineage row: status dot, title, runtime, elapsed; opens the child's
+/// thread when it has one.
+pub fn child_row(child: &Child, now: f64, key: String) -> AnyElement {
+    let color = if child.working {
+        theme().accent
+    } else if child.failed {
+        theme().danger
+    } else {
+        theme().success
+    };
+    let row = div()
+        .id(SharedString::from(key.clone()))
+        .debug_selector(move || key.clone())
+        .h(px(26.))
+        .px(px(8.))
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .rounded(px(7.))
+        .text_size(px(12.5))
+        .child(div().size(px(6.)).rounded_full().bg(color).flex_shrink_0())
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_color(theme().text_secondary)
+                .child(crate::text::sanitize(&child.title)),
+        )
+        .when(!child.runtime.is_empty(), |row| {
+            row.child(
+                div()
+                    .text_color(theme().text_muted)
+                    .child(child.runtime.clone()),
+            )
+        })
+        .when_some(elapsed(child, now), |row, time| {
+            row.child(div().text_color(theme().text_muted).child(time))
+        });
+    match child.thread.clone() {
+        Some(thread) => row
+            .cursor_pointer()
+            .hover(|s| s.bg(theme().hover))
+            .child(crate::icon::stroke(OPEN_ARROW, theme().text_muted, 12., 1.8))
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                open(&thread, window, cx);
+            })
+            .into_any_element(),
+        None => row.into_any_element(),
+    }
 }
 
 /// Asks the shell to open `id`; the shell's OpenThreadLink handler takes it.

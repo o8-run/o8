@@ -14,6 +14,8 @@ mod browser_preview_geometry;
 mod conversation;
 #[path = "history.rs"]
 mod history;
+#[path = "lineage_view.rs"]
+mod lineage_view;
 #[path = "transcript_images.rs"]
 pub(crate) mod images;
 #[path = "prompt_actions.rs"]
