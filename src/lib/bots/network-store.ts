@@ -77,6 +77,25 @@ export function requireNetworkThread(threadId: string, sqlite: Database.Database
   if (!thread) throw new BotNetworkError('This network thread has no available local binding.', 'network_thread_unavailable');
   return thread;
 }
+
+/** Called inside local bus admission: only SQLite metadata, with file projection after commit. */
+export function bindNetworkExchange(message: AgentMessage, participants: NetworkParticipant[], sqlite: Database.Database = getSqlite()): BotNetworkThread {
+  ensureV77BotNetworkThreadSchema(sqlite);
+  const conversationId = message.conversation?.id;
+  if (!conversationId || ![1, 2].includes(participants.length)) throw new BotNetworkError('A bounded local exchange is required.', 'network_exchange_required');
+  const prior = listNetworkThreads(sqlite).find(t => t.conversationId === conversationId);
+  if (prior) return prior;
+  const threadId = `thoughts-network-${createHash('sha256').update(conversationId).digest('hex').slice(0, 40)}`;
+  const thread: BotNetworkThread = { threadId, conversationId, repoPath: message.repo,
+    participants, title: participants.map(p => p.agentName).join(' and '), createdAt: message.timestamp };
+  assertConversation(thread, conversationId, sqlite);
+  if (findNetworkThread(threadId, sqlite) || existsSync(getCanonicalChatHistoryPath(threadId))) {
+    throw new BotNetworkError('The generated exchange thread id is already in use.', 'network_thread_exists');
+  }
+  sqlite.prepare('INSERT INTO bot_network_threads(thread_id,repo_path,conversation_id,participants_json,title,created_at) VALUES (?,?,?,?,?,?)')
+    .run(threadId, thread.repoPath, conversationId, JSON.stringify(participants), thread.title, thread.createdAt);
+  return thread;
+}
 export function listNetworkSendIntents(threadId: string, sqlite: Database.Database = getSqlite()): NetworkSendIntent[] {
   ensureV77BotNetworkThreadSchema(sqlite);
   return (sqlite.prepare('SELECT * FROM bot_network_sends WHERE thread_id = ? ORDER BY created_at,client_id').all(threadId) as SendRow[]).map(sendView);

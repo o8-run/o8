@@ -81,8 +81,8 @@ through the thread API, while the roster lists the canonical member once.
 
 Membership changes have a local command seam only. This step adds no HTTP/MCP membership mutation route,
 remote join or automatic discovery enrollment. A global roster does not enable cross-repository message
-routing: the legacy bus continues to use each session's explicit repository and agent name. Network-thread
-reply dispatch and the network MCP profile are subsequent work.
+routing: the legacy bus continues to use each session's explicit repository and agent name. The following
+sections describe the local network-thread and MCP paths over that bus.
 
 ## Local network threads
 
@@ -146,7 +146,74 @@ thread while retaining its bus exchange.
 
 A composer acknowledgement means durable bus acceptance. `poll` means the message is available in
 the recipient inbox; `native` records the existing runtime handoff. Neither proves processing. The
-network MCP profile and two-local-session messaging proof are subsequent work; hosted delivery is held.
+local MCP profile below exposes those existing stages; hosted delivery is held.
+
+## Local network MCP profile
+
+An operator can launch the existing MCP source entrypoint with the `network` profile and one previously
+recorded local binding. Run it from the checkout using Node 22 and its installed dependencies:
+
+```sh
+O8_OPERATOR_MCP_PROFILE=network O8_NETWORK_BINDING_ID=a-returned-binding-id \
+  node --import tsx src/lib/mcp/operator-mcp-server.ts
+```
+
+The existing data-directory resolvers select the database. A binding is an explicit local storage and
+delivery reference, not an authentication claim. Launching the profile does not join presence, enroll
+a process, create membership, grant permissions or change credentials. A missing, removed or replaced
+binding refuses new sends and inbox reads. Recovery of a previously accepted receipt or saved page uses
+its recorded context. Normal agent workers and the operator's `o8_msg_*` tools keep their existing behavior.
+
+This profile is **stdio only**. It refuses HTTP transport, and its tools are absent from the ordinary
+operator HTTP registry. It uses the existing legacy MCP initialize flow and stateless per-request
+protocol negotiation, along with the existing bounded-result paging helper.
+
+Implemented domain tools:
+
+- `list_team({})` returns durable members, the caller's explicit binding and the bindings in its repository.
+  Membership remains visible while a session is offline. Source session ids are retained; a display-name
+  rename does not rewrite addresses or historical authors.
+- `send_message({to, text, requestId, replyToId?, close?})` takes a binding id from the team roster. The
+  sender comes from the local launch binding. A reply needs the latest message id and obeys the existing
+  exchange sequencing, close and turn-budget rules. Only an existing operator exchange can use
+  `to: "operator"` with `replyToId`; this is a reply, not a new human-question service.
+- `check_inbox({cursor?, limit?})` reads the target session inbox and acknowledges it through the returned
+  cursor using the existing bus semantics. Omit the cursor to resume its durable acknowledgement cursor.
+  Follow `hasMore` for later pages. Already native/acknowledged messages are skipped even with an older
+  explicit cursor; a lost inbox response is not replayed by this tool. An operator's separate
+  `o8_msg_inbox` view still reads without acknowledging on the target's behalf.
+
+`requestId` is required for sends and is scoped to the explicit launch binding. Reuse it with identical
+arguments after an uncertain result; changing the text, recipient, reply target or close flag conflicts.
+Different bindings may independently use the same client request id. The service records bus acceptance
+and the exchange's immutable thread-binding snapshots in one SQLite transaction. Canonical JSON history
+is projected after commit. A history-write failure returns an accepted receipt with projection `pending`;
+same-id retry or later inbox/catalog projection repairs the file without resending the message.
+Accepted sends remain recoverable by the same request id and original arguments after the target's
+presence is replaced or removed; new acceptance still requires the exact current delivery context.
+
+The returned exchange thread can be assigned as a member's `home` using the local membership command.
+No home thread is chosen automatically when a member has several sessions or conversations. Existing
+operator and peer threads are reused by exchange id, and both peers retain their own author identities.
+
+Receipts distinguish durable acceptance from the bus's `poll`, `native` or `failed` delivery field and note.
+`native` can mean a runtime handoff or a target inbox acknowledgement; none of these stages proves peer
+processing. There is no `message_status` tool with a stronger receipt, and no placeholder `ask_user` tool.
+
+Large results use `o8_result_page` in the same way as operator tools. Follow `nextArguments` to recover
+the saved result without repeating a send or inbox read. The saved pages are process-local, expire after
+five minutes or eviction, and are lost on process restart. The durable bus and inbox acknowledgements
+survive restart; saved result pages do not turn target inbox acknowledgement into replay or exactly-once
+delivery.
+Saved pages remain readable in their existing process/data-directory/profile/binding scope after a
+presence change. New inbox reads validate the exact binding and select/acknowledge its inbox together
+under one SQLite write transaction; file projection happens after that transaction commits.
+
+The proof in `tests/bot-network-mcp-real-path.test.ts` launches two independent scripted local stdio
+protocol clients through the actual entrypoint and dispatcher. A discovers B, sends, B checks its inbox
+and replies with correlation, and A receives the reply. It covers deduplication, restart/cursor behavior,
+failed file projection and immutable peer authorship. These are scripted sessions, **not live Claude Code
+or Grok Bot validation**. Hosted delivery, remote/tunneled endpoints, pairing and identity trust remain held.
 
 ## Grok provider and its mailbox
 

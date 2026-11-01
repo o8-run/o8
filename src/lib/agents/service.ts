@@ -188,6 +188,8 @@ function projectNetworkMessage(message: import('./types').AgentMessage, sqlite: 
 export interface AgentMessageAdmission {
   expectedTarget?: Pick<AgentPresence, 'agentId' | 'name' | 'repo' | 'runtime' | 'sessionKey'>;
   beforePersist?: () => void;
+  /** Local routing metadata in the same SQLite transaction; never file projection. */
+  afterPersist?: (message: import('./types').AgentMessage) => void;
 }
 function assertExpectedTarget(target: AgentPresence | null, expected: NonNullable<AgentMessageAdmission['expectedTarget']>) {
   if (!target || target.agentId !== expected.agentId || target.name !== expected.name || target.repo !== expected.repo
@@ -285,7 +287,9 @@ export async function postAgentMessage(
     persisted = admission ? sqlite.transaction(() => {
       admission.beforePersist?.();
       if (admission.expectedTarget) assertExpectedTarget(findAgentPresence({ agentId: admission.expectedTarget.agentId }, sqlite), admission.expectedTarget);
-      return persist();
+      const accepted = persist();
+      admission.afterPersist?.(accepted.message);
+      return accepted;
     }).immediate() : persist();
   } catch (error) {
     if (error instanceof AgentConversationError) {
