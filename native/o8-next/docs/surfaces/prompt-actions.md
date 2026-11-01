@@ -29,7 +29,9 @@ draft once. The prelude remains until it is sent through the normal queue.
 
 The serialized context must fit the existing 128 KiB native prelude limit. An
 oversized prefix offers compaction guidance before creating any conversation.
-Creation performs no automatic compaction or model call. The saved canonical
+Creation performs no automatic compaction and never sends an agent turn.
+Saving follows the server's existing auto-titling setting; the explicit
+continuation name is then applied as an operator title. The saved canonical
 prefix remains exact, including after a lost response and retry.
 
 Creation disables repeated presses. A failed attempt retains its destination id
