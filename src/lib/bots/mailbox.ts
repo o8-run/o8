@@ -8,6 +8,7 @@ import { existsSync, statSync } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { botTextPrefix } from './text';
 
 export interface MailboxMessage {
   id: string;
@@ -63,8 +64,8 @@ function parseTail(bytes: Buffer, start: number, limit: number): MailboxMessage[
         id: suppliedId ?? `byte-${position}`,
         key,
         role,
-        text: raw.text.slice(0, 20_000),
-        at: typeof raw.at === 'string' ? raw.at.slice(0, 40) : null,
+        text: botTextPrefix(raw.text, 20_000),
+        at: typeof raw.at === 'string' ? botTextPrefix(raw.at, 40) : null,
       };
       out.push({ message, timestamp: timestamp(message.at) });
     } catch {
