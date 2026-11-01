@@ -141,6 +141,7 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
   autoTitleInferenceEnabled: boolean; // Optional background inference; code fallback remains available.
+  autoSettleEnabled: boolean; // Settle threads whose PRs merged or whose worktrees were cleaned up.
   /** Opt-in: replay the repo's test command against a rebased branch in the
    *  merge gate (in addition to typecheck). Default off — tests can be slow. */
   mergeTestReplayEnabled: boolean;
@@ -344,6 +345,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   thinkingEffort: 'max',
   promptCachingEnabled: true,
   autoTitleInferenceEnabled: true,
+  autoSettleEnabled: true,
   mergeTestReplayEnabled: false,
   requireApproval: 'high-risk',
   orchestratorModel: MODEL_IDS.orchestratorDefault,
@@ -448,6 +450,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
     result.promptCachingEnabled = stored.promptCachingEnabled;
   }
   if (typeof stored.autoTitleInferenceEnabled === 'boolean') result.autoTitleInferenceEnabled = stored.autoTitleInferenceEnabled;
+  if (typeof stored.autoSettleEnabled === 'boolean') result.autoSettleEnabled = stored.autoSettleEnabled;
   if (typeof stored.mergeTestReplayEnabled === 'boolean') {
     result.mergeTestReplayEnabled = stored.mergeTestReplayEnabled;
   }
@@ -660,6 +663,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     promptCachingEnabled:
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
     autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled ?? OPERATOR_DEFAULTS_FALLBACK.autoTitleInferenceEnabled,
+    autoSettleEnabled: fileValues.autoSettleEnabled ?? OPERATOR_DEFAULTS_FALLBACK.autoSettleEnabled,
     mergeTestReplayEnabled:
       fileValues.mergeTestReplayEnabled ?? OPERATOR_DEFAULTS_FALLBACK.mergeTestReplayEnabled,
     requireApproval: fileValues.requireApproval ?? OPERATOR_DEFAULTS_FALLBACK.requireApproval,
@@ -740,6 +744,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     promptCachingEnabled:
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
     autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled !== undefined ? 'file' : 'default',
+    autoSettleEnabled: fileValues.autoSettleEnabled !== undefined ? 'file' : 'default',
     mergeTestReplayEnabled: fileValues.mergeTestReplayEnabled !== undefined ? 'file' : 'default',
     requireApproval: fileValues.requireApproval !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
@@ -874,6 +879,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
     stored.promptCachingEnabled = Boolean(update.promptCachingEnabled);
   }
   if (update.autoTitleInferenceEnabled !== undefined) stored.autoTitleInferenceEnabled = Boolean(update.autoTitleInferenceEnabled);
+  if (update.autoSettleEnabled !== undefined) stored.autoSettleEnabled = Boolean(update.autoSettleEnabled);
   if (update.mergeTestReplayEnabled !== undefined) {
     stored.mergeTestReplayEnabled = Boolean(update.mergeTestReplayEnabled);
   }

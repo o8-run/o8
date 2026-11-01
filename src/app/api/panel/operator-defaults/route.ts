@@ -320,6 +320,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     }
     update.promptCachingEnabled = body.promptCachingEnabled;
   }
+  if (body.autoSettleEnabled !== undefined) {
+    if (typeof body.autoSettleEnabled !== 'boolean') {
+      throw new Error('autoSettleEnabled must be boolean.');
+    }
+    update.autoSettleEnabled = body.autoSettleEnabled;
+  }
   if (body.autoTitleInferenceEnabled !== undefined) {
     if (typeof body.autoTitleInferenceEnabled !== 'boolean') {
       throw new Error('autoTitleInferenceEnabled must be boolean.');

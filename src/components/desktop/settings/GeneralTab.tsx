@@ -304,6 +304,14 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
             disabled={!values || busyField === 'autoTitleInferenceEnabled'}
             onToggle={(next) => { void updateField('autoTitleInferenceEnabled', next); }}
           />
+          <SettingsRow
+            icon={<ChatIcon />}
+            label="Auto-settle finished threads"
+            subtitle="Settle a thread when its PRs merge or auto-clean removes its worktree. Pinned threads and threads waiting on you stay put."
+            checked={values?.autoSettleEnabled !== false}
+            disabled={!values || busyField === 'autoSettleEnabled'}
+            onToggle={(next) => { void updateField('autoSettleEnabled', next); }}
+          />
         </SettingsGroup>
       </section>
 
