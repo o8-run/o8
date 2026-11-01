@@ -73,6 +73,14 @@ impl BotThread {
         })
     }
     fn anchor_index(&self, message: &MailboxMessage) -> Option<usize> {
+        if let Some(key) = &message.key {
+            // A missing provenance key means this exact record left the
+            // retained window; never alias a colliding public source id.
+            return self
+                .messages
+                .iter()
+                .position(|m| m.key.as_ref() == Some(key));
+        }
         let mut matching = self
             .messages
             .iter()

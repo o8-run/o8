@@ -81,7 +81,7 @@ it('mailbox reads valid lines, skips torn ones and refuses unsafe paths', async 
     JSON.stringify({ role: 'tool', text: 'x' }),
   ].join('\n'));
   expect(await readMailbox(path)).toEqual([
-    { id: 'm1', role: 'user', text: 'hi', at: '2026-10-31T22:00:00Z' },
-    { id: expect.stringMatching(/^byte-\d+$/), role: 'bot', text: 'hello', at: null },
+    { id: 'm1', key: 'id:m1', role: 'user', text: 'hi', at: '2026-10-31T22:00:00Z' },
+    { id: expect.stringMatching(/^byte-\d+$/), key: expect.stringMatching(/^byte:\d+$/), role: 'bot', text: 'hello', at: null },
   ]);
 });

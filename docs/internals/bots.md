@@ -36,6 +36,11 @@ Mailbox: `<dataDir>/bots/<house>/<agentId>/thread.jsonl`, appended one JSON obje
   before the 500-message display limit. Supplied ids are preserved in full, within the input byte budget,
   and their deduplication identities are separate from legacy fallback ids. Stable ids refer to immutable
   messages; use a new id for a new turn. This is not global history deduplication or an exactly-once guarantee.
+- Returned records carry a server-owned `key` with that same namespace (`id:<sourceId>` or
+  `byte:<absoluteOffset>`). Native reading anchors use this key, so a legacy record and an explicitly
+  identified record remain distinct even when their public ids and content are identical. The producer's
+  `id` is preserved unchanged. If an anchored key leaves the retained window, another record with the
+  same public id does not replace it.
 - When every retained message has a parseable ISO timestamp with an explicit timezone, messages are sorted
   chronologically with append order breaking equal-time ties. If any timestamp is missing or invalid,
   the entire window retains append order. Clock skew is not detected or repaired.

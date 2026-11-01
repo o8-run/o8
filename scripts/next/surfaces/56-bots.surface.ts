@@ -1,5 +1,5 @@
 /** Disposable mailbox files served by the production read-only bot routes. */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 
@@ -21,13 +21,24 @@ export default async function register({ dataDir }: SurfaceContext): Promise<Sur
   const { GET: thread } = await import('../../../src/app/api/bots/[id]/thread/route');
   let requests = 0;
   let failing = false;
+  let collisionCount = 0;
   return {
     routes: {
       'GET /api/bots': bots,
       'GET /__fixture/bots/requests': async () => Response.json({ requests }),
       'POST /__fixture/bots': async request => {
-        const body = await request.json() as { messages?: unknown[]; failing?: boolean };
-        if (Array.isArray(body.messages)) writeMessages(body.messages);
+        const body = await request.json() as { messages?: unknown[]; failing?: boolean; collisionCount?: number };
+        if (Array.isArray(body.messages)) { writeMessages(body.messages); collisionCount = 0; }
+        if ([42, 501, 502].includes(body.collisionCount ?? 0)) {
+          const identical = { role: 'bot', text: 'Identical sender text\n'.repeat(20), at: '2026-10-31T12:00:00.000Z' };
+          const messages = [identical, { ...identical, id: 'byte-0' }, ...Array.from({ length: body.collisionCount! - 2 }, (_, n) => ({
+            id: `collision-${n}`, role: 'bot', text: `Message ${n}`, at: '2026-10-31T12:00:00.000Z',
+          }))];
+          if (collisionCount > 0 && body.collisionCount! >= collisionCount) {
+            appendFileSync(mailbox, messages.slice(collisionCount).map(m => JSON.stringify(m)).join('\n') + '\n');
+          } else writeMessages(messages);
+          collisionCount = body.collisionCount!;
+        }
         if (typeof body.failing === 'boolean') failing = body.failing;
         return Response.json({ ok: true });
       },

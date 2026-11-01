@@ -36,6 +36,10 @@ pub(crate) struct BotEntry {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub(crate) struct MailboxMessage {
     pub id: String,
+    /// Record provenance is separate from the producer's public id. Older
+    /// servers omit it, retaining the previous best-effort id matching.
+    #[serde(default)]
+    pub key: Option<String>,
     pub role: String,
     pub text: String,
     #[serde(default)]

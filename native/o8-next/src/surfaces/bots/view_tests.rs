@@ -28,6 +28,113 @@ fn open_bot(
     (fixture, shell, visual, view)
 }
 
+fn identical_messages(fixture: &Fixture, count: usize) {
+    let url = fixture.client.url("/__fixture/bots").unwrap();
+    fixture
+        .client
+        .request("POST", &url)
+        .send_json(json!({"collisionCount":count}))
+        .unwrap();
+}
+
+#[gpui::test]
+fn identical_legacy_and_source_rows_keep_the_exact_reader_occurrence_and_pixel_offset(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::start_mode(false, "--bots");
+    identical_messages(&fixture, 42);
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("identical-reader.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    shell.update_in(&mut visual, |s, window, cx| {
+        s.execute(Command::Bot("grok:agent-1".into()), window, cx)
+    });
+    ready(&shell, &mut visual);
+    let view = shell.read_with(&visual, |s, _| {
+        let tab = s.active().unwrap();
+        let Some(Content::Bot(view)) = s.content.get(&s.key(&tab)) else {
+            panic!("bot mirror")
+        };
+        view.clone()
+    });
+    view.update(&mut visual, |v, _| {
+        assert_eq!(v.messages.len(), 42);
+        assert_eq!(v.messages[0].id, "byte-0");
+        assert_eq!(v.messages[0].id, v.messages[1].id);
+        assert_eq!(v.messages[0].text, v.messages[1].text);
+        assert_eq!(v.messages[0].at, v.messages[1].at);
+        let row = v.scroll.bounds_for_item(1).expect("second identical row");
+        v.scroll
+            .set_offset(point(px(0.), v.scroll.bounds().top() - row.top() - px(17.)));
+    });
+    draw(&mut visual);
+    assert_eq!(view.read_with(&visual, |v, _| v.scroll.top_item()), 1);
+    let before = reading_position(&view, &mut visual).1;
+    refresh(&shell, &view, &mut visual);
+    assert_eq!(
+        view.read_with(&visual, |v, _| v.scroll.top_item()),
+        1,
+        "refresh must retain the second identical occurrence"
+    );
+    assert!((reading_position(&view, &mut visual).1 - before).abs() < px(1.));
+    identical_messages(&fixture, 501);
+    refresh(&shell, &view, &mut visual);
+    assert_eq!(view.read_with(&visual, |v, _| v.messages.len()), 500);
+    assert_eq!(
+        view.read_with(&visual, |v, _| v.scroll.top_item()),
+        0,
+        "the legacy occurrence leaves the capped window; the same source occurrence remains"
+    );
+    assert_eq!(
+        view.read_with(&visual, |v, _| v.messages[0].id.clone()),
+        "byte-0"
+    );
+    assert!(
+        (reading_position(&view, &mut visual).1 - before).abs() < px(1.),
+        "rollover preserves the within-row pixel position"
+    );
+    view.update(&mut visual, |v, _| v.scroll.scroll_to_bottom());
+    draw(&mut visual);
+    identical_messages(&fixture, 502);
+    refresh(&shell, &view, &mut visual);
+    let (offset, maximum) = view.read_with(&visual, |v, _| {
+        (v.scroll.offset().y, v.scroll.max_offset().height)
+    });
+    assert!(
+        (maximum + offset).abs() < px(2.),
+        "bottom following remains intact after identical rows leave the window"
+    );
+    // Also exercise the opposite collision: the legacy record leaves while
+    // the supplied record with the same public id is still retained.
+    identical_messages(&fixture, 42);
+    refresh(&shell, &view, &mut visual);
+    view.update(&mut visual, |v, _| {
+        let first = v.scroll.bounds_for_item(0).unwrap();
+        v.scroll.set_offset(point(
+            px(0.),
+            v.scroll.bounds().top() - first.top() - px(17.),
+        ));
+    });
+    draw(&mut visual);
+    assert_eq!(view.read_with(&visual, |v, _| v.scroll.top_item()), 0);
+    assert!(view.read_with(&visual, |v, _| v.scroll.offset().y < px(0.)));
+    identical_messages(&fixture, 501);
+    refresh(&shell, &view, &mut visual);
+    assert_eq!(
+        view.read_with(&visual, |v, _| v.messages[0].id.clone()),
+        "byte-0"
+    );
+    assert_eq!(
+        view.read_with(&visual, |v, _| v.scroll.offset().y),
+        px(0.),
+        "an expired legacy anchor resets to the oldest retained message instead of aliasing the supplied id"
+    );
+}
+
 fn requests(fixture: &Fixture) -> u64 {
     fixture
         .client

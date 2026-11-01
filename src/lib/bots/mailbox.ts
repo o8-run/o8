@@ -11,6 +11,8 @@ import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface MailboxMessage {
   id: string;
+  /** Server-owned record identity; source ids and legacy byte offsets are separate namespaces. */
+  key: string;
   role: 'user' | 'bot' | 'system';
   text: string;
   at: string | null;
@@ -59,6 +61,7 @@ function parseTail(bytes: Buffer, start: number, limit: number): MailboxMessage[
       seen.add(key);
       const message: MailboxMessage = {
         id: suppliedId ?? `byte-${position}`,
+        key,
         role,
         text: raw.text.slice(0, 20_000),
         at: typeof raw.at === 'string' ? raw.at.slice(0, 40) : null,

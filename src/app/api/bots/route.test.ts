@@ -49,7 +49,7 @@ it('thread route returns mailbox messages and the deep link; unknown bots 404', 
   writeFileSync(join(dir, 'thread.jsonl'), `${JSON.stringify({ id: 'a', role: 'user', text: 'yo' })}\n`);
   const id = encodeURIComponent(`grok:${AGENT}`);
   const body = await (await THREAD(req(`/api/bots/${id}/thread`), { params: Promise.resolve({ id }) })).json();
-  expect(body.messages).toEqual([{ id: 'a', role: 'user', text: 'yo', at: null }]);
+  expect(body.messages).toEqual([{ id: 'a', key: 'id:a', role: 'user', text: 'yo', at: null }]);
   expect(body.externalUrl).toBe(`grokbot://app/v1/agent?id=${AGENT}`);
   const missing = await THREAD(req('/api/bots/x/thread'), { params: Promise.resolve({ id: 'x' }) });
   expect(missing.status).toBe(404);
@@ -64,7 +64,7 @@ function mailbox() {
 const message = (id: string, at = '2026-10-31T12:00:00Z', text = id) =>
   JSON.stringify({ id, role: 'bot', text, at });
 
-async function threadMessages(): Promise<Array<{ id: string; text: string; at: string | null }>> {
+async function threadMessages(): Promise<Array<{ id: string; key?: string; text: string; at: string | null }>> {
   const response = await THREAD(req(`/api/bots/grok%3A${AGENT}/thread`), {
     params: Promise.resolve({ id: `grok:${AGENT}` }),
   });
@@ -81,6 +81,15 @@ it('thread route deduplicates stable ids before limiting and orders timestamped 
     ...Array.from({ length: 510 }, () => message('new', '2026-10-31T12:01:00Z', 'duplicate')),
   ].join('\n') + '\n');
   expect((await threadMessages()).map(m => [m.id, m.text])).toEqual([['old', 'old'], ['new', 'new']]);
+});
+
+it('thread route distinguishes identical legacy/source occurrences without changing source ids', async () => {
+  const identical = { role: 'bot', text: 'identical', at: '2026-10-31T12:00:00Z' };
+  writeFileSync(mailbox(), [JSON.stringify(identical), JSON.stringify({ ...identical, id: 'byte-0' })].join('\n') + '\n');
+  const messages = await threadMessages();
+  expect(messages.map(m => m.id)).toEqual(['byte-0', 'byte-0']);
+  expect(messages[0].key).not.toEqual(messages[1].key);
+  expect(messages.map(m => m.key)).toEqual(['byte:0', 'id:byte-0']);
 });
 
 it('thread route preserves append order when timestamps are absent or invalid', async () => {
