@@ -34,7 +34,7 @@ the existing operator-defaults route unless another owner is named.
 | Classic tab / section | Controls (all dynamic rows included) | Baseline | Current / residual |
 | --- | --- | --- | --- |
 | Shell / navigation | General, Account, Appearance, Voice, Permissions; Dispatch, Providers; Worktrees & storage, Projects, Git & PRs, Indexing; MCP, Mobile; Analytics, Diagnostics, About | partial | partial: native General, Dispatch, Models & providers, Git & PRs, Worktrees & storage, API keys only |
-| Shell / search | Search settings, ranked matches, Enter first match, Escape clear, section target | partial | partial: native cross-page field filtering and Cmd/Ctrl+F; no clear action or section context yet |
+| Shell / search | Search settings, ranked matches, Enter first match, Escape clear, section target | partial | partial: global field filtering includes section names, Clear search, Cmd/Ctrl+F and Escape clear; ranked result navigation and Enter-to-target remain |
 | Shell / history | Back, Forward, Back to workspace, section menus | missing | missing |
 | Shell / feedback | Send feedback entry | missing | missing |
 | General / Startup | Launch at login | missing | missing: classic `autostart_set` host command, no native Settings bridge |
@@ -59,7 +59,7 @@ the existing operator-defaults route unless another owner is named.
 | Voice / Symon conversations | List saved conversations; Open transcript; Back; Refresh | missing | missing |
 | Voice / iMessage bridge access | Allow Symon on iMessage; Use OpenClaw for iMessage; connection setup | missing | skipped: access and authentication |
 | Voice / Native Messages receiver | Enabled; authorized senders; Save; confirm native receiver; status | missing | skipped: sender authorization |
-| Permissions / macOS permissions | Microphone, Accessibility, Input Monitoring, Screen Recording, Full Disk Access; check/request/open settings; relaunch | missing | skipped: permission/security reviewer |
+| Permissions / macOS permissions | Microphone, Accessibility, Input Monitoring, Screen Recording; check/request/open settings; relaunch | missing | skipped: permission/security reviewer |
 | Dispatch / Fleet | Capacity presets (2, 5, 8); Concurrent agents | partial | partial: numeric concurrency exists, preset controls missing |
 | Dispatch / Fleet | Overlapping work: Warn/Block | present | present |
 | Dispatch / Supervision | Automatically fix failed checks; Investigate failures in chat; Automatically review completed work; Merge approval | present | present |
@@ -127,8 +127,10 @@ the existing operator-defaults route unless another owner is named.
 | Mobile / Symon Messages | Text Symon; allowed phone number; save/status | missing | skipped: sender access |
 | Mobile / Pairing | Show pairing QR | missing | skipped: credentials |
 | Mobile / Paired devices | Refresh; revoke/remove each device | missing | skipped: credentials |
-| Analytics / Totals | Cost/tokens/requests; date-range and refresh controls | missing | missing: existing native Usage surface may cover part; not yet verified |
-| Analytics / Spend over time, By surface | Chart range; grouping; breakdown | missing | missing |
+| Analytics / Autonomy | Clean merge receipts; success rate; partial or failed; outcomes | missing | missing |
+| Analytics / Governance | Approval rate; pending; rejected; review latency | missing | missing |
+| Analytics / Totals | Total spend, messages, cost/hour, input/output tokens, cache hit rate; date-range and refresh controls | missing | missing: existing native Usage surface may cover part; not yet verified |
+| Analytics / Spend over time, By surface | Spend chart; per-surface breakdown | missing | missing |
 | Diagnostics / Connection health | Check installed tools / Check again; each installed tool's status | missing | missing: authentication text skipped; install/version facts in scope |
 | Diagnostics / Feature diagnostics | Shipped feature audit; default-off feature flags; Refresh; release age/first shipped/promotion status | missing | missing |
 | Diagnostics / Maintenance | Archive old Codex sessions; result counts/duration | missing | missing: no maintenance executed by this task |
@@ -141,15 +143,18 @@ the existing operator-defaults route unless another owner is named.
 | About / Links | GitHub; Documentation; Releases | missing | missing |
 | About / Onboarding | Replay onboarding | missing | missing: native onboarding surface not present |
 | About / Report an issue | Enable sharing; Bug/Request; Message; attach/paste/drop/remove image; Send; status | missing | skipped: upload/redaction and outbound report review |
-| About / Credits | Contributor attribution | missing | missing |
+| About / Credits | Framework/runtime and design credits | missing | missing |
 | About / Developer | Reset + run onboarding; Preview onboarding; View detection | missing | missing: classic host onboarding |
+| Legacy Workers / tokens and fleet | Label; Scope; Max workers; create/copy/revoke token; remote runtime flag; fleet status | missing | skipped: credentials and remote access; not routed by current SettingsPage |
+| Legacy Cloud workers / team | Label; Team ID; create/connect/revoke/refresh | missing | skipped: credentials and account; not routed by current SettingsPage |
+| About / Release notes signup | Email entry; subscribe; status | missing | skipped: account details and outbound subscription |
 | Quick drawer / Account | Account/sign in | missing | skipped: authentication; existing native profile surface untouched |
 | Quick drawer / Settings | Open Settings (Cmd+,) | present | present in existing native profile surface |
 | Quick drawer / Appearance | Expand; Light; Dark; All Glass; selected state; close after choose | present | present in existing native profile surface; no rail changes |
 | Quick drawer / Get help | Expand; Keyboard shortcuts (Cmd+/); Community Discord; Documentation | present | present in existing native profile surface; no rail changes |
 | Quick drawer / capacity helper | Plan capacity rows; refresh; select/register plan | missing | skipped: account/billing (helper is not mounted by current drawer) |
 | Quick drawer / theme helper | Light; Dark; glass surface toggle | partial | partial: current drawer uses three complete looks; helper itself is not mounted |
-| Keyboard / shortcuts | Open searchable shortcut help and close it, keyboard scrolling | present | present as separate native modal; Settings entry missing |
+| Keyboard / shortcuts | Open shortcut help and close it, keyboard scrolling | present | present as separate native modal; Settings entry missing |
 | Sounds | No separate Sounds tab, sound picker, volume or mute control exists in the frozen Settings references | present | present as an inventory fact; do not invent preferences. Spoken updates are listed under Voice |
 
 ## Execution order
@@ -167,3 +172,6 @@ Each implementation commit adds or updates GPUI tests that activate real debug
 selectors through the shell. Run only affected native tests with Rust 1.97.1 and
 the worktree target cache. Serial fixture execution avoids shared-store races.
 No full suite, npm install, push, PR, release, rail changes, or secret changes.
+
+- General: `settings_parity_general_groups_and_global_search` failed on the absent Conversations group, then passed (1/1). It clicks the persisted usage switch, filters across pages, clears with the button, and clears with Escape without closing Settings.
+- Baseline: `settings_opens_from_shell_command_palette` passed (1/1).

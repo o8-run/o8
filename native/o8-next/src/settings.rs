@@ -132,7 +132,11 @@ pub(crate) struct Settings {
 impl EventEmitter<Close> for Settings {}
 impl Settings {
     pub fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(Composer::new);
+        let search = cx.new(|cx| {
+            let mut input = Composer::new(cx);
+            input.placeholder = "Search settings".into();
+            input
+        });
         let subscription = cx.observe(&search, |this, _, cx| this.changed(cx));
         let focus = cx.focus_handle();
         focus.focus(window);

@@ -18,13 +18,53 @@ pub struct Field {
 impl Field {
     pub fn matches(&self, query: &str) -> bool {
         let text = format!(
-            "{} {} {} {}",
-            self.id, self.label, self.section, self.detail
+            "{} {} {} {} {} {}",
+            self.id,
+            self.label,
+            self.section,
+            self.detail,
+            self.group(),
+            self.section_label()
         )
         .to_lowercase();
         query
             .split_whitespace()
             .all(|word| text.contains(&word.to_lowercase()))
+    }
+    pub fn section_label(&self) -> &'static str {
+        SECTIONS
+            .iter()
+            .find(|(id, _)| *id == self.section)
+            .map(|(_, label)| *label)
+            .unwrap_or(self.section)
+    }
+    pub fn group(&self) -> &'static str {
+        match self.id {
+            "autoTitleInferenceEnabled" => "Conversations",
+            "presentationQuietMode" | "notificationsReviewReady" => "Presentation",
+            "productTelemetryEnabled" | "crashReportsEnabled" | "telemetryOptIn" => "Privacy",
+            "parallelCap" | "overlapGate" => "Fleet",
+            "healBotEnabled"
+            | "supervisorAutoEscalate"
+            | "reviewContinuation"
+            | "requireApproval"
+            | "updateAutoApply" => "Supervision",
+            "packetExplainerEnabled" | "buyinDocEnabled" => "Change reports",
+            "meteredPacketCostCapUsd" | "meteredPacketInputTokenCap" => "Task spending limits",
+            "brainRoutingMode" | "brainCodexModel" | "brainCodexEffort" => "Engineering Brain",
+            "codexAppThreads" => "Codex app",
+            "thinkingEffort" | "promptCachingEnabled" => "Thinking & task models",
+            "classAComposer" | "brainUseClaudeCli" | "brainWarmupEnabled" | "workersUseBrain" => {
+                "Brain advanced"
+            }
+            "branchPrefix" => "Branches",
+            "commitAttributionEnabled" => "Commits",
+            "prLinkDestination" => "Pull requests",
+            "worktreeMaxCount" | "worktreeMaxTotalGb" => "Automatic cleanup",
+            "workspaceParkingMode" => "Workspace parking",
+            "storageReserveRatio" | "storageReserveFloorGb" => "Minimum free space",
+            _ => "Task limits & setup",
+        }
     }
     pub fn display(&self, value: &Value) -> String {
         match self.kind {

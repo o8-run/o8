@@ -74,6 +74,8 @@ impl Settings {
             "escape" if !self.busy => {
                 if self.editor.is_some() || self.confirm.is_some() {
                     self.cancel(window, cx);
+                } else if !self.search.read(cx).text.is_empty() {
+                    self.clear_search(cx);
                 } else {
                     cx.emit(Close);
                 }
@@ -208,21 +210,36 @@ impl Settings {
             }
         }
         div()
+            .debug_selector(move || format!("settings-row-{}", field.id))
             .flex()
-            .flex_col()
-            .gap(px(8.))
+            .flex_wrap()
+            .items_center()
+            .gap(px(16.))
             .py(px(16.))
             .border_b_1()
             .border_color(theme().border)
-            .child(div().text_size(px(13.5)).child(field.label))
             .child(
                 div()
-                    .text_size(px(11.))
-                    .text_color(theme().text_muted)
-                    .child(detail),
+                    .flex_1()
+                    .min_w(px(200.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(div().text_size(px(13.5)).child(field.label))
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme().text_muted)
+                            .child(detail),
+                    ),
             )
-            .child(controls)
+            .child(controls.max_w(px(350.)).items_center().justify_end())
             .into_any_element()
+    }
+    fn clear_search(&mut self, cx: &mut Context<Self>) {
+        self.search.update(cx, |s, cx| s.clear(cx));
+        self.scroll.set_offset(gpui::point(px(0.), px(0.)));
+        self.changed(cx);
     }
     fn key_row(
         &mut self,
@@ -566,7 +583,24 @@ impl Render for Settings {
             if fields.is_empty() {
                 content = content.child(empty("No settings match this search."));
             }
+            let mut previous = None;
             for field in fields {
+                let group = (field.section, field.group());
+                if previous != Some(group) {
+                    content = content.child(
+                        div()
+                            .debug_selector(move || format!("settings-group-{}", field.group()))
+                            .mt(px(16.))
+                            .text_size(px(11.))
+                            .text_color(theme().text_muted)
+                            .child(if query.len() >= 2 {
+                                format!("{} · {}", field.section_label(), field.group())
+                            } else {
+                                field.group().into()
+                            }),
+                    );
+                    previous = Some(group);
+                }
                 content = content.child(self.row(field, window, cx));
             }
         }
@@ -631,14 +665,26 @@ impl Render for Settings {
                     .id("settings-search")
                     .debug_selector(|| "settings-search".into())
                     .flex()
-                    .flex_col()
+                    .items_center()
+                    .gap(px(8.))
                     .w_full()
                     .min_w_0()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(|this, _, window, cx| this.search.read(cx).focus.focus(window)),
                     )
-                    .child(self.search.clone()),
+                    .child(div().flex_1().min_w_0().child(self.search.clone()))
+                    .when(!query.is_empty(), |v| {
+                        v.child(self.button(
+                            "settings-search-clear".into(),
+                            "Clear search".into(),
+                            true,
+                            false,
+                            window,
+                            cx,
+                            |this, _, cx| this.clear_search(cx),
+                        ))
+                    }),
             )
             .when_some(self.error.clone(), |v, error| {
                 v.child(

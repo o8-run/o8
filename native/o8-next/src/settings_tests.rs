@@ -614,3 +614,6 @@ fn settings_fixture_controls_and_toml_editor_fit_the_workspace(cx: &mut TestAppC
         "the TOML input must receive real pointer input inside the window"
     );
 }
+
+#[path = "settings_parity_tests.rs"]
+mod parity;
