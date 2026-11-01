@@ -1,4 +1,5 @@
 import { workerParentEnvironment } from './worker-environment';
+import { providerInstanceEnvironment } from './instance-context';
 import { deferredMcpArgumentsForCheck } from './deferred-mcp-arguments';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
@@ -112,7 +113,8 @@ export function childEnvironment(options: SpawnOptions & { env?: Record<string, 
       for (const [name, value] of Object.entries(process.env)) if (providerCredentialName(name)) parent[name] = value;
     }
   }
-  const input = { ...parent, ...options.env };
+  // The active provider instance's home selector and env win (empty for the default instance).
+  const input = { ...parent, ...options.env, ...providerInstanceEnvironment(options.runtimeId) };
   return resolvedEnvironment(input, options.inject !== false && permitsApiCredentials(options.runtimeId), { ...options, deniedValues: [...((options as Context).deniedValues ?? []), ...(options.env ? contexts.get(options.env)?.deniedValues ?? [] : [])] });
 }
 

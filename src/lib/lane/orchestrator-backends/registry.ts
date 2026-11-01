@@ -28,6 +28,7 @@ import { withOperatingAgreement } from '@/lib/operator/operating-agreement';
 import { applyOrchestrationMode } from './orchestration-mode';
 import { withVisualizationInstructions } from '@/lib/visualizations/orchestrator-prompt';
 import { assertOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
+import { runWithThreadProviderInstance } from '@/lib/providers/instance-launch';
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
@@ -49,7 +50,9 @@ export function withOrchestrationMode(
       const resolved = applyOrchestrationMode(message, options);
       const prompt = ['openclaw', 'hermes', 'acp', 'opencode', 'muse'].includes(backend.id)
         ? withVisualizationInstructions(resolved.message, repoPath, options?.threadId) : resolved.message;
-      return backend.sendTurn(repoPath, withOperatingAgreement(prompt), onEvent, resolved.options);
+      // Settings › Providers instances: the thread's bound instance (binary, home, env) for this turn.
+      return runWithThreadProviderInstance(backend.id, options?.threadId,
+        () => backend.sendTurn(repoPath, withOperatingAgreement(prompt), onEvent, resolved.options));
     },
   };
 }
