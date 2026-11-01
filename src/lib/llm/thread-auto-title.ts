@@ -237,8 +237,9 @@ export function maybeQueueThreadAutoTitle(filePath: string): void {
       const nextTitle = generated ?? fallback;
       if (!nextTitle) return;
       // An LLM miss must not clobber an existing title with a same-quality
-      // code crop — only fill code titles into blank/legacy slots once.
-      if (!generated && decision.reason === 'refresh') return;
+      // code crop — only fill code titles into blank/legacy slots once. The
+      // refresh still counts as tried, or every streamed save would retry it.
+      const keepTitle = !generated && decision.reason === 'refresh';
 
       // The server's turn writer and the Next routes save this file from
       // separate processes; re-read and write under the shared file lock.
@@ -247,8 +248,10 @@ export function maybeQueueThreadAutoTitle(filePath: string): void {
         // Another process may have titled or renamed it during the model call.
         const freshMessages = Array.isArray(fresh.messages) ? fresh.messages.length : 0;
         if (!decideAutoTitle({ ...fresh, messageCount: freshMessages }).run) return false;
-        fresh.title = nextTitle;
-        fresh.titleSource = generated ? 'llm' : 'code';
+        if (!keepTitle) {
+          fresh.title = nextTitle;
+          fresh.titleSource = generated ? 'llm' : 'code';
+        }
         fresh.autoTitledAtCount = messages.length;
         persistCanonicalChatHistoryRecord(
           tabId,
@@ -256,7 +259,7 @@ export function maybeQueueThreadAutoTitle(filePath: string): void {
         );
         return true;
       });
-      if (!titled) return;
+      if (!titled || keepTitle) return;
       console.log(`[thread-auto-title] ${decision.reason}: "${nextTitle}" (${generated ? 'llm' : 'code'})`);
     } catch {
       // best-effort — never break the persist path
