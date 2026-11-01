@@ -95,7 +95,13 @@ directory and env (T3's "Codex · work").
   with the o8 master key in `credentials`. Reads return secrets only as
   `{secret: true, configured: true}`. Nothing goes to settings.toml. The same
   name policy as the Local ACP env editor applies (no `O8_`/`CODEX_`/`OPENAI_`…
-  prefixes, no provider credential names; credential-like names must be secret).
+  prefixes, no provider credential names; credential-like names must be secret),
+  with one exception: a runtime (non-ACP) instance may set provider API key names
+  (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) as secrets only. Those replace the
+  shared Settings › API keys for that instance's sessions only, applied after the
+  credential policy in `childEnvironment`. The Local ACP editor keeps the global rules.
+- Deleting an instance removes its `configuration` row and all its `credentials`
+  rows (`deleteAcpEnvironment`). Reads never create the sqlite file.
 - **Migration:** classic's Local ACP slot (`local-acp.json`) is presented as the
   instance `acp` (default, "Local ACP · <name>"). It is still read and written by
   `local-connection.ts` and its env keeps its `acpEnvironmentId(connection)` key,
@@ -125,9 +131,10 @@ turn in an AsyncLocalStorage context. Inside it:
 - `resolveLocalAcpLaunch` / `localAcpProcessLaunch` use an ACP instance's
   command and env; `assertLocalAcpEnvironmentCurrent` checks its revision.
 
-**o8 next UI:** the list shows an "Instances" group ("Codex · work"); its detail
+**o8 next UI:** each instance row ("Codex · work") sits right under its base
+runtime row, and the detail panel starts level with the selected row. Its detail
 panel (`providers_instance.rs`) edits name, binary, home and env (rows with a
-Secret/Plain toggle; saved secrets show "•••••• saved" and are kept unless
+Secret/Plain toggle; a Secret value is masked while typing and cannot be copied; saved secrets show "•••••• saved" and are kept unless
 retyped), and has Delete… → "Delete instance" / "Keep". The Local ACP slot's
 command stays read-only there (edited by classic); its env is editable.
 
@@ -141,14 +148,14 @@ Classic's picker is unchanged.
 
 New code lives under `src/surfaces/`, which is owned by the surface. Shared Settings
 changed in three places, about 5 lines (`settings.rs`, `settings_fields.rs`,
-`settings_view.rs`). The `o8 next surface boundary` check allows only one
+`settings_view.rs`), plus a `masked` flag on the shared `Composer` (`src/composer.rs`). The `o8 next surface boundary` check allows only one
 `register_surfaces!` line outside surface modules, so a PR with these lines needs
 the `shell-work` label, the same as #5224's Settings work.
 
 ## Next slices
 
-1. Classic composer picker for instances; per-instance API keys (blocked today
-   by the env name policy for provider credentials); warm/persistent runtime
-   processes started outside a turn do not see instance context.
+1. Warm/persistent runtime processes started outside a turn do not see instance
+   context; ACP instances have no model list of their own; the Local ACP slot's
+   command is still edited in classic. Classic's picker is out of scope.
 2. Hide disabled runtimes even when they are the current or default lead, which
    needs a lead fallback.
