@@ -425,6 +425,12 @@ fn settings_providers_second_codex_instance_edit_env_and_delete(cx: &mut TestApp
     assert!(cx.debug_bounds("provider-instance-row-codex-new").is_some());
     assert!(cx.debug_bounds("provider-instance-detail").is_some());
     assert_eq!(instances(&fixture)[0]["runtime"], "codex");
+    // The instance sits right under its base runtime, and the detail starts level with it.
+    let base = cx.debug_bounds("provider-row-codex").expect("codex row");
+    let row = cx.debug_bounds("provider-instance-row-codex-new").unwrap();
+    let detail = cx.debug_bounds("provider-instance-detail").unwrap();
+    assert!(row.top() > base.top() && row.top() - base.bottom() < gpui::px(20.), "{base:?} {row:?}");
+    assert!((detail.top() - row.top()).abs() < gpui::px(4.), "{row:?} {detail:?}");
 
     click(cx, "provider-instance-name");
     for _ in 0..3 {
@@ -442,6 +448,10 @@ fn settings_providers_second_codex_instance_edit_env_and_delete(cx: &mut TestApp
     click(cx, "provider-env-value-0");
     cx.simulate_input("fixture-value");
     click(cx, "provider-env-secret-0");
+    let masked = panel(&shell, cx).read_with(cx, |p, cx| {
+        p.instance.as_ref().unwrap().read(cx).env[0].value.read(cx).masked
+    });
+    assert!(masked, "a secret value is masked while typing");
     click(cx, "provider-instance-save");
     for _ in 0..100 {
         draw_all(cx);

@@ -269,6 +269,9 @@ pub(crate) struct Providers {
     generation: u64,
     pub revision_count: u64,
     pub painted: Rc<Cell<u64>>,
+    /// Where the selected row sits in the list, so the detail lines up with it.
+    selected_top: Rc<Cell<f32>>,
+    list_top: Rc<Cell<f32>>,
 }
 
 impl Providers {
@@ -296,6 +299,8 @@ impl Providers {
             generation: 0,
             revision_count: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
+            selected_top: Rc::new(Cell::new(0.)),
+            list_top: Rc::new(Cell::new(0.)),
         };
         view.load(cx);
         view
@@ -881,20 +886,40 @@ impl Render for Providers {
             .flex()
             .flex_col()
             .gap(px(6.));
+        // Each runtime's saved instances sit right under its row.
+        let selected = self.selected.clone();
+        let marker = |cell: Rc<Cell<f32>>| {
+            gpui::canvas(|_, _, _| (), move |bounds, _, window, _| {
+                let top: f32 = bounds.origin.y.into();
+                if (cell.get() - top).abs() > 0.5 {
+                    cell.set(top);
+                    window.refresh();
+                }
+            })
+            .h(px(0.))
+            .w_full()
+        };
+        let mut placed = std::collections::BTreeSet::new();
+        let mut rows: Vec<(Option<String>, gpui::AnyElement)> = Vec::new();
         for runtime in self.runtimes.clone() {
-            list = list.child(self.row(runtime, window, cx));
+            let id = runtime.id.clone();
+            rows.push((Some(id.clone()), self.row(runtime, window, cx).into_any_element()));
+            for item in self.instances.clone().into_iter().filter(|i| i.runtime == id) {
+                placed.insert(item.id.clone());
+                let key = format!("i:{}", item.id);
+                rows.push((Some(key), self.instance_row(item, window, cx).into_any_element()));
+            }
         }
-        if !self.instances.is_empty() {
-            list = list.child(
-                div()
-                    .pt(px(8.))
-                    .text_size(px(11.))
-                    .text_color(theme().text_muted)
-                    .child("Instances"),
-            );
+        for item in self.instances.clone().into_iter().filter(|i| !placed.contains(&i.id)) {
+            let key = format!("i:{}", item.id);
+            rows.push((Some(key), self.instance_row(item, window, cx).into_any_element()));
         }
-        for item in self.instances.clone() {
-            list = list.child(self.instance_row(item, window, cx));
+        for (key, row) in rows {
+            if key.is_some() && key == selected {
+                list = list.child(div().flex().flex_col().child(marker(self.selected_top.clone())).child(row));
+            } else {
+                list = list.child(row);
+            }
         }
         if self.loaded && self.runtimes.is_empty() {
             list = list.child(
@@ -906,6 +931,7 @@ impl Render for Providers {
         // The dialog needs the full content width (built-in grid, registry
         // rows), so it sits above the list rather than beside it.
         let dialog = self.add.clone();
+        let offset = (self.selected_top.get() - self.list_top.get()).max(0.);
         let side = if dialog.is_some() {
             None
         } else if let Some(detail) = self.instance.clone() {
@@ -942,7 +968,16 @@ impl Render for Providers {
                 v.child(div().debug_selector(|| "providers-error".into()).text_color(theme().danger).child(error))
             })
             .children(dialog)
-            .child(div().flex().items_start().gap(px(16.)).child(list).children(side))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(16.))
+                    .child(div().flex().flex_col().child(marker(self.list_top.clone())).child(list))
+                    // The detail starts level with the selected row so a row near the
+                    // bottom never opens a panel that is scrolled out of view.
+                    .children(side.map(|side| div().flex_1().min_w_0().flex().flex_col().mt(px(offset)).child(side))),
+            )
             .when(self.loaded && !self.busy, |v| {
                 v.child(div().debug_selector(|| "providers-loaded".into()).h(px(1.)))
             })
