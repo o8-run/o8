@@ -2,6 +2,39 @@ use super::prompt_acceptance_tests::{focus, wait};
 use super::*;
 
 #[gpui::test]
+fn native_composer_dogfood_saved_prompt_body_accepts_enter(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-input", cx);
+    cx.simulate_input("A multiline saved prompt");
+    click("composer-attach", cx);
+    click("attach-save-prompt", cx);
+    click("composer-prompt-field-2", cx);
+    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_input("First line");
+    cx.simulate_keystrokes("enter");
+    cx.simulate_input("Second line");
+    click("composer-prompt-submit", cx);
+    wait(&surface, cx, |s, cx| {
+        !s.composer.read(cx).controls.prompt.result.is_empty()
+    });
+    let repo = surface.read_with(cx, |s, cx| s.intent_repo(cx).unwrap());
+    let prompts: Value = fixture
+        .client
+        .get(
+            "/api/prompt-library",
+            &[("scope", "available"), ("repoPath", &repo)],
+        )
+        .unwrap();
+    assert!(
+        prompts["prompts"].as_array().unwrap().iter().any(|p| {
+            p["title"] == "A multiline saved prompt" && p["body"] == "First line\nSecond line"
+        }),
+        "Enter must persist a line break in the saved prompt body"
+    );
+}
+
+#[gpui::test]
 fn native_composer_retry_consumes_only_context_frozen_in_its_queue_item(app: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, visual) = open(app, &fixture);
