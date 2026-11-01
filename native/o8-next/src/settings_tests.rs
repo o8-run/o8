@@ -6,7 +6,8 @@ use gpui::Modifiers;
 fn click(cx: &mut VisualTestContext, selector: &str) {
     draw(cx);
     let selector: &'static str = Box::leak(selector.to_owned().into_boxed_str());
-    if selector.starts_with("key-")
+    if selector.starts_with("settings-nav-")
+        || selector.starts_with("key-")
         || selector.starts_with("setting-")
         || selector.starts_with("edit-")
         || selector.starts_with("settings-confirm-")
@@ -17,16 +18,23 @@ fn click(cx: &mut VisualTestContext, selector: &str) {
                 .debug_bounds(selector)
                 .unwrap_or_else(|| panic!("missing native control: {selector}"));
             let viewport = cx
-                .debug_bounds("settings-scroll")
+                .debug_bounds(if selector.starts_with("settings-nav-") {
+                    "settings-navigation"
+                } else {
+                    "settings-scroll"
+                })
                 .expect("settings scroll viewport");
-            if viewport.contains(&target.center()) {
+            if viewport.contains(&target.center())
+                && target.top() >= viewport.top()
+                && target.bottom() <= viewport.bottom()
+            {
                 break;
             }
             cx.simulate_event(gpui::ScrollWheelEvent {
                 position: viewport.center(),
                 delta: gpui::ScrollDelta::Pixels(gpui::point(
                     gpui::px(0.),
-                    gpui::px(if target.center().y > viewport.bottom() {
+                    gpui::px(if target.bottom() > viewport.bottom() {
                         -200.
                     } else {
                         200.
@@ -614,3 +622,6 @@ fn settings_fixture_controls_and_toml_editor_fit_the_workspace(cx: &mut TestAppC
         "the TOML input must receive real pointer input inside the window"
     );
 }
+
+#[path = "settings_parity_tests.rs"]
+mod parity;

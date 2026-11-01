@@ -2,7 +2,7 @@
 use crate::{
     client::Client,
     composer::{Composer, Submit},
-    settings_fields::{FIELDS, Field, Kind},
+    settings_fields::{Field, Kind, fields},
     settings_secret::Secret,
 };
 use gpui::{AppContext, Context, Entity, EntityInputHandler, EventEmitter, FocusHandle, Window};
@@ -106,6 +106,11 @@ struct Editor {
     input: Input,
 }
 pub(crate) struct Close;
+pub(crate) enum Action {
+    Appearance(&'static str),
+    Shortcuts,
+}
+impl EventEmitter<Action> for Settings {}
 pub(crate) struct Settings {
     client: Client,
     pub snapshot: Option<Snapshot>,
@@ -128,11 +133,25 @@ pub(crate) struct Settings {
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     scroll: gpui::ScrollHandle,
+    navigation: navigation::State,
+    indexing: indexing::State,
+    storage: storage::State,
+    diagnostics: diagnostics::State,
+    connections: connections::State,
+    about_version: Option<String>,
+    about_busy: bool,
+    about_status: String,
+    about_error: Option<String>,
 }
 impl EventEmitter<Close> for Settings {}
 impl Settings {
     pub fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(Composer::new);
+        let search = cx.new(|cx| {
+            let mut input = Composer::new(cx);
+            input.focus = input.focus.clone().tab_stop(true);
+            input.placeholder = "Search settings".into();
+            input
+        });
         let subscription = cx.observe(&search, |this, _, cx| this.changed(cx));
         let focus = cx.focus_handle();
         focus.focus(window);
@@ -158,6 +177,15 @@ impl Settings {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             scroll: gpui::ScrollHandle::new(),
+            navigation: navigation::State::default(),
+            indexing: indexing::State::default(),
+            storage: storage::State::default(),
+            diagnostics: diagnostics::State::default(),
+            connections: connections::State::default(),
+            about_version: None,
+            about_busy: false,
+            about_status: String::new(),
+            about_error: None,
         };
         view.load(false, cx);
         view
@@ -183,9 +211,7 @@ impl Settings {
                 match data {
                     Data::Defaults(mut snapshot) => {
                         // Never keep extra response fields as a native settings cache.
-                        snapshot
-                            .values
-                            .retain(|id, _| FIELDS.iter().any(|f| f.id == id));
+                        snapshot.values.retain(|id, _| fields().any(|f| f.id == id));
                         self.error = snapshot.toml.as_ref().and_then(|t| t.error.clone());
                         self.snapshot = Some(snapshot);
                         if mutation {
@@ -220,6 +246,7 @@ impl Settings {
                 self.open_field = None;
             }
         }
+        self.load_panel(false, cx);
         self.changed(cx);
     }
     fn read(client: &Client, keys: bool) -> Result<Data, RequestError> {
@@ -278,11 +305,33 @@ impl Settings {
         self.editor = None;
         self.confirm = None;
         self.conflict = false;
+        self.navigation.remember(section);
         self.section = section;
         self.search.update(cx, |s, cx| s.clear(cx));
         self.scroll
             .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
         self.load(false, cx);
+        if section == "indexing" {
+            self.load_indexing_counts(true, cx);
+        }
+        self.load_panel(false, cx);
+    }
+    fn load_panel(&mut self, force: bool, cx: &mut Context<Self>) {
+        if self.section == "about" {
+            self.load_about(force, cx);
+        }
+        if self.section == "connections" {
+            self.load_connections(force, cx);
+        }
+        if self.section == "diagnostics" {
+            self.load_diagnostics(force, cx);
+        }
+        if self.section == "storage" {
+            self.load_storage(force, cx);
+        }
+        if self.section == "indexing" {
+            self.load_indexing(force, cx);
+        }
     }
     fn locked(&self, field: &Field) -> bool {
         self.busy
@@ -290,11 +339,7 @@ impl Settings {
             || self.snapshot.as_ref().is_none_or(|s| {
                 !s.values.contains_key(field.id)
                     || s.sources.get(field.id).is_some_and(|s| s == "env")
-                    || field.id == "notificationsReviewReady"
-                        && s.values
-                            .get("presentationQuietMode")
-                            .and_then(Value::as_bool)
-                            == Some(true)
+                    || field.dependency_reason(&s.values).is_some()
             })
     }
     fn begin(&mut self, target: Target, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -311,6 +356,7 @@ impl Settings {
         } else {
             let input = cx.new(Composer::new);
             input.update(cx, |input, cx| {
+                input.focus = input.focus.clone().tab_stop(true);
                 input.replace_text_in_range(None, text, window, cx)
             });
             input.read(cx).focus.focus(window);
@@ -444,3 +490,30 @@ impl Settings {
 }
 #[path = "settings_view.rs"]
 mod view;
+
+#[path = "settings_panels.rs"]
+mod panels;
+
+#[path = "settings_render.rs"]
+mod render;
+
+#[path = "settings_about.rs"]
+mod about;
+#[cfg(test)]
+#[path = "settings_test_peer.rs"]
+mod test_peer;
+
+#[path = "settings_connections.rs"]
+mod connections;
+
+#[path = "settings_diagnostics.rs"]
+mod diagnostics;
+
+#[path = "settings_storage.rs"]
+mod storage;
+
+#[path = "settings_indexing.rs"]
+mod indexing;
+
+#[path = "settings_navigation.rs"]
+mod navigation;
