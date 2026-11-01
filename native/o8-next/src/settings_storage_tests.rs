@@ -23,6 +23,39 @@ fn settings_parity_storage_refresh_keeps_unknown_accounting(cx: &mut TestAppCont
             .dispatch_headroom_bytes),
         Some(700)
     );
+    peer.reply("GET", "/api/worktrees/retention-usage", 200, json!({"accountingStatus":"observed","totalAllocatedBytes":1024,"storageAdmission":{"physicalAvailableBytes":100,"reservedBytes":300,"dispatchHeadroomBytes":-700}}));
+    click(cx, "setting-storage-refresh");
+    wait(&view, cx, |s| !s.storage.busy);
+    assert!(
+        view.read_with(cx, |s, _| s.storage.error.is_none()),
+        "negative task headroom must not discard known measurements"
+    );
+    assert_eq!(
+        view.read_with(cx, |s, _| s
+            .storage
+            .usage
+            .as_ref()
+            .unwrap()
+            .storage_admission
+            .as_ref()
+            .unwrap()
+            .dispatch_headroom_bytes
+            .map(|n| n.to_string())),
+        Some("-700".into())
+    );
+    peer.reply(
+        "GET",
+        "/api/worktrees/retention-usage",
+        503,
+        json!({"accountingStatus":"observed","totalAllocatedBytes":13}),
+    );
+    click(cx, "setting-storage-refresh");
+    wait(&view, cx, |s| !s.storage.busy);
+    assert!(
+        view.read_with(cx, |s, _| s.storage.error.is_some()
+            && s.storage.usage.as_ref().unwrap().total_allocated_bytes == Some(13)),
+        "HTTP failure remains degraded even with an observed tag"
+    );
     peer.reply("GET", "/api/worktrees/retention-usage", 503, json!({"accountingStatus":"partial","totalAllocatedBytes":null,"totalLogicalBytes":null,"storageAdmission":{"physicalAvailableBytes":null,"reservedBytes":null,"dispatchHeadroomBytes":null}}));
     click(cx, "setting-storage-refresh");
     wait(&view, cx, |s| !s.storage.busy);
@@ -36,6 +69,11 @@ fn settings_parity_storage_refresh_keeps_unknown_accounting(cx: &mut TestAppCont
                 .is_none()
     }));
     assert!(cx.debug_bounds("settings-storage-error").is_some());
+    peer.reply("GET", "/api/worktrees/retention-usage", 503, json!({}));
+    click(cx, "setting-storage-refresh");
+    wait(&view, cx, |s| !s.storage.busy);
+    assert!(view.read_with(cx, |s, _| s.storage.error.is_some()
+        && s.storage.usage.is_none()));
     peer.reply(
         "GET",
         "/api/worktrees/retention-usage",

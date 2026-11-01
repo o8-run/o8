@@ -24,7 +24,7 @@ struct Usage {
 struct Admission {
     physical_available_bytes: Option<u64>,
     reserved_bytes: Option<u64>,
-    dispatch_headroom_bytes: Option<u64>,
+    dispatch_headroom_bytes: Option<i64>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -159,7 +159,10 @@ impl Settings {
             (
                 "headroom",
                 "Available for new tasks",
-                admission.and_then(|a| a.dispatch_headroom_bytes),
+                // Match classic: a reserve shortfall means zero available for new tasks.
+                admission
+                    .and_then(|a| a.dispatch_headroom_bytes)
+                    .map(|bytes| bytes.max(0) as u64),
             ),
         ] {
             content = content.child(panels::fact(
