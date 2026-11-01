@@ -13,6 +13,9 @@ impl Drop for Host {
     }
 }
 fn fixture() -> (Host, Client) {
+    fixture_args(&[])
+}
+fn fixture_args(extra: &[&str]) -> (Host, Client) {
     let mut child = Command::new("node")
         .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .args([
@@ -23,6 +26,7 @@ fn fixture() -> (Host, Client) {
             "scripts/next/dev-server.ts",
             "--visualizations",
         ])
+        .args(extra)
         .env("O8_NEXT_API_TOKEN", "visualization-fixture-token")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -41,6 +45,84 @@ fn fixture() -> (Host, Client) {
         Host(child),
         Client::authenticated(&origin, Some("visualization-fixture-token".into())).unwrap(),
     )
+}
+
+#[gpui::test]
+fn fresh_panes_restore_saved_references_without_tool_results(cx: &mut gpui::TestAppContext) {
+    let (_host, client) = fixture_args(&["--visualizations-restored"]);
+    let history = client.history("thoughts-visualization").unwrap();
+    assert!(crate::model::render_tree(&history.transcript).iter().all(|row|
+        !matches!(row, Row::Message { nodes, .. } if nodes.iter().any(|node| node.kind == "visualization"))));
+    for _ in 0..2 {
+        let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client.clone(), window, cx));
+        view.update(cx, |s, cx| s.load_sessions(cx));
+        cx.run_until_parked();
+        view.update(cx, |s, cx| s.select("thoughts-visualization".into(), cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let until = Instant::now() + std::time::Duration::from_secs(10);
+        let index = loop {
+            view.update(cx, |s, cx| {
+                s.poll_stream(cx);
+            });
+            if let Some(index) = view.read_with(cx, |s, _| {
+                s.rows.iter().position(|row| {
+                    row.borrow()
+                        .cards
+                        .contains_key("vis-49720000-0000-4000-8000-000000000001")
+                })
+            }) {
+                break index;
+            }
+            assert!(
+                Instant::now() < until,
+                "the production list route must restore saved references"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        view.update(cx, |s, cx| {
+            s.list.scroll_to(ListOffset {
+                item_ix: index,
+                offset_in_item: px(0.),
+            });
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let card = view.read_with(cx, |s, _| {
+            s.rows[index].borrow().cards["vis-49720000-0000-4000-8000-000000000001"].clone()
+        });
+        assert_eq!(card.borrow().reference.version, Some(1));
+        assert_eq!(
+            card.borrow().reference.state_id(),
+            card.borrow().reference.id
+        );
+        #[cfg(target_os = "macos")]
+        {
+            let until = Instant::now() + std::time::Duration::from_secs(10);
+            while !card.borrow().ready && card.borrow().error.is_none() && Instant::now() < until {
+                view.update(cx, |s, cx| {
+                    s.poll_stream(cx);
+                    cx.notify();
+                });
+                cx.update(|window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear();
+                });
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(
+                card.borrow().ready,
+                "a restored document must load after its delayed read: {:?}",
+                card.borrow().error
+            );
+        }
+    }
 }
 #[gpui::test]
 fn visualization_at_its_message_and_reference_height(cx: &mut gpui::TestAppContext) {
