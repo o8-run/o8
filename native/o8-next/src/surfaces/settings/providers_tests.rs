@@ -1,6 +1,6 @@
 //! Settings › Providers: real clicks -> shell -> GPUI -> production routes -> settings.toml.
 use super::*;
-use crate::shell::{Shell, test_support::*};
+use crate::shell::{test_support::*, Shell};
 use crate::shell_state::State;
 use gpui::{Entity, Modifiers};
 use std::time::Duration;
@@ -60,6 +60,29 @@ fn draw_all(cx: &mut VisualTestContext) {
 }
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw_all(cx);
+    // The settings pane scrolls; bring the control into its viewport first.
+    for _ in 0..20 {
+        let (Some(target), Some(viewport)) = (
+            cx.debug_bounds(selector),
+            cx.debug_bounds("settings-scroll"),
+        ) else {
+            break;
+        };
+        if viewport.contains(&target.center()) {
+            break;
+        }
+        let dy = if target.center().y > viewport.bottom() {
+            -200.
+        } else {
+            200.
+        };
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: viewport.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(dy))),
+            ..Default::default()
+        });
+        draw_all(cx);
+    }
     let bounds = cx
         .debug_bounds(selector)
         .unwrap_or_else(|| panic!("missing native control: {selector}"));
@@ -179,4 +202,156 @@ fn settings_providers_list_switch_persists_detail_and_add_stub(cx: &mut TestAppC
     click(cx, "provider-add-close");
     draw_all(cx);
     assert!(cx.debug_bounds("provider-add").is_none());
+}
+
+fn dialog(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Entity<add::AddProvider> {
+    panel(shell, cx).read_with(cx, |p, _| p.add.clone().expect("add dialog open"))
+}
+fn wait_dialog(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
+    for _ in 0..200 {
+        draw_all(cx);
+        if dialog(shell, cx).read_with(cx, |d, _| !d.loading && d.busy.is_none()) {
+            draw_all(cx);
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("add dialog must settle");
+}
+fn saved_connection(fixture: &Fixture) -> Value {
+    fixture
+        .client
+        .get::<Value>("/api/runtime/acp-connection", &[])
+        .unwrap()["connection"]
+        .clone()
+}
+
+#[test]
+fn provider_paths_picker_and_registry_helpers() {
+    assert_eq!(
+        tilde("/home/box/.local/bin/codex", Some("/home/box")),
+        "~/.local/bin/codex"
+    );
+    assert_eq!(tilde("/home/box", Some("/home/box/")), "~");
+    assert_eq!(
+        tilde("/home/boxer/codex", Some("/home/box")),
+        "/home/boxer/codex"
+    );
+    assert_eq!(tilde("/usr/bin/codex", None), "/usr/bin/codex");
+    let defaults = json!({
+        "values": {"disabledRuntimes": ["codex"]},
+        "dispatchableRuntimes": [{"id": "codex"}, {"id": "claude-code"}]
+    });
+    let items = picker_inventory(&defaults).unwrap();
+    assert_eq!(items[0]["disabled"], true);
+    assert!(items[1].get("disabled").is_none());
+    assert!(picker_inventory(&json!({})).is_none());
+    let agent: add::Agent = serde_json::from_value(json!({
+        "id": "amp", "name": "Amp", "description": "ACP wrapper for Amp", "fingerprint": "f"
+    }))
+    .unwrap();
+    assert!(add::matches(&agent, " wrapper "));
+    assert!(add::matches(&agent, ""));
+    assert!(!add::matches(&agent, "claude"));
+    assert_eq!(
+        add::connection_body(" Local ", " amp ", "acp\n\n--x"),
+        json!({"connection": {"name": "Local", "command": "amp", "args": ["acp", "--x"], "useOpenRouter": false}})
+    );
+    let current = add::Connection {
+        name: "Amp".into(),
+        ..Default::default()
+    };
+    assert!(add::slot_notice(Some(&current)).contains("replaces “Amp”"));
+    assert!(add::slot_notice(None).contains("one Local ACP slot"));
+}
+
+#[gpui::test]
+fn settings_providers_add_dialog_registry_and_manual_acp(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("settings.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("s e t t i n g s");
+    cx.simulate_keystrokes("enter");
+    draw_all(cx);
+    click(cx, "settings-nav-providers");
+    wait(&shell, cx);
+    click(cx, "provider-add-button");
+    wait_dialog(&shell, cx);
+    assert!(
+        cx.debug_bounds("provider-add-builtin-codex").is_some(),
+        "built-in grid"
+    );
+    assert!(
+        cx.debug_bounds("provider-acp-fixture-agent").is_some(),
+        "registry entry"
+    );
+    assert!(cx.debug_bounds("provider-acp-guide-only").is_some());
+    assert!(
+        cx.debug_bounds("provider-acp-add-guide-only").is_none(),
+        "no package, no Add"
+    );
+    assert!(
+        cx.debug_bounds("provider-acp-slot").is_some(),
+        "one-slot notice"
+    );
+    assert_eq!(saved_connection(&fixture), Value::Null);
+
+    // Search filters by name and description.
+    click(cx, "provider-acp-search");
+    draw_all(cx);
+    cx.simulate_input("guide");
+    draw_all(cx);
+    assert!(cx.debug_bounds("provider-acp-fixture-agent").is_none());
+    assert!(cx.debug_bounds("provider-acp-guide-only").is_some());
+    for _ in 0..5 {
+        cx.simulate_keystrokes("backspace");
+    }
+    draw_all(cx);
+    assert!(cx.debug_bounds("provider-acp-fixture-agent").is_some());
+
+    click(cx, "provider-acp-add-fixture-agent");
+    wait_dialog(&shell, cx);
+    assert_eq!(
+        saved_connection(&fixture),
+        json!({"name": "Fixture Agent", "command": "fixture-agent", "args": ["--acp"], "useOpenRouter": false}),
+        "Add saves through classic's Local ACP connection"
+    );
+    assert!(
+        dialog(&shell, cx).read_with(cx, |d, _| d.current.as_ref().map(|c| c.name.clone()))
+            == Some("Fixture Agent".into())
+    );
+
+    // Configure manually replaces the one slot through the same save path.
+    click(cx, "provider-acp-manual");
+    draw_all(cx);
+    assert!(cx.debug_bounds("provider-acp-form").is_some());
+    click(cx, "provider-acp-command");
+    for _ in 0.."fixture-agent".len() {
+        cx.simulate_keystrokes("backspace");
+    }
+    cx.simulate_input("my-agent");
+    draw_all(cx);
+    click(cx, "provider-acp-save");
+    wait_dialog(&shell, cx);
+    let saved = saved_connection(&fixture);
+    assert_eq!(saved["command"], "my-agent", "{saved}");
+    assert_eq!(saved["name"], "Fixture Agent");
+    assert_eq!(saved["args"], json!(["--acp"]));
+    assert!(
+        cx.debug_bounds("provider-acp-form").is_none(),
+        "save closes the form"
+    );
+
+    // A built-in tile opens that runtime's detail panel.
+    click(cx, "provider-add-builtin-codex");
+    draw_all(cx);
+    assert!(cx.debug_bounds("provider-add").is_none());
+    assert!(cx.debug_bounds("provider-detail").is_some());
 }

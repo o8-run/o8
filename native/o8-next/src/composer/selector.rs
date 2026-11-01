@@ -805,7 +805,7 @@ impl Surface {
             client
                 .get("/api/panel/operator-defaults", &[])
                 .ok()
-                .and_then(|v: Value| v["dispatchableRuntimes"].as_array().cloned())
+                .and_then(|v: Value| crate::shell::settings::providers::picker_inventory(&v))
                 .map_or(json!("failed"), Value::Array)
         });
         let editor = self.composer.downgrade();
@@ -883,6 +883,10 @@ impl Surface {
         let mut houses = vec![];
         for &(key, label, runtime, glyph, _) in &LEAD_HOUSES {
             let found = item(runtime);
+            // Settings › Providers off: hidden for new sessions; a lead keeps it.
+            if key != lead && found.as_ref().is_some_and(|i| i["disabled"] == true) {
+                continue;
+            }
             // Claude and Codex always hold the rail, as in the desktop
             // picker; other houses appear once installed.
             let core = matches!(key, "claude" | "codex");

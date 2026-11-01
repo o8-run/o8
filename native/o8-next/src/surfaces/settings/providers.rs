@@ -8,16 +8,23 @@
 //! Settings switch. Nothing credential-shaped is deserialized or retained.
 use crate::{client::Client, settings::RequestError, theme::current as theme};
 use gpui::{
-    AnyElement, Context, Div, FocusHandle, IntoElement, KeyDownEvent, ParentElement, Render,
-    Stateful, Styled, Window, div, prelude::*, px,
+    div, prelude::*, px, AnyElement, Context, Div, FocusHandle, IntoElement, KeyDownEvent,
+    ParentElement, Render, Stateful, Styled, Window,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
-use std::{cell::Cell, collections::BTreeMap, rc::Rc};
+use serde_json::{json, Value};
+use std::{cell::Cell, collections::BTreeMap, rc::Rc, time::Duration};
+
+#[path = "providers_add.rs"]
+pub(crate) mod add;
 
 const INVENTORY: &str = "/api/panel/operator-defaults";
 const NATIVE: &str = "/api/panel/operator-defaults?include=native";
 const DETECT: &str = "/api/setup/detect";
+/// `/api/setup/detect` runs every CLI's `--version` under a 10s route
+/// deadline (cold: ~9s here). The shared 5s agent timeout always lost that
+/// race, so detection read as unavailable even for installed runtimes.
+const DETECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Debug, Default, Deserialize)]
 struct RuntimeConnection {
@@ -76,7 +83,64 @@ pub(crate) struct Loaded {
     runtimes: Vec<Runtime>,
     disabled: Vec<String>,
     revision: Option<String>,
-    tools: Option<BTreeMap<String, Tool>>,
+}
+
+/// One request with its own timeout. Refusals surface the route's `error`
+/// text (bounded); transport failures read as a timeout.
+pub(crate) fn call<T: serde::de::DeserializeOwned>(
+    client: &Client,
+    method: &str,
+    path: &str,
+    body: Value,
+    timeout: Duration,
+) -> Result<T, String> {
+    let url = client.url(path).map_err(|_| "Invalid route".to_string())?;
+    let request = client.request(method, &url).timeout(timeout);
+    let response = if method == "GET" {
+        request.call()
+    } else {
+        request.send_json(body)
+    };
+    match response {
+        Ok(response) => response
+            .into_json::<T>()
+            .map_err(|_| "Invalid response. Retry.".to_string()),
+        Err(ureq::Error::Status(_, response)) => Err(response
+            .into_json::<Value>()
+            .ok()
+            .and_then(|v| v["error"].as_str().map(|e| e.chars().take(300).collect()))
+            .unwrap_or_else(|| "o8 refused the request.".into())),
+        Err(_) => Err("o8 did not answer in time. Retry.".into()),
+    }
+}
+
+/// A binary path for display: the home prefix becomes `~`.
+pub(crate) fn tilde(path: &str, home: Option<&str>) -> String {
+    match home
+        .map(|h| h.trim_end_matches('/'))
+        .filter(|h| !h.is_empty())
+    {
+        Some(home) if path == home => "~".into(),
+        Some(home) if path.starts_with(&format!("{home}/")) => format!("~{}", &path[home.len()..]),
+        _ => path.into(),
+    }
+}
+
+/// Composer picker inventory: `dispatchableRuntimes`, each marked
+/// `"disabled": true` when Settings › Providers turned it off. The picker
+/// hides those for new sessions; a session's current runtime stays.
+pub(crate) fn picker_inventory(defaults: &Value) -> Option<Vec<Value>> {
+    let disabled: Vec<&str> = defaults["values"]["disabledRuntimes"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let mut items = defaults["dispatchableRuntimes"].as_array()?.clone();
+    for item in &mut items {
+        if item["id"].as_str().is_some_and(|id| disabled.contains(&id)) {
+            item["disabled"] = Value::Bool(true);
+        }
+    }
+    Some(items)
 }
 
 /// "codex-cli 0.162.1" → "v0.162.1"; anything without a number is dropped.
@@ -161,7 +225,9 @@ pub(crate) struct Providers {
     revision: Option<String>,
     pub tools: Option<BTreeMap<String, Tool>>,
     pub selected: Option<String>,
-    pub add_open: bool,
+    pub add: Option<gpui::Entity<add::AddProvider>>,
+    add_subscription: Option<gpui::Subscription>,
+    pub detecting: bool,
     pub busy: bool,
     pub loaded: bool,
     pub error: Option<String>,
@@ -181,7 +247,9 @@ impl Providers {
             revision: None,
             tools: None,
             selected: None,
-            add_open: false,
+            add: None,
+            add_subscription: None,
+            detecting: false,
             busy: false,
             loaded: false,
             error: None,
@@ -201,16 +269,10 @@ impl Providers {
     fn read(client: &Client) -> Result<Loaded, RequestError> {
         let inventory: Inventory = client.settings_request("GET", INVENTORY, Value::Null)?;
         let native: Native = client.settings_request("GET", NATIVE, Value::Null)?;
-        // Detection runs CLIs with a deadline; a refusal only hides versions.
-        let tools = client
-            .settings_request::<Detect>("GET", DETECT, Value::Null)
-            .ok()
-            .map(|d| d.tools.into_iter().map(|t| (t.id.clone(), t)).collect());
         Ok(Loaded {
             runtimes: inventory.runtimes,
             disabled: native.values.disabled,
             revision: native.toml.map(|t| t.revision),
-            tools,
         })
     }
     fn receive(
@@ -225,9 +287,6 @@ impl Providers {
                 self.runtimes = loaded.runtimes;
                 self.disabled = loaded.disabled;
                 self.revision = loaded.revision;
-                if loaded.tools.is_some() || self.tools.is_none() {
-                    self.tools = loaded.tools;
-                }
                 self.loaded = true;
                 self.error = None;
                 self.note = if saved {
@@ -260,11 +319,38 @@ impl Providers {
             let _ = this.update(cx, |this, cx| {
                 if this.generation == generation {
                     this.receive(result, false, cx);
+                    this.detect(cx);
                 }
             });
         })
         .detach();
         self.changed(cx);
+    }
+    /// Versions and paths arrive after the list; a failure only hides them.
+    fn detect(&mut self, cx: &mut Context<Self>) {
+        self.detecting = true;
+        let client = self.client.clone();
+        let task = cx.background_executor().spawn(async move {
+            call::<Detect>(&client, "GET", DETECT, Value::Null, DETECT_TIMEOUT)
+                .ok()
+                .map(|d| {
+                    d.tools
+                        .into_iter()
+                        .map(|t| (t.id.clone(), t))
+                        .collect::<BTreeMap<_, _>>()
+                })
+        });
+        cx.spawn(async move |this, cx| {
+            let tools = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.detecting = false;
+                if tools.is_some() || this.tools.is_none() {
+                    this.tools = tools;
+                }
+                this.changed(cx);
+            });
+        })
+        .detach();
     }
     /// Flip one runtime in `disabledRuntimes`. The switch only moves when the
     /// re-read server value says so, like the other Settings switches.
@@ -305,14 +391,32 @@ impl Providers {
     }
     pub fn select(&mut self, id: Option<String>, cx: &mut Context<Self>) {
         self.selected = id;
-        self.add_open = false;
+        self.add = None;
+        self.add_subscription = None;
         self.changed(cx);
     }
     pub fn open_add(&mut self, cx: &mut Context<Self>) {
-        self.add_open = !self.add_open;
-        if self.add_open {
-            self.selected = None;
+        if self.add.take().is_some() {
+            self.add_subscription = None;
+            return self.changed(cx);
         }
+        self.selected = None;
+        let builtins = self
+            .runtimes
+            .iter()
+            .map(|r| (r.id.clone(), r.label.clone()))
+            .collect();
+        let client = self.client.clone();
+        let dialog = cx.new(|cx| add::AddProvider::new(client, builtins, cx));
+        self.add_subscription = Some(cx.subscribe(
+            &dialog,
+            |this, _, event: &add::AddEvent, cx| match event {
+                add::AddEvent::Close => this.open_add(cx),
+                add::AddEvent::Builtin(id) => this.select(Some(id.clone()), cx),
+                add::AddEvent::Saved => this.changed(cx),
+            },
+        ));
+        self.add = Some(dialog);
         self.changed(cx);
     }
     fn focus(&mut self, id: &str, cx: &mut Context<Self>) -> FocusHandle {
@@ -477,13 +581,14 @@ impl Providers {
     }
     fn detail(&self, runtime: &Runtime) -> AnyElement {
         let tool = self.tools.as_ref().and_then(|t| t.get(&runtime.id));
+        let home_dir = std::env::var("HOME").ok();
         let binary = match (self.tools.is_some(), tool) {
             (
                 _,
                 Some(Tool {
                     path: Some(path), ..
                 }),
-            ) => path.clone(),
+            ) if !path.is_empty() => tilde(path, home_dir.as_deref()),
             (
                 true,
                 Some(Tool {
@@ -491,9 +596,20 @@ impl Providers {
                 })
                 | None,
             ) => "Not found on PATH".into(),
-            (false, _) => "Detection unavailable".into(),
+            (false, _) if self.detecting => "Detecting…".into(),
+            (false, _) => "Detection unavailable. Refresh Settings to retry.".into(),
             _ => "Detected, path not reported".into(),
         };
+        let version_text = tool
+            .and_then(|t| t.version.as_deref())
+            .and_then(version)
+            .unwrap_or_else(|| {
+                if self.detecting {
+                    "Detecting…".into()
+                } else {
+                    "Not reported".into()
+                }
+            });
         let line = |label: &'static str, help: &'static str, value: String| {
             div()
                 .flex()
@@ -557,6 +673,7 @@ impl Providers {
                 "The CLI o8 detected for this runtime.",
                 binary,
             ))
+            .child(line("Version", "From the CLI's --version.", version_text))
             .child(line(
                 "Home directory",
                 "Config and auth directory, from the runtime's selector.",
@@ -569,40 +686,6 @@ impl Providers {
                     .text_color(theme().text_muted)
                     .child("Read-only for now. Editing paths arrives with provider instances."),
             )
-            .into_any_element()
-    }
-    fn add_placeholder(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let close = self
-            .control("provider-add-close".into(), true, window, cx, |this, cx| {
-                this.open_add(cx)
-            })
-            .h(px(26.))
-            .px(px(10.))
-            .rounded(px(7.))
-            .flex()
-            .items_center()
-            .text_size(px(12.))
-            .bg(theme().surface_raised)
-            .child("Close");
-        div()
-            .debug_selector(|| "provider-add".into())
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(10.))
-            .p(px(16.))
-            .rounded(px(10.))
-            .border_1()
-            .border_color(theme().border)
-            .child(div().text_size(px(15.)).child("Add provider"))
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(theme().text_muted)
-                    .child("Adding accounts and ACP registry agents arrives in a later update. Built-in runtimes o8 detects are listed automatically."),
-            )
-            .child(div().flex().child(close))
             .into_any_element()
     }
 }
@@ -648,8 +731,11 @@ impl Render for Providers {
                     .child("o8 does not report any runtimes."),
             );
         }
-        let side = if self.add_open {
-            Some(self.add_placeholder(window, cx))
+        // The dialog needs the full content width (built-in grid, registry
+        // rows), so it sits above the list rather than beside it.
+        let dialog = self.add.clone();
+        let side = if dialog.is_some() {
+            None
         } else {
             self.selected
                 .as_ref()
@@ -681,6 +767,7 @@ impl Render for Providers {
             .when_some(self.error.clone(), |v, error| {
                 v.child(div().debug_selector(|| "providers-error".into()).text_color(theme().danger).child(error))
             })
+            .children(dialog)
             .child(div().flex().items_start().gap(px(16.)).child(list).children(side))
             .when(self.loaded && !self.busy, |v| {
                 v.child(div().debug_selector(|| "providers-loaded".into()).h(px(1.)))
