@@ -165,6 +165,19 @@ impl Render for Settings {
                 &query,
                 "diagnostics shipped feature audit flags maintenance transcript retention",
             );
+            let storage = panels::matches(
+                "storage",
+                self.section,
+                &query,
+                "storage disk worktrees workspace usage free reserved parking categories allocated logical",
+            );
+            if storage {
+                content = content.child(if query.len() >= 2 && self.section != "storage" {
+                    self.panel_result("storage", "Worktrees & storage", window, cx)
+                } else {
+                    self.storage_view(window, cx)
+                });
+            }
             if diagnostics {
                 content = content.child(if query.len() >= 2 && self.section != "diagnostics" {
                     self.panel_result("diagnostics", "Diagnostics", window, cx)
@@ -198,6 +211,7 @@ impl Render for Settings {
                 && !about
                 && !connections
                 && !diagnostics
+                && !storage
             {
                 content = content.child(empty("No settings match this search."));
             }

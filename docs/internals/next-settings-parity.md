@@ -101,13 +101,13 @@ the existing operator-defaults route unless another owner is named.
 | API Keys / Symon & voice keys | Every voice-service secret input; Save/Replace/Remove; status | missing | skipped: credentials and `settings_secret.rs` |
 | API Keys / Key storage | Storage details and key setup | missing | skipped: credential storage |
 | Local models / Local models | Dispatch model (Ollama/LM Studio/Cloud); Local endpoint/presets; Chat model/presets; Embedding model; Save/test | missing | missing: endpoint fields deliberately skipped for network-binding review; chat/embedding model-name controls present; dispatch choice/presets/test remain |
-| Worktrees & storage / Storage usage | Workspace files: allocated/logical; Refresh usage; Space for new tasks: free/reserved/available | missing | missing |
+| Worktrees & storage / Storage usage | Workspace files: allocated/logical; Refresh usage; Space for new tasks: free/reserved/available | missing | present: measured/partial/unknown accounting with refresh; unknown values stay unknown |
 | Worktrees & storage / Automatic cleanup | Workspace count per repository; Disk usage per repository | present | present |
 | Worktrees & storage / Advanced | Reuse dependencies (APFS) | missing | missing: native-safe defaults omit the effective environment override; needs that projection before an accurate switch can be offered |
 | Worktrees & storage / Workspace parking | Parking mode | present | present |
-| Worktrees & storage / Workspace parking | Fleet parking: parked/eligible/opted out; each repository's pressure parking switch | missing | missing |
+| Worktrees & storage / Workspace parking | Fleet parking: parked/eligible/opted out; each repository's pressure parking switch | missing | partial: fleet counts present; repository opt-out controls remain |
 | Worktrees & storage / Minimum free space | Volume reserve; Absolute floor | present | present |
-| Worktrees & storage / Storage categories | Source, dependencies, build files, runtime files, transcripts: allocated/logical/method | missing | missing |
+| Worktrees & storage / Storage categories | Source, dependencies, build files, runtime files, transcripts: allocated/logical/method | missing | present: categories, measurement time and method |
 | Worktrees & storage / Finished work | Repository choice; review cleanup candidates/retained recovery; reviewed cleanup action | missing | missing: no cleanup executed by this task |
 | Projects / Overview | Repositories/context/locks summary; create project; suggested grouping/dismiss | missing | partial: existing separate native Projects surface |
 | Projects / Active project context | Search saved projects; Details; Open workspace; Edit; Back; Tasks | missing | partial: separate native Projects surface, no Settings link |
@@ -190,6 +190,8 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 - Connections: `settings_parity_connections_read_only_capabilities_and_recovery` passed in the combined serial run. Real selectors read declared capabilities, switch configured workers, recover from an unavailable adapter, and prove search performs no inactive-panel reads until a result is opened. `settings_parity_actions_follow_shell_settings_lifecycle` passed: the global palette opens Projects and drops both Settings subscriptions together.
 
 - Diagnostics: `settings_parity_diagnostics_feature_audit_refresh_and_error` passed in two serial runs, including the latest combined run. It opens the page, refreshes typed release/lifecycle/source facts, shows unverified state and recovers from an HTTP error. Developer-gated diagnostics remain skipped.
+
+- Storage: `settings_parity_storage_refresh_keeps_unknown_accounting` passed in the latest combined run. It drives Refresh usage through complete, partial/503, unavailable, and recovery responses; even a 503 tagged observed remains visibly degraded. Missing measurements remain Unknown, with no cleanup or parking mutation.
 
 ## Host and security handoff
 
