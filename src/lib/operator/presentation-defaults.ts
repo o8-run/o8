@@ -25,11 +25,14 @@ export interface PresentationDefaults {
   presentationQuietMode: boolean;
   /** Native "ready for review" banner. Quiet mode forces this off while active. */
   notificationsReviewReady: ReviewReadyNotifications;
+  /** Composer: Enter queues a follow-up while a thread runs (default: Enter steers). */
+  composerEnterQueues: boolean;
 }
 
 export const PRESENTATION_FALLBACK: PresentationDefaults = {
   presentationQuietMode: false,
   notificationsReviewReady: 'on',
+  composerEnterQueues: false,
 };
 
 export function isReviewReadyNotifications(value: unknown): value is ReviewReadyNotifications {
@@ -46,6 +49,9 @@ export function resolveStoredPresentation(
   if (isReviewReadyNotifications(stored.notificationsReviewReady)) {
     result.notificationsReviewReady = stored.notificationsReviewReady;
   }
+  if (typeof stored.composerEnterQueues === 'boolean') {
+    result.composerEnterQueues = stored.composerEnterQueues;
+  }
   return result;
 }
 
@@ -61,6 +67,7 @@ export function presentationSettingSources(
   return {
     presentationQuietMode: stored.presentationQuietMode !== undefined ? 'file' : 'default',
     notificationsReviewReady: stored.notificationsReviewReady !== undefined ? 'file' : 'default',
+    composerEnterQueues: stored.composerEnterQueues !== undefined ? 'file' : 'default',
   };
 }
 
@@ -79,6 +86,12 @@ export function applyPresentationUpdate(
       throw new Error('notificationsReviewReady must be "off" or "on".');
     }
     stored.notificationsReviewReady = update.notificationsReviewReady;
+  }
+  if (update.composerEnterQueues !== undefined) {
+    if (typeof update.composerEnterQueues !== 'boolean') {
+      throw new Error('composerEnterQueues must be boolean.');
+    }
+    stored.composerEnterQueues = update.composerEnterQueues;
   }
 }
 

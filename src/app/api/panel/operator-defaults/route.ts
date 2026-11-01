@@ -286,6 +286,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update[field] = Number(value);
   }
 
+  if (body.composerEnterQueues !== undefined) {
+    if (typeof body.composerEnterQueues !== 'boolean') {
+      throw new Error('composerEnterQueues must be boolean.');
+    }
+    update.composerEnterQueues = body.composerEnterQueues;
+  }
   if (body.presentationQuietMode !== undefined) {
     if (typeof body.presentationQuietMode !== 'boolean') {
       throw new Error('presentationQuietMode must be boolean.');

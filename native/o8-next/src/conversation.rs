@@ -344,7 +344,7 @@ impl Surface {
         self.generation += 1;
         let generation = self.generation;
         self.saving = true;
-        if !remove && self.following.is_none() {
+        if !remove && !self.background_send && self.following.is_none() {
             self.following = Some(self.rows.len());
         }
         self.notice = if remove {

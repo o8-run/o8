@@ -110,6 +110,8 @@ pub(crate) struct Surface {
     /// follows that turn to its reply.
     following: Option<usize>,
     send_next: bool,
+    /// Set for the duration of a Cmd-Enter send: no transcript follow.
+    background_send: bool,
     subscriptions: Vec<gpui::Subscription>,
     sessions: Vec<Session>,
     selected: Option<String>,
@@ -136,6 +138,24 @@ impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
+        let defaults = client.clone();
+        let task = cx.background_executor().spawn(async move {
+            defaults
+                .get::<Value>("/api/panel/operator-defaults", &[("include", "values")])
+                .ok()
+        });
+        cx.spawn(async move |this, cx| {
+            if let Some(values) = task.await {
+                // Only lift the default; never undo a toggle made meanwhile.
+                if enter_queues(&values) {
+                    let _ = this.update(cx, |this, cx| {
+                        this.send_next = true;
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
         Self {
             client,
             embedded: false,
@@ -151,6 +171,7 @@ impl Surface {
             saving: false,
             following: None,
             send_next: false,
+            background_send: false,
             subscriptions: vec![],
             sessions: vec![],
             selected: None,
@@ -254,6 +275,14 @@ impl Surface {
                         this.send(None, cx);
                     }
                 }));
+            self.subscriptions.push(cx.subscribe(
+                &editor,
+                |this, _, _: &crate::composer::SubmitBackground, cx| {
+                    this.background_send = true;
+                    this.send(None, cx);
+                    this.background_send = false;
+                },
+            ));
             self.subscriptions.push(cx.subscribe(
                 &editor,
                 |this, editor, _: &crate::composer::images::ImagesChanged, cx| {
@@ -1002,3 +1031,19 @@ mod image_cache_tests;
 #[cfg(test)]
 #[path = "visualization_tests.rs"]
 mod visualization_tests;
+
+/// Operator default `composerEnterQueues`: Enter queues instead of steering.
+pub(crate) fn enter_queues(defaults: &Value) -> bool {
+    defaults["values"]["composerEnterQueues"] == true
+}
+
+#[cfg(test)]
+mod enter_default_tests {
+    #[test]
+    fn enter_steers_unless_the_operator_default_queues() {
+        use serde_json::json;
+        assert!(!super::enter_queues(&json!({"values":{}})));
+        assert!(!super::enter_queues(&json!(null)));
+        assert!(super::enter_queues(&json!({"values":{"composerEnterQueues":true}})));
+    }
+}

@@ -18,6 +18,9 @@ struct Snapshot {
 }
 pub struct Submit(pub bool);
 impl EventEmitter<Submit> for Composer {}
+/// Cmd-Enter: send without pulling the transcript to the new turn.
+pub struct SubmitBackground;
+impl EventEmitter<SubmitBackground> for Composer {}
 pub struct Composer {
     pub focus: FocusHandle,
     pub context: &'static str,
@@ -277,6 +280,7 @@ impl Composer {
                 self.replace_text_in_range(None, "\n", window, cx)
             }
             "enter" if command && key.modifiers.shift => cx.emit(Submit(true)),
+            "enter" if command => cx.emit(SubmitBackground),
             "enter" if !key.modifiers.shift => cx.emit(Submit(false)),
             "enter" => self.replace_text_in_range(None, "\n", window, cx),
             "a" if command => {

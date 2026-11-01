@@ -103,6 +103,13 @@ pub const FIELDS: &[Field] = &[
         BOOL,
     ),
     field(
+        "composerEnterQueues",
+        "Enter queues while running",
+        "general",
+        "While a thread runs, Enter queues the follow-up instead of steering. Cmd-Shift-Enter still swaps for one send.",
+        BOOL,
+    ),
+    field(
         "presentationQuietMode",
         "Quiet mode",
         "general",

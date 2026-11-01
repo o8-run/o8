@@ -286,6 +286,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   broadcastVoiceCalendarLeadMinutes: numberField('broadcast', 'voice_calendar_lead_minutes', 'an integer from 1 through 1440', (value) => Number.isInteger(value) && value >= 1 && value <= 1_440),
   broadcastVoiceTimeCheckins: booleanField('broadcast', 'voice_time_checkins'),
   presentationQuietMode: booleanField('presentation', 'quiet_mode'),
+  composerEnterQueues: booleanField('chat', 'enter_queues'),
   notificationsReviewReady: enumField('notifications', 'review_ready', '"off" or "on"', (value): value is OperatorDefaults['notificationsReviewReady'] => value === 'off' || value === 'on'),
   apfsDependencyImages: booleanField('git', 'apfs_dependency_images'),
   thinkingEffort: enumField('models', 'thinking_effort', 'a valid thinking effort', isThinkingEffort),
