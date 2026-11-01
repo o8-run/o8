@@ -99,6 +99,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   ],
   customize: [
     route('/api/customize/inventory', 'GET', () => import('@/app/api/customize/inventory/route')),
+    route('/api/customize/actions', 'GET POST', () => import('@/app/api/customize/actions/route')),
     route('/api/cortex/directives', 'GET', () => import('@/app/api/cortex/directives/route')),
     route('/api/setup/mcp-servers', 'GET', () => import('@/app/api/setup/mcp-servers/route')),
     route('/api/prompt-library', 'GET POST', () => import('@/app/api/prompt-library/route')),

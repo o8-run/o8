@@ -1,5 +1,9 @@
 use super::*;
 use serde_json::Value;
+#[path = "customize/inventory.rs"]
+mod inventory;
+#[path = "customize/plugins.rs"]
+mod plugins;
 #[path = "customize/view.rs"]
 mod view;
 pub(super) type Slice = EmptyState;
@@ -84,7 +88,7 @@ impl Client {
             Ok(response) => Self::read(response),
             Err(ureq::Error::Status(status, response)) => {
                 let data = Self::read::<Value>(response).unwrap_or(Value::Null);
-                let message = data["error"].as_str().unwrap_or("Project request refused");
+                let message = data["error"]["message"].as_str().or(data["error"].as_str()).unwrap_or("Project request refused");
                 let note = data["note"].as_str().unwrap_or("");
                 Err(format!("{} (HTTP {status}). {}", message.chars().take(512).collect::<String>(), note.chars().take(512).collect::<String>()))
             }
