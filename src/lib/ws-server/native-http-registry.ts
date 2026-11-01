@@ -14,6 +14,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
     route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),
     route('/api/orchestrator/state', 'GET PATCH', () => import('@/app/api/orchestrator/state/route')),
+    route('/api/orchestrator/shared-team/active', 'GET', () => import('@/app/api/orchestrator/shared-team/active/route')),
     route('/api/runtime/inventory', 'GET', () => import('@/app/api/runtime/inventory/route')),
     route('/api/mobile/history', 'GET', () => import('@/app/api/mobile/history/route')),
     route('/api/v2/chat-history', 'GET POST PATCH', () => import('@/app/api/v2/chat-history/route')),

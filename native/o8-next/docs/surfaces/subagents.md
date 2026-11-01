@@ -30,7 +30,8 @@ times appear only when the server supplies run timestamps.
   workspace and original lane session key.
 - Shared workers use `/api/orchestrator/shared-team/active` with the exact
   repository and parent thread. That route includes archived teams recorded for
-  the parent. The workspace view includes its active Shared team.
+  the parent. The workspace view includes its active Shared team. The native
+  daemon registers the same GET handler when Next is stopped.
 - The inspector preserves each source's last known data when that read fails and
   shows a local error. Unknown status remains unknown. A worker result held for
   parent delivery stays under Needs attention.
@@ -53,6 +54,8 @@ Workers inspection checks keyboard return to the same card. A lower-split check
 keeps detail in its existing slot and restores the tools that preceded inspection.
 A delayed production history read also proves that an earlier selection cannot
 replace the newly selected agent's transcript or images.
+`tests/o8d-next-surfaces-real-path.test.ts` covers the Shared read through the
+production native bridge with Next stopped.
 
 The initial native regressions fail on the absent `header-subagents` and
 `subagent-trace-subagent-calculation` controls. Final green receipts and live
