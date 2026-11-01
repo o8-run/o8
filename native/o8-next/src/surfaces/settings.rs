@@ -63,7 +63,9 @@ impl Shell {
         self.palette = false;
         self.surfaces.projects.open = false;
         let client = self.client.clone();
+        let providers = cx.new(|cx| providers::Providers::new(client.clone(), cx));
         let settings = cx.new(|cx| Settings::new(client, window, cx));
+        settings.update(cx, |s, _| s.providers = Some(providers.into()));
         self.surfaces.settings.subscription = Some(cx.subscribe_in(
             &settings,
             window,
@@ -143,6 +145,10 @@ impl Client {
         }
     }
 }
+
+// Settings › Providers lives with this surface; Settings only hosts its view.
+#[path = "settings/providers.rs"]
+pub(crate) mod providers;
 
 #[cfg(test)]
 #[path = "settings_shell_tests.rs"]

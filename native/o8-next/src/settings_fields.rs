@@ -89,6 +89,7 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("general", "General"),
     ("dispatch", "Dispatch"),
     ("models", "Models & providers"),
+    ("providers", "Providers"),
     ("git", "Git & PRs"),
     ("storage", "Worktrees & storage"),
     ("keys", "API keys"),
