@@ -133,12 +133,12 @@ the existing operator-defaults route unless another owner is named.
 | Analytics / Totals | Total spend, messages, cost/hour, input/output tokens, cache hit rate; date-range and refresh controls | missing | missing: existing native Usage surface may cover part; not yet verified |
 | Analytics / Spend over time, By surface | Spend chart; per-surface breakdown | missing | missing |
 | Diagnostics / Connection health | Check installed tools / Check again; each installed tool's status | missing | missing: authentication text skipped; install/version facts in scope |
-| Diagnostics / Feature diagnostics | Shipped feature audit; default-off feature flags; Refresh; release age/first shipped/promotion status | missing | missing |
+| Diagnostics / Feature diagnostics | Shipped feature audit; default-off feature flags; Refresh; release age/first shipped/promotion status | missing | present: read-only feature audit with refresh, lifecycle/source/age and unavailable recovery |
 | Diagnostics / Maintenance | Archive old Codex sessions; result counts/duration | missing | skipped: current production retention contract refuses external-provider transcript archival; no maintenance executed |
 | Diagnostics / Reset app data | Factory reset; confirmation text; confirm/cancel; result | missing | skipped: wipes credentials |
 | Diagnostics / Diagnostic authorization | Enable/disable developer tools | missing | skipped: authorization boundary |
-| Diagnostics / Recall health | Outcomes/directives; recall p50/p95/p99 24h/p95 7d; substrate health; Refresh | missing | missing |
-| Diagnostics / Loop status | Cron; prompt; open PRs; active lanes; recent merges disclosure; refresh | missing | missing |
+| Diagnostics / Recall health | Outcomes/directives; recall p50/p95/p99 24h/p95 7d; substrate health; Refresh | missing | skipped: classic developer-diagnostics authorization boundary; Brain totals available under Indexing |
+| Diagnostics / Loop status | Cron; prompt; open PRs; active lanes; recent merges disclosure; refresh | missing | skipped: classic developer-diagnostics authorization boundary |
 | Diagnostics / Demo sequence | Run demo; confirm/cancel; live trace | missing | skipped: diagnostic authorization |
 | About / Version | Version; Platform; Mode; Check for updates and result | missing | present: connected version, native platform/mode, verified check-only update result |
 | About / Links | GitHub; Documentation; Releases | missing | present: native link controls |
@@ -188,6 +188,8 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 - About: `settings_parity_about_links_version_and_verified_update_check` passed (1/1). A disposable HTTP peer proves current/available results, rejection of unverified replies, HTTP failure and recovery, the exact check-only request, version display and external-link destinations. The peer uses the shell tests' two-paint pattern. Combined reruns exposed intermittent repeated-button failures; follow-up verification remains open. No installed-app update acceptance is claimed.
 
 - Connections: `settings_parity_connections_read_only_capabilities_and_recovery` passed in the combined serial run. Real selectors read declared capabilities, switch configured workers, recover from an unavailable adapter, and prove search performs no inactive-panel reads until a result is opened. `settings_parity_actions_follow_shell_settings_lifecycle` passed: the global palette opens Projects and drops both Settings subscriptions together.
+
+- Diagnostics: `settings_parity_diagnostics_feature_audit_refresh_and_error` passed in two serial runs, including the latest combined run. It opens the page, refreshes typed release/lifecycle/source facts, shows unverified state and recovers from an HTTP error. Developer-gated diagnostics remain skipped.
 
 ## Host and security handoff
 

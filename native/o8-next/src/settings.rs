@@ -133,6 +133,7 @@ pub(crate) struct Settings {
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     scroll: gpui::ScrollHandle,
+    diagnostics: diagnostics::State,
     connections: connections::State,
     about_version: Option<String>,
     about_busy: bool,
@@ -172,6 +173,7 @@ impl Settings {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             scroll: gpui::ScrollHandle::new(),
+            diagnostics: diagnostics::State::default(),
             connections: connections::State::default(),
             about_version: None,
             about_busy: false,
@@ -309,6 +311,9 @@ impl Settings {
         }
         if self.section == "connections" {
             self.load_connections(force, cx);
+        }
+        if self.section == "diagnostics" {
+            self.load_diagnostics(force, cx);
         }
     }
     fn locked(&self, field: &Field) -> bool {
@@ -482,3 +487,6 @@ mod test_peer;
 
 #[path = "settings_connections.rs"]
 mod connections;
+
+#[path = "settings_diagnostics.rs"]
+mod diagnostics;

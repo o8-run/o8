@@ -159,6 +159,19 @@ impl Render for Settings {
                 &query,
                 "connections adapter capabilities workers actions session transforms usage limits",
             );
+            let diagnostics = panels::matches(
+                "diagnostics",
+                self.section,
+                &query,
+                "diagnostics shipped feature audit flags maintenance transcript retention",
+            );
+            if diagnostics {
+                content = content.child(if query.len() >= 2 && self.section != "diagnostics" {
+                    self.panel_result("diagnostics", "Diagnostics", window, cx)
+                } else {
+                    self.diagnostics_view(window, cx)
+                });
+            }
             if connections {
                 content = content.child(if query.len() >= 2 && self.section != "connections" {
                     self.panel_result("connections", "Connections", window, cx)
@@ -179,7 +192,13 @@ impl Render for Settings {
             if appearance {
                 content = content.child(self.appearance_view(window, cx));
             }
-            if fields.is_empty() && !appearance && !keyboard && !about && !connections {
+            if fields.is_empty()
+                && !appearance
+                && !keyboard
+                && !about
+                && !connections
+                && !diagnostics
+            {
                 content = content.child(empty("No settings match this search."));
             }
             let mut previous = None;

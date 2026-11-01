@@ -230,6 +230,7 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("storage", "Worktrees & storage"),
     ("keys", "API keys"),
     ("connections", "Connections"),
+    ("diagnostics", "Diagnostics"),
     ("about", "About"),
 ];
 pub const FIELDS: &[Field] = &[
