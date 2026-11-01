@@ -250,6 +250,14 @@
       ]
     },
     {
+      "id": "bots",
+      "flags": [
+        "--bots"
+      ],
+      "webRoute": "/dashboard",
+      "nativeSelectors": []
+    },
+    {
       "id": "setup",
       "flags": [
         "--onboarding"

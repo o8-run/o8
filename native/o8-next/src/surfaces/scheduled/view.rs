@@ -667,7 +667,7 @@ impl Scheduled {
             div()
                 .flex()
                 .flex_col()
-                .child(section_header("Connected agent schedules", count))
+                .child(section_header("Connected schedules", count))
                 .children(jobs.into_iter().map(|job| {
                     let id = job["id"].as_str().unwrap_or("").to_owned();
                     let enabled = job["enabled"] == true;
@@ -1105,6 +1105,12 @@ pub(super) fn schedule_label(schedule: &Value) -> String {
             let expr = schedule["expr"].as_str().unwrap();
             let parts: Vec<&str> = expr.split_whitespace().collect();
             let daily = parts.len() == 5 && parts[2..] == ["*", "*", "*"];
+            if parts.len() == 5
+                && parts[1..] == ["*", "*", "*", "*"]
+                && let Ok(minute) = parts[0].parse::<u32>()
+            {
+                return format!("Hourly at :{minute:02}{tz}");
+            }
             match (
                 daily,
                 parts.first().and_then(|m| m.parse::<u32>().ok()),

@@ -29,5 +29,8 @@ describe('local schedule discovery', () => {
     expect(row).toMatchObject({ name: 'Check it', agentId: 'codex', enabled: false, schedule: { label: 'Daily at 14:12' } });
     expect(JSON.stringify(row)).not.toContain('hidden');
     expect(rruleLabel(null)).toBeNull();
+    expect(rruleLabel('FREQ=MINUTELY;INTERVAL=15')).toBe('Every 15 minutes');
+    expect(rruleLabel('RRULE:FREQ=HOURLY;INTERVAL=1')).toBe('Every hour');
+    expect(rruleLabel('FREQ=DAILY;BYHOUR=3;BYMINUTE=10;BYSECOND=0')).toBe('Daily at 03:10');
   });
 });

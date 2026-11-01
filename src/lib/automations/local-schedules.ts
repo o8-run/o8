@@ -83,9 +83,12 @@ function tomlString(source: string, key: string): string | null {
 
 export function rruleLabel(rrule: string | null): string | null {
   if (!rrule) return null;
-  const part = (name: string) => new RegExp(`[:;]${name}=([^;]+)`).exec(rrule)?.[1] ?? null;
+  const part = (name: string) => new RegExp(`(?:^|[:;])${name}=([^;]+)`).exec(rrule)?.[1] ?? null;
   const frequency = part('FREQ')?.toLowerCase();
   if (!frequency) return null;
+  const every = Number(part('INTERVAL') ?? 1);
+  const unit = { minutely: 'minute', hourly: 'hour' }[frequency];
+  if (unit) return every > 1 ? `Every ${every} ${unit}s` : `Every ${unit}`;
   const hour = part('BYHOUR');
   const minute = part('BYMINUTE');
   const time = hour && minute && /^\d+$/.test(hour) && /^\d+$/.test(minute)

@@ -9,6 +9,11 @@ import { cutoverClient } from './fixtures/ws-cutover-client';
 const binary = process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
 // Native paths that still need Next (#5243). Remove a path when it is registered.
 const NEXT_ONLY_NATIVE_PATHS = new Set([
+  '/api/runtime/acp-connection',
+  '/api/runtime/acp-registry',
+  '/api/runtime/acp-registry/prepare',
+  '/api/runtime/provider-instances',
+  '/api/setup/detect',
   '/api/cortex/codebase-memory',
   '/api/cortex/cross-repo-proposals',
   '/api/cortex/diagnostics',

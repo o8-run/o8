@@ -36,6 +36,10 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/github-status', 'GET', () => import('@/app/api/panel/github-status/route')),
     route('/api/orchestrator/merge-preview', 'GET', () => import('@/app/api/orchestrator/merge-preview/route')),
   ],
+  bots: [
+    route('/api/bots', 'GET', () => import('@/app/api/bots/route')),
+    route('/api/bots/[id]/thread', 'GET', () => import('@/app/api/bots/[id]/thread/route')),
+  ],
   grid: [],
   shortcuts: [], // Local shortcut reference has no HTTP transport.
   terminal: [route('/api/mobile/terminal-sessions', 'GET', () => import('@/app/api/mobile/terminal-sessions/route'))],
