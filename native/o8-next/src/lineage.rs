@@ -157,6 +157,13 @@ pub fn link(id: &str) -> String {
     format!("{SCHEME}{id}")
 }
 
+/// The worktree branch a thread works on, when it is not the default branch.
+pub fn worktree_badge(branch: Option<&str>) -> Option<String> {
+    let branch = branch?.trim();
+    (!branch.is_empty() && !matches!(branch, "main" | "master" | "HEAD" | "trunk"))
+        .then(|| crate::text::sanitize(branch))
+}
+
 /// The thread row menu's Copy items: (selector, label, clipboard text, toast).
 pub fn copy_items(id: &str) -> [(&'static str, &'static str, String, &'static str); 2] {
     [
