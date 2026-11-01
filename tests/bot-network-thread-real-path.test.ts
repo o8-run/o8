@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
+import { StdioJsonRpcPeer } from '@/lib/runtimes/shared/stdio-json-rpc';
 
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 const root = mkdtempSync(join(tmpdir(), 'o8-network-thread-'));
@@ -26,6 +27,7 @@ const { createNetworkThread, findNetworkThread, reserveNetworkSend } = await imp
 const { projectNetworkThread } = await import('@/lib/bots/network-projection');
 const { readAgentConversationMessages } = await import('@/lib/agents/message-history');
 const { defaultLiveAgentPresenceSeams } = await import('@/lib/agents/live-presence');
+const { defaultAgentMessageDeliverySeams } = await import('@/lib/agents/delivery');
 const threadId = 'thoughts-network-fixture';
 const author = { kind: 'bot', id: 'bot-peer', name: 'Original peer', agentId: 'source-peer' };
 function request(path: string, body?: unknown, method?: string) {
@@ -44,9 +46,9 @@ beforeEach(() => {
 });
 afterAll(() => { closeDb(); rmSync(root, { recursive: true, force: true }); });
 
-function localBinding(name = 'OriginalPeer', agentId = 'source-peer') {
-  upsertAgentPresence({ agentId, name, repo, runtime: 'fixture-runtime', sessionKey: `fixture-session:${agentId}`,
-    worktreePath: null, laneId: null, packetId: null, lastSeen: new Date(Date.now() - 20 * 60_000).toISOString() });
+function localBinding(name = 'OriginalPeer', agentId = 'source-peer', runtime = 'fixture-runtime', live = false) {
+  upsertAgentPresence({ agentId, name, repo, runtime, sessionKey: `fixture-session:${agentId}`,
+    worktreePath: null, laneId: null, packetId: null, lastSeen: new Date(Date.now() - (live ? 0 : 20 * 60_000)).toISOString() });
   const member = membership({ action: 'create', house: 'fixture', name });
   if (Array.isArray(member)) throw new Error('Expected a member');
   const bound = membership({ action: 'bind', memberId: member.id, agentId });
@@ -369,3 +371,84 @@ it('network configuration retries keep the existing binding and never overwrite 
   expect(() => createNetworkThread({ threadId: occupied, bindingIds: [binding.id] })).toThrow('already exists');
   expect(readFileSync(path, 'utf8')).toBe('An existing damaged chat must be retained');
 });
+
+// Scripted local protocol clients and a delivery scheduling seam; no live vendor calls.
+async function ownershipPeer(bindingId: string) {
+  const peer = new StdioJsonRpcPeer({ command: process.execPath,
+    args: ['--import', 'tsx', 'src/lib/mcp/operator-mcp-server.ts'], cwd: process.cwd(),
+    env: { ...process.env, O8_OPERATOR_MCP_PROFILE: 'network', O8_NETWORK_BINDING_ID: bindingId,
+      O8_MCP_TRANSPORT: 'stdio', O8_MCP_NODE22_CHECKED: '1' } }, 25_000);
+  await peer.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'scripted-ownership-race', version: '1' } });
+  return peer;
+}
+async function ownershipCall(peer: StdioJsonRpcPeer, name: string, args: Record<string, unknown> = {}) {
+  const result = await peer.request<{ content: Array<{ text: string }>; isError?: boolean }>('tools/call', { name, arguments: args });
+  expect(result.isError, JSON.stringify(result)).not.toBe(true);
+  return JSON.parse(result.content[0].text);
+}
+
+it('an MCP reply during native delivery retains the original canonical thread across retry and reopen', async () => {
+  const { binding } = localBinding('RacingPeer', 'racing-peer', 'claude-code', true);
+  const thread = createNetworkThread({ bindingIds: [binding.id] }); projectNetworkThread(thread.threadId);
+  const record = readPersistedLlmChat(thread.threadId)!.history;
+  persistCanonicalChatHistoryRecord(thread.threadId, { ...record, title: 'The original operator thread', pinned: true });
+  const peer = await ownershipPeer(binding.id);
+  const presence = vi.spyOn(defaultLiveAgentPresenceSeams, 'discoverSessions').mockResolvedValue([]);
+  let boundAtDelivery: string | null | undefined;
+  let replied: { projection: { threadId: string }; message: { id: string; conversation: { id: string } } } | undefined;
+  const delivery = vi.spyOn(defaultAgentMessageDeliverySeams, 'sendClaude').mockImplementation(async () => {
+    boundAtDelivery = findNetworkThread(thread.threadId)?.conversationId;
+    const inbox = await ownershipCall(peer, 'check_inbox');
+    const first = inbox.messages.find((message: { text: string }) => message.text === 'Native delivery race');
+    if (!first) throw new Error('The durably admitted native send must reach the target inbox');
+    replied = await ownershipCall(peer, 'send_message', { to: 'operator', text: 'Reply before native delivery returns',
+      requestId: 'ownership-delivery-reply', replyToId: first.id });
+  });
+  try {
+    const body = composerBody('ownership-delivery-first', thread, 'Native delivery race');
+    const sent = await COMPOSE(request('/api/orchestrator/composer-queue', body));
+    expect(sent.status, await sent.clone().text()).toBe(200);
+    expect(delivery).toHaveBeenCalledOnce();
+    expect(boundAtDelivery).toBeTruthy();
+    expect(replied!.projection.threadId).toBe(thread.threadId);
+    const original = (await sent.json()).item.message;
+    expect(replied!.message.conversation.id).toBe(original.conversation.id);
+    await peer.close({ gracefulMs: 200 }); closeDb();
+    const retried = await COMPOSE(request('/api/orchestrator/composer-queue', body));
+    expect(retried.status, await retried.clone().text()).toBe(200);
+    expect((await retried.json()).item.message.id).toBe(original.id);
+    expect((await history(thread.threadId)).map(row => (row.network as { messageId: string }).messageId))
+      .toEqual([original.id, replied!.message.id]);
+    expect(readPersistedLlmChat(thread.threadId)!.history).toMatchObject({ title: 'The original operator thread', pinned: true });
+    expect(getSqlite().prepare('SELECT thread_id FROM bot_network_threads WHERE conversation_id = ?').all(original.conversation.id))
+      .toEqual([{ thread_id: thread.threadId }]);
+    expect(readAgentConversationMessages(original.conversation.id)).toHaveLength(2);
+  } finally {
+    delivery.mockRestore(); presence.mockRestore(); await peer.close({ gracefulMs: 200 });
+  }
+}, 60_000);
+
+it('an MCP reply after an interrupted native send recovers its saved thread before creating another one', async () => {
+  const { thread, binding } = open();
+  const id = 'ownership-interrupted-first';
+  const intent = reserveNetworkSend(thread.threadId, id, 'Interrupted before native association');
+  const first = await agentMessage({ repo, to: binding.agentName, text: intent.text, requestId: intent.requestId });
+  expect(findNetworkThread(thread.threadId)?.conversationId).toBeNull();
+  closeDb();
+  const peer = await ownershipPeer(binding.id);
+  try {
+    const replied = await ownershipCall(peer, 'send_message', { to: 'operator', text: 'Reply after process restart',
+      requestId: 'ownership-interrupted-reply', replyToId: first.id });
+    await peer.close({ gracefulMs: 200 }); closeDb();
+    const retried = await COMPOSE(request('/api/orchestrator/composer-queue', composerBody(id, thread, intent.text)));
+    expect(retried.status, await retried.clone().text()).toBe(200);
+    expect(replied.projection.threadId).toBe(thread.threadId);
+    expect((await retried.json()).item.message.id).toBe(first.id);
+    const rows = await history(thread.threadId);
+    expect(rows.map(row => (row.network as { messageId: string }).messageId)).toEqual([first.id, replied.message.id]);
+    expect(rows.map(row => (row.author as { kind: string }).kind)).toEqual(['human', 'bot']);
+    expect(getSqlite().prepare('SELECT thread_id FROM bot_network_threads WHERE conversation_id = ?').all(first.conversation!.id))
+      .toEqual([{ thread_id: thread.threadId }]);
+    expect(readAgentConversationMessages(first.conversation!.id)).toHaveLength(2);
+  } finally { await peer.close({ gracefulMs: 200 }); }
+}, 60_000);

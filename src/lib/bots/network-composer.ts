@@ -41,6 +41,9 @@ export async function postNetworkComposerMessage(input: unknown, principal: Requ
         replyToId: intent.replyToId, requestId: intent.requestId }, principal, undefined, sqlite, undefined, {
           expectedTarget: { agentId: target.agentId, name: target.agentName, repo: thread.repoPath, runtime: target.runtime, sessionKey: target.sessionKey },
           beforePersist: () => assertNetworkSendActive(intent, sqlite),
+          // The peer may answer during delivery. Commit ownership with the bus
+          // message, before any handoff or reply can observe that exchange.
+          afterPersist: accepted => completeNetworkSend(intent, accepted, sqlite),
         });
     }
     completeNetworkSend(intent, message, sqlite);
