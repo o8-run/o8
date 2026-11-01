@@ -154,7 +154,7 @@ the existing operator-defaults route unless another owner is named.
 | Quick drawer / Get help | Expand; Keyboard shortcuts (Cmd+/); Community Discord; Documentation | present | present in existing native profile surface; no rail changes |
 | Quick drawer / capacity helper | Plan capacity rows; refresh; select/register plan | missing | skipped: account/billing (helper is not mounted by current drawer) |
 | Quick drawer / theme helper | Light; Dark; glass surface toggle | partial | partial: current drawer uses three complete looks; helper itself is not mounted |
-| Keyboard / shortcuts | Open shortcut help and close it, keyboard scrolling | present | present as separate native modal; Settings entry missing |
+| Keyboard / shortcuts | Open shortcut help and close it, keyboard scrolling | present | partial: Settings entry now opens the native reference modal and restores focus; classic host-only shortcut coverage still depends on those host ports |
 | Sounds | No separate Sounds tab, sound picker, volume or mute control exists in the frozen Settings references | present | present as an inventory fact; do not invent preferences. Spoken updates are listed under Voice |
 
 ## Execution order
@@ -181,3 +181,5 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 - Model defaults: `settings_parity_model_defaults_persist` passed (1/1). Real selectors/edits persist worker efforts, reviewer/combined routing, fallback model, worker fallback, visibility, local model names and triage/action efforts. A single-provider profile pins the reviewer; tier edits preserve the saved runtime and model. House discovery remains held for a native-safe inventory response.
 
 - Voice notifications: `settings_parity_spoken_notifications_persist_and_gate_controls` passed (1/1). It clicks all notification switches, verifies saved values, checks disabled dependencies, saves the hourly budget and quiet-window start, and refuses an invalid time without changing the saved end.
+
+- Keyboard: `settings_parity_keyboard_opens_help_and_returns_to_settings` passed (1/1), opening the real shell help modal, closing back to Settings, then reopening it with Enter from the restored focus. The page renderer moved to `settings_render.rs` to keep the existing row-controls file below its size limit; internal Settings navigation scrolls without visible bars.

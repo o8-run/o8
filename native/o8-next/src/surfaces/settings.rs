@@ -76,6 +76,9 @@ impl Shell {
             window,
             |this, _, action: &crate::settings::Action, window, cx| match action {
                 crate::settings::Action::Appearance(mode) => this.set_appearance(mode, window, cx),
+                crate::settings::Action::Shortcuts => {
+                    (super::shortcuts::REGISTRATION.open)(this, Command::Shortcuts, window, cx);
+                }
             },
         ));
         self.surfaces.settings.view = Some(settings);

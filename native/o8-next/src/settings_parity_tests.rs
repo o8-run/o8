@@ -188,3 +188,23 @@ fn settings_parity_spoken_notifications_persist_and_gate_controls(cx: &mut TestA
     );
     assert_eq!(values(&fixture)["broadcastVoiceQuietEnd"], "08:00");
 }
+
+#[gpui::test]
+fn settings_parity_keyboard_opens_help_and_returns_to_settings(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut visual, _) = start(cx);
+    click(&mut visual, "settings-nav-keyboard");
+    frame(&shell, &mut visual);
+    click(&mut visual, "setting-keyboard-open");
+    settle(&mut visual);
+    assert!(visual.debug_bounds("keyboard-shortcuts").is_some());
+    click(&mut visual, "shortcuts-close");
+    settle(&mut visual);
+    assert!(visual.debug_bounds("settings-page").is_some());
+    assert!(visual.debug_bounds("setting-keyboard-open").is_some());
+    visual.simulate_keystrokes("enter");
+    settle(&mut visual);
+    assert!(
+        visual.debug_bounds("keyboard-shortcuts").is_some(),
+        "help restores focus to its Settings control"
+    );
+}

@@ -108,6 +108,7 @@ struct Editor {
 pub(crate) struct Close;
 pub(crate) enum Action {
     Appearance(&'static str),
+    Shortcuts,
 }
 impl EventEmitter<Action> for Settings {}
 pub(crate) struct Settings {
@@ -449,3 +450,6 @@ mod view;
 
 #[path = "settings_panels.rs"]
 mod panels;
+
+#[path = "settings_render.rs"]
+mod render;

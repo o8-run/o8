@@ -210,8 +210,9 @@ pub(crate) const EFFORT: &[(&str, &str)] = &[
 ];
 pub const SECTIONS: &[(&str, &str)] = &[
     ("general", "General"),
-    ("voice", "Voice"),
     ("appearance", "Appearance"),
+    ("voice", "Voice"),
+    ("keyboard", "Keyboard"),
     ("dispatch", "Dispatch"),
     ("models", "Models & providers"),
     ("local-models", "Local models"),

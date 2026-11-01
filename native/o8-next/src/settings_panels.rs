@@ -57,4 +57,35 @@ impl Settings {
                 .child("Changes apply immediately and are saved for the next launch. Glass uses the macOS desktop material where supported; other platforms may use solid surfaces."))
             .into_any_element()
     }
+    pub(super) fn keyboard_view(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(16.))
+            .child("Keyboard shortcuts")
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child("Browse the shortcuts available in this native workspace."),
+            )
+            .child(self.button(
+                "setting-keyboard-open".into(),
+                "Open keyboard shortcuts".into(),
+                !self.busy,
+                false,
+                window,
+                cx,
+                |_, _, cx| cx.emit(Action::Shortcuts),
+            ))
+            .into_any_element()
+    }
+}
+
+pub(super) fn matches(section: &str, active: &str, query: &str, keywords: &str) -> bool {
+    if query.len() < 2 {
+        section == active
+    } else {
+        query.split_whitespace().all(|word| keywords.contains(word))
+    }
 }
