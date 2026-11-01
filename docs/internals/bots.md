@@ -6,6 +6,9 @@ o8 next rail directly under PRs. One click opens the bot's main thread.
 - `src/lib/bots/registry.ts`: `BotEntry {id, house, name, icon {key?, url?}, mainThread {kind, id?, url?} | null, status}`.
   `listBots()` merges the per-house `PROVIDERS` with static entries from `<dataDir>/bots.json` (`{"bots": [...]}`).
 - `GET /api/bots` returns the list. `GET /api/bots/:id/thread` returns `{bot, messages, externalUrl}`. Both use panel auth.
+- `src/lib/bots/roster.ts` projects durable local members alongside those sources. Membership and
+  explicit session bindings live beside the agent store, with additive schema v76 initialized on normal DB boot
+  and through the agent store's lazy initializer.
 - Native: `native/o8-next/src/surfaces/bots.rs` (rail entries and `Tab::Bot(id)`), `bots/client.rs`, `bots/view.rs`.
 
 Bots are global destinations: no repository needs to be selected. Before any workspace exists,
@@ -33,6 +36,53 @@ command palette owns the pane and consumes its temporary Bot tab when resolved, 
 thread or returning to the original workspace cannot reopen it. Inactive bot tabs never redirect navigation.
 This references an existing o8 thread; it does not import an external vendor conversation or change
 the thread's composer dispatch.
+
+## Durable local membership
+
+A member has an immutable local storage id, house, display name, optional icon and optional o8 home-thread
+reference. Renaming changes its display name. Existing agent ids, runtime/session ids, author identities,
+repository/name addresses and inbox cursors retain their original values. Membership ids are data keys;
+they do not grant a bus principal or enroll a running process.
+
+An operator can bind several already-recorded local agent sessions to one member. Each binding snapshots
+the existing `agent_id`, agent name, repository, runtime and complete session key. A later presence row
+with a different session/context does not silently replace that binding. A member with live matching
+bindings is online; expired or disconnected bindings are offline and remain stored. The existing agent
+bus six-minute liveness rule is unchanged. A member without bindings has unknown status, or retains its
+existing provider's status when represented by that provider. Discovery alone never creates membership.
+
+The local maintenance command uses the checkout's Node/tsx dependencies and the existing data-directory
+resolvers. It reads one command object from stdin and prints the resulting member or member list, alongside
+normal DB startup/shutdown logs:
+
+```sh
+node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/bots-membership.ts <<'JSON'
+{"action":"create","id":"bot-local-build","house":"claude","name":"Build bot","iconKey":"claude-code"}
+JSON
+```
+
+Omit `id` to generate one and retain the returned id for future commands. Subsequent command objects:
+
+```json
+{"action":"bind","memberId":"bot-local-build","agentId":"an-existing-local-agent-id"}
+{"action":"rename","memberId":"bot-local-build","name":"Build reviewer"}
+{"action":"home","memberId":"bot-local-build","threadId":"an-existing-o8-thread-id"}
+{"action":"source","memberId":"bot-local-build","sourceId":"claude:existing-configured-entry"}
+{"action":"unbind","memberId":"bot-local-build","bindingId":"a-returned-binding-id"}
+{"action":"list"}
+```
+
+`home` accepts `null` to clear the reference. Setting a home reference does not create a conversation.
+`source` explicitly associates a provider/configuration id with a member for presentation and deduplication;
+it is not a message address. Existing provider/configuration order is retained, the first associated source
+keeps its presentation slot and mailbox context, and unrepresented members append in creation order.
+Stored display names and explicit home references override source presentation. Old source ids still resolve
+through the thread API, while the roster lists the canonical member once.
+
+Membership changes have a local command seam only. This step adds no HTTP/MCP membership mutation route,
+remote join or automatic discovery enrollment. A global roster does not enable cross-repository message
+routing: the legacy bus continues to use each session's explicit repository and agent name. Network-thread
+reply dispatch and the network MCP profile are subsequent work.
 
 ## Grok provider and its mailbox
 

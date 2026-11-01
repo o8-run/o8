@@ -6,6 +6,7 @@ import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
 import { ensureV45BroadcastFocusSchema } from '@/lib/db/v45-broadcast-focus-migration';
+import { ensureV76BotMembershipSchema } from '@/lib/db/v76-bot-membership-migration';
 import { parseMessageRefs } from './message-refs';
 import type { AgentConversationReceipt, AgentMessage, AgentMessageRefs, AgentPresence } from './types';
 import { normalizeAgentBusRepoPath, reconcilePersistedAgentBusRepoPaths } from './repo-paths';
@@ -137,6 +138,7 @@ function expandBroadcastTextLimit(sqlite: Database.Database): void {
 
 export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): void {
   ensureV45BroadcastFocusSchema(sqlite);
+  ensureV76BotMembershipSchema(sqlite);
   expandBroadcastTextLimit(sqlite);
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS agent_presence (
@@ -263,7 +265,6 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
     `).run();
   })();
 }
-
 function mapPresence(row: PresenceRow): AgentPresence {
   return {
     agentId: row.agent_id,
@@ -277,7 +278,6 @@ function mapPresence(row: PresenceRow): AgentPresence {
     lastSeen: row.last_seen,
   };
 }
-
 function mapConversation(row: ConversationRow): AgentConversation {
   return {
     id: row.id,

@@ -10,6 +10,11 @@ vi.mock('@/lib/panel/auth', () => ({
 }));
 const dirs = vi.hoisted(() => ({ data: '' }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => dirs.data }));
+const membership = vi.hoisted(() => ({ failed: false }));
+vi.mock('@/lib/agents/bot-membership-store', () => ({ listBotMembers: () => {
+  if (membership.failed) throw new Error('Fixture membership store unavailable');
+  return [];
+} }));
 
 import { GET } from './route';
 import { GET as THREAD } from './[id]/thread/route';
@@ -19,6 +24,7 @@ let root: string;
 
 beforeEach(() => {
   auth.denied = false;
+  membership.failed = false;
   root = mkdtempSync(join(tmpdir(), 'o8-bots-route-'));
   dirs.data = join(root, 'data');
   mkdirSync(join(root, 'agents', AGENT), { recursive: true });
@@ -41,6 +47,14 @@ it('GET /api/bots lists the grok bot', async () => {
 it('GET /api/bots honours panel auth', async () => {
   auth.denied = true;
   expect((await GET(req('/api/bots'))).status).toBe(401);
+});
+
+it('store failures produce unavailable responses instead of silently dropping durable members', async () => {
+  membership.failed = true;
+  const response = await GET(req('/api/bots'));
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ error: 'Bot roster is temporarily unavailable.' });
+  expect((await THREAD(req('/api/bots/x/thread'), { params: Promise.resolve({ id: 'x' }) })).status).toBe(503);
 });
 
 it('thread route returns mailbox messages and the deep link; unknown bots 404', async () => {

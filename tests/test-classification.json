@@ -1905,6 +1905,19 @@
       ]
     },
     {
+      "path": "tests/bot-membership-local-commands-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/bot-membership-roster-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/bounded-worktree-maintenance-real-path.test.ts",
       "reasons": [
         "child-process",
