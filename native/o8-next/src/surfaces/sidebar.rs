@@ -326,6 +326,13 @@ pub(super) const REGISTRATION: Registration = Registration {
                 .update(cx, |sidebar, _| sidebar.catalog_changed());
         }
     },
+    claim_link: |shell, url, window, cx| {
+        let Some(id) = crate::lineage::parse_link(url) else {
+            return false;
+        };
+        shell.open_thread_by_id(id.to_owned(), window, cx);
+        true
+    },
     ..Registration::new("", "", |shell, _, window, cx| {
         shell
             .surfaces
@@ -503,6 +510,21 @@ impl Shell {
         let repo = self.state.selected.clone().filter(|w| w != "Unassigned")?;
         let list = self.surfaces.sidebar.view.clone()?;
         Some(list.update(cx, |list, cx| list.start_thread(repo, open, cx)))
+    }
+    /// Opens a thread a lineage row, created-thread link or "started by"
+    /// marker named, or says so when this machine does not list it.
+    pub(crate) fn open_thread_by_id(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sessions.iter().any(|s| s.id == id) {
+            self.open_thread(id, window, cx);
+        } else {
+            toasts::show(
+                toasts::Kind::Info,
+                "That thread is not on this machine yet.",
+                vec![],
+                Some(toasts::NOTICE_TIMEOUT),
+                cx,
+            );
+        }
     }
     fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(workspace) = self
