@@ -47,7 +47,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/automations', 'GET POST', () => import('@/app/api/automations/route')),
     route('/api/automations/[id]', 'PATCH DELETE', () => import('@/app/api/automations/[id]/route')),
     route('/api/automations/[id]/run', 'POST', () => import('@/app/api/automations/[id]/run/route')),
-    route('/api/automations/connected', 'GET PATCH', () => import('@/app/api/automations/connected/route')),
+    route('/api/automations/connected', 'GET POST PATCH', () => import('@/app/api/automations/connected/route')),
     route('/api/panel/repos', 'GET', () => import('@/app/api/panel/repos/route')),
   ],
   palette: [], // Local commands and workspace navigation reuse the selected surface's transport.

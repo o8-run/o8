@@ -244,6 +244,18 @@ impl Scheduled {
         );
     }
 
+    fn run_connected(&mut self, id: String, cx: &mut Context<Self>) {
+        let key = format!("connected:{id}");
+        self.mutate(
+            key,
+            "run",
+            "POST",
+            "/api/automations/connected".into(),
+            Some(json!({ "id": id })),
+            cx,
+        );
+    }
+
     fn open_editor(&mut self, row: Option<Value>, window: &mut Window, cx: &mut Context<Self>) {
         let owner = cx.entity().downgrade();
         let repos = self.repos.clone();
@@ -299,7 +311,15 @@ impl Scheduled {
         } else if self.error.is_some() || matches!(self.connected, Some(Err(_))) {
             "Activity unavailable".to_owned()
         } else {
-            format!("{active} active")
+            let failed = self
+                .connected_jobs()
+                .iter()
+                .filter(|job| attention(job) == 0)
+                .count();
+            match failed {
+                0 => format!("{active} active"),
+                _ => format!("{active} active · {failed} failed"),
+            }
         };
         div()
             .flex()
@@ -327,8 +347,8 @@ impl Scheduled {
                     .flex_shrink_0()
                     .child(
                         div()
-                            .text_size(px(9.5))
-                            .text_color(theme().text_faint)
+                            .text_size(px(11.))
+                            .text_color(theme().text_muted)
                             .child(status),
                     )
                     .child(
@@ -662,89 +682,188 @@ impl Scheduled {
         if jobs.is_empty() {
             return None;
         }
-        let count = jobs.len();
-        Some(
+        let mut groups: [(&'static str, Vec<Value>); 3] =
+            [("This Mac", vec![]), ("Codex", vec![]), ("Agents", vec![])];
+        for job in jobs {
+            let group = match job["agentId"].as_str() {
+                Some("launchd" | "cron") => 0,
+                Some("codex") => 1,
+                _ => 2,
+            };
+            groups[group].1.push(job);
+        }
+        let mut section = div().flex().flex_col().gap(px(6.));
+        for (label, mut jobs) in groups {
+            if jobs.is_empty() {
+                continue;
+            }
+            jobs.sort_by_key(attention);
+            let count = jobs.len();
+            section = section.child(section_header(label, count)).child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .rounded(px(12.))
+                    .border_1()
+                    .border_color(theme().border)
+                    .bg(theme().surface)
+                    .overflow_hidden()
+                    .children(
+                        jobs.iter()
+                            .enumerate()
+                            .map(|(n, job)| self.connected_row(job, n + 1 == count, cx)),
+                    ),
+            );
+        }
+        Some(section.into_any_element())
+    }
+
+    fn connected_row(&self, job: &Value, last: bool, cx: &mut Context<Self>) -> AnyElement {
+        let id = job["id"].as_str().unwrap_or("").to_owned();
+        let enabled = job["enabled"] == true;
+        let read_only = job["readOnly"] == true;
+        let can_run = enabled && job["agentId"] == "launchd";
+        let busy = self.busy.get(&format!("connected:{id}")).copied();
+        let (status, color) = job_status(job);
+        let toggle_id = id.clone();
+        let run_id = id.clone();
+        let row = format!("scheduled-job-{id}");
+        let about = [
+            job["detail"].as_str().unwrap_or("").to_owned(),
+            schedule_label(&job["schedule"]),
+        ]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+        let moment = |label: &'static str, value: String| {
             div()
+                .w(px(84.))
+                .flex_shrink_0()
                 .flex()
                 .flex_col()
-                .child(section_header("Connected schedules", count))
-                .children(jobs.into_iter().map(|job| {
-                    let id = job["id"].as_str().unwrap_or("").to_owned();
-                    let enabled = job["enabled"] == true;
-                    let busy = self.busy.contains_key(&format!("connected:{id}"));
-                    let toggle_id = id.clone();
-                    let read_only = job["readOnly"] == true;
-                    let row = format!("scheduled-job-{id}");
+                .gap(px(2.))
+                .child(
                     div()
-                        .debug_selector(move || row)
-                        .min_h(px(52.))
-                        .flex()
-                        .items_center()
-                        .gap(px(9.))
-                        .px(px(10.))
-                        .py(px(7.))
-                        .opacity(if enabled { 1. } else { 0.62 })
-                        .child(
+                        .text_size(px(9.5))
+                        .text_color(theme().text_faint)
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme().text_secondary)
+                        .child(value),
+                )
+        };
+        div()
+            .debug_selector(move || row)
+            .min_h(px(58.))
+            .flex()
+            .items_center()
+            .gap(px(14.))
+            .px(px(14.))
+            .py(px(9.))
+            .when(!last, |row| row.border_b_1().border_color(theme().border))
+            .child(div().size(px(7.)).rounded_full().flex_shrink_0().bg(color))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    .when(!enabled, |text| text.opacity(0.6))
+                    .child(
+                        div()
+                            .text_size(px(13.5))
+                            .truncate()
+                            .child(job["name"].as_str().unwrap_or("").to_owned()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme().text_muted)
+                            .truncate()
+                            .child(about),
+                    ),
+            )
+            .child(
+                div()
+                    .w(px(112.))
+                    .flex_shrink_0()
+                    .text_size(px(11.))
+                    .text_color(color)
+                    .truncate()
+                    .child(status),
+            )
+            .child(moment(
+                "Last run",
+                relative(job["lastRunAt"].as_f64(), "Not recorded"),
+            ))
+            .child(moment(
+                "Next run",
+                if enabled {
+                    relative(job["nextRunAt"].as_f64(), "On schedule")
+                } else {
+                    "Paused".into()
+                },
+            ))
+            .child(
+                div()
+                    .w(px(136.))
+                    .flex_shrink_0()
+                    .flex()
+                    .justify_end()
+                    .gap(px(6.))
+                    .when(read_only, |actions| {
+                        actions.child(
                             div()
-                                .flex_1()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .gap(px(4.))
-                                .child(
-                                    div()
-                                        .text_size(px(13.5))
-                                        .child(job["name"].as_str().unwrap_or("").to_owned()),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(9.5))
-                                        .text_color(theme().text_muted)
-                                        .whitespace_nowrap()
-                                        .overflow_hidden()
-                                        .text_ellipsis()
-                                        .child(if read_only {
-                                            format!(
-                                                "{} · {}",
-                                                schedule_label(&job["schedule"]),
-                                                job["agentId"].as_str().unwrap_or(""),
-                                            )
-                                        } else {
-                                            format!(
-                                                "{} · {} · Next {} · Last {} ({})",
-                                                schedule_label(&job["schedule"]),
-                                                job["agentId"].as_str().unwrap_or(""),
-                                                relative(job["nextRunAt"].as_f64(), "unscheduled"),
-                                                relative(job["lastRunAt"].as_f64(), "never"),
-                                                job["lastRunStatus"].as_str().unwrap_or("idle"),
-                                            )
-                                        }),
-                                ),
+                                .text_size(px(10.5))
+                                .text_color(theme().text_faint)
+                                .child("View only"),
                         )
-                        .when(!read_only, |row| {
-                            row.child(
-                                action(
-                                    format!("scheduled-connected-{id}"),
-                                    if busy {
-                                        "Updating…"
-                                    } else if enabled {
-                                        "Pause"
-                                    } else {
-                                        "Resume"
-                                    },
-                                    false,
-                                    busy,
-                                )
-                                .on_click(cx.listener(
-                                    move |this, _, _, cx| {
-                                        this.toggle_connected(toggle_id.clone(), !enabled, cx)
-                                    },
-                                )),
+                    })
+                    .when(can_run, |actions| {
+                        actions.child(
+                            action(
+                                format!("scheduled-run-{id}"),
+                                if busy == Some("run") {
+                                    "Starting…"
+                                } else {
+                                    "Run now"
+                                },
+                                false,
+                                busy.is_some(),
                             )
-                        })
-                }))
-                .into_any_element(),
-        )
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| this.run_connected(run_id.clone(), cx),
+                            )),
+                        )
+                    })
+                    .when(!read_only, |actions| {
+                        actions.child(
+                            action(
+                                format!("scheduled-connected-{id}"),
+                                if busy == Some("toggle") {
+                                    "Updating…"
+                                } else if enabled {
+                                    "Pause"
+                                } else {
+                                    "Resume"
+                                },
+                                false,
+                                busy.is_some(),
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.toggle_connected(toggle_id.clone(), !enabled, cx)
+                                },
+                            )),
+                        )
+                    }),
+            )
+            .into_any_element()
     }
 }
 
@@ -792,7 +911,7 @@ impl Render for Scheduled {
                             .flex()
                             .flex_col()
                             .gap(px(14.))
-                            .pt(px(72.))
+                            .pt(px(44.))
                             .px(px(28.))
                             .pb(px(64.))
                             .child(self.header(cx))
@@ -965,9 +1084,15 @@ fn section_header(label: &'static str, count: usize) -> impl IntoElement {
         .gap(px(7.))
         .pt(px(14.))
         .pb(px(4.))
-        .text_color(theme().text_faint)
-        .child(div().text_size(px(10.)).child(label.to_uppercase()))
-        .child(div().text_size(px(9.5)).child(count.to_string()))
+        .text_color(theme().text_muted)
+        .child(
+            div()
+                .text_size(px(12.))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(theme().text)
+                .child(label),
+        )
+        .child(div().text_size(px(11.)).child(count.to_string()))
 }
 
 fn section_note(text: &str) -> impl IntoElement {
@@ -1021,6 +1146,35 @@ fn empty_state(
                 ),
             )
         })
+}
+
+/// A row's state in words and color. Paused wins: its last result is history.
+fn job_status(job: &Value) -> (String, gpui::Rgba) {
+    if job["enabled"] != true {
+        return ("Paused".into(), theme().text_faint);
+    }
+    match job["lastRunStatus"].as_str() {
+        Some("running") => ("Running now".into(), theme().accent),
+        Some("failed" | "error") => (
+            match job["lastExitCode"].as_i64() {
+                Some(code) => format!("Failed · exit {code}"),
+                None => "Failed".into(),
+            },
+            theme().danger,
+        ),
+        Some("ok") => ("Healthy".into(), theme().success),
+        _ => ("Scheduled".into(), theme().text_muted),
+    }
+}
+
+/// Rows that need a look first, paused ones last.
+fn attention(job: &Value) -> u8 {
+    match (job["enabled"] == true, job["lastRunStatus"].as_str()) {
+        (false, _) => 3,
+        (true, Some("failed" | "error")) => 0,
+        (true, Some("running")) => 1,
+        _ => 2,
+    }
 }
 
 fn status_color(status: &str) -> gpui::Rgba {
