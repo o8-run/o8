@@ -298,6 +298,14 @@ impl Settings {
             || self.snapshot.as_ref().is_none_or(|s| {
                 !s.values.contains_key(field.id)
                     || s.sources.get(field.id).is_some_and(|s| s == "env")
+                    || matches!(
+                        field.id,
+                        "orchestratorBackend" | "reviewerBackend" | "defaultDispatchRuntime"
+                    ) && s
+                        .values
+                        .get("subscriptionProfile")
+                        .and_then(Value::as_str)
+                        .is_some_and(|profile| profile != "both")
                     || field.id == "notificationsReviewReady"
                         && s.values
                             .get("presentationQuietMode")

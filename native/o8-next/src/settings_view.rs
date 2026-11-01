@@ -126,6 +126,17 @@ impl Settings {
             .is_some_and(|s| s == "env");
         let detail = if env {
             "Controlled by the server environment. Change the environment and restart o8 to edit it here."
+        } else if matches!(
+            field.id,
+            "orchestratorBackend" | "reviewerBackend" | "defaultDispatchRuntime"
+        ) && self
+            .snapshot
+            .as_ref()
+            .and_then(|s| s.values.get("subscriptionProfile"))
+            .and_then(Value::as_str)
+            .is_some_and(|profile| profile != "both")
+        {
+            "Pinned by Subscription profile. Choose All available to change this provider."
         } else {
             field.detail
         };
@@ -176,6 +187,22 @@ impl Settings {
                             ),
                     ),
                 );
+            }
+            Kind::TierEffort => {
+                controls = controls.child(field.display(&value));
+                for (index, (effort, label)) in crate::settings_fields::EFFORT.iter().enumerate() {
+                    let mut next = value.clone();
+                    next["effort"] = Value::from(*effort);
+                    controls = controls.child(self.button(
+                        format!("setting-{}-effort-{index}", field.id),
+                        (*label).into(),
+                        !locked,
+                        value["effort"] == *effort,
+                        window,
+                        cx,
+                        move |this, _, cx| this.set(field, next.clone(), cx),
+                    ));
+                }
             }
             Kind::Choice(options) => {
                 for (index, (key, label)) in options.iter().enumerate() {

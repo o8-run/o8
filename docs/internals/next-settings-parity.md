@@ -70,7 +70,7 @@ the existing operator-defaults route unless another owner is named.
 | Dispatch / Advanced | Edit settings.toml; Reload; Save; Cancel; stale-file handling | present | present: existing implementation; credential/redaction internals untouched |
 | Dispatch / Thinking & task models | Thinking effort; Prompt caching | present | present |
 | Dispatch / Thinking & task models | Adaptive orchestrator thinking; Show Ultra effort | missing | missing: client preferences |
-| Dispatch / Thinking & task models | Targeting triage runtime/effort; Targeting action runtime/effort | missing | missing |
+| Dispatch / Thinking & task models | Targeting triage runtime/effort; Targeting action runtime/effort | missing | partial: effort controls present and preserve runtime/model; runtime choices remain held with house discovery |
 | Dispatch / Brain advanced | Brain answer model; Brain uses Claude CLI; Pre-warm Brain runtimes; Workers use the Brain | present | present |
 | Dispatch / Task limits & setup | UI loop iterations/minutes/diff bytes/diff files/preview timeout; Workspace manifest execution | present | present |
 | Dispatch / Experimental | o8 next; Canvas mode; Native browser-view | missing | missing: may launch/switch application surfaces |
@@ -78,17 +78,17 @@ the existing operator-defaults route unless another owner is named.
 | Providers / each CLI house | Runtime status; Version; Binary path; Model selection guidance; Runtime configuration guidance | missing | partial outside Settings: composer already has house/model selection |
 | Providers / each CLI house | Account status; connection evidence; sign-in; who pays; account usage/limits and dashboard links | missing | skipped: account/authentication/billing review |
 | Providers / Adapter capabilities | Worker actions; Session transforms; Usage support; Account-limit observation support | missing | missing: capability facts only, not account data |
-| Providers / Codex models | Worker effort | missing | missing |
-| Providers / Claude models | Worker effort; Claude fallback model | missing | missing |
+| Providers / Codex models | Worker effort | missing | present: shared saved effort choices |
+| Providers / Claude models | Worker effort; Claude fallback model | missing | present: shared effort and fallback choices |
 | Providers / Claude connection | Model source; Model; Codex authorization; reconnect/reset/setup | missing | skipped: authentication/carrier setup |
-| Providers / OpenCode models | Show in dispatch pickers; fallback model | missing | missing |
+| Providers / OpenCode models | Show in dispatch pickers; fallback model | missing | partial: dispatch visibility present; live fallback catalog remains |
 | Providers / built-in worker | Availability; Managed model; Use in a conversation; Usage/limits guidance; Setup | missing | missing |
-| Providers / Orchestrator | Lead provider; Code review provider | missing | partial: reviewer control in progress; lead availability needs native-safe inventory |
-| Providers / Workers | Subscription profile; Default worker; one allow switch per runtime; Your Pi setup | missing | partial: subscription profile in progress; discovery/pool/Pi setup need a native-safe inventory projection |
+| Providers / Orchestrator | Lead provider; Code review provider | missing | partial: reviewer control present; lead availability needs native-safe inventory |
+| Providers / Workers | Subscription profile; Default worker; one allow switch per runtime; Your Pi setup | missing | partial: subscription profile present; discovery/pool/Pi setup need a native-safe inventory projection |
 | Providers / Pi setup | Cache warming: Off/During runs/During and between runs | missing | missing |
-| Providers / Advanced orchestrator options | OpenCode fallback model; Combined answer provider; Existing setup uses Claude | missing | missing |
+| Providers / Advanced orchestrator options | OpenCode fallback model; Combined answer provider; Existing setup uses Claude | missing | partial: combined answer and existing setup present; OpenCode live catalog remains |
 | Providers / Advanced worker setup | Codex launch method (Direct/Via Ori) | missing | skipped: credential carrier |
-| Providers / Advanced worker setup | Worker quota fallback | missing | missing |
+| Providers / Advanced worker setup | Worker quota fallback | missing | present |
 | Providers / Engineering Brain | Answer routing; Codex model; Codex effort | present | present |
 | Providers / Codex app | Show chats in the Codex app | present | present |
 | Providers / Runtime routing | Orchestrate, Build, Review, Brain, Triage, Action; expand configured/effective/source/availability/why/change path/last run/fallbacks; refresh | missing | missing |
@@ -100,7 +100,7 @@ the existing operator-defaults route unless another owner is named.
 | API Keys / Provider keys | Every provider key input; Save/Replace/Remove/Enable/Validate; OpenRouter connection/models/work/usage | partial | skipped: existing native key surface left untouched |
 | API Keys / Symon & voice keys | Every voice-service secret input; Save/Replace/Remove; status | missing | skipped: credentials and `settings_secret.rs` |
 | API Keys / Key storage | Storage details and key setup | missing | skipped: credential storage |
-| Local models / Local models | Dispatch model (Ollama/LM Studio/Cloud); Local endpoint/presets; Chat model/presets; Embedding model; Save/test | missing | missing: endpoint fields deliberately skipped for network-binding review; model names in scope |
+| Local models / Local models | Dispatch model (Ollama/LM Studio/Cloud); Local endpoint/presets; Chat model/presets; Embedding model; Save/test | missing | missing: endpoint fields deliberately skipped for network-binding review; chat/embedding model-name controls present; dispatch choice/presets/test remain |
 | Worktrees & storage / Storage usage | Workspace files: allocated/logical; Refresh usage; Space for new tasks: free/reserved/available | missing | missing |
 | Worktrees & storage / Automatic cleanup | Workspace count per repository; Disk usage per repository | present | present |
 | Worktrees & storage / Advanced | Reuse dependencies (APFS) | missing | missing |
@@ -177,3 +177,5 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 - Baseline: `settings_opens_from_shell_command_palette` passed (1/1).
 
 - Appearance: `settings_parity_appearance_drives_the_running_shell` passed (1/1), clicking Light Solid, Dark Solid and All Glass through Settings and observing the running shell theme. Persistence uses the existing native theme owner.
+
+- Model defaults: `settings_parity_model_defaults_persist` passed (1/1). Real selectors/edits persist worker efforts, reviewer/combined routing, fallback model, worker fallback, visibility, local model names and triage/action efforts. A single-provider profile pins the reviewer; tier edits preserve the saved runtime and model. House discovery remains held for a native-safe inventory response.

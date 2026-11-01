@@ -4,6 +4,7 @@ use serde_json::Value;
 #[derive(Clone, Copy)]
 pub enum Kind {
     Toggle,
+    TierEffort,
     Choice(&'static [(&'static str, &'static str)]),
     Number(f64, &'static str),
     Text,
@@ -53,6 +54,15 @@ impl Field {
             "meteredPacketCostCapUsd" | "meteredPacketInputTokenCap" => "Task spending limits",
             "brainRoutingMode" | "brainCodexModel" | "brainCodexEffort" => "Engineering Brain",
             "codexAppThreads" => "Codex app",
+            "subscriptionProfile" => "Workers",
+            "targetingTriage" | "targetingAction" => "Thinking & task models",
+            "reviewerBackend" => "Orchestrator",
+            "codexWorkerEffort" => "Codex models",
+            "claudeWorkerEffort" | "orchestratorModel" => "Claude models",
+            "collideAggregator" | "inAppOrchestratorEnabled" => "Advanced orchestrator options",
+            "crossHouseWorkerFallback" => "Advanced worker setup",
+            "experimentalOpencode" => "OpenCode models",
+            "localChatModel" | "localEmbedModel" => "Local models",
             "thinkingEffort" | "promptCachingEnabled" => "Thinking & task models",
             "classAComposer" | "brainUseClaudeCli" | "brainWarmupEnabled" | "workersUseBrain" => {
                 "Brain advanced"
@@ -68,6 +78,7 @@ impl Field {
     }
     pub fn display(&self, value: &Value) -> String {
         match self.kind {
+            Kind::TierEffort => value["runtime"].as_str().unwrap_or("Unavailable").into(),
             Kind::Number(scale, unit) => value
                 .as_f64()
                 .map(|n| format!("{}{}", n * scale, unit))
@@ -117,7 +128,7 @@ const fn field(
 }
 const BOOL: Kind = Kind::Toggle;
 const NUMBER: Kind = Kind::Number(1., "");
-const EFFORT: &[(&str, &str)] = &[
+pub(crate) const EFFORT: &[(&str, &str)] = &[
     ("adaptive", "Adaptive"),
     ("low", "Low"),
     ("medium", "Medium"),
@@ -130,6 +141,7 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("appearance", "Appearance"),
     ("dispatch", "Dispatch"),
     ("models", "Models & providers"),
+    ("local-models", "Local models"),
     ("git", "Git & PRs"),
     ("storage", "Worktrees & storage"),
     ("keys", "API keys"),
@@ -441,5 +453,127 @@ pub const FIELDS: &[Field] = &[
         "storage",
         "Minimum free disk space in GB before starting tasks.",
         NUMBER,
+    ),
+    field(
+        "subscriptionProfile",
+        "Subscription profile",
+        "models",
+        "Choose which connected tools may run tasks. A single-provider profile pins the lead, reviewer and default worker.",
+        Kind::Choice(&[
+            ("both", "All available"),
+            ("claude-only", "Claude only"),
+            ("codex-only", "Codex / OpenAI only"),
+        ]),
+    ),
+    field(
+        "reviewerBackend",
+        "Code review provider",
+        "models",
+        "Same as lead follows the orchestrator provider. A subscription profile can pin this choice.",
+        Kind::Choice(&[
+            ("follow", "Same as lead"),
+            ("claude", "Claude"),
+            ("codex", "Codex"),
+        ]),
+    ),
+    field(
+        "codexWorkerEffort",
+        "Codex worker effort",
+        "models",
+        "Used when a Codex worker has no effort choice.",
+        Kind::Choice(&[
+            ("adaptive", "Runtime default"),
+            ("low", "Low"),
+            ("medium", "Medium"),
+            ("high", "High"),
+            ("xhigh", "Extra"),
+        ]),
+    ),
+    field(
+        "claudeWorkerEffort",
+        "Claude worker effort",
+        "models",
+        "Used when a Claude Code worker has no effort choice.",
+        Kind::Choice(&[
+            ("adaptive", "Runtime default"),
+            ("low", "Low"),
+            ("medium", "Medium"),
+            ("high", "High"),
+            ("max", "Max"),
+        ]),
+    ),
+    field(
+        "orchestratorModel",
+        "Claude fallback model",
+        "models",
+        "Used only when a request does not select a model. Composer choices take precedence.",
+        Kind::Choice(&[
+            ("claude-opus-5-5", "Opus 5.5"),
+            ("claude-fable-5-1", "Fable 5.1"),
+            ("claude-fable-5", "Fable 5"),
+            ("claude-opus-5", "Opus 5"),
+            ("claude-opus-4-8", "Opus 4.8"),
+            ("claude-opus-4-7", "Opus 4.7"),
+            ("claude-opus-4-6", "Opus 4.6"),
+            ("claude-sonnet-5", "Sonnet 5"),
+            ("claude-sonnet-4-5", "Sonnet 4.5"),
+            ("claude-haiku-4-5", "Haiku 4.5"),
+        ]),
+    ),
+    field(
+        "collideAggregator",
+        "Combined answer provider",
+        "models",
+        "Choose who combines answers when the lead uses Claude + Codex.",
+        Kind::Choice(&[("auto", "Auto"), ("claude", "Claude"), ("codex", "Codex")]),
+    ),
+    field(
+        "inAppOrchestratorEnabled",
+        "Existing setup uses Claude",
+        "models",
+        "Only affects Use existing setup: on uses Claude, off uses Codex. An explicit lead takes precedence.",
+        BOOL,
+    ),
+    field(
+        "crossHouseWorkerFallback",
+        "Worker quota fallback",
+        "models",
+        "Allow a task to restart with another supported subscription provider when its worker reaches a usage limit.",
+        BOOL,
+    ),
+    field(
+        "experimentalOpencode",
+        "Show OpenCode in dispatch pickers",
+        "models",
+        "Allow OpenCode as a worker choice. Installing or signing in remains separate.",
+        BOOL,
+    ),
+    field(
+        "localChatModel",
+        "Chat model",
+        "local-models",
+        "Model served by your already configured local inference endpoint. Does not change its address or credentials.",
+        Kind::Text,
+    ),
+    field(
+        "localEmbedModel",
+        "Embedding model",
+        "local-models",
+        "Embedding model served by your already configured local inference endpoint.",
+        Kind::Text,
+    ),
+    field(
+        "targetingTriage",
+        "Targeting — triage tier",
+        "models",
+        "Effort used to assess repositories and simpler files. The saved provider and model are preserved.",
+        Kind::TierEffort,
+    ),
+    field(
+        "targetingAction",
+        "Targeting — action tier",
+        "models",
+        "Effort used for targeted implementation. The saved provider and model are preserved.",
+        Kind::TierEffort,
     ),
 ];
