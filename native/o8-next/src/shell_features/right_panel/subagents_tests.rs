@@ -120,6 +120,47 @@ fn wait_probe(s: &Entity<Shell>, v: &mut VisualTestContext, ready: impl Fn(&Valu
 }
 
 #[gpui::test]
+fn subagents_late_history_cannot_replace_the_selected_agent(cx: &mut TestAppContext) {
+    let (f, s, mut v) = setup(cx);
+    let _: Value = f
+        .client
+        .get("/api/subagents-fixture", &[("mode", "slow-history")])
+        .unwrap();
+    wait(&s, &mut v, "subagent-trace-subagent-calculation");
+    click(&mut v, "subagent-trace-subagent-calculation");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let state: Value = f.client.get("/api/subagents-fixture", &[]).unwrap();
+        if state["delayedHistory"] == 1 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the history read must be in flight"
+        );
+        v.run_until_parked();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    click(&mut v, "subagents-back");
+    click(&mut v, "subagent-row-subagent-fruit");
+    wait_probe(&s, &mut v, |p| p["rows"] == 2);
+    let _: Value = f
+        .client
+        .get("/api/subagents-fixture", &[("mode", "release-history")])
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(600));
+    v.run_until_parked();
+    draw(&mut v);
+    let detail = s.read_with(&v, |s, cx| subagents::probe(s, cx));
+    assert_eq!(detail["selected"], "subagent-fruit");
+    assert_eq!(
+        detail["rows"], 2,
+        "an old read cannot install another agent's rows"
+    );
+    assert_eq!(detail["readyImages"], 0);
+}
+
+#[gpui::test]
 fn subagents_transcript_loads_images_and_retries_earlier_history(cx: &mut TestAppContext) {
     let (f, s, mut v) = setup(cx);
     wait(&s, &mut v, "subagent-trace-subagent-calculation");

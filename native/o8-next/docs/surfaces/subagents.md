@@ -51,6 +51,8 @@ retry, image loading, grid parent changes, compact fit and held Shared results.
 The side-chat path also checks restoration of its split companion and composer focus.
 Workers inspection checks keyboard return to the same card. A lower-split check
 keeps detail in its existing slot and restores the tools that preceded inspection.
+A delayed production history read also proves that an earlier selection cannot
+replace the newly selected agent's transcript or images.
 
 The initial native regressions fail on the absent `header-subagents` and
 `subagent-trace-subagent-calculation` controls. Final green receipts and live
