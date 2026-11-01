@@ -152,17 +152,26 @@ impl Settings {
                     )
                     .w(px(34.))
                     .h(px(20.))
-                    .p(px(2.))
+                    .p(px(0.))
                     .rounded_full()
-                    .bg(track)
-                    .hover(move |v| v.bg(track).opacity(0.85))
-                    .when(on, |v| v.justify_end())
+                    // The track covers the button's own fill, so its hover
+                    // tint never shows; the button keeps focus and keys.
                     .child(
                         div()
-                            .size(px(16.))
+                            .size_full()
+                            .p(px(2.))
+                            .flex()
+                            .items_center()
                             .rounded_full()
-                            .bg(gpui::white())
-                            .shadow_sm(),
+                            .bg(track)
+                            .when(on, |v| v.justify_end())
+                            .child(
+                                div()
+                                    .size(px(16.))
+                                    .rounded_full()
+                                    .bg(gpui::white())
+                                    .shadow_sm(),
+                            ),
                     ),
                 );
             }

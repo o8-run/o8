@@ -185,9 +185,26 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
     search(cx, "presentationQuietMode");
     click(cx, "setting-presentationQuietMode");
     settle(cx);
+    // An Off/On choice is a switch: one click flips the saved word.
+    search(cx, "notificationsReviewReady");
+    let review = values(&fixture)["notificationsReviewReady"].clone();
+    frames.push(timed_action(&shell, cx, "setting-notificationsReviewReady"));
+    assert_eq!(
+        error(&shell, cx),
+        None,
+        "native switch notificationsReviewReady"
+    );
+    assert_eq!(
+        values(&fixture)["notificationsReviewReady"],
+        if review == "on" {
+            json!("off")
+        } else {
+            json!("on")
+        },
+        "persisted notificationsReviewReady"
+    );
     // Selectors are the choices shown by desktop Settings, not arbitrary JSON writes.
     for (field, index, expected) in [
-        ("notificationsReviewReady", 0, json!("off")),
         ("overlapGate", 1, json!("strict")),
         ("requireApproval", 0, json!("always")),
         ("updateAutoApply", 0, json!("off")),
