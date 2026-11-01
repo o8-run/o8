@@ -126,31 +126,28 @@ impl Settings {
             .is_some_and(|s| s == "env");
         let detail = if env {
             "Controlled by the server environment. Change the environment and restart o8 to edit it here."
-        } else if matches!(
-            field.id,
-            "orchestratorBackend" | "reviewerBackend" | "defaultDispatchRuntime"
-        ) && self
-            .snapshot
-            .as_ref()
-            .and_then(|s| s.values.get("subscriptionProfile"))
-            .and_then(Value::as_str)
-            .is_some_and(|profile| profile != "both")
-        {
-            "Pinned by Subscription profile. Choose All available to change this provider."
         } else {
-            field.detail
+            self.snapshot
+                .as_ref()
+                .and_then(|s| field.dependency_reason(&s.values))
+                .unwrap_or(field.detail)
         };
         let mut controls = div().flex().flex_wrap().gap(px(8.));
         match field.kind {
             // A switch, not a button labelled with its state: a lone "Off"
             // read as text. An Off/On choice is the same control.
-            Kind::Toggle | Kind::Choice(&[("off", "Off"), ("on", "On")]) => {
+            Kind::Toggle | Kind::WordToggle(_) | Kind::Choice(&[("off", "Off"), ("on", "On")]) => {
                 let toggle = matches!(field.kind, Kind::Toggle);
-                let on = if toggle { value == true } else { value == "on" };
+                let word = if let Kind::WordToggle(word) = field.kind {
+                    word
+                } else {
+                    "on"
+                };
+                let on = if toggle { value == true } else { value == word };
                 let next = match (toggle, on) {
                     (true, on) => Value::Bool(!on),
                     (false, true) => Value::from("off"),
-                    (false, false) => Value::from("on"),
+                    (false, false) => Value::from(word),
                 };
                 let track = if on { theme().accent } else { theme().border };
                 controls = controls.child(
@@ -588,8 +585,7 @@ impl Render for Settings {
                 }
             }
         } else {
-            let fields: Vec<_> = FIELDS
-                .iter()
+            let fields: Vec<_> = fields()
                 .filter(|f| {
                     if query.len() >= 2 {
                         f.matches(&query)

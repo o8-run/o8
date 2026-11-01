@@ -51,10 +51,10 @@ the existing operator-defaults route unless another owner is named.
 | Voice / Dictation | Mic input (dictate/record); Top pill; Live dictation (at caret/modal); External keyboard Fn and status | missing | missing: classic host preferences |
 | Voice / Transcription | Groq API key shortcut | missing | skipped: credentials |
 | Voice / Voice brain | Escalation; Conversation provider; Background provider; Model preset; Model | missing | missing: classic host voice preferences |
-| Voice / Proactive attention | Automatic AI commentary; Spoken updates | missing | missing |
-| Voice / Proactive attention | Hourly budget; Quiet hours; Quiet window start/end | missing | missing |
-| Voice / Proactive attention | Work needs you; Approvals; Review verdicts; Failures and limits; Completed work | missing | missing |
-| Voice / Proactive attention | Calendar events; Calendar lead time; Time check-ins | missing | missing |
+| Voice / Proactive attention | Automatic AI commentary; Spoken updates | missing | present: native switches use the existing shared preferences |
+| Voice / Proactive attention | Hourly budget; Quiet hours; Quiet window start/end | missing | present: dependent controls and clock validation |
+| Voice / Proactive attention | Work needs you; Approvals; Review verdicts; Failures and limits; Completed work | missing | present: switches disabled while Spoken updates is off |
+| Voice / Proactive attention | Calendar events; Calendar lead time; Time check-ins | missing | present: lead time requires spoken calendar updates |
 | Voice / Symon text brain | Automatic/connected-planner/managed routing | missing | missing |
 | Voice / Symon conversations | List saved conversations; Open transcript; Back; Refresh | missing | missing |
 | Voice / iMessage bridge access | Allow Symon on iMessage; Use OpenClaw for iMessage; connection setup | missing | skipped: access and authentication |
@@ -133,7 +133,7 @@ the existing operator-defaults route unless another owner is named.
 | Analytics / Spend over time, By surface | Spend chart; per-surface breakdown | missing | missing |
 | Diagnostics / Connection health | Check installed tools / Check again; each installed tool's status | missing | missing: authentication text skipped; install/version facts in scope |
 | Diagnostics / Feature diagnostics | Shipped feature audit; default-off feature flags; Refresh; release age/first shipped/promotion status | missing | missing |
-| Diagnostics / Maintenance | Archive old Codex sessions; result counts/duration | missing | missing: no maintenance executed by this task |
+| Diagnostics / Maintenance | Archive old Codex sessions; result counts/duration | missing | skipped: current production retention contract refuses external-provider transcript archival; no maintenance executed |
 | Diagnostics / Reset app data | Factory reset; confirmation text; confirm/cancel; result | missing | skipped: wipes credentials |
 | Diagnostics / Diagnostic authorization | Enable/disable developer tools | missing | skipped: authorization boundary |
 | Diagnostics / Recall health | Outcomes/directives; recall p50/p95/p99 24h/p95 7d; substrate health; Refresh | missing | missing |
@@ -179,3 +179,5 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 - Appearance: `settings_parity_appearance_drives_the_running_shell` passed (1/1), clicking Light Solid, Dark Solid and All Glass through Settings and observing the running shell theme. Persistence uses the existing native theme owner.
 
 - Model defaults: `settings_parity_model_defaults_persist` passed (1/1). Real selectors/edits persist worker efforts, reviewer/combined routing, fallback model, worker fallback, visibility, local model names and triage/action efforts. A single-provider profile pins the reviewer; tier edits preserve the saved runtime and model. House discovery remains held for a native-safe inventory response.
+
+- Voice notifications: `settings_parity_spoken_notifications_persist_and_gate_controls` passed (1/1). It clicks all notification switches, verifies saved values, checks disabled dependencies, saves the hourly budget and quiet-window start, and refuses an invalid time without changing the saved end.

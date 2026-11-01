@@ -2,7 +2,7 @@
 use crate::{
     client::Client,
     composer::{Composer, Submit},
-    settings_fields::{FIELDS, Field, Kind},
+    settings_fields::{Field, Kind, fields},
     settings_secret::Secret,
 };
 use gpui::{AppContext, Context, Entity, EntityInputHandler, EventEmitter, FocusHandle, Window};
@@ -191,9 +191,7 @@ impl Settings {
                 match data {
                     Data::Defaults(mut snapshot) => {
                         // Never keep extra response fields as a native settings cache.
-                        snapshot
-                            .values
-                            .retain(|id, _| FIELDS.iter().any(|f| f.id == id));
+                        snapshot.values.retain(|id, _| fields().any(|f| f.id == id));
                         self.error = snapshot.toml.as_ref().and_then(|t| t.error.clone());
                         self.snapshot = Some(snapshot);
                         if mutation {
@@ -298,19 +296,7 @@ impl Settings {
             || self.snapshot.as_ref().is_none_or(|s| {
                 !s.values.contains_key(field.id)
                     || s.sources.get(field.id).is_some_and(|s| s == "env")
-                    || matches!(
-                        field.id,
-                        "orchestratorBackend" | "reviewerBackend" | "defaultDispatchRuntime"
-                    ) && s
-                        .values
-                        .get("subscriptionProfile")
-                        .and_then(Value::as_str)
-                        .is_some_and(|profile| profile != "both")
-                    || field.id == "notificationsReviewReady"
-                        && s.values
-                            .get("presentationQuietMode")
-                            .and_then(Value::as_bool)
-                            == Some(true)
+                    || field.dependency_reason(&s.values).is_some()
             })
     }
     fn begin(&mut self, target: Target, text: &str, window: &mut Window, cx: &mut Context<Self>) {

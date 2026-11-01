@@ -4,6 +4,8 @@ use serde_json::Value;
 #[derive(Clone, Copy)]
 pub enum Kind {
     Toggle,
+    WordToggle(&'static str),
+    Time,
     TierEffort,
     Choice(&'static [(&'static str, &'static str)]),
     Number(f64, &'static str),
@@ -73,8 +75,58 @@ impl Field {
             "worktreeMaxCount" | "worktreeMaxTotalGb" => "Automatic cleanup",
             "workspaceParkingMode" => "Workspace parking",
             "storageReserveRatio" | "storageReserveFloorGb" => "Minimum free space",
+            _ if self.section == "voice" => "Proactive attention",
             _ => "Task limits & setup",
         }
+    }
+    pub fn dependency_reason(
+        &self,
+        values: &std::collections::BTreeMap<String, Value>,
+    ) -> Option<&'static str> {
+        let value = |id: &str| values.get(id).unwrap_or(&Value::Null);
+        if self.id == "notificationsReviewReady"
+            && value("presentationQuietMode") == &Value::Bool(true)
+        {
+            return Some("Held off while quiet mode is on.");
+        }
+        if matches!(
+            self.id,
+            "orchestratorBackend" | "reviewerBackend" | "defaultDispatchRuntime"
+        ) && value("subscriptionProfile")
+            .as_str()
+            .is_some_and(|profile| profile != "both")
+        {
+            return Some(
+                "Pinned by Subscription profile. Choose All available to change this provider.",
+            );
+        }
+        if matches!(
+            self.id,
+            "broadcastVoiceAttention"
+                | "broadcastVoiceApprovals"
+                | "broadcastVoiceReviews"
+                | "broadcastVoiceFailures"
+                | "broadcastVoiceCompletions"
+                | "broadcastVoiceCalendar"
+                | "broadcastVoiceTimeCheckins"
+                | "broadcastVoiceCalendarLeadMinutes"
+        ) && value("broadcastVoice").as_str() != Some("on")
+        {
+            return Some("Turn on Spoken updates to change this notification.");
+        }
+        if self.id == "broadcastVoiceCalendarLeadMinutes"
+            && value("broadcastVoiceCalendar") != &Value::Bool(true)
+        {
+            return Some("Turn on Calendar events to change the lead time.");
+        }
+        if matches!(
+            self.id,
+            "broadcastVoiceQuietStart" | "broadcastVoiceQuietEnd"
+        ) && value("broadcastVoiceQuietHours").as_str() != Some("on")
+        {
+            return Some("Turn on Quiet hours to change this window.");
+        }
+        None
     }
     pub fn display(&self, value: &Value) -> String {
         match self.kind {
@@ -83,6 +135,14 @@ impl Field {
                 .as_f64()
                 .map(|n| format!("{}{}", n * scale, unit))
                 .unwrap_or("Unavailable".into()),
+            Kind::WordToggle(word) => if value == word {
+                "On"
+            } else if value == "off" {
+                "Off"
+            } else {
+                "Unavailable"
+            }
+            .into(),
             Kind::Toggle => match value.as_bool() {
                 Some(true) => "On",
                 Some(false) => "Off",
@@ -95,7 +155,7 @@ impl Field {
                 .map(|(_, label)| *label)
                 .unwrap_or("Unavailable")
                 .into(),
-            Kind::Text => value.as_str().unwrap_or("Unavailable").into(),
+            Kind::Text | Kind::Time => value.as_str().unwrap_or("Unavailable").into(),
         }
     }
     pub fn parse(&self, text: &str) -> Result<Value, String> {
@@ -107,6 +167,18 @@ impl Field {
                 .filter(|n| n.is_finite())
                 .map(|n| Value::from(n / scale))
                 .ok_or("Enter a finite number.".into()),
+            Kind::Time => {
+                let text = text.trim();
+                let valid = text.len() == 5
+                    && text.as_bytes()[2] == b':'
+                    && text[..2].parse::<u8>().is_ok_and(|h| h < 24)
+                    && text[3..].parse::<u8>().is_ok_and(|m| m < 60);
+                if valid {
+                    Ok(Value::from(text))
+                } else {
+                    Err("Enter a time in HH:MM format (00:00–23:59).".into())
+                }
+            }
             _ => Ok(Value::from(text.trim())),
         }
     }
@@ -138,6 +210,7 @@ pub(crate) const EFFORT: &[(&str, &str)] = &[
 ];
 pub const SECTIONS: &[(&str, &str)] = &[
     ("general", "General"),
+    ("voice", "Voice"),
     ("appearance", "Appearance"),
     ("dispatch", "Dispatch"),
     ("models", "Models & providers"),
@@ -577,3 +650,9 @@ pub const FIELDS: &[Field] = &[
         Kind::TierEffort,
     ),
 ];
+
+#[path = "settings_voice_fields.rs"]
+mod voice;
+pub fn fields() -> impl Iterator<Item = &'static Field> {
+    FIELDS.iter().chain(voice::FIELDS)
+}
