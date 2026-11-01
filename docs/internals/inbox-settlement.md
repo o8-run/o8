@@ -151,3 +151,23 @@ An explicit inbox pin or unpin takes precedence over a stale transcript boolean.
 Conversation child rows project their parent's preference fields and cannot be
 independently pinned or reordered. Runtime observation and authentic WS activity
 preserve pins, manual order and the per-thread opt-out.
+
+## Automatic settlement sweep
+
+`src/lib/inbox/auto-settle.ts` runs every 60s from `ws-server.ts`, gated by the
+operator default `autoSettleEnabled` (`[inbox] auto_settle`, default on; Settings →
+General → "Auto-settle finished threads"). Pure rules live in `auto-settle-rules.ts`.
+
+A conversation settles when all linked PRs are merged (`pr-merged`), every owned
+packet was released via `markPacketReleased` (`released`, covers GitHub auto-merge,
+headless release, heal-bot and ancestry merges), or its remaining lanes were
+archived by the worktree reaper (`cleaned`). An open PR or unreleased packet blocks.
+Threads with no PR and no worker are never auto-settled.
+
+Never settled: pinned, `autoSettleDisabledAt` set, any `settledOverride`, running,
+queued, or anything `assertInboxCanSettle` rejects (approvals, waiting agents,
+awaiting_* lanes), or activity/unsettle newer than the evidence. Writes go through
+`mutateInboxAutoSettle` and record `autoSettledReason`/`autoSettledAt`; the reason
+is projected only while `settledAt === autoSettledAt`, so a manual settle shows no
+note. Undo is the ordinary unsettle (`settledOverride='active'`), which sticks.
+The native sidebar toasts newly auto-settled rows with Undo / Mod+Z.
