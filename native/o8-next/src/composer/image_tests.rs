@@ -3,7 +3,7 @@ use base64::Engine;
 use gpui::{ClipboardItem, ExternalPaths, FileDropEvent, Image, ImageFormat};
 
 #[gpui::test]
-fn native_composer_dogfood_sent_images_clear_while_next_draft_changes(cx: &mut TestAppContext) {
+fn native_composer_sent_images_clear_while_next_draft_changes(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     image_session(cx, &surface);

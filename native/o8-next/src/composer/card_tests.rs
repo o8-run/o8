@@ -124,7 +124,7 @@ if (composeComposerWireMessage(payload.text, payload.routing.pickedMode).wireMes
 }
 
 #[gpui::test]
-fn native_composer_dogfood_remove_queue_while_attachment_loads(cx: &mut TestAppContext) {
+fn native_composer_remove_queue_while_attachment_loads(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     surface.update(cx, |s, _| s.send_next = true);

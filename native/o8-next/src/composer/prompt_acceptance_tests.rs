@@ -47,7 +47,7 @@ fn native_composer_slash_click_keeps_typed_arguments(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn native_composer_dogfood_up_reaches_start_of_first_line(cx: &mut TestAppContext) {
+fn native_composer_up_reaches_start_of_first_line(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     click("composer-input", cx);

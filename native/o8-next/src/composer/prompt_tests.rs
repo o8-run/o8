@@ -2,7 +2,7 @@ use super::prompt_acceptance_tests::*;
 use super::*;
 
 #[gpui::test]
-fn native_composer_dogfood_uppercase_slash_runs_on_enter(cx: &mut TestAppContext) {
+fn native_composer_uppercase_slash_runs_on_enter(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     click("composer-input", cx);
