@@ -90,3 +90,17 @@ The GPUI regression is
 reply and approval handoffs, draft preservation, repeated opening, linked session
 selection, new-chat creation, and absence of sends. Existing in-place approval
 coverage is `inbox_cards_counts_statuses_and_approval_match_desktop_routes`.
+
+
+## Threads (design only)
+
+The [native Threads design](../../../../docs/internals/next-threads-panel.md)
+compares current Claude.ai project chats and the coordinating-project beta,
+traces classic's Tasks / Exchanges and evidence behavior, maps existing server
+routes, and proposes four bounded native PRs. Primary sources and local source
+links are included. Threads remains a placeholder as requested.
+
+Project context currently exposes repositories and instructions while explicitly
+reporting project input files as unwired. Recorded output artifacts are not a
+shared input knowledge base. Full knowledge upload or project-memory editing
+requires a separately reviewed server contract; none was built in this port.
