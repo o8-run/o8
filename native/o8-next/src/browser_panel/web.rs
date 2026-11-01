@@ -414,6 +414,19 @@ mod macos {
                     NSSize::new(x(bounds.size.width), x(bounds.size.height)),
                 );
                 let _: () = msg_send![self.view, setFrame: frame];
+                // At the window's bottom edge the page sits in the workspace
+                // frame's rounded corners, so its own bottom corners follow
+                // them (Q 2026-11-01).
+                let _: () = msg_send![self.view, setWantsLayer: YES];
+                let layer: id = msg_send![self.view, layer];
+                if layer != nil {
+                    let edge = height - x(bounds.bottom()) < 12.;
+                    let radius: f64 = if edge { 13. } else { 0. };
+                    let _: () = msg_send![layer, setCornerRadius: radius];
+                    let _: () = msg_send![layer, setMasksToBounds: if edge { YES } else { NO }];
+                    let bottom: u64 = if flipped == YES { 1 | 2 } else { 4 | 8 };
+                    let _: () = msg_send![layer, setMaskedCorners: bottom];
+                }
                 let _: () = msg_send![self.view, setHidden: NO];
             }
         }
