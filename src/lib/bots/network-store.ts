@@ -83,6 +83,17 @@ export function bindNetworkExchange(message: AgentMessage, participants: Network
   ensureV77BotNetworkThreadSchema(sqlite);
   const conversationId = message.conversation?.id;
   if (!conversationId || ![1, 2].includes(participants.length)) throw new BotNetworkError('A bounded local exchange is required.', 'network_exchange_required');
+  // Older/interrupted native sends can have a committed bus message but no
+  // association yet. Their saved intent owns the original thread; recover it
+  // before a peer reply claims the exchange for a newly generated thread.
+  const interrupted = sqlite.prepare(`SELECT sends.* FROM bot_network_sends sends
+    JOIN agent_messages message ON message.client_request_id = sends.bus_request_id
+    WHERE message.conversation_id = ? AND sends.status = 'pending' AND sends.agent_message_id IS NULL`)
+    .all(conversationId) as SendRow[];
+  for (const row of interrupted) {
+    const accepted = readAgentMessageByRequestId(row.bus_request_id, sqlite)!;
+    completeNetworkSend(sendView(row), accepted, sqlite);
+  }
   const prior = listNetworkThreads(sqlite).find(t => t.conversationId === conversationId);
   if (prior) return prior;
   const threadId = `thoughts-network-${createHash('sha256').update(conversationId).digest('hex').slice(0, 40)}`;

@@ -133,8 +133,12 @@ session identities come from accepted bus messages; matching recorded context ad
 and source ids. Missing historical identity stays unattributed. Member renames do not change old
 authors. Native peer messages display their author and never use the human bubble.
 
-Send intents, bus acceptance and canonical history replacement are separate steps, without one
-cross-store transaction. Known nonacceptance leaves a terminal rejected receipt; uncertain acceptance
+Send intents are reserved first. Bus acceptance and association with the existing canonical thread
+commit in one SQLite transaction before runtime delivery. A saved native intent recovers an older
+interrupted association before an MCP reply creates another thread. Canonical history replacement
+remains a separate step, without a cross-store transaction. Already-forked databases still require
+separate reconciliation; automatic repair of preexisting duplicate-thread records is outstanding.
+Known nonacceptance leaves a terminal rejected receipt; uncertain acceptance
 or failed history replacement returns 503 and retains the same retry identity. An unaccepted held
 intent can be retried or removed. Removal leaves a cancellation tombstone, so a delayed duplicate
 cannot revive it. A deliberate resend uses a fresh id. Cancellation and admission share a SQLite

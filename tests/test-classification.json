@@ -1942,7 +1942,8 @@
       "path": "tests/bot-network-thread-real-path.test.ts",
       "reasons": [
         "child-process",
-        "real-path"
+        "real-path",
+        "stdio-json-rpc-peer"
       ]
     },
     {
