@@ -22,8 +22,7 @@ impl Settings {
             .tab_stop(enabled);
         let focused = focus.is_focused(window);
         let mouse_focus = focus.clone();
-        let action = Rc::new(action);
-        let key_action = action.clone();
+        // GPUI sends Enter/Space release to on_click; key-down actions would repeat it.
         div()
             .id(gpui::SharedString::from(id.clone()))
             .debug_selector(move || id.clone())
@@ -62,12 +61,6 @@ impl Settings {
             .on_click(cx.listener(move |this, _, window, cx| {
                 if enabled {
                     action(this, window, cx);
-                }
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if enabled && matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    key_action(this, window, cx);
-                    cx.stop_propagation();
                 }
             }))
     }

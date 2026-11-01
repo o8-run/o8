@@ -201,7 +201,13 @@ fn settings_parity_keyboard_opens_help_and_returns_to_settings(cx: &mut TestAppC
     settle(&mut visual);
     assert!(visual.debug_bounds("settings-page").is_some());
     assert!(visual.debug_bounds("setting-keyboard-open").is_some());
-    visual.simulate_keystrokes("enter");
+    visual.simulate_event(gpui::KeyDownEvent {
+        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+        is_held: false,
+    });
+    visual.simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+    });
     settle(&mut visual);
     assert!(
         visual.debug_bounds("keyboard-shortcuts").is_some(),
@@ -348,5 +354,58 @@ fn settings_parity_classic_search_navigation_and_history(cx: &mut TestAppContext
     assert!(
         shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()),
         "Back at the first page returns to the workspace"
+    );
+}
+
+#[gpui::test]
+fn settings_parity_keyboard_activates_each_control_once(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, _) = start(cx);
+    let cx = &mut visual;
+    click(cx, "setting-autoTitleInferenceEnabled");
+    frame(&shell, cx);
+    let before = values(&fixture)["autoTitleInferenceEnabled"] == true;
+    cx.simulate_event(gpui::KeyDownEvent {
+        keystroke: gpui::Keystroke::parse("space").unwrap(),
+        is_held: false,
+    });
+    frame(&shell, cx);
+    cx.simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("space").unwrap(),
+    });
+    frame(&shell, cx);
+    assert_eq!(
+        values(&fixture)["autoTitleInferenceEnabled"],
+        !before,
+        "a held Space must toggle once across key down and key up"
+    );
+    click(cx, "settings-nav-appearance");
+    frame(&shell, cx);
+    click(cx, "settings-nav-dispatch");
+    frame(&shell, cx);
+    click(cx, "settings-back");
+    frame(&shell, cx);
+    cx.simulate_event(gpui::KeyDownEvent {
+        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+        is_held: false,
+    });
+    frame(&shell, cx);
+    cx.simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+    });
+    settle(cx);
+    assert!(
+        cx.debug_bounds("settings-page").is_some()
+            && cx.debug_bounds("settings-group-Conversations").is_some(),
+        "Enter moves one page back and keeps Settings open"
+    );
+    edit(cx, "branchPrefix", "first");
+    cx.simulate_keystrokes("tab shift-tab ctrl-a");
+    cx.simulate_input("second");
+    click(cx, "settings-save");
+    frame(&shell, cx);
+    assert_eq!(
+        values(&fixture)["branchPrefix"],
+        "second",
+        "Tab and Shift+Tab return to the non-secret editor input"
     );
 }

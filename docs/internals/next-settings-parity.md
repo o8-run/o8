@@ -155,7 +155,7 @@ the existing operator-defaults route unless another owner is named.
 | Quick drawer / Get help | Expand; Keyboard shortcuts (Cmd+/); Community Discord; Documentation | present | present in existing native profile surface; no rail changes |
 | Quick drawer / capacity helper | Plan capacity rows; refresh; select/register plan | missing | skipped: account/billing (helper is not mounted by current drawer) |
 | Quick drawer / theme helper | Light; Dark; glass surface toggle | partial | partial: current drawer uses three complete looks; helper itself is not mounted |
-| Keyboard / shortcuts | Open shortcut help and close it, keyboard scrolling | partial | partial: Settings entry now opens the native reference modal and restores focus; classic host-only shortcut coverage still depends on those host ports |
+| Keyboard / shortcuts | Open shortcut help and close it, keyboard scrolling | partial | partial: Settings opens the native help and restores focus; Tab stays in Settings and reveals navigation; controls activate once on release and non-secret editors remain reachable; classic host-only shortcut coverage remains |
 | Sounds | No separate Sounds tab, sound picker, volume or mute control exists in the frozen Settings references | present | present as an inventory fact; do not invent preferences. Spoken updates are listed under Voice |
 
 ## Execution order
@@ -201,6 +201,12 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 
 - Search and history: `settings_parity_classic_search_navigation_and_history` passed after its missing-control, Tab-focus and deferred-scroll failures. It clicks ranked results, presses Enter to reveal a field, clears search, drives Back/Forward and truncated history, and returns to the workspace. A 580px-high window proves Tab reveals the bottom of the Settings list. Supplied focus handles carry the Tab policy; direct list scrolling runs during layout without a frame callback or animation loop.
 
+- Keyboard activation: `settings_parity_keyboard_activates_each_control_once` failed first because one held Space toggled twice. GPUI already activates `on_click` on Enter/Space release, so the redundant key-down action was removed. The passing regression also moves exactly one history page and types/saves a non-secret field after Tab/Shift+Tab. Tab cycling remains inside the Settings surface. `settings_parity_keyboard_opens_help_and_returns_to_settings` uses a full press/release gesture for reopening help.
+
+- Harness and build receipts: the test peer explicitly uses blocking reads on accepted sockets after its nonblocking accept loop. Earlier intermittent transport failures could occur before a request reached the peer. Both click helpers reveal the entire control before activating it. Three consecutive rapid About runs passed after the visibility adjustment; final combined verification is recorded below. An ENOSPC rebuild and subsequent cached-object link failure were resolved by regenerating only this test crate's generated objects; dependency caches, source and unrelated worktrees were preserved.
+
+- Final native gate: `cd native/o8-next && CARGO_TARGET_DIR=$PWD/target cargo +1.97.1 test --bin o8-next settings_parity_ -- --test-threads=1 --nocapture` passed **16/16** (643 unrelated tests filtered out; 266.34 seconds). This includes the rapid About request-count regression, both keyboard regressions and the production-route persistence tests. Explicit-file `rustfmt --check` and `git diff --check` passed. No installed-app, release or broad-suite acceptance is claimed.
+
 ## Host and security handoff
 
 - Keep house discovery, default-worker/pool editing, role-readiness details and Pi
@@ -218,3 +224,19 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 - API Keys, `settings_secret.rs`, sign-in/accounts, credential storage/carriers,
   pairing/relay access, arbitrary MCP environment/config, permission/authorization,
   reset-with-keys, report redaction/upload and binding/address controls are held.
+
+## Timebox outcome
+
+Feature work stopped at the approximately three-hour bound. Full parity is not
+complete. The checklist has 42 present, 15 partial, 29 missing and 38 skipped rows
+(these are grouped checklist rows, not a count of individual controls).
+
+Remaining safe work includes host startup/close/update-channel and voice bridges;
+provider discovery, worker/Pi/routing details after a native-safe inventory exists;
+client-only dispatch preferences; storage parking/cleanup review; Settings project
+integration; analytics; and onboarding. Every remaining control stays marked in
+the table. Security-related skips stay with the reviewer.
+
+Decision: local commits only for lead review. No push, pull request, version bump
+or release was performed. Classic, server code, `settings_secret.rs`, sidebar,
+nav rail and bot rail were not edited.
