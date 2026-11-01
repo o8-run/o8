@@ -151,3 +151,82 @@ An explicit inbox pin or unpin takes precedence over a stale transcript boolean.
 Conversation child rows project their parent's preference fields and cannot be
 independently pinned or reordered. Runtime observation and authentic WS activity
 preserve pins, manual order and the per-thread opt-out.
+
+## Automatic settlement sweep
+
+`src/lib/inbox/settlement.ts` runs every 60s from `ws-server.ts`, gated by the
+operator default `autoSettleEnabled` (`[inbox] auto_settle`, default on; native Settings →
+General → "Auto-settle finished threads"). Pure rules live in `auto-settle-rules.ts`.
+
+A conversation settles when all linked PRs are merged (`pr-merged`), or a packet
+has canonical merge evidence from `markPacketReleased` (`released`, covers
+approve-and-merge, GitHub auto-merge, heal-bot and ancestry merges). Every owned
+packet must be finished before merge-based settlement. Read-only release and
+archived lanes can establish completion, but do not prove a merge or trigger an
+immediate settle by themselves. Historical `cleaned` notes remain readable.
+Threads with no PR and no worker are never auto-settled. Pure transitions live in
+`settlement-state.ts`; `auto-settle.ts` only re-exports the server entry points.
+
+Never settled: pinned, `autoSettleDisabledAt` set, any `settledOverride`, running,
+queued, or anything `assertInboxCanSettle` rejects (approvals, waiting agents,
+awaiting_* lanes), or activity/unsettle newer than the evidence. Writes go through
+`mutateInboxAutoSettle` and record `autoSettledReason`/`autoSettledAt`; the reason
+is projected only while `settledAt === autoSettledAt`, so a manual settle shows no
+note. Undo uses explicit unsettle (`settledOverride='active'`), which sticks, and
+ignores rows already restored to Active. An old Undo cannot settle a thread again.
+The native sidebar toasts newly auto-settled rows with Undo / Mod+Z (12s toast;
+Mod+Z works whenever focus is in the sidebar or nothing is focused).
+
+Idle settle: `[inbox] auto_settle_idle_days` (default 3, 0 = off; native Settings → General →
+"Auto-settle after idle days") settles a thread with a linked PR or worker after N
+days without activity (`idle`, note "idle 3d"). Bare threads are never idle-settled,
+and every guard above still applies. The idle period starts at the latest message
+or lane activity, persisted WS run completion, or observed runtime run. The same
+timestamp fences the mutation against newer activity.
+If newer work makes an old merge receipt stale, the thread can still settle
+after that work has been idle for N days. The same guards apply to that fallback.
+
+Per-thread opt-out in the native app: row context menu → "Don't auto-settle" /
+"Allow auto-settle" (the B02 `auto-settle` preference). Opted-out rows show a small
+crossed mark with the tooltip "Auto-settle is off".
+
+## Parking a settled workspace
+
+Manual and automatic settlement start a separate, bounded post-commit parking
+step after the metadata and history locks are released. The response does not
+wait for process or filesystem checks. Parking failures leave settlement durable.
+The metadata mutation itself never changes a worker or its release receipt.
+
+The existing workspace parking mode keeps its meaning: `manual` (the default)
+requires an explicit workspace Park request. Settling is not that request.
+`pressure` can park a completed managed workspace only while a real durable
+`reserve_breached` admission hold remains current and a fresh measurement still
+shows pressure on the same volume. Repository opt-out is read fresh under the
+existing policy lock. This step never retries admission or dispatches a worker.
+
+Completed eligibility requires the exact canonical packet and lane binding,
+canonical completion evidence (including read-only completion), a still-settled
+subject, managed materialization, clean Git and storage scans, owned-session
+quiescence and protected recovery truth. A first park creates its snapshot through
+the existing parker. Existing snapshots must match exactly, including their generation, HEAD and session
+proof. The current canonical release HEAD is pinned across parking and Restore;
+read-only completion without a HEAD remains valid. These checks are
+repeated at the existing destructive boundaries; new work or Unsettle refuses
+parking. All automatic parking, including dispatch pressure remediation, requires completed
+and settled ownership. Reviewing behavior for existing explicit parking remains unchanged.
+
+Listings attach `parkedWorkspaces` only for proven current parked membership.
+Each entry contains `packetId`, `repositoryUuid` and `reclaimedAvailableBytes`
+from the current generation's actual parked transition. Zero is known zero;
+null means the actual freed space is unknown. Signed values preserve net loss
+of available space during the measurement interval. Snapshot and receipt reads are
+batched once per listing, without scanning checkout directories.
+
+Unsettle changes inbox metadata only. Explicit workspace Restore uses the saved
+matching snapshot and original session identity, including for a completed lane,
+and leaves the lane completed. If maintenance cleared an absent lane path, only
+the matching parked generation and canonical packet binding can establish Restore
+ownership. A non-null conflicting path refuses. Exact successful Restore republishes
+the original path after setup and verification, under the existing locks. A held
+restore remains parked. The native detailed row shows Parked and the measured
+space; its Restore workspace menu action is separate from thread unarchive.

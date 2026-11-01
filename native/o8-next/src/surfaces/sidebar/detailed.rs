@@ -182,7 +182,12 @@ impl ThreadList {
                     )),
             );
         first = first.children(self.pin_mark(&id));
-        if let Some(st) = st {
+        first = first.children(self.auto_off_mark(&id));
+        let auto_reason = session
+            .filter(|s| s.settled())
+            .and_then(|s| s.auto_settled_reason.as_deref());
+        // The note carries the age; a bare age would repeat it.
+        if let Some(st) = st.filter(|_| state.is_some() || auto_reason.is_none()) {
             // An idle thread shows only its age; a state brings its mark.
             let color = state.map_or(faint, State::color);
             let key = st.key;
@@ -197,6 +202,24 @@ impl ThreadList {
                     .text_color(color)
                     .children(state.map(status_mark::mark))
                     .child(st.label),
+            );
+        }
+        // An automatic settle says why ("merged · 2h") beside any badge.
+        if let Some(reason) = auto_reason {
+            let sid = id.clone();
+            let age = row.age.clone();
+            let note = if age.starts_with(super::inbox::auto_note(reason)) {
+                age
+            } else {
+                super::inbox::note_with_age(reason, &age)
+            };
+            first = first.child(
+                div()
+                    .debug_selector(move || format!("thread-auto-note-{sid}"))
+                    .flex_shrink_0()
+                    .whitespace_nowrap()
+                    .text_color(faint)
+                    .child(note),
             );
         }
         let title = div()
@@ -239,6 +262,7 @@ impl ThreadList {
                             )
                     })),
             )
+            .children(self.workspace_parked_detail(&id))
             .children(self.pr_badge(&id, cx));
         if let Some(s) = session {
             if s.tmux_session.as_deref().is_some_and(|t| !t.is_empty()) {

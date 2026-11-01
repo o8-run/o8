@@ -5,7 +5,7 @@ import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
 import { normalizePacketSpendCap, normalizePacketSpendTelemetry } from '@/lib/orchestrator/metered-spend';
 import { normalizePacketContextTelemetry, reconcilePacketContextTelemetry } from '@/lib/orchestrator/packet-context-telemetry';
-import { applyLanePendingStatus, preferRuntimeRecoveryMessage, type DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
+import { applyLanePendingStatus, hasCompletedManagedBinding, preferRuntimeRecoveryMessage, type DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import { normalizeQualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import { normalizePacketStorageAdmission, normalizePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { normalizePacketAlignmentResolvedAt } from '@/lib/orchestrator/packet-alignment-normalize';
@@ -980,7 +980,7 @@ export function reconcileOrchestratorMissionState(
       next.blockedReason = null;
       return {
         ...next,
-        lane: laneMatch ? next.lane : null,
+        lane: laneMatch || hasCompletedManagedBinding(packet, domainLane) ? next.lane : null,
       };
     }
     clearUnprovenReleaseClaim(next);

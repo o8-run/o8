@@ -1,3 +1,4 @@
+import { createParkedWorkspaceContext, parkedWorkspaceProjection } from '@/lib/inbox/parked-workspaces';
 import { createInboxReadContext } from '@/lib/inbox/store';
 import { NextResponse, NextRequest } from 'next/server';
 import { inboxPackets, projectRuntimeInbox, readInboxLanes } from '@/lib/inbox/subjects';
@@ -17,8 +18,10 @@ export async function GET(req: NextRequest) {
     const packets = needsPackets ? inboxPackets() : [];
     const context = createInboxReadContext();
     const projected = snapshot.agents.map(agent => projectRuntimeInbox(agent, packets, lanes, context));
-    const agents = projected.some(agent => agent instanceof Promise) ? await Promise.all(projected) : projected;
-    return NextResponse.json({ ...snapshot, agents }, {
+    const agents = await Promise.all(projected);
+    const parked = createParkedWorkspaceContext(needsPackets ? packets : undefined, context, agents.map(agent => agent.inboxSubject));
+    return NextResponse.json({ ...snapshot, agents: agents.map(agent =>
+      Object.assign(agent, parkedWorkspaceProjection(agent.inboxSubject, parked))) }, {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
       },

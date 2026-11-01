@@ -2,7 +2,42 @@
 use crate::client::Client;
 use serde_json::{Value, json};
 
+pub(crate) enum WorkspaceRestoreOutcome {
+    Restored,
+    Refused(String),
+    Unconfirmed(String),
+}
+
 impl Client {
+    /// Existing workspace control API, with the same identity retained after an uncertain response.
+    pub(crate) fn restore_sidebar_workspace(&self, workspace: Option<&str>, packet: &str, mutation: &str) -> WorkspaceRestoreOutcome {
+        let Some(workspace) = workspace.filter(|path| std::path::Path::new(path).is_absolute()) else {
+            return WorkspaceRestoreOutcome::Refused("Select a workspace before restoring it.".into());
+        };
+        let client = self.in_workspace(workspace);
+        let mut url = client.url("/api/orchestrator/workspace").unwrap();
+        url.query_pairs_mut().append_pair("workspace", workspace);
+        let sent = client.request("POST", &url).send_json(json!({
+            "action": "restore", "packetId": packet, "clientMutationId": mutation,
+        }));
+        let (status, response) = match sent {
+            Ok(response) => (response.status(), response),
+            Err(ureq::Error::Status(status, response)) => (status, response),
+            Err(_) => return WorkspaceRestoreOutcome::Unconfirmed("Workspace Restore is unconfirmed. Retry keeps the same action identity.".into()),
+        };
+        let Ok(body) = Self::read::<Value>(response) else {
+            return WorkspaceRestoreOutcome::Unconfirmed("Workspace Restore response was unreadable. Retry keeps the same action identity.".into());
+        };
+        if body["ok"] == true && matches!(body["result"]["status"].as_str(), Some("restored" | "already_materialized")) {
+            return WorkspaceRestoreOutcome::Restored;
+        }
+        let note = body["error"]["message"].as_str().or(body["result"]["note"].as_str())
+            .unwrap_or("Workspace Restore was not confirmed.").to_owned();
+        if status >= 500 || body["result"]["outcomeUnknown"] == true || body["result"]["inProgress"] == true {
+            WorkspaceRestoreOutcome::Unconfirmed(note)
+        } else { WorkspaceRestoreOutcome::Refused(note) }
+    }
+
     pub(crate) fn mutate_sidebar(
         &self,
         workspace: Option<&str>,
@@ -105,6 +140,27 @@ impl Client {
         order_key: Option<&str>,
         revision: u64,
     ) -> Result<Value, String> {
+        let extra = order_key.map_or(Value::Null, |key| json!({ "orderKey": key }));
+        self.inbox_preference_with(workspace, id, action, extra, revision)
+    }
+    /// Turns this thread's auto-settle on or off (`auto-settle`, `enabled`).
+    pub(crate) fn inbox_auto_settle(
+        &self,
+        workspace: Option<&str>,
+        id: &str,
+        enabled: bool,
+        revision: u64,
+    ) -> Result<Value, String> {
+        self.inbox_preference_with(workspace, id, "auto-settle", json!({ "enabled": enabled }), revision)
+    }
+    fn inbox_preference_with(
+        &self,
+        workspace: Option<&str>,
+        id: &str,
+        action: &str,
+        extra: Value,
+        revision: u64,
+    ) -> Result<Value, String> {
         let workspace = workspace
             .filter(|path| std::path::Path::new(path).is_absolute())
             .ok_or("Select a workspace before changing this session.")?;
@@ -112,8 +168,10 @@ impl Client {
         url.query_pairs_mut().append_pair("workspace", workspace);
         let key = if id.contains(':') { "sessionKey" } else { "tabId" };
         let mut body = json!({ key: id, "inboxAction": action, "inboxRevision": revision });
-        if let Some(order_key) = order_key {
-            body["orderKey"] = json!(order_key);
+        if let Value::Object(extra) = extra {
+            for (key, value) in extra {
+                body[key] = value;
+            }
         }
         let request = self.in_workspace(workspace).request("PATCH", &url);
         let response = request.send_json(body).map_err(|error| match error {

@@ -11,8 +11,7 @@ import type { Lane } from '@/lib/lane/types';
 import { getSqlite } from '@/lib/db';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { getRuntime } from '@/lib/runtimes';
-import type { AgentRuntime, RuntimeId } from '@/lib/runtimes/types';
+import type { RuntimeId } from '@/lib/runtimes/types';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { PROCESS_TIMEOUT_MS } from '@/lib/lane/orchestrator-session-core';
 import { listLanes } from '@/lib/lane/registry';
@@ -25,7 +24,7 @@ import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-pl
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 import { inboxListingProjection, inboxReadStatement, inboxSubject, observeInboxRuntimeRun, readInboxState, type InboxReadContext } from './store';
 import { legacyInboxPin } from './preferences';
-import { hasQueuedTurnStart, type InboxSubject } from './settlement';
+import { hasQueuedTurnStart, type InboxSubject } from './settlement-state';
 
 export class InboxMutationError extends Error {
   constructor(message: string, public readonly status: number) { super(message); }
@@ -56,13 +55,18 @@ export function readInboxLanes(): Map<string, InboxLane> {
   if (!db.inTransaction) laneReads.set(db, { ...revision, lanes: newest });
   return newest;
 }
-export function runtimeInboxIdentity(agent: Pick<AgentSummary, 'sessionKey' | 'workspace'>, packets = inboxPackets(), lanes: Lane[] | Map<string, InboxLane> = listLanes(), context?: InboxReadContext) {
+export function runtimeInboxIdentity(agent: Pick<AgentSummary, 'sessionKey' | 'workspace'>, packets = inboxPackets(), lanes: Lane[] | Map<string, InboxLane> = listLanes(), context?: InboxReadContext, parentHistories?: Map<string, ReturnType<typeof readPersistedLlmChat>>) {
   const lane = lanes instanceof Map ? lanes.get(agent.sessionKey) : lanes.filter(candidate => candidate.sessionKey === agent.sessionKey).reverse()
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.updatedAt.localeCompare(a.updatedAt))[0];
   const workspace = agent.workspace.startsWith('~/') ? join(homedir(), agent.workspace.slice(2)) : agent.workspace;
   const packet = packets.find(candidate => lane ? candidate.id === lane.packetId : candidate.lane?.sessionKey === agent.sessionKey);
   const parentId = packet?.orchestratorThreadId || packet?.launchContext?.parentThreadId;
-  const parentHistory = parentId ? readPersistedLlmChat(parentId)?.history : null;
+  let savedParent = parentId ? parentHistories?.get(parentId) : undefined;
+  if (parentId && !parentHistories?.has(parentId)) {
+    savedParent = readPersistedLlmChat(parentId);
+    parentHistories?.set(parentId, savedParent);
+  }
+  const parentHistory = savedParent?.history ?? null;
   const parentInboxSubject = parentId
     ? inboxSubject('conversation', parentId, parentHistory?.repoPath ?? packet?.workspaceTargetPath ?? workspace,
       (parentHistory as { projectId?: string } | null)?.projectId ?? packet?.projectId, context?.workspaces)
@@ -106,13 +110,15 @@ export function observeAgentInboxRun(agent: AgentSummary, subject: InboxSubject,
   }
   const prior = readInboxState(subject, context);
   if (!forMutation && prior.settledOverride === null) return activity;
-  const runtime = getRuntime(agent.runtime as RuntimeId);
-  if (!runtime?.capabilities.readTranscript) return activity;
-  return observeAgentInboxTranscript(runtime, agent, subject, activity, context);
+  return observeAgentInboxTranscript(agent, subject, activity, context);
 }
 
-async function observeAgentInboxTranscript(runtime: AgentRuntime, agent: AgentSummary, subject: InboxSubject,
+async function observeAgentInboxTranscript(agent: AgentSummary, subject: InboxSubject,
   activity: RuntimeInboxActivity, context?: InboxReadContext): Promise<RuntimeInboxActivity> {
+  // Workspace guards also use subject identity; do not eagerly initialize owned runtimes through that path.
+  const { getRuntime } = await import('@/lib/runtimes');
+  const runtime = getRuntime(agent.runtime as RuntimeId);
+  if (!runtime?.capabilities.readTranscript) return activity;
   let transcript;
   try { transcript = await runtime.readTranscript(agent.sessionKey, undefined, 50); }
   catch { return activity; } // Missing evidence retains the explicit override.
@@ -129,7 +135,7 @@ async function observeAgentInboxTranscript(runtime: AgentRuntime, agent: AgentSu
   return activity;
 }
 
-function settleScope(subject: InboxSubject, packets = inboxPackets(), lanes = listLanes()) {
+export function settleScope(subject: InboxSubject, packets = inboxPackets(), lanes = listLanes()) {
   const childPackets = subject.kind === 'conversation' ? packets.filter(packet =>
     (packet.orchestratorThreadId || packet.launchContext?.parentThreadId) === subject.id) : [];
   const childIds = new Set(childPackets.map(packet => packet.id));

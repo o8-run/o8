@@ -2,6 +2,43 @@
 use super::*;
 
 #[gpui::test]
+fn settings_auto_settle_defaults_and_controls_persist(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, _) = start(cx);
+    let cx = &mut visual;
+    assert_eq!(values(&fixture)["autoSettleEnabled"], true);
+    assert_eq!(values(&fixture)["autoSettleIdleDays"], 3);
+    search(cx, "autoSettleEnabled");
+    click(cx, "setting-autoSettleEnabled");
+    frame(&shell, cx);
+    assert_eq!(values(&fixture)["autoSettleEnabled"], false);
+    search(cx, "autoSettleIdleDays");
+    click(cx, "edit-autoSettleIdleDays");
+    assert!(
+        cx.debug_bounds("settings-editor").is_none(),
+        "idle days follow the global switch"
+    );
+    search(cx, "autoSettleEnabled");
+    click(cx, "setting-autoSettleEnabled");
+    frame(&shell, cx);
+    for days in ["0", "5"] {
+        edit(cx, "autoSettleIdleDays", days);
+        click(cx, "settings-save");
+        frame(&shell, cx);
+        assert_eq!(error(&shell, cx), None);
+        assert_eq!(
+            values(&fixture)["autoSettleIdleDays"],
+            days.parse::<u64>().unwrap()
+        );
+        click(cx, "settings-refresh");
+        frame(&shell, cx);
+        assert_eq!(
+            values(&fixture)["autoSettleIdleDays"],
+            days.parse::<u64>().unwrap()
+        );
+    }
+}
+
+#[gpui::test]
 fn settings_parity_general_groups_and_global_search(cx: &mut TestAppContext) {
     let (fixture, shell, mut visual, _) = start(cx);
     let cx = &mut visual;

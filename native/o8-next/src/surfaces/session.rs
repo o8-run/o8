@@ -5,11 +5,11 @@ use serde_json::{Value, json};
 
 use crate::ui::Surface;
 #[cfg(test)]
-#[path = "../composer/loaded_shell_tests.rs"]
-mod loaded_shell_tests;
-#[cfg(test)]
 #[path = "../composer/image_loaded_shell_tests.rs"]
 mod image_loaded_shell_tests;
+#[cfg(test)]
+#[path = "../composer/loaded_shell_tests.rs"]
+mod loaded_shell_tests;
 pub(super) type Runtime = ();
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Slice {
@@ -103,10 +103,22 @@ impl Shell {
     }
 }
 
+/// Actual current-generation parking receipts. Signed deltas preserve net space loss too.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ParkedWorkspace {
+    pub packet_id: String,
+    pub repository_uuid: String,
+    #[serde(default)]
+    pub reclaimed_available_bytes: Option<i64>,
+}
+
 // Request adapters compile with this surface through its existing shell entry.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
+    #[serde(default)]
+    pub parked_workspaces: Vec<ParkedWorkspace>,
     pub id: String,
     pub title: String,
     #[serde(default)]
@@ -143,6 +155,13 @@ pub struct Session {
     pub settled_override: Option<String>,
     #[serde(default)]
     pub settled_at: Option<String>,
+    /// Why the server settled it on its own ("pr-merged", "released",
+    /// "cleaned"), while that automatic settle is the current one.
+    #[serde(default)]
+    pub auto_settled_reason: Option<String>,
+    /// This thread opted out of auto-settle (inboxAction `auto-settle`).
+    #[serde(default)]
+    pub auto_settle_disabled_at: Option<String>,
     /// `owner/repo` from the repo's git remote, else its folder; older hosts omit it.
     #[serde(default)]
     pub repo_slug: Option<String>,

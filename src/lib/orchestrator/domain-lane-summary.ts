@@ -30,6 +30,16 @@ export function applyLanePendingStatus(packet: OrchestratorPacket, lane: DomainL
   return false;
 }
 
+/** Retain a completed workspace association after its live tab or checkout disappears. */
+export function hasCompletedManagedBinding(packet: OrchestratorPacket, lane: DomainLaneSummary | null): boolean {
+  const binding = packet.lane;
+  return Boolean(lane?.status === 'completed' && lane.ownership === 'managed'
+    && lane.packetId === packet.id && binding?.laneId && binding.sessionKey
+    && binding.repoPath && binding.worktreePath && lane.laneId === binding.laneId
+    && lane.sessionKey === binding.sessionKey && lane.repoPath === binding.repoPath
+    && (lane.worktreePath === null || lane.worktreePath === binding.worktreePath));
+}
+
 export interface DomainLaneSummary {
   laneId: string;
   packetId: string;
@@ -43,6 +53,8 @@ export interface DomainLaneSummary {
   contextObservation?: PacketContextObservation;
   branch?: string;
   repoPath?: string;
+  worktreePath?: string | null;
+  ownership?: 'managed' | 'attached';
   label?: string;
   mergeMode?: LaneMergeMode;
   mergeModeNote?: string | null;

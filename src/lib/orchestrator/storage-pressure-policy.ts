@@ -2,7 +2,7 @@ import 'server-only';
 
 import path from 'node:path';
 
-import { listLanes } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, listLanes } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { listReposFresh } from '@/lib/repos/registry';
@@ -17,7 +17,7 @@ import {
   getWorkspaceSnapshot,
   listWorkspaceSnapshotTransitions,
 } from '@/lib/worktree/snapshot-state';
-import { parkWorkspace, type ParkWorkspaceResult } from '@/lib/workspace/hibernator';
+import { parkWorkspace, type ParkWorkspaceInput, type ParkWorkspaceResult } from '@/lib/workspace/hibernator';
 import {
   observeStorageVolume,
   type StorageVolumeObservation,
@@ -30,6 +30,7 @@ import {
   type PacketStorageAdmissionReceipt,
 } from './storage-admission';
 import { storagePressureCandidateSummary } from './storage-admission-held-message';
+import { assertSettledCompletedWorkspace } from '@/lib/workspace/completed-packet';
 import { withStoragePressurePolicyLock } from './storage-pressure-policy-lock';
 
 export interface StoragePressureProjection {
@@ -47,11 +48,7 @@ export interface StoragePressureDependencies {
   measureAllocatedBytes?: (workspacePath: string) => Promise<number | null>;
   observeVolume?: (targetPath: string) => Promise<StorageVolumeObservation>;
   getSnapshot?: typeof getWorkspaceSnapshot;
-  parkWorkspace?: (input: {
-    repositoryUuid: string;
-    packetId: string;
-    operationId: string;
-  }) => Promise<ParkWorkspaceResult>;
+  parkWorkspace?: (input: ParkWorkspaceInput) => Promise<ParkWorkspaceResult>;
   readParkedReclaimedBytes?: (
     repositoryUuid: string,
     packetId: string,
@@ -59,7 +56,7 @@ export interface StoragePressureDependencies {
   ) => number | null;
 }
 
-interface PressureCandidate {
+export interface PressureCandidate {
   lane: Lane;
   repo: RepoRegistryEntry | null;
   operationId: string;
@@ -136,17 +133,14 @@ function candidateReceipt(
   };
 }
 
-async function parkWithFreshPolicy(
+export async function parkWithFreshPolicy(
   candidate: PressureCandidate,
   heldVolumeId: string | null,
   mode: () => 'manual' | 'pressure',
   readRepos: () => Promise<RepoRegistryEntry[]>,
   observeVolume: NonNullable<StoragePressureDependencies['observeVolume']>,
-  park: (input: {
-    repositoryUuid: string;
-    packetId: string;
-    operationId: string;
-  }) => Promise<ParkWorkspaceResult>,
+  park: (input: ParkWorkspaceInput) => Promise<ParkWorkspaceResult>,
+  readLane: (packetId: string) => Lane | null = findLatestLaneByPacket,
 ): Promise<{ refusal: string | null; result: ParkWorkspaceResult | null }> {
   return withStoragePressurePolicyLock(async () => {
     const readPolicy = async (): Promise<string | null> => {
@@ -180,12 +174,25 @@ async function parkWithFreshPolicy(
     const finalPolicyRefusal = await readPolicy();
     if (finalPolicyRefusal) return { refusal: finalPolicyRefusal, result: null };
     try {
+      const completed = readLane(candidate.lane.packetId!);
+      if (!completed || completed.status !== 'completed') throw new Error('Automatic parking requires a completed lane.');
+      const proof = assertSettledCompletedWorkspace(completed);
+      const assertPolicyCurrent = async () => {
+        const policy = await readPolicy();
+        if (policy) throw new Error(policy);
+        const volume = await candidateVolumeRefusal(candidate.volumePath, heldVolumeId, observeVolume);
+        if (volume) throw new Error(volume);
+        const current = readLane(candidate.lane.packetId!);
+        if (!current || current.id !== completed.id) throw new Error('Automatic parking owner changed.');
+        assertSettledCompletedWorkspace(current, proof);
+      };
       return {
         refusal: null,
         result: await park({
           repositoryUuid: candidate.repo!.id,
           packetId: candidate.lane.packetId!,
           operationId: candidate.operationId,
+          assertPolicyCurrent,
         }),
       };
     } catch (error) {
@@ -220,10 +227,11 @@ async function buildCandidates(
   heldVolumeId: string | null,
   dependencies: Required<Pick<StoragePressureDependencies, 'listLanes' | 'listRepos' | 'measureAllocatedBytes' | 'observeVolume'>>,
   getSnapshot: typeof getWorkspaceSnapshot,
+  selectedMode: 'manual' | 'pressure',
 ): Promise<PressureCandidate[]> {
   const repos = await dependencies.listRepos();
   const lanes = dependencies.listLanes()
-    .filter((lane) => lane.status === 'reviewing' && lane.packetId)
+    .filter((lane) => lane.packetId && (lane.status === 'completed' || (selectedMode === 'manual' && lane.status === 'reviewing')))
     .sort((left, right) => (
       new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime()
       || left.packetId!.localeCompare(right.packetId!)
@@ -240,6 +248,10 @@ async function buildCandidates(
     else if (!lane.worktreePath || !lane.sessionKey) refusal = 'workspace_identity_incomplete';
     else if (!repo) refusal = 'repository_not_registered';
     else if (repo.storagePressureParkingDisabled) refusal = 'repository_opted_out';
+    if (!refusal && selectedMode === 'pressure') {
+      try { assertSettledCompletedWorkspace(lane); }
+      catch { refusal = 'completed_settled_owner_required'; }
+    }
 
     let snapshot = null;
     if (repo && lane.packetId && !refusal) {
@@ -310,6 +322,8 @@ export function createStoragePressureAdmissionCoordinator(
   const park = overrides.parkWorkspace ?? ((input) => parkWorkspace(input));
   const readSnapshot = overrides.getSnapshot ?? getWorkspaceSnapshot;
   const readReclaimed = overrides.readParkedReclaimedBytes ?? defaultReadParkedReclaimedBytes;
+  const readLane = (packetId: string) => dependencies.listLanes().filter(lane => lane.packetId === packetId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
 
   return {
     ...(base.prepareCreationBase ? {
@@ -333,6 +347,7 @@ export function createStoragePressureAdmissionCoordinator(
           held.receipt.volumeId,
           dependencies,
           readSnapshot,
+          selectedMode,
         );
       } catch {
         throw new PacketStorageAdmissionError(
@@ -376,6 +391,7 @@ export function createStoragePressureAdmissionCoordinator(
               candidate.repo!.id,
               candidate.lane.packetId!,
             )! }),
+            readLane,
           );
           if (replayPolicy.refusal) {
             receipts.push(candidateReceipt(candidate, 'refused', replayPolicy.refusal));
@@ -390,6 +406,7 @@ export function createStoragePressureAdmissionCoordinator(
             dependencies.listRepos,
             dependencies.observeVolume,
             park,
+            readLane,
           );
           if (guardedPark.refusal || !guardedPark.result) {
             receipts.push(candidateReceipt(candidate, 'refused', guardedPark.refusal ?? 'park_call_failed'));
