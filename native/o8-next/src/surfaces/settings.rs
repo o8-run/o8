@@ -85,6 +85,8 @@ impl Shell {
 }
 
 // Request adapters compile with this surface through its existing shell entry.
+const SETTINGS_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 impl Client {
     /// Settings shares the existing operator bearer, loopback policy, redirect
     /// refusal, timeout and response bound. No credential response is retained.
@@ -101,7 +103,10 @@ impl Client {
         })?;
         let request = self.request(method, &url);
         let response = if method == "GET" {
-            request.call()
+            // Reads only: the shared 5s agent timeout is shorter than
+            // operator-defaults takes on a busy `next dev` server (2-7s).
+            // Writes keep the shared timeout so their outcome stays bounded.
+            request.timeout(SETTINGS_READ_TIMEOUT).call()
         } else {
             request.send_json(body)
         };
