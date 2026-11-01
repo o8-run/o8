@@ -7718,7 +7718,7 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
-  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res)) return;
+  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT)) return;
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
   const allowedOrigins = new Set([

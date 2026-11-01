@@ -11,13 +11,15 @@ type Handler = (request: NextRequest, context: { params: Promise<Record<string, 
 const REQUEST_LIMIT = 16 * 1024 * 1024;
 
 /** Returns false for unregistered paths so the existing listener keeps its behavior. */
-export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse, publicPort: number): Promise<boolean> {
   if (!req.url?.startsWith('/api/')) return false;
   const abort = new AbortController();
   const disconnected = () => { if (!res.writableEnded) abort.abort(); };
   res.once('close', disconnected);
   try {
-    const url = new URL(req.url, `http://127.0.0.1:${req.socket.localPort}`);
+    // o8d relays from the public port to a private listener and keeps the
+    // client's Host, so the gate must compare Host with the public port.
+    const url = new URL(req.url, `http://127.0.0.1:${publicPort}`);
     const match = matchNativeHttpRoute(url.pathname);
     if (!match) return false;
     const headers = new Headers();
