@@ -75,6 +75,14 @@ pub(crate) struct Tool {
     detected: bool,
     version: Option<String>,
     path: Option<String>,
+    #[serde(rename = "authHint")]
+    auth_hint: Option<String>,
+}
+/// The CLI command a detect `authHint` names ("run: codex login (or set
+/// OPENAI_API_KEY)" gives "codex login").
+pub(crate) fn sign_in_command(hint: &str) -> Option<String> {
+    let command = hint.strip_prefix("run:")?.split(" (").next()?.trim();
+    (!command.is_empty()).then(|| command.to_owned())
 }
 #[derive(Deserialize)]
 struct Detect {
@@ -744,7 +752,7 @@ impl Providers {
         )
         .into_any_element()
     }
-    fn detail(&self, runtime: &Runtime) -> AnyElement {
+    fn detail(&self, runtime: &Runtime, cx: &Context<Self>) -> AnyElement {
         let tool = self.tools.as_ref().and_then(|t| t.get(&runtime.id));
         let home_dir = std::env::var("HOME").ok();
         let binary = match (self.tools.is_some(), tool) {
@@ -844,6 +852,36 @@ impl Providers {
                 "Config and auth directory, from the runtime's selector.",
                 home(&runtime.id).into(),
             ))
+            .children(
+                tool.and_then(|t| t.auth_hint.as_deref())
+                    .and_then(sign_in_command)
+                    .map(|command| {
+                        let label = format!("Sign in to {}", runtime.label);
+                        div()
+                            .id("provider-sign-in")
+                            .debug_selector(|| "provider-sign-in".into())
+                            .mt(px(10.))
+                            .px(px(10.))
+                            .py(px(6.))
+                            .rounded(px(7.))
+                            .border_1()
+                            .border_color(theme().border)
+                            .text_size(px(12.))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(theme().hover))
+                            .child(label)
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(command.clone()));
+                                crate::shell::toasts::show(
+                                    crate::shell::toasts::Kind::Success,
+                                    format!("Copied `{command}`. Run it in a terminal, then refresh."),
+                                    vec![],
+                                    Some(crate::shell::toasts::NOTICE_TIMEOUT),
+                                    cx,
+                                );
+                            }))
+                    }),
+            )
             .child(
                 div()
                     .pt(px(10.))
@@ -940,7 +978,7 @@ impl Render for Providers {
             self.selected
                 .as_ref()
                 .and_then(|id| self.runtimes.iter().find(|r| &r.id == id))
-                .map(|r| self.detail(r))
+                .map(|r| self.detail(r, cx))
         };
         div()
             .debug_selector(|| "settings-providers".into())

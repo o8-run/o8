@@ -524,3 +524,11 @@ fn settings_providers_second_codex_instance_edit_env_and_delete(cx: &mut TestApp
     assert!(cx.debug_bounds("provider-instance-row-codex-new").is_none());
     assert!(cx.debug_bounds("provider-instance-detail").is_none());
 }
+
+#[test]
+fn sign_in_command_reads_detect_hint() {
+    use super::sign_in_command;
+    assert_eq!(sign_in_command("run: codex login (or set OPENAI_API_KEY)").as_deref(), Some("codex login"));
+    assert_eq!(sign_in_command("run: opencode2 auth login").as_deref(), Some("opencode2 auth login"));
+    assert_eq!(sign_in_command("Set ANTHROPIC_API_KEY"), None);
+}
