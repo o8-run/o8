@@ -65,7 +65,7 @@ interface AutoTitleDecision {
   reason?: 'first' | 'refresh' | 'legacy-upgrade';
 }
 
-const PLACEHOLDER_TITLES = new Set(['new conversation', 'untitled conversation']);
+const PLACEHOLDER_TITLES = new Set(['new conversation', 'new chat', 'untitled conversation']);
 
 /** Pure decision logic — exported for the real-path test. */
 export function decideAutoTitle(record: {
@@ -244,7 +244,9 @@ export function maybeQueueThreadAutoTitle(filePath: string): void {
       // separate processes; re-read and write under the shared file lock.
       const titled = withCanonicalChatHistoryLock(tabId, () => {
         const fresh = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
-        if (fresh.titleSource === 'operator') return false;
+        // Another process may have titled or renamed it during the model call.
+        const freshMessages = Array.isArray(fresh.messages) ? fresh.messages.length : 0;
+        if (!decideAutoTitle({ ...fresh, messageCount: freshMessages }).run) return false;
         fresh.title = nextTitle;
         fresh.titleSource = generated ? 'llm' : 'code';
         fresh.autoTitledAtCount = messages.length;

@@ -37,7 +37,8 @@ afterEach(() => {
 describe('orchestrator thread history persistence', () => {
   it('titles a server-saved thread once it has an exchange, without a client POST', async () => {
     const history = await loadHistoryModule();
-    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo', title: 'New conversation' });
+    // No title, as the mobile client creates it: the file holds "New chat".
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });
     history.appendMobileOrchestratorUserMessage({
       tabId: thread.id, repoPath: '/tmp/repo', message: 'Fix the login redirect loop', backend: 'codex', timestampMs: 1_000,
     });
@@ -48,7 +49,7 @@ describe('orchestrator thread history persistence', () => {
     // No OpenRouter key in the temp home: the code fallback names it.
     await vi.waitFor(() => expect(JSON.parse(readFileSync(file, 'utf8')).titleSource).toBe('code'));
     const saved = JSON.parse(readFileSync(file, 'utf8'));
-    expect(saved.title).not.toBe('New conversation');
+    expect(saved.title).not.toBe('New chat');
     expect(saved.messages).toHaveLength(2);
   });
 

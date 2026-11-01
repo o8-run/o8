@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { persistCanonicalChatHistoryRecord, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
-import { maybeQueueThreadAutoTitle } from '@/lib/llm/thread-auto-title';
+import { decideAutoTitle, maybeQueueThreadAutoTitle } from '@/lib/llm/thread-auto-title';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { truncateBoundaryWithHandoff } from './orchestrator-handoff-history';
 import { appendUserHistoryMessage } from './orchestrator-thread-user-message';
@@ -148,7 +148,10 @@ function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
   historyWriteVersion += 1;
   // Clients that let the server save their turns (o8 next, mobile) never POST
   // the transcript, so the server titles the thread here, as the POST does.
-  if ((record.messages?.length ?? 0) >= 2) maybeQueueThreadAutoTitle(filePath);
+  // Decide on the record in hand: the titler's own file read is too costly
+  // for every streamed upsert.
+  const decision = decideAutoTitle({ ...record, messageCount: record.messages?.length ?? 0 });
+  if (decision.run) maybeQueueThreadAutoTitle(filePath);
 }
 export function repairFlippedOrchestratorTranscripts(): void {
   repairFlippedTranscriptHistory(ORCHESTRATOR_HISTORY_DIR, writeHistoryRecord);
