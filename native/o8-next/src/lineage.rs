@@ -375,3 +375,15 @@ fn iso_ms(text: &str) -> Option<f64> {
 #[cfg(test)]
 #[path = "lineage_tests.rs"]
 mod tests;
+
+/// A Codex or Claude session o8 can continue as its own chat: the backend and
+/// the provider session to resume. Other runtime keys stay read-only.
+pub fn continue_target(key: &str) -> Option<(&'static str, &str)> {
+    let (prefix, id) = key.split_once(':')?;
+    let backend = match prefix {
+        "codex" | "codex-discovered" | "codex-live" | "codex-owned" => "codex",
+        "claude-code" => "claude",
+        _ => return None,
+    };
+    Some((backend, id)).filter(|(_, id)| !id.is_empty())
+}

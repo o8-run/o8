@@ -527,6 +527,28 @@ impl ThreadList {
                     cx.notify();
                 }))
         });
+        let resume_id = id.clone();
+        let resume = crate::lineage::continue_target(&id).map(|_| {
+            div()
+                .id("sidebar-row-continue")
+                .debug_selector(|| "sidebar-row-continue".into())
+                .h(px(28.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(7.))
+                .text_size(px(12.5))
+                .cursor_pointer()
+                .hover(|s| s.bg(theme().hover))
+                .child(crate::icon::stroke(COPY, theme().text_muted, 14., 1.7))
+                .child("Continue in o8")
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.row_menu = None;
+                    this.continue_session(&resume_id, cx);
+                }))
+        });
         let menu = self.row_menu.as_ref()?;
         let filter = menu.repo.clone().map(|repo| {
             let active = self.scope_keys().contains(&repo);
@@ -587,6 +609,7 @@ impl ThreadList {
                             .children(pin)
                             .children(filter)
                             .children(snooze)
+                            .children(resume)
                             .children(copy)
                             .child(archive),
                     ),

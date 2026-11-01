@@ -382,11 +382,28 @@ impl ThreadList {
     /// Starts a conversation without opening it in the main pane when `open`
     /// is false (a split pane shows it); returns its id.
     pub(crate) fn start_thread(&mut self, repo: String, open: bool, cx: &mut Context<Self>) -> String {
+        self.start_thread_with(repo, open, None, cx)
+    }
+    /// Continues a read-only Codex or Claude session as an o8 chat: the new
+    /// chat carries the provider session id, so its first send resumes it.
+    pub(crate) fn continue_session(&mut self, key: &str, cx: &mut Context<Self>) {
+        let Some((backend, session)) = crate::lineage::continue_target(key) else { return };
+        let Some(source) = self.sessions.iter().find(|s| s.id == key) else { return };
+        let Some(repo) = source.repo_path.clone() else { return };
+        let extra = json!({
+            "backend": backend,
+            "orchestratorSessionIds": { backend: session },
+            "title": source.title.clone(),
+        });
+        self.start_thread_with(repo, true, Some(extra), cx);
+    }
+    fn start_thread_with(&mut self, repo: String, open: bool, extra: Option<Value>, cx: &mut Context<Self>) -> String {
         self.new_menu = false;
         // A new chat in the main pane reuses this repository's empty one, so
         // repeated New chat does not pile up untitled threads. A split pane
         // still gets its own.
         if open
+            && extra.is_none()
             && let Some(id) = self
                 .sessions
                 .iter()
@@ -433,6 +450,13 @@ impl ThreadList {
             }
             if let Some(model) = lead["orchestratorModel"].as_str().filter(|m| !m.is_empty()) {
                 body["model"] = json!(model);
+            }
+            // A continued session keeps its own runtime, not the lead's.
+            for (field, value) in extra.as_ref().and_then(Value::as_object).into_iter().flatten() {
+                body[field] = value.clone();
+            }
+            if extra.is_some() {
+                body.as_object_mut().map(|b| b.remove("model"));
             }
             let url = client
                 .url("/api/v2/chat-history")

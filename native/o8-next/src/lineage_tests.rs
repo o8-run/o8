@@ -156,3 +156,13 @@ fn worktree_badge_skips_default_branches() {
     assert_eq!(worktree_badge(Some(" ")), None);
     assert_eq!(worktree_badge(None), None);
 }
+
+#[test]
+fn continue_target_maps_codex_and_claude_sessions() {
+    use crate::lineage::continue_target;
+    assert_eq!(continue_target("codex-discovered:t1"), Some(("codex", "t1")));
+    assert_eq!(continue_target("claude-code:s9"), Some(("claude", "s9")));
+    assert_eq!(continue_target("llm-chat:x"), None);
+    assert_eq!(continue_target("codex:"), None);
+    assert_eq!(continue_target("thoughts-next-1"), None);
+}
