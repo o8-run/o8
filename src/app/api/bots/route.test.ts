@@ -12,7 +12,7 @@ const dirs = vi.hoisted(() => ({ data: '' }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => dirs.data }));
 
 import { GET } from './route';
-import { GET as THREAD } from './[id]/thread/route';
+import { GET as THREAD, POST as REPLY } from './[id]/thread/route';
 
 const AGENT = 'bf4d168a-f3a4-4625-9603-d43837e19abd';
 let root: string;
@@ -53,4 +53,18 @@ it('thread route returns mailbox messages and the deep link; unknown bots 404', 
   expect(body.externalUrl).toBe(`grokbot://app/v1/agent?id=${AGENT}`);
   const missing = await THREAD(req('/api/bots/x/thread'), { params: Promise.resolve({ id: 'x' }) });
   expect(missing.status).toBe(404);
+});
+
+it('thread POST appends the operator reply as a user line', async () => {
+  const id = encodeURIComponent(`grok:${AGENT}`);
+  const post = (text: unknown) => REPLY(new NextRequest(`http://127.0.0.1:3000/api/bots/${id}/thread`, {
+    method: 'POST', body: JSON.stringify({ text }),
+  }), { params: Promise.resolve({ id }) });
+  expect((await post('  ')).status).toBe(400);
+  const sent = await (await post('hi bot')).json();
+  expect(sent.message).toMatchObject({ role: 'user', text: 'hi bot' });
+  const body = await (await THREAD(req(`/api/bots/${id}/thread`), { params: Promise.resolve({ id }) })).json();
+  expect(body.messages.map((m: { text: string }) => m.text)).toEqual(['hi bot']);
+  auth.denied = true;
+  expect((await post('x')).status).toBe(401);
 });

@@ -1,11 +1,13 @@
 /**
  * File mailbox for a bot's main thread: `<dataDir>/bots/<house>/<botId>/thread.jsonl`.
  * One JSON object per line: `{ "id", "role": "user"|"bot"|"system", "text", "at" (ISO) }`.
- * The bot (or a mirror job it runs) appends; o8 only reads in v1. Unknown or
+ * The bot (or a mirror job it runs) appends bot lines; o8 appends the operator's
+ * `user` replies, which the bot reads on its next pass. Unknown or
  * malformed lines are skipped so a partial write never breaks the view.
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { dirname, join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface MailboxMessage {
@@ -48,4 +50,12 @@ export function readMailbox(path: string | null, limit = MAILBOX_LIMIT): Mailbox
     }
   });
   return out.slice(-limit);
+}
+
+/** Append one operator reply to the mailbox and return it. */
+export function appendMailbox(path: string, text: string, now = new Date()): MailboxMessage {
+  const message: MailboxMessage = { id: `o8-${randomUUID()}`, role: 'user', text: text.slice(0, 20_000), at: now.toISOString() };
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, `${JSON.stringify(message)}\n`);
+  return message;
 }

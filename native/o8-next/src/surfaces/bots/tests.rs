@@ -81,3 +81,10 @@ fn bot_entries_sit_under_prs_and_open_their_thread(cx: &mut TestAppContext) {
     draw(cx);
     set_bots(vec![]);
 }
+
+#[test]
+fn mcp_url_never_carries_a_token() {
+    use super::requests::mcp_url;
+    assert_eq!(mcp_url("http://127.0.0.1:3000/api/mcp?token=x"), "http://127.0.0.1:3000/api/mcp");
+    assert_eq!(mcp_url("http://127.0.0.1:3000/api/mcp"), "http://127.0.0.1:3000/api/mcp");
+}
