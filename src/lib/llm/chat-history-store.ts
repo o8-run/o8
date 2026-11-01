@@ -61,7 +61,7 @@ export interface PersistedLlmChatMessage {
 
 export interface PersistedLlmChatHistory {
   source?: 'bot-network';
-  network?: { conversationId: string | null; memberIds: string[]; canReply: boolean; closed?: boolean };
+  network?: { conversationId: string | null; memberIds: string[]; canReply: boolean; closed?: boolean; question?: import('@/lib/bots/network-types').NetworkQuestionSummary };
   messages: PersistedLlmChatMessage[];
   model?: string;
   savedAt?: string;

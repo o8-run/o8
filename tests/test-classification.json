@@ -1918,6 +1918,13 @@
       ]
     },
     {
+      "path": "tests/bot-network-ask-user-real-path.test.ts",
+      "reasons": [
+        "real-path",
+        "stdio-json-rpc-peer"
+      ]
+    },
+    {
       "path": "tests/bot-network-mcp-binding-race-real-path.test.ts",
       "reasons": [
         "real-path"

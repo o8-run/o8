@@ -1,3 +1,4 @@
+import { askNetworkMcpUser } from '@/lib/bots/question-service';
 import { AgentBusError } from '@/lib/agents/service';
 import { checkNetworkMcpInbox, listNetworkMcpTeam, sendNetworkMcpMessage } from '@/lib/bots/network-mcp-service';
 import { BotNetworkError } from '@/lib/bots/network-types';
@@ -52,7 +53,8 @@ export async function handleNetworkMcpMessage(message: OperatorMcpRequest, bindi
     validate(name, args);
     if (name === RESULT_PAGE_TOOL.name) return result(readOperatorResultPage(args, scope, names));
     const value = name === 'list_team' ? listNetworkMcpTeam(bindingId)
-      : name === 'check_inbox' ? checkNetworkMcpInbox(bindingId, args) : await sendNetworkMcpMessage(bindingId, args);
+      : name === 'check_inbox' ? checkNetworkMcpInbox(bindingId, args)
+      : name === 'ask_user' ? await askNetworkMcpUser(bindingId, args) : await sendNetworkMcpMessage(bindingId, args);
     return result(boundOperatorResult(name, scope, jsonResult(value)));
   } catch (error) {
     const failure: McpToolResult = jsonResult({ schema: 'o8/network.error/v1', error: {

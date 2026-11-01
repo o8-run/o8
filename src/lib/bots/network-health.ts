@@ -10,7 +10,9 @@ export function applyNetworkProjectionHealth(thread: MobileOrchestratorThread): 
   if (thread.source !== 'bot-network') return thread;
   const current = { ...thread };
   delete current.networkProjectionError;
+  delete current.outcome;
   const error = networkProjectionError(thread.id);
   return { ...current, status: error ? 'failed' : thread.messageCount ? 'ready' : 'idle',
+    ...(thread.networkQuestion?.status === 'pending' ? { outcome: 'asked' as const } : {}),
     ...(error ? { networkProjectionError: error } : {}) };
 }

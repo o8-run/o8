@@ -380,3 +380,7 @@ mod rail_tests;
 #[cfg(test)]
 #[path = "bots/settings_tests.rs"]
 mod settings_tests;
+
+#[cfg(test)]
+#[path = "bots/ask_user_tests.rs"]
+pub(crate) mod ask_user_tests;

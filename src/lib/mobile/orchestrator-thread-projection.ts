@@ -71,6 +71,7 @@ export interface OrchestratorAssistantUpsertInput {
 
 export type OrchestratorHistoryRecord = {
   source?: 'bot-network';
+  network?: { question?: import('@/lib/bots/network-types').NetworkQuestionSummary };
   messages?: ChatHistoryMessage[];
   model?: string | null;
   savedAt?: string | null;
@@ -208,7 +209,7 @@ export function projectOrchestratorThread(
 
   return applyNetworkProjectionHealth({
     id: tabId,
-    ...(record.source === 'bot-network' ? { source: record.source } : {}),
+    ...(record.source === 'bot-network' ? { source: record.source, ...(record.network?.question ? { networkQuestion: record.network.question } : {}) } : {}),
     title: trimTitle(orchestratorDisplayTitle(record.title, fallbackTitle), fallbackTitle),
     lastMessageAt: lastSpokeMs > 0 ? new Date(lastSpokeMs).toISOString() : (record.savedAt || modifiedAt),
     runtime: record.source === 'bot-network' ? 'unknown' : inferRuntime(effectiveModel(tabId, record)),

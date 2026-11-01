@@ -43,3 +43,11 @@ export class BotNetworkError extends Error {
     super(message); this.name = 'BotNetworkError';
   }
 }
+
+/** Attention metadata is distinct from delivery, exchange closure and agent execution. */
+export interface NetworkQuestionSummary {
+  id: string;
+  status: 'pending' | 'answered';
+  questionMessageId: string;
+  answerMessageId: string | null;
+}

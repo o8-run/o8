@@ -8,6 +8,7 @@ import { persistCanonicalChatHistoryRecord, readPersistedLlmChat, withCanonicalC
   type PersistedLlmChatMessage } from '@/lib/llm/chat-history-store';
 import { findNetworkThread, listNetworkThreads, recoverNetworkSends } from './network-store';
 import type { BotNetworkThread, NetworkMessageAuthor } from './network-types';
+import { findNetworkQuestionForThread } from './question-store';
 import { recordNetworkProjectionHealth } from './network-health';
 
 function authorFor(message: AgentMessage, thread: BotNetworkThread): NetworkMessageAuthor {
@@ -38,8 +39,10 @@ export function projectNetworkThread(threadId: string, sqlite: Database.Database
     const thread = findNetworkThread(threadId, sqlite)!;
     const messages = thread.conversationId ? readAgentConversationMessages(thread.conversationId, sqlite) : [];
     const existing = readPersistedLlmChat(threadId)?.history;
+    const question = findNetworkQuestionForThread(threadId, sqlite);
     const network = { conversationId: thread.conversationId, memberIds: thread.participants.map(p => p.memberId),
-      canReply: thread.participants.length === 1, closed: messages.at(-1)?.conversation?.status === 'closed' };
+      canReply: thread.participants.length === 1, closed: messages.at(-1)?.conversation?.status === 'closed',
+      ...(question ? { question: { id: question.id, status: question.status, questionMessageId: question.message.id, answerMessageId: question.answer?.id ?? null } } : {}) };
     const record = { ...existing, source: 'bot-network' as const, network, repoPath: thread.repoPath,
       title: existing?.title || thread.title, messages: messages.map(m => projectMessage(m, thread)),
       savedAt: messages.at(-1)?.timestamp ?? thread.createdAt, orchestratorVisible: true };

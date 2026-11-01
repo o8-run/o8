@@ -186,6 +186,8 @@ function projectNetworkMessage(message: import('./types').AgentMessage, sqlite: 
 
 /** Internal admission fence for a saved local delivery context; never read from the wire. */
 export interface AgentMessageAdmission {
+  /** Only the local durable ask_user handler admits an initial message to the human. */
+  operatorQuestion?: true;
   expectedTarget?: Pick<AgentPresence, 'agentId' | 'name' | 'repo' | 'runtime' | 'sessionKey'>;
   beforePersist?: () => void;
   /** Local routing metadata in the same SQLite transaction; never file projection. */
@@ -233,7 +235,7 @@ export async function postAgentMessage(
     repo = sender.repo;
   }
   if (repo) await reconcileLiveAgentPresence(repo, presenceSeams, sqlite);
-  const target = admission?.expectedTarget ? findAgentPresence({ agentId: admission.expectedTarget.agentId }, sqlite) : replyToId && to.toLowerCase() === 'operator' && repo ? {
+  const target = admission?.expectedTarget ? findAgentPresence({ agentId: admission.expectedTarget.agentId }, sqlite) : (replyToId || admission?.operatorQuestion) && to.toLowerCase() === 'operator' && repo ? {
     agentId: 'operator',
     name: 'operator',
     repo: normalizeAgentBusRepoPath(repo),
@@ -300,7 +302,7 @@ export async function postAgentMessage(
   let { message } = persisted;
   if (!persisted.created) return projectNetworkMessage(message, sqlite);
   if (target.runtime === 'operator') {
-    return projectNetworkMessage(updateAgentMessageDelivery(message.id, 'poll', 'Available in the operator Handoffs view.', sqlite), sqlite);
+    return projectNetworkMessage(updateAgentMessageDelivery(message.id, 'poll', admission?.operatorQuestion ? 'Durably queued for the operator.' : 'Available in the operator Handoffs view.', sqlite), sqlite);
   }
   if (!isPresenceLive(target)) return projectNetworkMessage(message, sqlite);
   const wakeSeams: AgentInboxWakeSeams = {

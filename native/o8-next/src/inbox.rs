@@ -1,6 +1,7 @@
 //! Native Inbox, backed exclusively by the desktop's existing routes.
 use crate::client::Client;
 use gpui::{Context, EventEmitter, FocusHandle, Window};
+use questions::QuestionFeed;
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -204,6 +205,8 @@ struct InboxResponse {
     items: Vec<Value>,
     maintainer: Option<Feed>,
     maintainer_error: Option<String>,
+    #[serde(flatten)]
+    questions: QuestionFeed,
 }
 #[derive(Deserialize)]
 struct ApprovalsResponse {
@@ -222,10 +225,14 @@ pub struct Inbox {
     items: Vec<Value>,
     feed: Feed,
     approvals: Vec<Value>,
+    questions: Vec<Value>,
+    questions_at: Instant,
+    questions_loading: bool,
+    questions_generation: u64,
     pub(crate) cards: [Vec<Card>; 5],
     pub(crate) loading: bool,
     pub(crate) loaded: bool,
-    pub(crate) errors: [Option<String>; 3],
+    pub(crate) errors: [Option<String>; 4],
     pub(crate) busy: Option<String>,
     pub(crate) action_focus: HashMap<String, [FocusHandle; 2]>,
     uncertain: HashSet<String>,
@@ -247,6 +254,10 @@ impl Inbox {
             items: vec![],
             feed: Feed::default(),
             approvals: vec![],
+            questions: vec![],
+            questions_at: Instant::now(),
+            questions_loading: false,
+            questions_generation: 0,
             cards: Default::default(),
             loading: false,
             loaded: false,
@@ -266,6 +277,7 @@ impl Inbox {
         self.focus.focus(window);
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
+        self.tick_questions(cx);
         if self.last_refresh.elapsed() >= Duration::from_secs(300) {
             self.load(cx);
         }
@@ -277,6 +289,7 @@ impl Inbox {
         self.loading = true;
         self.last_refresh = Instant::now();
         let revision = self.revision;
+        let questions_generation = self.start_question_read();
         let client = self.client.clone();
         let workspace = self.workspace.clone();
         let all = self.all;
@@ -285,9 +298,11 @@ impl Inbox {
                 ("scope", "all"),
                 ("includeDismissed", "1"),
                 ("includeMaintainer", "1"),
+                ("includeQuestions", "1"),
             ];
             if !all {
                 query.push(("maintainerRepoPath", workspace.as_str()));
+                query.push(("questionsRepoPath", workspace.as_str()));
             }
             (
                 client.get::<InboxResponse>("/api/panel/supervisor-inbox", &query),
@@ -304,6 +319,7 @@ impl Inbox {
                 if revision != this.revision { this.load(cx); return; }
                 match inbox {
                     Ok(inbox) => {
+                        if questions_generation == this.questions_generation { this.accept_questions(inbox.questions); }
                         this.items = inbox.items;
                         this.errors[0] = None;
                         this.errors[1] = inbox.maintainer_error;
@@ -419,6 +435,13 @@ impl Inbox {
                     Card::contribution(snapshot),
                 ));
             }
+        }
+        for question in self
+            .questions
+            .iter()
+            .filter(|q| self.all || q["repoPath"] == self.workspace)
+        {
+            replies.push((text(question, "createdAt"), Card::question(question)));
         }
         replies.sort_by(|(a, ac), (b, bc)| a.cmp(b).then(ac.id.cmp(&bc.id)));
         self.cards = [
@@ -539,7 +562,8 @@ impl Inbox {
     }
     pub(crate) fn error(&self) -> Option<&str> {
         self.errors[0].as_deref().or_else(|| match self.lane {
-            0 | 1 => self.errors[1].as_deref(),
+            0 => self.errors[3].as_deref().or(self.errors[1].as_deref()),
+            1 => self.errors[1].as_deref(),
             2 => self.errors[2].as_deref(),
             _ => None,
         })
@@ -586,3 +610,6 @@ fn github_url(value: &str) -> Option<String> {
         && url.password().is_none())
     .then(|| url.to_string())
 }
+
+#[path = "inbox_questions.rs"]
+mod questions;

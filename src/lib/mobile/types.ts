@@ -528,6 +528,9 @@ export type MobileOrchestratorThreadStatus = 'idle' | 'ready' | 'busy' | 'failed
 
 export interface MobileOrchestratorThread {
   source?: 'bot-network';
+  /** Uses the existing native needs-input attention marker, independently of execution status. */
+  outcome?: 'asked';
+  networkQuestion?: import('@/lib/bots/network-types').NetworkQuestionSummary;
   networkProjectionError?: string;
   id: string;
   title: string;

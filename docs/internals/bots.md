@@ -187,12 +187,14 @@ Implemented domain tools:
 - `send_message({to, text, requestId, replyToId?, close?})` takes a binding id from the team roster. The
   sender comes from the local launch binding. A reply needs the latest message id and obeys the existing
   exchange sequencing, close and turn-budget rules. Only an existing operator exchange can use
-  `to: "operator"` with `replyToId`; this is a reply, not a new human-question service.
+  `to: "operator"` with `replyToId`. Start a human question with `ask_user`.
 - `check_inbox({cursor?, limit?})` reads the target session inbox and acknowledges it through the returned
   cursor using the existing bus semantics. Omit the cursor to resume its durable acknowledgement cursor.
   Follow `hasMore` for later pages. Already native/acknowledged messages are skipped even with an older
   explicit cursor; a lost inbox response is not replayed by this tool. An operator's separate
   `o8_msg_inbox` view still reads without acknowledging on the target's behalf.
+- `ask_user({question, requestId})` creates a durable local question and returns its ticket immediately.
+  Repeat the same arguments to retrieve its pending state or correlated human answer after a restart.
 
 `requestId` is required for sends and is scoped to the explicit launch binding. Reuse it with identical
 arguments after an uncertain result; changing the text, recipient, reply target or close flag conflicts.
@@ -209,7 +211,7 @@ operator and peer threads are reused by exchange id, and both peers retain their
 
 Receipts distinguish durable acceptance from the bus's `poll`, `native` or `failed` delivery field and note.
 `native` can mean a runtime handoff or a target inbox acknowledgement; none of these stages proves peer
-processing. There is no `message_status` tool with a stronger receipt, and no placeholder `ask_user` tool.
+processing. There is no `message_status` tool with a stronger receipt.
 
 Large results use `o8_result_page` in the same way as operator tools. Follow `nextArguments` to recover
 the saved result without repeating a send or inbox read. The saved pages are process-local, expire after
@@ -225,6 +227,34 @@ protocol clients through the actual entrypoint and dispatcher. A discovers B, se
 and replies with correlation, and A receives the reply. It covers deduplication, restart/cursor behavior,
 failed file projection and immutable peer authorship. These are scripted sessions, **not live Claude Code
 or Grok Bot validation**. Hosted delivery, remote/tunneled endpoints, pairing and identity trust remain held.
+
+## Durable local questions
+
+The stdio network profile's `ask_user` tool puts one question into a canonical network thread and the
+existing native Inbox's **Needs reply** lane. A question accepts up to 4,000 UTF-16 units and a stable
+`requestId`. Its scope includes the launch binding, so retrying the same question coalesces across
+independent sessions; changing its text under that request id conflicts. A new question uses a new id.
+
+Schema v78 records question purpose and correlation alongside the existing bus and network binding in
+the same SQLite admission transaction. The bus owns the full question and answer text. Canonical history
+is a separate, replayable projection: failed history writes return projection `pending`, and retry or
+catalog reconciliation can rebuild it after a restart without sending the question again. Existing pin,
+snooze and Inbox preference revisions are preserved.
+
+The existing supervisor-inbox GET optionally includes questions. A bounded question-only read supplies
+the oldest 64 pending questions, with a truncation indicator and previews of up to 1,200 UTF-16 units
+plus an ellipsis, preserving Unicode boundaries. Full text remains in the ticket and native thread. The native question feed refreshes every
+ten seconds independently of the existing five-minute full Inbox refresh, preserving previous cards on
+failure and showing an error. Workspace filtering uses the recorded local delivery context.
+
+**Answer in thread** opens the real native conversation through the existing session opener. Its composer
+sends a correlated operator reply through the durable bus; it does not start a lead/model turn. An accepted
+answer removes the pending question on refresh and remains available through the original `ask_user`
+ticket after the client's session restarts or acknowledges its inbox. `check_inbox` also receives that
+reply with its existing acknowledgement semantics. Acceptance still does not prove reading or processing.
+
+The production-path and headless native tests use scripted local MCP clients, not live Claude or Grok.
+Settle/park and the separate exchange Inbox port are unchanged. No hosted delivery or bridge is added.
 
 ## Grok provider and its mailbox
 

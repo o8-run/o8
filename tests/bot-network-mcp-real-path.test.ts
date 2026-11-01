@@ -67,7 +67,7 @@ it('two independently bound stdio sessions discover the implemented local networ
   for (const peer of [a, b]) {
     const result = await peer.request<{ tools: Array<{ name: string }> }>('tools/list', {});
     expect(result.tools.map(tool => tool.name).sort()).toEqual([
-      'check_inbox', 'list_team', 'o8_result_page', 'send_message',
+      'ask_user', 'check_inbox', 'list_team', 'o8_result_page', 'send_message',
     ]);
   }
   expect(getSqlite().prepare('SELECT COUNT(*) AS count FROM bot_members').get()).toMatchObject({ count: 2 });
@@ -150,7 +150,7 @@ it('keeps bus conflict, latest-reply and closed-exchange semantics without chang
   expect((await run(activeA, 'send_message', { to: bindings[1], text: 'Bounded exchange', requestId: 'bounded-first' })).message.id).toBe(first.message.id);
 });
 
-it('replies to an existing operator exchange using its canonical thread without exposing ask_user', async () => {
+it('replies to an existing operator exchange using its canonical thread independently of questions', async () => {
   const first = await postAgentMessage({ to: 'LocalB', repo, text: 'An existing human conversation', requestId: 'operator-existing' }, { role: 'operator' });
   const thread = createNetworkThread({ bindingIds: [bindings[1]], conversationId: first.conversation!.id });
   projectNetworkThread(thread.threadId);
@@ -247,7 +247,7 @@ it('negotiates legacy and stateless MCP revisions and validates the narrow imple
   expect(await activeA.request('server/discover', { _meta })).toMatchObject({ resultType: 'complete', supportedVersions: ['2026-07-28', '2024-11-05'] });
   const catalog = await activeA.request<{ tools: Array<{ name: string }>; resultType: string }>('tools/list', { _meta });
   expect(catalog.resultType).toBe('complete');
-  expect(catalog.tools.map(tool => tool.name)).not.toContain('ask_user');
+  expect(catalog.tools.map(tool => tool.name)).toContain('ask_user');
   expect(catalog.tools.map(tool => tool.name)).not.toContain('message_status');
   await expect(activeA.request('server/discover', { _meta: { ..._meta, 'io.modelcontextprotocol/protocolVersion': '1900-01-01' } })).rejects.toMatchObject({ code: -32022 });
   await expect(activeA.request('initialize', { _meta })).rejects.toMatchObject({ code: -32601 });

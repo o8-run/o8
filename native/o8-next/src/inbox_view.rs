@@ -104,7 +104,7 @@ impl Inbox {
                     div().id(("inbox-open", index)).debug_selector({ let id = card.id.clone(); move || format!("inbox-open-{id}") })
                         .cursor_pointer().p(px(6.)).rounded(px(7.)).text_size(px(11.))
                         .hover(|s| s.bg(palette().surface_raised))
-                        .child(if card.session.is_empty() { "Open on GitHub" } else { "Open session" })
+                        .child(if card.source == "bot_question" { "Answer in thread" } else if card.session.is_empty() { "Open on GitHub" } else { "Open session" })
                         .on_click(cx.listener(move |this, _, _, cx| this.open(&open, cx)))))
                 .when(card.approval, |v| v.children([false, true].map(|approve| {
                     self.decision_button(card.clone(), index, approve, can_resolve, window, cx)
