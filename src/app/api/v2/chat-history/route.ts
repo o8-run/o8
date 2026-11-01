@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { projectNetworkThread } from '@/lib/bots/network-projection';
+import { networkProjectionError } from '@/lib/bots/network-health';
+import { isNetworkThread } from '@/lib/bots/network-store';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -164,6 +167,7 @@ export async function GET(request: NextRequest) {
   const startedAt = performance.now();
   const tabId = request.nextUrl.searchParams.get('tabId');
   if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400, headers: serverTimingHeader(startedAt) });
+  try { projectNetworkThread(tabId, undefined, { waitForLock: false }); } catch { /* Keep readable history and expose its projection health. */ }
 
   const filePath = safePath(tabId);
   let parsed: Record<string, unknown>;
@@ -174,6 +178,8 @@ export async function GET(request: NextRequest) {
     parsed = emptyHistoryRecord();
   }
 
+  const projectionError = networkProjectionError(tabId);
+  if (parsed.source === 'bot-network' && projectionError) parsed.network = { ...parsed.network as object, projectionError };
   const stableRecord = {
     ...parsed,
     messages: ensureStableChatMessageIds(Array.isArray(parsed.messages) ? parsed.messages : []),
@@ -226,6 +232,7 @@ export async function POST(request: NextRequest) {
     || ((body.repoPath !== undefined || !prior) && !matchesMutationWorkspace(workspace, body.repoPath))) {
     return NextResponse.json({ error: 'History was not found' }, { status: 404 });
   }
+  if (isNetworkThread(body.tabId)) return NextResponse.json({ error: 'Network messages are recorded through the agent bus. Use the network composer to send.' }, { status: 409 });
 
   // Don't save images in history (too large) — strip data URIs
   const messages = ensureStableChatMessageIds(body.messages.map((m: Record<string, unknown>) => ({
@@ -466,6 +473,7 @@ export async function DELETE(request: NextRequest) {
     if (!saved || !matchesMutationWorkspace(mutationWorkspace(request), saved.history.repoPath)) {
       return NextResponse.json({ error: 'History was not found' }, { status: 404 });
     }
+    if (isNetworkThread(tabId)) return NextResponse.json({ error: 'Archive this network thread to hide it. Its durable bus exchange is retained.' }, { status: 409 });
     deleteCanonicalChatHistoryRecord(tabId);
     return NextResponse.json({ ok: true });
   } catch (error) {

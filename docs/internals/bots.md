@@ -84,6 +84,70 @@ remote join or automatic discovery enrollment. A global roster does not enable c
 routing: the legacy bus continues to use each session's explicit repository and agent name. Network-thread
 reply dispatch and the network MCP profile are subsequent work.
 
+## Local network threads
+
+A network thread is a canonical `thoughts-*` conversation with source `bot-network`, explicitly bound
+to one durable agent-bus exchange and snapshots of its local session bindings. One binding creates an
+operator-to-bot conversation. Two bindings attach an existing peer exchange from the same repository.
+Human replies use the existing operator identity; peer exchanges show both bot authors and are
+read-only to human composition. Configuration does not enroll a process or create a new principal.
+
+After recording membership and a local session binding, create the operator conversation locally:
+
+```sh
+node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/bots-network-thread.ts <<'JSON'
+{"bindingIds":["a-returned-binding-id"]}
+JSON
+```
+
+Use the returned `threadId` with the existing membership `home` command to make it the member's rail
+destination. For a peer exchange, provide its existing `conversationId` and two `bindingIds`. A new
+thread id can be supplied; configuration never overwrites an existing chat.
+
+The native pane reads the ordinary thread/history endpoints. Its composer shows the recorded
+recipient instead of model controls and sends plain text through the existing composer endpoint to
+the agent message service. Orchestrator queue admission, lead continuation and backend execution
+refuse recorded network threads, including when their JSON projection is missing. Ordinary chats
+retain their backend/model routing. Attachments and live model voice are not network composition;
+dictation can still fill a text draft.
+
+The bus remains authoritative for message ids, ordering, participants, reply correlation, idempotency
+and turn budgets. One thread contains one bounded exchange (8 turns by default, with the existing
+extension rules). Closing or exhausting it does not silently start another; create a new exchange
+explicitly. Recipient context is checked after discovery and inside admission, so an alias or a
+replacement session cannot silently take the configured target.
+
+Message authors are independent of chat role and runtime/model attribution. Source names and
+session identities come from accepted bus messages; matching recorded context adds stable member
+and source ids. Missing historical identity stays unattributed. Member renames do not change old
+authors. Native peer messages display their author and never use the human bubble.
+
+Send intents, bus acceptance and canonical history replacement are separate steps, without one
+cross-store transaction. Known nonacceptance leaves a terminal rejected receipt; uncertain acceptance
+or failed history replacement returns 503 and retains the same retry identity. An unaccepted held
+intent can be retried or removed. Removal leaves a cancellation tombstone, so a delayed duplicate
+cannot revive it. A deliberate resend uses a fresh id. Cancellation and admission share a SQLite
+fence. Accepted bus messages cannot be removed as unsent drafts, and unresolved intents prevent
+inbox settlement through the existing synchronous guard.
+
+Error responses include a matching terminal `networkSend` receipt when acceptance, cancellation or
+rejection is known. The native pane retires only that cached send identity, including after navigation;
+an unknown outcome keeps the same identity for retry. Native held rows provide Retry and Remove while
+preserving separate editor drafts. Network text does not consume the normal-chat prompt prelude.
+
+Projection replays the bus after retries, restarts and history-file loss, using stable message ids.
+It reads authoritative state under the canonical history lock and avoids rewriting unchanged data.
+Existing history metadata and inbox preference state/revisions are preserved. Rebuilding an entirely
+lost JSON file recovers bus content and bindings, while file-only metadata such as a custom title is
+not recoverable from the bus. Catalog reads use a nonblocking projection lock and isolate failures per
+thread, retaining readable history with explicit health. Network activity does not infer Working from
+a last user-role record. Physical history DELETE directs the operator to Archive, which hides the
+thread while retaining its bus exchange.
+
+A composer acknowledgement means durable bus acceptance. `poll` means the message is available in
+the recipient inbox; `native` records the existing runtime handoff. Neither proves processing. The
+network MCP profile and two-local-session messaging proof are subsequent work; hosted delivery is held.
+
 ## Grok provider and its mailbox
 
 The Grok provider finds Grok Bot agents whose data directory is on this machine
@@ -133,7 +197,10 @@ of it, including when the 500-message window rolls forward. While reading older 
 message and its within-row position are anchored across refreshes. If that message leaves the bounded
 window, the view returns to the oldest retained message; earlier history is no longer available there.
 
-## Proposed: live conversation (design only, not built)
+## Earlier mailbox reply proposal (not built)
+
+Local network threads above use the existing durable agent bus. The following is the earlier mailbox
+reply proposal, retained for context; it is not the current reply implementation.
 
 The goal is to see a bot's real conversation in o8 and reply from o8. Two pieces:
 

@@ -12,6 +12,7 @@ fn markdown(body: &str) -> gpui::AnyElement {
     let state = Rc::new(RefCell::new(RowState::new(Row::Message {
         id: "issue-markdown".into(),
         role: "assistant".into(),
+        author: None,
         nodes: text::markdown(body),
     })));
     RetainedRow {

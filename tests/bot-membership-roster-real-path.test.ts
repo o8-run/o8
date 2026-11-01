@@ -14,7 +14,7 @@ Object.assign(process.env, { O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root,
 
 const { getSqlite, closeDb, getDbPath, DB_SCHEMA_VERSION } = await import('@/lib/db');
 const { GET } = await import('@/app/api/bots/route');
-const bootTables = getSqlite().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'bot_%' ORDER BY name").all();
+const bootTables = getSqlite().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('bot_members','bot_member_bindings','bot_member_sources') ORDER BY name").all();
 
 afterAll(() => { closeDb(); rmSync(root, { recursive: true, force: true }); });
 
@@ -26,7 +26,7 @@ it('normal boot creates membership and repeats the additive migration with exist
   const legacy = new Database(getDbPath());
   legacy.exec('DROP TABLE bot_member_sources; DROP TABLE bot_member_bindings; DROP TABLE bot_members');
   legacy.close();
-  expect(getSqlite().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'bot_%' ORDER BY name").all()).toEqual(expected);
+  expect(getSqlite().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('bot_members','bot_member_bindings','bot_member_sources') ORDER BY name").all()).toEqual(expected);
 });
 
 it('GET /api/bots projects durable membership from an on-disk database across a restart', async () => {

@@ -1,6 +1,7 @@
 import { ensureV74ConversationPrProvenanceSchema } from '@/lib/db/v74-conversation-pr-provenance-migration';
 import { ensureV75ComposerQueueLedgerSchema } from '@/lib/db/v75-composer-queue-ledger-migration';
 import { ensureV76BotMembershipSchema } from '@/lib/db/v76-bot-membership-migration';
+import { ensureV77BotNetworkThreadSchema } from '@/lib/db/v77-bot-network-thread-migration';
 import type Database from 'better-sqlite3';
 import { ensureV36HarnessSchema } from '@/lib/db/v36-harness-migration';
 import { ensureV37WorkspaceSnapshotSchema } from '@/lib/db/v37-workspace-snapshot-migration';
@@ -95,4 +96,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV74ConversationPrProvenanceSchema(sqlite);
   ensureV75ComposerQueueLedgerSchema(sqlite);
   ensureV76BotMembershipSchema(sqlite);
+  ensureV77BotNetworkThreadSchema(sqlite);
 }

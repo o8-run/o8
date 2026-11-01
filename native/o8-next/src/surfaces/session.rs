@@ -5,11 +5,11 @@ use serde_json::{Value, json};
 
 use crate::ui::Surface;
 #[cfg(test)]
-#[path = "../composer/loaded_shell_tests.rs"]
-mod loaded_shell_tests;
-#[cfg(test)]
 #[path = "../composer/image_loaded_shell_tests.rs"]
 mod image_loaded_shell_tests;
+#[cfg(test)]
+#[path = "../composer/loaded_shell_tests.rs"]
+mod loaded_shell_tests;
 pub(super) type Runtime = ();
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Slice {
@@ -184,6 +184,7 @@ impl Session {
 pub struct QueueError {
     pub message: String,
     pub status: Option<u16>,
+    pub network_send: Option<Value>,
 }
 
 impl Client {
@@ -195,6 +196,14 @@ impl Client {
             "/api/v2/chat-history",
             &[("tabId", &session.id), ("limit", "100")],
         )?;
+        if record["source"] == "bot-network" {
+            if record["repoPath"].as_str() != session.repo_path.as_deref() {
+                return Err(
+                    "The network conversation repository changed. Refresh before sending.".into(),
+                );
+            }
+            return Ok(json!({"source":"bot-network", "network":record["network"]}));
+        }
         if record["repoPath"].as_str() != session.repo_path.as_deref()
             || record["backend"].as_str() != session.backend.as_deref()
         {
@@ -255,18 +264,37 @@ impl Client {
         let url = self.url("/api/orchestrator/composer-queue").unwrap();
         let request = self.request(method, &url);
         let response = request.send_json(body.clone()).map_err(|e| match e {
-            ureq::Error::Status(code, _) => QueueError {
-                message: format!("Queue rejected the request (HTTP {code}). Draft retained."),
-                status: Some(code),
-            },
+            ureq::Error::Status(code, response) => {
+                let record: Value = Self::read(response).unwrap_or(Value::Null);
+                let network_send = record.get("networkSend").cloned();
+                let message = match network_send.as_ref().and_then(|r| r["status"].as_str()) {
+                    Some("accepted") => {
+                        "The bus accepted this message. Refresh its transcript; draft retained."
+                            .to_owned()
+                    }
+                    Some("cancelled") => "This send was removed. Draft retained.".to_owned(),
+                    Some("rejected") => format!(
+                        "{} Draft retained.",
+                        record["error"].as_str().unwrap_or("This send was refused.")
+                    ),
+                    _ => format!("Queue rejected the request (HTTP {code}). Draft retained."),
+                };
+                QueueError {
+                    message,
+                    status: Some(code),
+                    network_send,
+                }
+            }
             _ => QueueError {
                 message: "Delivery is unconfirmed. Retry checks the same message identity.".into(),
                 status: None,
+                network_send: None,
             },
         })?;
         Self::read(response).map_err(|message| QueueError {
             message,
             status: None,
+            network_send: None,
         })
     }
     pub fn history(&self, id: &str) -> Result<History, String> {

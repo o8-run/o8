@@ -57,7 +57,7 @@ interface PresenceRow {
   last_seen: string;
 }
 
-interface MessageRow {
+export interface MessageRow {
   sequence: number;
   id: string;
   from_agent: string;
@@ -315,7 +315,7 @@ export function listAgentConversations(
   `).all(normalizeAgentBusRepoPath(repo), limit) as ConversationRow[]).map(mapConversation);
 }
 
-function mapMessage(row: MessageRow, sqlite: Database.Database): AgentMessage {
+export function mapMessage(row: MessageRow, sqlite: Database.Database): AgentMessage {
   const conversation = row.conversation_id
     ? sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(row.conversation_id) as ConversationRow | undefined
     : undefined;

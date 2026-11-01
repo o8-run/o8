@@ -4,6 +4,8 @@ use gpui::{AnyElement, Div, KeyDownEvent, SharedString, Stateful};
 
 #[path = "context_view.rs"]
 mod context_view;
+#[path = "footer.rs"]
+mod footer;
 
 /// The mic and primary button in their own cached view: the draft turning
 /// empty or non-empty redraws only this, never the session (typing budget).
@@ -62,86 +64,7 @@ fn mic_glyph(color: gpui::Rgba, scale: f32) -> impl IntoElement {
     .h(px(20.))
 }
 
-/// An icon-only footer control: a 28px target with the label as its tooltip.
-fn icon_only(button: Stateful<Div>, path: &str, color: gpui::Rgba, label: String) -> Stateful<Div> {
-    let label = SharedString::from(label);
-    button
-        .w(px(28.))
-        .h(px(28.))
-        .px(px(0.))
-        .justify_center()
-        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(label.clone())).into())
-        .child(crate::icon::stroke(path, color, 18., 1.6))
-}
-
 impl Surface {
-    pub(crate) fn composer_footer(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let routing = self.composer_routing(cx).unwrap_or(Value::Null);
-        let picked = routing["pickedMode"].as_str().unwrap_or("fast");
-        let enabled = self.queue_ready
-            && !self.saving
-            && !self.composer.read(cx).controls.busy
-            && self.composer.read(cx).controls.pending_images == 0;
-        let leading = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(6.))
-            // One attachments control (Q 2026-10-31): files, screenshots,
-            // prompts, the worker checkout and permission all live in its
-            // drawer, so the composer keeps only what you type with.
-            .child(icon_only(
-                self.track_prompt_anchor(
-                    self.composer_button("composer-attach", "", enabled, cx, |s, w, cx| {
-                        s.open_composer_picker("attach", w, cx)
-                    }),
-                    "attach",
-                ),
-                PAPERCLIP,
-                theme().text_secondary,
-                format!(
-                    "Attach and settings · {}",
-                    crate::composer::controls::mode_label(picked)
-                ),
-            ));
-        let trailing = div()
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            // The bars sit against the model name, one quiet group.
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .child(self.track_prompt_anchor(self.lead_chip(&routing, enabled, cx), "model"))
-                    .children(
-                        self.thinking_chip(&routing, enabled, cx)
-                            .map(|chip| self.track_prompt_anchor(chip, "effort")),
-                    ),
-            )
-            // The round primary button sits over this slot from the card, so
-            // the emptiness flip never re-renders the footer region.
-            .child(div().w(px(self.primary_width())).h(px(28.)).flex_shrink_0());
-        div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .justify_end()
-            .gap(px(6.))
-            .min_h(px(36.))
-            .pt(px(4.))
-            .px(px(8.))
-            .pb(px(8.))
-            .child(leading)
-            .child(self.context_meter(window, cx))
-            .child(trailing)
-            .into_any_element()
-    }
-
     fn primary_view(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let view = if let Some(view) = &self.composer.read(cx).controls.send_view {
             view.clone()
@@ -169,6 +92,7 @@ impl Surface {
     /// draft. v1; the motion will be refined.
     fn primary_cluster(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let enabled = self.queue_ready
+            && self.network_can_reply()
             && !self.saving
             && !self.composer.read(cx).controls.busy
             && self.composer.read(cx).controls.pending_images == 0;
@@ -379,6 +303,9 @@ impl Surface {
 
     pub(super) fn composer_routing(&self, cx: &App) -> Option<Value> {
         let mut routing = self.routing.clone()?;
+        if routing["source"] == "bot-network" {
+            return Some(routing);
+        }
         for (key, value) in self.composer.read(cx).controls.overrides.as_object()? {
             routing[key] = value.clone();
         }

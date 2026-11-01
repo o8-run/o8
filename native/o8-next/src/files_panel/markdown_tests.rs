@@ -201,6 +201,7 @@ pub(super) fn chat_unchanged(cx: &mut TestAppContext) {
     let state = Rc::new(RefCell::new(RowState::new(Row::Message {
         id: "chat-newline-regression".into(),
         role: "assistant".into(),
+        author: None,
         nodes,
     })));
     let (_, cx) = cx.add_window_view(|_, _| ChatRow(state.clone()));

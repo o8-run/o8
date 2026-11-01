@@ -362,6 +362,9 @@ export type MobilePendingTurnWorkers = Record<string, NonNullable<MobileTurnRece
 
 // Shared transcript shape used across mobile history and runtime tails.
 export interface MobileTranscriptEntry {
+  author?: import('@/lib/bots/network-types').NetworkMessageAuthor;
+  network?: import('@/lib/bots/network-types').NetworkMessageReceipt;
+  runtime?: string;
   /** Spoken captions are display evidence, never a runtime completion receipt. */
   voice?: import('@/lib/transcripts/voice-captions').VoiceCaption;
   /** Matching send acknowledgement or live turn activity; not turn completion. */
@@ -524,6 +527,8 @@ export type MobileOrchestratorBackend = OrchestratorBackendId;
 export type MobileOrchestratorThreadStatus = 'idle' | 'ready' | 'busy' | 'failed';
 
 export interface MobileOrchestratorThread {
+  source?: 'bot-network';
+  networkProjectionError?: string;
   id: string;
   title: string;
   lastMessageAt: string;

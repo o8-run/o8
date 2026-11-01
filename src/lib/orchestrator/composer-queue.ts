@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getSqlite } from '@/lib/db';
+import { isNetworkThread } from '@/lib/bots/network-store';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { validateComposerImageAttachments, composerBackendSupportsImages } from '@/lib/mobile/composer-image-validation';
@@ -31,6 +32,7 @@ export function validateComposerQueueTarget(input: unknown, requireSaved = true)
   const target = input as Partial<ComposerQueueTarget> | null;
   if (!target || typeof target.repoPath !== 'string' || !target.repoPath.startsWith('/') || target.repoPath.length > 4096
     || typeof target.threadId !== 'string' || !/^thoughts-[A-Za-z0-9_-]{1,80}$/.test(target.threadId)) throw new Error('A valid repository and chat are required.');
+  if (isNetworkThread(target.threadId)) throw new Error('Network threads send through the agent bus, not the orchestrator queue.');
   const history = readPersistedLlmChat(target.threadId);
   if ((!history?.history.repoPath && requireSaved) || (history?.history.repoPath && composerQueueRepoKey(history.history.repoPath) !== composerQueueRepoKey(target.repoPath))) throw new Error('The queued message must target its saved chat repository.');
   return { repoPath: requireSaved ? realpathSync(target.repoPath) : composerQueueRepoKey(target.repoPath), threadId: target.threadId };

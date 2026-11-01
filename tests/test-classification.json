@@ -1918,6 +1918,13 @@
       ]
     },
     {
+      "path": "tests/bot-network-thread-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/bounded-worktree-maintenance-real-path.test.ts",
       "reasons": [
         "child-process",

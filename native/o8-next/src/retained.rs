@@ -552,10 +552,24 @@ fn layout(
                 b.node(&node, expanded, window);
             }
         }
-        Row::Message { role, nodes, .. } if role == "user" => {
+        Row::Message {
+            role,
+            author,
+            nodes,
+            ..
+        } if role == "user" && author.as_ref().is_none_or(|a| a["kind"] != "bot") => {
             user_bubble::layout(&mut b, width, nodes, expanded, window);
         }
-        Row::Message { nodes, .. } => {
+        Row::Message { author, nodes, .. } => {
+            if let Some(author) = author.as_ref().filter(|a| a["kind"] == "bot") {
+                b.plain(
+                    crate::text::sanitize(author["name"].as_str().unwrap_or("Bot")),
+                    12.,
+                    18.,
+                    window,
+                );
+                b.y += px(4.);
+            }
             for node in trimmed(nodes) {
                 let card = node
                     .data

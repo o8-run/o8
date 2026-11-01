@@ -280,6 +280,7 @@ impl Brain {
                 let row = Row::Message {
                     id: format!("brain-{i}"),
                     role: message.role.clone(),
+                    author: None,
                     nodes,
                 };
                 self.rows
