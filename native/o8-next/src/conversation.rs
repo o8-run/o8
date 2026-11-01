@@ -439,15 +439,16 @@ impl Surface {
                                 i.controls.prompt.queued_prelude = None;
                                 i.controls.prompt.command_wire = None;
                             });
-                            if this.composer.read(cx).text == draft {
-                                this.composer.update(cx, |i, cx| {
+                            this.composer.update(cx, |i, cx| {
+                                if i.text == draft {
                                     i.clear(cx);
-                                    i.controls
-                                        .images
-                                        .retain(|image| !sent_images.contains(image));
-                                    i.controls.files.retain(|file| !files.contains(file));
-                                });
-                            }
+                                }
+                                i.controls
+                                    .images
+                                    .retain(|image| !sent_images.contains(image));
+                                i.controls.files.retain(|file| !files.contains(file));
+                                cx.notify();
+                            });
                         }
                         // The queue rows under the composer show delivery, as on
                         // the desktop; the transcript keeps no confirmation line.
