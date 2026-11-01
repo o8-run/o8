@@ -112,3 +112,39 @@ fn elapsed_is_compact() {
     child.started = None;
     assert_eq!(elapsed(&child, 0.), None);
 }
+
+#[test]
+fn copy_items_offer_the_id_and_its_link() {
+    let items = copy_items("t-7");
+    assert_eq!(items[0].2, "t-7");
+    assert_eq!(items[0].3, "Thread ID copied");
+    assert_eq!(items[1].2, "o8://thread/t-7");
+    assert_eq!(parse_link(&items[1].2), Some("t-7"));
+}
+
+#[test]
+fn launch_and_task_calls_become_delegates_with_their_thread() {
+    let launch = crate::activity::activity(
+        "l1",
+        &json!({"name": "mcp__o8__o8_launch_task", "status": "done",
+                "args": {"taskId": "task-1"},
+                "result": "{\"ok\":true,\"execution\":{\"sessionId\":\"child-1\"}}"}),
+        "",
+    );
+    assert!(launch.delegate);
+    assert_eq!(launch.thread.as_deref(), Some("child-1"));
+    assert_eq!(launch.subject.as_deref(), Some("task-1"));
+    let read = crate::activity::activity(
+        "r1",
+        &json!({"name": "Read", "status": "done", "args": {"file_path": "a.rs"},
+                "result": "o8://thread/nope"}),
+        "",
+    );
+    assert!(!read.delegate && read.thread.is_none());
+    let task = crate::activity::activity(
+        "t1",
+        &json!({"name": "Task", "status": "running", "args": {"description": "Review"}}),
+        "",
+    );
+    assert!(task.delegate && task.status == "running");
+}
