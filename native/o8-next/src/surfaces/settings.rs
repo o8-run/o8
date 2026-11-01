@@ -7,7 +7,8 @@ pub(super) type Slice = EmptyState;
 #[derive(Default)]
 pub(super) struct Runtime {
     pub view: Option<Entity<Settings>>,
-    pub subscription: Option<gpui::Subscription>,
+    // Every shell closer drops this slot, so action listeners share its lifetime.
+    pub subscription: Option<(gpui::Subscription, gpui::Subscription)>,
 }
 pub(super) const REGISTRATION: Registration = Registration {
     command: Some((6, || Command::Settings)),
@@ -64,11 +65,22 @@ impl Shell {
         self.surfaces.projects.open = false;
         let client = self.client.clone();
         let settings = cx.new(|cx| Settings::new(client, window, cx));
-        self.surfaces.settings.subscription = Some(cx.subscribe_in(
+        let close_subscription = cx.subscribe_in(
             &settings,
             window,
             |this, _, _: &crate::settings::Close, window, cx| this.close_settings(window, cx),
-        ));
+        );
+        let action_subscription = cx.subscribe_in(
+            &settings,
+            window,
+            |this, _, action: &crate::settings::Action, window, cx| match action {
+                crate::settings::Action::Appearance(mode) => this.set_appearance(mode, window, cx),
+                crate::settings::Action::Shortcuts => {
+                    (super::shortcuts::REGISTRATION.open)(this, Command::Shortcuts, window, cx);
+                }
+            },
+        );
+        self.surfaces.settings.subscription = Some((close_subscription, action_subscription));
         self.surfaces.settings.view = Some(settings);
         self.revision += 1;
         cx.notify();

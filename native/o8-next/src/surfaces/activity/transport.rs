@@ -69,6 +69,7 @@ impl Client {
         if value
             .get("error")
             .is_some_and(|v| !v.is_null() && v != false && v != "")
+            && !(matches!(path, "/api/panel/prs" | "/api/panel/issues") && value["stale"] == true)
         {
             return Err(ReadError {
                 message: "Server could not complete this request. Retry to check again.".into(),

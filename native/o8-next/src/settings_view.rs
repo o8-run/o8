@@ -1,9 +1,9 @@
 use super::*;
-use crate::{settings_fields::SECTIONS, theme::current as theme};
-use gpui::{AnyElement, Div, KeyDownEvent, Render, Stateful, canvas, div, prelude::*, px};
+use crate::theme::current as theme;
+use gpui::{AnyElement, Div, KeyDownEvent, Stateful, div, prelude::*, px};
 
 impl Settings {
-    fn button(
+    pub(super) fn button(
         &mut self,
         id: String,
         label: String,
@@ -17,11 +17,12 @@ impl Settings {
             .controls
             .entry(id.clone())
             .or_insert_with(|| cx.focus_handle())
-            .clone();
+            .clone()
+            // Supplied focus handles own Tab policy; the element flag cannot set it.
+            .tab_stop(enabled);
         let focused = focus.is_focused(window);
         let mouse_focus = focus.clone();
-        let action = Rc::new(action);
-        let key_action = action.clone();
+        // GPUI sends Enter/Space release to on_click; key-down actions would repeat it.
         div()
             .id(gpui::SharedString::from(id.clone()))
             .debug_selector(move || id.clone())
@@ -62,28 +63,33 @@ impl Settings {
                     action(this, window, cx);
                 }
             }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if enabled && matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    key_action(this, window, cx);
-                    cx.stop_propagation();
-                }
-            }))
     }
-    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match event.keystroke.key.as_str() {
+            "enter"
+                if !self.busy
+                    && self.editor.is_none()
+                    && self.search.read(cx).focus.is_focused(window) =>
+            {
+                self.open_first_result(window, cx);
+            }
             "escape" if !self.busy => {
                 if self.editor.is_some() || self.confirm.is_some() {
                     self.cancel(window, cx);
+                } else if !self.search.read(cx).text.is_empty() {
+                    self.clear_search(cx);
                 } else {
                     cx.emit(Close);
                 }
             }
             "tab" => {
-                if event.keystroke.modifiers.shift {
-                    window.focus_prev();
-                } else {
-                    window.focus_next();
-                }
+                self.step_settings_focus(event.keystroke.modifiers.shift, window, cx);
+                self.keep_navigation_focus_visible(window);
             }
             "f" if event.keystroke.modifiers.control || event.keystroke.modifiers.platform => {
                 self.search.read(cx).focus.focus(window)
@@ -104,7 +110,7 @@ impl Settings {
         self.changed(cx);
         cx.stop_propagation();
     }
-    fn row(
+    pub(super) fn row(
         &mut self,
         field: &'static Field,
         window: &Window,
@@ -125,19 +131,30 @@ impl Settings {
         let detail = if env {
             "Controlled by the server environment. Change the environment and restart o8 to edit it here."
         } else {
-            field.detail
+            self.snapshot
+                .as_ref()
+                .and_then(|s| field.dependency_reason(&s.values))
+                .unwrap_or(field.detail)
         };
         let mut controls = div().flex().flex_wrap().gap(px(8.));
         match field.kind {
+            Kind::ReadOnly => {
+                controls = controls.child(field.display(&value));
+            }
             // A switch, not a button labelled with its state: a lone "Off"
             // read as text. An Off/On choice is the same control.
-            Kind::Toggle | Kind::Choice(&[("off", "Off"), ("on", "On")]) => {
+            Kind::Toggle | Kind::WordToggle(_) | Kind::Choice(&[("off", "Off"), ("on", "On")]) => {
                 let toggle = matches!(field.kind, Kind::Toggle);
-                let on = if toggle { value == true } else { value == "on" };
+                let word = if let Kind::WordToggle(word) = field.kind {
+                    word
+                } else {
+                    "on"
+                };
+                let on = if toggle { value == true } else { value == word };
                 let next = match (toggle, on) {
                     (true, on) => Value::Bool(!on),
                     (false, true) => Value::from("off"),
-                    (false, false) => Value::from("on"),
+                    (false, false) => Value::from(word),
                 };
                 let track = if on { theme().accent } else { theme().border };
                 controls = controls.child(
@@ -175,6 +192,22 @@ impl Settings {
                     ),
                 );
             }
+            Kind::TierEffort => {
+                controls = controls.child(field.display(&value));
+                for (index, (effort, label)) in crate::settings_fields::EFFORT.iter().enumerate() {
+                    let mut next = value.clone();
+                    next["effort"] = Value::from(*effort);
+                    controls = controls.child(self.button(
+                        format!("setting-{}-effort-{index}", field.id),
+                        (*label).into(),
+                        !locked,
+                        value["effort"] == *effort,
+                        window,
+                        cx,
+                        move |this, _, cx| this.set(field, next.clone(), cx),
+                    ));
+                }
+            }
             Kind::Choice(options) => {
                 for (index, (key, label)) in options.iter().enumerate() {
                     controls = controls.child(self.button(
@@ -207,24 +240,69 @@ impl Settings {
                     ));
             }
         }
+        if field.id == "parallelCap" {
+            for cap in [2, 5, 8] {
+                controls = controls.child(self.button(
+                    format!("setting-parallelCap-preset-{cap}"),
+                    cap.to_string(),
+                    !locked,
+                    value == cap,
+                    window,
+                    cx,
+                    move |this, _, cx| this.set(field, Value::from(cap), cx),
+                ));
+            }
+        }
+        if field.id == "brainCodexModel" {
+            for (index, (model, label)) in crate::settings_fields::BRAIN_MODELS.iter().enumerate() {
+                controls = controls.child(self.button(
+                    format!("setting-brainCodexModel-preset-{index}"),
+                    (*label).into(),
+                    !locked,
+                    value == *model,
+                    window,
+                    cx,
+                    move |this, _, cx| this.set(field, Value::from(*model), cx),
+                ));
+            }
+        }
         div()
+            .id(gpui::SharedString::from(format!(
+                "settings-row-{}",
+                field.id
+            )))
+            .debug_selector(move || format!("settings-row-{}", field.id))
             .flex()
-            .flex_col()
-            .gap(px(8.))
+            .flex_wrap()
+            .items_center()
+            .gap(px(16.))
             .py(px(16.))
             .border_b_1()
             .border_color(theme().border)
-            .child(div().text_size(px(13.5)).child(field.label))
             .child(
                 div()
-                    .text_size(px(11.))
-                    .text_color(theme().text_muted)
-                    .child(detail),
+                    .flex_1()
+                    .min_w(px(200.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(div().text_size(px(13.5)).child(field.label))
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme().text_muted)
+                            .child(detail),
+                    ),
             )
-            .child(controls)
+            .child(controls.max_w(px(350.)).items_center().justify_end())
             .into_any_element()
     }
-    fn key_row(
+    pub(super) fn clear_search(&mut self, cx: &mut Context<Self>) {
+        self.search.update(cx, |s, cx| s.clear(cx));
+        self.scroll.set_offset(gpui::point(px(0.), px(0.)));
+        self.changed(cx);
+    }
+    pub(super) fn key_row(
         &mut self,
         provider: Provider,
         window: &Window,
@@ -360,7 +438,7 @@ impl Settings {
         }
         row.into_any_element()
     }
-    fn editor_view(
+    pub(super) fn editor_view(
         &mut self,
         editor: Editor,
         window: &Window,
@@ -436,256 +514,4 @@ impl Settings {
                     if let Some(editor) = &this.editor { match &editor.input { Input::Text(s) => s.read(cx).focus.focus(window), Input::Secret(s) => s.read(cx).focus.focus(window) } }
                 })).child(input)).into_any_element()
     }
-}
-impl Render for Settings {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.open_file && !self.busy {
-            self.open_file = false;
-            if let Some(toml) = self.snapshot.as_ref().and_then(|s| s.toml.as_ref()) {
-                if toml.error.is_none() {
-                    let text = toml.text.clone();
-                    let revision = toml.revision.clone();
-                    self.begin(Target::File(revision), &text, window, cx);
-                }
-            }
-        }
-        if !self.busy {
-            if let Some(field) = self.open_field.take() {
-                if !self.locked(field) {
-                    if let Some(snapshot) = &self.snapshot {
-                        if let Some(toml) = &snapshot.toml {
-                            let revision = toml.revision.clone();
-                            let value = &snapshot.values[field.id];
-                            let text = match field.kind {
-                                Kind::Number(scale, _) => {
-                                    (value.as_f64().unwrap_or(0.) * scale).to_string()
-                                }
-                                _ => value.as_str().unwrap_or("").into(),
-                            };
-                            self.begin(Target::Field(field, revision), &text, window, cx);
-                        }
-                    }
-                }
-            }
-        }
-        let revision = self.revision;
-        let painted = self.painted.clone();
-        let close = self.button(
-            "settings-close".into(),
-            "Close settings (Esc)".into(),
-            !self.busy,
-            false,
-            window,
-            cx,
-            |_, _, cx| cx.emit(Close),
-        );
-        let refresh = self.button(
-            "settings-refresh".into(),
-            "Refresh".into(),
-            !self.busy,
-            false,
-            window,
-            cx,
-            |this, _, cx| this.load(false, cx),
-        );
-        let file = self.button(
-            "settings-file-open".into(),
-            "Edit settings.toml".into(),
-            !self.busy && self.snapshot.is_some() && self.editor.is_none(),
-            false,
-            window,
-            cx,
-            |this, _, cx| this.load(true, cx),
-        );
-        let additional = match self.snapshot.as_ref().and_then(|s| s.toml.as_ref()) {
-            Some(t) if t.error.is_none() && t.additional_settings_set => {
-                "Additional TOML entries: set"
-            }
-            Some(t) if t.error.is_none() => "Additional TOML entries: not set",
-            _ => "Additional TOML entries: unavailable",
-        };
-        let mut navigation = div()
-            .w(px(200.))
-            .flex_shrink_0()
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .pr(px(16.));
-        for (id, label) in SECTIONS {
-            navigation = navigation.child(self.button(
-                format!("settings-nav-{id}"),
-                (*label).into(),
-                !self.busy && self.editor.is_none(),
-                self.section == *id,
-                window,
-                cx,
-                move |this, _, cx| this.select(id, cx),
-            ));
-        }
-        let query = self.search.read(cx).text.trim().to_lowercase();
-        let mut content = div()
-            .id("settings-content")
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(16.));
-        if let Some(editor) = self.editor.clone() {
-            content = content.child(self.editor_view(editor, window, cx));
-        } else if self.section == "keys" {
-            content = content.child("Provider keys").child(div().text_size(px(11.)).text_color(theme().text_muted).child("Only presence and connection state are shown. Changes apply to new sessions."));
-            if let Some(keys) = &self.keys {
-                let providers = keys.providers.clone();
-                if providers.is_empty() {
-                    content = content.child(empty("No provider keys are available."));
-                }
-                for provider in providers {
-                    content = content.child(self.key_row(provider, window, cx));
-                }
-            }
-        } else {
-            let fields: Vec<_> = FIELDS
-                .iter()
-                .filter(|f| {
-                    if query.len() >= 2 {
-                        f.matches(&query)
-                    } else {
-                        f.section == self.section
-                    }
-                })
-                .collect();
-            content = content.child(if query.len() >= 2 {
-                "Search results"
-            } else {
-                SECTIONS
-                    .iter()
-                    .find(|(id, _)| *id == self.section)
-                    .unwrap()
-                    .1
-            });
-            if fields.is_empty() {
-                content = content.child(empty("No settings match this search."));
-            }
-            for field in fields {
-                content = content.child(self.row(field, window, cx));
-            }
-        }
-        div()
-            .id("settings-page")
-            .debug_selector(|| "settings-page".into())
-            .size_full()
-            .flex()
-            .flex_col()
-            .p(px(24.))
-            .gap(px(16.))
-            .bg(theme().background)
-            .text_color(theme().text)
-            .font_family(theme().font_ui)
-            .font_weight(gpui::FontWeight::LIGHT)
-            .text_size(px(13.5))
-            .track_focus(&self.focus)
-            .tab_stop(false)
-            .capture_key_down(cx.listener(Self::key))
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(8.))
-                    .items_center()
-                    // Status sits beside the title: a line above the list
-                    // pushed every row down mid-click, so a second click on a
-                    // switch landed in the gap.
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .items_baseline()
-                            .gap(px(10.))
-                            .child("Settings")
-                            .when(!self.note.is_empty(), |v| {
-                                v.child(
-                                    div()
-                                        .when(self.busy, |v| {
-                                            v.debug_selector(|| "settings-loading".into())
-                                        })
-                                        .truncate()
-                                        .text_size(px(11.))
-                                        .text_color(theme().text_muted)
-                                        .child(self.note.clone()),
-                                )
-                            }),
-                    )
-                    .child(file)
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(theme().text_muted)
-                            .child(additional),
-                    )
-                    .child(refresh)
-                    .child(close),
-            )
-            .child(
-                div()
-                    .id("settings-search")
-                    .debug_selector(|| "settings-search".into())
-                    .flex()
-                    .flex_col()
-                    .w_full()
-                    .min_w_0()
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(|this, _, window, cx| this.search.read(cx).focus.focus(window)),
-                    )
-                    .child(self.search.clone()),
-            )
-            .when_some(self.error.clone(), |v, error| {
-                v.child(
-                    div()
-                        .debug_selector(|| "settings-error".into())
-                        .text_color(theme().danger)
-                        .child(error),
-                )
-            })
-            .when(self.conflict, |v| {
-                v.child(
-                    div()
-                        .debug_selector(|| "settings-conflict".into())
-                        .child("The file changed in another app. Reload before saving."),
-                )
-            })
-            .child(
-                div().flex().flex_1().min_h_0().child(navigation).child(
-                    div()
-                        .id("settings-scroll")
-                        .debug_selector(|| "settings-scroll".into())
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_y_scroll()
-                        .track_scroll(&self.scroll)
-                        .child(content),
-                ),
-            )
-            .when(
-                !self.busy
-                    && if self.section == "keys" {
-                        self.keys.is_some()
-                    } else {
-                        self.snapshot.is_some()
-                    },
-                |v| v.child(div().debug_selector(|| "settings-loaded".into()).h(px(1.))),
-            )
-            .child(
-                canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision))
-                    .h(px(1.))
-                    .w_full(),
-            )
-    }
-}
-fn empty(label: &'static str) -> Div {
-    div()
-        .debug_selector(|| "settings-empty".into())
-        .text_color(theme().text_muted)
-        .child(label)
 }

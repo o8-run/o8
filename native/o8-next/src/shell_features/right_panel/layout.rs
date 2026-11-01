@@ -508,11 +508,8 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
         Tool::Prs => contextual::pr(s, cx),
         tool if !tool.ready() => placeholder(tool).into_any_element(),
         // The side chat opens once its new conversation is listed.
-        Tool::SideChat => s
-            .content
-            .get(&super::key(s, tool))
-            .map(Content::element)
-            .unwrap_or_else(|| div().child("Starting chat…").into_any_element()),
+        Tool::SideChat => side::element(s, cx),
+        Tool::Resources => resources::element(s, cx),
         tool => s
             .content
             .get(&super::key(s, tool))
@@ -532,10 +529,14 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
 }
 pub(super) fn body(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
     let p = s.features.read::<Panel>().unwrap();
-    // Each pane fades out at the split and the panel's bottom edge; the
-    // upper pane's top is its tab strip, which stays crisp.
-    let faded = |body: AnyElement, top: bool| {
-        let color = theme().background;
+    // Each pane fades out at the split and the panel's bottom edge; each
+    // pane's top is its tab strip or header, which stays crisp.
+    // o8.md fades inside its own card instead.
+    let faded = |body: AnyElement, tool: Tool| {
+        if tool == Tool::Spec {
+            return body;
+        }
+        let color = crate::theme::current().background;
         div()
             .relative()
             .size_full()
@@ -543,11 +544,10 @@ pub(super) fn body(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
             .flex_col()
             .min_h_0()
             .child(body)
-            .when(top, |v| v.child(crate::theme::edge_fade(false, 16., color)))
             .child(crate::theme::edge_fade(true, 24., color))
             .into_any_element()
     };
-    let upper = faded(pane(s, p.selected, cx), false);
+    let upper = faded(pane(s, p.selected, cx), p.selected);
     let Some(lower) = p.lower else { return upper };
     let bounds = p.split_bounds.clone();
     let ratio = s.state.right_panel.ratio;
@@ -570,7 +570,7 @@ pub(super) fn body(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
         .flex_col()
         .child(share(upper, ratio))
         .child(chrome::divider(s, lower, cx))
-        .child(share(faded(pane(s, lower, cx), true), 100. - ratio))
+        .child(share(faded(pane(s, lower, cx), lower), 100. - ratio))
         .child(
             canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
                 .absolute()

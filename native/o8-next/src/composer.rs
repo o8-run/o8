@@ -101,6 +101,16 @@ impl Composer {
         self.typing = None;
         self.changed(cx);
     }
+    /// How far a long draft has grown the chat input past its 52px floor.
+    /// The card spends it upward over the transcript, as classic's floating
+    /// composer did, so the transcript keeps its size while you type.
+    pub(crate) fn rise(&self, window: &Window) -> f32 {
+        if self.framed || self.inline {
+            return 0.;
+        }
+        // The unframed input pads 11px above and 4px below its text.
+        (f32::from(self.height) + 15.).clamp(52., card_max(window)) - 52.
+    }
     pub fn composing(&self) -> bool {
         self.marked.is_some()
     }
@@ -589,11 +599,7 @@ impl Render for Composer {
         }
         let input = cx.entity();
         let height = self.height;
-        // Classic's ComposerArea: max(52px, min(200px, 28vh)). A long draft
-        // grows the card, then scrolls; 52 is the floor, not the ceiling.
-        let card_max = (f32::from(window.viewport_size().height) * 0.28)
-            .min(200.)
-            .max(52.);
+        let card_max = card_max(window);
         div()
             .id("composer-input")
             .debug_selector(|| "composer-input".into())
@@ -863,3 +869,11 @@ mod tests;
 #[cfg(test)]
 #[path = "composer/native_tests.rs"]
 mod native_tests;
+
+/// Classic's ComposerArea: max(52px, min(200px, 28vh)). A long draft grows the
+/// input to this, then scrolls; 52 is the floor, not the ceiling.
+fn card_max(window: &Window) -> f32 {
+    (f32::from(window.viewport_size().height) * 0.28)
+        .min(200.)
+        .max(52.)
+}

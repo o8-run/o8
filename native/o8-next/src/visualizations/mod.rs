@@ -1,9 +1,11 @@
 //! Inline transcript documents. The host never exposes application requests to HTML.
+#[cfg(test)]
+mod load_tests;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod protocol;
 pub mod transcript;
-use crate::client::Client;
+use crate::client::{Client, LOAD_REQUEST_TIMEOUT};
 use protocol::{Message, Reference, UNAVAILABLE, valid_state};
 use serde_json::{Value, json};
 use std::{
@@ -27,6 +29,7 @@ pub struct Card {
     pub bounds: Option<gpui::Bounds<gpui::Pixels>>,
     client: Client,
     loading: Option<mpsc::Receiver<Result<String, String>>>,
+    // The document read and the native host each get their own load deadline.
     started: Option<Instant>,
     source: Option<String>,
     state: Value,
@@ -127,7 +130,11 @@ impl Card {
         }
     }
     pub fn start(&mut self) {
-        if self.error.is_some() || self.started.is_some() {
+        if self.error.is_some()
+            || self.loading.is_some()
+            || self.source.is_some()
+            || self.started.is_some()
+        {
             return;
         }
         let client = self.client.clone();
@@ -135,7 +142,6 @@ impl Card {
         let nonce = self.nonce.clone();
         let (send, receive) = mpsc::channel();
         self.loading = Some(receive);
-        self.started = Some(Instant::now());
         std::thread::spawn(move || {
             let result = document(&client, &reference, &nonce);
             let _ = send.send(result);
@@ -155,10 +161,7 @@ impl Card {
         if let Some(result) = self.loading.as_ref().and_then(|r| r.try_recv().ok()) {
             self.loading = None;
             match result {
-                Ok(source) => {
-                    self.source = Some(source);
-                    self.started = Some(Instant::now());
-                }
+                Ok(source) => self.source = Some(source),
                 Err(error) => self.error = Some(error),
             }
             changed = true;
@@ -232,6 +235,8 @@ impl Card {
                     self.error = Some(UNAVAILABLE.into());
                     self.dirty = true;
                     self.client.wake();
+                } else {
+                    self.started = Some(Instant::now());
                 }
             }
             if let Some(host) = &self.host {
@@ -262,7 +267,11 @@ fn document(client: &Client, reference: &Reference, nonce: &str) -> Result<Strin
         .url(&format!("/api/visualizations/{}", reference.id))
         .map_err(|_| UNAVAILABLE)?;
     url.query_pairs_mut().append_pair("nativeNonce", nonce);
-    let response = match client.request("GET", &url).call() {
+    let response = match client
+        .request("GET", &url)
+        .timeout(LOAD_REQUEST_TIMEOUT)
+        .call()
+    {
         Ok(response) => response,
         Err(ureq::Error::Status(_, response)) => {
             let body: Value = Client::read(response).unwrap_or(Value::Null);

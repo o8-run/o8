@@ -117,8 +117,11 @@ impl Surface {
                 div()
                     .flex()
                     .items_center()
-                    .child(self.lead_chip(&routing, enabled, cx))
-                    .children(self.thinking_chip(&routing, enabled, cx)),
+                    .child(self.track_prompt_anchor(self.lead_chip(&routing, enabled, cx), "model"))
+                    .children(
+                        self.thinking_chip(&routing, enabled, cx)
+                            .map(|chip| self.track_prompt_anchor(chip, "effort")),
+                    ),
             )
             // The round primary button sits over this slot from the card, so
             // the emptiness flip never re-renders the footer region.
@@ -374,7 +377,7 @@ impl Surface {
             )))
     }
 
-    pub(super) fn composer_routing(&self, cx: &App) -> Option<Value> {
+    pub(in crate::ui) fn composer_routing(&self, cx: &App) -> Option<Value> {
         let mut routing = self.routing.clone()?;
         for (key, value) in self.composer.read(cx).controls.overrides.as_object()? {
             routing[key] = value.clone();

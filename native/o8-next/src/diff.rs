@@ -10,6 +10,10 @@ use tree_sitter::{Language, Node, Parser};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Target {
     Packet(String),
+    Commit {
+        path: String,
+        hash: String,
+    },
     Worktree {
         path: String,
         base: Option<String>,
@@ -66,6 +70,38 @@ pub struct Document {
 impl Target {
     pub fn read(&self, client: &Client) -> Result<(Document, Value), String> {
         let response: Response = match self {
+            Self::Commit { path, hash } => {
+                if !(7..=40).contains(&hash.len()) || !hash.bytes().all(|c| c.is_ascii_hexdigit()) {
+                    return Err("Invalid commit revision".into());
+                }
+                let value: Value = client.get(
+                    &format!("/api/panel/commits/{hash}"),
+                    &[("workspace", path)],
+                )?;
+                if value["error"].is_string() {
+                    return Err(value["error"]
+                        .as_str()
+                        .unwrap_or("Commit unavailable")
+                        .into());
+                }
+                let commit = &value["commit"];
+                let diff = commit["diff"]
+                    .as_str()
+                    .ok_or("Commit diff unavailable")?
+                    .to_owned();
+                let head = commit["hash"]
+                    .as_str()
+                    .ok_or("Commit identity unavailable")?;
+                if !head.to_lowercase().starts_with(&hash.to_lowercase()) {
+                    return Err("Commit response belongs to another revision".into());
+                }
+                Response {
+                    truncated: diff.ends_with("... (truncated at 50KB)"),
+                    diff,
+                    head_sha: head.into(),
+                    ..Default::default()
+                }
+            }
             Self::Packet(packet) => {
                 // Packet ids occupy exactly one path segment.
                 let id: String = url::form_urlencoded::byte_serialize(packet.as_bytes()).collect();
