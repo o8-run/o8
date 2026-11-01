@@ -58,6 +58,8 @@ Mailbox: `<dataDir>/bots/<house>/<agentId>/thread.jsonl`, appended one JSON obje
 
 - Writers append complete JSON objects followed by a newline. Only newline-terminated records are visible;
   an unfinished final record becomes visible on a later read after its newline arrives. Malformed and unknown records are skipped.
+- Display text is capped at 20,000 UTF-16 units and bot names at 80. A cutoff through a surrogate
+  pair drops the whole pair, preserving valid Unicode for the native JSON decoder. Source message ids are unchanged.
 - Each request asynchronously reads at most the last **1 MiB** from one opened descriptor, bounded to
   its initially observed size. For a cropped file the budget includes one preceding byte of boundary
   context, leaving up to 1 MiB minus 1 byte of payload. A record crossing the payload boundary is
