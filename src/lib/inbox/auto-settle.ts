@@ -3,14 +3,16 @@
  * web app, mobile and the native sidebar all read the same settlement; a
  * listing shows `autoSettledReason` while that automatic settle is current,
  * and the ordinary `unsettle` action undoes it (and keeps it un-settled).
- * Toggle: operator default `autoSettleEnabled` ([inbox] auto_settle).
+ * Toggle: operator default `autoSettleEnabled` ([inbox] auto_settle); idle
+ * settle after `autoSettleIdleDays` ([inbox] auto_settle_idle_days, 0 = off).
  */
 import { getSqlite } from '@/lib/db';
 import { listLanes } from '@/lib/lane/registry';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import type { AgentSummary } from '@/lib/fleet/types';
-import { conversationVerdict, laneVerdict, type AutoSettleLane, type AutoSettlePacket, type AutoSettlePr, type AutoSettleVerdict } from './auto-settle-rules';
+import { listMobileOrchestratorThreads } from '@/lib/mobile/orchestrator-thread-history';
+import { conversationVerdict, idleVerdict, laneVerdict, type AutoSettleLane, type AutoSettlePacket, type AutoSettlePr, type AutoSettleVerdict } from './auto-settle-rules';
 import { legacyInboxPin } from './preferences';
 import { autoSettleEligible, inboxSubject, mutateInboxAutoSettle, readInboxState } from './store';
 import { assertInboxCanSettle, inboxPackets, runtimeInboxIdentity } from './subjects';
@@ -30,7 +32,7 @@ function linkedPrs(): Map<string, AutoSettlePr[]> {
   return byThread;
 }
 
-export function collectAutoSettleCandidates(): Candidate[] {
+export function collectAutoSettleCandidates(idleDays = 0, now = Date.now()): Candidate[] {
   const packets = inboxPackets();
   const lanes = listLanes();
   const prs = linkedPrs();
@@ -46,8 +48,12 @@ export function collectAutoSettleCandidates(): Candidate[] {
   const laneRows: AutoSettleLane[] = lanes.map(lane => ({ packetId: lane.packetId ?? null, sessionKey: lane.sessionKey ?? null,
     status: lane.status, updatedAt: lane.updatedAt, repoPath: lane.repoPath, projectId: lane.projectId ?? null }));
   const out: Candidate[] = [];
+  const activity = idleDays > 0
+    ? new Map(listMobileOrchestratorThreads({ limit: 100_000 }).map(t => [t.id, t.lastMessageAt] as const))
+    : new Map<string, string>();
   for (const threadId of new Set([...prs.keys(), ...owned.keys()])) {
-    const verdict = conversationVerdict(prs.get(threadId) ?? [], owned.get(threadId) ?? [], laneRows);
+    const verdict = conversationVerdict(prs.get(threadId) ?? [], owned.get(threadId) ?? [], laneRows)
+      ?? idleVerdict(activity.get(threadId), idleDays, now);
     if (!verdict) continue;
     const record = readPersistedLlmChat(threadId)?.history as { repoPath?: string; projectId?: string; pinned?: boolean; archivedAt?: string | null } | undefined;
     if (!record || record.archivedAt) continue;
@@ -61,15 +67,17 @@ export function collectAutoSettleCandidates(): Candidate[] {
   for (const [sessionKey, lane] of newest) {
     const identity = runtimeInboxIdentity({ sessionKey, workspace: lane.repoPath }, packets, lanes);
     if (identity.parentInboxSubject) continue;
-    const verdict = laneVerdict(lane, lane.packetId ? byId.get(lane.packetId) : undefined);
+    const verdict = laneVerdict(lane, lane.packetId ? byId.get(lane.packetId) : undefined)
+      ?? idleVerdict(lane.updatedAt, idleDays, now);
     if (verdict) out.push({ subject: identity.inboxSubject, verdict, legacyPinned: false });
   }
   return out;
 }
 
-export async function runInboxAutoSettleSweep(options: { force?: boolean; agents?: AgentSummary[] } = {}): Promise<string[]> {
-  if (!options.force && !getOperatorDefaultsSync().values.autoSettleEnabled) return [];
-  const candidates = collectAutoSettleCandidates()
+export async function runInboxAutoSettleSweep(options: { force?: boolean; agents?: AgentSummary[]; idleDays?: number; now?: number } = {}): Promise<string[]> {
+  const defaults = getOperatorDefaultsSync().values;
+  if (!options.force && !defaults.autoSettleEnabled) return [];
+  const candidates = collectAutoSettleCandidates(options.idleDays ?? defaults.autoSettleIdleDays ?? 0, options.now)
     .filter(c => autoSettleEligible(readInboxState(c.subject), c.verdict.evidenceAt, c.legacyPinned));
   if (!candidates.length) return [];
   let agents = options.agents;

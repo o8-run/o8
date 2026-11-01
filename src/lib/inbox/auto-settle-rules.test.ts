@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { conversationVerdict, laneVerdict, packetsVerdict, prVerdict, type AutoSettleLane, type AutoSettlePacket } from './auto-settle-rules';
+import { conversationVerdict, idleVerdict, laneVerdict, packetsVerdict, prVerdict, type AutoSettleLane, type AutoSettlePacket } from './auto-settle-rules';
 import { autoSettleEligible } from './store';
 
 const lane = (packetId: string, status: string, updatedAt = '2026-10-30T10:00:00.000Z'): AutoSettleLane =>
@@ -47,5 +47,15 @@ describe('auto-settle rules', () => {
     expect(autoSettleEligible({ ...base, runAt: '2026-10-30T11:00:00.000Z' }, at)).toBe(false);
     expect(autoSettleEligible({ ...base, unsettledAt: '2026-10-30T11:00:00.000Z' }, at)).toBe(false);
     expect(autoSettleEligible({ ...base }, 'not a date')).toBe(false);
+  });
+});
+
+describe('idleVerdict', () => {
+  const now = Date.parse('2026-10-31T12:00:00Z');
+  it('settles after N whole days of no activity, and 0 is off', () => {
+    expect(idleVerdict('2026-10-28T11:00:00Z', 3, now)).toEqual({ reason: 'idle', evidenceAt: '2026-10-28T11:00:00.000Z' });
+    expect(idleVerdict('2026-10-29T12:00:00Z', 3, now)).toBeNull();
+    expect(idleVerdict('2026-01-01T00:00:00Z', 0, now)).toBeNull();
+    expect(idleVerdict(null, 3, now)).toBeNull();
   });
 });

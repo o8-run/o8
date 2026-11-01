@@ -10,9 +10,12 @@
  *               merged-by-ancestry all mint the same release receipt).
  *  - cleaned:   the rest of its worker lanes were archived by auto-clean (the
  *               worktree reaper) or by hand, so nothing is left to look at.
- * A thread with no linked PR and no worker is never settled automatically.
+ *  - idle:      after `[inbox] auto_settle_idle_days` (default 3, 0 = off) with no
+ *               activity, as T3's idle settle; open PRs or workers do not block it.
+ * A thread with no linked PR and no worker is never settled automatically, not
+ * even when idle: it may hold unfinished work (Q, 2026-10-31).
  */
-export type AutoSettleReason = 'pr-merged' | 'released' | 'cleaned';
+export type AutoSettleReason = 'pr-merged' | 'released' | 'cleaned' | 'idle';
 
 export interface AutoSettlePr { threadId: string; mergedAt: string | null }
 export interface AutoSettlePacket {
@@ -62,6 +65,14 @@ export function conversationVerdict(prs: AutoSettlePr[], packets: AutoSettlePack
   return pr ?? (prs.length ? null : packetsVerdict(packets, lanes));
 }
 
+const DAY_MS = 86_400_000;
+/** Idle settle for a thread that has a PR or worker: last activity `days` or more ago. */
+export function idleVerdict(lastActivityAt: string | null | undefined, days: number, now = Date.now()): AutoSettleVerdict | null {
+  if (!(days > 0) || !lastActivityAt) return null;
+  const at = Date.parse(lastActivityAt);
+  return Number.isFinite(at) && now - at >= days * DAY_MS ? { reason: 'idle', evidenceAt: new Date(at).toISOString() } : null;
+}
+
 export const AUTO_SETTLE_NOTES: Record<AutoSettleReason, string> = {
-  'pr-merged': 'PR merged', released: 'Merged', cleaned: 'Worktree cleaned up',
+  'pr-merged': 'PR merged', released: 'Merged', cleaned: 'Worktree cleaned up', idle: 'Idle',
 };

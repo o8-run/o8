@@ -16,13 +16,13 @@ const prefix = `thoughts-autosettle-${process.pid}`;
 const patch = (body: Record<string, unknown>) => PATCH(new NextRequest('http://localhost/api/v2/chat-history', {
   method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
 }));
-async function seed(suffix: string, pinned = false) {
+async function seed(suffix: string, pinned = false, at = 100) {
   const tabId = `${prefix}-${suffix}`;
   ids.push(tabId);
   expect((await POST(new NextRequest('http://localhost/api/v2/chat-history', {
     method: 'POST', body: JSON.stringify({ tabId, pinned, repoPath: process.cwd(), messages: [
-      { id: 'u', role: 'user', content: 'Ship it', timestamp: 100 },
-      { id: 'a', role: 'assistant', content: 'Done', timestamp: 101 },
+      { id: 'u', role: 'user', content: 'Ship it', timestamp: at },
+      { id: 'a', role: 'assistant', content: 'Done', timestamp: at + 1 },
     ] }),
   }))).status).toBe(200);
   return tabId;
@@ -59,7 +59,7 @@ describe('server auto-settle sweep', () => {
     expect((await patch({ tabId: optedOut, inboxAction: 'auto-settle', inboxRevision: 0, enabled: false })).status).toBe(200);
     fixture.agents = [{ sessionKey: kids[4].lane.sessionKey, workspace: process.cwd(), runtime: 'codex', status: 'waiting', approvalStatus: 'pending' }];
 
-    const settled = await runInboxAutoSettleSweep({ force: true });
+    const settled = await runInboxAutoSettleSweep({ force: true, idleDays: 0 });
     expect(settled.sort()).toEqual([cleaned, merged].sort());
     expect(await row(merged)).toMatchObject({ settledOverride: 'settled', autoSettledReason: 'released' });
     expect(await row(cleaned)).toMatchObject({ settledOverride: 'settled', autoSettledReason: 'cleaned' });
@@ -68,7 +68,7 @@ describe('server auto-settle sweep', () => {
     // Undo is the ordinary unsettle; the next sweep leaves it alone.
     const undone = await (await patch({ tabId: merged, inboxAction: 'unsettle' })).json();
     expect(undone).toMatchObject({ settledOverride: 'active', autoSettledReason: null });
-    expect(await runInboxAutoSettleSweep({ force: true })).toEqual([]);
+    expect(await runInboxAutoSettleSweep({ force: true, idleDays: 0 })).toEqual([]);
     expect(await row(merged)).not.toHaveProperty('autoSettledReason');
 
     // A manual settle carries no automatic note.
@@ -78,7 +78,7 @@ describe('server auto-settle sweep', () => {
 
     // Needs input resolved: the waiting thread settles next sweep.
     fixture.agents = [];
-    expect(await runInboxAutoSettleSweep({ force: true })).toEqual([waiting]);
+    expect(await runInboxAutoSettleSweep({ force: true, idleDays: 0 })).toEqual([waiting]);
   }, 120_000);
 
   it('is off when the operator default is off', async () => {
@@ -94,5 +94,23 @@ describe('server auto-settle sweep', () => {
     // Test one's orphaned archived lane is now a standalone worker and settles too.
     expect(await runInboxAutoSettleSweep()).toContain(tabId);
     expect(await row(tabId)).toMatchObject({ autoSettledReason: 'released' });
+  }, 60_000);
+
+  it('settles idle threads with a PR or worker after N days, never bare or pinned ones', async () => {
+    const idle = await seed('idle', false, Date.now());
+    const bare = await seed('bare', false, Date.now());
+    const pinnedIdle = await seed('idlepin', true, Date.now());
+    const kids = [child(idle, 'i', false), child(pinnedIdle, 'ip', false)];
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'auto-settle-idle', repoPath: process.cwd(), packets: kids.map(k => k.packet) });
+    fixture.agents = [];
+    // Not idle long enough yet; and 0 days is off.
+    expect(await runInboxAutoSettleSweep({ force: true, idleDays: 3, now: Date.now() + 86_400_000 })).not.toContain(idle);
+    expect(await runInboxAutoSettleSweep({ force: true, idleDays: 0, now: Date.now() + 9 * 86_400_000 })).not.toContain(idle);
+    const settled = await runInboxAutoSettleSweep({ force: true, idleDays: 3, now: Date.now() + 4 * 86_400_000 });
+    expect(settled).toContain(idle);
+    expect(settled).not.toContain(bare);
+    expect(settled).not.toContain(pinnedIdle);
+    expect(await row(idle)).toMatchObject({ settledOverride: 'settled', autoSettledReason: 'idle' });
+    expect(await row(bare)).not.toHaveProperty('settledOverride');
   }, 60_000);
 });
