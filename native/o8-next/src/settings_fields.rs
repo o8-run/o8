@@ -1,5 +1,34 @@
 //! Desktop row vocabulary and existing operator-defaults field names.
 use serde_json::Value;
+use std::{
+    collections::HashMap,
+    sync::{LazyLock, Mutex},
+};
+
+// Several windows can share a backend; independent backends keep separate
+// invalidations (including the production-path fixture hosts in native tests).
+static BOT_RAIL_REVISIONS: LazyLock<Mutex<HashMap<String, u64>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+fn backend_key(client: &crate::client::Client) -> String {
+    client
+        .url("/")
+        .map(|url| url.to_string())
+        .unwrap_or_default()
+}
+pub(crate) fn bot_rail_revision(client: &crate::client::Client) -> u64 {
+    *BOT_RAIL_REVISIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&backend_key(client))
+        .unwrap_or(&0)
+}
+pub(crate) fn bot_rail_changed(client: &crate::client::Client) {
+    *BOT_RAIL_REVISIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(backend_key(client))
+        .or_default() += 1;
+}
 
 #[derive(Clone, Copy)]
 pub enum Kind {
@@ -7,6 +36,7 @@ pub enum Kind {
     Choice(&'static [(&'static str, &'static str)]),
     Number(f64, &'static str),
     Text,
+    Bots,
 }
 pub struct Field {
     pub id: &'static str,
@@ -44,6 +74,7 @@ impl Field {
                 .map(|(_, label)| *label)
                 .unwrap_or("Unavailable")
                 .into(),
+            Kind::Bots => format!("{} selected", value.as_array().map_or(0, Vec::len)),
             Kind::Text => value.as_str().unwrap_or("Unavailable").into(),
         }
     }
@@ -87,6 +118,7 @@ const EFFORT: &[(&str, &str)] = &[
 ];
 pub const SECTIONS: &[(&str, &str)] = &[
     ("general", "General"),
+    ("bots", "Bots"),
     ("dispatch", "Dispatch"),
     ("models", "Models & providers"),
     ("git", "Git & PRs"),
@@ -94,6 +126,13 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("keys", "API keys"),
 ];
 pub const FIELDS: &[Field] = &[
+    field(
+        "botRailEnabledIds",
+        "Bots in the rail",
+        "bots",
+        "Choose which discovered local bots appear below PRs.",
+        Kind::Bots,
+    ),
     field(
         "autoTitleInferenceEnabled",
         "Model-generated titles",

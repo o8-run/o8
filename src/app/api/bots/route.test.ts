@@ -38,10 +38,17 @@ afterEach(() => {
 
 const req = (path: string) => new NextRequest(`http://127.0.0.1:3000${path}`);
 
-it('GET /api/bots lists the grok bot', async () => {
+it('GET /api/bots lists the grok bot after Settings setup', async () => {
+  mkdirSync(dirs.data, { recursive: true });
+  writeFileSync(join(dirs.data, 'settings.toml'), `[bots]\nrail_enabled = ["grok:${AGENT}"]\n`);
   const body = await (await GET(req('/api/bots'))).json();
   expect(body.bots).toHaveLength(1);
   expect(body.bots[0]).toMatchObject({ id: `grok:${AGENT}`, house: 'grok', name: 'cash' });
+});
+
+it('a discovered bot is absent from the rail until explicitly set up in Settings', async () => {
+  const body = await (await GET(req('/api/bots'))).json();
+  expect(body.bots).toEqual([]);
 });
 
 it('GET /api/bots honours panel auth', async () => {

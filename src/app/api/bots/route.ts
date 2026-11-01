@@ -3,14 +3,16 @@ export const runtime = 'nodejs';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { listRosterBots } from '@/lib/bots/roster';
+import { getOperatorDefaults } from '@/lib/operator/defaults';
+import { listConfiguredRosterBots } from '@/lib/bots/roster';
 
-/** Always-on bots from every house, in rail order. */
+/** Only Settings-selected bots, with durable membership and adapter deduplication. */
 export async function GET(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
   try {
-    return NextResponse.json({ bots: listRosterBots() });
+    const { values } = await getOperatorDefaults();
+    return NextResponse.json({ bots: listConfiguredRosterBots(values.botRailEnabledIds) });
   } catch {
     return NextResponse.json({ error: 'Bot roster is temporarily unavailable.' }, { status: 503 });
   }
