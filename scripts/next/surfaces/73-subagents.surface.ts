@@ -1,5 +1,6 @@
 /** Disposable persisted mission and history, through the production read routes. */
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 import type { OrchestratorPacket } from '../../../src/lib/orchestrator/types';
@@ -18,7 +19,7 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
   const { createLane, setLaneStatus } = await import('../../../src/lib/lane/registry');
   const { markPacketReleased } = await import('../../../src/lib/orchestrator/packet-release-truth');
   const { persistComposerImages } = await import('../../../src/lib/mobile/orchestrator-image-media');
-  const image = persistComposerImages([{ dataUri: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8/x8AAwMCAO+jD1sAAAAASUVORK5CYII=', name: 'Agent capture.png' }]);
+  const image = persistComposerImages([{ dataUri: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAAAwCAIAAAAJh2qgAAAAVklEQVR4nO3PAQ3AIADAMEAOnlCOmbv4k71VsM197viT9XXA2wzXGa4zXGe4znCd4TrDdYbrDNcZrjNcZ7jOcJ3hOsN1husM1xmuM1xnuM5wneE6w3UPI0QBwum7oOkAAAAASUVORK5CYII=', name: 'Agent capture.png' }]);
   const parent = 'thoughts-review';
   const started = Date.now() - 30_000;
   const tasks = [
@@ -60,6 +61,10 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
     if (status === 'released') markPacketReleased(packets.find(p => p.id === `subagent-${id}`)!, { source: 'read_only_completed' });
   }
   if (process.argv.includes('--subagents-shared')) {
+    // Shared ownership records bind to a real checkout HEAD, including in this
+    // disposable empty repository. No worker is launched by this fixture.
+    execFileSync('git', ['-c', 'user.name=o8 fixture', '-c', 'user.email=fixture@example.invalid',
+      'commit', '--allow-empty', '-m', 'Fixture baseline'], { cwd: repo, stdio: 'ignore' });
     const { reserveSharedCheckoutMember, recordSharedCheckoutMember } = await import('../../../src/lib/orchestrator/shared-checkout-team');
     const member = { repoPath: repo, parentThreadId: parent, runtime: 'opencode', taskName: 'Shared verification',
       clientMutationId: 'subagent-shared-fixture', paths: ['shared-verification.txt'] };
