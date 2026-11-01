@@ -7,6 +7,11 @@ use std::{
     collections::{HashMap, HashSet},
     time::{Duration, Instant},
 };
+#[path = "inbox_exchanges.rs"]
+mod exchanges;
+#[path = "inbox_exchange_view.rs"]
+mod exchange_view;
+pub(crate) use exchanges::{AgentExchange, ExchangeChanged, ExchangeSelection};
 
 pub const VIEWS: [(&str, &str); 5] = [
     ("replies", "Needs reply"),
@@ -239,6 +244,7 @@ impl EventEmitter<ReplyContext> for Inbox {}
 pub struct OpenSession(pub String);
 impl EventEmitter<OpenSession> for Inbox {}
 pub struct Inbox {
+    exchanges: exchanges::State,
     client: Client,
     workspace: String,
     pub(crate) focus: FocusHandle,
@@ -265,6 +271,7 @@ impl Inbox {
     pub fn new(client: Client, workspace: String, cx: &mut Context<Self>) -> Self {
         let all = workspace.is_empty();
         let mut inbox = Self {
+            exchanges: Default::default(),
             client,
             workspace,
             focus: cx.focus_handle(),
@@ -297,6 +304,7 @@ impl Inbox {
         if self.last_refresh.elapsed() >= Duration::from_secs(300) {
             self.load(cx);
         }
+        self.refresh_exchanges(cx);
     }
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
         if self.loading {
@@ -323,10 +331,14 @@ impl Inbox {
                     "/api/panel/approvals",
                     &[("status", "pending"), ("scope", "all")],
                 ),
+                client.agent_exchanges((!all).then_some(workspace.as_str()), false).and_then(|mut rows| {
+                    rows.extend(client.agent_exchanges((!all).then_some(workspace.as_str()), true)?);
+                    Ok(rows)
+                }),
             )
         });
         cx.spawn(async move |this, cx| {
-            let (inbox, approvals) = task.await;
+            let (inbox, approvals, exchanges) = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading = false;
                 if revision != this.revision { this.load(cx); return; }
@@ -345,6 +357,10 @@ impl Inbox {
                     Err(error) => this.errors[2] = Some(format!("Approvals could not be refreshed. Previous approvals are still shown. {error}")),
                 }
                 this.loaded = true;
+                match exchanges {
+                    Ok(rows) => this.exchange_rows(rows, cx),
+                    Err(error) => this.exchanges.error = Some(error),
+                }
                 this.rebuild(cx);
                 cx.notify();
             });
@@ -511,6 +527,7 @@ impl Inbox {
         self.revision += 1;
         self.items.clear();
         self.feed = Feed::default();
+        self.exchanges.rows.clear();
         self.rebuild(cx);
         self.loaded = false;
         self.load(cx);

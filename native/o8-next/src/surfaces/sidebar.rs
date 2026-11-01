@@ -386,6 +386,13 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     super::palette::open_workspaces(shell, window, cx);
                 }
                 ThreadEvent::Selected(id) => shell.open_thread(id.clone(), window, cx),
+                ThreadEvent::Exchange(target) => {
+                    shell.execute(Command::Inbox, window, cx);
+                    if let Some(view) = shell.panel_front_key().and_then(|key| match shell.content.get(&key) {
+                        Some(Content::Inbox(view)) => Some(view.clone()),
+                        _ => None,
+                    }) { view.update(cx, |inbox, cx| inbox.select_exchange(target.clone(), cx)); }
+                }
                 ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),
                 ThreadEvent::Scope(project, keys) => {
                     if keys.is_empty() {

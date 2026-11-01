@@ -5,6 +5,28 @@ import { NextRequest } from 'next/server';
 import type { ApprovalRecord } from '../../src/lib/approvals/types';
 import type { SupervisorInboxItem } from '../../src/lib/supervisor/inbox';
 import type { MaintainerFeed, MaintainerContribution } from '../../src/lib/inbox/maintainer-types';
+import type { AgentConversation } from '../../src/lib/agents/store';
+
+/** Seed the existing durable bus directly, without discovery, delivery or provider turns. */
+async function seedAgentExchangeFixtures(repo: string) {
+  const { persistAgentMessage } = await import('../../src/lib/agents/store');
+  const { getSqlite } = await import('../../src/lib/db');
+  const refs = { laneId: null, packetId: null, identities: {
+    from: { runtime: 'poll', sessionKey: 'poll:inbox-aster' },
+    to: { runtime: 'poll', sessionKey: 'poll:inbox-birch' },
+  } };
+  const first = persistAgentMessage({ repo, from: 'Aster', to: 'Birch', text: 'Exchange one opening.', refs }).message;
+  persistAgentMessage({ repo, from: 'Birch', to: 'Aster', text: 'Exchange one peer response.',
+    replyToId: first.id, refs: { ...refs, identities: { from: refs.identities.to, to: refs.identities.from } } });
+  const second = persistAgentMessage({ repo, from: 'Aster', to: 'Birch', text: 'Separate exchange, same peers.', refs }).message;
+  const terminal = persistAgentMessage({ repo, from: 'Aster', to: 'Birch', text: 'Check the finished exchange.', refs }).message;
+  persistAgentMessage({ repo, from: 'Birch', to: 'Aster', text: 'Final exchange response.',
+    replyToId: terminal.id, close: true, refs: { ...refs, identities: { from: refs.identities.to, to: refs.identities.from } } });
+  persistAgentMessage({ repo: `${repo}/exchange-secondary`, from: 'Aster', to: 'Birch', text: 'Exchange in another repository.', refs });
+  const summary = getSqlite().prepare('UPDATE agent_conversations SET summary = ? WHERE id = ?');
+  summary.run('Keep the exchange summary.', first.conversation!.id);
+  summary.run('Separate same-peer exchange.', second.conversation!.id);
+}
 
 export async function seedInboxFixture(repo: string, dataDir: string) {
   execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://github.com/example/inbox-fixture.git']);
@@ -55,14 +77,25 @@ export async function seedInboxFixture(repo: string, dataDir: string) {
   getSqlite().prepare("UPDATE approvals SET status = 'approved', resolution_json = ? WHERE id = ?")
     .run(JSON.stringify({ action: 'approved', actor: 'desktop', continuationStatus: 'outcome_unknown' }), uncertain.id);
   writeFileSync(`${dataDir}/worker-token`, 'fixture-inbox-worker-credential', { mode: 0o600 });
+  await seedAgentExchangeFixtures(repo);
   return approvals;
 }
 
 /** Oracle uses desktop routes and its reply queue, independently of the Rust model. */
-export async function writeInboxOracle(file: string) {
+export async function writeInboxOracle(file: string, repo: string, token: string) {
   const { GET: inbox } = await import('../../src/app/api/panel/supervisor-inbox/route');
   const { GET: approvals } = await import('../../src/app/api/panel/approvals/route');
   const { maintainerReplyQueue } = await import('../../src/lib/inbox/maintainer-replies');
+  const { GET: conversations } = await import('../../src/app/api/agents/conversation/route');
+  const { getSqlite } = await import('../../src/lib/db');
+  const agentExchanges: AgentConversation[] = [];
+  for (const scope of [repo, `${repo}/exchange-secondary`]) {
+    const result = await conversations(new NextRequest(`http://127.0.0.1/api/agents/conversation?repo=${encodeURIComponent(scope)}&limit=100`, {
+      headers: { authorization: `Bearer ${token}` },
+    }));
+    if (result.status !== 200) throw new Error(`Conversation fixture failed with HTTP ${result.status}`);
+    agentExchanges.push(...(await result.json() as { conversations: AgentConversation[] }).conversations);
+  }
   const response = await inbox(new Request('http://127.0.0.1/api/panel/supervisor-inbox?scope=all&includeDismissed=1&includeMaintainer=1'));
   const body = await response.json() as { items: SupervisorInboxItem[]; maintainer: MaintainerFeed };
   const approvalBody = await (await approvals(new NextRequest('http://127.0.0.1/api/panel/approvals?status=pending&scope=all'))).json() as { approvals: ApprovalRecord[] };
@@ -78,5 +111,7 @@ export async function writeInboxOracle(file: string) {
     contributions: body.maintainer.contributions.map(card), approvals: approvalBody.approvals.map(card),
     agents: items.filter((item) => active(item) && item.kind !== 'outside_human_waiting').map(card),
     history: items.filter((item) => !active(item)).map(card),
+    agentExchanges,
+    agentExchangeMessages: getSqlite().prepare('SELECT id, text, conversation_id AS conversationId FROM agent_messages ORDER BY sequence').all(),
   }));
 }

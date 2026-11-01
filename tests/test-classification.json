@@ -1588,6 +1588,13 @@
       ]
     },
     {
+      "path": "tests/agent-exchange-inbox-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/agent-inbox-wake-reservation-real-path.test.ts",
       "reasons": [
         "child-process",

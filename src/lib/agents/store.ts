@@ -56,7 +56,7 @@ interface PresenceRow {
   last_seen: string;
 }
 
-interface MessageRow {
+export interface MessageRow {
   sequence: number;
   id: string;
   from_agent: string;
@@ -75,7 +75,7 @@ interface MessageRow {
   created_at: string;
 }
 
-interface ConversationRow {
+export interface ConversationRow {
   id: string;
   repo_path: string;
   participant_a: string;
@@ -88,6 +88,8 @@ interface ConversationRow {
   summary: string | null;
   created_at: string;
   updated_at: string;
+  revision: number;
+  manual_close_json: string | null;
 }
 
 export interface AgentConversation {
@@ -103,6 +105,7 @@ export interface AgentConversation {
   summary: string | null;
   createdAt: string;
   updatedAt: string;
+  revision: number;
 }
 
 interface InboxStateRow {
@@ -216,6 +219,11 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
   `);
   // Legacy pending wakes retain their TTL/ACK behavior; only new claims get an ID.
   sqlite.transaction(() => {
+    const columns = new Set((sqlite.pragma('table_info(agent_conversations)') as Array<{ name: string }>).map(column => column.name));
+    if (!columns.has('revision')) sqlite.exec('ALTER TABLE agent_conversations ADD COLUMN revision INTEGER NOT NULL DEFAULT 0');
+    if (!columns.has('manual_close_json')) sqlite.exec('ALTER TABLE agent_conversations ADD COLUMN manual_close_json TEXT');
+  }).immediate();
+  sqlite.transaction(() => {
     const columns = sqlite.pragma('table_info(agent_inbox_state)') as Array<{ name: string }>;
     if (!columns.some((column) => column.name === 'native_wake_id')) sqlite.exec('ALTER TABLE agent_inbox_state ADD COLUMN native_wake_id TEXT');
   }).immediate();
@@ -278,7 +286,7 @@ function mapPresence(row: PresenceRow): AgentPresence {
   };
 }
 
-function mapConversation(row: ConversationRow): AgentConversation {
+export function mapConversation(row: ConversationRow): AgentConversation {
   return {
     id: row.id,
     repo: row.repo_path,
@@ -292,6 +300,7 @@ function mapConversation(row: ConversationRow): AgentConversation {
     summary: row.summary,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    revision: row.revision,
   };
 }
 
@@ -315,7 +324,7 @@ export function listAgentConversations(
   `).all(normalizeAgentBusRepoPath(repo), limit) as ConversationRow[]).map(mapConversation);
 }
 
-function mapMessage(row: MessageRow, sqlite: Database.Database): AgentMessage {
+export function mapMessage(row: MessageRow, sqlite: Database.Database): AgentMessage {
   const conversation = row.conversation_id
     ? sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(row.conversation_id) as ConversationRow | undefined
     : undefined;
@@ -542,7 +551,8 @@ export function persistAgentMessage(
     );
     sqlite.prepare(`
       UPDATE agent_conversations
-      SET turn_count = ?, last_message_id = ?, closed_at = ?, closed_reason = ?, summary = ?, updated_at = ?
+      SET turn_count = ?, last_message_id = ?, closed_at = ?, closed_reason = ?, summary = ?, updated_at = ?,
+          revision = revision + 1, manual_close_json = NULL
       WHERE id = ?
     `).run(
       turnIndex,
@@ -764,37 +774,4 @@ export function listRecentAgentMessagesAcrossRepos(
   return rows.map((row) => mapMessage(row, sqlite));
 }
 
-export function updateAgentConversation(
-  input: { id: string; repo: string; action: 'close' | 'extend'; summary?: string | null },
-  sqlite: Database.Database = getSqlite(),
-): AgentConversation {
-  ensureAgentBusSchema(sqlite);
-  const repo = normalizeAgentBusRepoPath(input.repo);
-  return sqlite.transaction(() => {
-    const row = sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(input.id) as ConversationRow | undefined;
-    if (!row || row.repo_path !== repo) {
-      throw new AgentConversationError('Conversation was not found in this repository.', 'agent_conversation_not_found', 404);
-    }
-    const now = new Date().toISOString();
-    if (input.action === 'close') {
-      if (row.closed_at) return mapConversation(row);
-      sqlite.prepare(`
-        UPDATE agent_conversations SET closed_at = ?, closed_reason = 'operator_stop', summary = ?, updated_at = ? WHERE id = ?
-      `).run(now, input.summary ?? null, now, input.id);
-    } else {
-      if (!row.closed_at) {
-        throw new AgentConversationError('Only a closed conversation can be extended.', 'agent_conversation_open', 409);
-      }
-      const nextLimit = Math.min(AGENT_CONVERSATION_MAX_LIMIT, row.turn_count + AGENT_CONVERSATION_EXTENSION);
-      if (nextLimit <= row.turn_count) {
-        throw new AgentConversationError('This conversation has reached the maximum turn limit.', 'agent_conversation_max_limit', 409);
-      }
-      sqlite.prepare(`
-        UPDATE agent_conversations
-        SET turn_limit = ?, closed_at = NULL, closed_reason = NULL, summary = NULL, updated_at = ?
-        WHERE id = ?
-      `).run(nextLimit, now, input.id);
-    }
-    return mapConversation(sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(input.id) as ConversationRow);
-  }).immediate();
-}
+export { updateAgentConversation } from './conversation-inbox';

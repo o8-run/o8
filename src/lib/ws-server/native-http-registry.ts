@@ -82,6 +82,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/issues/[number]', 'GET', () => import('@/app/api/panel/issues/[number]/route')),
   ],
   inbox: [
+    route('/api/agents/conversation', 'GET POST', () => import('@/app/api/agents/conversation/route')),
     route('/api/panel/supervisor-inbox', 'GET', () => import('@/app/api/panel/supervisor-inbox/route')),
     route('/api/panel/approvals', 'GET POST', () => import('@/app/api/panel/approvals/route')),
   ],

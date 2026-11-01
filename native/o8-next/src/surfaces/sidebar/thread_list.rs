@@ -26,6 +26,7 @@ pub enum Event {
     Loaded(Vec<Session>),
     Refreshed(Vec<Session>, Option<Ledger>),
     Selected(String),
+    Exchange(crate::inbox::ExchangeSelection),
     Error(String),
     Workspace(Option<String>, Ledger),
     /// A `ui-command` frame for the main window. Every socket receives the
@@ -112,6 +113,7 @@ pub struct ThreadList {
     pr_loading: bool,
     pr_hover: Option<pr_links::PrHover>,
     pub sessions: Vec<Session>,
+    exchanges: Vec<crate::inbox::AgentExchange>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
     pub scroll: UniformListScrollHandle,
@@ -223,6 +225,7 @@ impl ThreadList {
             undo: None,
             closed: HashSet::new(),
             sessions: vec![],
+            exchanges: vec![],
             rows: Rc::new(vec![]),
             selected: None,
             scroll: UniformListScrollHandle::new(),
@@ -311,6 +314,7 @@ impl ThreadList {
         {
             rows.truncate(index);
         }
+        rows.extend(self.agent_exchange_rows());
         self.rows = Rc::new(rows);
         // Remeasure detailed rows; keep the reader's place.
         let top = self.detailed_list.logical_scroll_top();
@@ -431,7 +435,8 @@ impl ThreadList {
                 Err(error) => return Err(error),
             };
             let ledger = header.as_ref().map(|header| header.ledger.clone());
-            Ok::<_, String>((sessions, ledger, header, branches))
+            let exchanges = client.agent_exchanges(None, false);
+            Ok::<_, String>((sessions, ledger, header, branches, exchanges))
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -447,7 +452,8 @@ impl ThreadList {
                 this.last_load = Instant::now();
                 this.last_inventory = Instant::now();
                 match result {
-                    Ok((mut sessions, ledger, header, branches)) => {
+                    Ok((mut sessions, ledger, header, branches, exchanges)) => {
+                        if let Ok(exchanges) = exchanges { this.exchanges = exchanges; }
                         this.branch_ids = branches.keys().cloned().collect();
                         this.branch_names = branches;
                         if let Some(header) = header {
@@ -741,25 +747,6 @@ impl ThreadList {
         self.editor.read(cx).focus.focus(window);
         cx.notify();
     }
-    pub fn choose(&mut self, id: String, cx: &mut Context<Self>) {
-        if !self.rows.iter().any(|r| r.id.as_ref() == Some(&id)) {
-            return;
-        }
-        self.edit_generation += 1;
-        self.suspend_rename(cx);
-        self.choice = Some(id.clone());
-        self.editing = false;
-        self.selected = Some(id.clone());
-        // A choice made before the list carries a new thread cancels its open.
-        self.pending_open = None;
-        if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
-            s.unread = false;
-        }
-        self.clear_woken(&id, cx);
-        self.rebuild();
-        cx.emit(Event::Selected(id));
-        cx.notify();
-    }
     fn submit(&mut self, cx: &mut Context<Self>) {
         if let Some(id) = self.rename.clone() {
             let title = self.editor.read(cx).text.trim().to_string();
@@ -772,7 +759,7 @@ impl ThreadList {
     }
     fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_generation += 1;
-        let Some(id) = self.choice.clone().filter(|id| !id.contains(':')) else {
+        let Some(id) = self.choice.clone().filter(|id| !id.contains(':') && !self.exchanges.iter().any(|exchange| exchange.id == *id)) else {
             return;
         };
         self.suspend_rename(cx);
@@ -830,7 +817,7 @@ impl ThreadList {
         self.mutate(id, json!({"archivedAt":archived}), cx);
     }
     fn mutate(&mut self, id: String, patch: serde_json::Value, cx: &mut Context<Self>) {
-        if self.saving {
+        if self.saving || self.exchanges.iter().any(|exchange| exchange.id == id) {
             return;
         }
         self.saving = true;
@@ -1016,6 +1003,8 @@ mod archive_controls;
 
 #[path = "inbox.rs"]
 mod inbox;
+#[path = "agent_exchanges.rs"]
+mod agent_exchanges;
 #[path = "auto_settle_toggle.rs"]
 mod auto_settle_toggle;
 #[path = "snooze.rs"]
