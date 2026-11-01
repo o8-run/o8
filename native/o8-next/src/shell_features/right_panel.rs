@@ -19,6 +19,9 @@ mod side_chat_tests;
 #[cfg(test)]
 #[path = "right_panel/resources_tests.rs"]
 mod resources_tests;
+#[cfg(test)]
+#[path = "right_panel/subagents_tests.rs"]
+mod subagents_tests;
 // The desktop's right panel (O8Panel). Its tools open as tabs in the panel's
 // own strip; "+" lists every desktop panel tool (o8-panel/panel-tools.tsx),
 // including the ones o8 next does not have yet, which open a placeholder.
