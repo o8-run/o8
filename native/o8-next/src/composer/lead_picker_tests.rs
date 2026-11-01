@@ -175,3 +175,46 @@ fn native_composer_lead_picker_same_runtime_only_changes_the_model(cx: &mut Test
         "a model-only choice changes only the chat's model"
     );
 }
+
+#[gpui::test]
+fn native_composer_lead_picker_lists_and_binds_provider_instances(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let url = fixture
+        .client
+        .url("/api/runtime/provider-instances")
+        .unwrap();
+    let created: Value = fixture
+        .client
+        .request("POST", &url)
+        .send_json(json!({"action": "create", "instance": {"runtime": "codex", "name": "work"}}))
+        .unwrap()
+        .into_json()
+        .unwrap();
+    assert_eq!(created["instance"]["id"], "codex-work");
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-model", cx);
+    assert!(
+        cx.debug_bounds("lead-house-codex").is_some(),
+        "the default instance stays"
+    );
+    click("lead-house-codex@codex-work", cx);
+    click("model-gpt-6-astra", cx);
+    let selected = surface.read_with(cx, |s, cx| {
+        assert!(s.composer.read(cx).controls.error.is_empty());
+        s.selected.clone().unwrap()
+    });
+    assert!(selected.starts_with("thoughts-next-"), "{selected}");
+    let bound: Value = fixture
+        .client
+        .get(
+            "/api/runtime/provider-instances",
+            &[("thread", selected.as_str())],
+        )
+        .unwrap();
+    assert_eq!(bound["thread"]["instance"], "codex-work");
+    let history: Value = fixture
+        .client
+        .get("/api/v2/chat-history", &[("tabId", selected.as_str())])
+        .unwrap();
+    assert_eq!(history["backend"], "codex");
+}

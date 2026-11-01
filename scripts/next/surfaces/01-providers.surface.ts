@@ -16,9 +16,13 @@ const catalog = {
 };
 
 export async function prepare(_context: SurfaceContext): Promise<SurfaceRoutes> {
-  if (!process.argv.includes('--settings')) return {};
-  const connection = () => import('../../../src/app/api/runtime/acp-connection/route');
   const instances = () => import('../../../src/app/api/runtime/provider-instances/route');
+  // Provider instances also back the composer picker, so every surface has them.
+  if (!process.argv.includes('--settings')) return { priority: 1, routes: {
+    'GET /api/runtime/provider-instances': async request => (await instances()).GET(request),
+    'POST /api/runtime/provider-instances': async request => (await instances()).POST(request),
+  }, admit: () => 200 };
+  const connection = () => import('../../../src/app/api/runtime/acp-connection/route');
   return {
     priority: 1,
     routes: {

@@ -146,6 +146,29 @@ pub(crate) fn picker_inventory(defaults: &Value) -> Option<Vec<Value>> {
     Some(items)
 }
 
+/// Composer picker: enabled, non-default provider instances as inventory
+/// items (`{"id": "instance:<id>", "instanceOf": runtime, …}`), read on the
+/// settings path. A failed read only hides instances.
+pub(crate) fn picker_instances(client: &Client) -> Vec<Value> {
+    client
+        .settings_request::<instance::Listing>("GET", instance::INSTANCES, Value::Null)
+        .map(|l| l.instances)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| i.enabled && !i.default)
+        .map(|i| json!({"id": format!("instance:{}", i.id), "instanceOf": i.runtime, "instanceId": i.id, "name": i.name}))
+        .collect()
+}
+/// `(instance id, name)` for each picker instance of `runtime`.
+pub(crate) fn instances_of(inventory: Option<&[Value]>, runtime: &str) -> Vec<(String, String)> {
+    inventory
+        .unwrap_or_default()
+        .iter()
+        .filter(|i| !runtime.is_empty() && i["instanceOf"] == runtime)
+        .filter_map(|i| Some((i["instanceId"].as_str()?.to_owned(), i["name"].as_str()?.to_owned())))
+        .collect()
+}
+
 /// "codex-cli 0.162.1" → "v0.162.1"; anything without a number is dropped.
 pub(crate) fn version(raw: &str) -> Option<String> {
     raw.split_whitespace()

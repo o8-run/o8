@@ -455,7 +455,12 @@ impl Surface {
         cx: &mut Context<Self>,
     ) {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
-        if routing["backend"] == backend {
+        // "codex@codex-work": a Settings › Providers instance of that runtime.
+        let (backend, instance) = match backend.split_once('@') {
+            Some((backend, instance)) => (backend, Some(instance.to_owned())),
+            None => (backend, None),
+        };
+        if instance.is_none() && routing["backend"] == backend {
             self.composer_choice("model", model, window, cx);
             return;
         }
@@ -511,6 +516,14 @@ impl Surface {
                     "repoPath": repo, "repoName": name, "title": "New conversation",
                 }))
                 .map_err(|e| e.to_string())?;
+            // Bind the thread to the instance; clearing a default pick is best effort.
+            let bind = client.url("/api/runtime/provider-instances").unwrap();
+            let bound = client.request("POST", &bind).send_json(
+                json!({"action": "bind", "thread": thread, "id": instance.clone().unwrap_or_default()}),
+            );
+            if instance.is_some() {
+                bound.map_err(|e| e.to_string())?;
+            }
             Ok::<_, String>(())
         });
         cx.spawn_in(window, async move |this, cx| {
