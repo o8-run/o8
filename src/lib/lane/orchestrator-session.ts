@@ -574,7 +574,7 @@ export async function sendToOrchestrator(
   }
   const model = carrier.model;
   const effortPin = resolveEffortPin({ runtime: 'claude-code', model,
-    explicitModel: selectedOrchestratorModel(options.model, 'claude-code'), requestedEffort: options.thinkingEffort });
+    explicitModel: selectedOrchestratorModel(options.model), requestedEffort: options.thinkingEffort });
   if (!effortPin.ok) throw new EffortPinRejectionError(effortPin.code, effortPin.message);
   const thinkingEffort = effortPin.selectedEffort ?? 'adaptive';
   if (options.serviceTier && options.serviceTier !== 'default' && (options.serviceTier !== 'fast' || carrier.source !== 'native' || !claudeModelSupportsFast(model) || process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1')) {

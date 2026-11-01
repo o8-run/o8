@@ -16,6 +16,8 @@ mod conversation;
 mod history;
 #[path = "transcript_images.rs"]
 pub(crate) mod images;
+#[path = "prompt_actions.rs"]
+mod prompt_actions;
 #[path = "session_sidebar.rs"]
 mod session_sidebar;
 #[path = "shell_session.rs"]
@@ -139,6 +141,7 @@ pub(crate) struct Surface {
     /// Rows that end a finished turn and carry Play and Copy.
     action_rows: BTreeSet<usize>,
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
+    prompt_actions: prompt_actions::State,
     /// A fork's new thread, whose carried draft sends once its queue is ready.
     fork_send: Option<String>,
     /// The dictation wave's level history.
@@ -188,12 +191,14 @@ impl Surface {
             away_from_end: false,
             action_rows: BTreeSet::new(),
             action_feedback: Default::default(),
+            prompt_actions: Default::default(),
             fork_send: None,
             wave: Default::default(),
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
         if self.selected.as_ref() != Some(&id) {
+            self.prompt_actions.selection_changed();
             if let Some(brain) = self.selected.as_ref().and_then(|id| self.brains.get(id)) {
                 brain.update(cx, |brain, cx| {
                     brain.expanded = false;
@@ -213,12 +218,21 @@ impl Surface {
             );
             let mode = crate::composer::mode_store::load(store.as_deref());
             let prelude = crate::composer::mode_store::load_prelude(store.as_deref());
+            let prompt_draft = crate::composer::mode_store::take_prompt_draft(store.as_deref());
             let editor = cx.new(|cx| {
                 let mut editor = Composer::new(cx);
                 editor.controls.slash.enabled = true;
                 editor.send_intents = true;
                 editor.controls.prompt.store = store;
                 editor.controls.prompt.prelude = prelude;
+                match prompt_draft {
+                    Ok(Some(draft)) => {
+                        editor.set_text(&draft.text, cx);
+                        editor.controls.images = draft.images;
+                    }
+                    Err(error) => editor.controls.error = error,
+                    Ok(None) => {}
+                }
                 if let Some(mode) = mode {
                     editor.controls.overrides["mode"] =
                         json!(if mode == "solo" { "single" } else { "fleet" });
@@ -495,6 +509,7 @@ impl Surface {
         }
     }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
+        self.prompt_clock(cx);
         self.poll_saved_visualizations(cx);
         let mut visualizations_changed = false;
         for (index, row) in self.rows.iter().enumerate() {

@@ -3,7 +3,7 @@ import { EffortPinRejectionError, resolveEffortPin } from '@/lib/orchestrator/ef
 import { resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { resolveCachedCodexOrchestratorModel, userCodexHome } from '../codex-orchestrator-config';
 import { resolveOrchestratorModelSync } from '../codex-orchestrator-options';
-import { resolveClaudeOrchestratorModel } from '../orchestrator-model-guard';
+import { resolveClaudeOrchestratorModel, selectedOrchestratorModel } from '../orchestrator-model-guard';
 import type { MoaParticipant } from './moa';
 
 /** Validate the whole composition before any participant can start inference. */
@@ -18,8 +18,8 @@ export async function assertCollideEffortPins(proposers: readonly MoaParticipant
       ? selectedClaudeCodeWorkerModelSync() ?? resolveClaudeOrchestratorModel(participant.model)
       : participant.backend === 'codex'
         ? resolveCachedCodexOrchestratorModel(resolveOrchestratorModelSync(participant.model)).model
-        : participant.model ?? null;
-    const input = { runtime, model, explicitModel: participant.model, requestedEffort: effort,
+        : selectedOrchestratorModel(participant.model) ?? null;
+    const input = { runtime, model, explicitModel: selectedOrchestratorModel(participant.model), requestedEffort: effort,
       codexHome: runtime === 'codex' ? userCodexHome() : undefined };
     const pin = resolveEffortPin(input);
     if (!pin.ok) throw new EffortPinRejectionError(pin.code, `Collide ${role}: ${pin.message}`);

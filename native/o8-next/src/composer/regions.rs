@@ -85,10 +85,11 @@ impl Surface {
         // Play and Copy under each finished turn's answer; a row that gains or
         // loses them is measured again.
         let ends = Rc::new(crate::transcript_actions::turn_ends(&rows));
-        let marked: BTreeSet<usize> = ends.keys().copied().collect();
+        let prompts = Rc::new(self.prompt_action_rows(cx));
+        let marked: BTreeSet<usize> = ends.keys().chain(prompts.keys()).copied().collect();
         for index in marked.symmetric_difference(&self.action_rows) {
             if *index < rows.len() {
-                self.list.splice(*index..*index + 1, 1);
+                self.remeasure_action_row(*index);
             }
         }
         self.action_rows = marked;
@@ -119,7 +120,7 @@ impl Surface {
                 list(self.list.clone(), {
                     let list_state = self.list.clone();
                     let view = view.clone();
-                    move |index, _, _| {
+                    move |index, window, _| {
                         if index >= rows.len() {
                             return super::conversation::queue_tail(
                                 &queued,
@@ -134,6 +135,16 @@ impl Surface {
                             painted: painted_rows.clone(),
                         }
                         .interactive(&list_state);
+                        if let Some(prompt) = prompts.get(&index) {
+                            return div()
+                                .w_full()
+                                .flex()
+                                .flex_col()
+                                .group("prompt-row")
+                                .child(row)
+                                .child(super::prompt_actions::row(&view, prompt, window))
+                                .into_any_element();
+                        }
                         match ends.get(&index) {
                             Some(text) => div()
                                 .w_full()
