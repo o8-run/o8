@@ -15,6 +15,10 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
   // --sidebar-before-inbox serves the thread and runtime listings as a host
   // from before #5110 did: without inbox subjects or settlement fields.
   const beforeInbox = process.argv.includes('--sidebar-before-inbox');
+  // --sidebar-auto-settle lets a test settle a thread the way the server's
+  // sweep does (src/lib/inbox/settlement.ts), while the app is open.
+  const autoSettle = process.argv.includes('--sidebar-auto-settle');
+  const autoSettleActions: string[] = [];
   const { GET: historyList } = await import('../../../src/app/api/v2/chat-history/list/route');
   if (!enabled) return { routes: { 'GET /api/v2/chat-history/list': historyList } };
   const fixture = await import('../sidebar-fixture');
@@ -37,6 +41,20 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
       'GET /api/runtime/archive': runtimeArchive.GET, 'POST /api/runtime/archive': runtimeArchive.POST,
       ...(auditKeyboard ? { 'GET /api/sidebar-fixture/archives': async () => Response.json({ archives }) } : {}),
       ...(beforeInbox ? { 'GET /api/runtime/inventory': inventory } : {}),
+      ...(autoSettle ? { 'GET /api/sidebar-fixture/auto-settle': async (request: import('next/server').NextRequest) => {
+        const tabId = request.nextUrl.searchParams.get('tabId');
+        const store = await import('../../../src/lib/inbox/store');
+        for (let offset = 0; ; offset += 500) {
+          const url = new URL(`/api/mobile/orchestrator/threads?limit=500&offset=${offset}`, request.url);
+          const page = (await (await sessions(new (await import('next/server')).NextRequest(url))).json()).threads as Array<{ id: string; inboxSubject: Parameters<typeof store.mutateInboxAutoSettle>[0] }>;
+          const thread = page.find(row => row.id === tabId);
+          if (thread) {
+            const settled = store.mutateInboxAutoSettle(thread.inboxSubject, 'pr-merged', new Date().toISOString(), () => {});
+            return Response.json({ settled });
+          }
+          if (page.length < 500) return Response.json({ settled: false }, { status: 404 });
+        }
+      }, 'GET /api/sidebar-fixture/auto-settle-actions': async () => Response.json(autoSettleActions) } : {}),
     },
     admit: ({ route, url, body, method }) => {
       if (route === patchHistory && body && Object.hasOwn(JSON.parse(body), 'inboxAction')) {
@@ -58,6 +76,10 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
           || route === saveHistory && /^thoughts-next-\d+$/.test(target.tabId) && realpathSync(target.repoPath) === realpathSync(repo)) ? 200 : 400;
     },
     run: async (route, request) => {
+      if (autoSettle && route === patchHistory) {
+        const body = await request.clone().json();
+        if (body.inboxAction) autoSettleActions.push(body.inboxAction);
+      }
       if (beforeInbox && (route === sessions || route === inventory)) {
         const key = route === sessions ? 'threads' : 'agents';
         const response = await route(request);

@@ -3527,6 +3527,12 @@
       ]
     },
     {
+      "path": "tests/inbox-auto-settle-integration.test.ts",
+      "reasons": [
+        "integration"
+      ]
+    },
+    {
       "path": "tests/inbox-preferences.integration.test.ts",
       "reasons": [
         "child-process",

@@ -25,7 +25,7 @@ import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-pl
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 import { inboxListingProjection, inboxReadStatement, inboxSubject, observeInboxRuntimeRun, readInboxState, type InboxReadContext } from './store';
 import { legacyInboxPin } from './preferences';
-import { hasQueuedTurnStart, type InboxSubject } from './settlement';
+import { hasQueuedTurnStart, type InboxSubject } from './settlement-state';
 
 export class InboxMutationError extends Error {
   constructor(message: string, public readonly status: number) { super(message); }

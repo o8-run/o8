@@ -147,6 +147,8 @@ impl Client {
                     .cloned(),
                 settled_override: agent["settledOverride"].as_str().map(str::to_owned),
                 settled_at: agent["settledAt"].as_str().map(str::to_owned),
+                auto_settled_reason: agent["autoSettledReason"].as_str().map(str::to_owned),
+                auto_settle_disabled_at: agent["autoSettleDisabledAt"].as_str().map(str::to_owned),
             });
         }
         if let Some(workspace) = self.workspace() {

@@ -7,7 +7,7 @@
  * Adapted for o8: boundary fixtures for the ported TypeScript rules.
  */
 import { describe, expect, it } from 'vitest';
-import { emptySettlement, hasQueuedTurnStart, transitionSettlement } from './settlement';
+import { emptySettlement, hasQueuedTurnStart, transitionSettlement } from './settlement-state';
 
 describe('ported settlement rules', () => {
   it.each([[-120_001, false], [-120_000, true], [0, true], [120_000, true], [120_001, false]] as const)(

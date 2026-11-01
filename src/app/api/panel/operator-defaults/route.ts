@@ -1,3 +1,4 @@
+import { parseUpdate as parseConversationDefaultsUpdate } from '@/lib/operator/conversation-defaults';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { parseKnowledgeSources } from '@/lib/operator/knowledge-source-defaults';
 import { NextResponse } from 'next/server';
@@ -320,12 +321,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     }
     update.promptCachingEnabled = body.promptCachingEnabled;
   }
-  if (body.autoTitleInferenceEnabled !== undefined) {
-    if (typeof body.autoTitleInferenceEnabled !== 'boolean') {
-      throw new Error('autoTitleInferenceEnabled must be boolean.');
-    }
-    update.autoTitleInferenceEnabled = body.autoTitleInferenceEnabled;
-  }
+  Object.assign(update, parseConversationDefaultsUpdate(body));
 
   if (body.requireApproval !== undefined) {
     if (!isRequireApproval(body.requireApproval)) {

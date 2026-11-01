@@ -105,6 +105,27 @@ impl Client {
         order_key: Option<&str>,
         revision: u64,
     ) -> Result<Value, String> {
+        let extra = order_key.map_or(Value::Null, |key| json!({ "orderKey": key }));
+        self.inbox_preference_with(workspace, id, action, extra, revision)
+    }
+    /// Turns this thread's auto-settle on or off (`auto-settle`, `enabled`).
+    pub(crate) fn inbox_auto_settle(
+        &self,
+        workspace: Option<&str>,
+        id: &str,
+        enabled: bool,
+        revision: u64,
+    ) -> Result<Value, String> {
+        self.inbox_preference_with(workspace, id, "auto-settle", json!({ "enabled": enabled }), revision)
+    }
+    fn inbox_preference_with(
+        &self,
+        workspace: Option<&str>,
+        id: &str,
+        action: &str,
+        extra: Value,
+        revision: u64,
+    ) -> Result<Value, String> {
         let workspace = workspace
             .filter(|path| std::path::Path::new(path).is_absolute())
             .ok_or("Select a workspace before changing this session.")?;
@@ -112,8 +133,10 @@ impl Client {
         url.query_pairs_mut().append_pair("workspace", workspace);
         let key = if id.contains(':') { "sessionKey" } else { "tabId" };
         let mut body = json!({ key: id, "inboxAction": action, "inboxRevision": revision });
-        if let Some(order_key) = order_key {
-            body["orderKey"] = json!(order_key);
+        if let Value::Object(extra) = extra {
+            for (key, value) in extra {
+                body[key] = value;
+            }
         }
         let request = self.in_workspace(workspace).request("PATCH", &url);
         let response = request.send_json(body).map_err(|error| match error {
