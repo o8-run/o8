@@ -27,6 +27,20 @@ fn wait(s: &Entity<Shell>, v: &mut VisualTestContext, selector: &'static str) {
         std::thread::sleep(Duration::from_millis(20));
     }
 }
+#[track_caller]
+fn wait_gone(s: &Entity<Shell>, v: &mut VisualTestContext, selector: &'static str) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        s.update_in(v, |s, w, cx| s.tick(false, w, cx));
+        v.run_until_parked();
+        draw(v);
+        if v.debug_bounds(selector).is_none() {
+            return;
+        }
+        assert!(Instant::now() < deadline, "Still visible: {selector}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
 fn setup(cx: &mut TestAppContext) -> (Fixture, Entity<Shell>, VisualTestContext) {
     setup_mode(cx, "--subagents")
 }
@@ -280,6 +294,7 @@ fn subagents_grid_updated_trace_keeps_keyboard_return(cx: &mut TestAppContext) {
             if steps.iter().any(|step| step.command.contains("updated.rs")))
     })));
     click(&mut v, "subagents-close");
+    wait_gone(&s, &mut v, "subagents-inspector");
     v.simulate_keystrokes("enter");
     wait(&s, &mut v, "subagents-detail-subagent-calculation");
 }
@@ -310,6 +325,7 @@ fn subagents_side_chat_returns_to_its_parent_and_split(cx: &mut TestAppContext) 
     click(&mut v, "subagent-trace-subagent-calculation");
     wait(&s, &mut v, "subagents-detail-subagent-calculation");
     click(&mut v, "subagents-close");
+    wait_gone(&s, &mut v, "subagents-inspector");
     s.update_in(&mut v, |s, w, cx| s.tick(false, w, cx));
     assert!(s.read_with(&v, |s, _| s.state.right_panel.visible));
     assert!(s.read_with(&v, |s, _| {
@@ -338,6 +354,7 @@ fn subagents_workers_action_returns_keyboard_focus_to_its_card(cx: &mut TestAppC
     v.simulate_keystrokes("escape");
     s.update_in(&mut v, |s, w, cx| s.tick(false, w, cx));
     assert!(!s.read_with(&v, |s, _| s.state.right_panel.visible));
+    wait_gone(&s, &mut v, "subagents-inspector");
     v.simulate_keystrokes("enter");
     wait(&s, &mut v, "subagents-detail-subagent-calculation");
 }
