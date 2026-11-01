@@ -6,7 +6,7 @@ import { AcpModelPicker } from '../AcpModelPicker';
 import { useRuntimeInventory } from '../../onboarding/useRuntimeInventory';
 import { RuntimeToolsPanel } from '../../onboarding/RuntimeToolsPanel';
 import { FloatingSurface } from '../../FloatingSurface';
-import { runtimeForLead, visibleRuntimeInventory } from '@/lib/setup/runtime-recommendation';
+import { enabledRuntimeInventory, runtimeForLead, visibleRuntimeInventory } from '@/lib/setup/runtime-recommendation';
 import { findCatalogueModel, type CatalogueGroup } from '@/lib/orchestrator/acp-model-catalogue';
 import { type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -57,7 +57,7 @@ export function ComposerPicker({ state, composerModelGroups, onModelChange, onBa
   useEffect(() => () => { generation.current += 1; }, []);
   const tools = useRuntimeInventory(open);
   const { favorites, toggleFavorite } = useModelFavorites('lead');
-  const installed = visibleRuntimeInventory(tools.inventory ?? [], []);
+  const installed = enabledRuntimeInventory(visibleRuntimeInventory(tools.inventory ?? [], []), tools.disabled);
   const ready = (runtime: string | null) => tools.inventory?.some((item) => item.id === runtime && item.available) === true;
   const leadGroup = composerModelGroups.find((group) => group.key === state.leadBackend || group.options.some((option) => option.backend === state.leadBackend && option.model === state.leadModelId));
   const houses: House[] = composerModelGroups.filter((group) => group === leadGroup || group.key === 'o8' || (group.key === 'acp' && acpAvailable) || installed.some((item) => item.id === runtimeForLead(group.key)))
