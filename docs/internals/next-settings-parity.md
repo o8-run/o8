@@ -193,7 +193,7 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 
 - Storage: `settings_parity_storage_refresh_keeps_unknown_accounting` covers complete data, signed headroom parsing, a 503 tagged observed, partial/null accounting, malformed/unavailable responses and recovery to measured zero. The additional `settings_correction_5220_signed_headroom_from_producer_shape` drives native Refresh with negative, positive and null admission projections and checks rendered values. Negative headroom now remains negative in “Task space after reserves”; known allocation metrics stay visible.
 
-- Indexing: the original `settings_parity_indexing_refresh_docs_and_independent_counts` case covers a reported refresh receipt and exact repository path, index-state HTTP 503 while totals remain available, then an index recovery while totals become unavailable. The original case does not cover an unconfirmed POST result or a retry of the docs action.
+- Indexing: `settings_parity_indexing_refresh_docs_and_independent_counts` covers the original receipt/path and independent index/totals availability cases. `settings_correction_5221_refresh_docs_updates_rendered_totals` now checks a changed rendered total after the actual native docs action, a follow-up totals 503 and recovery, unconfirmed/missing-result and explicit-false responses, a docs POST 503, and successful retry. `settings_correction_5221_revisit_refreshes_rendered_totals` checks a changed total after leaving and revisiting Indexing.
 
 - Fleet presets: `settings_parity_classic_fleet_presets_persist_and_recover` failed first on the missing preset selector, then passed. It persists 2, 5 and 8 through the production settings route, refuses a failed write without changing the saved capacity, and recovers after Refresh.
 
@@ -232,6 +232,34 @@ DTO to `Option<i64>`, but still clamped its display to zero.
   committed test proves. Storage unavailable/503/recovery cases are present in
   the later committed tests. The original Indexing case is described without
   claiming unconfirmed-success or docs-retry coverage.
+- **#5221:** A confirmed docs refresh invalidates saved-instruction/outcome totals
+  and fetches them after the POST. An invalidated in-flight totals read queues a
+  fresh read instead of publishing its old snapshot. Native section selection
+  also refreshes totals on revisit. A failed totals request clears the old count
+  and renders **Unavailable**, without turning a confirmed docs receipt into an
+  unconfirmed write or pretending that a failed write succeeded.
+- Red: in the pre-implementation combined run,
+  `settings_correction_5221_refresh_docs_updates_rendered_totals` failed because
+  the rendered total stayed at 4 after Refresh docs;
+  `settings_correction_5221_revisit_refreshes_rendered_totals` failed because the
+  cached total survived leaving and revisiting the page.
+- Green for #5221: `CARGO_TARGET_DIR=$PWD/target cargo +1.97.1 test --bin o8-next settings_correction_5221_ -- --test-threads=1 --nocapture`
+  passed **2/2**, 660 unrelated tests filtered out, in **0.40 seconds**. The
+  controls render totals **4 → 7**, **Unavailable** after the following totals
+  503, **11** after recovery, and **12** after retrying failed/unconfirmed docs
+  writes. The new totals GET follows the docs POST; every POST uses the selected
+  repository's exact path. Revisit changes **4 → 19** without requiring manual
+  Refresh.
+- Combined correction gate: the original red command then passed **3/3**,
+  659 unrelated tests filtered out, in **0.57 seconds**.
+- Existing parity regression gate: `CARGO_TARGET_DIR=$PWD/target cargo +1.97.1 test --bin o8-next settings_parity_ -- --test-threads=1 --nocapture`
+  passed **16/16**, 646 unrelated tests filtered out, in **203.70 seconds**.
+  Explicit-file `rustfmt --check` and `git diff --check` passed.
+- These are native-control/HTTP-peer regressions, not execution of the live
+  ingestion producer or installed-app acceptance. Both findings remain local
+  commits for parent diff review. No push, merge, release, security changes,
+  installs or new target caches; parent-owned Linux paths and live dev stayed
+  untouched.
 
 ## Host and security handoff
 

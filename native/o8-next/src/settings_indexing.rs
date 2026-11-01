@@ -11,6 +11,7 @@ pub(super) struct State {
     counts_busy: bool,
     counts: Option<Counts>,
     counts_error: bool,
+    counts_refresh_pending: bool,
     jobs: BTreeMap<String, Job>,
 }
 #[derive(Default)]
@@ -79,19 +80,35 @@ impl Settings {
             })
             .detach();
         }
-        if !self.indexing.counts_busy
-            && (force || self.indexing.counts.is_none() && !self.indexing.counts_error)
-        {
-            self.indexing.counts_busy = true;
+        self.load_indexing_counts(force, cx);
+        self.changed(cx);
+    }
+    pub(super) fn load_indexing_counts(&mut self, force: bool, cx: &mut Context<Self>) {
+        if force {
+            self.indexing.counts = None;
             self.indexing.counts_error = false;
-            let client = self.client.clone();
-            let task = cx.background_executor().spawn(async move {
-                client.settings_request::<Counts>("GET", "/api/cortex/diagnostics", Value::Null)
-            });
-            cx.spawn(async move |this, cx| {
-                let result = task.await;
-                let _ = this.update(cx, |this, cx| {
-                    this.indexing.counts_busy = false;
+        }
+        if self.indexing.counts_busy {
+            self.indexing.counts_refresh_pending |= force;
+            return;
+        }
+        if !force && (self.indexing.counts.is_some() || self.indexing.counts_error) {
+            return;
+        }
+        self.indexing.counts_busy = true;
+        self.indexing.counts_refresh_pending = false;
+        let client = self.client.clone();
+        let task = cx.background_executor().spawn(async move {
+            client.settings_request::<Counts>("GET", "/api/cortex/diagnostics", Value::Null)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.indexing.counts_busy = false;
+                if this.indexing.counts_refresh_pending {
+                    // A completed ingest invalidated this in-flight snapshot.
+                    this.load_indexing_counts(true, cx);
+                } else {
                     match result {
                         Ok(counts) if counts.ok != Some(false) => {
                             this.indexing.counts = Some(counts)
@@ -101,11 +118,11 @@ impl Settings {
                             this.indexing.counts_error = true;
                         }
                     }
-                    this.changed(cx);
-                });
-            })
-            .detach();
-        }
+                }
+                this.changed(cx);
+            });
+        })
+        .detach();
         self.changed(cx);
     }
     fn refresh_docs(&mut self, entry: Entry, cx: &mut Context<Self>) {
@@ -139,16 +156,18 @@ impl Settings {
             let _ = this.update(cx, |this, cx| {
                 let job = this.indexing.jobs.entry(repo_id).or_default();
                 job.busy = false;
-                match result {
+                let confirmed = match result {
                     Ok(Refresh { ok: true, result: Some(result) }) => {
                         job.failed = false;
                         job.note = Some(match (result.written_directives, result.scanned_files) {
                             (Some(written), Some(scanned)) => format!("{written} sections refreshed · {scanned} files scanned"),
                             _ => "Refresh accepted; result counts were not reported.".into(),
                         });
+                        true
                     }
-                    _ => { job.failed = true; job.note = Some("Could not confirm the document refresh. Retry when the runtime is available.".into()); }
-                }
+                    _ => { job.failed = true; job.note = Some("Could not confirm the document refresh. Retry when the runtime is available.".into()); false }
+                };
+                if confirmed { this.load_indexing_counts(true, cx); }
                 this.changed(cx);
             });
         }).detach();

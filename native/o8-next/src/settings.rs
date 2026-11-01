@@ -311,6 +311,9 @@ impl Settings {
         self.scroll
             .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
         self.load(false, cx);
+        if section == "indexing" {
+            self.load_indexing_counts(true, cx);
+        }
         self.load_panel(false, cx);
     }
     fn load_panel(&mut self, force: bool, cx: &mut Context<Self>) {
