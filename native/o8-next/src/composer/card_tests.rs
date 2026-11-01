@@ -2,6 +2,8 @@ use super::*;
 #[path = "context_card_tests.rs"]
 mod context_tests;
 mod image_tests;
+#[path = "picker_dismiss_tests.rs"]
+mod picker_dismiss_tests;
 #[path = "prompt_acceptance_tests.rs"]
 mod prompt_acceptance_tests;
 #[path = "prompt_persistence_tests.rs"]
