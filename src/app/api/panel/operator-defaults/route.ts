@@ -384,6 +384,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.workerRuntimes = [...new Set(body.workerRuntimes)];
   }
 
+  if (body.disabledRuntimes !== undefined) {
+    if (!Array.isArray(body.disabledRuntimes) || !body.disabledRuntimes.every(isDispatchRuntime)) {
+      throw new Error('disabledRuntimes must contain only dispatchable runtimes.');
+    }
+    update.disabledRuntimes = [...new Set(body.disabledRuntimes)];
+  }
+
   if (body.codexWorkerEffort !== undefined) {
     if (!isThinkingEffort(body.codexWorkerEffort)) {
       throw new Error('codexWorkerEffort must be a valid effort level.');

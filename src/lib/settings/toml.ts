@@ -225,6 +225,15 @@ function dispatchRuntimeListField(section: string, key: string): TomlField<Opera
   };
 }
 
+function optionalDispatchRuntimeListField(section: string, key: string): TomlField<OperatorDefaults['disabledRuntimes']> {
+  return {
+    path: [section, key],
+    parse: (value, tomlKey) => Array.isArray(value) && value.every(isDispatchRuntime)
+      ? [...new Set(value)]
+      : invalid(tomlKey, 'an array of dispatchable runtime names'),
+  };
+}
+
 function branchPrefixField(section: string, key: string): TomlField<string> {
   return {
     path: [section, key],
@@ -301,6 +310,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   workerExecutionCarrier: executionCarrierField('models', 'worker_execution_carrier'),
   workerStartMode: enumField('operator', 'worker_start_mode', 'one of "autonomous", "huddle", or "adaptive"', isWorkerStartMode),
   workerRuntimes: dispatchRuntimeListField('models', 'worker_runtimes'),
+  disabledRuntimes: optionalDispatchRuntimeListField('providers', 'disabled_runtimes'),
   codexWorkerEffort: enumField('models', 'codex_worker_effort', 'a valid thinking effort', isThinkingEffort),
   claudeWorkerEffort: enumField('models', 'claude_worker_effort', 'a valid thinking effort', isThinkingEffort),
   brainCodexModel: codexModelField('brain', 'codex_model'),

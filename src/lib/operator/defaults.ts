@@ -161,6 +161,8 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   workerExecutionCarrier: ExecutionCarrierId | null;
   workerStartMode: WorkerStartMode;
   workerRuntimes: OrchestratorRuntime[];
+  /** Runtimes the operator turned off in Settings › Providers. Empty means all are on. */
+  disabledRuntimes: OrchestratorRuntime[];
   /** Default Codex worker effort. 'adaptive' preserves runtime default behavior. */
   codexWorkerEffort: ThinkingEffort;
   /** Default Claude Code worker effort. 'adaptive' preserves runtime default behavior. */
@@ -354,6 +356,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   workerExecutionCarrier: null,
   workerStartMode: 'autonomous',
   workerRuntimes: ['codex'],
+  disabledRuntimes: [],
   codexWorkerEffort: 'adaptive',
   claudeWorkerEffort: 'adaptive',
   ...BRAIN_DEFAULTS,
@@ -469,6 +472,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (Array.isArray(stored.workerRuntimes)) {
     const workerRuntimes = [...new Set(stored.workerRuntimes.filter(isDispatchRuntime))];
     if (workerRuntimes.length > 0) result.workerRuntimes = workerRuntimes;
+  }
+  if (Array.isArray(stored.disabledRuntimes)) {
+    result.disabledRuntimes = [...new Set(stored.disabledRuntimes.filter(isDispatchRuntime))];
   }
   if (stored.codexWorkerEffort && isThinkingEffort(stored.codexWorkerEffort)) {
     result.codexWorkerEffort = stored.codexWorkerEffort;
@@ -672,6 +678,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     workerExecutionCarrier: fileValues.workerExecutionCarrier !== undefined ? fileValues.workerExecutionCarrier : OPERATOR_DEFAULTS_FALLBACK.workerExecutionCarrier,
     workerStartMode: fileValues.workerStartMode ?? OPERATOR_DEFAULTS_FALLBACK.workerStartMode,
     workerRuntimes: fileValues.workerRuntimes ?? OPERATOR_DEFAULTS_FALLBACK.workerRuntimes,
+    disabledRuntimes: fileValues.disabledRuntimes ?? OPERATOR_DEFAULTS_FALLBACK.disabledRuntimes,
     codexWorkerEffort:
       envCodexEffort ?? fileValues.codexWorkerEffort ?? OPERATOR_DEFAULTS_FALLBACK.codexWorkerEffort,
     claudeWorkerEffort:
@@ -750,6 +757,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     workerExecutionCarrier: fileValues.workerExecutionCarrier !== undefined ? 'file' : 'default',
     workerStartMode: fileValues.workerStartMode !== undefined ? 'file' : 'default',
     workerRuntimes: fileValues.workerRuntimes !== undefined ? 'file' : 'default',
+    disabledRuntimes: fileValues.disabledRuntimes !== undefined ? 'file' : 'default',
     codexWorkerEffort:
       envCodexEffort !== null ? 'env' : fileValues.codexWorkerEffort !== undefined ? 'file' : 'default',
     claudeWorkerEffort:
@@ -913,6 +921,12 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
       throw new Error('workerRuntimes must contain at least one dispatchable runtime.');
     }
     stored.workerRuntimes = [...new Set(update.workerRuntimes)];
+  }
+  if (update.disabledRuntimes !== undefined) {
+    if (!Array.isArray(update.disabledRuntimes) || !update.disabledRuntimes.every(isDispatchRuntime)) {
+      throw new Error('disabledRuntimes must contain only dispatchable runtimes.');
+    }
+    stored.disabledRuntimes = [...new Set(update.disabledRuntimes)];
   }
   if (update.codexWorkerEffort !== undefined) {
     if (!isThinkingEffort(update.codexWorkerEffort)) {
