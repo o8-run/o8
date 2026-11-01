@@ -175,12 +175,22 @@ fn write_store(name: &str, value: Value, cx: &App) -> bool {
     }
     written
 }
+/// A speed belongs to the thread it was picked in, so one fast worker does
+/// not speed up every thread on that model.
+fn tier_key(thread: Option<&str>, backend: &str, model: &str) -> String {
+    format!("{}|{backend}:{model}", thread.unwrap_or("new"))
+}
 /// The speed chosen for this lead, sent as routing.serviceTier like classic.
-pub(super) fn service_tier(backend: &str, model: &str, cx: &App) -> Option<String> {
+pub(super) fn service_tier(
+    thread: Option<&str>,
+    backend: &str,
+    model: &str,
+    cx: &App,
+) -> Option<String> {
     if !matches!(backend, "codex" | "claude") {
         return None;
     }
-    read_store("composer-service-tiers.json", cx)[format!("{backend}:{model}")]
+    read_store("composer-service-tiers.json", cx)[tier_key(thread, backend, model)]
         .as_str()
         .map(str::to_owned)
 }
@@ -649,7 +659,7 @@ impl Surface {
             .get(&format!("{backend}:{model}"))
             .cloned()
             .unwrap_or(Value::Null);
-        let requested = service_tier(backend, model, cx);
+        let requested = service_tier(self.selected.as_deref(), backend, model, cx);
         let selected = requested
             .clone()
             .or_else(|| snapshot["configuredTier"].as_str().map(str::to_owned))
@@ -762,7 +772,7 @@ impl Surface {
         cx: &mut Context<Self>,
     ) {
         let mut store = read_store("composer-service-tiers.json", cx);
-        store[format!("{backend}:{model}")] = json!(tier);
+        store[tier_key(self.selected.as_deref(), backend, model)] = json!(tier);
         if !write_store("composer-service-tiers.json", store, cx) {
             self.composer.update(cx, |i, _| {
                 i.controls.error = "Could not save this choice.".into()
@@ -1259,5 +1269,17 @@ impl Surface {
                 c.child(light("Applying selection…", 11., theme().text_muted).p(px(8.)))
             });
         vec![rail.into_any_element(), content.into_any_element()]
+    }
+}
+
+#[cfg(test)]
+mod tier_tests {
+    #[test]
+    fn a_speed_belongs_to_its_thread() {
+        let key = super::tier_key;
+        assert_ne!(
+            key(Some("one"), "codex", "gpt"),
+            key(Some("two"), "codex", "gpt")
+        );
     }
 }

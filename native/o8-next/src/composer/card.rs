@@ -316,6 +316,7 @@ impl Surface {
         routing["pickedMode"] = json!(picked);
         routing["mode"] = json!("fleet");
         if let Some(tier) = super::composer_selector::service_tier(
+            self.selected.as_deref(),
             routing["backend"].as_str().unwrap_or(""),
             routing["model"].as_str().unwrap_or(""),
             cx,
