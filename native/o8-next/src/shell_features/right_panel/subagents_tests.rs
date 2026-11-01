@@ -162,7 +162,8 @@ fn subagents_grid_follows_focused_parent_and_fits_compact_window(cx: &mut TestAp
             [
                 "llm-chat:thoughts-review".into(),
                 "llm-chat:thoughts-tools".into(),
-            ],
+            ]
+            .into_iter(),
         ))
         .unwrap();
     s.update_in(&mut v, |s, w, cx| s.execute(Command::Grid, w, cx));
@@ -191,6 +192,46 @@ fn subagents_grid_follows_focused_parent_and_fits_compact_window(cx: &mut TestAp
         .expect("compact inspector remains reachable");
     assert!(bounds.right() <= px(900.) && bounds.bottom() <= px(700.));
     click(&mut v, "subagents-close");
+}
+
+#[gpui::test]
+fn subagents_side_chat_returns_to_its_parent_and_split(cx: &mut TestAppContext) {
+    let (_f, s, mut v) = setup(cx);
+    s.update_in(&mut v, |s, w, cx| {
+        s.execute(Command::Session("thoughts-tools".into()), w, cx);
+        let repo = s.state.selected.clone().unwrap();
+        s.state
+            .right_panel
+            .side_chats
+            .insert(repo, "thoughts-review".into());
+        show(s, Tool::SideChat, w, cx);
+        s.features.get::<Panel>().into_lower = true;
+        show(s, Tool::Targeting, w, cx);
+    });
+    wait(&s, &mut v, "subagent-trace-subagent-calculation");
+    let side = s.read_with(&v, |s, _| {
+        let Content::Session(view) = &s.content[&key(s, Tool::SideChat)] else {
+            panic!("side chat")
+        };
+        view.clone()
+    });
+    side.update_in(&mut v, |side, w, cx| side.shell_focus(true, w, cx));
+    v.simulate_input("Side draft");
+    click(&mut v, "subagent-trace-subagent-calculation");
+    wait(&s, &mut v, "subagents-detail-subagent-calculation");
+    click(&mut v, "subagents-close");
+    s.update_in(&mut v, |s, w, cx| s.tick(false, w, cx));
+    assert!(s.read_with(&v, |s, _| s.state.right_panel.visible));
+    assert!(s.read_with(&v, |s, _| {
+        let p = s.features.read::<Panel>().unwrap();
+        p.selected == Tool::SideChat && p.lower == Some(Tool::Targeting)
+    }));
+    v.simulate_input(" continues");
+    assert_eq!(
+        side.read_with(&v, |side, cx| side.shell_issue_state(cx)["draft"].clone()),
+        "Side draft continues",
+        "closing the inspector must restore the visible parent composer focus"
+    );
 }
 
 #[gpui::test]
