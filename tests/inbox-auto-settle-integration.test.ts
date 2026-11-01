@@ -7,6 +7,8 @@ import { createEmptyOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { runInboxAutoSettleSweep } from '@/lib/inbox/auto-settle';
+import { inboxSubject, readInboxState, recordInboxConversationEvent } from '@/lib/inbox/store';
+import { enqueueComposerSend } from '@/lib/orchestrator/composer-queue';
 
 // Only external runtime discovery is fixed. Routes, SQLite, histories and lanes are real.
 const fixture = vi.hoisted(() => ({ agents: [] as Array<Record<string, unknown>> }));
@@ -45,6 +47,59 @@ afterAll(async () => {
 });
 
 describe('server auto-settle sweep', () => {
+  it('exposes and persists the existing auto-settle defaults through the native Settings route', async () => {
+    const defaults = await import('@/app/api/panel/operator-defaults/route');
+    const url = 'http://localhost/api/panel/operator-defaults?include=native';
+    const read = async () => (await defaults.GET(new Request(url))).json();
+    const initial = await read();
+    expect(initial.values).toMatchObject({ autoSettleEnabled: true, autoSettleIdleDays: 3 });
+    for (const values of [{ autoSettleEnabled: false, autoSettleIdleDays: 0 }, { autoSettleEnabled: true, autoSettleIdleDays: 3 }]) {
+      const before = await read();
+      const saved = await defaults.POST(new Request(url, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...values, settingsTomlRevision: before.settingsToml.revision }),
+      }));
+      expect(saved.status).toBe(200);
+      expect((await read()).values).toMatchObject(values);
+    }
+  });
+
+  it('settles a normally completed WS run only after its latest activity has been idle for N days', async () => {
+    const tabId = await seed('completed-run', false, Date.now() - 86_400_000);
+    const kid = child(tabId, 'completed-run', false);
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'auto-settle-completed-run', repoPath: process.cwd(), packets: [kid.packet] });
+    const event = (status: string) => recordInboxConversationEvent({ event: 'status', data: { threadId: tabId, repoPath: process.cwd(), status } });
+    event('busy');
+    event('ready');
+    const state = readInboxState(inboxSubject('conversation', tabId, process.cwd()));
+    expect(state.runStatus).toBe('idle');
+    const completedAt = Date.parse(state.runAt!);
+    fixture.agents = [];
+    expect(await runInboxAutoSettleSweep({ force: true, idleDays: 3, now: completedAt + 2 * 86_400_000 })).not.toContain(tabId);
+    expect(await runInboxAutoSettleSweep({ force: true, idleDays: 3, now: completedAt + 4 * 86_400_000 })).toContain(tabId);
+    expect(await row(tabId)).toMatchObject({ settledOverride: 'settled', autoSettledReason: 'idle' });
+  }, 60_000);
+
+  it('keeps idle running, approval-blocked and durably queued threads active', async () => {
+    const running = await seed('idle-running');
+    const waiting = await seed('idle-approval');
+    const queued = await seed('idle-queued');
+    const kids = [child(running, 'idle-running', false), child(waiting, 'idle-approval', false), child(queued, 'idle-queued', false)];
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'auto-settle-idle-guards', repoPath: process.cwd(), packets: kids.map(k => k.packet) });
+    recordInboxConversationEvent({ event: 'status', data: { threadId: running, repoPath: process.cwd(), status: 'busy' } });
+    enqueueComposerSend({ id: `${prefix}-queue`, repoPath: process.cwd(), threadId: queued, intent: 'send-next', payload: {
+      text: 'next', wireMessage: 'next', images: [], routing: { backend: 'codex', model: 'gpt-5', effort: 'high', permissionMode: 'plan', mode: 'single', pickedMode: 'solo', collide: false },
+    } });
+    fixture.agents = [{ sessionKey: kids[1].lane.sessionKey, workspace: process.cwd(), runtime: 'codex', status: 'waiting', approvalStatus: 'pending' }];
+    try {
+      const settled = await runInboxAutoSettleSweep({ force: true, idleDays: 3, now: Date.now() + 4 * 86_400_000 });
+      for (const id of [running, waiting, queued]) {
+        expect(settled).not.toContain(id);
+        expect(await row(id)).not.toHaveProperty('settledOverride');
+      }
+    } finally { fixture.agents = []; }
+  }, 60_000);
+
   it('settles merged and cleaned threads, skips pinned/opted-out/needs-input/open ones, and undo sticks', async () => {
     const merged = await seed('merged');
     const cleaned = await seed('cleaned');
@@ -57,6 +112,7 @@ describe('server auto-settle sweep', () => {
     setLaneStatus(kids[1].lane.id, 'archived');
     writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'auto-settle', repoPath: process.cwd(), packets: kids.map(k => k.packet) });
     expect((await patch({ tabId: optedOut, inboxAction: 'auto-settle', inboxRevision: 0, enabled: false })).status).toBe(200);
+    expect(await row(optedOut)).toMatchObject({ autoSettleDisabledAt: expect.any(String) });
     fixture.agents = [{ sessionKey: kids[4].lane.sessionKey, workspace: process.cwd(), runtime: 'codex', status: 'waiting', approvalStatus: 'pending' }];
 
     const settled = await runInboxAutoSettleSweep({ force: true, idleDays: 0 });

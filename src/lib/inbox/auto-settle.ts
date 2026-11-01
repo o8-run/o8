@@ -23,6 +23,16 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 interface Candidate { subject: InboxSubject; verdict: AutoSettleVerdict; legacyPinned: boolean }
 
+function idleCandidateVerdict(subject: InboxSubject, lastActivityAt: string | undefined, days: number, now: number): AutoSettleVerdict | null {
+  if (!(days > 0)) return null;
+  const state = readInboxState(subject);
+  // A normal ready event follows the last message. Count that completion as
+  // activity while retaining its timestamp as the mutation's freshness fence.
+  const latest = Math.max(...[lastActivityAt, state.runAt, state.observedRunAt]
+    .map(at => at ? Date.parse(at) : NaN).filter(Number.isFinite));
+  return idleVerdict(Number.isFinite(latest) ? new Date(latest).toISOString() : null, days, now);
+}
+
 function linkedPrs(): Map<string, AutoSettlePr[]> {
   const rows = getSqlite().prepare(`SELECT c.thread_id AS threadId, p.merged_at AS mergedAt FROM conversation_pr_context c
     LEFT JOIN github_pull_requests p ON p.pull_request_id = c.pull_request_id
@@ -52,12 +62,12 @@ export function collectAutoSettleCandidates(idleDays = 0, now = Date.now()): Can
     ? new Map(listMobileOrchestratorThreads({ limit: 100_000 }).map(t => [t.id, t.lastMessageAt] as const))
     : new Map<string, string>();
   for (const threadId of new Set([...prs.keys(), ...owned.keys()])) {
-    const verdict = conversationVerdict(prs.get(threadId) ?? [], owned.get(threadId) ?? [], laneRows)
-      ?? idleVerdict(activity.get(threadId), idleDays, now);
-    if (!verdict) continue;
     const record = readPersistedLlmChat(threadId)?.history as { repoPath?: string; projectId?: string; pinned?: boolean; archivedAt?: string | null } | undefined;
     if (!record || record.archivedAt) continue;
-    out.push({ subject: inboxSubject('conversation', threadId, record.repoPath, record.projectId), verdict, legacyPinned: legacyInboxPin(record) !== null });
+    const subject = inboxSubject('conversation', threadId, record.repoPath, record.projectId);
+    const verdict = conversationVerdict(prs.get(threadId) ?? [], owned.get(threadId) ?? [], laneRows)
+      ?? idleCandidateVerdict(subject, activity.get(threadId), idleDays, now);
+    if (verdict) out.push({ subject, verdict, legacyPinned: legacyInboxPin(record) !== null });
   }
   // Standalone workers: the newest lane per session decides.
   const newest = new Map<string, AutoSettleLane>();
@@ -68,7 +78,7 @@ export function collectAutoSettleCandidates(idleDays = 0, now = Date.now()): Can
     const identity = runtimeInboxIdentity({ sessionKey, workspace: lane.repoPath }, packets, lanes);
     if (identity.parentInboxSubject) continue;
     const verdict = laneVerdict(lane, lane.packetId ? byId.get(lane.packetId) : undefined)
-      ?? idleVerdict(lane.updatedAt, idleDays, now);
+      ?? idleCandidateVerdict(identity.inboxSubject, lane.updatedAt, idleDays, now);
     if (verdict) out.push({ subject: identity.inboxSubject, verdict, legacyPinned: false });
   }
   return out;
