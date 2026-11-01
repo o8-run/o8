@@ -805,7 +805,11 @@ impl Surface {
             client
                 .get("/api/panel/operator-defaults", &[])
                 .ok()
-                .and_then(|v: Value| v["dispatchableRuntimes"].as_array().cloned())
+                .and_then(|v: Value| crate::shell::settings::providers::picker_inventory(&v))
+                .map(|mut items| {
+                    items.extend(crate::shell::settings::providers::picker_instances(&client));
+                    items
+                })
                 .map_or(json!("failed"), Value::Array)
         });
         let editor = self.composer.downgrade();
@@ -822,6 +826,8 @@ impl Surface {
 
     /// A searchable house's live model catalog (AcpModelPicker).
     fn load_catalogue(&mut self, house: &str, cx: &mut Context<Self>) {
+        // A provider instance house ("acp@id") shares its runtime's catalogue.
+        let house = house.split('@').next().unwrap_or(house);
         if !LEAD_HOUSES.iter().any(|h| h.0 == house && h.4)
             || self
                 .composer
@@ -883,6 +889,10 @@ impl Surface {
         let mut houses = vec![];
         for &(key, label, runtime, glyph, _) in &LEAD_HOUSES {
             let found = item(runtime);
+            // Settings › Providers off: hidden for new sessions; a lead keeps it.
+            if key != lead && found.as_ref().is_some_and(|i| i["disabled"] == true) {
+                continue;
+            }
             // Claude and Codex always hold the rail, as in the desktop
             // picker; other houses appear once installed.
             let core = matches!(key, "claude" | "codex");
@@ -893,6 +903,11 @@ impl Surface {
                         .as_ref()
                         .map_or(inventory.is_none() || core, |i| i["available"] == true);
                 houses.push((key.to_owned(), label.to_owned(), glyph, true, ready));
+            }
+            // Settings › Providers instances of this runtime: "Codex · work".
+            for (id, name) in crate::shell::settings::providers::instances_of(inventory.as_deref(), runtime) {
+                let ready = found.as_ref().map_or(true, |i| i["available"] == true);
+                houses.push((format!("{key}@{id}"), format!("{label} · {name}"), glyph, true, ready));
             }
         }
         houses
@@ -995,6 +1010,21 @@ impl Surface {
         // (backend, id, label, house) for each model the visible lead houses offer.
         let catalogues = self.composer.read(cx).controls.catalogues.clone();
         let models_of = |key: &str| -> Vec<(String, String, String, String)> {
+            // An instance house lists its runtime's models; picks carry
+            // "backend@instance" so choose_lead binds the thread to it.
+            if let Some((base, instance)) = key.split_once('@') {
+                let base = base.to_owned();
+                return models_of_house(&base, &catalogues)
+                    .into_iter()
+                    .map(|m| (format!("{}@{instance}", m.0), m.1, m.2, key.to_owned()))
+                    .collect();
+            }
+            models_of_house(key, &catalogues)
+        };
+        fn models_of_house(
+            key: &str,
+            catalogues: &std::collections::HashMap<String, Value>,
+        ) -> Vec<(String, String, String, String)> {
             match key {
                 "claude" | "codex" => HOUSES
                     .iter()
@@ -1017,7 +1047,7 @@ impl Surface {
                     })
                     .collect(),
             }
-        };
+        }
         let lead_keys: Vec<String> = houses.iter().filter(|h| h.3).map(|h| h.0.clone()).collect();
         // A query searches every house from any tab, Favorites included:
         // "son" on Favorites found nothing while Sonnet sat one tab away.
@@ -1138,7 +1168,9 @@ impl Surface {
                     ),
             );
         }
-        let loading = catalogues.get(house.as_str()).is_some_and(Value::is_null);
+        let loading = catalogues
+            .get(house.split('@').next().unwrap_or(&house))
+            .is_some_and(Value::is_null);
         if empty {
             let note = if loading {
                 "Loading models…".into()

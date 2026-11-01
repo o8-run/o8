@@ -115,6 +115,8 @@ pub(crate) struct Settings {
     client: Client,
     pub snapshot: Option<Snapshot>,
     pub keys: Option<Inventory>,
+    /// Settings › Providers, owned by the settings surface module.
+    pub providers: Option<gpui::AnyView>,
     section: &'static str,
     search: Entity<Composer>,
     editor: Option<Editor>,
@@ -159,6 +161,7 @@ impl Settings {
             client,
             snapshot: None,
             keys: None,
+            providers: None,
             section: "general",
             search,
             editor: None,

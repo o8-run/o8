@@ -154,6 +154,7 @@ import {
 } from './lib/mobile/orchestrator-thread-history';
 import { OrchestratorThreadProjectError } from './lib/mobile/orchestrator-thread-project';
 import { persistOrchestratorThreadUserMessageFromWire } from './lib/ws-server/orchestrator-thread-send';
+import { disabledRuntimeRefusal } from './lib/providers/disabled-runtimes';
 import { resolveMobileTurnSelection } from './lib/ws-server/mobile-turn-selection';
 import {
   composerBackendSupportsImages,
@@ -5310,6 +5311,12 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
   }
   const requestedBackendId = resolveMsgBackendId(msg);
   const backendId = resolveOrchestratorExecutionBackendId(requestedBackendId, msg.orchestrationMode);
+  const disabledRefusal = disabledRuntimeRefusal({ backend: backendId, threadId });
+  if (disabledRefusal) {
+    send(client, { channel: 'orchestrator', event: 'error', data: { repoPath, threadId,
+      error: disabledRefusal, ...orchestratorCommandAckCorrelation(correlationId) } });
+    return;
+  }
   try {
     assertOrchestratorPermissionMode(backendId, msg.permissionMode);
   } catch (error) {
