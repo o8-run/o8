@@ -2,6 +2,22 @@ use super::prompt_acceptance_tests::*;
 use super::*;
 
 #[gpui::test]
+fn native_composer_dogfood_uppercase_slash_runs_on_enter(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-input", cx);
+    cx.simulate_input("/PROMPTS");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    draw(cx);
+    surface.read_with(cx, |s, cx| {
+        assert_eq!(s.composer.read(cx).controls.open, Some("prompts"));
+        assert!(s.composer.read(cx).text.is_empty());
+        assert!(s.queue["items"].as_array().unwrap().is_empty());
+    });
+}
+
+#[gpui::test]
 fn native_composer_controls_orchestrate_routes_one_fleet_turn_without_changing_the_mode(
     cx: &mut TestAppContext,
 ) {
