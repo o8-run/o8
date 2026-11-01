@@ -61,6 +61,7 @@ impl PullRequests {
                     ("updated", "Updated", None),
                     ("oldest", "Oldest", None),
                     ("newest", "Newest", None),
+                    ("ready", "Merge readiness", None),
                 ],
                 enabled: !self.loading,
             },

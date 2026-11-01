@@ -25,12 +25,14 @@ interface PullStats {
   deletions: number;
   reviewRequests: { nodes: Array<{ requestedReviewer: { login?: string } | null } | null> } | null;
   commits: { nodes: Array<{ commit: { statusCheckRollup: { state: string } | null } }> };
+  reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
+  mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null;
 }
 
 const STATS_QUERY = `query PullRequestListStats($ids: [ID!]!) {
   nodes(ids: $ids) {
     ... on PullRequest {
-      number additions deletions
+      number additions deletions reviewDecision mergeable
       reviewRequests(first: 100) { nodes { requestedReviewer { ... on User { login } } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     }
@@ -83,6 +85,7 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
       headRepoFullName: pull.head.repo?.full_name ?? null,
       url: pull.html_url, labels: pull.labels.map((label) => label.name),
       createdAt: pull.created_at,
+      reviewDecision: summary?.reviewDecision ?? null, mergeable: summary?.mergeable ?? null,
     }; }),
   };
 }

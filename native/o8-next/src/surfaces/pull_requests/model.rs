@@ -242,7 +242,8 @@ impl PullRequests {
         } else {
             self.state.clone()
         };
-        let sort = self.sort.clone();
+        // Merge readiness is ranked here from the updated-order page.
+        let sort = if self.sort == "ready" { "updated".to_string() } else { self.sort.clone() };
         let task = cx.background_executor().spawn(async move {
             let result = client.get::<Value>(
                 "/api/panel/prs",
@@ -285,6 +286,9 @@ impl PullRequests {
                             if !s.rows.iter().any(|r| r["number"] == row["number"]) {
                                 s.rows.push(row);
                             }
+                        }
+                        if s.sort == "ready" {
+                            super::readiness::sort_by_readiness(&mut s.rows);
                         }
                         s.page = page;
                         if let Some((repo, number)) = s.pending.take() {
