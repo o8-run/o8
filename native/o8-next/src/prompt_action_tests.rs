@@ -37,7 +37,10 @@ fn saved(client: &Client, id: &str) -> Value {
         .unwrap()
 }
 
-fn seed(client: &Client, count: usize) -> Session {
+fn seed(client: &Client, count: usize, cx: &mut TestAppContext) -> Session {
+    let fixture: Value = client.get("/api/prompt-action-fixture", &[]).unwrap();
+    let root = std::path::PathBuf::from(fixture["nativeDraftRoot"].as_str().unwrap());
+    cx.update(|cx| cx.set_global(crate::composer::mode_store::TestRoot(root)));
     let session = client
         .sessions()
         .unwrap()
@@ -88,7 +91,7 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
 #[gpui::test]
 fn prompt_toolbar_copies_original_and_exposes_metadata(cx: &mut TestAppContext) {
     let (_host, client) = fixture();
-    let session = seed(&client, 2);
+    let session = seed(&client, 2, cx);
     let saved_client = client.clone();
     let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
     view.update(cx, |s, cx| {
@@ -122,7 +125,7 @@ fn prompt_toolbar_copies_original_and_exposes_metadata(cx: &mut TestAppContext) 
 #[gpui::test]
 fn prompt_toolbar_forks_full_prefix_without_future_context(cx: &mut TestAppContext) {
     let (_host, client) = fixture();
-    let session = seed(&client, 62);
+    let session = seed(&client, 62, cx);
     let original = saved(&client, &session.id);
     let saved_client = client.clone();
     let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
@@ -167,7 +170,7 @@ fn prompt_toolbar_forks_full_prefix_without_future_context(cx: &mut TestAppConte
 #[gpui::test]
 fn prompt_toolbar_rewind_confirms_and_preserves_source_draft(cx: &mut TestAppContext) {
     let (_host, client) = fixture();
-    let session = seed(&client, 3);
+    let session = seed(&client, 3, cx);
     let original = saved(&client, &session.id);
     let saved_client = client.clone();
     let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
@@ -252,7 +255,7 @@ fn configure(client: &Client, body: Value) {
 #[gpui::test]
 fn prompt_toolbar_first_prompt_fork_retries_the_same_saved_identity(cx: &mut TestAppContext) {
     let (_host, client) = fixture();
-    let session = seed(&client, 2);
+    let session = seed(&client, 2, cx);
     configure(&client, json!({"loseNextSave":true}));
     let saved_client = client.clone();
     let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
@@ -312,7 +315,7 @@ fn prompt_toolbar_first_prompt_fork_retries_the_same_saved_identity(cx: &mut Tes
 #[gpui::test]
 fn prompt_toolbar_rewind_restores_media_after_navigation(cx: &mut TestAppContext) {
     let (_host, client) = fixture();
-    let session = seed(&client, 3);
+    let session = seed(&client, 3, cx);
     let image: Value = client.get("/api/prompt-action-fixture", &[]).unwrap();
     let mut record = saved(&client, &session.id);
     record["tabId"] = json!(session.id);
@@ -372,5 +375,164 @@ fn prompt_toolbar_rewind_restores_media_after_navigation(cx: &mut TestAppContext
             .unwrap()
             .len(),
         6
+    );
+}
+
+#[gpui::test]
+fn prompt_continuation_is_ready_when_first_listed(cx: &mut TestAppContext) {
+    let (_host, client) = fixture();
+    let session = seed(&client, 3, cx);
+    configure(&client, json!({"holdNextSave":true}));
+    let saved_client = client.clone();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| {
+        s.sessions = saved_client.sessions().unwrap();
+        s.select(session.id.clone(), cx);
+    });
+    settle(&view, cx, |s, _| s.queue_ready);
+    let destination = format!("thoughts-next-{}", crate::clock::now());
+    let (routing, store) = view.read_with(cx, |s, cx| {
+        (
+            s.composer_routing(cx).unwrap(),
+            crate::composer::mode_store::path(
+                &saved_client.url("/").unwrap().to_string(),
+                &destination,
+                cx,
+            ),
+        )
+    });
+    let (progress, _stages) = async_channel::unbounded();
+    let worker_client = saved_client.clone();
+    let source = session.clone();
+    let worker_id = destination.clone();
+    // GPUI's deterministic test dispatcher polls blocking tasks on this thread.
+    // Real I/O keeps the save pending while the native view opens its listed chat.
+    let worker = std::thread::spawn(move || {
+        crate::ui::prompt_actions::continuation::create(
+            &worker_client,
+            &source,
+            "ask-1",
+            "same **exact** prompt\nnext line",
+            &worker_id,
+            true,
+            &routing,
+            store,
+            progress,
+        )
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let id = loop {
+        if let Some(created) = saved_client
+            .sessions()
+            .unwrap()
+            .into_iter()
+            .find(|s| s.id.starts_with("thoughts-next-"))
+        {
+            break created.id;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    view.update(cx, |s, cx| {
+        s.sessions = saved_client.sessions().unwrap();
+        s.select(id.clone(), cx);
+    });
+    assert!(
+        !worker.is_finished(),
+        "open destination while its create response is still delayed"
+    );
+    view.read_with(cx, |s, cx| {
+        assert_eq!(s.composer.read(cx).text, "same **exact** prompt\nnext line");
+        let prelude = &s.composer.read(cx).controls.prompt.prelude;
+        assert!(prelude.contains("Answer 0"));
+        assert!(!prelude.contains("Answer 1"));
+    });
+    view.update(cx, |s, cx| {
+        s.composer
+            .update(cx, |i, cx| i.set_text("my new draft", cx))
+    });
+    configure(&saved_client, json!({"releaseSave":true}));
+    assert!(worker.join().unwrap().is_ok());
+    view.update(cx, |s, cx| {
+        s.select(session.id.clone(), cx);
+        s.select(id.clone(), cx);
+    });
+    settle(&view, cx, |s, _| s.queue_ready);
+    view.read_with(cx, |s, cx| {
+        assert_eq!(
+            s.composer.read(cx).text,
+            "my new draft",
+            "late success and revisiting must not overwrite an edited draft"
+        )
+    });
+}
+
+#[gpui::test]
+fn prompt_toolbar_archived_retry_preserves_consumed_draft_and_history(cx: &mut TestAppContext) {
+    let (_host, client) = fixture();
+    let session = seed(&client, 2, cx);
+    configure(&client, json!({"loseNextSave":true}));
+    let saved_client = client.clone();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| {
+        s.sessions = saved_client.sessions().unwrap();
+        s.select(session.id.clone(), cx);
+    });
+    settle(&view, cx, |s, _| s.queue_ready);
+    let origin = view.read_with(cx, |s, _| s.composer.clone());
+    show(&view, "ask-1", cx);
+    click(cx, "prompt-rewind-ask-1");
+    click(cx, "prompt-rewind-confirm-ask-1");
+    settle(&view, cx, |_, app| !origin.read(app).controls.busy);
+    let id = saved_client
+        .sessions()
+        .unwrap()
+        .into_iter()
+        .find(|s| s.id.starts_with("thoughts-next-"))
+        .unwrap()
+        .id;
+    view.update(cx, |s, cx| {
+        s.sessions = saved_client.sessions().unwrap();
+        s.select(id.clone(), cx);
+    });
+    settle(&view, cx, |s, _| s.queue_ready);
+    let store = view.read_with(cx, |_, cx| {
+        crate::composer::mode_store::path(&saved_client.url("/").unwrap().to_string(), &id, cx)
+            .unwrap()
+    });
+    let draft_file = store.with_extension("prompt-draft.json");
+    let consumed_draft = std::fs::read(&draft_file).unwrap();
+    let prelude_file = store.with_extension("prelude.json");
+    crate::composer::mode_store::save_prelude(Some(&store), "edited context stays").unwrap();
+    let edited_context = std::fs::read(&prelude_file).unwrap();
+    let url = saved_client.url("/api/v2/chat-history").unwrap();
+    saved_client
+        .request("PATCH", &url)
+        .send_json(json!({
+            "tabId":id,"archivedAt":"2026-11-01T00:00:00Z","title":"Keep archive title",
+        }))
+        .unwrap();
+    let archived = saved(&saved_client, &id);
+    assert!(!saved_client.sessions().unwrap().iter().any(|s| s.id == id));
+    view.update(cx, |s, cx| s.select(session.id.clone(), cx));
+    settle(&view, cx, |s, _| s.queue_ready);
+    show(&view, "ask-1", cx);
+    click(cx, "prompt-rewind-ask-1");
+    click(cx, "prompt-rewind-confirm-ask-1");
+    settle(&view, cx, |_, app| !origin.read(app).controls.busy);
+    assert_eq!(
+        std::fs::read(draft_file).unwrap(),
+        consumed_draft,
+        "retry must not restore a consumed draft in an archived continuation"
+    );
+    assert_eq!(
+        std::fs::read(prelude_file).unwrap(),
+        edited_context,
+        "retry must not replace context in an archived continuation"
+    );
+    assert_eq!(
+        saved(&saved_client, &id),
+        archived,
+        "retry must not POST or rename the archived canonical record"
     );
 }
