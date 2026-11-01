@@ -249,11 +249,23 @@ describe('inbox settlement through operator mutation and native listings', () =>
     } finally { park.mockRestore(); policy.restore(); }
   });
 
-  it.each(['repository-opt-out', 'unfinished-lane'] as const)('keeps the %s guard in settled mode', async guard => {
-    const tabId = await seed(`parking-settled-${guard}`);
+  it.each([['completed', 1], ['reviewing', 0]] as const)('parks a manual settle in settled mode only for finished work (%s)', async (status, calls) => {
+    const tabId = await seed(`parking-settled-manual-${status}`);
+    const f = await parkingCandidate(tabId, status);
+    const policy = parkingPolicy(f, 'settled');
+    policy.volumeSpy.mockImplementation(async target => ({ ...f.observation(target), availableBytes: 900, freeBytes: 900 }));
+    const park = vi.spyOn(workspaceParking, 'parkWorkspace').mockResolvedValue({ status: 'refused', code: 'fixture', note: 'Fixture' } as never);
+    try {
+      expect((await mutateAndDrain(tabId, 'settle')).status).toBe(200);
+      expect(getLane(f.lane.id)!.status).toBe(status);
+      expect(park).toHaveBeenCalledTimes(calls);
+    } finally { park.mockRestore(); policy.restore(); }
+  });
+
+  it('keeps the repository opt-out in settled mode', async () => {
+    const tabId = await seed('parking-settled-opt-out');
     const f = await autoParkingCandidate(tabId, 'released');
-    if (guard === 'repository-opt-out') f.repo.storagePressureParkingDisabled = true;
-    else setLaneStatus(f.lane.id, 'reviewing');
+    f.repo.storagePressureParkingDisabled = true;
     const policy = parkingPolicy(f, 'settled');
     const park = vi.spyOn(workspaceParking, 'parkWorkspace').mockResolvedValue({ status: 'refused', code: 'must_not_run', note: 'Unexpected' } as never);
     try {
