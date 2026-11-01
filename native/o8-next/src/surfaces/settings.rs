@@ -8,6 +8,7 @@ pub(super) type Slice = EmptyState;
 pub(super) struct Runtime {
     pub view: Option<Entity<Settings>>,
     pub subscription: Option<gpui::Subscription>,
+    pub actions: Option<gpui::Subscription>,
 }
 pub(super) const REGISTRATION: Registration = Registration {
     command: Some((6, || Command::Settings)),
@@ -31,6 +32,7 @@ pub(super) const REGISTRATION: Registration = Registration {
     before_tab: |s| {
         s.surfaces.settings.view = None;
         s.surfaces.settings.subscription = None;
+        s.surfaces.settings.actions = None;
     },
     key_down: |s, event, window, cx| {
         let key = event.keystroke.key.as_str();
@@ -69,6 +71,13 @@ impl Shell {
             window,
             |this, _, _: &crate::settings::Close, window, cx| this.close_settings(window, cx),
         ));
+        self.surfaces.settings.actions = Some(cx.subscribe_in(
+            &settings,
+            window,
+            |this, _, action: &crate::settings::Action, window, cx| match action {
+                crate::settings::Action::Appearance(mode) => this.set_appearance(mode, window, cx),
+            },
+        ));
         self.surfaces.settings.view = Some(settings);
         self.revision += 1;
         cx.notify();
@@ -76,6 +85,7 @@ impl Shell {
     fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.surfaces.settings.view = None;
         self.surfaces.settings.subscription = None;
+        self.surfaces.settings.actions = None;
         self.restore_focus(window, cx);
         self.revision += 1;
         cx.notify();

@@ -1,0 +1,60 @@
+//! Settings-only panels use the same shell actions as the native workspace.
+use super::*;
+use crate::theme::{self, current as theme};
+use gpui::{AnyElement, div, prelude::*, px};
+
+impl Settings {
+    pub(super) fn appearance_view(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut choices = div().flex().flex_wrap().gap(px(12.));
+        for (mode, label, description) in [
+            ("light", "Light Solid", "Opaque panels and workspace."),
+            ("dark", "Dark Solid", "Opaque panels and workspace."),
+            ("glass", "All Glass", "Glass across the entire window."),
+        ] {
+            let active = theme::appearance_name() == mode;
+            choices = choices.child(
+                self.button(
+                    format!("setting-appearance-{mode}"),
+                    label.into(),
+                    true,
+                    active,
+                    window,
+                    cx,
+                    move |this, _, cx| {
+                        cx.emit(Action::Appearance(mode));
+                        this.changed(cx);
+                    },
+                )
+                .h_auto()
+                .min_h(px(90.))
+                .w(px(180.))
+                .p(px(16.))
+                .flex_col()
+                .items_start()
+                .gap(px(8.))
+                .border_1()
+                .border_color(if active {
+                    theme().accent
+                } else {
+                    theme().border
+                })
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme().text_muted)
+                        .child(description),
+                ),
+            );
+        }
+        div().flex().flex_col().gap(px(16.))
+            .child(div().text_color(theme().text_muted).child("Theme"))
+            .child(choices)
+            .child(div().text_size(px(11.)).text_color(theme().text_muted)
+                .child("Changes apply immediately and are saved for the next launch. Glass uses the macOS desktop material where supported; other platforms may use solid surfaces."))
+            .into_any_element()
+    }
+}

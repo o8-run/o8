@@ -44,7 +44,7 @@ the existing operator-defaults route unless another owner is named.
 | General / Presentation | Quiet mode; Review notifications, held off during quiet mode | present | present: live classic presentation receipt in existing review tests |
 | General / Privacy | Share usage data; Share crash reports; Automatically upload local crash logs | present | present: preference controls only; reporting/redaction internals skipped |
 | Account / Profile, Session | Profile; sign in; sign out; manage account | missing | skipped: account and authentication reviewer |
-| Appearance / Theme | Light Solid; Dark Solid; All Glass, immediate repaint and persisted selection | missing | missing in Settings (same three choices already exist in native profile menu) |
+| Appearance / Theme | Light Solid; Dark Solid; All Glass, immediate repaint and persisted selection | missing | present: Settings choices reuse the native shell action, repaint/material switch and saved appearance |
 | Voice / Voice shortcuts | Hold/double-tap Fn; Right Option; Ctrl+Z; Right Command; Escape; Cmd+Option+,; external Fn guidance | missing | missing: classic host gestures, do not advertise as native shortcuts |
 | Voice / Symon | Open Symon settings | missing | missing: classic host surface |
 | Voice / Permissions | Accessibility; Input Monitoring; Fn key binding and system settings | missing | skipped: permission/security review |
@@ -74,7 +74,7 @@ the existing operator-defaults route unless another owner is named.
 | Dispatch / Brain advanced | Brain answer model; Brain uses Claude CLI; Pre-warm Brain runtimes; Workers use the Brain | present | present |
 | Dispatch / Task limits & setup | UI loop iterations/minutes/diff bytes/diff files/preview timeout; Workspace manifest execution | present | present |
 | Dispatch / Experimental | o8 next; Canvas mode; Native browser-view | missing | missing: may launch/switch application surfaces |
-| Providers / provider navigation | Installed/configured provider tabs; Show available; tool scan retry | missing | missing |
+| Providers / provider navigation | Installed/configured provider tabs; Show available; tool scan retry | missing | skipped pending security review: inventory response combines account diagnostics and stored TOML; needs a native-safe projection |
 | Providers / each CLI house | Runtime status; Version; Binary path; Model selection guidance; Runtime configuration guidance | missing | partial outside Settings: composer already has house/model selection |
 | Providers / each CLI house | Account status; connection evidence; sign-in; who pays; account usage/limits and dashboard links | missing | skipped: account/authentication/billing review |
 | Providers / Adapter capabilities | Worker actions; Session transforms; Usage support; Account-limit observation support | missing | missing: capability facts only, not account data |
@@ -83,8 +83,8 @@ the existing operator-defaults route unless another owner is named.
 | Providers / Claude connection | Model source; Model; Codex authorization; reconnect/reset/setup | missing | skipped: authentication/carrier setup |
 | Providers / OpenCode models | Show in dispatch pickers; fallback model | missing | missing |
 | Providers / built-in worker | Availability; Managed model; Use in a conversation; Usage/limits guidance; Setup | missing | missing |
-| Providers / Orchestrator | Lead provider; Code review provider | missing | missing |
-| Providers / Workers | Subscription profile; Default worker; one allow switch per runtime; Your Pi setup | missing | missing |
+| Providers / Orchestrator | Lead provider; Code review provider | missing | partial: reviewer control in progress; lead availability needs native-safe inventory |
+| Providers / Workers | Subscription profile; Default worker; one allow switch per runtime; Your Pi setup | missing | partial: subscription profile in progress; discovery/pool/Pi setup need a native-safe inventory projection |
 | Providers / Pi setup | Cache warming: Off/During runs/During and between runs | missing | missing |
 | Providers / Advanced orchestrator options | OpenCode fallback model; Combined answer provider; Existing setup uses Claude | missing | missing |
 | Providers / Advanced worker setup | Codex launch method (Direct/Via Ori) | missing | skipped: credential carrier |
@@ -175,3 +175,5 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 
 - General: `settings_parity_general_groups_and_global_search` failed on the absent Conversations group, then passed (1/1). It clicks the persisted usage switch, filters across pages, clears with the button, and clears with Escape without closing Settings.
 - Baseline: `settings_opens_from_shell_command_palette` passed (1/1).
+
+- Appearance: `settings_parity_appearance_drives_the_running_shell` passed (1/1), clicking Light Solid, Dark Solid and All Glass through Settings and observing the running shell theme. Persistence uses the existing native theme owner.

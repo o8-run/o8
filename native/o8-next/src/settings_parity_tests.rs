@@ -43,3 +43,17 @@ fn settings_parity_general_groups_and_global_search(cx: &mut TestAppContext) {
             .is_some()
     );
 }
+
+#[gpui::test]
+fn settings_parity_appearance_drives_the_running_shell(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut visual, _) = start(cx);
+    let previous = crate::theme::appearance_name();
+    click(&mut visual, "settings-nav-appearance");
+    frame(&shell, &mut visual);
+    for mode in ["light", "dark", "glass", previous] {
+        click(&mut visual, &format!("setting-appearance-{mode}"));
+        frame(&shell, &mut visual);
+        assert_eq!(crate::theme::appearance_name(), mode);
+        assert!(visual.debug_bounds("settings-page").is_some());
+    }
+}

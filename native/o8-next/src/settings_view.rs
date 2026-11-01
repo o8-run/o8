@@ -3,7 +3,7 @@ use crate::{settings_fields::SECTIONS, theme::current as theme};
 use gpui::{AnyElement, Div, KeyDownEvent, Render, Stateful, canvas, div, prelude::*, px};
 
 impl Settings {
-    fn button(
+    pub(super) fn button(
         &mut self,
         id: String,
         label: String,
@@ -580,7 +580,17 @@ impl Render for Settings {
                     .unwrap()
                     .1
             });
-            if fields.is_empty() {
+            let appearance = if query.len() >= 2 {
+                query.split_whitespace().all(|word| {
+                    "appearance theme light dark solid all glass workspace".contains(word)
+                })
+            } else {
+                self.section == "appearance"
+            };
+            if appearance {
+                content = content.child(self.appearance_view(window, cx));
+            }
+            if fields.is_empty() && !appearance {
                 content = content.child(empty("No settings match this search."));
             }
             let mut previous = None;

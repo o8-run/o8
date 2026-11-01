@@ -127,6 +127,7 @@ const EFFORT: &[(&str, &str)] = &[
 ];
 pub const SECTIONS: &[(&str, &str)] = &[
     ("general", "General"),
+    ("appearance", "Appearance"),
     ("dispatch", "Dispatch"),
     ("models", "Models & providers"),
     ("git", "Git & PRs"),

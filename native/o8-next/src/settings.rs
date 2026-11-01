@@ -106,6 +106,10 @@ struct Editor {
     input: Input,
 }
 pub(crate) struct Close;
+pub(crate) enum Action {
+    Appearance(&'static str),
+}
+impl EventEmitter<Action> for Settings {}
 pub(crate) struct Settings {
     client: Client,
     pub snapshot: Option<Snapshot>,
@@ -448,3 +452,6 @@ impl Settings {
 }
 #[path = "settings_view.rs"]
 mod view;
+
+#[path = "settings_panels.rs"]
+mod panels;
