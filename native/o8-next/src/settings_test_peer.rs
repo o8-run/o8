@@ -153,6 +153,14 @@ pub(super) fn wait(
 }
 #[track_caller]
 pub(super) fn click(cx: &mut VisualTestContext, selector: &'static str) {
+    click_mode(cx, selector, true);
+}
+#[track_caller]
+pub(super) fn raw_click(cx: &mut VisualTestContext, selector: &'static str) {
+    click_mode(cx, selector, false);
+}
+#[track_caller]
+fn click_mode(cx: &mut VisualTestContext, selector: &'static str, paint_press: bool) {
     draw(cx);
     for _ in 0..30 {
         let bounds = cx
@@ -166,12 +174,12 @@ pub(super) fn click(cx: &mut VisualTestContext, selector: &'static str) {
             None
         };
         let Some(scroll_selector) = scroll_selector else {
-            cx.simulate_click(bounds.center(), Modifiers::default());
+            press(cx, selector, bounds.center(), paint_press);
             return;
         };
         let viewport = cx.debug_bounds(scroll_selector).unwrap();
         if viewport.contains(&bounds.center()) {
-            cx.simulate_click(bounds.center(), Modifiers::default());
+            press(cx, selector, bounds.center(), paint_press);
             return;
         }
         cx.simulate_event(gpui::ScrollWheelEvent {
@@ -189,4 +197,44 @@ pub(super) fn click(cx: &mut VisualTestContext, selector: &'static str) {
         draw(cx);
     }
     panic!("{selector} must scroll into view");
+}
+
+// Give focus/pressed-state invalidation a frame before releasing the mouse.
+fn press(
+    cx: &mut VisualTestContext,
+    selector: &'static str,
+    position: gpui::Point<gpui::Pixels>,
+    paint_press: bool,
+) {
+    if !paint_press {
+        cx.simulate_click(position, Modifiers::default());
+        return;
+    }
+    cx.simulate_event(gpui::MouseMoveEvent {
+        position,
+        pressed_button: None,
+        modifiers: Modifiers::default(),
+    });
+    draw(cx);
+    cx.simulate_event(gpui::MouseDownEvent {
+        position,
+        button: gpui::MouseButton::Left,
+        modifiers: Modifiers::default(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    draw(cx);
+    if selector == "setting-about-check-updates" {
+        assert_eq!(
+            cx.debug_bounds(selector).unwrap().center(),
+            position,
+            "update check must not move during a press"
+        );
+    }
+    cx.simulate_event(gpui::MouseUpEvent {
+        position,
+        button: gpui::MouseButton::Left,
+        modifiers: Modifiers::default(),
+        click_count: 1,
+    });
 }

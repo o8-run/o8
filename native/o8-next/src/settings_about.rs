@@ -115,6 +115,7 @@ impl Settings {
         let mut content = div()
             .flex()
             .flex_col()
+            .flex_shrink_0()
             .gap(px(16.))
             .child("Version")
             .child(panels::fact(
@@ -162,21 +163,29 @@ impl Settings {
                     |this, _, cx| this.check_update(cx),
                 ),
             );
+        // Keep repeated checks in place as pending, success and error text changes.
+        let mut feedback = div()
+            .min_h(px(64.))
+            .flex_shrink_0()
+            .flex()
+            .flex_col()
+            .gap(px(4.));
         if !self.about_status.is_empty() {
-            content = content.child(
+            feedback = feedback.child(
                 div()
                     .debug_selector(|| "settings-about-update-result".into())
                     .child(self.about_status.clone()),
             );
         }
         if let Some(error) = &self.about_error {
-            content = content.child(
+            feedback = feedback.child(
                 div()
                     .debug_selector(|| "settings-about-error".into())
                     .text_color(theme().danger)
                     .child(error.clone()),
             );
         }
+        content = content.child(feedback);
         content = content.child("Links");
         for (id, label, url) in [
             ("github", "GitHub", "https://github.com/o8-run/o8"),
