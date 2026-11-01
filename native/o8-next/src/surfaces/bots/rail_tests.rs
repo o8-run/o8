@@ -398,8 +398,38 @@ fn bots_missing_native_targets_and_unknown_persisted_ids_are_explicit(cx: &mut T
     assert!(next.debug_bounds("bot-thread-error").is_some());
 }
 
+// Content readiness does not imply that an asynchronous catalog read finished.
+// Pump production maintenance until the requested catalog condition is true.
+fn hydrate_late_catalog(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        cx.run_until_parked();
+        if shell.read_with(cx, |s, _| {
+            s.sessions.iter().any(|v| v.id == "thoughts-bots-late")
+        }) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "late native target must hydrate into the catalog"
+        );
+        shell.update_in(cx, |s, window, cx| s.tick(true, window, cx));
+        draw(cx);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[gpui::test]
 fn bots_restored_native_target_opens_after_catalog_hydration(cx: &mut TestAppContext) {
+    restored_native_target(cx, true);
+}
+
+#[gpui::test]
+fn bots_restored_native_target_opens_when_catalog_finishes_after_home(cx: &mut TestAppContext) {
+    restored_native_target(cx, false);
+}
+
+fn restored_native_target(cx: &mut TestAppContext, hydrate_before_home: bool) {
     let fixture = Fixture::start_mode(false, "--bots --settings");
     let sessions = fixture.client.sidebar_sessions().unwrap();
     let target_workspace = sessions
@@ -444,9 +474,15 @@ fn bots_restored_native_target_opens_after_catalog_hydration(cx: &mut TestAppCon
     });
     settle(&restored, &mut next);
     assert!(restored.read_with(&next, |s, _| s.surfaces.settings.view.is_some()));
-    configure(&fixture, json!({"addNativeThread":true}));
-    restored.update(&mut next, |s, cx| s.load(cx));
-    settle(&restored, &mut next);
+    if hydrate_before_home {
+        configure(&fixture, json!({"addNativeThread":true}));
+        restored.update(&mut next, |s, cx| s.load(cx));
+        hydrate_late_catalog(&restored, &mut next);
+    } else {
+        assert!(!restored.read_with(&next, |s, _| {
+            s.sessions.iter().any(|v| v.id == "thoughts-bots-late")
+        }));
+    }
     assert!(
         restored.read_with(&next, |s, _| s.surfaces.settings.view.is_some()),
         "late targets cannot dismiss Settings"
@@ -456,6 +492,13 @@ fn bots_restored_native_target_opens_after_catalog_hydration(cx: &mut TestAppCon
         Some(Tab::Bot("o8:late".into()))
     );
     click(&mut next, "shell-home");
+    assert!(!restored.read_with(&next, |s, _| s.surfaces.settings.view.is_some()));
+    if !hydrate_before_home {
+        // The target cannot arrive during the Home click: it does not exist yet.
+        configure(&fixture, json!({"addNativeThread":true}));
+        restored.update(&mut next, |s, cx| s.load(cx));
+    }
+    hydrate_late_catalog(&restored, &mut next);
     settle(&restored, &mut next);
     ready(&restored, &mut next);
     assert_eq!(selected(&restored, &next).0, "thoughts-bots-late");
