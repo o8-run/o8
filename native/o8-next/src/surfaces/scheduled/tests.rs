@@ -34,6 +34,14 @@ fn connected_schedules_label_daily_cron_and_intervals() {
         "0 9 * * 1-5"
     );
     assert_eq!(
+        schedule_label(&json!({"kind": "cron", "expr": "0 10 * * 5"})),
+        "Fridays at 10:00 AM"
+    );
+    assert_eq!(
+        schedule_label(&json!({"kind": "cron", "expr": "15 18 29 10 *"})),
+        "Once a year"
+    );
+    assert_eq!(
         schedule_label(&json!({"kind": "every", "everyMs": 7_200_000})),
         "Every 2h"
     );

@@ -1258,6 +1258,33 @@ pub(super) fn schedule_label(schedule: &Value) -> String {
         Some("cron") if schedule["expr"].is_string() => {
             let expr = schedule["expr"].as_str().unwrap();
             let parts: Vec<&str> = expr.split_whitespace().collect();
+            if parts.len() == 5
+                && parts[2..4] == ["*", "*"]
+                && let (Ok(minute), Ok(hour), Ok(day)) = (
+                    parts[0].parse::<u32>(),
+                    parts[1].parse::<u32>(),
+                    parts[4].parse::<usize>(),
+                )
+                && let Some(day) = [
+                    "Sundays",
+                    "Mondays",
+                    "Tuesdays",
+                    "Wednesdays",
+                    "Thursdays",
+                    "Fridays",
+                    "Saturdays",
+                    "Sundays",
+                ]
+                .get(day)
+                && minute < 60
+                && hour < 24
+            {
+                return format!(
+                    "{day} at {}:{minute:02} {}{tz}",
+                    if hour % 12 == 0 { 12 } else { hour % 12 },
+                    if hour < 12 { "AM" } else { "PM" }
+                );
+            }
             let daily = parts.len() == 5 && parts[2..] == ["*", "*", "*"];
             if parts.len() == 5
                 && parts[1..] == ["*", "*", "*", "*"]
@@ -1275,6 +1302,9 @@ pub(super) fn schedule_label(schedule: &Value) -> String {
                     if hour % 12 == 0 { 12 } else { hour % 12 },
                     if hour < 12 { "AM" } else { "PM" }
                 ),
+                _ if parts.len() == 5 && parts[4] == "*" && parts[2] != "*" && parts[3] != "*" => {
+                    "Once a year".into()
+                }
                 _ => format!("{expr}{tz}"),
             }
         }
