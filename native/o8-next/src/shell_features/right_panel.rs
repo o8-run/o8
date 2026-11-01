@@ -11,6 +11,8 @@ mod layout;
 mod notes;
 #[path = "right_panel/resources.rs"]
 mod resources;
+#[path = "right_panel/subagents.rs"]
+mod subagents;
 #[path = "right_panel/side_chat.rs"]
 mod side;
 #[cfg(test)]
@@ -33,8 +35,17 @@ mod subagents_tests;
 // apps/web/src/components/ui/panel-tab-close-button.tsx at
 // 5b4f2aa1532730d4dd51d2cb48a57ff74a0f54eb.
 struct RightPanel;
+pub(super) fn subagent_button(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
+    subagents::summary_button(s, cx)
+}
 register_shell_feature!(RightPanel);
 impl ShellFeature for RightPanel {
+    fn observers(&self) -> &'static [PreferenceObserver] {
+        &[PreferenceObserver {
+            order: 15,
+            install: subagents::watch,
+        }]
+    }
     fn ticks(&self) -> &'static [TickHook] {
         &[TickHook {
             order: 50,
@@ -43,6 +54,7 @@ impl ShellFeature for RightPanel {
                 ensure_side_chat(s, window, cx);
                 move_inbox_tabs(s, window, cx);
                 resources::tick(s, cx);
+                subagents::tick(s, cx);
             },
         }]
     }
@@ -116,6 +128,7 @@ enum Tool {
     Activity,
     SideChat,
     Resources,
+    Subagents,
     Targeting,
     Prs,
     Compare,
@@ -136,7 +149,15 @@ impl Tool {
                 Tool::Spec,
             ],
         ),
-        ("More", &[Tool::Threads, Tool::Activity, Tool::SideChat]),
+        (
+            "More",
+            &[
+                Tool::Subagents,
+                Tool::Threads,
+                Tool::Activity,
+                Tool::SideChat,
+            ],
+        ),
         ("Diagnostics", &[Tool::Resources, Tool::Targeting]),
     ];
     fn tab(self) -> Option<Tab> {
@@ -167,6 +188,7 @@ impl Tool {
             Tool::Activity => "Activity",
             Tool::SideChat => "Side chat",
             Tool::Resources => "Resources",
+            Tool::Subagents => "Subagents",
             Tool::Targeting => "Targeting",
             Tool::Prs => "Pull requests",
             Tool::Compare => "Compare",
@@ -186,6 +208,7 @@ impl Tool {
             Tool::Activity => "Repository history and mission decisions",
             Tool::SideChat => "A separate conversation with its own messages",
             Tool::Resources => "Live session CPU and memory",
+            Tool::Subagents => "Inspect delegated work, progress and agent transcripts",
             Tool::Targeting => "Find code to direct your agents toward",
             Tool::Prs => "Review a pull request",
             Tool::Compare => "Compare candidates",
@@ -205,6 +228,7 @@ impl Tool {
             Tool::Activity => ACTIVITY,
             Tool::SideChat => SIDE_CHAT,
             Tool::Resources => RESOURCES,
+            Tool::Subagents => THREADS,
             Tool::Targeting => TARGETS,
             Tool::Prs => REVIEW,
             Tool::Compare => COLUMNS,
@@ -540,6 +564,9 @@ fn ensure_side_chat(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>)
 }
 
 fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
+    if tool == Tool::Subagents {
+        subagents::prepare(s, cx);
+    }
     if tool == Tool::SideChat {
         side_chat(s, cx);
     }
@@ -602,6 +629,16 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         contextual::ensure_prs(s, window, cx);
     }
     layout::select(s, tool, window, cx);
+    if tool == Tool::Subagents {
+        subagents::focus(s, window, cx);
+    }
+    if tool == Tool::Subagents && f32::from(window.viewport_size().width) < 1180. {
+        let panel = s.features.get::<Panel>();
+        panel.maximized = true;
+        panel.motion.set(true);
+        panel.morph.set(true);
+        s.state.right_panel.visible = true;
+    }
     if let Some(content) = s.content.get(&key) {
         content.focus(tool == Tool::SideChat, window, cx);
     } else if let Some(view) = s
@@ -670,6 +707,7 @@ pub(super) fn open_surface(
         "terminal" => Tool::Terminal,
         "browser" => Tool::Browser,
         "devices" => Tool::Devices,
+        "subagents" => Tool::Subagents,
         "prs" => Tool::Prs,
         "compare" => Tool::Compare,
         _ => return false,

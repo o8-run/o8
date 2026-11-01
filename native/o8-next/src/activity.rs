@@ -36,6 +36,8 @@ pub struct Step {
     #[serde(skip)]
     pub todos: Vec<(String, String)>,
     #[serde(skip)]
+    pub(crate) delegations: Vec<crate::subagents::model::Reference>,
+    #[serde(skip)]
     rollup_kind: RollupKind,
 }
 
@@ -716,6 +718,7 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
         started: tool["startedAt"].as_f64(),
         finished: tool["finishedAt"].as_f64(),
         todos: todos(args),
+        delegations: crate::subagents::model::references(&name, tool),
         status,
         reason,
         group: 0,
@@ -873,6 +876,7 @@ mod tests {
             },
             subject: None,
             parts: vec![],
+            delegations: vec![],
             found: vec![],
             links: vec![],
             batch: None,

@@ -47,6 +47,7 @@ mod theme;
 #[cfg(test)]
 mod theme_tests;
 mod trace;
+mod subagents;
 mod transcript_actions;
 mod transport;
 mod ui;

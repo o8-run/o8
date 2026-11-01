@@ -76,6 +76,7 @@ fn render(
                 .items_center()
                 .gap(px(4.))
                 .mt(px(1.3))
+                .child(super::right_panel::subagent_button(s, cx))
                 .child(super::activity_dock::toggle_button(s, cx))
                 .when(!panel_open, |row| {
                     row.child(super::right_panel::toggle_button(s, false, cx))
@@ -131,7 +132,13 @@ fn render(
                 let edge = super::super::sidebar::width(s) * open;
                 let top = (crate::theme::GEOMETRY.header - 26.) / 2.;
                 row.child(div().w(px(edge.max(FOLDED))).h_full().flex_shrink_0())
-                    .child(div().absolute().left(px(14.)).top(px(top)).child(sidebar_toggle(hidden, cx)))
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(14.))
+                            .top(px(top))
+                            .child(sidebar_toggle(hidden, cx)),
+                    )
                     .child(
                         div()
                             .absolute()

@@ -56,13 +56,13 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         p.split_drag = false;
     }
     if !fresh {
-        if viewport < 1180. && p.motion.is_open() {
+        if viewport < 1180. && p.motion.is_open() && p.selected != Tool::Subagents {
             p.motion.set(false);
             p.morph.set(false);
             p.maximized = false;
             cx.notify();
         }
-        if viewport >= 1180.
+        if (viewport >= 1180. || s.features.get::<Panel>().selected == Tool::Subagents)
             && s.state.right_panel.visible
             && !s.features.get::<Panel>().motion.is_open()
         {
@@ -510,6 +510,7 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
         // The side chat opens once its new conversation is listed.
         Tool::SideChat => side::element(s, cx),
         Tool::Resources => resources::element(s, cx),
+        Tool::Subagents => subagents::element(s, cx),
         tool => s
             .content
             .get(&super::key(s, tool))

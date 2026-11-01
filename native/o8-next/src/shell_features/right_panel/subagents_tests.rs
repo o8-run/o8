@@ -1,7 +1,7 @@
 //! User paths through the shell, retained traces and persisted mission state.
 use super::*;
-use crate::shell::test_support::*;
 use crate::shell::test_support::open;
+use crate::shell::test_support::*;
 
 fn click(v: &mut VisualTestContext, selector: &'static str) {
     draw(v);
@@ -26,7 +26,10 @@ fn wait(s: &Entity<Shell>, v: &mut VisualTestContext, selector: &'static str) {
     }
 }
 fn setup(cx: &mut TestAppContext) -> (Fixture, Entity<Shell>, VisualTestContext) {
-    let f = Fixture::start_mode(false, "--subagents");
+    setup_mode(cx, "--subagents")
+}
+fn setup_mode(cx: &mut TestAppContext, mode: &str) -> (Fixture, Entity<Shell>, VisualTestContext) {
+    let f = Fixture::start_mode(false, mode);
     let state = crate::shell_state::State {
         bounds: [0., 0., 1680., 1050.],
         ..Default::default()
@@ -52,6 +55,12 @@ fn subagents_trace_opens_detail_without_replacing_steps_or_parent(cx: &mut TestA
         (tab, view.clone())
     });
     main.update_in(&mut v, |view, w, cx| view.shell_focus(true, w, cx));
+    let original_steps = main.read_with(&v, |m, _| m.shell_steps().0);
+    assert!(
+        original_steps
+            .iter()
+            .any(|s| s.command.contains("preserved.rs"))
+    );
     v.simulate_input("Keep my parent draft");
     wait(&s, &mut v, "subagent-trace-subagent-calculation");
     click(&mut v, "subagent-trace-subagent-calculation");
@@ -73,6 +82,14 @@ fn subagents_trace_opens_detail_without_replacing_steps_or_parent(cx: &mut TestA
         v.read_from_clipboard().unwrap().text().unwrap(),
         "apple, banana, cherry, mango, pear"
     );
+    click(&mut v, "subagents-close");
+    s.update_in(&mut v, |s, w, cx| s.tick(false, w, cx));
+    assert!(!s.read_with(&v, |s, _| s.state.right_panel.visible));
+    assert_eq!(
+        original_steps,
+        main.read_with(&v, |m, _| m.shell_steps().0),
+        "the inspector must extend the existing trace without replacing its steps"
+    );
     let snapshot: Value = f.client.get("/api/subagents-fixture", &[]).unwrap();
     assert!(
         snapshot["calls"]
@@ -82,6 +99,120 @@ fn subagents_trace_opens_detail_without_replacing_steps_or_parent(cx: &mut TestA
             .all(|c| c.as_str().unwrap().starts_with("GET ")),
         "inspection must not dispatch or steer work"
     );
+}
+
+fn wait_probe(s: &Entity<Shell>, v: &mut VisualTestContext, ready: impl Fn(&Value) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        s.update_in(v, |s, w, cx| s.tick(false, w, cx));
+        v.run_until_parked();
+        draw(v);
+        let data = s.read_with(v, |s, cx| subagents::probe(s, cx));
+        if ready(&data) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Inspector did not settle: {data}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[gpui::test]
+fn subagents_transcript_loads_images_and_retries_earlier_history(cx: &mut TestAppContext) {
+    let (f, s, mut v) = setup(cx);
+    wait(&s, &mut v, "subagent-trace-subagent-calculation");
+    click(&mut v, "subagent-trace-subagent-calculation");
+    wait(&s, &mut v, "subagents-load-older");
+    wait_probe(&s, &mut v, |p| p["readyImages"] == 1);
+    let _: Value = f
+        .client
+        .get("/api/subagents-fixture", &[("mode", "fail-page")])
+        .unwrap();
+    click(&mut v, "subagents-load-older");
+    wait(&s, &mut v, "subagents-retry-history");
+    let _: Value = f
+        .client
+        .get("/api/subagents-fixture", &[("mode", "ready-page")])
+        .unwrap();
+    click(&mut v, "subagents-retry-history");
+    wait_probe(&s, &mut v, |p| {
+        p["rows"].as_u64().is_some_and(|n| n >= 124) && p["detailPending"] == false
+    });
+    assert!(v.debug_bounds("subagents-load-older").is_none());
+    assert_eq!(
+        s.read_with(&v, |s, cx| subagents::probe(s, cx)["readyImages"].clone()),
+        1
+    );
+}
+
+#[gpui::test]
+fn subagents_grid_follows_focused_parent_and_fits_compact_window(cx: &mut TestAppContext) {
+    let (f, s, mut v) = setup(cx);
+    let repo = s.read_with(&v, |s, _| s.state.selected.clone().unwrap());
+    let options = crate::pane_layout::Options {
+        size: 2,
+        workspace: repo,
+        file: f.root.join("subagents.json").with_extension("grid.json"),
+    };
+    options
+        .save(&crate::pane_layout::Layout::new(
+            2,
+            [
+                "llm-chat:thoughts-review".into(),
+                "llm-chat:thoughts-tools".into(),
+            ],
+        ))
+        .unwrap();
+    s.update_in(&mut v, |s, w, cx| s.execute(Command::Grid, w, cx));
+    ready(&s, &mut v);
+    click(&mut v, "header-subagents");
+    wait(&s, &mut v, "subagent-row-subagent-calculation");
+    let grid = s.read_with(&v, |s, _| {
+        let Content::Grid(g) = &s.content[&s.key(&Tab::Grid)] else {
+            panic!("Grid")
+        };
+        g.clone()
+    });
+    grid.update_in(&mut v, |g, w, cx| g.shell_focus(w, cx));
+    v.simulate_keystrokes("ctrl-alt-right");
+    wait(&s, &mut v, "subagent-row-subagent-unrelated");
+    assert!(
+        v.debug_bounds("subagent-row-subagent-calculation")
+            .is_none(),
+        "a focused grid parent must not retain another parent's agents"
+    );
+    v.simulate_resize(gpui::size(px(900.), px(700.)));
+    s.update_in(&mut v, |s, w, cx| s.tick(false, w, cx));
+    draw(&mut v);
+    let bounds = v
+        .debug_bounds("subagents-inspector")
+        .expect("compact inspector remains reachable");
+    assert!(bounds.right() <= px(900.) && bounds.bottom() <= px(700.));
+    click(&mut v, "subagents-close");
+}
+
+#[gpui::test]
+fn subagents_shared_results_keep_held_delivery_in_attention(cx: &mut TestAppContext) {
+    let (f, s, mut v) = setup_mode(cx, "--subagents --subagents-shared");
+    wait(&s, &mut v, "subagent-trace-opencode-owned:subagent-shared");
+    click(&mut v, "subagent-trace-opencode-owned:subagent-shared");
+    wait(
+        &s,
+        &mut v,
+        "subagents-detail-opencode-owned:subagent-shared",
+    );
+    wait_probe(&s, &mut v, |p| p["rows"].as_u64().is_some_and(|n| n > 0));
+    click(&mut v, "subagents-back");
+    wait(&s, &mut v, "subagents-group-done-2");
+    let _: Value = f
+        .client
+        .get("/api/subagents-fixture", &[("mode", "held")])
+        .unwrap();
+    click(&mut v, "subagents-refresh");
+    wait(&s, &mut v, "subagents-group-attention-2");
+    assert!(v.debug_bounds("subagents-group-done-1").is_some());
 }
 
 #[gpui::test]

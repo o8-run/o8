@@ -40,6 +40,8 @@ pub struct RowState {
     cache: Option<Layout>,
     pub(crate) images: crate::ui::images::Cache,
     pub cards: crate::visualizations::Cards,
+    pub(crate) subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
+    pub(crate) subagent_agents: Rc<Vec<crate::subagents::model::Agent>>,
 }
 impl RowState {
     #[cfg(test)]
@@ -71,6 +73,8 @@ impl RowState {
             cache: None,
             images: Default::default(),
             cards: Default::default(),
+            subagents: None,
+            subagent_agents: Default::default(),
         }
     }
     /// A row that changed in place (a tool step finished) keeps its disclosure;

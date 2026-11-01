@@ -18,6 +18,8 @@ mod history;
 pub(crate) mod images;
 #[path = "prompt_actions.rs"]
 mod prompt_actions;
+#[path = "subagents/binding.rs"]
+mod subagent_binding;
 #[path = "session_sidebar.rs"]
 mod session_sidebar;
 #[path = "shell_session.rs"]
@@ -144,6 +146,8 @@ pub(crate) struct Surface {
     action_rows: BTreeSet<usize>,
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
     prompt_actions: prompt_actions::State,
+    subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
+    subagent_observer: Option<gpui::Subscription>,
     /// A fork's new thread, whose carried draft sends once its queue is ready.
     fork_send: Option<String>,
     /// The dictation wave's level history.
@@ -195,6 +199,8 @@ impl Surface {
             action_rows: BTreeSet::new(),
             action_feedback: Default::default(),
             prompt_actions: Default::default(),
+            subagents: None,
+            subagent_observer: None,
             fork_send: None,
             wave: Default::default(),
         }
@@ -353,6 +359,7 @@ impl Surface {
         cx.notify();
         let client = self.client.clone();
         let session = self.sessions.iter().find(|s| s.id == id).cloned();
+        self.bind_subagent_scope(session.as_ref(), cx);
         self.saved_visualizations
             .select(session.as_ref().and_then(|session| {
                 transcript_visualizations::Scope::new(
@@ -482,6 +489,7 @@ impl Surface {
         self.list
             .splice(prefix..old.len() - suffix, states.len() - prefix - suffix);
         self.rows = Rc::new(states);
+        self.attach_subagents(cx);
         self.load_images(cx);
         if initial {
             self.list = self.list.clone().measure_all();
@@ -519,6 +527,11 @@ impl Surface {
         }
     }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.embedded {
+            if let Some(view) = self.subagents.clone() {
+                view.update(cx, |v, cx| v.tick(false, cx));
+            }
+        }
         self.prompt_clock(cx);
         self.poll_saved_visualizations(cx);
         let mut visualizations_changed = false;
@@ -844,7 +857,22 @@ impl Render for Surface {
                                     .child(self.composer_panel(window, cx)),
                             ),
                     )
-                    .child(self.brain_panel(px(right_width), cx)),
+                    .child(self.brain_panel(px(right_width), cx))
+                    .when(!self.embedded, |row| {
+                        row.when_some(
+                            self.subagents.as_ref().filter(|v| v.read(cx).open).cloned(),
+                            |row, view| {
+                                row.child(
+                                    div()
+                                        .w(px(420.))
+                                        .max_w(gpui::relative(0.6))
+                                        .h_full()
+                                        .flex_shrink_0()
+                                        .child(view),
+                                )
+                            },
+                        )
+                    }),
             )
             .child(transcript_visualizations::Visible(
                 self.saved_visualizations.visible.clone(),
