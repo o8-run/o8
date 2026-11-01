@@ -658,7 +658,7 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn transcript_issue_links_open_beside_the_chat(cx: &mut TestAppContext) {
+fn each_clicked_issue_gets_its_own_panel_tab(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let state = State {
         selected: fixture.folders.first().cloned(),
@@ -672,17 +672,20 @@ fn transcript_issue_links_open_beside_the_chat(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     cx.run_until_parked();
-    shell.update_in(cx, |s, window, cx| {
-        s.open_transcript_link("https://github.com/o8-run/o8/issues/7", window, cx)
-    });
-    cx.run_until_parked();
-    assert!(shell.read_with(cx, |s, _| {
-        s.panel_shows(|key| matches!(s.content.get(key), Some(Content::Issues(_))))
-    }));
+    for url in [
+        "https://github.com/o8-run/o8/issues/7",
+        "https://github.com/o8-run/o8/issues/8",
+        "https://github.com/o8-run/o8/issues/7",
+    ] {
+        shell.update_in(cx, |s, window, cx| s.open_transcript_link(url, window, cx));
+        cx.run_until_parked();
+    }
+    draw(cx);
+    assert!(cx.debug_bounds("panel-issue-tab-7").is_some());
+    assert!(cx.debug_bounds("panel-issue-tab-8").is_some());
+    assert!(cx.debug_bounds("issue-new").is_none(), "only the issue shows");
     assert!(
-        shell.read_with(cx, |s, _| s
-            .active()
-            .is_none_or(|tab| tab.label() != "Issues")),
+        shell.read_with(cx, |s, _| s.active().is_none_or(|tab| tab.label() != "Issues")),
         "the issue stays out of the workspace"
     );
 }

@@ -430,6 +430,7 @@ impl Render for Issues {
         let revision = self.revision;
         let painted = self.painted.clone();
         let content = match self.mode {
+            _ if self.single => self.detail_view(cx),
             Mode::List => self.list_view(cx),
             Mode::Detail => self.detail_view(cx),
             Mode::Create => self.create_view(cx),
@@ -452,15 +453,15 @@ impl Render for Issues {
             .text_size(px(13.))
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key))
-            .child(
-                div()
-                    .flex()
-                    .gap(px(8.))
-                    .flex_wrap()
-                    .p(px(8.))
-                    .child("Issues")
-                    .children(self.repos.iter().enumerate().filter(|_| !self.compact).map(
-                        |(index, repo)| {
+            .when(!self.single, |v| {
+                v.child(
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .flex_wrap()
+                        .p(px(8.))
+                        .child("Issues")
+                        .children(self.repos.iter().enumerate().map(|(index, repo)| {
                             self.control(
                                 format!("issue-repo-{index}"),
                                 repo.slug().unwrap_or_default(),
@@ -477,40 +478,40 @@ impl Render for Issues {
                                     s.select_repo(index, cx);
                                 }),
                             )
-                        },
-                    ))
-                    .child(self.control("issue-new", "New issue").on_click(cx.listener(
-                        |s, _, _, cx| {
-                            if !s.busy {
-                                s.mode = Mode::Create;
-                                s.created = None;
-                                s.error.clear();
-                                s.changed(cx);
-                            }
-                        },
-                    )))
-                    .child(
-                        self.control("issue-back", "Issue list")
-                            .on_click(cx.listener(|s, _, _, cx| {
-                                s.mode = Mode::List;
-                                s.changed(cx);
-                            })),
-                    )
-                    .child(self.control("issue-retry", "Retry").on_click(cx.listener(
-                        |s, _, _, cx| {
-                            if s.repos.is_empty() {
-                                s.load_repos(cx);
-                            } else {
-                                let action = if s.mode == Mode::Detail {
-                                    s.detail_number.map(Action::Detail).unwrap_or(Action::List)
+                        }))
+                        .child(self.control("issue-new", "New issue").on_click(cx.listener(
+                            |s, _, _, cx| {
+                                if !s.busy {
+                                    s.mode = Mode::Create;
+                                    s.created = None;
+                                    s.error.clear();
+                                    s.changed(cx);
+                                }
+                            },
+                        )))
+                        .child(
+                            self.control("issue-back", "Issue list")
+                                .on_click(cx.listener(|s, _, _, cx| {
+                                    s.mode = Mode::List;
+                                    s.changed(cx);
+                                })),
+                        )
+                        .child(self.control("issue-retry", "Retry").on_click(cx.listener(
+                            |s, _, _, cx| {
+                                if s.repos.is_empty() {
+                                    s.load_repos(cx);
                                 } else {
-                                    Action::List
-                                };
-                                s.request(action, cx);
-                            }
-                        },
-                    ))),
-            )
+                                    let action = if s.mode == Mode::Detail {
+                                        s.detail_number.map(Action::Detail).unwrap_or(Action::List)
+                                    } else {
+                                        Action::List
+                                    };
+                                    s.request(action, cx);
+                                }
+                            },
+                        ))),
+                )
+            })
             .when(self.busy, |v| {
                 v.child(
                     div()
@@ -546,6 +547,22 @@ impl Render for Issues {
                         )),
                 )
             })
+            .when(self.single && !self.busy && !self.error.is_empty(), |v| {
+                v.child(
+                    div()
+                        .px(px(8.))
+                        .child(
+                            self.control("issue-retry", "Try again")
+                                .on_click(cx.listener(|s, _, _, cx| {
+                                    if s.repos.is_empty() {
+                                        s.load_repos(cx);
+                                    } else if let Some(number) = s.detail_number {
+                                        s.request(Action::Detail(number), cx);
+                                    }
+                                })),
+                        ),
+                )
+            })
             .when(self.repos.is_empty() && !self.busy, |v| {
                 v.child("No repos available")
             })
@@ -558,69 +575,73 @@ impl Render for Issues {
                     .p(px(12.))
                     .child(content),
             )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(8.))
-                    .p(px(8.))
-                    .child(
-                        div()
-                            .debug_selector({
-                                let id = self
-                                    .linked
-                                    .as_ref()
-                                    .map(|i| format!("issue-linked-{}", i.issue.number))
-                                    .unwrap_or("issue-unlinked".into());
-                                move || id.clone()
-                            })
-                            .child(
-                                self.marker(
-                                    self.linked
+            .when(!self.single, |v| {
+                v.child(
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .p(px(8.))
+                        .child(
+                            div()
+                                .debug_selector({
+                                    let id = self
+                                        .linked
                                         .as_ref()
                                         .map(|i| format!("issue-linked-{}", i.issue.number))
-                                        .unwrap_or("issue-unlinked".into()),
+                                        .unwrap_or("issue-unlinked".into());
+                                    move || id.clone()
+                                })
+                                .child(
+                                    self.marker(
+                                        self.linked
+                                            .as_ref()
+                                            .map(|i| format!("issue-linked-{}", i.issue.number))
+                                            .unwrap_or("issue-unlinked".into()),
+                                    ),
+                                )
+                                .child(
+                                    self.linked
+                                        .as_ref()
+                                        .map(|i| {
+                                            format!("Linked to #{} in {}", i.issue.number, i.repo)
+                                        })
+                                        .unwrap_or("No issue linked yet.".into()),
                                 ),
+                        )
+                        .when(self.linked.is_some(), |v| {
+                            v.child(self.control("issue-open-linked", "Open issue").on_click(
+                                cx.listener(|s, _, _, cx| {
+                                    if let Some(i) = &s.linked {
+                                        s.open_url(&i.issue.url, cx);
+                                    }
+                                }),
+                            ))
+                            .child(
+                                self.control("issue-clear", "Clear link")
+                                    .on_click(cx.listener(|s, _, _, cx| {
+                                        s.linked = None;
+                                        if let Some(worker) = &s.worker {
+                                            worker.update(cx, |s, cx| s.shell_link_issue(None, cx));
+                                        }
+                                        s.changed(cx);
+                                    })),
                             )
                             .child(
-                                self.linked
-                                    .as_ref()
-                                    .map(|i| format!("Linked to #{} in {}", i.issue.number, i.repo))
-                                    .unwrap_or("No issue linked yet.".into()),
-                            ),
-                    )
-                    .when(self.linked.is_some(), |v| {
-                        v.child(self.control("issue-open-linked", "Open issue").on_click(
-                            cx.listener(|s, _, _, cx| {
-                                if let Some(i) = &s.linked {
-                                    s.open_url(&i.issue.url, cx);
-                                }
-                            }),
-                        ))
-                        .child(
-                            self.control("issue-clear", "Clear link")
-                                .on_click(cx.listener(|s, _, _, cx| {
-                                    s.linked = None;
-                                    if let Some(worker) = &s.worker {
-                                        worker.update(cx, |s, cx| s.shell_link_issue(None, cx));
-                                    }
-                                    s.changed(cx);
-                                })),
-                        )
-                        .child(
-                            self.control("issue-task-composer", "Task composer")
-                                .on_click(cx.listener(|s, _, window, cx| {
-                                    s.ensure_worker(window, cx);
-                                    if s.worker.is_some() {
-                                        s.mode = Mode::Worker;
-                                    } else {
-                                        s.error =
-                                            "No workspace worker session is available.".into();
-                                    }
-                                    s.changed(cx);
-                                })),
-                        )
-                    }),
-            )
+                                self.control("issue-task-composer", "Task composer")
+                                    .on_click(cx.listener(|s, _, window, cx| {
+                                        s.ensure_worker(window, cx);
+                                        if s.worker.is_some() {
+                                            s.mode = Mode::Worker;
+                                        } else {
+                                            s.error =
+                                                "No workspace worker session is available.".into();
+                                        }
+                                        s.changed(cx);
+                                    })),
+                            )
+                        }),
+                )
+            })
             .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
     }
 }

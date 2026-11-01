@@ -156,7 +156,6 @@ impl Tool {
                 Tool::Subagents,
                 Tool::Threads,
                 Tool::Activity,
-                Tool::Issues,
                 Tool::SideChat,
             ],
         ),
@@ -168,7 +167,6 @@ impl Tool {
             Tool::Terminal => Some(Tab::Terminal),
             Tool::Review => Some(Tab::Diff),
             Tool::Activity => Some(Tab::Activity),
-            Tool::Issues => Some(Tab::Issues),
 
             _ => None,
         }
@@ -380,7 +378,7 @@ impl Shell {
         self.features.get::<Panel>().menu_lower = false;
     }
     /// Opens one pull request in the panel's PR tabs, as classic's PRs list does.
-    /// Opens one issue in the right panel, as classic's Canvas issue tab did.
+    /// Opens one issue in its own right panel tab, as classic's Canvas did.
     /// Without a repository it reads from the workspace's.
     pub(crate) fn open_issue_in_panel(
         &mut self,
@@ -389,16 +387,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        show(self, Tool::Issues, window, cx);
-        if let Some(Content::Issues(view)) = self.content.get(&key(self, Tool::Issues)) {
-            view.update(cx, |view, cx| {
-                view.compact = true;
-                match &repo {
-                    Some(repo) => view.open(repo, number, cx),
-                    None => view.open_here(number, cx),
-                }
-            });
-        }
+        contextual::open_issue(self, repo.unwrap_or_default(), number, window, cx);
     }
     pub(crate) fn open_pr_in_panel(
         &mut self,
@@ -727,7 +716,6 @@ pub(super) fn open_surface(
     let tool = match surface {
         "inbox" => Tool::Inbox,
         "activity" => Tool::Activity,
-        "issues" => Tool::Issues,
         "review" => Tool::Review,
         "o8md" => Tool::Spec,
         "workspace" | "files" => Tool::Files,

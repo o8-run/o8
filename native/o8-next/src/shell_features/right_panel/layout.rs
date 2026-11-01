@@ -13,7 +13,7 @@ impl Tool {
     pub(super) fn utility(self) -> bool {
         !matches!(
             self,
-            Self::Launcher | Self::Browser | Self::Prs | Self::Compare
+            Self::Launcher | Self::Browser | Self::Prs | Self::Issues | Self::Compare
         )
     }
 }
@@ -488,7 +488,7 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
     if s.state.selected.is_none()
         && matches!(
             tool,
-            Tool::Files | Tool::Review | Tool::Activity | Tool::Prs | Tool::Terminal
+            Tool::Files | Tool::Review | Tool::Activity | Tool::Prs | Tool::Issues | Tool::Terminal
         )
     {
         return div()
@@ -513,6 +513,7 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
         Tool::Devices => super::super::devices::element(s, cx),
         Tool::Compare => contextual::comparison(s, cx),
         Tool::Prs => contextual::pr(s, cx),
+        Tool::Issues => contextual::issue(s, cx),
         tool if !tool.ready() => placeholder(tool).into_any_element(),
         // The side chat opens once its new conversation is listed.
         Tool::SideChat => side::element(s, cx),

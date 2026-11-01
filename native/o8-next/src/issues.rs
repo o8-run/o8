@@ -146,8 +146,8 @@ pub struct Issues {
     detail: Option<Issue>,
     detail_number: Option<u64>,
     opening_here: Option<u64>,
-    /// Beside the chat there is one repository in view and no room for chips.
-    pub compact: bool,
+    /// One issue beside the chat: no list, repository chips or link strip.
+    single: bool,
     linked: Option<LinkedIssue>,
     mode: Mode,
     title: Entity<Composer>,
@@ -206,7 +206,7 @@ impl Issues {
             detail: None,
             detail_number: None,
             opening_here: None,
-            compact: false,
+            single: false,
             linked: None,
             mode: Mode::List,
             title,
@@ -281,6 +281,25 @@ impl Issues {
             self.opening = None;
             self.request(Action::Detail(number), cx);
         }
+    }
+    /// A view of just one issue, for a right panel tab.
+    pub fn single(
+        client: Client,
+        workspace: Option<String>,
+        (repo, number): (String, u64),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut this = Self::new(client, workspace, window, cx);
+        this.single = true;
+        this.mode = Mode::Detail;
+        this.detail_number = Some(number);
+        if repo.is_empty() {
+            this.open_here(number, cx);
+        } else {
+            this.open(&repo, number, cx);
+        }
+        this
     }
     /// Opens a bare `#123` from the repository this view is on.
     pub fn open_here(&mut self, number: u64, cx: &mut Context<Self>) {

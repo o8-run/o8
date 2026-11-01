@@ -327,6 +327,7 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
             .items_center()
             .gap(px(4.))
             .children(p.tabs.iter().map(|t| tool_tab(s, *t, cx)))
+            .children(contextual::issue_tabs(s, cx))
             .when(selected == Tool::Launcher, |v| {
                 v.child(
                     button(s, "panel-tab", "New tab", cx, |s, w, cx| {
