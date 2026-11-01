@@ -137,7 +137,15 @@ pub fn inline(text: &str) -> Vec<Run> {
         } else if c.get(12).is_some() {
             (link.as_str(), m.as_str())
         } else if c.get(6).is_some() {
-            ("strong", &c[6])
+            // Links and issue numbers keep working inside bold text.
+            runs.extend(inline(&c[6]).into_iter().map(|mut run| {
+                if run.style == "text" {
+                    run.style = "strong".into();
+                }
+                run
+            }));
+            cursor = m.end();
+            continue;
         } else if c.get(7).is_some() {
             ("em", &c[7])
         } else if c.get(8).is_some() {
@@ -331,6 +339,19 @@ mod link_tests {
                 "the bug".to_owned()
             )]
         );
+    }
+    #[test]
+    fn links_survive_bold_text() {
+        assert_eq!(
+            links("**[#5242: search](https://github.com/o8-run/o8/issues/5242)**"),
+            [(
+                "link:https://github.com/o8-run/o8/issues/5242".to_owned(),
+                "#5242: search".to_owned()
+            )]
+        );
+        assert_eq!(links("**#2952 and #5095**").len(), 2);
+        let runs = inline("**#2952 and #5095**");
+        assert_eq!(runs[1].style, "strong");
     }
     #[test]
     fn short_numbers_and_anchors_stay_plain() {

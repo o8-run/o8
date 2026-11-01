@@ -146,6 +146,8 @@ pub struct Issues {
     detail: Option<Issue>,
     detail_number: Option<u64>,
     opening_here: Option<u64>,
+    /// Beside the chat there is one repository in view and no room for chips.
+    pub compact: bool,
     linked: Option<LinkedIssue>,
     mode: Mode,
     title: Entity<Composer>,
@@ -204,6 +206,7 @@ impl Issues {
             detail: None,
             detail_number: None,
             opening_here: None,
+            compact: false,
             linked: None,
             mode: Mode::List,
             title,

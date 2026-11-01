@@ -391,9 +391,12 @@ impl Shell {
     ) {
         show(self, Tool::Issues, window, cx);
         if let Some(Content::Issues(view)) = self.content.get(&key(self, Tool::Issues)) {
-            view.update(cx, |view, cx| match &repo {
-                Some(repo) => view.open(repo, number, cx),
-                None => view.open_here(number, cx),
+            view.update(cx, |view, cx| {
+                view.compact = true;
+                match &repo {
+                    Some(repo) => view.open(repo, number, cx),
+                    None => view.open_here(number, cx),
+                }
             });
         }
     }

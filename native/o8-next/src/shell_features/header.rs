@@ -178,10 +178,10 @@ fn render(
 fn edge_mark() -> gpui::Div {
     div()
         .absolute()
-        .top(px(9.))
-        .bottom(px(9.))
+        .top(px(8.))
+        .bottom(px(8.))
         .w(px(1.))
-        .bg(theme().border)
+        .bg(theme().text_faint)
 }
 
 /// SidebarTogglePill: 14px panel glyph, orange while the sidebar is pinned open.

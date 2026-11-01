@@ -459,24 +459,26 @@ impl Render for Issues {
                     .flex_wrap()
                     .p(px(8.))
                     .child("Issues")
-                    .children(self.repos.iter().enumerate().map(|(index, repo)| {
-                        self.control(
-                            format!("issue-repo-{index}"),
-                            repo.slug().unwrap_or_default(),
-                        )
-                        .bg(if index == self.selected {
-                            theme().selection
-                        } else {
-                            theme().surface_raised
-                        })
-                        .on_mouse_down(
-                            gpui::MouseButton::Left,
-                            cx.listener(move |s, _, window, cx| {
-                                window.prevent_default();
-                                s.select_repo(index, cx);
-                            }),
-                        )
-                    }))
+                    .children(self.repos.iter().enumerate().filter(|_| !self.compact).map(
+                        |(index, repo)| {
+                            self.control(
+                                format!("issue-repo-{index}"),
+                                repo.slug().unwrap_or_default(),
+                            )
+                            .bg(if index == self.selected {
+                                theme().selection
+                            } else {
+                                theme().surface_raised
+                            })
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                cx.listener(move |s, _, window, cx| {
+                                    window.prevent_default();
+                                    s.select_repo(index, cx);
+                                }),
+                            )
+                        },
+                    ))
                     .child(self.control("issue-new", "New issue").on_click(cx.listener(
                         |s, _, _, cx| {
                             if !s.busy {

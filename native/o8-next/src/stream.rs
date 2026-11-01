@@ -448,6 +448,13 @@ impl Transcript {
         let overlaps = entries
             .iter()
             .any(|entry| self.entries.iter().any(|current| current.id == entry.id));
+        // A send's echo can arrive as a one-turn window: one that is shorter and
+        // shares nothing with this chat extends it rather than wiping it.
+        if !overlaps && !entries.is_empty() && entries.len() < self.entries.len() {
+            let mut next = self.entries.clone();
+            next.extend(entries);
+            return self.merge(next, true);
+        }
         if replace && !overlaps {
             self.backfilled = false;
             self.page = None;
@@ -572,6 +579,28 @@ mod tests {
     }
 
     #[test]
+    fn a_one_turn_replace_keeps_the_chat_it_arrives_in() {
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:window","transcript":[
+                    {"id":"a","role":"user","text":"One","timestamp":1},
+                    {"id":"b","role":"assistant","text":"Two","timestamp":2}
+                ]}),
+            )
+            .unwrap(),
+        );
+        let snapshot = |entries: Value| serde_json::json!({"sessionKey":"llm-chat:window","replace":true,"entries":entries});
+        assert!(transcript.history(&snapshot(serde_json::json!([
+            {"id":"c","role":"user","text":"Three","timestamp":3}
+        ]))));
+        assert_eq!(transcript.rows.len(), 3, "the send joins the chat");
+        // A window that overlaps still rules, so a shortened chat stays short.
+        assert!(transcript.history(&snapshot(serde_json::json!([
+            {"id":"a","role":"user","text":"One","timestamp":1}
+        ]))));
+        assert_eq!(transcript.rows.len(), 1);
+    }
+    #[test]
     fn a_working_row_stays_under_every_message_of_the_turn() {
         let mut transcript = Transcript::new(
             serde_json::from_value(
@@ -584,15 +613,21 @@ mod tests {
             data["assistantMessageId"] = "reply".into();
             serde_json::json!({"channel":"orchestrator","event":event,"seq":seq,"data":data})
         };
-        let live_last = |transcript: &Transcript| {
-            matches!(transcript.rows.last(), Some(Row::Activity { trace, .. }) if trace.live)
-        };
+        let live_last = |transcript: &Transcript| matches!(transcript.rows.last(), Some(Row::Activity { trace, .. }) if trace.live);
         transcript.apply(&frame(1, "status", serde_json::json!({"status":"busy"})));
         assert!(live_last(&transcript), "shows before the first word");
         transcript.apply(&frame(2, "output", serde_json::json!({"text":"First"})));
         assert!(live_last(&transcript), "stays under the reply");
-        transcript.apply(&frame(3, "tool-use", serde_json::json!({"toolUseId":"t","name":"Read"})));
-        transcript.apply(&frame(4, "tool-result", serde_json::json!({"toolUseId":"t","status":"ok"})));
+        transcript.apply(&frame(
+            3,
+            "tool-use",
+            serde_json::json!({"toolUseId":"t","name":"Read"}),
+        ));
+        transcript.apply(&frame(
+            4,
+            "tool-result",
+            serde_json::json!({"toolUseId":"t","status":"ok"}),
+        ));
         transcript.apply(&frame(5, "output", serde_json::json!({"text":"Second"})));
         assert!(live_last(&transcript), "stays under the next message");
         let live = transcript
