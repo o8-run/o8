@@ -548,10 +548,14 @@ impl Surface {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
+        let rise = self.composer.read(cx).rise(window);
         div()
             .w_full()
             .max_w(px(crate::theme::GEOMETRY.composer_width))
             .mx_auto()
+            // A growing draft lifts the card over the transcript rather than
+            // shrinking it, so the transcript region is reused while typing.
+            .mt(px(-rise))
             .flex()
             .flex_col()
             .child(self.composer_card(window, cx))
