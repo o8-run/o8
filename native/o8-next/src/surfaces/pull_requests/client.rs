@@ -8,7 +8,7 @@ impl Client {
         url.query_pairs_mut().append_pair("packetId", packet);
         let (value, refused): (Value, bool) = match crate::client::get_with_retry(|| {
             self.request("GET", &url)
-                .timeout(crate::client::LOAD_REQUEST_TIMEOUT)
+                .timeout(crate::client::load_timeout())
                 .call()
         }) {
             Ok(response) => (Self::read(response)?, false),

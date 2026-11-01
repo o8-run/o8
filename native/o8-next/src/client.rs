@@ -29,7 +29,7 @@ impl Drop for ShortLoadTimeout {
         SHORT_LOAD_TIMEOUT.set(false);
     }
 }
-fn load_timeout() -> Duration {
+pub(crate) fn load_timeout() -> Duration {
     #[cfg(test)]
     if SHORT_LOAD_TIMEOUT.get() {
         return Duration::from_secs(2);

@@ -191,6 +191,16 @@ impl Issues {
         id: impl Into<String>,
         label: impl Into<String>,
     ) -> gpui::Stateful<gpui::Div> {
+        self.bare_control(id, label)
+            .bg(theme().surface_raised)
+            .hover(|style| style.bg(theme().hover))
+    }
+    /// A control that brings its own surface and hover.
+    fn bare_control(
+        &self,
+        id: impl Into<String>,
+        label: impl Into<String>,
+    ) -> gpui::Stateful<gpui::Div> {
         let id = id.into();
         div()
             .id(gpui::SharedString::from(id.clone()))
@@ -205,8 +215,6 @@ impl Issues {
             .px(px(10.))
             .py(px(6.))
             .rounded(px(6.))
-            .bg(theme().surface_raised)
-            .hover(|style| style.bg(theme().hover))
             .child(label.into())
             .child(self.marker(id))
     }
@@ -403,15 +411,13 @@ impl Issues {
                     .gap(px(10.))
                     .text_size(px(12.))
                     .child(
-                        self.control(
+                        self.bare_control(
                             "issue-github",
                             format!("{} #{number} ↗", self.slug().unwrap_or_default()),
                         )
                             .px(px(0.))
                             .py(px(0.))
-                            .bg(gpui::transparent_black())
                             .text_color(theme().text_muted)
-                            .hover(|style| style.bg(gpui::transparent_black()))
                             .on_click(cx.listener(move |s, _, _, cx| {
                                 if let Some(issue) = &s.detail {
                                     s.open_url(&issue.url, cx);
@@ -430,7 +436,7 @@ impl Issues {
                     .child(div().flex_1())
                     .when(!repository.missing(), |v| {
                         v.child(
-                            self.control("issue-work", "Work on issue")
+                            self.bare_control("issue-work", "Work on issue")
                                 .bg(theme().accent)
                                 .text_color(crate::theme::on_accent())
                                 .hover(|style| style.opacity(0.9))

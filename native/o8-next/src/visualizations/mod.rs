@@ -5,7 +5,7 @@ mod load_tests;
 pub mod macos;
 pub mod protocol;
 pub mod transcript;
-use crate::client::{Client, LOAD_REQUEST_TIMEOUT};
+use crate::client::{Client, load_timeout};
 use protocol::{Message, Reference, UNAVAILABLE, valid_state};
 use serde_json::{Value, json};
 use std::{
@@ -269,7 +269,7 @@ fn document(client: &Client, reference: &Reference, nonce: &str) -> Result<Strin
     url.query_pairs_mut().append_pair("nativeNonce", nonce);
     let response = match client
         .request("GET", &url)
-        .timeout(LOAD_REQUEST_TIMEOUT)
+        .timeout(load_timeout())
         .call()
     {
         Ok(response) => response,
