@@ -42,6 +42,32 @@ pub(crate) fn save_prelude(path: Option<&Path>, text: &str) -> Result<(), String
     save(path.as_deref(), text)
         .map_err(|_| "Queued context could not be saved for the next launch.".into())
 }
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct PromptDraft {
+    pub text: String,
+    pub images: Vec<serde_json::Value>,
+}
+pub(crate) fn save_prompt_draft(path: Option<&Path>, draft: &PromptDraft) -> Result<(), String> {
+    let path = path.map(|p| p.with_extension("prompt-draft.json"));
+    let text = serde_json::to_string(draft).map_err(|e| e.to_string())?;
+    if serde_json::to_vec(&text).map_err(|e| e.to_string())?.len() > 32 * 1024 * 1024 {
+        return Err("The restored prompt exceeds the native draft limit.".into());
+    }
+    save(path.as_deref(), &text).map_err(|_| "The restored prompt could not be saved.".into())
+}
+pub(crate) fn take_prompt_draft(path: Option<&Path>) -> Result<Option<PromptDraft>, String> {
+    let path = path.map(|p| p.with_extension("prompt-draft.json"));
+    let Some(text) = load_text(path.as_deref(), 32 * 1024 * 1024).filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    let draft = serde_json::from_str(&text)
+        .map_err(|_| "The saved continuation draft could not be opened.".to_owned())?;
+    // Consume once. Returning to an already edited conversation never restores over its new draft.
+    save(path.as_deref(), "")
+        .map_err(|_| "The restored prompt could not be marked as opened.".to_owned())?;
+    Ok(Some(draft))
+}
 pub(crate) fn save(path: Option<&Path>, mode: &str) -> Result<(), String> {
     let Some(path) = path else {
         return Ok(());

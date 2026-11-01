@@ -122,6 +122,9 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
 #[path = "worker_tests.rs"]
 mod worker_tests;
 
+#[path = "prompt_action_tests.rs"]
+mod prompt_action_tests;
+
 #[gpui::test]
 fn session_chrome_uses_layout_instead_of_role_labels(cx: &mut TestAppContext) {
     let (_server, client) = fixture();
