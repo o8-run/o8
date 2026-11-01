@@ -1,0 +1,149 @@
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { NextRequest } from 'next/server';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+
+const auth = vi.hoisted(() => ({ denied: false }));
+vi.mock('@/lib/panel/auth', () => ({
+  requirePanelAuth: () => auth.denied ? Response.json({ error: 'Unauthorized' }, { status: 401 }) : null,
+}));
+const dirs = vi.hoisted(() => ({ data: '' }));
+vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => dirs.data }));
+
+import { GET } from './route';
+import { GET as THREAD } from './[id]/thread/route';
+
+const AGENT = 'bf4d168a-f3a4-4625-9603-d43837e19abd';
+let root: string;
+
+beforeEach(() => {
+  auth.denied = false;
+  root = mkdtempSync(join(tmpdir(), 'o8-bots-route-'));
+  dirs.data = join(root, 'data');
+  mkdirSync(join(root, 'agents', AGENT), { recursive: true });
+  writeFileSync(join(root, 'agents', AGENT, 'profile.json'), JSON.stringify({ name: 'cash' }));
+  vi.stubEnv('O8_GROK_AGENT_DATA', join(root, 'agents'));
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  rmSync(root, { recursive: true, force: true });
+});
+
+const req = (path: string) => new NextRequest(`http://127.0.0.1:3000${path}`);
+
+it('GET /api/bots lists the grok bot', async () => {
+  const body = await (await GET(req('/api/bots'))).json();
+  expect(body.bots).toHaveLength(1);
+  expect(body.bots[0]).toMatchObject({ id: `grok:${AGENT}`, house: 'grok', name: 'cash' });
+});
+
+it('GET /api/bots honours panel auth', async () => {
+  auth.denied = true;
+  expect((await GET(req('/api/bots'))).status).toBe(401);
+});
+
+it('thread route returns mailbox messages and the deep link; unknown bots 404', async () => {
+  const dir = join(dirs.data, 'bots', 'grok', AGENT);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'thread.jsonl'), `${JSON.stringify({ id: 'a', role: 'user', text: 'yo' })}\n`);
+  const id = encodeURIComponent(`grok:${AGENT}`);
+  const body = await (await THREAD(req(`/api/bots/${id}/thread`), { params: Promise.resolve({ id }) })).json();
+  expect(body.messages).toEqual([{ id: 'a', role: 'user', text: 'yo', at: null }]);
+  expect(body.externalUrl).toBe(`grokbot://app/v1/agent?id=${AGENT}`);
+  const missing = await THREAD(req('/api/bots/x/thread'), { params: Promise.resolve({ id: 'x' }) });
+  expect(missing.status).toBe(404);
+});
+
+function mailbox() {
+  const dir = join(dirs.data, 'bots', 'grok', AGENT);
+  mkdirSync(dir, { recursive: true });
+  return join(dir, 'thread.jsonl');
+}
+
+const message = (id: string, at = '2026-10-31T12:00:00Z', text = id) =>
+  JSON.stringify({ id, role: 'bot', text, at });
+
+async function threadMessages(): Promise<Array<{ id: string; text: string; at: string | null }>> {
+  const response = await THREAD(req(`/api/bots/grok%3A${AGENT}/thread`), {
+    params: Promise.resolve({ id: `grok:${AGENT}` }),
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(Object.keys(body).sort()).toEqual(['bot', 'externalUrl', 'messages']);
+  return body.messages;
+}
+
+it('thread route deduplicates stable ids before limiting and orders timestamped backfill', async () => {
+  writeFileSync(mailbox(), [
+    message('new', '2026-10-31T12:01:00Z'),
+    message('old'),
+    ...Array.from({ length: 510 }, () => message('new', '2026-10-31T12:01:00Z', 'duplicate')),
+  ].join('\n') + '\n');
+  expect((await threadMessages()).map(m => [m.id, m.text])).toEqual([['old', 'old'], ['new', 'new']]);
+});
+
+it('thread route preserves append order when timestamps are absent or invalid', async () => {
+  writeFileSync(mailbox(), [
+    message('new', '2026-10-31T12:01:00Z'),
+    JSON.stringify({ id: 'legacy', role: 'user', text: 'no timestamp' }),
+    message('old'),
+    message('invalid', 'not-a-date'),
+  ].join('\n') + '\n');
+  expect((await threadMessages()).map(m => m.id)).toEqual(['new', 'legacy', 'old', 'invalid']);
+});
+
+it('thread route breaks equal timestamp ties by first complete append order', async () => {
+  writeFileSync(mailbox(), `${message('b')}\n${message('a')}\n${message('b')}\n`);
+  expect((await threadMessages()).map(m => m.id)).toEqual(['b', 'a']);
+});
+
+it('thread route bounds the mailbox to its recent 1 MiB byte window', async () => {
+  writeFileSync(mailbox(), `${message('outside-budget', undefined, 'x'.repeat(1024 * 1024 + 128))}\n${message('recent')}\n`);
+  expect((await threadMessages()).map(m => m.id)).toEqual(['recent']);
+});
+
+it('thread route ignores an unfinished last record until its newline is appended', async () => {
+  const path = mailbox();
+  writeFileSync(path, `${message('committed')}\n${message('unfinished')}`);
+  expect((await threadMessages()).map(m => m.id)).toEqual(['committed']);
+  appendFileSync(path, '\n');
+  expect((await threadMessages()).map(m => m.id)).toEqual(['committed', 'unfinished']);
+});
+
+it('thread route shows the last 500 distinct messages in order', async () => {
+  writeFileSync(mailbox(), Array.from({ length: 503 }, (_, n) => message(`m-${n}`)).join('\n') + '\n');
+  const messages = await threadMessages();
+  expect(messages).toHaveLength(500);
+  expect(messages[0].id).toBe('m-3');
+  expect(messages.at(-1)?.id).toBe('m-502');
+});
+
+it('thread route keeps legacy fallback ids stable while the bounded tail advances', async () => {
+  const path = mailbox();
+  writeFileSync(path, `${'x'.repeat(1024 * 1024)}\n${JSON.stringify({ role: 'bot', text: 'legacy' })}\n`);
+  const [legacy] = await threadMessages();
+  appendFileSync(path, `${message('later')}\n`);
+  expect((await threadMessages())[0]).toEqual(legacy);
+});
+
+it('thread route preserves distinct long source ids and separates them from legacy fallback identities', async () => {
+  const prefix = 'x'.repeat(160);
+  writeFileSync(mailbox(), [
+    JSON.stringify({ role: 'bot', text: 'legacy' }),
+    message('byte-0', undefined, 'explicit id'),
+    message(`${prefix}a`, undefined, 'long a'),
+    message(`${prefix}b`, undefined, 'long b'),
+  ].join('\n') + '\n');
+  const messages = await threadMessages();
+  expect(messages.map(m => m.text)).toEqual(['legacy', 'explicit id', 'long a', 'long b']);
+  expect(messages.slice(2).map(m => m.id)).toEqual([`${prefix}a`, `${prefix}b`]);
+});
+
+it('thread route includes a complete record at the payload boundary using one budgeted context byte', async () => {
+  const first = `${message('first')}\n`;
+  const last = `${message('last')}\n`;
+  const filler = 'x'.repeat(1024 * 1024 - 1 - Buffer.byteLength(first + last) - 1) + '\n';
+  writeFileSync(mailbox(), `{}\n${first}${filler}${last}`);
+  expect((await threadMessages()).map(m => m.id)).toEqual(['first', 'last']);
+});
