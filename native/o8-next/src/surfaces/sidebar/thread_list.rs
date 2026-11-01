@@ -127,6 +127,9 @@ pub struct ThreadList {
     #[cfg(test)]
     pub(super) title_layouts: HashMap<String, gpui::TextLayout>,
     last_age: Instant,
+    /// Moving state marks drawn since the last redraw, by `status_mark::bit`.
+    mark_drawn: std::cell::Cell<u8>,
+    mark_pace: bool,
     search_pending: Option<Instant>,
     search_running: bool,
     search_matches: HashSet<String>,
@@ -226,6 +229,8 @@ impl ThreadList {
             #[cfg(test)]
             title_layouts: HashMap::new(),
             last_age: Instant::now(),
+            mark_drawn: std::cell::Cell::new(0),
+            mark_pace: false,
             search_pending: None,
             search_running: false,
             search_matches: HashSet::new(),

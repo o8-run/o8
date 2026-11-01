@@ -46,6 +46,10 @@ impl Render for ThreadList {
                 self.reveal = None;
             }
         }
+        if !self.mark_pace {
+            self.mark_pace = true;
+            super::status_mark::pace(cx);
+        }
         if !self.editing && self.editor.read(cx).focus.is_focused(window) {
             self.focus.focus(window);
         }

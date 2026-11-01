@@ -443,7 +443,8 @@ impl ThreadList {
             .into_any_element(),
         )
     }
-    /// A thread row's right-click: its repository's filter, when it has one.
+    /// A thread row's right-click: Archive, plus its repository's filter when
+    /// it has one.
     pub(in crate::shell::sidebar) fn open_row_menu(
         &mut self,
         id: &str,
@@ -457,8 +458,8 @@ impl ThreadList {
             .find(|s| s.id == id)
             .and_then(|s| s.repo_path.clone())
             .filter(|repo| repos.iter().any(|(path, _)| path == repo));
-        // The Inbox view's rows always offer Snooze.
-        self.row_menu = (repo.is_some() || self.snoozable(id) || self.pinnable(id).is_some()).then(|| RowMenu {
+        // Every thread row offers Archive or Restore.
+        self.row_menu = Some(RowMenu {
             repo,
             id: id.to_owned(),
             position,

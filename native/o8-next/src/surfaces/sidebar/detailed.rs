@@ -33,7 +33,10 @@ pub(crate) fn status(s: &Session, running: bool, age: &str) -> Status {
 }
 fn status_of(state: Option<State>, age: &str) -> Status {
     match state {
-        Some(State::Running) => Status { key: "running", label: age.to_owned() },
+        // Running counts its time; a snoozed row already sits under Snoozed.
+        Some(state @ (State::Running | State::Snoozed)) => {
+            Status { key: state.key(), label: age.to_owned() }
+        }
         Some(state) => Status { key: state.key(), label: state.label().into() },
         None => Status { key: "age", label: age.to_owned() },
     }
@@ -191,7 +194,7 @@ impl ThreadList {
                     .items_center()
                     .gap(px(5.))
                     .text_color(color)
-                    .children(state.map(|state| status_mark::mark(state, &id)))
+                    .children(state.map(status_mark::mark))
                     .child(st.label),
             );
         }
