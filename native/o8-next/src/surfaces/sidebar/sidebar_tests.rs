@@ -738,3 +738,5 @@ mod archive_tests;
 
 #[path = "pin_reorder_tests.rs"]
 mod pin_reorder_tests;
+#[path = "copy_tests.rs"]
+mod copy_tests;

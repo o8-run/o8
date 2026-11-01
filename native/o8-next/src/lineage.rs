@@ -157,6 +157,14 @@ pub fn link(id: &str) -> String {
     format!("{SCHEME}{id}")
 }
 
+/// The thread row menu's Copy items: (selector, label, clipboard text, toast).
+pub fn copy_items(id: &str) -> [(&'static str, &'static str, String, &'static str); 2] {
+    [
+        ("sidebar-row-copy-id", "Copy thread ID", id.to_owned(), "Thread ID copied"),
+        ("sidebar-row-copy-link", "Copy link", link(id), "Thread link copied"),
+    ]
+}
+
 /// The thread id in an `o8://thread/<id>` link.
 pub fn parse_link(url: &str) -> Option<&str> {
     let id = url.strip_prefix(SCHEME)?.trim_end_matches('/');
