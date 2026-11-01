@@ -113,6 +113,8 @@ pub(crate) struct Surface {
     subscriptions: Vec<gpui::Subscription>,
     sessions: Vec<Session>,
     selected: Option<String>,
+    /// Embedded side conversations must not follow main-history navigation.
+    bound_session: Option<String>,
     rows: Rc<Vec<Rc<RefCell<RowState>>>>,
     images: images::Cache,
     transcript: Option<Transcript>,
@@ -166,6 +168,7 @@ impl Surface {
             subscriptions: vec![],
             sessions: vec![],
             selected: None,
+            bound_session: None,
             rows: Rc::new(vec![]),
             images: Default::default(),
             transcript: None,
@@ -193,6 +196,13 @@ impl Surface {
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
+        if self
+            .bound_session
+            .as_ref()
+            .is_some_and(|bound| bound != &id)
+        {
+            return;
+        }
         if self.selected.as_ref() != Some(&id) {
             if let Some(brain) = self.selected.as_ref().and_then(|id| self.brains.get(id)) {
                 brain.update(cx, |brain, cx| {
@@ -586,7 +596,14 @@ impl Surface {
                 }
                 match result {
                     Ok(sessions) => {
-                        this.sessions = sessions;
+                        this.sessions = sessions
+                            .into_iter()
+                            .filter(|session| {
+                                this.bound_session
+                                    .as_ref()
+                                    .is_none_or(|id| &session.id == id)
+                            })
+                            .collect();
                         if let Some(id) = this
                             .selected
                             .clone()

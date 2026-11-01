@@ -35,3 +35,25 @@ The initial broader 44-case run passed 43 cases and exposed the rapid-click test
 helper draining background work between presses. The corrected test dispatches
 both real clicks before draining and passes. Fixture ESLint, touched-file
 Rust formatting, and the whitespace check pass.
+
+## Side chat
+
+Reference: classic's `O8Panel.tsx`, `o8-panel/SideChatIntro.tsx`, and
+`contextual-panel/surfaces.tsx` under `src/components/desktop/`.
+
+| Parity check | Native behavior |
+| --- | --- |
+| Separate conversation | A dedicated thread per workspace; its ID is outside the main empty-chat reuse pool. |
+| Shared conversation and composer | Uses the production `Surface`, composer, queue, history, and message rendering. No second chat implementation. |
+| History isolation | The embedded view is bound to its own thread and cannot follow unrelated main-history selection. |
+| Main conversation | Starting and using Side chat preserve the main tab and unsent draft. |
+| Startup and recovery | Named loading state and an in-panel Retry after failure. No indefinite startup label after a confirmed failure. |
+| Persistence | Reopening the panel or shell restores the workspace's saved Side chat ID and server history. |
+| Appearance | Solid reading surface and classic's explanatory header. No animation loop added. |
+
+The GPUI regression is
+`side_chat_retries_sends_its_own_messages_and_restores_its_thread`. It drives the
+tool and retry controls, types into the native composer, checks the production
+queue and persisted history, preserves the main draft, and reopens the shell.
+The fixture authors only its local lead and backend admission; history and queue
+handlers are the existing production routes.

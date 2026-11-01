@@ -1,6 +1,10 @@
 //! Narrow embedding API. The shell uses the production Surface and composer.
 use super::*;
 impl Surface {
+    pub(crate) fn shell_bind_thread(&mut self, id: String) {
+        self.sessions.retain(|session| session.id == id);
+        self.bound_session = Some(id);
+    }
     /// Puts Symon's drafted message ahead of the draft, unsent, as the desktop's
     /// orchestrator_draft injection does, and focuses the composer.
     pub(crate) fn prepend_draft(

@@ -9,6 +9,11 @@ mod contextual;
 mod layout;
 #[path = "../files_panel/spec_shell.rs"]
 mod notes;
+#[path = "right_panel/side_chat.rs"]
+mod side;
+#[cfg(test)]
+#[path = "right_panel/side_chat_tests.rs"]
+mod side_chat_tests;
 // The desktop's right panel (O8Panel). Its tools open as tabs in the panel's
 // own strip; "+" lists every desktop panel tool (o8-panel/panel-tools.tsx),
 // including the ones o8 next does not have yet, which open a placeholder.
@@ -317,10 +322,10 @@ impl Shell {
             let Some(workspace) = self.state.selected.clone() else {
                 return;
             };
-            let Some(id) = self.start_thread(false, cx) else {
+            self.state.right_panel.side_chats.remove(&workspace);
+            let Some(_) = side::start(self, cx) else {
                 return;
             };
-            self.state.right_panel.side_chats.insert(workspace, id);
             let key = key(self, Tool::SideChat);
             self.content.remove(&key);
             Tool::SideChat
@@ -516,37 +521,12 @@ pub(super) fn edge(
 /// The side chat's conversation in the open workspace: a chat of its own,
 /// started on the operator's lead the first time the view opens.
 fn side_chat(s: &mut Shell, cx: &mut Context<Shell>) -> Option<String> {
-    let workspace = s.state.selected.clone()?;
-    if let Some(id) = s.state.right_panel.side_chats.get(&workspace) {
-        return Some(id.clone());
-    }
-    let id = s.start_thread(false, cx)?;
-    s.state.right_panel.side_chats.insert(workspace, id.clone());
-    s.persist();
-    Some(id)
+    side::start(s, cx)
 }
 
 /// Opens the side chat once its conversation is listed.
 fn ensure_side_chat(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
-    let Some(p) = s.features.read::<Panel>() else {
-        return;
-    };
-    if !(p.selected == Tool::SideChat || p.lower == Some(Tool::SideChat)) {
-        return;
-    }
-    let key = key(s, Tool::SideChat);
-    let workspace = s.state.selected.clone().unwrap_or_default();
-    let Some(id) = s.state.right_panel.side_chats.get(&workspace).cloned() else {
-        return;
-    };
-    if s.content.contains_key(&key) || !s.sessions.iter().any(|x| x.id == id) {
-        return;
-    }
-    let tab = Tab::Session(id);
-    if let Some(content) = (tab.registration().create)(s, tab, workspace, window, cx) {
-        s.content.insert(key, content);
-        cx.notify();
-    }
+    side::ensure(s, window, cx)
 }
 
 fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
@@ -613,7 +593,7 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     }
     layout::select(s, tool, window, cx);
     if let Some(content) = s.content.get(&key) {
-        content.focus(false, window, cx);
+        content.focus(tool == Tool::SideChat, window, cx);
     } else if let Some(view) = s
         .features
         .read::<Panel>()
