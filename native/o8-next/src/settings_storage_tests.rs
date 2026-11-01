@@ -2,6 +2,88 @@ use super::*;
 use crate::settings::test_peer::*;
 use gpui::TestAppContext;
 
+// Admission fields match readPacketStorageAdmissionProjection's returned shape.
+fn projection_usage(physical: Option<u64>, headroom: Option<i64>) -> Value {
+    let observed = physical.is_some();
+    json!({
+        "schema":"o8/worktree-storage-telemetry/v1",
+        "measuredAt":"2026-11-01T06:00:00Z",
+        "accountingStatus":if observed { "observed" } else { "partial" },
+        "totalCount":2,"totalBytes":1024,"totalAllocatedBytes":1024,"totalLogicalBytes":2048,
+        "storageAdmission":{
+            "accountingStatus":if observed { "observed" } else { "unknown" },
+            "reserveRatio":0.1,"absoluteFloorBytes":500,
+            "physicalAvailableBytes":physical,
+            "reservedBytes":if observed { 300 } else { 0 },
+            "requiredReserveBytes":physical.map(|_| 500),
+            "dispatchHeadroomBytes":headroom,
+            "activeReservations":if observed { 1 } else { 0 }
+        },
+        "storagePressure":{"parkedWorkspaces":2,"eligibleRepositories":3,"optedOutRepositories":1,"repositories":[]},
+        "categoryStorage":{"measuredAt":"2026-11-01T06:00:00Z","categories":{}}
+    })
+}
+
+#[gpui::test]
+fn settings_correction_5220_signed_headroom_from_producer_shape(cx: &mut TestAppContext) {
+    let peer = Peer::new();
+    peer.reply(
+        "GET",
+        "/api/worktrees/retention-usage",
+        200,
+        projection_usage(Some(100), Some(-700)),
+    );
+    let (view, cx) = open(&peer, cx);
+    wait(&view, cx, |_| true);
+    click(cx, "settings-nav-storage");
+    wait(&view, cx, |s| !s.storage.busy && s.storage.usage.is_some());
+    assert!(
+        cx.debug_bounds("settings-storage-headroom-value--700 B")
+            .is_some(),
+        "reserve pressure must remain negative in the rendered metric"
+    );
+    for (status, physical, headroom, selector) in [
+        (
+            200,
+            Some(1000),
+            Some(200),
+            "settings-storage-headroom-value-200 B",
+        ),
+        (503, None, None, "settings-storage-headroom-value-Unknown"),
+    ] {
+        peer.reply(
+            "GET",
+            "/api/worktrees/retention-usage",
+            status,
+            projection_usage(physical, headroom),
+        );
+        click(cx, "setting-storage-refresh");
+        wait(&view, cx, |s| !s.storage.busy);
+        assert!(
+            cx.debug_bounds(selector).is_some(),
+            "missing rendered producer value: {selector}"
+        );
+        assert_eq!(
+            view.read_with(cx, |s, _| s.storage.error.is_some()),
+            status == 503
+        );
+    }
+    assert!(
+        cx.debug_bounds("settings-storage-allocated-value-1.0 KiB")
+            .is_some()
+    );
+    assert!(
+        cx.debug_bounds("settings-storage-logical-value-2.0 KiB")
+            .is_some()
+    );
+    assert!(view.read_with(cx, |s, _| {
+        s.storage.usage.as_ref().is_some_and(|usage| {
+            usage.total_allocated_bytes == Some(1024) && usage.total_logical_bytes == Some(2048)
+        })
+    }));
+    assert!(peer.calls().iter().all(|(method, _, _)| method == "GET"));
+}
+
 #[gpui::test]
 fn settings_parity_storage_refresh_keeps_unknown_accounting(cx: &mut TestAppContext) {
     let peer = Peer::new();

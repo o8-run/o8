@@ -62,6 +62,13 @@ fn bytes(value: Option<u64>) -> String {
     }
     format!("{value} B")
 }
+fn signed_bytes(value: Option<i64>) -> String {
+    match value {
+        Some(value) if value < 0 => format!("-{}", bytes(Some(value.unsigned_abs()))),
+        Some(value) => bytes(Some(value as u64)),
+        None => bytes(None),
+    }
+}
 impl Settings {
     pub(super) fn load_storage(&mut self, force: bool, cx: &mut Context<Self>) {
         if self.storage.busy
@@ -156,14 +163,6 @@ impl Settings {
                 "Set aside for tasks",
                 admission.and_then(|a| a.reserved_bytes),
             ),
-            (
-                "headroom",
-                "Available for new tasks",
-                // Match classic: a reserve shortfall means zero available for new tasks.
-                admission
-                    .and_then(|a| a.dispatch_headroom_bytes)
-                    .map(|bytes| bytes.max(0) as u64),
-            ),
         ] {
             content = content.child(panels::fact(
                 &format!("settings-storage-{id}"),
@@ -171,6 +170,11 @@ impl Settings {
                 &bytes(value),
             ));
         }
+        content = content.child(panels::fact(
+            "settings-storage-headroom",
+            "Task space after reserves",
+            &signed_bytes(admission.and_then(|a| a.dispatch_headroom_bytes)),
+        ));
         let pressure = usage.and_then(|usage| usage.storage_pressure.as_ref());
         content = content.child("Fleet parking");
         for (id, label, value) in [

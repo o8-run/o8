@@ -110,6 +110,7 @@ pub(super) fn matches(section: &str, active: &str, query: &str, keywords: &str) 
 
 pub(super) fn fact(id: &str, label: &str, value: &str) -> gpui::Div {
     let selector = id.to_owned();
+    let value_selector = format!("{id}-value-{value}");
     div()
         .debug_selector(move || selector.clone())
         .flex()
@@ -122,6 +123,7 @@ pub(super) fn fact(id: &str, label: &str, value: &str) -> gpui::Div {
         .child(label.to_owned())
         .child(
             div()
+                .debug_selector(move || value_selector.clone())
                 .text_color(theme().text_secondary)
                 .child(value.to_owned()),
         )

@@ -101,7 +101,7 @@ the existing operator-defaults route unless another owner is named.
 | API Keys / Symon & voice keys | Every voice-service secret input; Save/Replace/Remove; status | missing | skipped: credentials and `settings_secret.rs` |
 | API Keys / Key storage | Storage details and key setup | missing | skipped: credential storage |
 | Local models / Local models | Dispatch model (Ollama/LM Studio/Cloud); Local endpoint/presets; Chat model/presets; Embedding model; Save/test | missing | missing: endpoint fields deliberately skipped for network-binding review; chat/embedding model-name controls present; dispatch choice/presets/test remain |
-| Worktrees & storage / Storage usage | Workspace files: allocated/logical; Refresh usage; Space for new tasks: free/reserved/available | missing | present: measured/partial/unknown accounting with refresh; unknown values stay unknown |
+| Worktrees & storage / Storage usage | Workspace files: allocated/logical; Refresh usage; Space for new tasks: free/reserved/available | missing | present: measured/partial/unknown accounting with refresh; signed task headroom and unknown values remain truthful |
 | Worktrees & storage / Automatic cleanup | Workspace count per repository; Disk usage per repository | present | present |
 | Worktrees & storage / Advanced | Reuse dependencies (APFS) | missing | missing: native-safe defaults omit the effective environment override; needs that projection before an accurate switch can be offered |
 | Worktrees & storage / Workspace parking | Parking mode | present | present |
@@ -133,7 +133,7 @@ the existing operator-defaults route unless another owner is named.
 | Analytics / Totals | Total spend, messages, cost/hour, input/output tokens, cache hit rate; date-range and refresh controls | missing | missing: existing native Usage surface may cover part; not yet verified |
 | Analytics / Spend over time, By surface | Spend chart; per-surface breakdown | missing | missing |
 | Diagnostics / Connection health | Check installed tools / Check again; each installed tool's status | missing | missing: authentication text skipped; install/version facts in scope |
-| Diagnostics / Feature diagnostics | Shipped feature audit; default-off feature flags; Refresh; release age/first shipped/promotion status | missing | present: read-only feature audit with refresh, lifecycle/source/age and unavailable recovery |
+| Diagnostics / Feature diagnostics | Shipped feature audit; default-off feature flags; Refresh; release age/first shipped/promotion status | missing | present: read-only feature audit with refresh, lifecycle/source/age and unavailable state |
 | Diagnostics / Maintenance | Archive old Codex sessions; result counts/duration | missing | skipped: current production retention contract refuses external-provider transcript archival; no maintenance executed |
 | Diagnostics / Reset app data | Factory reset; confirmation text; confirm/cancel; result | missing | skipped: wipes credentials |
 | Diagnostics / Diagnostic authorization | Enable/disable developer tools | missing | skipped: authorization boundary |
@@ -189,11 +189,11 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 
 - Connections: `settings_parity_connections_read_only_capabilities_and_recovery` passed in the combined serial run. Real selectors read declared capabilities, switch configured workers, recover from an unavailable adapter, and prove search performs no inactive-panel reads until a result is opened. `settings_parity_actions_follow_shell_settings_lifecycle` passed: the global palette opens Projects and drops both Settings subscriptions together.
 
-- Diagnostics: `settings_parity_diagnostics_feature_audit_refresh_and_error` passed in two serial runs, including the latest combined run. It opens the page, refreshes typed release/lifecycle/source facts, shows unverified state and recovers from an HTTP error. Developer-gated diagnostics remain skipped.
+- Diagnostics: the committed `settings_parity_diagnostics_feature_audit_refresh_and_error` case covers unverified and attention audit states, flag metadata, and HTTP 503 clearing the cached audit. It stops after the 503; post-error recovery is not claimed by this test. Developer-gated diagnostics remain skipped.
 
-- Storage: `settings_parity_storage_refresh_keeps_unknown_accounting` passed in the fresh serial run. Real Refresh clicks cover complete data, negative task headroom, a 503 tagged observed, partial/null accounting, malformed/unavailable responses and recovery to measured zero. Signed headroom is retained; available task space displays zero during a reserve shortfall, matching classic. Known measurements survive a shortfall. The new case was written first; disk-full and cache-link failures prevented its initial red execution.
+- Storage: `settings_parity_storage_refresh_keeps_unknown_accounting` covers complete data, signed headroom parsing, a 503 tagged observed, partial/null accounting, malformed/unavailable responses and recovery to measured zero. The additional `settings_correction_5220_signed_headroom_from_producer_shape` drives native Refresh with negative, positive and null admission projections and checks rendered values. Negative headroom now remains negative in “Task space after reserves”; known allocation metrics stay visible.
 
-- Indexing: `settings_parity_indexing_refresh_docs_and_independent_counts` passed in the latest combined run. Real controls refresh repository state and Brain totals independently, refresh one repository's documents with the exact path, show written/scanned counts, refuse unconfirmed success, and retry after failure.
+- Indexing: the original `settings_parity_indexing_refresh_docs_and_independent_counts` case covers a reported refresh receipt and exact repository path, index-state HTTP 503 while totals remain available, then an index recovery while totals become unavailable. The original case does not cover an unconfirmed POST result or a retry of the docs action.
 
 - Fleet presets: `settings_parity_classic_fleet_presets_persist_and_recover` failed first on the missing preset selector, then passed. It persists 2, 5 and 8 through the production settings route, refuses a failed write without changing the saved capacity, and recovers after Refresh.
 
@@ -205,7 +205,33 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 
 - Harness and build receipts: the test peer explicitly uses blocking reads on accepted sockets after its nonblocking accept loop. Earlier intermittent transport failures could occur before a request reached the peer. Both click helpers reveal the entire control before activating it. Three consecutive rapid About runs passed after the visibility adjustment; final combined verification is recorded below. An ENOSPC rebuild and subsequent cached-object link failure were resolved by regenerating only this test crate's generated objects; dependency caches, source and unrelated worktrees were preserved.
 
-- Final native gate: `cd native/o8-next && CARGO_TARGET_DIR=$PWD/target cargo +1.97.1 test --bin o8-next settings_parity_ -- --test-threads=1 --nocapture` passed **16/16** (643 unrelated tests filtered out; 266.34 seconds). This includes the rapid About request-count regression, both keyboard regressions and the production-route persistence tests. Explicit-file `rustfmt --check` and `git diff --check` passed. No installed-app, release or broad-suite acceptance is claimed.
+- Initial timebox native gate at `895ff4af8`: `cd native/o8-next && CARGO_TARGET_DIR=$PWD/target cargo +1.97.1 test --bin o8-next settings_parity_ -- --test-threads=1 --nocapture` passed **16/16** (643 unrelated tests filtered out; 266.34 seconds). This includes the rapid About request-count regression, both keyboard regressions and the production-route persistence tests. Explicit-file `rustfmt --check` and `git diff --check` passed. No installed-app, release or broad-suite acceptance is claimed.
+
+## Correction round 1
+
+The review was pinned to `c9afdd94641a39703bde0164d15122c79b5e018a`; this
+round starts from `895ff4af8`. The later `de6019c79` already changed the admission
+DTO to `Option<i64>`, but still clamped its display to zero.
+
+- **#5220:** Keep signed headroom in the displayed metric. The regression uses
+  the admission fields returned by `readPacketStorageAdmissionProjection`, inside
+  the retention-usage response shape: 100 available minus 500 reserve minus 300
+  reserved gives **-700 B**; 1000 available gives **200 B**; unavailable admission
+  gives **Unknown** in a partial/503 response. Allocated and logical measurements
+  remain visible. The rendered-value selectors inspect the same value given to
+  the native text element.
+- Red: `CARGO_TARGET_DIR=$PWD/target cargo +1.97.1 test --bin o8-next settings_correction_ -- --test-threads=1 --nocapture`
+  failed **0/3 passed**, including `settings_correction_5220_signed_headroom_from_producer_shape`
+  at the negative rendered-value assertion. Only tests and rendered-value
+  selectors had been added before this run.
+- Green for #5220: `CARGO_TARGET_DIR=$PWD/target cargo +1.97.1 test --bin o8-next settings_correction_5220_ -- --test-threads=1 --nocapture`
+  passed **1/1**, 661 unrelated tests filtered out, in **0.15 seconds**. The
+  producer-shaped regression passes for negative, positive and null values
+  through native navigation/Refresh.
+- Receipt reconciliation: the Diagnostics recovery claim was narrowed to what its
+  committed test proves. Storage unavailable/503/recovery cases are present in
+  the later committed tests. The original Indexing case is described without
+  claiming unconfirmed-success or docs-retry coverage.
 
 ## Host and security handoff
 
@@ -225,7 +251,7 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
   pairing/relay access, arbitrary MCP environment/config, permission/authorization,
   reset-with-keys, report redaction/upload and binding/address controls are held.
 
-## Timebox outcome
+## Initial timebox outcome
 
 Feature work stopped at the approximately three-hour bound. Full parity is not
 complete. The checklist has 42 present, 15 partial, 29 missing and 38 skipped rows
