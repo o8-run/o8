@@ -33,9 +33,9 @@ the existing operator-defaults route unless another owner is named.
 
 | Classic tab / section | Controls (all dynamic rows included) | Baseline | Current / residual |
 | --- | --- | --- | --- |
-| Shell / navigation | General, Account, Appearance, Voice, Permissions; Dispatch, Providers; Worktrees & storage, Projects, Git & PRs, Indexing; MCP, Mobile; Analytics, Diagnostics, About | partial | partial: native General, Dispatch, Models & providers, Git & PRs, Worktrees & storage, API keys only |
-| Shell / search | Search settings, ranked matches, Enter first match, Escape clear, section target | partial | partial: global field filtering includes section names, Clear search, Cmd/Ctrl+F and Escape clear; ranked result navigation and Enter-to-target remain |
-| Shell / history | Back, Forward, Back to workspace, section menus | missing | missing |
+| Shell / navigation | General, Account, Appearance, Voice, Permissions; Dispatch, Providers; Worktrees & storage, Projects, Git & PRs, Indexing; MCP, Mobile; Analytics, Diagnostics, About | partial | partial: native General, Appearance, Voice, Keyboard, Dispatch, Models & providers, Local models, Git & PRs, Worktrees & storage, API keys, Indexing, Connections, Diagnostics and About; remaining pages and controls are listed below |
+| Shell / search | Search settings, ranked matches, Enter first match, Escape clear, section target | partial | present: weighted field matches across sections, Open first match, Enter to the section/field, automatic reveal, Clear search, Cmd/Ctrl+F and Escape clear; inactive remote panels remain unloaded |
+| Shell / history | Back, Forward, Back to workspace, section menus | missing | partial: Back/Forward, forward-history truncation and Back to workspace present; classic section menus remain |
 | Shell / feedback | Send feedback entry | missing | missing |
 | General / Startup | Launch at login | missing | missing: classic `autostart_set` host command, no native Settings bridge |
 | General / Startup | When closing with active agents: Ask every time, Keep working, Stop and quit (Windows/Linux) | missing | missing: classic host close lifecycle |
@@ -84,7 +84,7 @@ the existing operator-defaults route unless another owner is named.
 | Providers / OpenCode models | Show in dispatch pickers; fallback model | missing | partial: dispatch visibility present; live fallback catalog remains |
 | Providers / built-in worker | Availability; Managed model; Use in a conversation; Usage/limits guidance; Setup | missing | missing |
 | Providers / Orchestrator | Lead provider; Code review provider | missing | partial: reviewer control present; lead availability needs native-safe inventory |
-| Providers / Workers | Subscription profile; Default worker; one allow switch per runtime; Your Pi setup | missing | partial: subscription profile present; discovery/pool/Pi setup need a native-safe inventory projection |
+| Providers / Workers | Subscription profile; Default worker; one allow switch per runtime; Your Pi setup | missing | partial: subscription profile and read-only saved default/pool present; discovery/pool/Pi setup need a native-safe inventory projection |
 | Providers / Pi setup | Cache warming: Off/During runs/During and between runs | missing | missing |
 | Providers / Advanced orchestrator options | OpenCode fallback model; Combined answer provider; Existing setup uses Claude | missing | partial: combined answer and existing setup present; OpenCode live catalog remains |
 | Providers / Advanced worker setup | Codex launch method (Direct/Via Ori) | missing | skipped: credential carrier |
@@ -198,6 +198,8 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 - Fleet presets: `settings_parity_classic_fleet_presets_persist_and_recover` failed first on the missing preset selector, then passed. It persists 2, 5 and 8 through the production settings route, refuses a failed write without changing the saved capacity, and recovers after Refresh.
 
 - Brain model presets: `settings_parity_classic_brain_model_presets_persist` failed first on the absent selector, then passed. It selects and persists all eight classic model values through the production route and preserves the custom-model editor.
+
+- Search and history: `settings_parity_classic_search_navigation_and_history` passed after its missing-control, Tab-focus and deferred-scroll failures. It clicks ranked results, presses Enter to reveal a field, clears search, drives Back/Forward and truncated history, and returns to the workspace. A 580px-high window proves Tab reveals the bottom of the Settings list. Supplied focus handles carry the Tab policy; direct list scrolling runs during layout without a frame callback or animation loop.
 
 ## Host and security handoff
 

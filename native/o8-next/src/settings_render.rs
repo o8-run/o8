@@ -75,6 +75,7 @@ impl Render for Settings {
         };
         let mut navigation = div()
             .id("settings-navigation")
+            .track_scroll(&self.navigation.list_scroll)
             .debug_selector(|| "settings-navigation".into())
             .min_h_0()
             .overflow_y_scroll()
@@ -100,8 +101,11 @@ impl Render for Settings {
             .id("settings-content")
             .flex_1()
             .min_w_0()
+            .min_h_0()
             .flex()
             .flex_col()
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll)
             .gap(px(16.));
         if let Some(editor) = self.editor.clone() {
             content = content.child(self.editor_view(editor, window, cx));
@@ -117,15 +121,7 @@ impl Render for Settings {
                 }
             }
         } else {
-            let fields: Vec<_> = fields()
-                .filter(|f| {
-                    if query.len() >= 2 {
-                        f.matches(&query)
-                    } else {
-                        f.section == self.section
-                    }
-                })
-                .collect();
+            let fields = self.visible_fields(&query);
             content = content.child(if query.len() >= 2 {
                 "Search results"
             } else {
@@ -135,6 +131,19 @@ impl Render for Settings {
                     .unwrap()
                     .1
             });
+            let mut child_index = 1;
+            if let Some(label) = self.first_result_label(&query) {
+                content = content.child(self.button(
+                    "settings-search-open-first".into(),
+                    label,
+                    !self.busy,
+                    false,
+                    window,
+                    cx,
+                    |this, window, cx| this.open_first_result(window, cx),
+                ));
+                child_index += 1;
+            }
             let appearance = panels::matches(
                 "appearance",
                 self.section,
@@ -178,6 +187,7 @@ impl Render for Settings {
                 "indexing repository index engineering brain instructions outcomes knowledge documentation",
             );
             if indexing {
+                child_index += 1;
                 content = content.child(if query.len() >= 2 && self.section != "indexing" {
                     self.panel_result("indexing", "Indexing", window, cx)
                 } else {
@@ -185,6 +195,7 @@ impl Render for Settings {
                 });
             }
             if storage {
+                child_index += 1;
                 content = content.child(if query.len() >= 2 && self.section != "storage" {
                     self.panel_result("storage", "Worktrees & storage", window, cx)
                 } else {
@@ -192,6 +203,7 @@ impl Render for Settings {
                 });
             }
             if diagnostics {
+                child_index += 1;
                 content = content.child(if query.len() >= 2 && self.section != "diagnostics" {
                     self.panel_result("diagnostics", "Diagnostics", window, cx)
                 } else {
@@ -199,6 +211,7 @@ impl Render for Settings {
                 });
             }
             if connections {
+                child_index += 1;
                 content = content.child(if query.len() >= 2 && self.section != "connections" {
                     self.panel_result("connections", "Connections", window, cx)
                 } else {
@@ -206,6 +219,7 @@ impl Render for Settings {
                 });
             }
             if about {
+                child_index += 1;
                 content = content.child(if query.len() >= 2 && self.section != "about" {
                     self.panel_result("about", "About", window, cx)
                 } else {
@@ -213,9 +227,11 @@ impl Render for Settings {
                 });
             }
             if keyboard {
+                child_index += 1;
                 content = content.child(self.keyboard_view(window, cx));
             }
             if appearance {
+                child_index += 1;
                 content = content.child(self.appearance_view(window, cx));
             }
             if fields.is_empty()
@@ -246,10 +262,14 @@ impl Render for Settings {
                             }),
                     );
                     previous = Some(group);
+                    child_index += 1;
                 }
+                self.reveal_search_target(field, child_index);
                 content = content.child(self.row(field, window, cx));
+                child_index += 1;
             }
         }
+        let history = self.history_view(window, cx);
         div()
             .id("settings-page")
             .debug_selector(|| "settings-page".into())
@@ -306,6 +326,7 @@ impl Render for Settings {
                     .child(refresh)
                     .child(close),
             )
+            .child(history)
             .child(
                 div()
                     .id("settings-search")
@@ -354,8 +375,10 @@ impl Render for Settings {
                         .debug_selector(|| "settings-scroll".into())
                         .flex_1()
                         .min_w_0()
-                        .overflow_y_scroll()
-                        .track_scroll(&self.scroll)
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .overflow_hidden()
                         .child(content),
                 ),
             )

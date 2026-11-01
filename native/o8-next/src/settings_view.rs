@@ -17,7 +17,9 @@ impl Settings {
             .controls
             .entry(id.clone())
             .or_insert_with(|| cx.focus_handle())
-            .clone();
+            .clone()
+            // Supplied focus handles own Tab policy; the element flag cannot set it.
+            .tab_stop(enabled);
         let focused = focus.is_focused(window);
         let mouse_focus = focus.clone();
         let action = Rc::new(action);
@@ -76,6 +78,13 @@ impl Settings {
         cx: &mut Context<Self>,
     ) {
         match event.keystroke.key.as_str() {
+            "enter"
+                if !self.busy
+                    && self.editor.is_none()
+                    && self.search.read(cx).focus.is_focused(window) =>
+            {
+                self.open_first_result(window, cx);
+            }
             "escape" if !self.busy => {
                 if self.editor.is_some() || self.confirm.is_some() {
                     self.cancel(window, cx);
@@ -86,11 +95,8 @@ impl Settings {
                 }
             }
             "tab" => {
-                if event.keystroke.modifiers.shift {
-                    window.focus_prev();
-                } else {
-                    window.focus_next();
-                }
+                self.step_settings_focus(event.keystroke.modifiers.shift, window, cx);
+                self.keep_navigation_focus_visible(window);
             }
             "f" if event.keystroke.modifiers.control || event.keystroke.modifiers.platform => {
                 self.search.read(cx).focus.focus(window)
@@ -268,6 +274,10 @@ impl Settings {
             }
         }
         div()
+            .id(gpui::SharedString::from(format!(
+                "settings-row-{}",
+                field.id
+            )))
             .debug_selector(move || format!("settings-row-{}", field.id))
             .flex()
             .flex_wrap()

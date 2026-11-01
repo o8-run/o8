@@ -50,6 +50,8 @@ impl Peer {
                     thread::sleep(Duration::from_millis(2));
                     continue;
                 };
+                // Accepted sockets can inherit the listener's nonblocking mode on macOS.
+                socket.set_nonblocking(false).unwrap();
                 socket
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
@@ -178,7 +180,10 @@ fn click_mode(cx: &mut VisualTestContext, selector: &'static str, paint_press: b
             return;
         };
         let viewport = cx.debug_bounds(scroll_selector).unwrap();
-        if viewport.contains(&bounds.center()) {
+        if viewport.contains(&bounds.center())
+            && bounds.top() >= viewport.top()
+            && bounds.bottom() <= viewport.bottom()
+        {
             press(cx, selector, bounds.center(), paint_press);
             return;
         }
@@ -186,7 +191,7 @@ fn click_mode(cx: &mut VisualTestContext, selector: &'static str, paint_press: b
             position: viewport.center(),
             delta: gpui::ScrollDelta::Pixels(gpui::point(
                 gpui::px(0.),
-                gpui::px(if bounds.center().y > viewport.bottom() {
+                gpui::px(if bounds.bottom() > viewport.bottom() {
                     -200.
                 } else {
                     200.

@@ -279,3 +279,74 @@ fn settings_parity_classic_brain_model_presets_persist(cx: &mut TestAppContext) 
         "saved custom model values remain editable"
     );
 }
+
+#[gpui::test]
+fn settings_parity_classic_search_navigation_and_history(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut visual, _) = start(cx);
+    let cx = &mut visual;
+    cx.simulate_resize(gpui::size(gpui::px(980.), gpui::px(580.)));
+    settle(cx);
+    let mut revealed = false;
+    for _ in 0..30 {
+        cx.simulate_keystrokes("tab");
+        settle(cx);
+        let viewport = cx.debug_bounds("settings-navigation").unwrap();
+        let last = cx.debug_bounds("settings-nav-about").unwrap();
+        if viewport.contains(&last.center()) {
+            revealed = true;
+            break;
+        }
+    }
+    assert!(
+        revealed,
+        "keyboard focus reveals clipped Settings navigation without scrollbars"
+    );
+    search(cx, "review");
+    click(cx, "settings-search-open-first");
+    frame(&shell, cx);
+    assert!(
+        cx.debug_bounds("settings-group-Presentation").is_some(),
+        "label-prefix matches rank before descriptions in other sections"
+    );
+    search(cx, "uiLoopPreviewTimeoutMs");
+    cx.simulate_keystrokes("enter");
+    frame(&shell, cx);
+    settle(cx);
+    let viewport = cx.debug_bounds("settings-scroll").unwrap();
+    let target = cx.debug_bounds("edit-uiLoopPreviewTimeoutMs").unwrap();
+    assert!(
+        viewport.contains(&target.center()),
+        "Enter opens and reveals the matching field: target={target:?}, viewport={viewport:?}"
+    );
+    assert!(cx.debug_bounds("settings-search-clear").is_none());
+    click(cx, "settings-back");
+    frame(&shell, cx);
+    assert!(cx.debug_bounds("settings-group-Conversations").is_some());
+    click(cx, "settings-forward");
+    frame(&shell, cx);
+    assert!(cx.debug_bounds("settings-group-Fleet").is_some());
+    click(cx, "settings-nav-appearance");
+    frame(&shell, cx);
+    click(cx, "settings-back");
+    frame(&shell, cx);
+    search(cx, "branch prefix");
+    cx.simulate_keystrokes("enter");
+    frame(&shell, cx);
+    assert!(cx.debug_bounds("settings-group-Branches").is_some());
+    click(cx, "settings-forward");
+    frame(&shell, cx);
+    assert!(
+        cx.debug_bounds("settings-group-Branches").is_some(),
+        "new navigation truncates forward history"
+    );
+    for _ in 0..2 {
+        click(cx, "settings-back");
+        frame(&shell, cx);
+    }
+    click(cx, "settings-back");
+    settle(cx);
+    assert!(
+        shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()),
+        "Back at the first page returns to the workspace"
+    );
+}

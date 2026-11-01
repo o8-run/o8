@@ -133,6 +133,7 @@ pub(crate) struct Settings {
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     scroll: gpui::ScrollHandle,
+    navigation: navigation::State,
     indexing: indexing::State,
     storage: storage::State,
     diagnostics: diagnostics::State,
@@ -147,6 +148,7 @@ impl Settings {
     pub fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| {
             let mut input = Composer::new(cx);
+            input.focus = input.focus.clone().tab_stop(true);
             input.placeholder = "Search settings".into();
             input
         });
@@ -175,6 +177,7 @@ impl Settings {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             scroll: gpui::ScrollHandle::new(),
+            navigation: navigation::State::default(),
             indexing: indexing::State::default(),
             storage: storage::State::default(),
             diagnostics: diagnostics::State::default(),
@@ -302,6 +305,7 @@ impl Settings {
         self.editor = None;
         self.confirm = None;
         self.conflict = false;
+        self.navigation.remember(section);
         self.section = section;
         self.search.update(cx, |s, cx| s.clear(cx));
         self.scroll
@@ -349,6 +353,7 @@ impl Settings {
         } else {
             let input = cx.new(Composer::new);
             input.update(cx, |input, cx| {
+                input.focus = input.focus.clone().tab_stop(true);
                 input.replace_text_in_range(None, text, window, cx)
             });
             input.read(cx).focus.focus(window);
@@ -506,3 +511,6 @@ mod storage;
 
 #[path = "settings_indexing.rs"]
 mod indexing;
+
+#[path = "settings_navigation.rs"]
+mod navigation;

@@ -20,20 +20,29 @@ pub struct Field {
     pub kind: Kind,
 }
 impl Field {
-    pub fn matches(&self, query: &str) -> bool {
-        let text = format!(
-            "{} {} {} {} {} {}",
-            self.id,
-            self.label,
-            self.section,
-            self.detail,
-            self.group(),
-            self.section_label()
-        )
-        .to_lowercase();
-        query
-            .split_whitespace()
-            .all(|word| text.contains(&word.to_lowercase()))
+    pub fn search_score(&self, query: &str) -> Option<u32> {
+        let label = self.label.to_lowercase();
+        let group =
+            format!("{} {} {}", self.section, self.group(), self.section_label()).to_lowercase();
+        let id = self.id.to_lowercase();
+        let detail = self.detail.to_lowercase();
+        let mut score = 0;
+        for word in query.split_whitespace() {
+            score += if label.starts_with(word) {
+                6
+            } else if label.contains(word) {
+                4
+            } else if group.contains(word) {
+                3
+            } else if id.contains(word) {
+                2
+            } else if detail.contains(word) {
+                1
+            } else {
+                return None;
+            };
+        }
+        Some(score)
     }
     pub fn section_label(&self) -> &'static str {
         SECTIONS
