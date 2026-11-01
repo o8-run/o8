@@ -153,47 +153,46 @@ impl Settings {
         }
     }
     /// Classic's Settings header: back leaves Settings from its first page.
-    pub(super) fn history_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn history_view(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let enabled = !self.busy && self.editor.is_none();
         let forward = self.navigation.at + 1 < self.navigation.trail.len();
+        let arrow =
+            |path: &'static str| crate::icon::stroke(path, theme().text_secondary, 15., 1.8);
         div()
             .flex()
             .items_center()
-            .gap(px(2.))
+            .gap(px(4.))
             .flex_shrink_0()
-            .child(self.history_arrow("settings-back", "M15 18l-6-6 6-6", enabled, false, cx))
-            .child(self.history_arrow(
-                "settings-forward",
-                "M9 18l6-6-6-6",
-                enabled && forward,
-                true,
-                cx,
-            ))
+            .child(
+                self.button(
+                    "settings-back".into(),
+                    String::new(),
+                    enabled,
+                    false,
+                    window,
+                    cx,
+                    |this, _, cx| this.browse(false, cx),
+                )
+                .w(px(26.))
+                .px(px(0.))
+                .justify_center()
+                .child(arrow("M15 18l-6-6 6-6")),
+            )
+            .child(
+                self.button(
+                    "settings-forward".into(),
+                    String::new(),
+                    enabled && forward,
+                    false,
+                    window,
+                    cx,
+                    |this, _, cx| this.browse(true, cx),
+                )
+                .w(px(26.))
+                .px(px(0.))
+                .justify_center()
+                .child(arrow("M9 18l6-6-6-6")),
+            )
             .into_any_element()
-    }
-    fn history_arrow(
-        &self,
-        id: &'static str,
-        path: &'static str,
-        enabled: bool,
-        forward: bool,
-        cx: &mut Context<Self>,
-    ) -> gpui::Stateful<gpui::Div> {
-        div()
-            .id(id)
-            .debug_selector(move || id.into())
-            .size(px(26.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(7.))
-            .opacity(if enabled { 1. } else { 0.35 })
-            .when(enabled, |arrow| {
-                arrow
-                    .cursor_pointer()
-                    .hover(|arrow| arrow.bg(theme().hover))
-                    .on_click(cx.listener(move |this, _, _, cx| this.browse(forward, cx)))
-            })
-            .child(crate::icon::stroke(path, theme().text_secondary, 15., 1.8))
     }
 }

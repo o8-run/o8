@@ -94,11 +94,16 @@ fn sidebar_selection_leaves_projects_and_settings(cx: &mut TestAppContext) {
             .clone()
             .unwrap()
     });
-    // Settings lives in the rail's profile menu, as in the desktop rail.
-    for (buttons, panel) in [
-        (&["shell-profile", "profile-settings"][..], "settings-page"),
-        (&["rail-more", "rail-more-projects"][..], "project-new"),
-    ] {
+    // Settings lives in the rail's profile menu and takes over the window.
+    click(cx, "shell-profile");
+    click(cx, "profile-settings");
+    settle(&shell, cx);
+    assert!(cx.debug_bounds("settings-page").is_some());
+    assert!(cx.debug_bounds("thread-row-2").is_none());
+    click(cx, "settings-close");
+    settle(&shell, cx);
+    assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()));
+    for (buttons, panel) in [(&["rail-more", "rail-more-projects"][..], "project-new")] {
         for button in buttons.iter().copied() {
             click(cx, button);
         }

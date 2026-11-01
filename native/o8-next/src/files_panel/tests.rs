@@ -704,6 +704,6 @@ fn privacy_eye_hides_contents_across_files(cx: &mut TestAppContext) {
     assert!(panel.read_with(cx, |p, _| p.contents_hidden));
     assert!(cx.debug_bounds("files-markdown-1").is_none());
     click(cx, "files-hidden");
-    wait(cx, "files-markdown-1");
+    wait(cx, "files-markdown-2");
     assert!(cx.debug_bounds("files-hidden").is_none());
 }

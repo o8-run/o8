@@ -22,9 +22,11 @@ fn render(
     cx: &mut Context<Shell>,
 ) -> Option<AnyElement> {
     // Settings takes over the window: only the rail stays, as in classic.
-    if let Some(view) = s.surfaces.settings.view.clone() {
+    if s.surfaces.settings.view.is_some() {
         // The panel's native pages draw above the window, so they still get covered.
         let _ = super::right_panel::element(s, window, cx);
+        // Settings can open Shortcuts over itself, so the overlay order still decides.
+        let page = registrations().iter().find_map(|r| (r.overlay)(s));
         return Some(
             div()
                 .flex()
@@ -44,7 +46,7 @@ fn render(
                         .overflow_hidden()
                         .border_1()
                         .border_color(crate::theme::current().border)
-                        .child(view),
+                        .children(page),
                 )
                 .into_any_element(),
         );

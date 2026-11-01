@@ -280,7 +280,7 @@ impl Render for Settings {
                 child_index += 1;
             }
         }
-        let history = self.history_view(cx);
+        let history = self.history_view(window, cx);
         div()
             .id("settings-page")
             .debug_selector(|| "settings-page".into())
