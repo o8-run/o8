@@ -477,3 +477,43 @@ fn sidebar_announces_server_auto_settle_with_note_and_mod_z(cx: &mut TestAppCont
     wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Active"));
     assert_eq!(stored(&fixture, FIRST), "active");
 }
+
+/// The row menu turns this thread's auto-settle off (the server records the
+/// opt-out) and back on; a thread with it off carries a mark.
+#[gpui::test]
+fn sidebar_row_menu_toggles_per_thread_auto_settle(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, _project) = start("--shell --composer --sidebar", cx);
+    let opted_out = |fixture: &Fixture| {
+        for offset in (0..).step_by(500) {
+            let listed: Value = fixture
+                .client
+                .get(
+                    "/api/mobile/orchestrator/threads",
+                    &[("limit", "500"), ("offset", &offset.to_string())],
+                )
+                .unwrap();
+            let page = listed["threads"].as_array().unwrap();
+            if let Some(thread) = page.iter().find(|t| t["id"] == FIRST) {
+                return thread["autoSettleDisabledAt"].is_string();
+            }
+            assert_eq!(page.len(), 500);
+        }
+        unreachable!()
+    };
+    let mark: &'static str = Box::leak(format!("thread-auto-off-{FIRST}").into_boxed_str());
+    for off in [true, false] {
+        let target = row(&shell, &mut visual, FIRST);
+        let at = visual.debug_bounds(target).unwrap().center();
+        visual.simulate_mouse_down(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+        visual.simulate_mouse_up(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+        draw(&mut visual);
+        click(&mut visual, "sidebar-row-auto-settle");
+        wait_for(&shell, &mut visual, |s, cx| {
+            s.surfaces.sidebar.view.as_ref().unwrap().read(cx).auto_settle_off(FIRST) == off
+        });
+        assert_eq!(opted_out(&fixture), off);
+        row(&shell, &mut visual, FIRST);
+        draw(&mut visual);
+        assert_eq!(visual.debug_bounds(mark).is_some(), off);
+    }
+}

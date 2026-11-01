@@ -182,6 +182,7 @@ impl ThreadList {
                     )),
             );
         first = first.children(self.pin_mark(&id));
+        first = first.children(self.auto_off_mark(&id));
         let auto_reason = session
             .filter(|s| s.settled())
             .and_then(|s| s.auto_settled_reason.as_deref());
@@ -210,7 +211,7 @@ impl ThreadList {
             let note = if age.starts_with(super::inbox::auto_note(reason)) {
                 age
             } else {
-                format!("{} · {}", super::inbox::auto_note(reason), age)
+                super::inbox::note_with_age(reason, &age)
             };
             first = first.child(
                 div()

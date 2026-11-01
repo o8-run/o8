@@ -34,6 +34,15 @@ pub(super) fn newly_auto_settled(before: &[Session], after: &[Session]) -> Vec<(
         .collect()
 }
 
+/// "merged · 2h"; an idle settle reads "idle 3d".
+pub(super) fn note_with_age(reason: &str, age: &str) -> String {
+    if reason == "idle" {
+        format!("idle {age}")
+    } else {
+        format!("{} · {}", auto_note(reason), age)
+    }
+}
+
 /// An automatic settle was not the user's doing, so its Undo stays up
 /// longer than a manual Settle's notice.
 pub(super) const AUTO_SETTLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
@@ -43,6 +52,7 @@ pub(super) fn auto_note(reason: &str) -> &'static str {
     match reason {
         "pr-merged" | "released" => "merged",
         "cleaned" => "cleaned",
+        "idle" => "idle",
         _ => "auto",
     }
 }
@@ -126,7 +136,7 @@ pub(super) fn rows(
                 .and_then(|s| s.auto_settled_reason.as_deref())
         });
         if let Some(reason) = reason {
-            row.age = format!("{} · {}", auto_note(reason), row.age);
+            row.age = note_with_age(reason, &row.age);
         }
     }
     let open = searching || expanded.contains("Archived");
@@ -504,5 +514,12 @@ mod auto_settle_tests {
         assert!(age("a").starts_with("merged · "), "{}", age("a"));
         assert!(age("c").starts_with("cleaned · "), "{}", age("c"));
         assert!(!age("b").contains('·'), "{}", age("b"));
+    }
+
+    #[test]
+    fn an_idle_settle_reads_idle_and_its_age() {
+        assert_eq!(note_with_age("idle", "4d"), "idle 4d");
+        assert_eq!(note_with_age("released", "2h"), "merged · 2h");
+        assert_eq!(note_with_age("cleaned", "1d"), "cleaned · 1d");
     }
 }

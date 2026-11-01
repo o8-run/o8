@@ -352,6 +352,7 @@ impl ThreadList {
                                             .text_size(px(9.5))
                                             .text_color(theme().text_faint)
                                             .children(row.id.as_deref().and_then(|id| this.pin_mark(id)))
+                                            .children(row.id.as_deref().and_then(|id| this.auto_off_mark(id)))
                                             .child(row.age.clone())
                                             .when(row.branch, |v| v.child("⑂")),
                                     )

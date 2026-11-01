@@ -531,6 +531,7 @@ impl ThreadList {
                             incoming.settled_override = old.settled_override.clone();
                             incoming.settled_at = old.settled_at.clone();
                             incoming.auto_settled_reason = old.auto_settled_reason.clone();
+                            incoming.auto_settle_disabled_at = old.auto_settle_disabled_at.clone();
                             incoming.pinned_at = old.pinned_at.clone();
                             incoming.pin_order_key = old.pin_order_key.clone();
                             incoming.inbox_revision = old.inbox_revision;
@@ -1004,6 +1005,8 @@ mod archive_controls;
 
 #[path = "inbox.rs"]
 mod inbox;
+#[path = "auto_settle_toggle.rs"]
+mod auto_settle_toggle;
 #[path = "snooze.rs"]
 mod snooze;
 #[path = "pr_links.rs"]

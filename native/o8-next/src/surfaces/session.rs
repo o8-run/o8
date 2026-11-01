@@ -147,6 +147,9 @@ pub struct Session {
     /// "cleaned"), while that automatic settle is the current one.
     #[serde(default)]
     pub auto_settled_reason: Option<String>,
+    /// This thread opted out of auto-settle (inboxAction `auto-settle`).
+    #[serde(default)]
+    pub auto_settle_disabled_at: Option<String>,
     /// `owner/repo` from the repo's git remote, else its folder; older hosts omit it.
     #[serde(default)]
     pub repo_slug: Option<String>,
