@@ -19,6 +19,14 @@ pub(super) type View = ActivityPane;
 pub(super) const REGISTRATION: Registration = Registration {
     command: Some((4, || Command::Activity)),
     create,
+    tick: |shell, window, cx| {
+        let background = !window.is_window_active();
+        for content in shell.content.values() {
+            if let Content::Activity(view) = content {
+                view.update(cx, |pane, _| pane.background = background);
+            }
+        }
+    },
     ..Registration::new("Activity", "Open Activity", |_, _, _, _| {
         Some((Tab::Activity, false))
     })
@@ -62,7 +70,10 @@ fn create(
     shell.subscriptions.push(cx.subscribe_in(
         &activity,
         window,
-        move |shell, _, event: &ActivityEvent, window, cx| match event {
+        move |shell, source, event: &ActivityEvent, window, cx| match event {
+            ActivityEvent::Commit(row) => {
+                source.update(cx, |pane, cx| pane.open_commit(row, window, cx));
+            }
             ActivityEvent::Draft(repo,text) => draft::open(shell,repo,text,window,cx),
             ActivityEvent::Preferences(saved) => {
                 shell.state.workspaces.entry(created_for.clone()).or_default().surfaces.activity.activity_preferences=saved.clone();
@@ -90,7 +101,14 @@ fn create(
                 shell.content.remove(&key);
                 shell.execute(Command::Diff, window, cx);
             }
-            ActivityEvent::Open(url) => shell.open_link(url, window, cx),
+            ActivityEvent::Open(url) => {
+                let panel = shell.panel_shows(|key| matches!(shell.content.get(key), Some(Content::Activity(view)) if view.entity_id() == source.entity_id()));
+                if panel && let Some((repo, number)) = github_item(url, "pull") {
+                    shell.open_pr_in_panel(repo, number, window, cx);
+                } else {
+                    shell.open_link(url, window, cx);
+                }
+            },
         },
     ));
     Some(Content::Activity(activity))
@@ -105,7 +123,7 @@ impl ShellView for ActivityPane {
         });
     }
 
-    fn tick(view: &Entity<Self>, refresh: bool, cx: &mut Context<Shell>) {
+    fn tick(view: &Entity<Self>, _: bool, cx: &mut Context<Shell>) {
         // Inspect the active workspace after the shell's current borrow is returned.
         let shell = cx.weak_entity();
         let view = view.clone();
@@ -118,22 +136,25 @@ impl ShellView for ActivityPane {
                 // The main area's Activity tab, or Activity in front in the right panel.
                 let main =
                     shell.active() == Some(Tab::Activity) && shows(&shell.key(&Tab::Activity));
-                if main || shell.panel_shows(|key| shows(key)) {
-                    view.update(cx, |activity, cx| {
+                let visible = main || shell.panel_shows(|key| shows(key));
+                view.update(cx, |activity, cx| {
+                    activity.sync_updates(visible, cx);
+                    if visible {
                         activity.tick(cx);
-                        if refresh {
-                            activity.load_dossiers(cx);
-                            activity.load_proposals(cx);
-                        }
-                    });
-                }
+                    }
+                });
             });
         });
     }
 
     #[cfg(test)]
     fn ready(view: &Entity<Self>, cx: &App) -> bool {
-        view.read(cx).ready()
+        let pane = view.read(cx);
+        pane.ready()
+            && pane
+                .commit
+                .as_ref()
+                .is_none_or(|(_, view)| view.read(cx).ready)
     }
 }
 
@@ -153,3 +174,11 @@ mod tests;
 #[cfg(test)]
 #[path = "activity/packet_tests.rs"]
 mod packet_tests;
+
+#[cfg(test)]
+#[path = "activity/updates_tests.rs"]
+mod updates_tests;
+
+#[cfg(test)]
+#[path = "activity/commit_tests.rs"]
+mod commit_tests;

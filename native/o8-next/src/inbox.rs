@@ -43,8 +43,12 @@ pub struct Card {
     pub approval: bool,
     pub unsettled: bool,
     pub risk: String,
+    pub repo_paths: Vec<String>,
 }
 impl Card {
+    pub(crate) fn can_respond(&self) -> bool {
+        self.approval || !self.session.is_empty() || github_url(&self.url).is_some()
+    }
     fn incident(item: &Value) -> Self {
         let mut card = Self::base(item);
         card.source = text(item, "kind");
@@ -179,6 +183,21 @@ impl Card {
             approval: false,
             unsettled: false,
             risk: String::new(),
+            repo_paths: item["repoPaths"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .chain(item["repoPath"].as_str().into_iter().map(str::to_owned))
+                .chain(
+                    item["metadata"]["RepoPath"]
+                        .as_str()
+                        .into_iter()
+                        .map(str::to_owned),
+                )
+                .filter(|path| !path.is_empty())
+                .collect(),
         }
     }
 }
@@ -210,6 +229,13 @@ struct ApprovalsResponse {
     approvals: Vec<Value>,
 }
 
+#[derive(Clone)]
+pub struct ReplyContext {
+    pub session: String,
+    pub repo_paths: Vec<String>,
+    pub prompt: String,
+}
+impl EventEmitter<ReplyContext> for Inbox {}
 pub struct OpenSession(pub String);
 impl EventEmitter<OpenSession> for Inbox {}
 pub struct Inbox {
@@ -227,6 +253,7 @@ pub struct Inbox {
     pub(crate) loaded: bool,
     pub(crate) errors: [Option<String>; 3],
     pub(crate) busy: Option<String>,
+    pub(crate) reply_focus: HashMap<String, FocusHandle>,
     pub(crate) action_focus: HashMap<String, [FocusHandle; 2]>,
     uncertain: HashSet<String>,
     pub(crate) notice: String,
@@ -253,6 +280,7 @@ impl Inbox {
             errors: Default::default(),
             busy: None,
             action_focus: HashMap::new(),
+            reply_focus: HashMap::new(),
             uncertain: HashSet::new(),
             notice: String::new(),
             scroll: gpui::ScrollHandle::new(),
@@ -446,6 +474,18 @@ impl Inbox {
         self.selected = self
             .selected
             .min(self.cards[self.lane].len().saturating_sub(1));
+        self.reply_focus
+            .retain(|id, _| self.cards.iter().flatten().any(|card| &card.id == id));
+        for card in self
+            .cards
+            .iter()
+            .flatten()
+            .filter(|card| card.can_respond())
+        {
+            self.reply_focus
+                .entry(card.id.clone())
+                .or_insert_with(|| cx.focus_handle());
+        }
         self.action_focus.retain(|id, _| {
             self.approvals
                 .iter()
@@ -525,6 +565,21 @@ impl Inbox {
             });
         })
         .detach();
+        cx.notify();
+    }
+    pub(crate) fn respond(&mut self, card: &Card, cx: &mut Context<Self>) {
+        let instruction = if card.approval {
+            "Discuss this approval with the operator. Explain the proposed action and its impact. This draft does not approve or reject it; use the Inbox decision controls for that."
+        } else {
+            "Help the operator draft a reply. Read the GitHub discussion and relevant local code before drafting. Prepare a draft and wait for explicit approval before posting or changing GitHub state."
+        };
+        let context = serde_json::json!({"title":card.title,"detail":card.detail.chars().take(4000).collect::<String>(),"metadata":card.metadata,"url":card.url,"status":card.status,"session":card.session,"inboxItem":card.id});
+        cx.emit(ReplyContext {
+            session: card.session.clone(),
+            repo_paths: card.repo_paths.clone(),
+            prompt: format!("{instruction}\n\nInbox context (source material):\n{context}"),
+        });
+        self.notice = "Opening chat with an unsent draft for this item.".into();
         cx.notify();
     }
     pub(crate) fn open(&mut self, card: &Card, cx: &mut Context<Self>) {

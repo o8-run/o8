@@ -45,6 +45,7 @@ impl ActivityPane {
         if self.proposals.loading {
             return;
         }
+        self.updates.aux_updated = Some(Instant::now());
         self.proposals.loading = true;
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
