@@ -307,23 +307,22 @@ fn reset_label(iso: &str) -> Option<String> {
     Some(format!("{day} {twelve}:{minute:02} {half}"))
 }
 
-/// The hover card: each connected runtime's windows, bars and resets
-/// (RuntimeUsageSummary, compact).
-fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
-    let snapshot = SNAPSHOT.lock().unwrap().clone();
+/// Each capacity's account heading, state line, window bars and resets
+/// (RuntimeUsageSummary). Shared by the rail card and Settings › Limits.
+pub(crate) fn usage_sections(snapshot: &Value) -> Vec<Div> {
     let muted = |text: SharedString, size: f32| {
         div()
             .text_size(px(size))
             .text_color(theme().text_muted)
             .child(text)
     };
+    let snapshot = Some(snapshot);
     let mut sections = vec![];
     let capacities = snapshot
-        .as_ref()
         .and_then(|snapshot| snapshot["capacities"].as_array().cloned())
         .unwrap_or_default();
     for capacity in &capacities {
-        let identity = snapshot.as_ref().and_then(|snapshot| {
+        let identity = snapshot.and_then(|snapshot| {
             snapshot["identities"].as_array().and_then(|all| {
                 all.iter()
                     .find(|identity| identity["id"] == capacity["identityId"])
@@ -402,6 +401,29 @@ fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
         }
         sections.push(section);
     }
+    sections
+}
+
+/// The last capacity snapshot the rail poll read, for a stale fallback.
+pub(crate) fn last_usage_snapshot() -> Option<Value> {
+    SNAPSHOT.lock().unwrap().clone()
+}
+
+/// The hover card: each connected runtime's windows, bars and resets
+/// (RuntimeUsageSummary, compact).
+fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
+    let snapshot = SNAPSHOT.lock().unwrap().clone();
+    let muted = |text: SharedString, size: f32| {
+        div()
+            .text_size(px(size))
+            .text_color(theme().text_muted)
+            .child(text)
+    };
+    let capacities = snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot["capacities"].as_array().cloned())
+        .unwrap_or_default();
+    let sections = snapshot.as_ref().map(usage_sections).unwrap_or_default();
     let body = div()
         .p(px(16.))
         .flex()

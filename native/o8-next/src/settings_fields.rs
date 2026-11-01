@@ -92,6 +92,7 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("git", "Git & PRs"),
     ("storage", "Worktrees & storage"),
     ("keys", "API keys"),
+    ("limits", "Limits"),
 ];
 pub const FIELDS: &[Field] = &[
     field(
