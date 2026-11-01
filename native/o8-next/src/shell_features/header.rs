@@ -19,7 +19,7 @@ fn render(
     cx: &mut Context<Shell>,
 ) -> Option<AnyElement> {
     // The desktop header, measured from WorkspaceHeaderStrip, LeftHeaderStrip
-    // and PanelHeaderStrip. The sidebar toggle stays at x=74 (rail 60 + 14)
+    // and PanelHeaderStrip. The sidebar toggle stays at x=78 (rail 52 + 26)
     // whether the sidebar is open or not. With the sidebar open, search sits
     // at the sidebar's right edge and back/forward start the workspace header;
     // with it closed, toggle, search, back and forward share one row.
@@ -65,7 +65,7 @@ fn render(
         .gap(px(4.))
         // 4px workspace inset, plus the strip's 10px collapsed padding, or its
         // 8px padding after the 4px sidebar resize edge.
-        .pl(px(if hidden && !moving { 14. } else { 16. }))
+        .pl(px(if hidden && !moving { TOGGLE_INSET } else { 16. }))
         .pr(px(8.))
         .when(hidden && !moving, |row| {
             row.child(sidebar_toggle(true, cx)).child(search_button(cx))
@@ -121,7 +121,7 @@ fn render(
                         .flex()
                         .items_center()
                         .gap(px(4.))
-                        .pl(px(14.))
+                        .pl(px(TOGGLE_INSET))
                         .pr(px(8.))
                         .child(sidebar_toggle(false, cx))
                         .child(div().flex_1())
@@ -139,14 +139,14 @@ fn render(
                     .child(
                         div()
                             .absolute()
-                            .left(px(14.))
+                            .left(px(TOGGLE_INSET))
                             .top(px(top))
                             .child(sidebar_toggle(hidden, cx)),
                     )
                     .child(
                         div()
                             .absolute()
-                            .left(px((edge - 8. - SEARCH_W).max(14. + TOGGLE_W + 4.)))
+                            .left(px((edge - 8. - SEARCH_W).max(TOGGLE_INSET + TOGGLE_W + 4.)))
                             .top(px(top))
                             .child(search_button(cx)),
                     )
@@ -168,7 +168,9 @@ const SEARCH_W: f32 = 30.;
 /// The travelling slot's floor: the folded strip's 14px inset, toggle, 4px gap,
 /// search and 4px gap, less the strip's 16px padding in flight, so Back lands
 /// where the folded header puts it.
-const FOLDED: f32 = 14. + TOGGLE_W + 4. + SEARCH_W + 4. - 16.;
+/// Past the traffic lights, so the toggle never crowds them.
+const TOGGLE_INSET: f32 = 26.;
+const FOLDED: f32 = TOGGLE_INSET + TOGGLE_W + 4. + SEARCH_W + 4. - 16.;
 
 fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
     pill(

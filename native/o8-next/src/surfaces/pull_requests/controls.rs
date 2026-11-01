@@ -343,11 +343,11 @@ impl PullRequests {
     /// The header's control row.
     pub(super) fn controls(&self, cx: &mut Context<Self>) -> AnyElement {
         let [sort, state, scope, layout] = self.pickers();
-        // flex: 1 1 220px, as the desktop search field.
+        // Grows into free space and shrinks before the row wraps.
         let search = control("pr-search".into())
             .flex_grow()
             .flex_shrink()
-            .flex_basis(px(220.))
+            .flex_basis(px(120.))
             .justify_start()
             .child(icon(SEARCH, 15.))
             .child(div().flex_1().min_w_0().child(self.search.clone()));
