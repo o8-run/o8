@@ -35,6 +35,23 @@ afterEach(() => {
 });
 
 describe('orchestrator thread history persistence', () => {
+  it('titles a server-saved thread once it has an exchange, without a client POST', async () => {
+    const history = await loadHistoryModule();
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo', title: 'New conversation' });
+    history.appendMobileOrchestratorUserMessage({
+      tabId: thread.id, repoPath: '/tmp/repo', message: 'Fix the login redirect loop', backend: 'codex', timestampMs: 1_000,
+    });
+    history.upsertMobileOrchestratorAssistantMessage({
+      tabId: thread.id, repoPath: '/tmp/repo', messageId: 'assistant-1', content: 'Fixed.', backend: 'codex', timestampMs: 1_001,
+    });
+    const file = history.safeOrchestratorHistoryPath(thread.id);
+    // No OpenRouter key in the temp home: the code fallback names it.
+    await vi.waitFor(() => expect(JSON.parse(readFileSync(file, 'utf8')).titleSource).toBe('code'));
+    const saved = JSON.parse(readFileSync(file, 'utf8'));
+    expect(saved.title).not.toBe('New conversation');
+    expect(saved.messages).toHaveLength(2);
+  });
+
   it('repairs persisted legacy history before first use while post-health startup is still pending', async () => {
     const history = await loadHistoryModule();
     mkdirSync(history.ORCHESTRATOR_HISTORY_DIR, { recursive: true });
