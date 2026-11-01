@@ -47,6 +47,29 @@ fn native_composer_slash_click_keeps_typed_arguments(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn native_composer_dogfood_up_reaches_start_of_first_line(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-input", cx);
+    cx.simulate_input("alpha beta\nsecond line");
+    draw(cx);
+    cx.simulate_keystrokes("ctrl-home right right right up");
+    surface.update_in(cx, |s, window, cx| {
+        s.composer.update(cx, |i, cx| {
+            assert_eq!(
+                gpui::EntityInputHandler::selected_text_range(i, false, window, cx)
+                    .unwrap()
+                    .range,
+                0..0,
+                "Up from the first visual line must reach the start of the draft"
+            );
+        });
+    });
+    cx.simulate_keystrokes("right right right shift-up ctrl-c");
+    assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), "alp");
+}
+
+#[gpui::test]
 fn native_composer_controls_slash_opens_arrows_and_enter_apply(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
