@@ -34,6 +34,7 @@ import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED
 import { isSubscriptionProfile } from '@/lib/operator/subscription-profile';
 import { isTargetingTier } from '@/lib/operator/targeting-tier';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
+import { isBotRailEnabledIds } from '@/lib/operator/presentation-defaults';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { AUTHENTICATED_ENDPOINT_GUIDANCE, credentialBearingUrlPart } from './credential-safe-url';
 import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
@@ -285,6 +286,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   broadcastVoiceCalendar: booleanField('broadcast', 'voice_calendar'),
   broadcastVoiceCalendarLeadMinutes: numberField('broadcast', 'voice_calendar_lead_minutes', 'an integer from 1 through 1440', (value) => Number.isInteger(value) && value >= 1 && value <= 1_440),
   broadcastVoiceTimeCheckins: booleanField('broadcast', 'voice_time_checkins'),
+  botRailEnabledIds: { path: ['bots', 'rail_enabled'], parse: (value, key) => isBotRailEnabledIds(value) ? [...new Set(value)] : invalid(key, 'an array of non-empty bot ids') },
   presentationQuietMode: booleanField('presentation', 'quiet_mode'),
   notificationsReviewReady: enumField('notifications', 'review_ready', '"off" or "on"', (value): value is OperatorDefaults['notificationsReviewReady'] => value === 'off' || value === 'on'),
   apfsDependencyImages: booleanField('git', 'apfs_dependency_images'),

@@ -20,9 +20,19 @@ pub(crate) struct RequestError {
 #[derive(Deserialize)]
 pub(crate) struct Snapshot {
     pub values: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub bots: Vec<BotSetupCandidate>,
     pub sources: BTreeMap<String, String>,
     #[serde(rename = "settingsToml")]
     pub toml: Option<Toml>,
+}
+#[derive(Clone, Deserialize)]
+pub(crate) struct BotSetupCandidate {
+    pub id: String,
+    pub name: String,
+    pub house: String,
+    #[serde(rename = "selectionIds")]
+    pub selection_ids: Vec<String>,
 }
 #[derive(Deserialize)]
 pub(crate) struct Toml {
@@ -187,7 +197,14 @@ impl Settings {
                             .values
                             .retain(|id, _| FIELDS.iter().any(|f| f.id == id));
                         self.error = snapshot.toml.as_ref().and_then(|t| t.error.clone());
+                        let rail_changed = self.snapshot.as_ref().is_some_and(|old| {
+                            old.values.get("botRailEnabledIds")
+                                != snapshot.values.get("botRailEnabledIds")
+                        });
                         self.snapshot = Some(snapshot);
+                        if rail_changed && !mutation {
+                            crate::settings_fields::bot_rail_changed(&self.client);
+                        }
                         if mutation {
                             self.note = "Saved. New actions use these settings.".into();
                         }
@@ -339,6 +356,8 @@ impl Settings {
         self.busy = true;
         self.error = None;
         self.note = "Saving settings…".into();
+        let bot_choice_write = !keys
+            && (body.get("botRailEnabledIds").is_some() || body.get("settingsToml").is_some());
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             if keys {
@@ -352,6 +371,9 @@ impl Settings {
                 Ok(result)
             } else {
                 let _: serde::de::IgnoredAny = client.settings_request(method, DEFAULTS, body)?;
+                // Invalidate as soon as the save is accepted, independently
+                // of this view's lifetime and of the following readback.
+                if bot_choice_write { crate::settings_fields::bot_rail_changed(&client); }
                 Self::read(&client, false).map_err(|_| RequestError {
                     status: None, message: "The change was accepted, but current settings are unavailable. Refresh before trying again.".into(),
                 })
@@ -444,3 +466,6 @@ impl Settings {
 }
 #[path = "settings_view.rs"]
 mod view;
+
+#[path = "settings_bots.rs"]
+mod bots;

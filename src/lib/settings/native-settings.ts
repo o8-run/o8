@@ -1,4 +1,5 @@
 /** Native Settings receives declared values and presence, never raw stored TOML. */
+import { listBots } from '@/lib/bots/registry';
 import {
   getOperatorDefaults,
   getOperatorDefaultsTomlState,
@@ -28,6 +29,7 @@ export function nativeSettingsPayload(data: OperatorDefaultsWithSources, state: 
   let additionalSettingsSet = false;
   if (!state.error) ({ text, additionalSettingsSet } = projectOperatorDefaultsToml(state.text));
   return {
+    bots: listBots().map(({ id, name, house }) => ({ id, name, house, selectionIds: [id] })),
     values: safeValues(data.values),
     sources: data.sources,
     settingsToml: {

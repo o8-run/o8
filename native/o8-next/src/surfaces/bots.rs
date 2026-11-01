@@ -24,6 +24,7 @@ pub(super) struct Runtime {
     entries: Vec<BotEntry>,
     loading: bool,
     fetched: Option<Instant>,
+    settings_revision: u64,
     error: Option<String>,
     scroll: gpui::ScrollHandle,
 }
@@ -31,9 +32,21 @@ const POLL: Duration = Duration::from_secs(30);
 
 fn load_roster(shell: &mut Shell, force: bool, cx: &mut Context<Shell>) {
     let state = &mut shell.surfaces.bots;
-    if state.loading || !force && state.fetched.is_some_and(|t| t.elapsed() < POLL) {
+    let settings_revision = crate::settings_fields::bot_rail_revision(&shell.client);
+    if state.settings_revision != settings_revision && !state.entries.is_empty() {
+        // Confirmed Settings choices supersede cached visibility even if
+        // the replacement roster fails or an older request is in flight.
+        state.entries.clear();
+        cx.notify();
+    }
+    if state.loading
+        || !force
+            && state.settings_revision == settings_revision
+            && state.fetched.is_some_and(|t| t.elapsed() < POLL)
+    {
         return;
     }
+    state.settings_revision = settings_revision;
     state.loading = true;
     state.fetched = Some(Instant::now());
     let client = shell.client.clone();
@@ -43,6 +56,11 @@ fn load_roster(shell: &mut Shell, force: bool, cx: &mut Context<Shell>) {
         let _ = this.update(cx, |shell, cx| {
             let state = &mut shell.surfaces.bots;
             state.loading = false;
+            if settings_revision != crate::settings_fields::bot_rail_revision(&shell.client) {
+                state.fetched = None;
+                cx.notify();
+                return;
+            }
             match result {
                 Ok(entries) => {
                     state.entries = entries;
@@ -358,3 +376,7 @@ mod tests;
 #[cfg(test)]
 #[path = "bots/rail_tests.rs"]
 mod rail_tests;
+
+#[cfg(test)]
+#[path = "bots/settings_tests.rs"]
+mod settings_tests;
