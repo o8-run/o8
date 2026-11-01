@@ -475,6 +475,7 @@ impl ThreadList {
         let snooze = self.snooze_items(&id, cx);
         let pin = self.pin_item(&id, cx);
         let auto_settle = self.auto_settle_item(&id, cx);
+        let workspace_restores = self.workspace_restore_items(&id, cx);
         // Archive left the row's hover strip for the state mark (Q 2026-10-31).
         let archived = self.sessions.iter().any(|s| s.id == id && s.status == "archived");
         let archive_id = id.clone();
@@ -556,6 +557,7 @@ impl ThreadList {
                             }))
                             .children(pin)
                             .children(auto_settle)
+                            .children(workspace_restores)
                             .children(filter)
                             .children(snooze)
                             .child(archive),

@@ -103,10 +103,22 @@ impl Shell {
     }
 }
 
+/// Actual current-generation parking receipts. Signed deltas preserve net space loss too.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ParkedWorkspace {
+    pub packet_id: String,
+    pub repository_uuid: String,
+    #[serde(default)]
+    pub reclaimed_available_bytes: Option<i64>,
+}
+
 // Request adapters compile with this surface through its existing shell entry.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
+    #[serde(default)]
+    pub parked_workspaces: Vec<ParkedWorkspace>,
     pub id: String,
     pub title: String,
     #[serde(default)]

@@ -113,6 +113,7 @@ impl Client {
                 "enabled":true,"title":packet["title"],"branch":packet["branchTarget"],"runtime":packet["runtime"],"status":packet["status"],"repo":packet["workspaceTargetPath"].as_str().and_then(|path| path.rsplit('/').find(|part| !part.is_empty())),"launchContext":packet["launchContext"]
             }));
             sessions.push(Session {
+                parked_workspaces: serde_json::from_value(agent["parkedWorkspaces"].clone()).unwrap_or_default(),
                 repo_slug: None,
                 pinned_at: agent["pinnedAt"].as_str().map(str::to_owned),
                 pin_order_key: agent["pinOrderKey"].as_str().map(str::to_owned),
@@ -213,7 +214,8 @@ impl Client {
                 "id": id, "title": record["title"], "status": "archived",
                 "runtime": record["backend"].as_str().unwrap_or(""),
                 "repoPath": record["repoPath"], "backend": record["backend"],
-                "lastMessageAt": record["modifiedAt"], "messageCount": record["messageCount"]
+                "lastMessageAt": record["modifiedAt"], "messageCount": record["messageCount"],
+                "parkedWorkspaces": record["parkedWorkspaces"].as_array().cloned().unwrap_or_default()
             }))
             .map_err(|_| "Invalid archived thread")?;
             session.title = crate::text::sanitize(&session.title);

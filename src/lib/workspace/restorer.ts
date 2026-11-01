@@ -1,8 +1,10 @@
+import { completedParkedWorkspace, type CompletedRestorePin } from './completed-packet';
+import { getSqlite } from '@/lib/db';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { spokenReviewSnapshotFingerprint } from '@/lib/lane/lane-diff-facts';
-import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, updateLane } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { listRepos } from '@/lib/repos/registry';
@@ -302,6 +304,7 @@ export async function restoreWorkspace(
     let lane: Lane | null = null;
     let snapshot: WorkspaceSnapshotRecord | null = null;
     let archivedRecovery: ArchivedReviewRecovery | null = null;
+    let completedPin: CompletedRestorePin | null = null;
     let allowedIgnoredPaths: string[] = [];
     let allowedExternalSymlinks: WorkspaceStorageVerifierOptions['allowedExternalSymlinks'] = {};
     let requiredCopyBindings: WorkspaceStorageVerifierOptions['requiredCopyBindings'] = {};
@@ -309,6 +312,7 @@ export async function restoreWorkspace(
       if (!input.operationId.trim()) throw new Error('operationId is required.');
       repo = (await deps.listRepos()).find((entry) => entry.id === input.repositoryUuid);
       if (!repo) throw new Error('Registered repository UUID was not found.');
+      const registeredRepo = repo;
       lane = deps.findLaneByPacket(input.packetId);
       if (!lane || lane.packetId !== input.packetId || lane.ownership !== 'managed') {
         throw new Error('Only a managed reviewing packet lane can be restored.');
@@ -320,6 +324,10 @@ export async function restoreWorkspace(
         if (!expected || expected.generation !== snapshot.snapshotGeneration || expected.version !== snapshot.version
           || expected.fingerprint !== snapshot.snapshotFingerprint) throw new Error('The requested parked generation changed.');
         archivedRecovery = await prepareArchivedReviewRecovery(lane, snapshot);
+      } else if (lane.status === 'completed') {
+        const completed = completedParkedWorkspace(lane, snapshot);
+        if (!completed) throw new Error('Completed Restore requires the matching parked generation and canonical release HEAD.');
+        completedPin = { snapshot, releaseHead: completed.releaseHead };
       } else if (lane.status !== 'reviewing') throw new Error('Only a managed reviewing packet lane can be restored.');
       if (snapshot.state === 'materialized') return { status: 'already_materialized', snapshot };
       if (snapshot.state !== 'parked') throw new Error(`Workspace snapshot is ${snapshot.state}; reconcile it before restoring.`);
@@ -365,6 +373,16 @@ export async function restoreWorkspace(
         archiveRecoveryOriginalVersion: archivedRecovery ? snapshot.version : null,
         archiveRecoverySessionFingerprint: archivedRecovery?.binding.recordFingerprint ?? null,
       });
+      const assertCompletedRestoreCurrent = () => {
+        if (!completedPin) return null;
+        const current = deps.findLaneByPacket(input.packetId);
+        const currentSnapshot = getWorkspaceSnapshot(registeredRepo.id, input.packetId);
+        if (!current || !currentSnapshot || !completedParkedWorkspace(current, currentSnapshot, undefined, completedPin)) {
+          throw new Error('Completed workspace owner, release HEAD or pinned generation changed during explicit Restore.');
+        }
+        return current;
+      };
+      assertCompletedRestoreCurrent();
       await deps.restoreExact({
         repoPath: repo.localPath,
         worktreeId: path.basename(snapshot.originalPath),
@@ -379,6 +397,7 @@ export async function restoreWorkspace(
         isolationKind,
       });
       await deps.afterExactRestore?.(snapshot.originalPath);
+      assertCompletedRestoreCurrent();
       const materializationIdentity = await assertManagedWorkspaceMaterialization(
         repo.localPath,
         snapshot.originalPath,
@@ -470,7 +489,15 @@ export async function restoreWorkspace(
         firstFingerprint: first.fingerprint,
         secondFingerprint: second.fingerprint,
       });
-      snapshot = archivedRecovery ? await completeArchivedReviewRecovery(archivedRecovery, complete) : complete();
+      snapshot = archivedRecovery ? await completeArchivedReviewRecovery(archivedRecovery, complete)
+        : completedPin ? getSqlite().transaction(() => {
+          const current = assertCompletedRestoreCurrent()!;
+          const materialized = complete();
+          if (current.worktreePath === null) {
+            updateLane(current.id, { worktreePath: materialized.originalPath }, 'system', { phase: 'workspace_restored' });
+          }
+          return materialized;
+        }).immediate() : complete();
       if (setupReceipt.install.materialization) {
         deps.queueDependencyPublication(
           snapshot.originalPath,

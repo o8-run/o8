@@ -67,6 +67,13 @@ fn label(path: &str) -> String {
         .unwrap_or(path)
         .into()
 }
+/// Parking changes listing-only receipt details after the Settle response.
+fn workspace_parked(frame: &Value) -> bool {
+    frame["channel"] == "mutation"
+        && frame["event"] == "mutation.settled"
+        && frame["data"]["mutation"]["action"] == "workspace.park"
+        && frame["data"]["mutation"]["status"] == "completed"
+}
 
 pub struct ThreadList {
     client: Client,
@@ -144,6 +151,7 @@ pub struct ThreadList {
     loading: bool,
     saving: bool,
     pending_archives: HashMap<String, String>,
+    pending_workspace_restores: HashMap<String, String>,
     dirty: Option<Instant>,
     generation: u64,
     last_load: Instant,
@@ -166,7 +174,7 @@ impl EventEmitter<Event> for ThreadList {}
 impl ThreadList {
     #[cfg(test)]
     pub(crate) fn diagnostic(&self) -> serde_json::Value {
-        json!({"headerMenu":self.header_menu,"project":self.header.ledger.active_project_id,"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"selected":self.selected,"choice":self.choice_row(),"dirty":self.dirty.is_some(),"generation":self.generation,"scopes":self.scopes,"searchRunning":self.search_running,"searchPending":self.search_pending.is_some()})
+        json!({"headerMenu":self.header_menu,"project":self.header.ledger.active_project_id,"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"settling":self.settling.is_some(),"selected":self.selected,"choice":self.choice_row(),"dirty":self.dirty.is_some(),"generation":self.generation,"scopes":self.scopes,"searchRunning":self.search_running,"searchPending":self.search_pending.is_some()})
     }
     pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(Composer::new);
@@ -244,6 +252,7 @@ impl ThreadList {
             loading: false,
             saving: false,
             pending_archives: HashMap::new(),
+            pending_workspace_restores: HashMap::new(),
             dirty: None,
             generation: 0,
             last_load: Instant::now(),
@@ -530,6 +539,7 @@ impl ThreadList {
                             incoming.pinned_at = old.pinned_at.clone();
                             incoming.pin_order_key = old.pin_order_key.clone();
                             incoming.inbox_revision = old.inbox_revision;
+                            incoming.parked_workspaces = old.parked_workspaces.clone();
                         }
                         // Repo, branch and run start are listing-only too.
                         incoming.repo_slug = incoming.repo_slug.take().or(old.repo_slug.clone());
@@ -560,20 +570,22 @@ impl ThreadList {
                 if matches!(
                     frame["channel"].as_str(),
                     Some("orchestrator-threads" | "agent-lifecycle" | "lane-lifecycle")
-                ) || frame["channel"] == "system" && frame["event"] == "connected"
+                ) || workspace_parked(&frame)
+                    || frame["channel"] == "system" && frame["event"] == "connected"
                     || frame["channel"] == "realtime"
                         && frame["event"] == "batch"
                         && frame["data"]["events"].as_array().is_some_and(|events| {
                             events.iter().any(|event| {
                                 event["stream"] == "global"
-                                    && matches!(
-                                        event["channel"].as_str(),
-                                        Some(
-                                            "orchestrator-threads"
-                                                | "agent-lifecycle"
-                                                | "lane-lifecycle"
-                                        )
-                                    )
+                                    && (workspace_parked(event)
+                                        || matches!(
+                                            event["channel"].as_str(),
+                                            Some(
+                                                "orchestrator-threads"
+                                                    | "agent-lifecycle"
+                                                    | "lane-lifecycle"
+                                            )
+                                        ))
                             })
                         })
                 {
@@ -1026,3 +1038,6 @@ impl ThreadList {
         }
     }
 }
+
+#[path = "parking.rs"]
+mod parking;

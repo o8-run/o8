@@ -262,6 +262,7 @@ impl ThreadList {
                             )
                     })),
             )
+            .children(self.workspace_parked_detail(&id))
             .children(self.pr_badge(&id, cx));
         if let Some(s) = session {
             if s.tmux_session.as_deref().is_some_and(|t| !t.is_empty()) {

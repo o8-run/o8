@@ -1,3 +1,4 @@
+import { startSettledWorkspaceParking } from './workspace-parking';
 /**
  * The auto-settle sweep (rules in auto-settle-rules.ts). Server-side, so the
  * web app, mobile and the native sidebar all read the same settlement; a
@@ -137,6 +138,7 @@ export async function runInboxAutoSettleSweep(options: { force?: boolean; agents
         assertCompletionEvidenceCurrent(subject, verdict);
         assertInboxCanSettle(subject, agents!);
       }, legacyPinned)) {
+        startSettledWorkspaceParking(subject);
         settled.push(subject.id);
         console.log(`[inbox] auto-settled ${subject.kind} ${subject.id} (${verdict.reason})`);
       }
