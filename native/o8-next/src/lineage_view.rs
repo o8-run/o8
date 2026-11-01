@@ -4,7 +4,6 @@ use super::*;
 use crate::{lineage, model::Row, theme::current as theme};
 use gpui::{AnyElement, MouseButton, SharedString};
 
-const BRANCH: &str = "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM18 9a9 9 0 0 1-9 9";
 const STARTED_BY: &str = "M9 6v6a3 3 0 0 0 3 3h6M15 12l3 3-3 3";
 
 thread_local! {
@@ -40,8 +39,7 @@ impl Surface {
         lineage::set_shown(children.clone());
         let session = self.sessions.iter().find(|s| s.id == thread);
         let parent = session.and_then(|s| lineage::parent(s).map(str::to_owned));
-        let branch = session.and_then(|s| lineage::worktree_badge(s.branch.as_deref()));
-        if children.is_empty() && parent.is_none() && branch.is_none() {
+        if children.is_empty() && parent.is_none() {
             return None;
         }
         let now = lineage::now_ms();
@@ -94,37 +92,6 @@ impl Surface {
                         .child(title),
                 )
                 .on_click(move |_, window, cx| lineage::open(&id, window, cx))
-        });
-        let badge = branch.map(|branch| {
-            div()
-                .debug_selector(|| "lineage-worktree".into())
-                .h(px(22.))
-                .px(px(8.))
-                .flex()
-                .items_center()
-                .gap(px(5.))
-                .rounded(px(6.))
-                .border_1()
-                .border_color(theme().border)
-                .text_size(px(11.5))
-                .text_color(theme().text_muted)
-                .child(crate::icon::stroke(BRANCH, theme().text_muted, 11., 1.8))
-                .child(
-                    div()
-                        .max_w(px(220.))
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(branch),
-                )
-        });
-        let context = (badge.is_some() || started_by.is_some()).then(|| {
-            div()
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .children(badge)
-                .children(started_by)
         });
         let key = format!("strip:{thread}");
         let open = lineage::is_open(&key);
@@ -193,7 +160,7 @@ impl Surface {
                 .mb(px(6.))
                 .flex()
                 .flex_col()
-                .children(context)
+                .children(started_by)
                 .children(summary)
                 .when(open, |view| {
                     view.children(children.iter().enumerate().map(|(n, child)| {

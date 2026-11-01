@@ -153,17 +153,6 @@ fn launch_and_task_calls_become_delegates_with_their_thread() {
 }
 
 #[test]
-fn worktree_badge_skips_default_branches() {
-    assert_eq!(
-        worktree_badge(Some("box/orch")).as_deref(),
-        Some("box/orch")
-    );
-    assert_eq!(worktree_badge(Some("main")), None);
-    assert_eq!(worktree_badge(Some(" ")), None);
-    assert_eq!(worktree_badge(None), None);
-}
-
-#[test]
 fn the_card_skips_helpers_the_trace_already_links() {
     let mut linked = step("a", "ok", true, None);
     linked.delegations = vec![crate::subagents::model::Reference {
