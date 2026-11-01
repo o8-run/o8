@@ -134,6 +134,7 @@ pub(super) fn draw(cx: &mut VisualTestContext) {
         window.draw(cx).clear();
     });
 }
+#[track_caller]
 pub(super) fn wait(
     view: &Entity<Settings>,
     cx: &mut VisualTestContext,
@@ -150,14 +151,26 @@ pub(super) fn wait(
     }
     panic!("Settings panel response must reach paint");
 }
+#[track_caller]
 pub(super) fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
     for _ in 0..30 {
         let bounds = cx
             .debug_bounds(selector)
             .unwrap_or_else(|| panic!("missing {selector}"));
-        let viewport = cx.debug_bounds("settings-scroll").unwrap();
-        if !selector.starts_with("setting-") || viewport.contains(&bounds.center()) {
+        let scroll_selector = if selector.starts_with("settings-nav-") {
+            Some("settings-navigation")
+        } else if selector.starts_with("setting-") || selector.starts_with("settings-result-") {
+            Some("settings-scroll")
+        } else {
+            None
+        };
+        let Some(scroll_selector) = scroll_selector else {
+            cx.simulate_click(bounds.center(), Modifiers::default());
+            return;
+        };
+        let viewport = cx.debug_bounds(scroll_selector).unwrap();
+        if viewport.contains(&bounds.center()) {
             cx.simulate_click(bounds.center(), Modifiers::default());
             return;
         }

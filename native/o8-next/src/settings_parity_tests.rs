@@ -208,3 +208,16 @@ fn settings_parity_keyboard_opens_help_and_returns_to_settings(cx: &mut TestAppC
         "help restores focus to its Settings control"
     );
 }
+
+#[gpui::test]
+fn settings_parity_actions_follow_shell_settings_lifecycle(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut visual, _) = start(cx);
+    visual.simulate_keystrokes("ctrl-shift-p");
+    visual.simulate_keystrokes("p r o j e c t s enter");
+    settle(&mut visual);
+    assert!(
+        shell.read_with(&mut visual, |s, _| s.surfaces.settings.view.is_none()
+            && s.surfaces.settings.subscription.is_none())
+    );
+    assert!(shell.read_with(&mut visual, |s, _| s.surfaces.projects.open));
+}

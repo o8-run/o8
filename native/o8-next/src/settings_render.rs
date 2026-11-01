@@ -75,6 +75,7 @@ impl Render for Settings {
         };
         let mut navigation = div()
             .id("settings-navigation")
+            .debug_selector(|| "settings-navigation".into())
             .min_h_0()
             .overflow_y_scroll()
             .w(px(200.))
@@ -152,8 +153,25 @@ impl Render for Settings {
                 &query,
                 "about version platform mode updates github documentation releases credits",
             );
+            let connections = panels::matches(
+                "connections",
+                self.section,
+                &query,
+                "connections adapter capabilities workers actions session transforms usage limits",
+            );
+            if connections {
+                content = content.child(if query.len() >= 2 && self.section != "connections" {
+                    self.panel_result("connections", "Connections", window, cx)
+                } else {
+                    self.connections_view(window, cx)
+                });
+            }
             if about {
-                content = content.child(self.about_view(window, cx));
+                content = content.child(if query.len() >= 2 && self.section != "about" {
+                    self.panel_result("about", "About", window, cx)
+                } else {
+                    self.about_view(window, cx)
+                });
             }
             if keyboard {
                 content = content.child(self.keyboard_view(window, cx));
@@ -161,7 +179,7 @@ impl Render for Settings {
             if appearance {
                 content = content.child(self.appearance_view(window, cx));
             }
-            if fields.is_empty() && !appearance && !keyboard && !about {
+            if fields.is_empty() && !appearance && !keyboard && !about && !connections {
                 content = content.child(empty("No settings match this search."));
             }
             let mut previous = None;

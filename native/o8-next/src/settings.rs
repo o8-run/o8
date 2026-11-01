@@ -133,6 +133,7 @@ pub(crate) struct Settings {
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     scroll: gpui::ScrollHandle,
+    connections: connections::State,
     about_version: Option<String>,
     about_busy: bool,
     about_status: String,
@@ -146,20 +147,7 @@ impl Settings {
             input.placeholder = "Search settings".into();
             input
         });
-        let subscription = cx.observe(&search, |this, _, cx| {
-            let query = this.search.read(cx).text.trim().to_lowercase();
-            if query.len() >= 2
-                && panels::matches(
-                    "about",
-                    this.section,
-                    &query,
-                    "about version platform mode updates github documentation releases credits",
-                )
-            {
-                this.load_about(false, cx);
-            }
-            this.changed(cx);
-        });
+        let subscription = cx.observe(&search, |this, _, cx| this.changed(cx));
         let focus = cx.focus_handle();
         focus.focus(window);
         let mut view = Self {
@@ -184,6 +172,7 @@ impl Settings {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             scroll: gpui::ScrollHandle::new(),
+            connections: connections::State::default(),
             about_version: None,
             about_busy: false,
             about_status: String::new(),
@@ -248,6 +237,7 @@ impl Settings {
                 self.open_field = None;
             }
         }
+        self.load_panel(false, cx);
         self.changed(cx);
     }
     fn read(client: &Client, keys: bool) -> Result<Data, RequestError> {
@@ -316,6 +306,9 @@ impl Settings {
     fn load_panel(&mut self, force: bool, cx: &mut Context<Self>) {
         if self.section == "about" {
             self.load_about(force, cx);
+        }
+        if self.section == "connections" {
+            self.load_connections(force, cx);
         }
     }
     fn locked(&self, field: &Field) -> bool {
@@ -486,3 +479,6 @@ mod about;
 #[cfg(test)]
 #[path = "settings_test_peer.rs"]
 mod test_peer;
+
+#[path = "settings_connections.rs"]
+mod connections;

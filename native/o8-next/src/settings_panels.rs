@@ -57,6 +57,24 @@ impl Settings {
                 .child("Changes apply immediately and are saved for the next launch. Glass uses the macOS desktop material where supported; other platforms may use solid surfaces."))
             .into_any_element()
     }
+    pub(super) fn panel_result(
+        &mut self,
+        section: &'static str,
+        label: &'static str,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.button(
+            format!("settings-result-{section}"),
+            format!("Open {label}"),
+            !self.busy,
+            false,
+            window,
+            cx,
+            move |this, _, cx| this.select(section, cx),
+        )
+        .into_any_element()
+    }
     pub(super) fn keyboard_view(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         div()
             .flex()

@@ -7,8 +7,8 @@ pub(super) type Slice = EmptyState;
 #[derive(Default)]
 pub(super) struct Runtime {
     pub view: Option<Entity<Settings>>,
-    pub subscription: Option<gpui::Subscription>,
-    pub actions: Option<gpui::Subscription>,
+    // Every shell closer drops this slot, so action listeners share its lifetime.
+    pub subscription: Option<(gpui::Subscription, gpui::Subscription)>,
 }
 pub(super) const REGISTRATION: Registration = Registration {
     command: Some((6, || Command::Settings)),
@@ -32,7 +32,6 @@ pub(super) const REGISTRATION: Registration = Registration {
     before_tab: |s| {
         s.surfaces.settings.view = None;
         s.surfaces.settings.subscription = None;
-        s.surfaces.settings.actions = None;
     },
     key_down: |s, event, window, cx| {
         let key = event.keystroke.key.as_str();
@@ -66,12 +65,12 @@ impl Shell {
         self.surfaces.projects.open = false;
         let client = self.client.clone();
         let settings = cx.new(|cx| Settings::new(client, window, cx));
-        self.surfaces.settings.subscription = Some(cx.subscribe_in(
+        let close_subscription = cx.subscribe_in(
             &settings,
             window,
             |this, _, _: &crate::settings::Close, window, cx| this.close_settings(window, cx),
-        ));
-        self.surfaces.settings.actions = Some(cx.subscribe_in(
+        );
+        let action_subscription = cx.subscribe_in(
             &settings,
             window,
             |this, _, action: &crate::settings::Action, window, cx| match action {
@@ -80,7 +79,8 @@ impl Shell {
                     (super::shortcuts::REGISTRATION.open)(this, Command::Shortcuts, window, cx);
                 }
             },
-        ));
+        );
+        self.surfaces.settings.subscription = Some((close_subscription, action_subscription));
         self.surfaces.settings.view = Some(settings);
         self.revision += 1;
         cx.notify();
@@ -88,7 +88,6 @@ impl Shell {
     fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.surfaces.settings.view = None;
         self.surfaces.settings.subscription = None;
-        self.surfaces.settings.actions = None;
         self.restore_focus(window, cx);
         self.revision += 1;
         cx.notify();

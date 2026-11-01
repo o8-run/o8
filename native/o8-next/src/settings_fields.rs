@@ -4,6 +4,7 @@ use serde_json::Value;
 #[derive(Clone, Copy)]
 pub enum Kind {
     Toggle,
+    ReadOnly,
     WordToggle(&'static str),
     Time,
     TierEffort,
@@ -56,7 +57,7 @@ impl Field {
             "meteredPacketCostCapUsd" | "meteredPacketInputTokenCap" => "Task spending limits",
             "brainRoutingMode" | "brainCodexModel" | "brainCodexEffort" => "Engineering Brain",
             "codexAppThreads" => "Codex app",
-            "subscriptionProfile" => "Workers",
+            "subscriptionProfile" | "defaultDispatchRuntime" | "workerRuntimes" => "Workers",
             "targetingTriage" | "targetingAction" => "Thinking & task models",
             "reviewerBackend" => "Orchestrator",
             "codexWorkerEffort" => "Codex models",
@@ -130,6 +131,15 @@ impl Field {
     }
     pub fn display(&self, value: &Value) -> String {
         match self.kind {
+            Kind::ReadOnly => match value {
+                Value::String(value) => value.clone(),
+                Value::Array(values) => values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                _ => "Unavailable".into(),
+            },
             Kind::TierEffort => value["runtime"].as_str().unwrap_or("Unavailable").into(),
             Kind::Number(scale, unit) => value
                 .as_f64()
@@ -219,6 +229,7 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("git", "Git & PRs"),
     ("storage", "Worktrees & storage"),
     ("keys", "API keys"),
+    ("connections", "Connections"),
     ("about", "About"),
 ];
 pub const FIELDS: &[Field] = &[
@@ -650,6 +661,20 @@ pub const FIELDS: &[Field] = &[
         "models",
         "Effort used for targeted implementation. The saved provider and model are preserved.",
         Kind::TierEffort,
+    ),
+    field(
+        "defaultDispatchRuntime",
+        "Default worker",
+        "models",
+        "Saved worker used when a task does not choose a runtime.",
+        Kind::ReadOnly,
+    ),
+    field(
+        "workerRuntimes",
+        "Allowed workers",
+        "models",
+        "Saved worker pool. Inspect declared actions in Connections.",
+        Kind::ReadOnly,
     ),
 ];
 

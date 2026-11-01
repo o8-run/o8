@@ -139,6 +139,9 @@ impl Settings {
         };
         let mut controls = div().flex().flex_wrap().gap(px(8.));
         match field.kind {
+            Kind::ReadOnly => {
+                controls = controls.child(field.display(&value));
+            }
             // A switch, not a button labelled with its state: a lone "Off"
             // read as text. An Off/On choice is the same control.
             Kind::Toggle | Kind::WordToggle(_) | Kind::Choice(&[("off", "Off"), ("on", "On")]) => {

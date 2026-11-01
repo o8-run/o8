@@ -77,7 +77,7 @@ the existing operator-defaults route unless another owner is named.
 | Providers / provider navigation | Installed/configured provider tabs; Show available; tool scan retry | missing | skipped pending security review: inventory response combines account diagnostics and stored TOML; needs a native-safe projection |
 | Providers / each CLI house | Runtime status; Version; Binary path; Model selection guidance; Runtime configuration guidance | missing | partial outside Settings: composer already has house/model selection |
 | Providers / each CLI house | Account status; connection evidence; sign-in; who pays; account usage/limits and dashboard links | missing | skipped: account/authentication/billing review |
-| Providers / Adapter capabilities | Worker actions; Session transforms; Usage support; Account-limit observation support | missing | missing: capability facts only, not account data |
+| Providers / Adapter capabilities | Worker actions; Session transforms; Usage support; Account-limit observation support | missing | present: read-only configured worker capabilities, refresh, unavailable/error recovery; no account data |
 | Providers / Codex models | Worker effort | missing | present: shared saved effort choices |
 | Providers / Claude models | Worker effort; Claude fallback model | missing | present: shared effort and fallback choices |
 | Providers / Claude connection | Model source; Model; Codex authorization; reconnect/reset/setup | missing | skipped: authentication/carrier setup |
@@ -103,7 +103,7 @@ the existing operator-defaults route unless another owner is named.
 | Local models / Local models | Dispatch model (Ollama/LM Studio/Cloud); Local endpoint/presets; Chat model/presets; Embedding model; Save/test | missing | missing: endpoint fields deliberately skipped for network-binding review; chat/embedding model-name controls present; dispatch choice/presets/test remain |
 | Worktrees & storage / Storage usage | Workspace files: allocated/logical; Refresh usage; Space for new tasks: free/reserved/available | missing | missing |
 | Worktrees & storage / Automatic cleanup | Workspace count per repository; Disk usage per repository | present | present |
-| Worktrees & storage / Advanced | Reuse dependencies (APFS) | missing | missing |
+| Worktrees & storage / Advanced | Reuse dependencies (APFS) | missing | missing: native-safe defaults omit the effective environment override; needs that projection before an accurate switch can be offered |
 | Worktrees & storage / Workspace parking | Parking mode | present | present |
 | Worktrees & storage / Workspace parking | Fleet parking: parked/eligible/opted out; each repository's pressure parking switch | missing | missing |
 | Worktrees & storage / Minimum free space | Volume reserve; Absolute floor | present | present |
@@ -118,6 +118,7 @@ the existing operator-defaults route unless another owner is named.
 | Git & PRs / Pull requests | Open pull requests (In o8/Browser) | present | present |
 | Indexing / Repositories | Every repository index status; Refresh docs; Retry | missing | missing |
 | Indexing / Engineering Brain | Saved instructions; Recorded task outcomes; Knowledge storage | missing | missing |
+| Indexing / Conversation history | Choose ZIP/JSON conversation export; Import conversation history; local profile/topic/unfinished-project summary | missing | skipped: account-export/profile ingestion review |
 | Indexing / Knowledge sources | Folder; include patterns; exclude patterns; add/refresh/remove source and facts | missing | missing: source ingestion/redaction behavior skipped |
 | MCP / Clients | Claude Desktop, Claude Code, Hermes Agent, OpenClaw status; Install/Update/Remove | missing | skipped: writes authenticated client configuration |
 | MCP / External servers | Add command/URL/JSON; candidate edit/add; manual name/transport/command/args/env/URL; enable; worker/Symon injection; test; remove | missing | skipped: arbitrary environment, credentials and network endpoints |
@@ -154,7 +155,7 @@ the existing operator-defaults route unless another owner is named.
 | Quick drawer / Get help | Expand; Keyboard shortcuts (Cmd+/); Community Discord; Documentation | present | present in existing native profile surface; no rail changes |
 | Quick drawer / capacity helper | Plan capacity rows; refresh; select/register plan | missing | skipped: account/billing (helper is not mounted by current drawer) |
 | Quick drawer / theme helper | Light; Dark; glass surface toggle | partial | partial: current drawer uses three complete looks; helper itself is not mounted |
-| Keyboard / shortcuts | Open shortcut help and close it, keyboard scrolling | present | partial: Settings entry now opens the native reference modal and restores focus; classic host-only shortcut coverage still depends on those host ports |
+| Keyboard / shortcuts | Open shortcut help and close it, keyboard scrolling | partial | partial: Settings entry now opens the native reference modal and restores focus; classic host-only shortcut coverage still depends on those host ports |
 | Sounds | No separate Sounds tab, sound picker, volume or mute control exists in the frozen Settings references | present | present as an inventory fact; do not invent preferences. Spoken updates are listed under Voice |
 
 ## Execution order
@@ -184,4 +185,24 @@ No full suite, npm install, push, PR, release, rail changes, or secret changes.
 
 - Keyboard: `settings_parity_keyboard_opens_help_and_returns_to_settings` passed (1/1), opening the real shell help modal, closing back to Settings, then reopening it with Enter from the restored focus. The page renderer moved to `settings_render.rs` to keep the existing row-controls file below its size limit; internal Settings navigation scrolls without visible bars.
 
-- About: `settings_parity_about_links_version_and_verified_update_check` passed (1/1). A disposable HTTP peer proves current/available results, rejection of unverified replies, HTTP failure and recovery, the exact check-only request, version display and external-link destinations. Its first run exposed a test-peer paint-settling gap; it now uses the shell tests' two-paint pattern. No installed-app update acceptance is claimed.
+- About: `settings_parity_about_links_version_and_verified_update_check` passed (1/1). A disposable HTTP peer proves current/available results, rejection of unverified replies, HTTP failure and recovery, the exact check-only request, version display and external-link destinations. The peer uses the shell tests' two-paint pattern. Combined reruns exposed intermittent repeated-button failures; follow-up verification remains open. No installed-app update acceptance is claimed.
+
+- Connections: `settings_parity_connections_read_only_capabilities_and_recovery` passed in the combined serial run. Real selectors read declared capabilities, switch configured workers, recover from an unavailable adapter, and prove search performs no inactive-panel reads until a result is opened. `settings_parity_actions_follow_shell_settings_lifecycle` passed: the global palette opens Projects and drops both Settings subscriptions together.
+
+## Host and security handoff
+
+- Keep house discovery, default-worker/pool editing, role-readiness details and Pi
+  setup held until the reviewer provides an inventory projection without account
+  diagnostics or stored TOML. The native-safe defaults remain the source for
+  configured runtime IDs and non-secret model preferences.
+- Startup, close-with-active-work, update-channel and voice hardware preferences
+  belong to classic's host bridge. No native Settings endpoint exists for these;
+  no replacement server or host lifecycle was added.
+- APFS dependency reuse also needs its effective environment override in a native-safe
+  response; the file preference alone would be misleading.
+- The native shortcut reference lists actual native bindings. Classic's quick-actions,
+  new-orchestrator-tab, panels, composer and global voice rows must only be added
+  when their underlying native handlers are verified. Do not advertise host-only bindings.
+- API Keys, `settings_secret.rs`, sign-in/accounts, credential storage/carriers,
+  pairing/relay access, arbitrary MCP environment/config, permission/authorization,
+  reset-with-keys, report redaction/upload and binding/address controls are held.

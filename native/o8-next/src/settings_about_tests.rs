@@ -85,5 +85,11 @@ fn settings_parity_about_links_version_and_verified_update_check(cx: &mut TestAp
     );
     click(cx, "setting-about-check-updates");
     wait(&view, cx, |s| !s.about_busy);
-    assert!(view.read_with(cx, |s, _| s.about_error.is_none()));
+    assert!(
+        view.read_with(cx, |s, _| s.about_error.is_none()),
+        "status={:?}, error={:?}, calls={:?}",
+        view.read_with(cx, |s, _| s.about_status.clone()),
+        view.read_with(cx, |s, _| s.about_error.clone()),
+        peer.calls()
+    );
 }
