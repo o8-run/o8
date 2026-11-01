@@ -558,6 +558,7 @@ impl Surface {
             .mt(px(-rise))
             .flex()
             .flex_col()
+            .children(self.lineage_strip(cx))
             .child(self.composer_card(window, cx))
             .into_any_element()
     }

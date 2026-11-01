@@ -35,6 +35,15 @@ pub struct Step {
     /// A plan tool's items, (text, status: pending | in_progress | completed).
     #[serde(skip)]
     pub todos: Vec<(String, String)>,
+    /// A subagent, delegate or launch call, for the thread's lineage.
+    #[serde(skip)]
+    pub delegate: bool,
+    /// The thread a launch or delegate call created, read from its result.
+    #[serde(skip)]
+    pub thread: Option<String>,
+    /// Messages this call sent to or read from other threads.
+    #[serde(skip)]
+    pub messages: Vec<crate::thread_messages::Bubble>,
     #[serde(skip)]
     pub(crate) delegations: Vec<crate::subagents::model::Reference>,
     #[serde(skip)]
@@ -679,6 +688,9 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
             "web-search" => (arg(&["query", "q"]), None),
             "web-read" => (arg(&["url", "uri"]), None),
             "agent" => (arg(&["description", "prompt"]), None),
+            _ if name.contains("launch_task") || name.contains("dispatch") => {
+                (arg(&["title", "name", "description", "prompt", "taskId"]), None)
+            }
             _ => (subject.clone(), None),
         };
         vec![Part {
@@ -698,6 +710,10 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
     }
     let output = tool["result"].as_str().unwrap_or("");
     let searched = parts.len() == 1 && matches!(parts[0].key.as_str(), "search" | "list");
+    let delegate = key == "agent"
+        || ["launch_task", "dispatch", "delegate", "spawn"]
+            .iter()
+            .any(|word| name.contains(word));
     Step {
         id: id.into(),
         command,
@@ -719,6 +735,13 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
         finished: tool["finishedAt"].as_f64(),
         todos: todos(args),
         delegations: crate::subagents::model::references(&name, tool),
+        messages: crate::thread_messages::parse(&name, args, output),
+        delegate,
+        thread: if delegate {
+            crate::lineage::created_thread(output)
+        } else {
+            None
+        },
         status,
         reason,
         group: 0,
@@ -882,6 +905,9 @@ mod tests {
             batch: None,
             started: None,
             finished: None,
+            delegate: false,
+            thread: None,
+            messages: vec![],
             todos: vec![],
         }
     }

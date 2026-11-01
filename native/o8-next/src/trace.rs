@@ -1363,6 +1363,13 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
         }
     }
 
+    let card = subagent_card(&id, &steps, &timed, now, index, list);
+    let bubbles: Vec<AnyElement> = steps
+        .iter()
+        .flat_map(|step| step.messages.iter())
+        .enumerate()
+        .map(|(n, bubble)| crate::thread_messages::element(bubble, format!("trace-message-{index}-{n}")))
+        .collect();
     // Reading column and insets match the transcript's message rows.
     let column = crate::theme::GEOMETRY.composer_width + 48.;
     div()
@@ -1389,6 +1396,8 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
                 .child(header)
                 .child(crate::subagents::trace::element(state.clone(), &steps))
                 .child(body)
+                .children(card)
+                .children(bubbles)
                 .when(animating, |column| {
                     // Redraw while anything moves: the shimmer, arc, clock and fades.
                     column.child(
@@ -1401,6 +1410,79 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
                 }),
         )
         .into_any_element()
+}
+
+/// "4 subagents · 4 working" under a trace that delegated, opening to the
+/// helpers it started; a row with a thread opens it.
+fn subagent_card(
+    id: &str,
+    steps: &[Step],
+    trace: &Trace,
+    now: f64,
+    index: usize,
+    list: &gpui::ListState,
+) -> Option<AnyElement> {
+    let mut children = crate::lineage::unlinked_children(steps);
+    if !trace.live {
+        // A saved call that never reported back is not still working.
+        children.iter_mut().for_each(|c| c.working = false);
+    }
+    let children = crate::lineage::with_live_status(children);
+    let (count, working) = crate::lineage::card_label(&children)?;
+    let key = format!("card:{id}");
+    let open = crate::lineage::is_open(&key);
+    let toggle_list = list.clone();
+    let toggle_key = key.clone();
+    let header = div()
+        .id(("trace-subagents", index))
+        .debug_selector(move || format!("trace-subagents-{index}"))
+        .h(px(ROW))
+        .px(px(8.))
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .cursor_pointer()
+        .on_click(move |_, window, cx| {
+            crate::lineage::toggle(&toggle_key);
+            toggle_list.splice(index..index + 1, 1);
+            window.refresh();
+            cx.stop_propagation();
+        })
+        .child(crate::icon::stroke(ATOM, theme().text_muted, 14., 1.6))
+        .child(div().text_color(theme().text).child(count))
+        .when_some(working, |row, working| {
+            row.child(div().text_color(theme().accent).child(working))
+        })
+        .child(div().flex_1())
+        .when_some(
+            trace
+                .started
+                .map(|start| seconds(trace.ended.filter(|_| !trace.live).unwrap_or(now) - start)),
+            |row, time| row.child(div().text_color(theme().text_muted).child(time)),
+        )
+        .child(crate::icon::stroke(
+            if open { CHEVRON_DOWN } else { CHEVRON_RIGHT },
+            theme().text_muted,
+            12.,
+            2.,
+        ));
+    Some(
+        div()
+            .mt(px(4.))
+            .rounded(px(10.))
+            .border_1()
+            .border_color(theme().border)
+            .flex()
+            .flex_col()
+            .child(header)
+            .when(open, |card| {
+                card.children(children.iter().enumerate().map(|(n, child)| {
+                    crate::lineage::child_row(child, now, format!("trace-subagent-{index}-{n}"))
+                }))
+                .pb(px(4.))
+            })
+            .into_any_element(),
+    )
 }
 
 #[cfg(test)]

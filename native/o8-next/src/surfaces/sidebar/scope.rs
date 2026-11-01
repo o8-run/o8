@@ -11,6 +11,8 @@
 use super::*;
 use gpui::{Corner, MouseButton, Pixels, Point, anchored, deferred};
 
+const COPY: &str = "M9 9h10v10H9z M5 15V5h10";
+
 /// The open scope picker: its search text and highlighted item.
 #[derive(Default)]
 pub(in crate::shell::sidebar) struct Menu {
@@ -498,6 +500,35 @@ impl ThreadList {
                 this.row_menu = None;
                 this.archive_id(archive_id.clone(), cx);
             }));
+        let copy = crate::lineage::copy_items(&id).map(|(selector, label, text, toast)| {
+            div()
+                .id(selector)
+                .debug_selector(move || selector.into())
+                .h(px(28.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(7.))
+                .text_size(px(12.5))
+                .cursor_pointer()
+                .hover(|s| s.bg(theme().hover))
+                .child(crate::icon::stroke(COPY, theme().text_muted, 14., 1.7))
+                .child(label)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.row_menu = None;
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
+                    crate::shell::toasts::show(
+                        crate::shell::toasts::Kind::Success,
+                        toast,
+                        vec![],
+                        Some(crate::shell::toasts::NOTICE_TIMEOUT),
+                        cx,
+                    );
+                    cx.notify();
+                }))
+        });
         let menu = self.row_menu.as_ref()?;
         let filter = menu.repo.clone().map(|repo| {
             let active = self.scope_keys().contains(&repo);
@@ -560,6 +591,7 @@ impl ThreadList {
                             .children(workspace_restores)
                             .children(filter)
                             .children(snooze)
+                            .children(copy)
                             .child(archive),
                     ),
             )
