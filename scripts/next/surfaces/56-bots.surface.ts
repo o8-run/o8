@@ -3,8 +3,8 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 
-export default async function register({ dataDir }: SurfaceContext): Promise<SurfaceRoutes> {
-  if (!process.argv.includes('--bots')) return {};
+export default async function register({ dataDir, repo, seeds }: SurfaceContext): Promise<SurfaceRoutes> {
+  if (!process.argv.includes('--bots')) return { routes: { 'GET /api/bots': async () => Response.json({ bots: [] }) } };
   const profiles = join(dataDir, 'bot-profiles');
   const directory = join(dataDir, 'bots', 'grok', 'agent-1');
   mkdirSync(profiles, { recursive: true });
@@ -20,14 +20,21 @@ export default async function register({ dataDir }: SurfaceContext): Promise<Sur
   const { GET: bots } = await import('../../../src/app/api/bots/route');
   const { GET: thread } = await import('../../../src/app/api/bots/[id]/thread/route');
   let requests = 0;
+  let rosterRequests = 0;
   let failing = false;
+  let rosterFailing = false;
   let collisionCount = 0;
   return {
     routes: {
-      'GET /api/bots': bots,
-      'GET /__fixture/bots/requests': async () => Response.json({ requests }),
+      'GET /api/bots': async request => {
+        rosterRequests += 1;
+        return rosterFailing ? Response.json({ error: 'Fixture roster unavailable' }, { status: 503 }) : bots(request);
+      },
+      'GET /__fixture/bots/requests': async () => Response.json({ requests, rosterRequests }),
       'POST /__fixture/bots': async request => {
-        const body = await request.json() as { messages?: unknown[]; failing?: boolean; collisionCount?: number };
+        const body = await request.json() as {
+          messages?: unknown[]; bots?: unknown[]; failing?: boolean; rosterFailing?: boolean; addNativeThread?: boolean; collisionCount?: number;
+        };
         if (Array.isArray(body.messages)) { writeMessages(body.messages); collisionCount = 0; }
         if ([42, 501, 502].includes(body.collisionCount ?? 0)) {
           const identical = { role: 'bot', text: 'Identical sender text\n'.repeat(20), at: '2026-10-31T12:00:00.000Z' };
@@ -39,7 +46,17 @@ export default async function register({ dataDir }: SurfaceContext): Promise<Sur
           } else writeMessages(messages);
           collisionCount = body.collisionCount!;
         }
+        if (Array.isArray(body.bots)) writeFileSync(join(dataDir, 'bots.json'), JSON.stringify({ bots: body.bots }));
         if (typeof body.failing === 'boolean') failing = body.failing;
+        if (typeof body.rosterFailing === 'boolean') rosterFailing = body.rosterFailing;
+        if (body.addNativeThread) {
+          const seed = { id: 'thoughts-bots-late', title: 'A bot thread arriving later',
+            messages: [{ id: 'late-message', role: 'assistant', content: 'Native bot thread', timestamp: 1790812800000 }] };
+          writeFileSync(join(dataDir, 'chat-history', `${seed.id}.json`), JSON.stringify({ ...seed,
+            repoPath: repo, backend: 'claude', model: 'claude-code', orchestratorVisible: true,
+            savedAt: '2026-10-01T00:00:00.000Z' }));
+          if (!seeds.some(s => s.id === seed.id)) seeds.push(seed);
+        }
         return Response.json({ ok: true });
       },
     },

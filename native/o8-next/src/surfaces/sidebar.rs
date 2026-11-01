@@ -500,7 +500,7 @@ impl Shell {
         let list = self.surfaces.sidebar.view.clone()?;
         Some(list.update(cx, |list, cx| list.start_thread(repo, open, cx)))
     }
-    fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(workspace) = self
             .sessions
             .iter()

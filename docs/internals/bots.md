@@ -8,6 +8,30 @@ o8 next rail directly under PRs. One click opens the bot's main thread.
 - `GET /api/bots` returns the list. `GET /api/bots/:id/thread` returns `{bot, messages, externalUrl}`. Both use panel auth.
 - Native: `native/o8-next/src/surfaces/bots.rs` (rail entries and `Tab::Bot(id)`), `bots/client.rs`, `bots/view.rs`.
 
+Bots are global destinations: no repository needs to be selected. Before any workspace exists,
+bot tabs persist in the shell's empty workspace key and restore there. With a selected workspace,
+they use the shell's existing tab persistence alongside its other surfaces. An unknown persisted
+bot id keeps its tab and shows the server's unavailable error instead of opening a different bot.
+
+The roster is owned by each shell window and fetched automatically at most once per 30 seconds,
+with one asynchronous roster request in flight. Explicit retry bypasses the interval. A failed fetch keeps the last known entries, removes their status
+dots, and exposes a retry target directly in the bot region. Successful retry restores current status.
+There is no process-wide bot cache or permanent polling thread.
+
+The bot region scrolls directly below PRs. Its height yields to the existing rail controls and footer.
+At short window heights the surrounding destinations also scroll, keeping usage and profile controls
+fixed and reachable; the bot region retains at least one row. Bot rows have no drag handler.
+
+`mainThread: {kind: "o8-thread", id}` opens the existing native conversation through the sidebar's
+thread opener: it switches to the thread's workspace and reuses that workspace's active session
+surface when possible. It does not render the thread as an empty mailbox. Restored or unavailable
+targets show a loading/unavailable state while the thread catalog hydrates; an active bot tab opens
+its native conversation if that target later appears. Deferred opening waits while an overlay or
+command palette owns the pane and consumes its temporary Bot tab when resolved, so closing the native
+thread or returning to the original workspace cannot reopen it. Inactive bot tabs never redirect navigation.
+This references an existing o8 thread; it does not import an external vendor conversation or change
+the thread's composer dispatch.
+
 ## Grok provider and its mailbox
 
 The Grok provider finds Grok Bot agents whose data directory is on this machine

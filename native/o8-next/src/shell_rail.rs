@@ -594,43 +594,58 @@ impl Shell {
                     }
                 })),
             )
-            // A click starts a chat on the lead; a drag drops one onto the workspace.
+            // Bots share the remaining rail height with the existing destinations.
+            // At the minimum window height this outer viewport lets the PR/bot
+            // region stay reachable while the usage/profile footer remains fixed.
             .child(
-                button("rail-orchestrator", Icon::Play, "Run orchestrator", false)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.capture(window, cx);
-                        features::start_chat(this, window, cx);
-                    }))
-                    .on_drag(features::RailPane::Chat, |drag, _, _, cx| {
-                        cx.new(|_| drag.clone())
-                    }),
+                div()
+                    .id("rail-destinations")
+                    .debug_selector(|| "rail-destinations".into())
+                    .w_full()
+                    .min_h_0()
+                    .flex_shrink()
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    // A click starts a chat on the lead; a drag drops one onto the workspace.
+                    .child(
+                        button("rail-orchestrator", Icon::Play, "Run orchestrator", false)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.capture(window, cx);
+                                features::start_chat(this, window, cx);
+                            }))
+                            .on_drag(features::RailPane::Chat, |drag, _, _, cx| {
+                                cx.new(|_| drag.clone())
+                            }),
+                    )
+                    // A click opens a terminal; a drag drops one onto the workspace.
+                    .child(
+                        tab(
+                            "rail-terminal",
+                            Icon::Terminal,
+                            "Run terminal",
+                            Tab::Terminal,
+                            || Command::Terminal,
+                        )
+                        .on_drag(features::RailPane::Terminal, |drag, _, _, cx| {
+                            cx.new(|_| drag.clone())
+                        }),
+                    )
+                    // AutomationsPage, as the desktop rail's Scheduled entry.
+                    .child(tab(
+                        "rail-scheduled",
+                        Icon::Clock,
+                        "Scheduled",
+                        Tab::Scheduled,
+                        || Command::Scheduled,
+                    ))
+                    // Grid stays in code but off the rail until it earns a place (Q, 10-30).
+                    .child(divider())
+                    // RailMoreMenu, then PRs last, as CompactNavigationRail orders them.
+                    .child(features::rail_more(self, cx))
+                    .children(top),
             )
-            // A click opens a terminal; a drag drops one onto the workspace.
-            .child(
-                tab(
-                    "rail-terminal",
-                    Icon::Terminal,
-                    "Run terminal",
-                    Tab::Terminal,
-                    || Command::Terminal,
-                )
-                .on_drag(features::RailPane::Terminal, |drag, _, _, cx| {
-                    cx.new(|_| drag.clone())
-                }),
-            )
-            // AutomationsPage, as the desktop rail's Scheduled entry.
-            .child(tab(
-                "rail-scheduled",
-                Icon::Clock,
-                "Scheduled",
-                Tab::Scheduled,
-                || Command::Scheduled,
-            ))
-            // Grid stays in code but off the rail until it earns a place (Q, 10-30).
-            .child(divider())
-            // RailMoreMenu, then PRs last, as CompactNavigationRail orders them.
-            .child(features::rail_more(self, cx))
-            .children(top)
             .child(divider())
             .child(div().flex_1().min_h_0())
             .child(gauge(self, cx))

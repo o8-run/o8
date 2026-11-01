@@ -49,8 +49,7 @@ fn ids_are_path_encoded_and_unknown_houses_fall_back_to_the_bot_glyph() {
 
 #[gpui::test]
 fn bot_entries_sit_under_prs_and_open_their_thread(cx: &mut TestAppContext) {
-    set_bots(vec![grok()]);
-    let fixture = Fixture::new();
+    let fixture = Fixture::start_mode(false, "--bots");
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("bots.json"),
@@ -59,6 +58,10 @@ fn bot_entries_sit_under_prs_and_open_their_thread(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     ready(&shell, cx);
+    for _ in 0..4 {
+        cx.run_until_parked();
+        draw(cx);
+    }
     draw(cx);
     let prs = cx
         .debug_bounds("rail-pull-requests")
@@ -79,5 +82,4 @@ fn bot_entries_sit_under_prs_and_open_their_thread(cx: &mut TestAppContext) {
         "a click opens the bot's main thread in the main pane"
     );
     draw(cx);
-    set_bots(vec![]);
 }

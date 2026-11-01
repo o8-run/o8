@@ -25,6 +25,7 @@ pub(crate) struct BotThread {
     pub(crate) external_url: Option<String>,
     pub(crate) error: Option<String>,
     pub(crate) loading: bool,
+    pub(super) native_loading: bool,
     in_flight: bool,
     fetched: Option<Instant>,
 }
@@ -48,6 +49,7 @@ impl BotThread {
             external_url: None,
             error: None,
             loading: true,
+            native_loading: true,
             in_flight: false,
             fetched: None,
         };
@@ -163,7 +165,12 @@ impl Render for BotThread {
             .map(|b| b.house.clone())
             .unwrap_or_default();
         let link = self.external_url.clone();
-        let empty = !self.loading && self.error.is_none() && self.messages.is_empty();
+        let native = self
+            .bot
+            .as_ref()
+            .and_then(|b| b.main_thread.as_ref())
+            .is_some_and(|t| t.kind == "o8-thread");
+        let empty = !native && !self.loading && self.error.is_none() && self.messages.is_empty();
         let restore = self.reading_anchor.take().map(|anchor| {
             (
                 self.anchor_index(&anchor.message)
@@ -204,6 +211,7 @@ impl Render for BotThread {
             });
         div()
             .id("bot-thread")
+            .debug_selector(|| "bot-thread".into())
             .key_context("BotThread")
             .track_focus(&self.focus)
             .size_full()
@@ -281,7 +289,21 @@ impl Render for BotThread {
                     .flex_col()
                     .gap(px(12.))
                     .when_some(self.error.clone(), |d, e| {
-                        d.child(div().text_sm().text_color(theme().danger).child(SharedString::from(e)))
+                        d.child(div().id("bot-thread-error").debug_selector(|| "bot-thread-error".into())
+                            .text_sm().text_color(theme().danger).child(SharedString::from(e)))
+                    })
+                    .when(self.loading && !native, |d| {
+                        d.child(div().id("bot-thread-loading").debug_selector(|| "bot-thread-loading".into())
+                            .text_sm().text_color(theme().text_muted).child("Loading the bot's conversation…"))
+                    })
+                    .when(native && self.error.is_none(), |d| {
+                        let (id, text) = if self.native_loading {
+                            ("bot-native-loading", "Loading the bot's o8 thread…")
+                        } else {
+                            ("bot-native-unavailable", "This bot's o8 thread is unavailable. Refresh the server connection to check again.")
+                        };
+                        d.child(div().id(id).debug_selector(move || id.into())
+                            .text_sm().text_color(theme().text_muted).child(text))
                     })
                     .when(empty, |d| {
                         d.child(

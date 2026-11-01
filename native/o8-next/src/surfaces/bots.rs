@@ -6,8 +6,7 @@ use super::*;
 use crate::icon::Tip;
 use crate::theme::current as theme;
 use gpui::{AnyElement, SharedString};
-use std::sync::{Mutex, Once};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[path = "bots/client.rs"]
 mod requests;
@@ -17,38 +16,147 @@ mod view;
 pub(crate) use requests::BotEntry;
 
 pub(super) type Slice = EmptyState;
-pub(super) type Runtime = ();
 pub(super) type View = view::BotThread;
 
-/// The rail's current bot list, refreshed by a background poll.
-static BOTS: Mutex<Vec<BotEntry>> = Mutex::new(Vec::new());
+/// Window-owned roster and scroll state; no process-wide poller.
+#[derive(Default)]
+pub(super) struct Runtime {
+    entries: Vec<BotEntry>,
+    loading: bool,
+    fetched: Option<Instant>,
+    error: Option<String>,
+    scroll: gpui::ScrollHandle,
+}
 const POLL: Duration = Duration::from_secs(30);
 
-pub(super) fn bots() -> Vec<BotEntry> {
-    BOTS.lock().unwrap().clone()
-}
-#[cfg(test)]
-pub(super) fn set_bots(list: Vec<BotEntry>) {
-    *BOTS.lock().unwrap() = list;
-}
-
-fn watch(client: &Client) {
-    // Fixture servers record every request, so tests seed the list instead.
-    if cfg!(test) {
+fn load_roster(shell: &mut Shell, force: bool, cx: &mut Context<Shell>) {
+    let state = &mut shell.surfaces.bots;
+    if state.loading || !force && state.fetched.is_some_and(|t| t.elapsed() < POLL) {
         return;
     }
-    static STARTED: Once = Once::new();
-    STARTED.call_once(|| {
-        let client = client.clone();
-        std::thread::spawn(move || {
-            loop {
-                if let Ok(list) = client.bots() {
-                    *BOTS.lock().unwrap() = list;
+    state.loading = true;
+    state.fetched = Some(Instant::now());
+    let client = shell.client.clone();
+    let task = cx.background_executor().spawn(async move { client.bots() });
+    cx.spawn(async move |this, cx| {
+        let result = task.await;
+        let _ = this.update(cx, |shell, cx| {
+            let state = &mut shell.surfaces.bots;
+            state.loading = false;
+            match result {
+                Ok(entries) => {
+                    state.entries = entries;
+                    state.error = None;
                 }
-                std::thread::sleep(POLL);
+                Err(error) => state.error = Some(error),
+            }
+            cx.notify();
+        });
+    })
+    .detach();
+}
+
+fn native_id(bot: &BotEntry) -> Option<&str> {
+    bot.main_thread
+        .as_ref()
+        .filter(|t| t.kind == "o8-thread")?
+        .id
+        .as_deref()
+}
+
+fn can_open(shell: &Shell, id: &str) -> bool {
+    shell.sessions.iter().any(|s| s.id == id)
+}
+
+fn open_native(
+    shell: &mut Shell,
+    tab: Tab,
+    id: String,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    // A global bot can have unresolved placeholders in several workspace tab
+    // lists. Retire every copy before opening its single resolved conversation.
+    for (workspace, saved) in &mut shell.state.workspaces {
+        let before = saved.tabs.len();
+        let active = saved
+            .tabs
+            .iter()
+            .take(saved.active)
+            .filter(|t| *t != &tab)
+            .count();
+        saved.tabs.retain(|t| t != &tab);
+        if before != saved.tabs.len() {
+            saved.active = active.min(saved.tabs.len().saturating_sub(1));
+            let key = format!("{workspace}|{tab:?}");
+            shell.content.remove(&key);
+            shell.state.tab_labels.remove(&key);
+        }
+    }
+    shell.open_thread(id, window, cx);
+}
+
+/// Restored Bot tabs may precede both roster and thread-catalog hydration.
+/// Only the active bot can redirect; inactive mirrors never steal navigation.
+fn route_native(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    if shell.palette || shell.shortcuts || registrations().iter().any(|r| (r.overlay_open)(shell)) {
+        return;
+    }
+    let Some(Tab::Bot(id)) = shell.active() else {
+        return;
+    };
+    let tab = Tab::Bot(id);
+    let key = shell.key(&tab);
+    let Some(Content::Bot(view)) = shell.content.get(&key) else {
+        return;
+    };
+    let view = view.clone();
+    let target = view
+        .read(cx)
+        .bot
+        .as_ref()
+        .and_then(|b| b.main_thread.clone())
+        .filter(|t| t.kind == "o8-thread");
+    let Some(target) = target else { return };
+    if let Some(id) = target
+        .id
+        .filter(|id| shell.connected && can_open(shell, id))
+    {
+        open_native(shell, tab, id, window, cx);
+    } else {
+        // Routine maintenance also sets shell.loading; a completed healthy
+        // catalog must continue to report a missing target as unavailable.
+        let loading = !shell.connected;
+        view.update(cx, |view, cx| {
+            if view.native_loading != loading {
+                view.native_loading = loading;
+                cx.notify();
             }
         });
-    });
+    }
+}
+
+fn roster_status(label: String, cx: &mut Context<Shell>) -> AnyElement {
+    div()
+        .id("rail-bots-retry")
+        .debug_selector(|| "rail-bots-retry".into())
+        .size(px(super::rail::TARGET))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(10.))
+        .cursor_pointer()
+        .hover(|v| v.bg(theme().hover))
+        .tooltip(move |_, cx| cx.new(|_| Tip(label.clone().into())).into())
+        .child(crate::icon::stroke(
+            "M20 7v5h-5 M4 17v-5h5 M6 7a7 7 0 0 1 12-1l2 6 M4 12l2 6a7 7 0 0 0 12-1",
+            theme().text_muted,
+            19.,
+            1.8,
+        ))
+        .on_click(cx.listener(|shell, _, _, cx| load_roster(shell, true, cx)))
+        .into_any_element()
 }
 
 /// House glyphs. Grok is a bespoke o8 stroke (ring cut by a diagonal, after
@@ -75,10 +183,27 @@ pub(super) fn rail_id(bot: &BotEntry) -> SharedString {
 }
 
 fn entry(s: &Shell, bot: &BotEntry, cx: &mut Context<Shell>) -> AnyElement {
-    let active = s.active() == Some(Tab::Bot(bot.id.clone()));
+    let active = match s.active() {
+        Some(Tab::Bot(id)) => id == bot.id,
+        Some(Tab::Session(id)) => native_id(bot).is_some_and(|target| {
+            s.current()
+                .and_then(|w| w.selections.get(&id))
+                .unwrap_or(&id)
+                == target
+        }),
+        _ => false,
+    };
     let id = rail_id(bot);
     let selector = id.clone();
-    let name: SharedString = bot.name.clone().into();
+    let name: SharedString = if s.surfaces.bots.error.is_some() {
+        format!(
+            "{} · Bot list unavailable; showing the last known entry",
+            bot.name
+        )
+        .into()
+    } else {
+        bot.name.clone().into()
+    };
     let color = if active {
         theme().text
     } else {
@@ -105,17 +230,30 @@ fn entry(s: &Shell, bot: &BotEntry, cx: &mut Context<Shell>) -> AnyElement {
             19.,
             1.8,
         ))
-        .when_some(status_color(&bot.status), |view, dot| {
-            view.child(
-                div()
-                    .absolute()
-                    .right(px(9.))
-                    .bottom(px(9.))
-                    .size(px(7.))
-                    .rounded_full()
-                    .bg(dot),
-            )
-        })
+        .when_some(
+            s.surfaces
+                .bots
+                .error
+                .is_none()
+                .then(|| status_color(&bot.status))
+                .flatten(),
+            |view, dot| {
+                let marker: SharedString =
+                    format!("rail-bot-status-{}-{}", bot.id, bot.status).into();
+                let selector = marker.clone();
+                view.child(
+                    div()
+                        .id(marker)
+                        .debug_selector(move || selector.to_string())
+                        .absolute()
+                        .right(px(9.))
+                        .bottom(px(9.))
+                        .size(px(7.))
+                        .rounded_full()
+                        .bg(dot),
+                )
+            },
+        )
         .on_click(cx.listener(move |this, _, window, cx| {
             this.capture(window, cx);
             this.execute(Command::Bot(bot_id.clone()), window, cx);
@@ -124,11 +262,23 @@ fn entry(s: &Shell, bot: &BotEntry, cx: &mut Context<Shell>) -> AnyElement {
 }
 
 pub(super) const REGISTRATION: Registration = Registration {
+    global: true,
+    initialize: |shell, _, cx| load_roster(shell, true, cx),
+    tick: |shell, window, cx| {
+        load_roster(shell, false, cx);
+        route_native(shell, window, cx);
+    },
     create: |shell, tab, _, window, cx| {
         let Tab::Bot(id) = tab else {
             return None;
         };
-        let bot = bots().into_iter().find(|b| b.id == id);
+        let bot = shell
+            .surfaces
+            .bots
+            .entries
+            .iter()
+            .find(|b| b.id == id)
+            .cloned();
         let client = shell.client.clone();
         Some(Content::Bot(
             cx.new(|cx| view::BotThread::new(client, id, bot, window, cx)),
@@ -139,11 +289,48 @@ pub(super) const REGISTRATION: Registration = Registration {
         if position != NavPosition::BeforeWorkspaces {
             return vec![];
         }
-        watch(&s.client);
-        bots().iter().map(|bot| entry(s, bot, cx)).collect()
+        let state = &s.surfaces.bots;
+        if state.entries.is_empty() && !state.loading && state.error.is_none() {
+            return vec![];
+        }
+        let status = state
+            .error
+            .as_ref()
+            .map(|error| format!("Bot list unavailable: {error}. Click to retry."))
+            .or_else(|| state.entries.is_empty().then(|| "Loading bots…".into()));
+        let region = div()
+            .id("rail-bots")
+            .debug_selector(|| "rail-bots".into())
+            .w(px(super::rail::TARGET))
+            .min_h(px(super::rail::TARGET))
+            .flex_shrink()
+            .flex()
+            .flex_col()
+            .overflow_y_scroll()
+            .track_scroll(&state.scroll)
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .when_some(status, |list, label| list.child(roster_status(label, cx)))
+            .children(state.entries.iter().map(|bot| entry(s, bot, cx)));
+        vec![region.into_any_element()]
     },
-    ..Registration::new("Bot", "", |_, command, _, _| match command {
-        Command::Bot(id) => Some((Tab::Bot(id), false)),
+    ..Registration::new("Bot", "", |shell, command, window, cx| match command {
+        Command::Bot(id) => {
+            let native = shell
+                .surfaces
+                .bots
+                .entries
+                .iter()
+                .find(|b| b.id == id)
+                .and_then(native_id)
+                .filter(|id| can_open(shell, id))
+                .map(str::to_owned);
+            if let Some(thread) = native {
+                open_native(shell, Tab::Bot(id), thread, window, cx);
+                None
+            } else {
+                Some((Tab::Bot(id), false))
+            }
+        }
         _ => None,
     })
 };
@@ -167,3 +354,7 @@ impl ShellView for View {
 #[cfg(test)]
 #[path = "bots/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "bots/rail_tests.rs"]
+mod rail_tests;
