@@ -35,6 +35,26 @@ afterEach(() => {
 });
 
 describe('orchestrator thread history persistence', () => {
+  it('records a refresh the model could not title, so later saves do not retry it', async () => {
+    const history = await loadHistoryModule();
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });
+    const file = history.safeOrchestratorHistoryPath(thread.id);
+    for (let turn = 0; turn < 4; turn += 1) {
+      history.appendMobileOrchestratorUserMessage({
+        tabId: thread.id, repoPath: '/tmp/repo', message: `Step ${turn} of the login fix`, backend: 'codex', timestampMs: 2_000 + turn * 2,
+      });
+      history.upsertMobileOrchestratorAssistantMessage({
+        tabId: thread.id, repoPath: '/tmp/repo', messageId: `assistant-${turn}`, content: 'Done.', backend: 'codex', timestampMs: 2_001 + turn * 2,
+      });
+      // Let each queued title run settle before the next exchange.
+      await vi.waitFor(() => expect(JSON.parse(readFileSync(file, 'utf8')).titleSource).toBe('code'));
+    }
+    // No key: the refresh at 8 messages has no model title. The code title
+    // stays and the attempt is recorded.
+    await vi.waitFor(() => expect(JSON.parse(readFileSync(file, 'utf8')).autoTitledAtCount).toBe(8));
+    expect(JSON.parse(readFileSync(file, 'utf8')).title).toBe('Step 0 of the login fix');
+  });
+
   it('titles a server-saved thread once it has an exchange, without a client POST', async () => {
     const history = await loadHistoryModule();
     // No title, as the mobile client creates it: the file holds "New chat".
