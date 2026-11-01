@@ -316,11 +316,14 @@ impl Surface {
             "model" => menu = menu.children(self.lead_menu(routing, busy, model, cx)),
             _ => {}
         }
-        menu.when(matches!(open, "mode" | "attach" | "send"), |v| {
-            v.on_mouse_down_out(cx.listener(|s, event: &gpui::MouseDownEvent, _, cx| {
-                s.dismiss_prompt_outside(event, cx)
-            }))
-        })
+        menu.when(
+            matches!(open, "mode" | "attach" | "send" | "model" | "effort"),
+            |v| {
+                v.on_mouse_down_out(cx.listener(|s, event: &gpui::MouseDownEvent, _, cx| {
+                    s.dismiss_prompt_outside(event, cx)
+                }))
+            },
+        )
         .into_any_element()
     }
 
