@@ -61,9 +61,26 @@ gpui::actions!(
         /// The composer waveform: start or stop chat Live voice, which the shell owns.
         ToggleVoice,
         /// The composer mic: start dictation, or stop it and send what was said.
-        ToggleDictation
+        ToggleDictation,
+        /// Opens the transcript link last clicked.
+        OpenTranscriptLink
     ]
 );
+
+thread_local! {
+    /// The link an OpenTranscriptLink dispatch opens; set just before dispatch.
+    static PENDING_LINK: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Asks the shell to open a transcript link.
+pub(crate) fn open_link(url: &str, window: &mut Window, cx: &mut App) {
+    PENDING_LINK.with(|pending| *pending.borrow_mut() = Some(url.to_owned()));
+    window.dispatch_action(Box::new(OpenTranscriptLink), cx);
+}
+
+pub(crate) fn take_pending_link() -> Option<String> {
+    PENDING_LINK.with(|pending| pending.borrow_mut().take())
+}
 
 /// Composer dictation as this chat's mic shows it; the shell sets it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

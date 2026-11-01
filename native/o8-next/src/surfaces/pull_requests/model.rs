@@ -126,7 +126,7 @@ impl PullRequests {
         cx.default_global::<Deliveries>();
         let search = cx.new(|cx| {
             let mut search = Composer::new(cx);
-            search.placeholder = "Search pull requests".into();
+            search.placeholder = "Search PRs".into();
             search
         });
         let editor = cx.new(|cx| {

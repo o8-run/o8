@@ -157,8 +157,31 @@ fn render(
             .when_some(panel, |row, (full, shown)| {
                 row.child(super::right_panel::header(s, full, shown, cx))
             })
+            // The resize edges stay invisible below; these mark where they sit.
+            .when(!hidden && !moving, |row| {
+                let glass = if s.system_glass {
+                    super::super::sidebar::GLASS_EDGE_GAP
+                } else {
+                    0.
+                };
+                row.child(edge_mark().left(px(super::super::sidebar::width(s) + glass)))
+            })
+            .when_some(
+                panel.filter(|_| !super::right_panel::maximized(s)),
+                |row, (_, shown)| row.child(edge_mark().right(px(shown + 4.))),
+            )
             .into_any_element(),
     )
+}
+
+/// A quiet hairline in the header above a resize edge.
+fn edge_mark() -> gpui::Div {
+    div()
+        .absolute()
+        .top(px(9.))
+        .bottom(px(9.))
+        .w(px(1.))
+        .bg(theme().border)
 }
 
 /// SidebarTogglePill: 14px panel glyph, orange while the sidebar is pinned open.

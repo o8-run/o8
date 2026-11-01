@@ -353,6 +353,23 @@ impl Shell {
             cx.open_url(url);
         }
     }
+    /// Issues and pull requests open beside the chat; other web links leave o8.
+    pub(super) fn open_transcript_link(
+        &mut self,
+        url: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(number) = url.strip_prefix('#').and_then(|n| n.parse().ok()) {
+            self.open_issue_in_panel(None, number, window, cx);
+        } else if let Some((repo, number)) = github_item(url, "issues") {
+            self.open_issue_in_panel(Some(repo), number, window, cx);
+        } else if let Some((repo, number)) = github_item(url, "pull") {
+            self.open_pr_in_panel(repo, number, window, cx);
+        } else if url.starts_with("https://") || url.starts_with("http://") {
+            cx.open_url(url);
+        }
+    }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
             return;

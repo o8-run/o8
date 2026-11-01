@@ -104,7 +104,7 @@ pub(super) fn resize(shell: &mut Shell, event: &gpui::DragMoveEvent<Resize>) {
 /// On glass the right panel's cards sit 12px inside its edge, so its handle
 /// has air on the panel side; the sidebar's sits as far outside its card,
 /// so the two handles mirror (Q 2026-11-01).
-const GLASS_EDGE_GAP: f32 = 12.;
+pub(super) const GLASS_EDGE_GAP: f32 = 12.;
 /// A wide grab target over the boundary with a quiet line that glows on hover.
 fn edge(
     width: f32,

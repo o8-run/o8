@@ -29,7 +29,7 @@ mod user_bubble;
 
 #[path = "retained/text.rs"]
 mod row_text;
-use row_text::text_run;
+use row_text::{is_item, link_target, text_run};
 
 pub struct RowState {
     pub row: Row,
@@ -160,6 +160,11 @@ struct Thumbnail {
     name: String,
     unavailable: bool,
 }
+/// Where a link sits in a row, one spot per wrapped line.
+struct LinkSpot {
+    bounds: Bounds<Pixels>,
+    url: String,
+}
 struct Layout {
     size: Size<Pixels>,
     /// The appearance its colors were shaped in.
@@ -167,6 +172,7 @@ struct Layout {
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
     images: Vec<Thumbnail>,
+    links: Vec<LinkSpot>,
     cards: Vec<(String, Bounds<Pixels>)>,
 }
 struct Builder {
@@ -177,6 +183,7 @@ struct Builder {
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
     images: Vec<Thumbnail>,
+    links: Vec<LinkSpot>,
     /// Where the last paragraph gap ended, so blank lines collapse to one gap.
     gap_end: Option<Pixels>,
 }
@@ -217,6 +224,7 @@ impl Builder {
                         row_id: self.row_id.clone(),
                         image_cache: self.image_cache.clone(),
                         images: vec![],
+                        links: vec![],
                         width: width + px(48.),
                         y: top,
                         lines: vec![],
@@ -231,6 +239,17 @@ impl Builder {
                         }
                     }
                     builder.text(&runs, PROSE.0, PROSE.1, 0., window);
+                    let shift = point(width * column as f32, px(0.));
+                    if data["aligns"][column].as_str().is_none_or(|a| a == "left") {
+                        for mut link in builder.links {
+                            link.bounds.origin += shift;
+                            self.links.push(link);
+                        }
+                        for mut pill in builder.backgrounds {
+                            pill.bounds.origin += shift;
+                            self.backgrounds.push(pill);
+                        }
+                    }
                     for mut line in builder.lines {
                         line.origin.x += width * column as f32;
                         line.align = match data["aligns"][column].as_str() {
@@ -323,6 +342,49 @@ impl Builder {
             self.y += px(18.);
         }
     }
+    /// Finds a link on one shaped line and marks each wrapped piece of it.
+    fn link(
+        &mut self,
+        line: &WrappedLine,
+        offset: usize,
+        span: &std::ops::Range<usize>,
+        url: &str,
+        (inset, line_height): (Pixels, f32),
+    ) {
+        let start = span.start.max(offset) - offset;
+        let end = span.end.min(offset + line.len()).saturating_sub(offset);
+        let pill = is_item(url);
+        let mut pieces: Vec<(Pixels, Pixels, Pixels)> = vec![];
+        for (index, _) in line.text.char_indices().chain([(line.len(), ' ')]) {
+            if index < start || index > end {
+                continue;
+            }
+            let Some(at) = line.position_for_index(index, px(line_height)) else {
+                continue;
+            };
+            match pieces.last_mut() {
+                Some(piece) if piece.2 == at.y => piece.1 = at.x,
+                _ => pieces.push((at.x, at.x, at.y)),
+            }
+        }
+        for (from, to, y) in pieces.into_iter().filter(|(from, to, _)| to > from) {
+            let bounds = Bounds::new(
+                point(inset + from - px(4.), self.y + y + px(2.)),
+                size(to - from + px(8.), px(line_height - 4.)),
+            );
+            if pill {
+                self.backgrounds.push(Backdrop {
+                    bounds,
+                    color: theme().selection,
+                    radius: px(6.),
+                });
+            }
+            self.links.push(LinkSpot {
+                bounds,
+                url: url.to_owned(),
+            });
+        }
+    }
     fn text(
         &mut self,
         runs: &[Run],
@@ -341,11 +403,27 @@ impl Builder {
         if lines.is_empty() {
             self.y += px(line_height);
         }
+        let origin = px(24. + inset);
+        let (mut start, mut offset) = (0, 0);
+        let spans: Vec<_> = runs
+            .iter()
+            .map(|run| {
+                let at = start..start + run.text.len();
+                start = at.end;
+                at
+            })
+            .collect();
         for line in lines {
             let height = line.size(px(line_height)).height;
+            for (run, span) in runs.iter().zip(&spans) {
+                if let Some(url) = link_target(run) {
+                    self.link(&line, offset, span, url, (origin, line_height));
+                }
+            }
+            offset += line.len() + 1;
             self.lines.push(Line {
                 line,
-                origin: point(px(24. + inset), self.y),
+                origin: point(origin, self.y),
                 height: px(line_height),
                 align: TextAlign::Left,
             });
@@ -522,6 +600,7 @@ fn layout(
         row_id: row.id().into(),
         image_cache: images,
         images: vec![],
+        links: vec![],
         width,
         y: px(8.),
         lines: vec![],
@@ -651,6 +730,7 @@ fn layout(
                     lines: b.lines,
                     backgrounds: b.backgrounds,
                     images: vec![],
+                    links: b.links,
                     cards: vec![],
                 };
             }
@@ -683,6 +763,7 @@ fn layout(
         lines: b.lines,
         backgrounds: b.backgrounds,
         images: b.images,
+        links: b.links,
         cards: placements,
     }
 }
@@ -905,6 +986,22 @@ impl Element for RetainedRow {
                 child.prepaint_at(origin + image.bounds.origin, window, cx);
                 child
             })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .chain(cache.links.iter().enumerate().map(|(index, link)| {
+                let url = link.url.clone();
+                let mut child = div()
+                    .id(("transcript-link", index))
+                    .debug_selector(move || format!("transcript-link-{index}"))
+                    .w(link.bounds.size.width)
+                    .h(link.bounds.size.height)
+                    .cursor_pointer()
+                    .on_click(move |_, window, cx| crate::ui::open_link(&url, window, cx))
+                    .into_any_element();
+                child.layout_as_root(link.bounds.size.map(AvailableSpace::Definite), window, cx);
+                child.prepaint_at(origin + link.bounds.origin, window, cx);
+                child
+            }))
             .collect()
     }
     fn paint(

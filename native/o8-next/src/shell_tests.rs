@@ -657,5 +657,35 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     assert!(offline.read_with(offline_cx, |s, _| !s.connected && s.notice == "Server down"));
 }
 
+#[gpui::test]
+fn transcript_issue_links_open_beside_the_chat(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let state = State {
+        selected: fixture.folders.first().cloned(),
+        ..State::default()
+    };
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("issue-link.json"),
+        state,
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    shell.update_in(cx, |s, window, cx| {
+        s.open_transcript_link("https://github.com/o8-run/o8/issues/7", window, cx)
+    });
+    cx.run_until_parked();
+    assert!(shell.read_with(cx, |s, _| {
+        s.panel_shows(|key| matches!(s.content.get(key), Some(Content::Issues(_))))
+    }));
+    assert!(
+        shell.read_with(cx, |s, _| s
+            .active()
+            .is_none_or(|tab| tab.label() != "Issues")),
+        "the issue stays out of the workspace"
+    );
+}
+
 #[path = "shell_look_tests.rs"]
 mod look;

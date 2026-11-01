@@ -145,6 +145,7 @@ pub struct Issues {
     issues: Vec<Issue>,
     detail: Option<Issue>,
     detail_number: Option<u64>,
+    opening_here: Option<u64>,
     linked: Option<LinkedIssue>,
     mode: Mode,
     title: Entity<Composer>,
@@ -202,6 +203,7 @@ impl Issues {
             issues: vec![],
             detail: None,
             detail_number: None,
+            opening_here: None,
             linked: None,
             mode: Mode::List,
             title,
@@ -277,6 +279,16 @@ impl Issues {
             self.request(Action::Detail(number), cx);
         }
     }
+    /// Opens a bare `#123` from the repository this view is on.
+    pub fn open_here(&mut self, number: u64, cx: &mut Context<Self>) {
+        match self.slug() {
+            Some(slug) => {
+                let slug = slug.to_owned();
+                self.open(&slug, number, cx)
+            }
+            None => self.opening_here = Some(number),
+        }
+    }
     fn repo_index(&self, slug: &str) -> Option<usize> {
         self.repos
             .iter()
@@ -325,6 +337,13 @@ impl Issues {
                                     .position(|r| same_workspace(&r.local_path, path))
                             })
                             .unwrap_or(0);
+                        if let Some((number, slug)) = this
+                            .opening_here
+                            .take()
+                            .zip(this.slug().map(|slug| slug.to_owned()))
+                        {
+                            this.opening = Some((slug, number));
+                        }
                         this.request(Action::List, cx);
                     }
                     Err(error) => this.fail(error),

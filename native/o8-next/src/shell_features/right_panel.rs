@@ -126,6 +126,7 @@ enum Tool {
     Spec,
     Threads,
     Activity,
+    Issues,
     SideChat,
     Resources,
     Subagents,
@@ -155,6 +156,7 @@ impl Tool {
                 Tool::Subagents,
                 Tool::Threads,
                 Tool::Activity,
+                Tool::Issues,
                 Tool::SideChat,
             ],
         ),
@@ -166,6 +168,7 @@ impl Tool {
             Tool::Terminal => Some(Tab::Terminal),
             Tool::Review => Some(Tab::Diff),
             Tool::Activity => Some(Tab::Activity),
+            Tool::Issues => Some(Tab::Issues),
 
             _ => None,
         }
@@ -186,6 +189,7 @@ impl Tool {
             Tool::Review => "Review",
             Tool::Threads => "Threads",
             Tool::Activity => "Activity",
+            Tool::Issues => "Issues",
             Tool::SideChat => "Side chat",
             Tool::Resources => "Resources",
             Tool::Subagents => "Subagents",
@@ -206,6 +210,7 @@ impl Tool {
             Tool::Review => "Working changes across your project",
             Tool::Threads => "Project tasks and agent exchanges",
             Tool::Activity => "Repository history and mission decisions",
+            Tool::Issues => "Read a GitHub issue beside the chat",
             Tool::SideChat => "A separate conversation with its own messages",
             Tool::Resources => "Live session CPU and memory",
             Tool::Subagents => "Inspect delegated work, progress and agent transcripts",
@@ -226,6 +231,7 @@ impl Tool {
             Tool::Review => REVIEW,
             Tool::Threads => THREADS,
             Tool::Activity => ACTIVITY,
+            Tool::Issues => ISSUES,
             Tool::SideChat => SIDE_CHAT,
             Tool::Resources => RESOURCES,
             Tool::Subagents => THREADS,
@@ -374,6 +380,23 @@ impl Shell {
         self.features.get::<Panel>().menu_lower = false;
     }
     /// Opens one pull request in the panel's PR tabs, as classic's PRs list does.
+    /// Opens one issue in the right panel, as classic's Canvas issue tab did.
+    /// Without a repository it reads from the workspace's.
+    pub(crate) fn open_issue_in_panel(
+        &mut self,
+        repo: Option<String>,
+        number: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        show(self, Tool::Issues, window, cx);
+        if let Some(Content::Issues(view)) = self.content.get(&key(self, Tool::Issues)) {
+            view.update(cx, |view, cx| match &repo {
+                Some(repo) => view.open(repo, number, cx),
+                None => view.open_here(number, cx),
+            });
+        }
+    }
     pub(crate) fn open_pr_in_panel(
         &mut self,
         repo: String,
@@ -701,6 +724,7 @@ pub(super) fn open_surface(
     let tool = match surface {
         "inbox" => Tool::Inbox,
         "activity" => Tool::Activity,
+        "issues" => Tool::Issues,
         "review" => Tool::Review,
         "o8md" => Tool::Spec,
         "workspace" | "files" => Tool::Files,
@@ -1065,6 +1089,7 @@ const DEVICES: &str =
     "M9 2h6a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z M10 5h4 M11 19h2";
 const THREADS: &str = "M4 4h16v13H9l-5 4V4Z M8 9h8 M8 13h5";
 const ACTIVITY: &str = "M2 12h4l3-9 6 18 3-9h4";
+const ISSUES: &str = "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18Z M12 8v5 M12 16h.01";
 const SIDE_CHAT: &str = "M11 5a8 8 0 1 0 0 16 8 8 0 1 0 0-16Z M19 2v6 M16 5h6";
 const RESOURCES: &str = "M4 15a8 8 0 0 1 16 0 M12 15l4-4 M12 14a1 1 0 1 0 0 2 1 1 0 1 0 0-2Z";
 const TARGETS: &str = "M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16Z M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M12 2v3 M12 19v3 M2 12h3 M19 12h3";

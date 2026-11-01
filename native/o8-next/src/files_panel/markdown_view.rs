@@ -29,7 +29,7 @@ fn runs(source: &[Run], weight: FontWeight, code: bool, muted: bool) -> Vec<Text
             TextRun {
                 len: run.text.len(),
                 font: face,
-                color: if run.style == "link" {
+                color: if run.style.starts_with("link") {
                     theme().accent
                 } else if muted {
                     theme().text_muted
