@@ -139,6 +139,13 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
         if (mode === 'fast') delay = 0;
         if (mode === 'fail-page') failPage = true;
         if (mode === 'ready-page') failPage = false;
+        if (mode === 'update-parent') {
+          messages[1].toolCalls![0].args = { command: 'cat preserved.rs updated.rs' };
+          writeFileSync(join(dataDir, 'chat-history', `${parent}.json`), JSON.stringify({
+            title: 'Inspect subagents', repoPath: repo, backend: 'pi', model: 'pi', orchestratorVisible: true,
+            savedAt: new Date().toISOString(), messages,
+          }));
+        }
         if (mode === 'held' && process.argv.includes('--subagents-shared')) {
           const { getSqlite } = await import('../../../src/lib/db');
           getSqlite().prepare(`INSERT OR REPLACE INTO shared_worker_returns

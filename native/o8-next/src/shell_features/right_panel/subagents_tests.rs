@@ -237,6 +237,54 @@ fn subagents_grid_follows_focused_parent_and_fits_compact_window(cx: &mut TestAp
 }
 
 #[gpui::test]
+fn subagents_grid_updated_trace_keeps_keyboard_return(cx: &mut TestAppContext) {
+    let (f, s, mut v) = setup(cx);
+    let repo = s.read_with(&v, |s, _| s.state.selected.clone().unwrap());
+    let options = crate::pane_layout::Options {
+        size: 1,
+        workspace: repo,
+        file: f.root.join("subagents.json").with_extension("grid.json"),
+    };
+    options
+        .save(&crate::pane_layout::Layout::new(
+            1,
+            ["llm-chat:thoughts-review".into()].into_iter(),
+        ))
+        .unwrap();
+    s.update_in(&mut v, |s, w, cx| s.execute(Command::Grid, w, cx));
+    ready(&s, &mut v);
+    wait(&s, &mut v, "subagent-trace-subagent-calculation");
+    click(&mut v, "subagent-trace-subagent-calculation");
+    wait(&s, &mut v, "subagents-detail-subagent-calculation");
+    let grid = s.read_with(&v, |s, _| {
+        let Content::Grid(g) = &s.content[&s.key(&Tab::Grid)] else {
+            panic!("Grid")
+        };
+        g.clone()
+    });
+    let _: Value = f
+        .client
+        .get("/api/subagents-fixture", &[("mode", "update-parent")])
+        .unwrap();
+    let history = f.client.history("llm-chat:thoughts-review").unwrap();
+    grid.update_in(&mut v, |g, _, cx| {
+        g.panes[0].install(history, f.client.clone());
+        g.shell_subagents()
+            .unwrap()
+            .update(cx, |i, cx| i.tick(true, cx));
+        cx.notify();
+    });
+    wait(&s, &mut v, "subagent-trace-subagent-calculation");
+    assert!(grid.read_with(&v, |g, _| g.panes[0].rows.iter().any(|row| {
+        matches!(&row.borrow().row, crate::model::Row::Activity { steps, .. }
+            if steps.iter().any(|step| step.command.contains("updated.rs")))
+    })));
+    click(&mut v, "subagents-close");
+    v.simulate_keystrokes("enter");
+    wait(&s, &mut v, "subagents-detail-subagent-calculation");
+}
+
+#[gpui::test]
 fn subagents_side_chat_returns_to_its_parent_and_split(cx: &mut TestAppContext) {
     let (_f, s, mut v) = setup(cx);
     s.update_in(&mut v, |s, w, cx| {
