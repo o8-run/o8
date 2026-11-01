@@ -49,6 +49,32 @@ fn selected(shell: &Entity<Shell>, cx: &VisualTestContext) -> (String, gpui::Ent
 }
 
 #[gpui::test]
+fn bots_rail_no_bot_fixed_navigation_baseline(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("no-bot-geometry.json"),
+        State::default(),
+        cx,
+    );
+    settle(&shell, &mut visual);
+    ready(&shell, &mut visual);
+    assert!(visual.debug_bounds("rail-bots").is_none());
+    for height in [400., 480., 520., 816.] {
+        visual.simulate_resize(size(px(800.), px(height)));
+        draw(&mut visual);
+        let prs = bounds(&mut visual, "rail-pull-requests");
+        let gauge = bounds(&mut visual, "rail-usage");
+        let profile = bounds(&mut visual, "shell-profile");
+        println!("NO_BOT_BASELINE height={height} prs={prs:?} gauge={gauge:?} profile={profile:?}");
+        assert!(
+            visual.debug_bounds("rail-destinations").is_none(),
+            "original destinations have no new viewport"
+        );
+    }
+}
+
+#[gpui::test]
 fn bots_without_a_workspace_open_by_click_and_restore(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(true, "--shell --bots --inbox-empty");
     let file = fixture.root.join("global-bot.json");
@@ -98,13 +124,7 @@ fn bots_without_a_workspace_open_by_click_and_restore(cx: &mut TestAppContext) {
 fn bots_shell_rail_bounds_large_rosters_and_keeps_the_footer_clickable(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--bots");
     for count in [20, 100] {
-        configure(
-            &fixture,
-            json!({"bots":(0..count).map(|n| json!({
-            "id":format!("fixture:{n}"),"house":"fixture","name":format!("Bot {n}"),
-            "mainThread":{"kind":"mailbox","id":"agent-1"}
-        })).collect::<Vec<_>>()}),
-        );
+        configure(&fixture, json!({"bots":[]}));
         let (shell, mut visual) = open(
             fixture.client.clone(),
             fixture.root.join(format!("rail-{count}.json")),
@@ -113,30 +133,52 @@ fn bots_shell_rail_bounds_large_rosters_and_keeps_the_footer_clickable(cx: &mut 
         );
         settle(&shell, &mut visual);
         ready(&shell, &mut visual);
-        for height in [400., 520., 816.] {
+        for height in [400., 480., 520., 540., 816.] {
+            configure(&fixture, json!({"bots":[]}));
+            shell.update(&mut visual, |s, _| s.surfaces.bots.fetched = None);
+            settle(&shell, &mut visual);
             visual.simulate_resize(size(px(800.), px(height)));
             draw(&mut visual);
-            let destinations = bounds(&mut visual, "rail-destinations");
-            if bounds(&mut visual, "rail-bots").bottom() > destinations.bottom() {
-                // At the 400px minimum, the existing destinations themselves
-                // need scrolling; the footer must remain fixed throughout.
-                visual.simulate_event(gpui::ScrollWheelEvent {
-                    position: point(destinations.center().x, destinations.top() + px(10.)),
-                    delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-100_000.))),
-                    modifiers: Default::default(),
-                    touch_phase: gpui::TouchPhase::Moved,
-                });
-                draw(&mut visual);
-            }
+            let baseline_prs = bounds(&mut visual, "rail-pull-requests");
+            let baseline_gauge = bounds(&mut visual, "rail-usage");
+            let baseline_footer = bounds(&mut visual, "shell-profile");
+            configure(
+                &fixture,
+                json!({"bots":(0..count).map(|n| json!({
+                "id":format!("fixture:{n}"),"house":"fixture","name":format!("Bot {n}"),
+                "mainThread":{"kind":"mailbox","id":"agent-1"}
+            })).collect::<Vec<_>>()}),
+            );
+            shell.update(&mut visual, |s, _| s.surfaces.bots.fetched = None);
+            settle(&shell, &mut visual);
+            assert_eq!(
+                shell.read_with(&visual, |s, _| s.surfaces.bots.entries.len()),
+                count
+            );
+            assert!(visual.debug_bounds("rail-destinations").is_none());
             let prs = bounds(&mut visual, "rail-pull-requests");
-            let bots = bounds(&mut visual, "rail-bots");
             let footer = bounds(&mut visual, "shell-profile");
             let gauge = bounds(&mut visual, "rail-usage");
-            assert!(bots.top() >= prs.bottom() && bots.top() - prs.bottom() < px(4.));
-            assert!(
-                bots.size.height >= px(44.),
-                "at least one bot remains reachable at height {height}"
+            assert_eq!(prs, baseline_prs, "bots do not move the existing PR target");
+            assert_eq!(
+                gauge, baseline_gauge,
+                "bots consume only the existing spacer"
             );
+            assert_eq!(
+                footer, baseline_footer,
+                "bots add no footer overflow, including below feasible heights"
+            );
+            let Some(bots) = visual
+                .debug_bounds("rail-bots")
+                .filter(|b| b.size.height >= px(44.))
+            else {
+                assert!(
+                    height < 540.,
+                    "a complete bot row fits at feasible short heights"
+                );
+                continue;
+            };
+            assert!(bots.top() >= prs.bottom() && bots.top() - prs.bottom() < px(4.));
             assert!(
                 bots.bottom() <= gauge.top(),
                 "bots leave the footer reachable"

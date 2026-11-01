@@ -302,7 +302,7 @@ pub(super) const REGISTRATION: Registration = Registration {
             .id("rail-bots")
             .debug_selector(|| "rail-bots".into())
             .w(px(super::rail::TARGET))
-            .min_h(px(super::rail::TARGET))
+            .min_h_0()
             .flex_shrink()
             .flex()
             .flex_col()

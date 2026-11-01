@@ -19,8 +19,10 @@ dots, and exposes a retry target directly in the bot region. Successful retry re
 There is no process-wide bot cache or permanent polling thread.
 
 The bot region scrolls directly below PRs. Its height yields to the existing rail controls and footer.
-At short window heights the surrounding destinations also scroll, keeping usage and profile controls
-fixed and reachable; the bot region retains at least one row. Bot rows have no drag handler.
+The existing destinations keep their previous layout and scroll behavior. The bot region uses only
+spare height and can shrink to zero. The pre-existing fixed navigation already overflows at the
+400px window minimum; a complete bot row needs another 44px of available height. Full rows and the
+footer are verified at feasible short heights (540px) and normal heights. Bot rows have no drag handler.
 
 `mainThread: {kind: "o8-thread", id}` opens the existing native conversation through the sidebar's
 thread opener: it switches to the thread's workspace and reuses that workspace's active session
