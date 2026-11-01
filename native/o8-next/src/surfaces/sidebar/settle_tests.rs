@@ -41,7 +41,7 @@ fn row(shell: &Entity<Shell>, cx: &mut VisualTestContext, id: &str) -> &'static 
     shell.update(cx, |s, cx| {
         let sidebar = s.surfaces.sidebar.view.clone().unwrap();
         sidebar.update(cx, |l, cx| {
-            l.scroll.scroll_to_item(index, ScrollStrategy::Center);
+            l.scroll_row(index, ScrollStrategy::Center, false);
             cx.notify();
         });
     });
@@ -477,4 +477,83 @@ fn sidebar_inbox_vocabulary_keeps_merge_outcome_separate_from_attention(cx: &mut
     assert!(list(&shell, &visual, |list| list.sessions.iter().any(|session| {
         session.id == MERGED && session.outcome.as_deref() == Some("merged")
     })));
+}
+
+fn parked_row(cx: &mut TestAppContext, unknown: bool) {
+    const ID: &str = "thoughts-sidebar-0019";
+    let flags = if unknown { " --sidebar-parked-unknown" } else { "" };
+    let (fixture, shell, mut visual, project) = start(
+        &format!("--shell --composer --sidebar --sidebar-markers --sidebar-merged --sidebar-parked{flags}"),
+        cx,
+    );
+    let oracle: Value = fixture.client.get("/api/sidebar-fixture/parking", &[]).unwrap();
+    assert_eq!(oracle["snapshot"]["state"], "parked");
+    assert_eq!(oracle["workspaceRestores"], json!([]));
+    let receipt = oracle["transitions"].as_array().unwrap().iter()
+        .find(|transition| transition["toState"] == "parked").unwrap();
+    if unknown {
+        assert!(receipt["receipt"]["reclaimedAvailableBytes"].is_null());
+    } else {
+        assert_eq!(receipt["receipt"]["reclaimedAvailableBytes"], 2_147_483_648_u64);
+    }
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-inbox");
+    wait_for(&shell, &mut visual, |s, _| {
+        s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
+    });
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-detailed");
+    wait_for(&shell, &mut visual, |s, _| s.state.sidebar_detailed_rows);
+    click(&mut visual, "thread-search");
+    visual.simulate_input("Sidebar thread 19");
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, ID, "Settled"));
+    let target = row(&shell, &mut visual, ID);
+    assert!(visual.debug_bounds("thread-workspace-parked-thoughts-sidebar-0019").is_some(),
+        "the settled row must paint its parked workspace detail");
+    let detail = if unknown { "thread-workspace-freed-unknown-thoughts-sidebar-0019" }
+        else { "thread-workspace-freed-2147483648-thoughts-sidebar-0019" };
+    assert!(visual.debug_bounds(detail).is_some(),
+        "the detail must distinguish observed bytes from unknown accounting");
+
+    let at = visual.debug_bounds(target).unwrap().center();
+    visual.simulate_mouse_move(at, None, gpui::Modifiers::default());
+    click(&mut visual, "thread-settle-thoughts-sidebar-0019");
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, ID, "Active"));
+    assert_eq!(stored(&fixture, ID), "active");
+    let untouched: Value = fixture.client.get("/api/sidebar-fixture/parking", &[]).unwrap();
+    assert_eq!(untouched["snapshot"], oracle["snapshot"], "Unsettle is metadata only");
+    assert_eq!(untouched["workspaceRestores"], json!([]), "Unsettle never asks to restore");
+
+    // Explicit workspace Restore is distinct from the existing archive Restore.
+    let target = row(&shell, &mut visual, ID);
+    let at = visual.debug_bounds(target).unwrap().center();
+    visual.simulate_mouse_down(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+    visual.simulate_mouse_up(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+    draw(&mut visual);
+    assert!(visual.debug_bounds("sidebar-row-workspace-restore-sidebar-branch").is_some());
+    click(&mut visual, "sidebar-row-workspace-restore-sidebar-branch");
+    let_http_land(&mut visual);
+    settle(&shell, &mut visual);
+    let requested: Value = fixture.client.get("/api/sidebar-fixture/parking", &[]).unwrap();
+    let restores = requested["workspaceRestores"].as_array().unwrap();
+    assert_eq!(restores.len(), 1);
+    assert_eq!(restores[0]["action"], "restore");
+    assert_eq!(restores[0]["packetId"], "sidebar-branch");
+    assert!(restores[0]["clientMutationId"].as_str().is_some_and(|id| !id.is_empty()));
+    assert!(restores[0]["archivedAt"].is_null());
+    assert_eq!(requested["snapshot"], oracle["snapshot"], "the held restore cannot claim success");
+    assert_eq!(stored(&fixture, ID), "active");
+    let history: Value = fixture.client.get("/api/v2/chat-history", &[("tabId", ID)]).unwrap();
+    assert!(history["archivedAt"].is_null());
+    assert_eq!(history["messages"].as_array().unwrap().len(), 2);
+}
+
+#[gpui::test]
+fn sidebar_parked_workspace_shows_receipt_and_restores_only_by_explicit_menu(cx: &mut TestAppContext) {
+    parked_row(cx, false);
+}
+
+#[gpui::test]
+fn sidebar_parked_workspace_keeps_missing_freed_bytes_unknown(cx: &mut TestAppContext) {
+    parked_row(cx, true);
 }

@@ -12,6 +12,8 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
   const enabled = process.argv.includes('--sidebar');
   const auditKeyboard = process.argv.includes('--sidebar-keyboard-audit');
   const archives: Array<{ method: string; path: string; tabId?: string }> = [];
+  const workspaceRestores: Array<Record<string, unknown>> = [];
+  const parkingFixture = process.argv.includes('--sidebar-parked');
   // --sidebar-before-inbox serves the thread and runtime listings as a host
   // from before #5110 did: without inbox subjects or settlement fields.
   const beforeInbox = process.argv.includes('--sidebar-before-inbox');
@@ -36,9 +38,24 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
       'POST /api/v2/chat-history': saveHistory, 'GET /api/v2/chat-history/list': historyList,
       'GET /api/runtime/archive': runtimeArchive.GET, 'POST /api/runtime/archive': runtimeArchive.POST,
       ...(auditKeyboard ? { 'GET /api/sidebar-fixture/archives': async () => Response.json({ archives }) } : {}),
+      ...(parkingFixture ? {
+        'GET /api/sidebar-fixture/parking': async () => {
+          const { getWorkspaceSnapshot, listWorkspaceSnapshotTransitions } = await import('../../../src/lib/worktree/snapshot-state');
+          return Response.json({ workspaceRestores,
+            snapshot: getWorkspaceSnapshot('sidebar-parked-repo', 'sidebar-branch'),
+            transitions: listWorkspaceSnapshotTransitions('sidebar-parked-repo', 'sidebar-branch') });
+        },
+        // The real service's destructive restore path is covered by its disposable
+        // workspace tests. This peer records the native command and holds it.
+        'POST /api/orchestrator/workspace': async request => {
+          workspaceRestores.push(await request.json() as Record<string, unknown>);
+          return Response.json({ ok: false, error: { code: 'fixture_restore_held', message: 'Fixture restore is held.' } }, { status: 409 });
+        },
+      } : {}),
       ...(beforeInbox ? { 'GET /api/runtime/inventory': inventory } : {}),
     },
     admit: ({ route, url, body, method }) => {
+      if (parkingFixture && url.pathname === '/api/orchestrator/workspace') return 200;
       if (route === patchHistory && body && Object.hasOwn(JSON.parse(body), 'inboxAction')) {
         return seeds.some(seed => seed.id === JSON.parse(body).tabId) ? 200 : 404;
       }

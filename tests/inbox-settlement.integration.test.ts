@@ -1,12 +1,14 @@
 import { spawn } from 'node:child_process';
+import { AsyncLocalStorage, createHook } from 'node:async_hooks';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
-import { inboxSubject, recordInboxConversationEvent } from '@/lib/inbox/store';
+import { inboxSubject, readInboxState, recordInboxConversationEvent } from '@/lib/inbox/store';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { createEmptyOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -20,6 +22,13 @@ import { getSqlite } from '@/lib/db';
 import { persistCanonicalChatHistoryRecord, readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { threadGitContext } from '@/lib/repos/thread-git-context';
 import { enqueueComposerSend } from '@/lib/orchestrator/composer-queue';
+import { createWorkspaceSnapshot, getWorkspaceSnapshot, transitionWorkspaceSnapshot } from '@/lib/worktree/snapshot-state';
+import * as workspaceParking from '@/lib/workspace/hibernator';
+import * as storageAdmission from '@/lib/workspace/storage-admission';
+import * as operatorDefaults from '@/lib/operator/defaults';
+import * as repos from '@/lib/repos/registry';
+import type { RepoRegistryEntry } from '@/lib/repos/types';
+import type { LaneStatus } from '@/lib/lane/types';
 
 // Runtime discovery is an external provider boundary. The lanes, approvals,
 // transcript, mutation, persisted metadata and both listing routes are real.
@@ -44,6 +53,35 @@ const request = (body: Record<string, unknown>, query = '') => new NextRequest(`
   method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
 });
 const mutate = (tabId: string, inboxAction: string) => PATCH(request({ tabId, inboxAction }));
+
+/** Observe completion of work descended from this PATCH, including a detached
+ * post-step. The polling promises belong to the test, outside the request scope.
+ * No production observer/export is needed, so the pre-change route still runs.
+ */
+async function mutateAndDrain(tabId: string, inboxAction: string) {
+  const scope = new AsyncLocalStorage<object>();
+  const owner = {};
+  const pending = new Map<number, string>();
+  const scheduled = new Set(['PROMISE', 'Timeout', 'Immediate', 'Microtask', 'TickObject']);
+  const hook = createHook({
+    init(id, type) {
+      if (scope.getStore() === owner && scheduled.has(type)) pending.set(id, type);
+    },
+    promiseResolve(id) { if (pending.get(id) === 'PROMISE') pending.delete(id); },
+    destroy(id) { if (pending.get(id) !== 'PROMISE') pending.delete(id); },
+  });
+  hook.enable();
+  try {
+    const response = await scope.run(owner, () => mutate(tabId, inboxAction));
+    await response.arrayBuffer();
+    await expect.poll(() => [...pending.values()].sort(), {
+      timeout: 2_000,
+      message: 'All request-owned post-step promises/callbacks must finish before checking the policy refusal.',
+    }).toEqual([]);
+    return response;
+  } finally { hook.disable(); scope.disable(); }
+}
+
 async function seed(suffix: string, timestamp = 100) {
   const tabId = `${prefix}-${suffix}`;
   ids.push(tabId);
@@ -60,6 +98,59 @@ async function listed(tabId: string) {
   const data = await (await list(new NextRequest('http://localhost/api/mobile/orchestrator/threads?limit=500'))).json();
   return data.threads.find((thread: { id: string }) => thread.id === tabId);
 }
+
+async function parkingCandidate(tabId: string, laneStatus: LaneStatus = 'completed') {
+  const packetId = `${tabId}-candidate`;
+  const repositoryUuid = `${tabId}-repo`;
+  const workspacePath = join(getDataDir(), `${packetId}-checkout`);
+  const sessionKey = `codex:${packetId}`;
+  const lane = createLane({ repoPath: process.cwd(), worktreePath: workspacePath, branch: 'fixture-candidate',
+    runtime: 'codex', sessionKey, packetId, baseCommit: 'a'.repeat(40) });
+  setLaneStatus(lane.id, laneStatus);
+  const packet: OrchestratorPacket = { id: packetId, referenceLabel: 'P1', title: 'Parking candidate', summary: '',
+    workspaceTargetPath: process.cwd(), branchTarget: lane.branch, runtime: 'codex',
+    dependencyLabels: [], dependencyPacketIds: [], queueState: 'held', releaseState: 'pending',
+    status: 'awaiting_review', blockedReason: null, review: null, attemptCount: 1, orchestratorThreadId: tabId,
+    lane: { tileId: 'fixture', tabId: sessionKey, repoPath: process.cwd(), worktreePath: workspacePath,
+      runtime: 'codex', sessionKey, laneId: lane.id } };
+  const pressurePacket: OrchestratorPacket = { ...packet, id: `${tabId}-held-dispatch`,
+    lane: null, orchestratorThreadId: `${tabId}-another-thread`, status: 'blocked', releaseState: 'pending' };
+  markPacketReleased(packet, { source: 'approve_and_merge', mergeCommit: 'b'.repeat(40), headSha: 'b'.repeat(40) });
+  const observation = (targetPath: string): storageAdmission.StorageVolumeObservation => ({
+    status: 'observed', targetPath, probePath: process.cwd(), volumeId: 'device:inbox-parking-fixture',
+    availableBytes: 50, freeBytes: 50, totalBytes: 1_000, observedAt: Date.now(), error: null,
+  });
+  // A real durable reserve-breach decision, not a mode flag or a guessed disk threshold.
+  const held = await new storageAdmission.StorageAdmissionStore(getSqlite(), { observeVolume: async target => observation(target) }).reserve({
+    mutationId: `${tabId}:reserve`, reservationId: `${tabId}:reservation`, targetPath: process.cwd(),
+    exactBytes: 100, ownerId: pressurePacket.id, ownerGeneration: 1, leaseExpiresAt: Date.now() + 60_000,
+    policy: { reserveRatio: 0, absoluteFloorBytes: 100 },
+  });
+  expect(held).toMatchObject({ decision: 'held', reason: 'reserve_breached' });
+  pressurePacket.storageAdmission = { schema: 'o8/packet-storage-admission/v1', state: 'held', reason: held.reason,
+    reservationId: `${tabId}:reservation`, mutationId: held.mutationId, ownerId: pressurePacket.id, ownerGeneration: 1,
+    estimateBytes: 100, estimateSource: 'same-repo-history', historySamples: 1, volumeId: held.observation!.volumeId,
+    physicalAvailableBytes: held.observation!.availableBytes, reservedBeforeBytes: held.activeReservedBytes,
+    requiredReserveBytes: held.requiredReserveBytes, dispatchHeadroomBytes: held.headroomBytes, pressure: null,
+    recordedAt: held.recordedAt };
+  writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: `${tabId}-mission`,
+    repoPath: process.cwd(), packets: [packet, pressurePacket] });
+  const snapshot = createWorkspaceSnapshot({ repositoryUuid, packetId, laneId: lane.id,
+    originalPath: workspacePath, branch: lane.branch, baseCommit: 'a'.repeat(40), headCommit: 'b'.repeat(40),
+    treeSha: 'c'.repeat(40), recoveryRef: `refs/o8/workspace-snapshots/${packetId}`, diffFingerprint: 'fixture-candidate-diff',
+    sessionIdentities: [{ kind: 'owned-session', identity: sessionKey }], creationId: `${packetId}:create` }).record;
+  const repo = { id: repositoryUuid, localPath: process.cwd(), storagePressureParkingDisabled: false } as RepoRegistryEntry;
+  return { packet, lane, repo, snapshot, observation };
+}
+
+function parkingPolicy(f: Awaited<ReturnType<typeof parkingCandidate>>, mode: 'manual' | 'pressure' = 'pressure') {
+  const defaults = operatorDefaults.getOperatorDefaultsSync();
+  const modeSpy = vi.spyOn(operatorDefaults, 'getOperatorDefaultsSync').mockReturnValue({ ...defaults,
+    values: { ...defaults.values, workspaceParkingMode: mode, storageReserveRatio: 0, storageReserveFloorGb: 100 / 1_073_741_824 } });
+  const reposSpy = vi.spyOn(repos, 'listReposFresh').mockResolvedValue([f.repo]);
+  const volumeSpy = vi.spyOn(storageAdmission, 'observeStorageVolume').mockImplementation(async target => f.observation(target));
+  return { modeSpy, reposSpy, volumeSpy, restore: () => { modeSpy.mockRestore(); reposSpy.mockRestore(); volumeSpy.mockRestore(); } };
+}
 afterAll(async () => {
   if (fixture.previousClaudeHome === undefined) delete process.env.CLAUDE_HOME;
   else process.env.CLAUDE_HOME = fixture.previousClaudeHome;
@@ -67,6 +158,103 @@ afterAll(async () => {
 });
 
 describe('inbox settlement through operator mutation and native listings', () => {
+  it('returns durable Settle before a pending parking post-step and performs no storage admission retry', async () => {
+    const tabId = await seed('parking-postcommit');
+    const f = await parkingCandidate(tabId);
+    const policy = parkingPolicy(f);
+    const subject = inboxSubject('conversation', tabId, process.cwd());
+    let releasePark!: () => void;
+    const pending = new Promise<void>(resolve => { releasePark = resolve; });
+    const park = vi.spyOn(workspaceParking, 'parkWorkspace').mockImplementation(async () => {
+      expect(getSqlite().inTransaction).toBe(false);
+      expect(readInboxState(subject).settledOverride).toBe('settled');
+      await pending;
+      return { status: 'refused', code: 'fixture_held', note: 'The post-step remains separate.' };
+    });
+    const admissionWrites = () => (getSqlite().prepare('SELECT COUNT(*) AS count FROM storage_admission_mutations').get() as { count: number }).count;
+    const before = admissionWrites();
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await Promise.race([mutate(tabId, 'settle'), new Promise<null>(resolve => { deadline = setTimeout(() => resolve(null), 1_000); })]);
+      expect(response, 'Settle must answer while filesystem parking is pending').not.toBeNull();
+      expect(response!.status).toBe(200);
+      expect(readInboxState(subject)).toMatchObject({ settledOverride: 'settled', settledAt: expect.any(String) });
+      await expect.poll(() => park.mock.calls.length).toBe(1);
+      expect(park.mock.calls[0][0]).toMatchObject({ repositoryUuid: f.repo.id, packetId: f.packet.id });
+      expect(admissionWrites()).toBe(before);
+      releasePark();
+      await pending;
+      expect(getWorkspaceSnapshot(f.repo.id, f.packet.id)).toEqual(f.snapshot);
+      expect((await listed(tabId)).settledOverride).toBe('settled');
+    } finally { if (deadline) clearTimeout(deadline); releasePark(); park.mockRestore(); policy.restore(); }
+  });
+
+  it.each(['manual', 'opted-out', 'healthy', 'wrong-volume', 'unknown-volume', 'reviewing'] as const)(
+    'keeps settlement separate and skips automatic parking for %s', async reason => {
+      const tabId = await seed(`parking-skip-${reason}`);
+      const f = await parkingCandidate(tabId, reason === 'reviewing' ? 'reviewing' : 'completed');
+      if (reason === 'opted-out') f.repo.storagePressureParkingDisabled = true;
+      const policy = parkingPolicy(f, reason === 'manual' ? 'manual' : 'pressure');
+      if (reason === 'healthy') policy.volumeSpy.mockImplementation(async target => ({ ...f.observation(target), availableBytes: 900, freeBytes: 900 }));
+      if (reason === 'wrong-volume') policy.volumeSpy.mockImplementation(async target => ({ ...f.observation(target), volumeId: 'device:other' }));
+      if (reason === 'unknown-volume') policy.volumeSpy.mockImplementation(async target => ({ ...f.observation(target), status: 'unknown', volumeId: null }));
+      const park = vi.spyOn(workspaceParking, 'parkWorkspace').mockResolvedValue({ status: 'refused', code: 'must_not_run', note: 'Unexpected parking.' });
+      try {
+        expect((await mutateAndDrain(tabId, 'settle')).status).toBe(200);
+        expect(park).not.toHaveBeenCalled();
+        expect(readInboxState(inboxSubject('conversation', tabId, process.cwd())).settledOverride).toBe('settled');
+        expect(getWorkspaceSnapshot(f.repo.id, f.packet.id)).toEqual(f.snapshot);
+      } finally { park.mockRestore(); policy.restore(); }
+    },
+  );
+
+  it.each([2_147_483_648, 0, null])('projects a parked packet receipt (%s bytes) without restoring on Unsettle', async reclaimedAvailableBytes => {
+    const tabId = await seed(`parked-${reclaimedAvailableBytes ?? 'unknown'}`);
+    const packetId = `${tabId}-packet`;
+    const repositoryUuid = `${tabId}-repo`;
+    const sessionKey = `codex:${packetId}`;
+    const workspacePath = join(getDataDir(), `${packetId}-absent-checkout`);
+    const lane = createLane({ repoPath: process.cwd(), worktreePath: workspacePath, branch: 'fixture-parked',
+      runtime: 'codex', sessionKey, packetId, baseCommit: 'a'.repeat(40) });
+    setLaneStatus(lane.id, 'completed');
+    const packet: OrchestratorPacket = { id: packetId, referenceLabel: 'P1', title: 'Parked packet', summary: '',
+      workspaceTargetPath: process.cwd(), branchTarget: lane.branch, runtime: 'codex',
+      dependencyLabels: [], dependencyPacketIds: [], queueState: 'held', releaseState: 'pending',
+      status: 'awaiting_review', blockedReason: null, review: null, attemptCount: 1, orchestratorThreadId: tabId,
+      lane: { tileId: 'fixture', tabId: sessionKey, repoPath: process.cwd(), worktreePath: workspacePath,
+        runtime: 'codex', sessionKey, laneId: lane.id } };
+    markPacketReleased(packet, { source: 'approve_and_merge', mergeCommit: 'b'.repeat(40), headSha: 'b'.repeat(40) });
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: `${tabId}-mission`,
+      repoPath: process.cwd(), packets: [packet] });
+    let snapshot = createWorkspaceSnapshot({ repositoryUuid, packetId, laneId: lane.id,
+      originalPath: workspacePath, branch: lane.branch, baseCommit: 'a'.repeat(40), headCommit: 'b'.repeat(40),
+      treeSha: 'c'.repeat(40), recoveryRef: `refs/o8/workspace-snapshots/${packetId}`, diffFingerprint: 'fixture-diff',
+      sessionIdentities: [{ kind: 'owned-session', identity: sessionKey }], creationId: `${packetId}:create` }).record;
+    for (const state of ['parkable', 'hibernating', 'parked'] as const) {
+      snapshot = transitionWorkspaceSnapshot({ repositoryUuid, packetId, transitionId: `${packetId}:${state}`,
+        expectedState: snapshot.state, expectedVersion: snapshot.version, expectedGeneration: snapshot.snapshotGeneration,
+        toState: state, receipt: state === 'parked' && reclaimedAvailableBytes !== null ? { reclaimedAvailableBytes } : {} }).record!;
+    }
+    const messages = readPersistedLlmChat(tabId)!.history.messages;
+    expect((await mutate(tabId, 'settle')).status).toBe(200);
+    const expected = [{ packetId, repositoryUuid, reclaimedAvailableBytes }];
+    expect(await listed(tabId)).toMatchObject({ settledOverride: 'settled', parkedWorkspaces: expected });
+    const histories = await (await historyList(new NextRequest('http://localhost/api/v2/chat-history/list?include=orchestrator'))).json();
+    expect(histories.conversations.find((row: { tabId: string }) => row.tabId === tabId))
+      .toMatchObject({ settledOverride: 'settled', parkedWorkspaces: expected });
+    fixture.agents = [{ sessionKey, workspace: process.cwd(), runtime: 'codex', status: 'idle', approvalStatus: 'none' }];
+    try {
+      const runtime = await (await inventory(new NextRequest('http://localhost/api/runtime/inventory'))).json();
+      expect(runtime.agents[0]).toMatchObject({ parentInboxSubject: { kind: 'conversation', id: tabId }, parkedWorkspaces: expected });
+      expect((await mutate(tabId, 'unsettle')).status).toBe(200);
+      expect(readInboxState(inboxSubject('conversation', tabId, process.cwd())).settledOverride).toBe('active');
+      expect(getWorkspaceSnapshot(repositoryUuid, packetId)).toEqual(snapshot);
+      expect(existsSync(workspacePath)).toBe(false);
+      expect(readPersistedLlmChat(tabId)!.history.messages).toEqual(messages);
+      expect(readPersistedLlmChat(tabId)!.history).not.toHaveProperty('archivedAt', expect.any(String));
+    } finally { fixture.agents = []; }
+  });
+
   it('round-trips settle/unsettle and repeat timestamps without archiving or dropping messages', async () => {
     const tabId = await seed('roundtrip');
     expect(await listed(tabId)).toMatchObject({ settledOverride: null, settledAt: null, unsettledAt: null });
