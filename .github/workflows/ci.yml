@@ -31,7 +31,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}-${{ inputs.integration_base }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   typecheck:
