@@ -125,7 +125,7 @@ pub(super) fn thread_row(s: &Session, now: u64, branches: &HashSet<String>) -> R
         attention: sidebar::rank(s) > 0 || s.unread,
         marker: "",
         folder: None,
-        machine: s.machine_label.clone(),
+        machine: s.away().map(str::to_owned),
     }
 }
 /// A titled group of threads, at most `cap` until disclosed or searched.

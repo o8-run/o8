@@ -223,6 +223,9 @@ impl ThreadList {
                         } else {
                             28.
                         }))
+                        .when_some(row.id.clone().filter(|_| thread), |view, id| {
+                            this.with_thread_hover(view, id, cx)
+                        })
                         .flex()
                         .items_center()
                         // Headings keep the row height but sit low in it, so
@@ -296,16 +299,19 @@ impl ThreadList {
                                 })
                                 .when(thread, |view| {
                                     // A folder already names its threads' repository.
-                                    view.when(!by_repo, |view| {
+                                    view.when(row.machine.is_some(), |view| {
+                                        view.child(thread_hover::machine_mark())
+                                    })
+                                    .when(!by_repo, |view| {
                                         view.child(
                                             div()
-                                                .max_w(px(if row.machine.is_some() { 120. } else { 65. }))
+                                                .max_w(px(65.))
                                                 .min_w_0()
                                                 .text_ellipsis()
                                                 .font_weight(gpui::FontWeight(260.))
                                                 .text_size(px(11.5))
                                                 .text_color(theme().text_faint)
-                                                .child(row.on_machine(label(&row.workspace))),
+                                                .child(label(&row.workspace)),
                                         )
                                     })
                                     .child(

@@ -132,6 +132,8 @@ pub struct ThreadList {
     pr_links_at: Option<Instant>,
     pr_loading: bool,
     pr_hover: Option<pr_links::PrHover>,
+    /// The thread whose facts card is opening or open (thread_hover.rs).
+    thread_hover: Option<thread_hover::ThreadHover>,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
@@ -239,6 +241,7 @@ impl ThreadList {
             pr_links_at: None,
             pr_loading: false,
             pr_hover: None,
+            thread_hover: None,
             views: HashMap::new(),
             view_menu: false,
             new_menu: false,
@@ -1083,6 +1086,8 @@ mod bulk;
 mod open_editor;
 #[path = "pr_links.rs"]
 pub(crate) mod pr_links;
+#[path = "thread_hover.rs"]
+mod thread_hover;
 #[path = "detailed.rs"]
 pub(crate) mod detailed;
 #[path = "pins.rs"]

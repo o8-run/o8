@@ -206,6 +206,12 @@ pub struct Session {
     pub inbox_revision: Option<u64>,
 }
 impl Session {
+    /// Where this thread runs when that isn't this computer.
+    pub(crate) fn away(&self) -> Option<&str> {
+        self.machine_label
+            .as_deref()
+            .or((self.runtime == "cloud").then_some("Cloud"))
+    }
     pub fn settled(&self) -> bool {
         self.settled_override.as_deref() == Some("settled")
     }
