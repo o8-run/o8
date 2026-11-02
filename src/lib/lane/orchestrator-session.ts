@@ -685,7 +685,7 @@ export async function sendToOrchestrator(
       const timeout = setTimeout(() => {
         console.warn(`[orchestrator-session] Process timeout (${PROCESS_TIMEOUT_MS}ms) — killing ${session.sessionName}`);
         const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
-        onEvent({
+        if (!w.activeTurn?.heldResult) onEvent({
           type: 'error',
           error: `Orchestrator hit the ${minutes}-minute watchdog limit and was terminated — a turn running this long has almost certainly hung. Re-send your message to continue.`,
         });
@@ -739,7 +739,7 @@ export async function sendToOrchestrator(
                     try { return readFileSync(crashRecord.stderrPath, 'utf8').trim(); } catch { return ''; }
                   })()
                 : '';
-              settleOrchestratorTurn(session, w, stderr ? new Error(stderr.slice(0, 500)) : null);
+              settleOrchestratorTurn(session, w, stderr && !turn.heldResult ? new Error(stderr.slice(0, 500)) : null);
             }
           },
         });

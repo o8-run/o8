@@ -103,3 +103,76 @@ describe('parseOrchestratorTurnUsage', () => {
     });
   });
 });
+
+describe('processStreamEvent — a real Claude turn with background agents', () => {
+  const stream = (inner: Record<string, unknown>, parent?: string) => ({
+    type: 'stream_event', event: inner, ...(parent ? { parent_tool_use_id: parent } : {}),
+  });
+  const say = (text: string) => stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } });
+  const startText = stream({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+  const call = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'a1', name: 'Agent', input: { description: 'Sort fruit' } }] } };
+  const started = { type: 'system', subtype: 'task_started', tool_use_id: 'a1', is_backgrounded: true, task_type: 'local_agent' };
+  const launched = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a1', content: 'Async agent launched successfully.' }] } };
+  const answered = { type: 'system', subtype: 'task_notification', tool_use_id: 'a1', status: 'completed', summary: 'apple, kiwi' };
+
+  it('streams words as they arrive and does not repeat them from the assistant event', () => {
+    const out = run([
+      say('Hello '),
+      say('world'),
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Hello world' }] } },
+    ]);
+    expect(textsOf(out)).toEqual(['Hello ', 'world']);
+  });
+
+  it('streams thinking once', () => {
+    const out = run([
+      stream({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Hmm' } }),
+      { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Hmm' }] } },
+    ]);
+    expect(out.filter((e) => e.type === 'thinking')).toHaveLength(1);
+  });
+
+  it('separates a later text block from the one before it', () => {
+    expect(textsOf(run([startText, say('One.'), startText, say('Two.')])).join('')).toBe('One.\n\nTwo.');
+  });
+
+  it('keeps a later message that arrives without deltas', () => {
+    const message = stream({ type: 'message_start', message: {} });
+    const out = run([
+      message, say('One.'),
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'One.' }] } },
+      message,
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Two.' }] } },
+    ]);
+    expect(textsOf(out)).toEqual(['One.', 'Two.']);
+  });
+
+  it('streams a thinking summary once', () => {
+    const out = run([
+      stream({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_summary', summary: 'Hmm' } }),
+      { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Hmm' }] } },
+    ]);
+    expect(out.filter((e) => e.type === 'thinking')).toHaveLength(1);
+  });
+
+  it('keeps a subagent out of the parent reply', () => {
+    const out = run([
+      stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'inner' } }, 'a1'),
+      { type: 'assistant', parent_tool_use_id: 'a1', message: { content: [{ type: 'text', text: 'inner' }] } },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it('reports the agent answer, not the launch, as the result of its call', () => {
+    const out = run([call, started, launched, answered]);
+    expect(out.filter((e) => e.type === 'tool_result')).toMatchObject([
+      { id: 'a1', name: 'Agent', output: 'apple, kiwi' },
+    ]);
+  });
+
+  it('leaves the launch of a background shell alone', () => {
+    const shell = { ...started, tool_use_id: 's1', task_type: 'local_bash' };
+    const ack = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 's1', content: 'Running' }] } };
+    expect(run([shell, ack]).filter((e) => e.type === 'tool_result')).toMatchObject([{ id: 's1', output: 'Running' }]);
+  });
+});

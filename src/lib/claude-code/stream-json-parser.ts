@@ -1,4 +1,5 @@
 import { cacheUsageEvidence } from '@/lib/prompt-cache/usage-evidence';
+import { createBackgroundAgents } from './background-agents';
 export type ClaudeCodeStreamJsonChatEvent =
   | { type: 'delta'; text: string; blockIndex?: number; messageIndex?: number; messageKey?: string }
   | { type: 'thinking'; text: string; blockIndex?: number; messageIndex?: number; messageKey?: string }
@@ -199,6 +200,8 @@ export function createClaudeCodeStreamJsonParser(
     emittedDone: false,
   };
   const tracker = createToolTracker();
+  const backgroundAgents = createBackgroundAgents();
+  let heldResult: Record<string, unknown> | null = null;
   const streamedTextIndices = new Set<number>();
   const streamedThinkingIndices = new Set<number>();
   let streamedTextWithoutIndex = false;
@@ -322,11 +325,18 @@ export function createClaudeCodeStreamJsonParser(
     const isResult = event.type === 'result';
     const isError = event.is_error === true
       || (isResult && subtype !== undefined && subtype !== 'success');
+    if (isResult && !isError && backgroundAgents.holdsResult()) {
+      // Its usage is reported above, so the end of a held turn must not repeat it.
+      heldResult = { ...event, usage: undefined, total_cost_usd: undefined, cost_usd: undefined };
+      return;
+    }
     const explicitResult = asString(event.result);
     const errorText = isError && Array.isArray(event.errors)
       ? event.errors.filter((value): value is string => typeof value === 'string').join('\n')
       : '';
-    const resultText = explicitResult?.trim() ? explicitResult : errorText || state.fullResponse;
+    const resultText = backgroundAgents.seen() && !isError
+      ? state.fullResponse
+      : explicitResult?.trim() ? explicitResult : errorText || state.fullResponse;
     const doneEvent: ClaudeCodeStreamJsonParserEvent = {
       type: 'done',
       text: resultText,
@@ -357,6 +367,8 @@ export function createClaudeCodeStreamJsonParser(
     if (type === 'system') {
       const id = asString(event.session_id);
       if (id) state.sessionId = id;
+      const answer = backgroundAgents.observe(event);
+      if (answer) emitToolResult({ tool_use_id: answer.id, output: answer.output, is_error: answer.isError }, events);
       return events;
     }
 
@@ -475,7 +487,8 @@ export function createClaudeCodeStreamJsonParser(
       if (!Array.isArray(content)) return events;
       for (const rawBlock of content) {
         const block = asRecord(rawBlock);
-        if (block?.type === 'tool_result') {
+        // A background agent's call returns at launch; its answer is the result.
+        if (block?.type === 'tool_result' && !backgroundAgents.isRunning(asString(block.tool_use_id) ?? '')) {
           emitToolResult(block, events);
         }
       }
@@ -567,6 +580,11 @@ export function createClaudeCodeStreamJsonParser(
         const step = planStepFromLine(planLineBuffer);
         if (step) events.push({ type: 'plan_step', text: step, status: 'active' });
         planLineBuffer = '';
+      }
+      // The process or its caller gave up on a held turn, which had succeeded.
+      if (heldResult) {
+        backgroundAgents.forget();
+        emitDone(heldResult, events);
       }
       return events;
     },

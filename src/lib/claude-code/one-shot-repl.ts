@@ -34,6 +34,7 @@ import os from 'node:os';
 
 import {
   createClaudeCodeStreamJsonParser,
+  type ClaudeCodeStreamJsonParserEvent,
 } from './stream-json-parser';
 import { assertNoPrintFlag } from './assert-no-print-flag';
 import { claudeEffortFlagValue } from '@/lib/orchestrator/thinking-effort';
@@ -116,12 +117,7 @@ export async function askClaudeOneShot(
       else resolve(text ?? '');
     };
 
-    const timer = setTimeout(() => {
-      finish(new Error(`[qa][claude-repl] timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    child.stdout.on('data', (chunk: Buffer) => {
-      const events = parser.pushChunk(chunk.toString('utf8'));
+    const finishOnDone = (events: ClaudeCodeStreamJsonParserEvent[]) => {
       for (const evt of events) {
         if (evt.type === 'done') {
           resultText = evt.text ?? resultText;
@@ -129,6 +125,15 @@ export async function askClaudeOneShot(
           return;
         }
       }
+    };
+
+    const timer = setTimeout(() => {
+      finishOnDone(parser.flush());
+      finish(new Error(`[qa][claude-repl] timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      finishOnDone(parser.pushChunk(chunk.toString('utf8')));
     });
 
     child.stderr.on('data', (chunk: Buffer) => {
@@ -142,14 +147,7 @@ export async function askClaudeOneShot(
 
     child.on('close', (code, signal) => {
       // Flush any trailing buffered line — `done` may arrive without trailing newline.
-      const trailing = parser.flush();
-      for (const evt of trailing) {
-        if (evt.type === 'done') {
-          resultText = evt.text ?? resultText;
-          finish(evt.isError ? new Error('Worker returned a failed result.') : null, resultText.trim());
-          return;
-        }
-      }
+      finishOnDone(parser.flush());
       if (settled) return;
       const suffix = signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`;
       finish(new Error(

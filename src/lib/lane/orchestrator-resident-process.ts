@@ -119,6 +119,10 @@ export function settleOrchestratorTurn(
 ): void {
   const turn = w.activeTurn;
   if (!turn || turn.settled) return;
+  if (turn.heldResult && !error) {
+    successfulResult = true;
+    terminalOutcome = 'completed';
+  }
   const hadCrashRecord = !!turn.crashRecord;
   turn.settled = true;
   clearTimeout(turn.timeout);
@@ -202,9 +206,13 @@ export function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState,
     return false;
   }
   processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
+  // The model is answering an agent, so the turn is unfinished again.
+  if (raw.subtype === 'status' && raw.status === 'requesting') turn.heldResult = false;
   if (raw.type === 'result') {
     turn.usage = parseOrchestratorTurnUsage(raw);
     const successfulResult = raw.is_error !== true && !(typeof raw.subtype === 'string' && raw.subtype.startsWith('error_'));
+    turn.heldResult = successfulResult && turn.toolTracker.backgroundAgents.holdsResult();
+    if (turn.heldResult) return true;
     // Only a successful result drives false-dispatch checks and prompt delivery.
     settleOrchestratorTurn(session, w, null, successfulResult, successfulResult ? 'completed' : 'failed');
     return false;
@@ -274,7 +282,7 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
       }
       w.stdoutLineBuffer = '';
       const stderr = w.stderrBuffer.trim();
-      settleOrchestratorTurn(session, w, code === 0 || code === null ? null : new Error(stderr.slice(0, 500) || `orchestrator proc exited with code ${code}`), false, code === 0 ? 'unconfirmed' : 'failed');
+      settleOrchestratorTurn(session, w, w.activeTurn.heldResult || code === 0 || code === null ? null : new Error(stderr.slice(0, 500) || `orchestrator proc exited with code ${code}`), false, code === 0 ? 'unconfirmed' : 'failed');
     }
     session.status = 'dead'; // proc gone → next turn respawns (auto-recover)
   });

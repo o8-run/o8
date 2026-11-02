@@ -1,3 +1,4 @@
+import { createBackgroundAgents } from '@/lib/claude-code/background-agents';
 import { cacheUsageEvidence } from '@/lib/prompt-cache/usage-evidence';
 import { planFromToolInput, type OrchestratorPlanStep } from './orchestrator-plan';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -93,6 +94,13 @@ interface ToolCallTracker {
    * already in claude-code/stream-json-parser.ts (a9d94b51).
    */
   hasAnyStreamedText: () => boolean;
+  recordThinkingDelta: () => void;
+  hasAnyStreamedThinking: () => boolean;
+  /** A new message starts: its replay only repeats what it streamed itself. */
+  startMessage: () => void;
+  /** True once this turn has shown any text, so the next block needs a break. */
+  hasTurnText: () => boolean;
+  backgroundAgents: ReturnType<typeof createBackgroundAgents>;
 }
 
 function tokenCount(value: unknown): number {
@@ -122,8 +130,11 @@ export function createToolCallTracker(): ToolCallTracker {
   const pendingQueue: Array<{ id?: string | null; name: string; input: unknown }> = [];
   const streamedTextIndices = new Set<number>();
   let anyStreamedText = false;
+  let anyStreamedThinking = false;
+  let turnText = false;
 
   return {
+    backgroundAgents: createBackgroundAgents(),
     recordToolUse(tool) {
       if (tool.id && pendingById.has(tool.id)) {
         return;
@@ -151,12 +162,27 @@ export function createToolCallTracker(): ToolCallTracker {
     recordTextDelta(index) {
       streamedTextIndices.add(index);
       anyStreamedText = true;
+      turnText = true;
     },
     hasStreamedText(index) {
       return streamedTextIndices.has(index);
     },
     hasAnyStreamedText() {
       return anyStreamedText;
+    },
+    recordThinkingDelta() {
+      anyStreamedThinking = true;
+    },
+    hasAnyStreamedThinking() {
+      return anyStreamedThinking;
+    },
+    startMessage() {
+      streamedTextIndices.clear();
+      anyStreamedText = false;
+      anyStreamedThinking = false;
+    },
+    hasTurnText() {
+      return turnText;
     },
   };
 }
@@ -189,10 +215,41 @@ export function processStreamEvent(
 ): void {
   const type = event.type as string | undefined;
 
+  // A subagent streams inside its parent. Its words and tools are its own; the
+  // parent receives them once, as the result of the call that started it.
+  if (event.parent_tool_use_id) return;
+
   switch (type) {
     case 'system': {
       const id = event.session_id as string | undefined;
       if (id) onSessionId(id);
+      const answer = tracker.backgroundAgents.observe(event);
+      if (answer) {
+        const matchedTool = tracker.resolveToolResult(answer.id);
+        onEvent({
+          type: 'tool_result',
+          id: answer.id,
+          name: matchedTool?.name ?? '',
+          input: matchedTool?.input,
+          output: answer.output,
+          ...(answer.isError ? { isError: true } : {}),
+        });
+      }
+      break;
+    }
+
+    // `--include-partial-messages` wraps the live deltas. A tool call waits for
+    // the `assistant` event, which carries its input.
+    case 'stream_event': {
+      const inner = event.event as Record<string, unknown> | undefined;
+      const block = inner?.content_block as ContentBlock | undefined;
+      if (inner?.type === 'message_start') {
+        tracker.startMessage();
+      } else if (inner?.type === 'content_block_delta') {
+        processStreamEvent(inner, onEvent, onSessionId, onCost, tracker);
+      } else if (inner?.type === 'content_block_start' && block?.type === 'text' && tracker.hasTurnText()) {
+        onEvent({ type: 'text', text: '\n\n' });
+      }
       break;
     }
 
@@ -204,6 +261,7 @@ export function processStreamEvent(
         if (blockIndex >= 0) tracker.recordTextDelta(blockIndex);
         onEvent({ type: 'text', text: delta.text });
       } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+        tracker.recordThinkingDelta();
         onEvent({ type: 'thinking', text: delta.thinking });
       } else if (delta.type === 'thinking_summary') {
         const summary = typeof delta.summary === 'string'
@@ -214,6 +272,7 @@ export function processStreamEvent(
               ? delta.text
               : '';
         if (summary) {
+          tracker.recordThinkingDelta();
           onEvent({ type: 'thinking', text: summary });
         }
       }
@@ -249,7 +308,7 @@ export function processStreamEvent(
       const message = event.message as Record<string, unknown> | undefined;
       const content = message?.content;
       if (!Array.isArray(content)) break;
-      content.forEach((rawBlock, index) => {
+      content.forEach((rawBlock) => {
         const block = rawBlock as ContentBlock;
         if (block.type === 'text' && typeof block.text === 'string') {
           // Content-based dedup (not index-based): if ANY text streamed via
@@ -257,12 +316,11 @@ export function processStreamEvent(
           // skip it. Index-matching mis-fired when the replay's content array
           // shifted (thinking blocks), doubling the Collide aggregator's answer.
           if (tracker.hasAnyStreamedText()) {
-            console.log(`[stream-dedupe] skipping assistant text block ${index} (text already streamed via deltas this turn, ${block.text.length} chars)`);
             return;
           }
           onEvent({ type: 'text', text: block.text });
         } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
-          onEvent({ type: 'thinking', text: block.thinking });
+          if (!tracker.hasAnyStreamedThinking()) onEvent({ type: 'thinking', text: block.thinking });
         } else if (block.type === 'tool_use' && typeof block.name === 'string') {
           const nextTool = {
             id: typeof block.id === 'string' ? block.id : null,
@@ -284,6 +342,8 @@ export function processStreamEvent(
       if (!Array.isArray(content)) break;
       for (const block of content as ContentBlock[]) {
         if (block.type !== 'tool_result') continue;
+        // A background agent's call returns at launch; its answer is the result.
+        if (tracker.backgroundAgents.isRunning(block.tool_use_id ?? '')) continue;
         const matchedTool = tracker.resolveToolResult(typeof block.tool_use_id === 'string' ? block.tool_use_id : null);
         onEvent({
           type: 'tool_result',
