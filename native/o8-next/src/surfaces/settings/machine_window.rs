@@ -123,6 +123,12 @@ impl Route {
         let mut args = self.base_args();
         args.extend([
             "-N".to_owned(),
+            // A shared SSH connection would take these forwards and let this
+            // process exit, so they'd outlive the tunnel that asked for them.
+            "-o".to_owned(),
+            "ControlMaster=no".to_owned(),
+            "-o".to_owned(),
+            "ControlPath=none".to_owned(),
             "-o".to_owned(),
             "ExitOnForwardFailure=yes".to_owned(),
             "-o".to_owned(),
@@ -240,6 +246,7 @@ mod tests {
     fn the_target_always_follows_the_end_of_options() {
         let remote = Remote::parse("t\n47100\n47105\n").unwrap();
         let args = route().tunnel_args(5000, 5001, &remote);
+        assert!(args.contains(&"ControlPath=none".to_owned()));
         assert_eq!(&args[args.len() - 2..], ["--", "me@box"]);
         assert!(args.contains(&"127.0.0.1:5000:127.0.0.1:47100".to_owned()));
         assert!(args.contains(&"127.0.0.1:5001:127.0.0.1:47105".to_owned()));
