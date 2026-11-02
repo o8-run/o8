@@ -1162,7 +1162,7 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
     // While a turn runs its agents show as cards; the finished trace lists them.
     let timeline: Vec<Step> = steps
         .iter()
-        .filter(|s| !(s.delegate && trace.live))
+        .filter(|s| !(s.delegate && (trace.live || trace.helpers_below)))
         .cloned()
         .collect();
     let lines = lines(&timeline, &timed);
