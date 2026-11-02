@@ -319,7 +319,7 @@ impl Inspector {
             }
         }
         if let Some(detail) = &self.detail {
-            content = content.child(div().flex_1().min_h_0().child(detail.content()));
+            content = content.child(detail.content());
         } else {
             content = content.child(
                 div()
