@@ -12,6 +12,10 @@ use super::*;
 use gpui::{Corner, MouseButton, Pixels, Point, anchored, deferred};
 
 const COPY: &str = "M9 9h10v10H9z M5 15V5h10";
+/// A filled-looking ring: the unread mark.
+const UNREAD: &str = "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z";
+/// Lucide refresh-cw.
+const RETITLE: &str = "M3 12a9 9 0 0 1 15-6.7L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-15 6.7L3 16 M3 21v-5h5";
 
 /// The open scope picker: its search text and highlighted item.
 #[derive(Default)]
@@ -573,10 +577,12 @@ impl ThreadList {
             .px(px(8.))
             .flex()
             .items_center()
+            .gap(px(8.))
             .rounded(px(7.))
             .text_size(px(12.5))
             .cursor_pointer()
             .hover(|s| s.bg(theme().hover))
+            .child(crate::icon::stroke(RETITLE, theme().text_muted, 14., 1.7))
             .child("Regenerate title")
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -594,10 +600,12 @@ impl ThreadList {
                 .px(px(8.))
                 .flex()
                 .items_center()
+                .gap(px(8.))
                 .rounded(px(7.))
                 .text_size(px(12.5))
                 .cursor_pointer()
                 .hover(|s| s.bg(theme().hover))
+                .child(crate::icon::stroke(UNREAD, theme().text_muted, 14., 1.7))
                 .child("Mark unread")
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |this, _, _, cx| {
