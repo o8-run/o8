@@ -61,14 +61,16 @@ pub(crate) const REVEAL_STAGGER: Duration = Duration::from_millis(70);
 /// A live reply's tools sit where they ran: under the words before them, not
 /// above the whole reply. Each stretch of words becomes its own entry.
 fn split_at_tools(entries: Vec<Entry>) -> Vec<Entry> {
-    let at = |tool: &Value| tool["textAt"].as_u64().unwrap_or(0) as usize;
+    let at = |tool: &Value, text: &str| {
+        text.floor_char_boundary(tool["textAt"].as_u64().unwrap_or(0) as usize)
+    };
     entries
         .into_iter()
         .flat_map(|entry| {
             let tools = entry.tools.clone().unwrap_or_default();
             let mut cuts: Vec<usize> = tools
                 .iter()
-                .map(|tool| at(tool).min(entry.text.len()))
+                .map(|tool| at(tool, &entry.text))
                 .filter(|cut| *cut > 0)
                 .collect();
             cuts.sort_unstable();
@@ -101,7 +103,7 @@ fn split_at_tools(entries: Vec<Entry>) -> Vec<Entry> {
                         tools: Some(
                             tools
                                 .iter()
-                                .filter(|t| at(t).min(entry.text.len()) == start)
+                                .filter(|t| at(t, &entry.text) == start)
                                 .cloned()
                                 .collect(),
                         ),
@@ -808,6 +810,23 @@ mod tests {
         let shown: Vec<String> = t.shown.iter().map(|e| e.text.clone()).collect();
         assert_eq!(shown, ["First words", " then more"]);
         assert!(matches!(t.rows.last(), Some(Row::Activity { trace, .. }) if trace.live));
+    }
+
+    #[test]
+    fn a_tool_position_inside_a_character_does_not_panic() {
+        let entry = Entry {
+            id: "e".into(),
+            role: "assistant".into(),
+            text: "\u{2014} first second".into(),
+            tools: Some(vec![
+                serde_json::json!({"id":"t1","textAt":1}),
+                serde_json::json!({"id":"t2","textAt":9}),
+            ]),
+            extra: Default::default(),
+        };
+        let split = split_at_tools(vec![entry]);
+        let tools: usize = split.iter().filter_map(|e| e.tools.as_ref()).map(Vec::len).sum();
+        assert_eq!(tools, 2, "both tools survive the split");
     }
 
     #[test]

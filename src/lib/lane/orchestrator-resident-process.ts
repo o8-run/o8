@@ -198,6 +198,7 @@ export function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState,
     return false;
   }
 
+  if (raw.parent_tool_use_id) recordSubagentEvent(raw);
   const turn = w.activeTurn;
   if (!turn) return true; // stray output between turns
   const resumeError = missingClaudeResumeError(raw, session.claudeSessionId);
@@ -206,7 +207,6 @@ export function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState,
     settleOrchestratorTurn(session, w, new Error(resumeError));
     return false;
   }
-  if (raw.parent_tool_use_id) recordSubagentEvent(raw);
   processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
   // The model is answering an agent, so the turn is unfinished again.
   if (raw.subtype === 'status' && raw.status === 'requesting') turn.heldResult = false;

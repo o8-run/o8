@@ -282,7 +282,15 @@ async function readHistory(request: NextRequest, paged: boolean) {
 export async function GET(request: NextRequest) {
   const sessionKey = request.nextUrl.searchParams.get('sessionKey');
   const subagent = subagentSessionId(sessionKey);
-  if (subagent) return NextResponse.json({ sessionKey, transcript: readSubagentTranscript(subagent) });
+  if (subagent) {
+    const headers = { 'Cache-Control': 'no-store, max-age=0' };
+    try {
+      return NextResponse.json({ sessionKey, transcript: await readSubagentTranscript(subagent) }, { headers });
+    } catch (error) {
+      console.warn('[mobile/history] failed to read a subagent chat', error);
+      return NextResponse.json({ error: 'Could not read this subagent chat.' }, { status: 500, headers });
+    }
+  }
   const paged = request.nextUrl.searchParams.get('page') === '1';
   const response = await readHistory(request, paged);
   if (!paged || !response.ok) return response;
