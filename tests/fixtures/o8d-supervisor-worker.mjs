@@ -5,6 +5,15 @@ import { spawn } from 'node:child_process';
 
 if (process.argv.includes('--version') || process.argv.includes('--help')) {
   console.log('codex-cli 1.0.0');
+} else if (process.argv[2] === 'app-server') {
+  const { createInterface } = await import('node:readline');
+  createInterface({ input: process.stdin }).on('line', line => {
+    const message = JSON.parse(line); if (!message.id) return;
+    const result = message.method === 'model/list' ? { data: [{ model: 'gpt-5.4', isDefault: true,
+      supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }] }
+      : message.method === 'config/read' ? { config: {} } : {};
+    console.log(JSON.stringify({ id: message.id, result }));
+  }).on('close', () => process.exit(0));
 } else {
   console.log(JSON.stringify({ type: 'thread.started', thread_id: 'supervisor-fixture-thread' }));
   let sequence = 0;

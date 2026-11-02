@@ -5,7 +5,7 @@ import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-p
 import { assertExecutionCarrierDispatchable } from '@/lib/runtimes/shared/execution-carrier-preflight';
 import { getDispatchableRuntimeAvailability } from '@/lib/runtimes/shared/auth-detect';
 import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
-import { codexModelDiscoveryHome } from '@/lib/codex/model-discovery-cache';
+import { resolveCodexLaunchIdentity } from '@/lib/codex/launch-context';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { readCodexSubscriptionProxyModels } from '@/lib/claude-code/codex-subscription-proxy';
 import { resolveClaudeCodeWorkerSelection } from '@/lib/claude-code/worker-profile';
@@ -14,7 +14,7 @@ import { SUPPORTED_MODEL_IDS } from '@/lib/models';
 import { getThreecodeModelCatalogue } from '@/lib/runtimes/threecode-model-catalogue';
 import { resolveAcpLaunch } from '@/lib/lane/orchestrator-backends/acp';
 import { probeAcpModels } from './acp-model-probe';
-import { probeMuseModels } from '@/lib/muse/models';
+import { museWorkerModelContext, probeMuseModels } from '@/lib/muse/models';
 import { getRuntimeCapability, type OrchestratorRuntime } from './runtime-capabilities';
 import { resolveEffortPin } from './effort-pin';
 import { THINKING_EFFORTS, type ThinkingEffort } from './thinking-effort';
@@ -54,7 +54,7 @@ export function configuredWorkerPool(snapshot = getOperatorDefaultsSync()): Orch
 }
 
 export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath: string): Promise<WorkerModelCatalog> {
-  const codexHome = runtime === 'codex' ? codexModelDiscoveryHome() : undefined;
+  const codexHome = runtime === 'codex' ? resolveCodexLaunchIdentity().configHomeRef : undefined;
   const defaults = getOperatorDefaultsSync().values;
   const capability = getRuntimeCapability(runtime);
   let defaultModel = runtime === 'opencode' ? defaults.opencodeWorkerModel
@@ -64,6 +64,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
   let ids: string[] = [];
   let source = 'runtime-default';
   let carrier: ClaudeCodeModelSource | null = null;
+  let modelEfforts: Map<string, string[] | null> | undefined;
   if (runtime === 'claude-code') {
     const configured = resolveClaudeCodeWorkerSelection();
     carrier = configured.source;
@@ -86,7 +87,11 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     ids = defaultModel ? [defaultModel] : [];
     source = 'configured-execution-carrier-model';
   } else if (runtime === 'codex') {
-    ids = Object.keys((await getCodexSpeedCatalogue(codexHome)).models);
+    const catalog = await getCodexSpeedCatalogue(codexHome, true);
+    ids = Object.keys(catalog.models);
+    modelEfforts = new Map(ids.map(id => [id, catalog.reasoningEfforts?.[id] ?? null]));
+    defaultModel = runtime === defaults.defaultDispatchRuntime && defaults.defaultDispatchModel
+      ? defaults.defaultDispatchModel : catalog.nativeDefaultModel ?? null;
     if (defaultModel && parseLocalModel(defaultModel)) ids.push(defaultModel);
     source = 'installed-model-list';
   } else if (runtime === '3code') {
@@ -101,14 +106,25 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     defaultModel ??= catalog.currentModel;
     source = catalog.source;
   } else if (runtime === 'muse') {
-    const catalog = await probeMuseModels(repoPath, false);
+    const catalog = await probeMuseModels(repoPath, true, await museWorkerModelContext());
     ids = catalog.models.map(model => model.id);
+    modelEfforts = new Map(catalog.models.map(model => [model.id, model.efforts]));
+    defaultModel ??= catalog.models.find(model => model.isDefault)?.id ?? null;
     source = catalog.source;
   } else {
     ids = defaultModel ? [defaultModel] : [];
   }
   return {
-    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => resolveEffortPin({ runtime, model: id, requestedEffort: effort, codexHome }).ok) })),
+    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => {
+      // Preserve discovered variants even when transport admission must refuse one.
+      if (runtime === 'codex' && modelEfforts?.has(id)) {
+        if (effort === 'none' || effort === 'minimal') return modelEfforts.get(id)?.includes(effort)
+          && resolveEffortPin({ runtime, model: id, requestedEffort: effort, codexHome }).ok;
+        return effort === 'adaptive' || modelEfforts.get(id)?.includes(effort);
+      }
+      return resolveEffortPin({ runtime, model: id, requestedEffort: effort, codexHome,
+        ...(modelEfforts ? { modelEfforts: modelEfforts.get(id) } : {}) }).ok;
+    }) })),
     defaultModel, carrier, source, observedAt: new Date().toISOString(),
   };
 }

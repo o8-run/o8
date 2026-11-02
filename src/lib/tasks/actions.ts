@@ -23,7 +23,7 @@ import {
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import type { AgentReportReason, Lane, LaneEventActor } from '@/lib/lane/types';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
-import { resolveEffortAliases, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
+import { resolveEffortAliases, resolveRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { readOrchestratorControlPlaneState, withLockedState } from '@/lib/orchestrator/control-plane';
@@ -137,15 +137,15 @@ export function readTaskEffortSelection(body: Record<string, unknown>): Thinking
   return selection.requestedEffort;
 }
 
-function resolveTaskWorkerRouting(input: NonNullable<Parameters<typeof resolveWorkerRouting>[0]>): WorkerRouting {
+async function resolveTaskWorkerRouting(input: NonNullable<Parameters<typeof resolveWorkerRouting>[0]>, cwd: string | null, packetId?: string): Promise<WorkerRouting> {
   const routing = resolveWorkerRouting(input);
-  const pin = resolveEffortPin({
+  const pin = await resolveRuntimeEffortPin({
     requestedEffort: input.requestedEffort,
     runtime: routing.selectedRuntime,
     model: routing.selectedModel ?? getRuntimeCapability(routing.selectedRuntime).defaultModel ?? null,
     explicitModel: typeof input.requestedModel === 'string' ? input.requestedModel : null,
     modelDisposition: routing.modelDisposition,
-  });
+  }, { cwd: cwd ?? undefined, packetId });
   if (!pin.ok) throw new TaskMutationError(400, pin.message);
   return routing;
 }
@@ -369,14 +369,14 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
   const repoPath = targetRepo.localPath;
   const summary = input.summary?.trim() || title;
   const now = nowIso();
-  const workerRouting = resolveTaskWorkerRouting({
+  const workerRouting = await resolveTaskWorkerRouting({
     workerIntent: input.workerIntent,
     requestedProvider: input.requestedProvider,
     requestedRuntime: input.requestedRuntime,
     requestedModel: input.model,
     requestedEffort: input.requestedEffort,
     source: 'task-create',
-  });
+  }, repoPath);
   const allowedFiles = normalizeAllowedFiles(input.allowedFiles);
   const taskBrief = buildProjectTaskBrief(context, {
     repoPath,
@@ -493,14 +493,14 @@ export async function claimTask(taskId: string, input: TaskClaimInput = {}): Pro
 export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}): Promise<TaskMutationResult> {
   const actor = normalizeActor(input.actor);
   const task = await resolveTask(taskId, input);
-  const workerRouting = resolveTaskWorkerRouting({
+  const workerRouting = await resolveTaskWorkerRouting({
     workerIntent: input.workerIntent ?? task.workerIntent ?? undefined,
     requestedProvider: input.requestedProvider ?? task.workerRouting?.requestedProvider ?? undefined,
     requestedRuntime: input.requestedRuntime ?? task.workerRouting?.requestedRuntime ?? task.runtime,
     requestedModel: input.model ?? task.workerRouting?.requestedModel ?? undefined,
     requestedEffort: input.requestedEffort ?? task.workerRouting?.requestedEffort ?? undefined,
     source: 'task-dispatch',
-  });
+  }, task.repoPath, task.packetId ?? undefined);
   try {
     if (workerRouting.selectedRuntime === 'cloud') {
       const error = remoteWorkerPreflightError(input.model ?? task.workerRouting?.requestedModel);

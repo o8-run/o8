@@ -15,6 +15,8 @@ const h = vi.hoisted(() => ({ launch: vi.fn<typeof import('@/lib/runtime/actions
 vi.mock('@/lib/runtime/actions', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/runtime/actions')>(), launchRuntimeSurface: h.launch,
 }));
+vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () =>
+  (await import('./helpers/codex-model-list-fixture')).codexEffortCatalogFixture }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));
@@ -55,7 +57,8 @@ const rows: Row[] = [
     ...SUPPORTED_MODEL_IDS.filter(model => runtime === 'gemini' && model.startsWith('gemini-')),
     ...(runtime === 'opencode' ? ['provider/model', 'provider/model/high'] : []),
   ])].map(model => ({ runtime, model, supported: [] }))),
-  ...[undefined, 'muse-catalog-fixture'].map(model => ({ runtime: 'muse' as const, model, supported: ALL })),
+  // Without live account/model evidence only the runtime default is selectable.
+  ...[undefined, 'muse-catalog-fixture'].map(model => ({ runtime: 'muse' as const, model, supported: [] })),
 ];
 const vectors = rows.flatMap(row => [undefined, 'adaptive', ...ALL, 'disabled'].map(effort => ({ ...row, effort })));
 

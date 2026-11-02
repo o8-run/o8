@@ -1,3 +1,4 @@
+import { codexModelListFixtureScript } from './helpers/codex-model-list-fixture';
 /**
  * Mission reasoning-effort pin (#2519) — real path.
  *
@@ -33,7 +34,6 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_OWNED_CODEX_ROOT = join(dataDir, 'owned-codex');
 process.env.O8_CODEX_BIN = fakeCodexPath;
-process.env.O8_TEST_CODEX_ARGS_FILE = argsPath;
 process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
 process.env.O8_WORKER_SANDBOX = '0';
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
@@ -285,7 +285,8 @@ if (args.includes('--version')) {
   process.stdout.write('codex-cli 0.145.0\\n');
   process.exit(0);
 }
-appendFileSync(process.env.O8_TEST_CODEX_ARGS_FILE, JSON.stringify(args) + '\\n');
+${codexModelListFixtureScript()}
+appendFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args) + '\\n');
 const outputIndex = args.indexOf('--output-last-message');
 if (outputIndex >= 0 && args[outputIndex + 1]) {
   writeFileSync(args[outputIndex + 1], 'Configured Brain answer.');
@@ -293,7 +294,7 @@ if (outputIndex >= 0 && args[outputIndex + 1]) {
 }
 process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'worker-' + process.pid }) + '\\n');
 process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }) + '\\n');
-`;
+}`;
   writeFileSync(fakeCodexPath, fixture, 'utf8');
   chmodSync(fakeCodexPath, 0o755);
   stubExternalFetch();

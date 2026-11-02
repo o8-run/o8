@@ -8,6 +8,7 @@ import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { writeJsonFile } from '@/lib/fs/json';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
+import { readPacketSessionIdentitySync } from '@/lib/runtimes/shared/owned-session/packet-identity';
 
 const IDENTITY_CATALOG_SCHEMA = 'o8/runtime-identities/v1' as const;
 
@@ -175,12 +176,23 @@ export async function getSelectedRuntimeIdentity(runtime: string): Promise<Runti
 }
 
 /** Synchronous admission boundaries use the same persisted, validated selection. */
-export function getSelectedRuntimeIdentitySync(runtime: string): RuntimeIdentityRecord | null {
+export function getSelectedRuntimeIdentitySync(runtime: string): RuntimeLaunchIdentity | null {
   return getRuntimeLaunchIdentitySync(runtime);
 }
 
-/** Catalog fallback after explicit and saved-session identities are resolved. */
-export function getRuntimeLaunchIdentitySync(runtime: string, packetId?: string): RuntimeIdentityRecord | null {
+/** One precedence for admission and execution: explicit, saved, bound, selected. */
+export function getRuntimeLaunchIdentitySync(runtime: string, packetId?: string, context: {
+  identity?: RuntimeLaunchIdentity; configHome?: string; sessionRoot?: string; surfacePrefix?: string;
+} = {}): RuntimeLaunchIdentity | null {
+  if (context.identity) return context.identity;
+  if (context.configHome) return { id: identityId(runtime, context.configHome), label: 'Explicit runtime account', configHomeRef: context.configHome };
+  const sessionRoot = context.sessionRoot ?? (runtime === 'codex'
+    ? process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(getDataDir(), 'owned-codex')
+    : runtime === 'muse' ? process.env.O8_OWNED_MUSE_ROOT || path.join(getDataDir(), 'owned-muse') : undefined);
+  if (packetId && sessionRoot) {
+    const saved = readPacketSessionIdentitySync(sessionRoot, context.surfacePrefix ?? `${runtime}-owned:`, packetId);
+    if (saved) return saved;
+  }
   let catalog: RuntimeIdentityCatalog;
   try {
     catalog = normalizeCatalog(JSON.parse(readFileSync(catalogPath(), 'utf8')) as unknown);

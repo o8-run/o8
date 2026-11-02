@@ -56,7 +56,7 @@ if (process.argv.includes('app-server')) {
       fs.writeFileSync(file, JSON.stringify(catalog));
     }
     const models = JSON.parse(fs.readFileSync(require('node:path').join(process.env.CODEX_HOME, 'models_cache.json'), 'utf8')).models;
-    console.log(JSON.stringify({ id, result: method === 'model/list' ? { data: models.map(model => ({ model: model.slug })) }
+    console.log(JSON.stringify({ id, result: method === 'model/list' ? { data: models.map(model => ({ model: model.slug, supportedReasoningEfforts: [...['low', 'medium', 'high', 'max', 'xhigh', 'ultra'], ...(model.supported_reasoning_levels || []).map(level => level.effort).filter(effort => effort === 'none' || effort === 'minimal')].map(reasoningEffort => ({ reasoningEffort })) })) }
       : method === 'config/read' ? { config: {} } : {} }));
   });
 } else {
@@ -113,6 +113,7 @@ async function finished(surfaceId: string) {
     const session = saved(surfaceId);
     expect(session.activeRun).toBeUndefined();
     expect(session.recentRuns[0].outcome).toBe('finished');
+    expect(session.recentRuns[0].childExit?.classification).toBe('clean-exit');
   }, { timeout: 10_000 });
 }
 beforeEach(async () => {

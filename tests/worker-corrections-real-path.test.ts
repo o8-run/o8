@@ -12,7 +12,7 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBacke
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => true) }));
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn(), triggerScanIfStale: vi.fn(), startChangePolling: vi.fn(), stopChangePolling: vi.fn() }));
-vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [] } }) }));
+vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [] }, reasoningEfforts: { 'gpt-5.6-terra': ['low'] } }) }));
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-worker-correction-')));
 const data = join(root, 'data'); const repo = join(data, 'repo'); const bin = join(root, 'codex');
 mkdirSync(join(data, 'chat-history'), { recursive: true }); mkdirSync(repo);

@@ -8,6 +8,8 @@ import * as laneGitModule from '@/lib/lane/lane-git';
 import { getSqlite } from '@/lib/db';
 import type { RuntimeCapacitySnapshot } from '@/lib/runtimes/types';
 
+vi.mock('@/lib/codex/service-tier-catalogue', async () => ({ getCodexSpeedCatalogue: async () =>
+  (await import('./helpers/codex-model-list-fixture')).codexEffortCatalogFixture }));
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({
   ensureDispatchBackendReady: async () => ({ status: 'ready', binaryPath: process.execPath }),
 }));
