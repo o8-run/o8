@@ -119,6 +119,10 @@ export function settleOrchestratorTurn(
 ): void {
   const turn = w.activeTurn;
   if (!turn || turn.settled) return;
+  if (turn.heldResult && !error) {
+    successfulResult = true;
+    terminalOutcome = 'completed';
+  }
   const hadCrashRecord = !!turn.crashRecord;
   turn.settled = true;
   clearTimeout(turn.timeout);
@@ -276,8 +280,7 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
       }
       w.stdoutLineBuffer = '';
       const stderr = w.stderrBuffer.trim();
-      if (w.activeTurn.heldResult) settleOrchestratorTurn(session, w, null, true, 'completed');
-      else settleOrchestratorTurn(session, w, code === 0 || code === null ? null : new Error(stderr.slice(0, 500) || `orchestrator proc exited with code ${code}`), false, code === 0 ? 'unconfirmed' : 'failed');
+      settleOrchestratorTurn(session, w, w.activeTurn.heldResult || code === 0 || code === null ? null : new Error(stderr.slice(0, 500) || `orchestrator proc exited with code ${code}`), false, code === 0 ? 'unconfirmed' : 'failed');
     }
     session.status = 'dead'; // proc gone → next turn respawns (auto-recover)
   });

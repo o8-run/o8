@@ -43,6 +43,18 @@ export function appendOperatorStopNote(buffer: AssistantTextBuffer): void {
   buffer.append(buffer.value.trim() ? `\n\n${OPERATOR_STOPPED_NOTE}` : OPERATOR_STOPPED_NOTE);
 }
 
+/** Saving rewrites the whole thread, so streamed text saves at this pace. */
+export const INCREMENTAL_PERSIST_MS = 1_500;
+
+export function createPersistPacer(now: () => number = Date.now): () => boolean {
+  let last = 0;
+  return () => {
+    if (now() - last <= INCREMENTAL_PERSIST_MS) return false;
+    last = now();
+    return true;
+  };
+}
+
 export function createAssistantTextBuffer(): AssistantTextBuffer {
   let text = '';
   let persisted = '';

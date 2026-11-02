@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { handleClaudeJsonLine } from '@/lib/lane/orchestrator-resident-process';
+import { handleClaudeJsonLine, settleOrchestratorTurn } from '@/lib/lane/orchestrator-resident-process';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { createToolCallTracker } from '@/lib/lane/orchestrator-stream-events';
 import type { OrchestratorSession } from '@/lib/lane/orchestrator-session';
@@ -31,7 +31,7 @@ function residentTurn() {
   const session = { sessionName: 'test', proc: null, status: 'busy', claudeSessionId: 'session-1' } as unknown as OrchestratorSession;
   const feed = (...lines: unknown[]) => lines.forEach((line) => handleClaudeJsonLine(session, w, JSON.stringify(line)));
   const done = () => events.filter((event) => event.type === 'done');
-  return { turn, feed, done, events };
+  return { turn, feed, done, events, session, w };
 }
 
 const started = (id: string) => ({ type: 'system', subtype: 'task_started', tool_use_id: id, is_backgrounded: true, task_type: 'local_agent' });
@@ -51,6 +51,13 @@ describe('a resident Claude turn with background agents', () => {
     feed(result('Both finished.'));
     expect(done()).toMatchObject([{ terminalOutcome: 'completed' }]);
     expect(turn.resolve).toHaveBeenCalledOnce();
+  });
+
+  it('completes a held turn when its log ends', () => {
+    const { feed, done, session, w } = residentTurn();
+    feed(started('a1'), result('Started.'));
+    settleOrchestratorTurn(session, w, null);
+    expect(done()).toMatchObject([{ terminalOutcome: 'completed' }]);
   });
 
   it('ends at the first result when only a background shell runs', () => {

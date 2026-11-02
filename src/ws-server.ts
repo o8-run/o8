@@ -163,7 +163,7 @@ import {
   validateComposerImageAttachments,
   type ComposerImageAttachment,
 } from './lib/mobile/composer-image-validation';
-import { appendOperatorStopNote, createAssistantTextBuffer } from './lib/ws-server/orchestrator-assistant-text';
+import { appendOperatorStopNote, createAssistantTextBuffer, createPersistPacer } from './lib/ws-server/orchestrator-assistant-text';
 import { prepareOrchestratorProjectTurn } from './lib/ws-server/orchestrator-project-context';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
@@ -1218,6 +1218,7 @@ function promoteOrchestratorFallbackSubscribers(input: {
 
 const reboundOrchestratorRecords = new Set<string>();
 const reboundAssistantText = new Map<string, string>();
+const reboundPersistPacers = new Map<string, () => boolean>();
 
 function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: OrchestratorEvent): void {
   const threadId = typeof record.threadId === 'string' && record.threadId.startsWith('thoughts-')
@@ -1281,7 +1282,8 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
   switch (event.type) {
     case 'text':
       reboundAssistantText.set(record.id, `${reboundAssistantText.get(record.id) ?? ''}${event.text}`);
-      persistAssistantText(null);
+      if (!reboundPersistPacers.has(record.id)) reboundPersistPacers.set(record.id, createPersistPacer());
+      if (reboundPersistPacers.get(record.id)!()) persistAssistantText(null);
       wsMsg = JSON.stringify({
         channel: 'orchestrator',
         event: 'output',
@@ -1329,6 +1331,7 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
         data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, backend },
       });
       reboundAssistantText.delete(record.id);
+      reboundPersistPacers.delete(record.id);
       reboundOrchestratorRecords.delete(record.id);
       break;
     case 'error':
@@ -5500,8 +5503,7 @@ async function handleOrchestratorSendMsgOnce(
   // loses its entire streamed reply on the next reload — the transcript drops
   // back to just the user messages (operator-observed data loss). Throttled so
   // a fast token stream doesn't hammer the chat-history file + threads broadcast.
-  let lastIncrementalPersistAt = 0;
-  const INCREMENTAL_PERSIST_MS = 1_500;
+  const incrementalPersistDue = createPersistPacer();
 
   const persistAssistantText = (
     sessionId: string | null,
@@ -5849,8 +5851,7 @@ async function handleOrchestratorSendMsgOnce(
             if (isThreadBacked) {
               // Throttled mid-stream persist so a wedged turn's reply survives a
               // reload instead of dropping to user-only on disk.
-              if (Date.now() - lastIncrementalPersistAt > INCREMENTAL_PERSIST_MS) {
-                lastIncrementalPersistAt = Date.now();
+              if (incrementalPersistDue()) {
                 persistAssistantText(null, turnBackend.id, undefined, effectiveTurnModel);
               }
             }
