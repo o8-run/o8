@@ -60,6 +60,13 @@ describe('a resident Claude turn with background agents', () => {
     expect(done()).toMatchObject([{ terminalOutcome: 'completed' }]);
   });
 
+  it('does not call a turn complete while the model is still answering an agent', () => {
+    const { feed, done, session, w } = residentTurn();
+    feed(started('a1'), result('Started.'), answered('a1'), requesting);
+    settleOrchestratorTurn(session, w, null);
+    expect(done()).toMatchObject([{ terminalOutcome: 'unconfirmed' }]);
+  });
+
   it('ends at the first result when only a background shell runs', () => {
     const { feed, done } = residentTurn();
     feed({ ...started('s1'), task_type: 'local_bash' }, result('The server is up.'));

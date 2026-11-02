@@ -131,7 +131,11 @@ export async function runBoundChatContinuation(
     if (controller.signal.aborted) throw new Error('Parent continuation stopped.');
     if (!completed) throw new Error('Parent continuation ended without a completion receipt.');
   } catch (error) {
-    if (text) persist(null);
+    try {
+      if (text) persist(null);
+    } catch (persistError) {
+      console.warn('[bound-chat-continuation] failed to save partial text', persistError);
+    }
     hooks.publish(backend.peekSession(input.repoPath, undefined, expected.threadId)?.sessionName ?? '', controller.signal.aborted ? 'status' : 'error', controller.signal.aborted
       ? { ...data, status: 'stopped' } : { ...data, error: 'The continuation failed. Inspect the originating chat before retrying.' });
     throw error;

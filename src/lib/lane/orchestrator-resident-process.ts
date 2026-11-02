@@ -206,6 +206,8 @@ export function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState,
     return false;
   }
   processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
+  // The model is answering an agent, so the turn is unfinished again.
+  if (raw.subtype === 'status' && raw.status === 'requesting') turn.heldResult = false;
   if (raw.type === 'result') {
     turn.usage = parseOrchestratorTurnUsage(raw);
     const successfulResult = raw.is_error !== true && !(typeof raw.subtype === 'string' && raw.subtype.startsWith('error_'));

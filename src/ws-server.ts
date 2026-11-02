@@ -1219,6 +1219,11 @@ function promoteOrchestratorFallbackSubscribers(input: {
 const reboundOrchestratorRecords = new Set<string>();
 const reboundAssistantText = new Map<string, string>();
 const reboundPersistPacers = new Map<string, () => boolean>();
+function reboundPersistDue(recordId: string): boolean {
+  const due = reboundPersistPacers.get(recordId) ?? createPersistPacer();
+  reboundPersistPacers.set(recordId, due);
+  return due();
+}
 
 function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: OrchestratorEvent): void {
   const threadId = typeof record.threadId === 'string' && record.threadId.startsWith('thoughts-')
@@ -1282,8 +1287,7 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
   switch (event.type) {
     case 'text':
       reboundAssistantText.set(record.id, `${reboundAssistantText.get(record.id) ?? ''}${event.text}`);
-      if (!reboundPersistPacers.has(record.id)) reboundPersistPacers.set(record.id, createPersistPacer());
-      if (reboundPersistPacers.get(record.id)!()) persistAssistantText(null);
+      if (reboundPersistDue(record.id)) persistAssistantText(null);
       wsMsg = JSON.stringify({
         channel: 'orchestrator',
         event: 'output',
@@ -1336,6 +1340,7 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
       break;
     case 'error':
       persistAssistantText(null);
+      reboundPersistPacers.delete(record.id);
       try {
         const failedThread = markMobileOrchestratorThreadFailed({ tabId: threadId, repoPath, assistantMessageId, error: event.error, backend });
         if (failedThread) broadcast({ channel: 'orchestrator-threads', event: 'upsert', data: { thread: failedThread } });
