@@ -101,4 +101,4 @@ async function main() {
     process.stdin.resume();
   } else setTimeout(close, 120_000).unref();
 }
-void main().catch(() => { console.error('[o8-next-grid] Fixture startup failed'); process.exitCode = 1; });
+void main().catch(() => { console.error('[o8-next-grid] Fixture startup failed'); process.exit(1); });
