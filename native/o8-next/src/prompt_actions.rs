@@ -511,7 +511,7 @@ pub(super) fn row(view: &Entity<Surface>, prompt: &Prompt, window: &Window) -> A
         .child(control(view, prompt, "fork", FORK, prompt.fork_reason.clone().unwrap_or_else(|| "Fork from here. Start a new conversation through this prompt. This one stays as it is.".into()), prompt.fork_reason.is_none(), &prompt.focus[2], Action::Fork));
     let mut body = div()
         .w_full()
-        .max_w(px(crate::retained::COLUMN))
+        .max_w(px(crate::retained::reading_column()))
         .pr(px(18.))
         .pb(px(6.))
         .flex()

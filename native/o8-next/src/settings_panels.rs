@@ -50,9 +50,28 @@ impl Settings {
                 ),
             );
         }
+        let mut widths = div().flex().flex_wrap().gap(px(12.));
+        for (name, label, _) in theme::CHAT_WIDTHS {
+            widths = widths.child(self.button(
+                format!("setting-chat-width-{name}"),
+                label.into(),
+                true,
+                theme::chat_width_name() == name,
+                window,
+                cx,
+                move |this, _, cx| {
+                    if theme::set_chat_width(name) {
+                        cx.refresh_windows();
+                    }
+                    this.changed(cx);
+                },
+            ));
+        }
         div().flex().flex_col().gap(px(16.))
             .child(div().text_color(theme().text_muted).child("Theme"))
             .child(choices)
+            .child(div().text_color(theme().text_muted).child("Chat width"))
+            .child(widths)
             .child(div().text_size(px(11.)).text_color(theme().text_muted)
                 .child("Changes apply immediately and are saved for the next launch. Glass uses the macOS desktop material where supported; other platforms may use solid surfaces."))
             .into_any_element()
