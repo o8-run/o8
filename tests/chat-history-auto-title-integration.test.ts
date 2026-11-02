@@ -134,6 +134,21 @@ describe('chat-history auto-title state through real routes (#2530)', () => {
     expect(receipts()).toHaveLength(0);
   });
 
+  it('keeps the title and reports the failure when a requested regenerate gets no model title', async () => {
+    await save({ messages: messages(2) });
+    await vi.waitFor(() => expect(stored().title).toBe('Initial sorting topic'));
+    fetchMock.mockReset().mockResolvedValue({ ok: false } as Response);
+
+    const result = await PATCH(new NextRequest('http://localhost/api/v2/chat-history', {
+      method: 'PATCH',
+      body: JSON.stringify({ tabId, regenerateTitle: true }),
+    }));
+
+    expect(result.status).toBe(409);
+    expect(await result.json()).toMatchObject({ ok: false });
+    expect(stored()).toMatchObject({ title: 'Initial sorting topic', titleSource: 'llm' });
+  });
+
   it('coalesces concurrent saves into one provider attempt and one receipt', async () => {
     let finish!: () => void;
     fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => {

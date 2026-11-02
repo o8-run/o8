@@ -144,6 +144,13 @@ impl Client {
             Ok(host) if !host.is_empty() => request.set("Host", &host),
             _ => request,
         };
+        // A slow server is not a down server: reads get the load deadline. A call
+        // that must fail fast sets its own timeout after this one.
+        let request = if method == "GET" {
+            request.timeout(LOAD_REQUEST_TIMEOUT)
+        } else {
+            request
+        };
         if let Some(token) = &self.token {
             request.set("Authorization", &format!("Bearer {token}"))
         } else {
@@ -235,6 +242,22 @@ fn tunneled_ws_port() -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_plain_read_outlasts_the_five_second_default() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.read(&mut [0; 1024]);
+            std::thread::sleep(std::time::Duration::from_millis(5_200));
+            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        });
+        let client = super::Client::new(&format!("http://127.0.0.1:{port}")).unwrap();
+        let url = client.url("/slow").unwrap();
+        assert_eq!(client.request("GET", &url).call().unwrap().status(), 200);
+    }
+
     #[test]
     fn transient_errors_are_stale_not_fatal() {
         assert!(super::transient("/api/panel/repos: Request timed out"));

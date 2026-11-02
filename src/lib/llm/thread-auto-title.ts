@@ -251,6 +251,9 @@ async function titleThread(filePath: string, force: boolean): Promise<string | n
     if (!tabId) return null;
     const inferenceEnabled = getOperatorDefaultsSync().values.autoTitleInferenceEnabled;
     const generated = inferenceEnabled ? await llmTitle(firstUser, lastAssistant, tabId) : null;
+    // A requested regenerate that got no model title leaves the thread alone,
+    // so the route can report it instead of saving a crop of the first message.
+    if (force && inferenceEnabled && !generated) return null;
     const fallback = compactTitleFromMessage(firstUser);
     const nextTitle = generated ?? fallback;
     if (!nextTitle) return null;
