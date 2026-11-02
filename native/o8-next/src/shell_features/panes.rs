@@ -495,7 +495,6 @@ fn track(
     }
 }
 
-/// The conversation the main pane shows.
 /// A thread let go over the main chat's composer becomes context for the next
 /// prompt instead of a split. The main chat's own thread has nothing to add.
 fn link_in_composer(
@@ -517,6 +516,7 @@ fn link_in_composer(
     view.update(cx, |view, cx| view.take_thread_drop(id, title, position, cx))
 }
 
+/// The conversation the main pane shows.
 fn main_thread(s: &Shell, cx: &gpui::App) -> Option<String> {
     s.active().and_then(|tab| shown(s, &tab, cx))
 }
