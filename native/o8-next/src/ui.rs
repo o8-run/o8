@@ -153,6 +153,7 @@ pub(crate) struct Surface {
     /// The reader rests at the end of the transcript, so it stays there.
     pub(crate) pinned: bool,
     changed_at: std::time::Instant,
+    chat_width: f32,
     list_generation: u64,
     history_loading: bool,
     history_error: Option<String>,
@@ -234,6 +235,7 @@ impl Surface {
             reconcile_live: false,
             pinned: true,
             changed_at: std::time::Instant::now(),
+            chat_width: crate::theme::chat_width(),
             list_generation: 0,
             history_loading: false,
             history_error: None,

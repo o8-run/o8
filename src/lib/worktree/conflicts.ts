@@ -1,4 +1,5 @@
 import { resolveGitBinary } from '@/lib/git/binary';
+import { committedDiff } from '@/lib/worktree/committed-diff';
 /**
  * Cross-Worktree Conflict Detection + Resolution
  *
@@ -264,9 +265,7 @@ export async function analyzeLineConflict(
  */
 async function getWorktreeChangeSize(worktree: WorktreeInfo): Promise<number> {
   try {
-    const { stdout } = await execFileAsync(resolveGitBinary(), [
-      'diff', '--shortstat', `${worktree.baseBranch}...HEAD`,
-    ], { windowsHide: true, cwd: worktree.path, timeout: 5000 });
+    const stdout = await committedDiff(worktree.path, worktree.baseBranch, '--shortstat');
 
     // Parse: "3 files changed, 42 insertions(+), 8 deletions(-)"
     const insertions = stdout.match(/(\d+) insertion/)?.[1] ?? '0';
