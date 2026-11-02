@@ -362,7 +362,7 @@ fn pull_requests_check_buckets_match_desktop(cx: &mut TestAppContext) {
             ))
             .unwrap_or_else(|| panic!("missing desktop check bucket {bucket}"));
         if let Some(bottom) = previous {
-            assert!(group.top() >= bottom);
+            assert!(group.top() >= bottom, "{bucket} top {:?} above previous bottom {bottom:?}", group.top());
         }
         for index in members {
             let row = cx
