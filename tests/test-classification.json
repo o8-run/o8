@@ -4701,6 +4701,13 @@
       ]
     },
     {
+      "path": "tests/next-fixture-startup-failure.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/next-highlighting-real-path.test.ts",
       "reasons": [
         "native-build",
