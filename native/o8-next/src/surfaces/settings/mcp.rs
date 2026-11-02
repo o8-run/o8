@@ -10,7 +10,9 @@ use std::{collections::HashMap, time::Duration};
 const CONFIG: &str = "/api/setup/mcp-config";
 const CLAUDE: &str = "/api/setup/claude-desktop";
 const EXTERNAL: &str = "/api/setup/external-client";
-const TIMEOUT: Duration = Duration::from_secs(20);
+// Longer than the 30 s a Hermes install may take, so a slow Connect isn't
+// reported as failed and then finish anyway.
+const TIMEOUT: Duration = Duration::from_secs(35);
 
 #[derive(Clone, Copy, PartialEq)]
 struct Target {
