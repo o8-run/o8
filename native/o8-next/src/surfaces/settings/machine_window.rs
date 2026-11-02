@@ -6,9 +6,12 @@ use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const REMOTE_API_PORT: u16 = 47120;
-const REMOTE_WS_PORT: u16 = 47125;
-const TOKEN_COMMAND: &str = "cat ~/.o8/ws-token";
+/// A source checkout writes no port files and always uses these two.
+const DEFAULT_API_PORT: u16 = 47120;
+const DEFAULT_WS_PORT: u16 = 47125;
+/// Three lines: the token, then the ports an installed server chose.
+const REMOTE_COMMAND: &str =
+    "cat ~/.o8/ws-token; echo; cat ~/.o8/api-port 2>/dev/null; echo; cat ~/.o8/ws-port 2>/dev/null";
 const TUNNEL_WAIT: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -17,6 +20,29 @@ pub(crate) struct Route {
     pub target: String,
     pub port: u16,
     pub ssh_config: Option<String>,
+}
+
+#[derive(Debug, PartialEq)]
+struct Remote {
+    token: String,
+    api: u16,
+    ws: u16,
+}
+
+impl Remote {
+    fn parse(output: &str) -> Option<Self> {
+        let mut lines = output.lines().map(str::trim);
+        let token = lines.next().filter(|token| !token.is_empty())?.to_owned();
+        let mut port = |fallback: u16| {
+            lines
+                .next()
+                .and_then(|line| line.parse().ok())
+                .unwrap_or(fallback)
+        };
+        let api = port(DEFAULT_API_PORT);
+        let ws = port(DEFAULT_WS_PORT);
+        Some(Self { token, api, ws })
+    }
 }
 
 impl Route {
@@ -44,13 +70,13 @@ impl Route {
         args
     }
 
-    fn token_args(&self) -> Vec<String> {
+    fn remote_args(&self) -> Vec<String> {
         let mut args = self.base_args();
-        args.extend(["--".to_owned(), self.target.clone(), TOKEN_COMMAND.to_owned()]);
+        args.extend(["--".to_owned(), self.target.clone(), REMOTE_COMMAND.to_owned()]);
         args
     }
 
-    fn tunnel_args(&self, api: u16, ws: u16) -> Vec<String> {
+    fn tunnel_args(&self, api: u16, ws: u16, remote: &Remote) -> Vec<String> {
         let forward = |local: u16, remote: u16| format!("127.0.0.1:{local}:127.0.0.1:{remote}");
         let mut args = self.base_args();
         args.extend([
@@ -60,9 +86,9 @@ impl Route {
             "-o".to_owned(),
             "ServerAliveInterval=15".to_owned(),
             "-L".to_owned(),
-            forward(api, REMOTE_API_PORT),
+            forward(api, remote.api),
             "-L".to_owned(),
-            forward(ws, REMOTE_WS_PORT),
+            forward(ws, remote.ws),
             "--".to_owned(),
             self.target.clone(),
         ]);
@@ -71,18 +97,20 @@ impl Route {
 
     pub(crate) fn open(self) -> Result<(), String> {
         let reply = Command::new("ssh")
-            .args(self.token_args())
+            .args(self.remote_args())
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()
             .map_err(|_| "Could not start ssh.".to_owned())?;
-        let token = String::from_utf8_lossy(&reply.stdout).trim().to_owned();
-        if !reply.status.success() || token.is_empty() {
-            return Err("o8 is not running on this machine, or ssh could not reach it.".into());
-        }
+        let remote = reply
+            .status
+            .success()
+            .then(|| Remote::parse(&String::from_utf8_lossy(&reply.stdout)))
+            .flatten()
+            .ok_or("o8 is not running on this machine, or ssh could not reach it.")?;
         let (api, ws) = (free_port()?, free_port()?);
         let mut tunnel = Command::new("ssh")
-            .args(self.tunnel_args(api, ws))
+            .args(self.tunnel_args(api, ws, &remote))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -104,8 +132,8 @@ impl Route {
                 "--shell-state",
                 &format!("{home}/.o8/next-shell-{}.json", self.id),
             ])
-            .env("O8_NEXT_API_TOKEN", token)
-            .env("O8_NEXT_TUNNEL_HOST", format!("127.0.0.1:{REMOTE_API_PORT}"))
+            .env("O8_NEXT_API_TOKEN", &remote.token)
+            .env("O8_NEXT_TUNNEL_HOST", format!("127.0.0.1:{}", remote.api))
             .env("O8_NEXT_WS_PORT", ws.to_string())
             .env_remove("O8_NEXT_CLERK_SESSION_TOKEN")
             .env_remove("O8_NEXT_TOKEN_FILE")
@@ -162,12 +190,21 @@ mod tests {
 
     #[test]
     fn the_target_always_follows_the_end_of_options() {
-        let args = route().tunnel_args(5000, 5001);
+        let remote = Remote::parse("t\n47100\n47105\n").unwrap();
+        let args = route().tunnel_args(5000, 5001, &remote);
         assert_eq!(&args[args.len() - 2..], ["--", "me@box"]);
-        assert!(args.contains(&"127.0.0.1:5000:127.0.0.1:47120".to_owned()));
-        assert!(args.contains(&"127.0.0.1:5001:127.0.0.1:47125".to_owned()));
-        let token = route().token_args();
-        assert_eq!(&token[token.len() - 3..], ["--", "me@box", TOKEN_COMMAND]);
+        assert!(args.contains(&"127.0.0.1:5000:127.0.0.1:47100".to_owned()));
+        assert!(args.contains(&"127.0.0.1:5001:127.0.0.1:47105".to_owned()));
+        let read = route().remote_args();
+        assert_eq!(&read[read.len() - 3..], ["--", "me@box", REMOTE_COMMAND]);
+    }
+
+    #[test]
+    fn a_server_without_port_files_uses_the_source_checkout_ports() {
+        let remote = Remote::parse("token\n\n\n").unwrap();
+        assert_eq!((remote.api, remote.ws), (47120, 47125));
+        assert_eq!(Remote::parse("\n47100\n47105\n"), None);
+        assert_eq!(Remote::parse(""), None);
     }
 
     #[test]
