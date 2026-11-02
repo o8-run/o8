@@ -308,7 +308,7 @@ export function processStreamEvent(
       const message = event.message as Record<string, unknown> | undefined;
       const content = message?.content;
       if (!Array.isArray(content)) break;
-      content.forEach((rawBlock, index) => {
+      content.forEach((rawBlock) => {
         const block = rawBlock as ContentBlock;
         if (block.type === 'text' && typeof block.text === 'string') {
           // Content-based dedup (not index-based): if ANY text streamed via
