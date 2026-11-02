@@ -1,5 +1,8 @@
 //! Small, ordered shell registries. Contributions and their state live in modules.
 use super::*;
+pub(super) use window_state::persist as persist_window_state;
+#[cfg(test)]
+pub(super) use window_state::settle_test_window;
 use crate::theme::current as theme;
 use gpui::AnyElement;
 use registry::{Frame, KeyResult};
