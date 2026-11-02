@@ -88,17 +88,7 @@ impl Render for Settings {
             .flex_col()
             .gap(px(8.))
             .pr(px(16.));
-        for (id, label) in SECTIONS {
-            navigation = navigation.child(self.button(
-                format!("settings-nav-{id}"),
-                (*label).into(),
-                !self.busy && self.editor.is_none(),
-                self.section == *id,
-                window,
-                cx,
-                move |this, _, cx| this.select(id, cx),
-            ));
-        }
+        navigation = self.navigation_list(navigation, window, cx);
         let query = self.search.read(cx).text.trim().to_lowercase();
         let mut content = div()
             .id("settings-content")
