@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { codexComposerImagePaths, persistComposerImages } from './orchestrator-image-media';
+import { codexComposerImagePaths, persistComposerImages, withAttachmentFilePaths } from './orchestrator-image-media';
 
 const previousMediaRoot = process.env.CORTEX_IDE_MEDIA_ROOT;
 const roots: string[] = [];
@@ -35,5 +35,19 @@ describe('composer image media', () => {
     process.env.CORTEX_IDE_MEDIA_ROOT = join(root, 'media');
     expect(() => persistComposerImages([{ dataUri: 'data:image/svg+xml;base64,PHN2Zz4=', name: 'unsafe.svg' }])).toThrow();
     expect(() => persistComposerImages([{ dataUri: 'data:image/png;base64,%%%=', name: 'broken.png' }])).toThrow();
+  });
+
+  it('names a real file so an agent can use the image itself', () => {
+    const root = mkdtempSync(join(tmpdir(), 'o8-composer-image-'));
+    roots.push(root);
+    process.env.CORTEX_IDE_MEDIA_ROOT = join(root, 'media');
+    expect(withAttachmentFilePaths('Hello', undefined)).toBe('Hello');
+    expect(withAttachmentFilePaths('Hello', [])).toBe('Hello');
+    const dataUri = `data:image/png;base64,${Buffer.from('image').toString('base64')}`;
+    const message = withAttachmentFilePaths('Add this to the PR', [{ dataUri, name: 'shot.png' }]);
+    const path = /^- (.+\.png)$/m.exec(message)?.[1];
+    expect(message.startsWith('Add this to the PR\n\nAttached image files on this machine:\n- ')).toBe(true);
+    expect(existsSync(path as string)).toBe(true);
+    expect(message).not.toContain('base64');
   });
 });
