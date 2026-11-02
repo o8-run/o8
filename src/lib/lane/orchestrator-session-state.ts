@@ -36,6 +36,8 @@ export interface OrchestratorActiveTurn {
   turnSessionId: string | null;
   cost: number | null;
   usage?: OrchestratorTurnUsage | null;
+  /** The model finished, and the turn stays open for a background agent. */
+  heldResult?: boolean;
   lastAssistantText: string;
   sawToolUseAfterText: boolean;
   launchAgentCallCount: number;

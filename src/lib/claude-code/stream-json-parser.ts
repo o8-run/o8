@@ -1,4 +1,5 @@
 import { cacheUsageEvidence } from '@/lib/prompt-cache/usage-evidence';
+import { createBackgroundAgents } from './background-agents';
 export type ClaudeCodeStreamJsonChatEvent =
   | { type: 'delta'; text: string; blockIndex?: number; messageIndex?: number; messageKey?: string }
   | { type: 'thinking'; text: string; blockIndex?: number; messageIndex?: number; messageKey?: string }
@@ -199,11 +200,8 @@ export function createClaudeCodeStreamJsonParser(
     emittedDone: false,
   };
   const tracker = createToolTracker();
-  // Background agents answer through task_notification, and the model reads
-  // that answer in a request of its own. The turn stays open until it has.
-  const runningTasks = new Set<string>();
-  let unreadTaskAnswer = false;
-  let heldResult = false;
+  const backgroundAgents = createBackgroundAgents();
+  let heldResult: Record<string, unknown> | null = null;
   const streamedTextIndices = new Set<number>();
   const streamedThinkingIndices = new Set<number>();
   let streamedTextWithoutIndex = false;
@@ -325,8 +323,9 @@ export function createClaudeCodeStreamJsonParser(
     if (state.emittedDone) return;
     const subtype = asString(event.subtype);
     const isResult = event.type === 'result';
-    if (isResult && event.is_error !== true && (runningTasks.size > 0 || unreadTaskAnswer)) {
-      heldResult = true;
+    if (isResult && event.is_error !== true && backgroundAgents.holdsResult()) {
+      // Its usage is reported above, so the end of a held turn must not repeat it.
+      heldResult = { ...event, usage: undefined, total_cost_usd: undefined, cost_usd: undefined };
       return;
     }
     const isError = event.is_error === true
@@ -335,7 +334,7 @@ export function createClaudeCodeStreamJsonParser(
     const errorText = isError && Array.isArray(event.errors)
       ? event.errors.filter((value): value is string => typeof value === 'string').join('\n')
       : '';
-    const resultText = heldResult
+    const resultText = backgroundAgents.seen() && !isError
       ? state.fullResponse
       : explicitResult?.trim() ? explicitResult : errorText || state.fullResponse;
     const doneEvent: ClaudeCodeStreamJsonParserEvent = {
@@ -368,20 +367,8 @@ export function createClaudeCodeStreamJsonParser(
     if (type === 'system') {
       const id = asString(event.session_id);
       if (id) state.sessionId = id;
-      const subtype = asString(event.subtype);
-      const toolUseId = asString(event.tool_use_id);
-      if (subtype === 'task_started' && toolUseId && event.is_backgrounded === true) {
-        runningTasks.add(toolUseId);
-      } else if (subtype === 'task_notification' && toolUseId && runningTasks.delete(toolUseId)) {
-        unreadTaskAnswer = true;
-        emitToolResult({
-          tool_use_id: toolUseId,
-          output: asString(event.summary) ?? '',
-          is_error: event.status !== 'completed',
-        }, events);
-      } else if (subtype === 'status' && event.status === 'requesting') {
-        unreadTaskAnswer = false;
-      }
+      const answer = backgroundAgents.observe(event);
+      if (answer) emitToolResult({ tool_use_id: answer.id, output: answer.output, is_error: answer.isError }, events);
       return events;
     }
 
@@ -501,7 +488,7 @@ export function createClaudeCodeStreamJsonParser(
       for (const rawBlock of content) {
         const block = asRecord(rawBlock);
         // A background agent's call returns at launch; its answer is the result.
-        if (block?.type === 'tool_result' && !runningTasks.has(asString(block.tool_use_id) ?? '')) {
+        if (block?.type === 'tool_result' && !backgroundAgents.isRunning(asString(block.tool_use_id) ?? '')) {
           emitToolResult(block, events);
         }
       }
@@ -593,6 +580,11 @@ export function createClaudeCodeStreamJsonParser(
         const step = planStepFromLine(planLineBuffer);
         if (step) events.push({ type: 'plan_step', text: step, status: 'active' });
         planLineBuffer = '';
+      }
+      // The process or its caller gave up on a held turn, which had succeeded.
+      if (heldResult) {
+        backgroundAgents.forget();
+        emitDone(heldResult, events);
       }
       return events;
     },

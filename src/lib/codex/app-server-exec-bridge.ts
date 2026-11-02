@@ -13,6 +13,7 @@ import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { spawn } from '@/lib/providers/child-process';
 import { readFileSync, rmSync } from 'node:fs';
 import type { CodexAppBridgeSpec } from './app-bridge-spec';
+import { createCollabTracker } from './app-bridge-collab';
 import { appBridgeContext, retainedAppBridgeContextHashes } from './app-bridge-context';
 import { orchestratorErrorMessage } from '@/lib/transcripts/orchestrator-error';
 
@@ -21,6 +22,7 @@ class RpcRefusal extends Error {}
 interface Usage { input_tokens: number; cached_input_tokens: number; output_tokens: number }
 
 const STOP_GRACE_MS = 1_500;
+const collab = createCollabTracker();
 
 function out(line: Json): void {
   process.stdout.write(`${JSON.stringify(line)}\n`);
@@ -52,6 +54,10 @@ function emitItem(phase: 'started' | 'completed', item: Json): void {
   const id = text(item.id) || null;
   const type = text(item.type);
   if (type === 'userMessage' || type === 'hookPrompt') return;
+  if (type === 'collabAgentToolCall') {
+    collab.lines(phase, item).forEach(out);
+    return;
+  }
   if (phase === 'started') {
     out({ type: 'item.started', item: { type, id } });
     return;
