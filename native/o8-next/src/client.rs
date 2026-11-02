@@ -138,6 +138,12 @@ impl Client {
     /// Shared operator bearer, agent timeout and redirect policy for surface adapters.
     pub(crate) fn request(&self, method: &str, url: &Url) -> ureq::Request {
         let request = self.agent.request(method, url.as_str());
+        // Through a tunnel the far server must still see its own port, or its
+        // local-host check refuses the request.
+        let request = match std::env::var("O8_NEXT_TUNNEL_HOST") {
+            Ok(host) if !host.is_empty() => request.set("Host", &host),
+            _ => request,
+        };
         if let Some(token) = &self.token {
             request.set("Authorization", &format!("Bearer {token}"))
         } else {
@@ -215,10 +221,16 @@ impl Client {
         };
         let mut url = self.origin.join("/ws").unwrap();
         url.set_scheme("ws").unwrap();
-        url.set_port(Some(info.ws_port)).unwrap();
+        // A tunneled server reports its own port; the local end of the tunnel differs.
+        let port = tunneled_ws_port().unwrap_or(info.ws_port);
+        url.set_port(Some(port)).unwrap();
         url.query_pairs_mut().append_pair("token", &info.ws_token);
-        Ok((url, SocketAddr::new(ip, info.ws_port)))
+        Ok((url, SocketAddr::new(ip, port)))
     }
+}
+
+fn tunneled_ws_port() -> Option<u16> {
+    std::env::var("O8_NEXT_WS_PORT").ok()?.parse().ok().filter(|port| *port != 0)
 }
 
 #[cfg(test)]
