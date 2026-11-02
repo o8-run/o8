@@ -1,10 +1,13 @@
-//! A bot's main thread, read-only. For Grok bots this is the o8 mailbox the
+//! A bot's main thread, two-way through its mailbox: o8 appends the
+//! operator's replies as `user` lines and the bot answers on its next pass. For Grok bots this is the o8 mailbox the
 //! bot mirrors its chat into (`<dataDir>/bots/grok/<agentId>/thread.jsonl`);
 //! the real Grok Bot chat opens through the app's deep link.
 use super::requests::{BotEntry, MailboxMessage};
 use super::*;
 use crate::theme::current as theme;
-use gpui::{FocusHandle, Pixels, ScrollHandle, SharedString};
+use crate::browser_panel::address::Address;
+use crate::composer::Submit;
+use gpui::{Entity, FocusHandle, Pixels, ScrollHandle, SharedString};
 use std::time::{Duration, Instant};
 
 const REFRESH: Duration = Duration::from_secs(10);
@@ -28,6 +31,8 @@ pub(crate) struct BotThread {
     pub(super) native_loading: bool,
     in_flight: bool,
     fetched: Option<Instant>,
+    pub(crate) reply: Entity<Address>,
+    sending: bool,
 }
 
 impl BotThread {
@@ -38,6 +43,12 @@ impl BotThread {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let reply = cx.new(|cx| {
+            let mut input = Address::new(cx);
+            input.placeholder = "Reply to the bot…".into();
+            input
+        });
+        cx.subscribe(&reply, |this, _, _: &Submit, cx| this.send(cx)).detach();
         let mut view = Self {
             client,
             id,
@@ -52,6 +63,8 @@ impl BotThread {
             native_loading: true,
             in_flight: false,
             fetched: None,
+            reply,
+            sending: false,
         };
         view.load(cx);
         view
@@ -95,6 +108,32 @@ impl BotThread {
             // A legacy byte-offset fallback may equal an explicitly supplied id.
             self.messages.iter().position(|m| m == message)
         }
+    }
+    pub(crate) fn send(&mut self, cx: &mut Context<Self>) {
+        let text = self.reply.read(cx).text.trim().to_owned();
+        if text.is_empty() || self.sending {
+            return;
+        }
+        self.sending = true;
+        let (client, id) = (self.client.clone(), self.id.clone());
+        let task = cx
+            .background_executor()
+            .spawn(async move { client.bot_reply(&id, &text) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.sending = false;
+                match result {
+                    Ok(()) => {
+                        this.reply.update(cx, |r, cx| r.clear(cx));
+                        this.load(cx);
+                    }
+                    Err(error) => this.error = Some(error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
     fn load(&mut self, cx: &mut Context<Self>) {
         if self.in_flight {
@@ -240,9 +279,34 @@ impl Render for BotThread {
                         div()
                             .text_xs()
                             .text_color(theme().text_muted)
-                            .child(SharedString::from(format!("{house} · read-only mirror"))),
+                            .child(SharedString::from(format!("{house} · mailbox"))),
                     )
                     .child(div().flex_1())
+                    .child(
+                        div()
+                            .id("bot-thread-copy-mcp")
+                            .debug_selector(|| "bot-thread-copy-mcp".into())
+                            .px(px(10.))
+                            .py(px(4.))
+                            .rounded(px(8.))
+                            .cursor_pointer()
+                            .text_xs()
+                            .border_1()
+                            .border_color(theme().border)
+                            .hover(|v| v.bg(theme().hover))
+                            .child("Copy MCP URL")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let Some(url) = this.client.mcp_url() else { return };
+                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(url));
+                                crate::shell::toasts::show(
+                                    crate::shell::toasts::Kind::Success,
+                                    "MCP URL copied",
+                                    vec![],
+                                    Some(crate::shell::toasts::NOTICE_TIMEOUT),
+                                    cx,
+                                );
+                            })),
+                    )
                     .when_some(link, |d, url| {
                         d.child(
                             div()
@@ -310,10 +374,20 @@ impl Render for BotThread {
                             div()
                                 .text_sm()
                                 .text_color(theme().text_muted)
-                                .child("No messages mirrored yet. The bot appends its chat to this thread's mailbox; see NOTES for the protocol."),
+                                .child("No messages yet. Replies below go to the bot's mailbox; the bot answers on its next pass."),
                         )
                     })
                     .children(rows),
+            )
+            .child(
+                div()
+                    .id("bot-thread-reply")
+                    .debug_selector(|| "bot-thread-reply".into())
+                    .px(px(20.))
+                    .py(px(10.))
+                    .border_t_1()
+                    .border_color(theme().border)
+                    .child(self.reply.clone()),
             )
     }
 }
