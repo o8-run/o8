@@ -87,6 +87,8 @@ impl Shell {
         settings.update(cx, |s, _| s.limits = Some(limits.into()));
         let machines = cx.new(|cx| machines::Machines::new(self.client.clone(), cx));
         settings.update(cx, |s, _| s.machines = Some(machines.into()));
+        let mcp = cx.new(|cx| mcp::Mcp::new(self.client.clone(), cx));
+        settings.update(cx, |s, _| s.mcp = Some(mcp.into()));
         self.surfaces.settings.view = Some(settings);
         self.revision += 1;
         cx.notify();
@@ -186,6 +188,8 @@ pub(crate) mod providers;
 pub(crate) mod limits;
 #[path = "settings/machines.rs"]
 pub(crate) mod machines;
+#[path = "settings/mcp.rs"]
+pub(crate) mod mcp;
 
 #[cfg(test)]
 #[path = "settings_shell_tests.rs"]

@@ -21,7 +21,7 @@ pub(super) const NAV: &[(&str, &[&str])] = &[
         &["dispatch", "models", "local-models", "providers", "keys"],
     ),
     ("Workspace", &["storage", "git", "indexing"]),
-    ("Connections", &["machines", "connections"]),
+    ("Connections", &["mcp", "machines", "connections"]),
     ("System", &["limits", "diagnostics", "about"]),
 ];
 
