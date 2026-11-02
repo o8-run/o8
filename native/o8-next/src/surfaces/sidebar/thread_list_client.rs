@@ -101,9 +101,7 @@ impl Client {
                 session.outcome = subject.outcome.clone();
             }
         }
-        // The ten-second worker read stays fresh; a catalog reload does not need
-        // to force a process scan as well.
-        let inventory: Value = self.get("/api/runtime/inventory", &[])?;
+        let inventory: Value = self.get("/api/runtime/inventory", &[("fresh", "1")])?;
         for agent in inventory["agents"].as_array().into_iter().flatten() {
             let Some(key) = agent["sessionKey"].as_str().filter(|key| key.contains(':')) else {
                 continue;
