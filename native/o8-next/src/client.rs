@@ -60,6 +60,31 @@ struct WsInfo {
     ws_port: u16,
     ws_token: String,
 }
+/// How a server on another machine is reached through a local tunnel.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Tunnel {
+    /// The far server's own host and port, which its local-host check expects.
+    pub host: String,
+    /// The local end of the forwarded live socket.
+    pub ws_port: Option<u16>,
+}
+impl Tunnel {
+    /// A window opened for one machine is handed its tunnel in the environment.
+    fn from_env() -> Option<Self> {
+        let host = std::env::var("O8_NEXT_TUNNEL_HOST").ok();
+        let ws_port = std::env::var("O8_NEXT_WS_PORT")
+            .ok()
+            .and_then(|port| port.parse().ok())
+            .filter(|port| *port != 0);
+        match host.filter(|host| !host.is_empty()) {
+            Some(host) => Some(Self { host, ws_port }),
+            None => ws_port.map(|port| Self {
+                host: String::new(),
+                ws_port: Some(port),
+            }),
+        }
+    }
+}
 #[derive(Clone)]
 pub struct Client {
     origin: Url,
@@ -68,6 +93,7 @@ pub struct Client {
     desktop_session: Option<String>,
     workspace: Option<String>,
     wake: Option<async_channel::Sender<()>>,
+    tunnel: Option<Tunnel>,
 }
 impl Client {
     pub fn new(origin: &str) -> Result<Self, String> {
@@ -104,6 +130,7 @@ impl Client {
             wake: None,
             token: token.filter(|s| !s.trim().is_empty()),
             desktop_session: None,
+            tunnel: Tunnel::from_env(),
             agent: ureq::AgentBuilder::new()
                 .redirects(0)
                 .try_proxy_from_env(false)
@@ -114,6 +141,14 @@ impl Client {
     pub(crate) fn with_wakeup(mut self, wake: async_channel::Sender<()>) -> Self {
         self.wake = Some(wake);
         self
+    }
+    /// Sends this client's requests through a tunnel to another machine.
+    pub(crate) fn with_tunnel(mut self, tunnel: Option<Tunnel>) -> Self {
+        self.tunnel = tunnel;
+        self
+    }
+    pub(crate) fn tunnel(&self) -> Option<Tunnel> {
+        self.tunnel.clone()
     }
 
     pub(crate) fn wake(&self) {
@@ -140,9 +175,9 @@ impl Client {
         let request = self.agent.request(method, url.as_str());
         // Through a tunnel the far server must still see its own port, or its
         // local-host check refuses the request.
-        let request = match std::env::var("O8_NEXT_TUNNEL_HOST") {
-            Ok(host) if !host.is_empty() => request.set("Host", &host),
-            _ => request,
+        let request = match self.tunnel.as_ref().filter(|t| !t.host.is_empty()) {
+            Some(tunnel) => request.set("Host", &tunnel.host),
+            None => request,
         };
         // A slow server is not a down server: reads get the load deadline. A call
         // that must fail fast sets its own timeout after this one.
@@ -243,19 +278,43 @@ impl Client {
         let mut url = self.origin.join("/ws").unwrap();
         url.set_scheme("ws").unwrap();
         // A tunneled server reports its own port; the local end of the tunnel differs.
-        let port = tunneled_ws_port().unwrap_or(info.ws_port);
+        let port = self
+            .tunnel
+            .as_ref()
+            .and_then(|tunnel| tunnel.ws_port)
+            .unwrap_or(info.ws_port);
         url.set_port(Some(port)).unwrap();
         url.query_pairs_mut().append_pair("token", &info.ws_token);
         Ok((url, SocketAddr::new(ip, port)))
     }
 }
 
-fn tunneled_ws_port() -> Option<u16> {
-    std::env::var("O8_NEXT_WS_PORT").ok()?.parse().ok().filter(|port| *port != 0)
-}
-
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tunneled_client_names_the_far_server_as_host() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0; 2048];
+            let read = socket.read(&mut request).unwrap();
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+                .unwrap();
+            String::from_utf8_lossy(&request[..read]).to_lowercase()
+        });
+        let client = super::Client::authenticated(&format!("http://127.0.0.1:{port}"), None)
+            .unwrap()
+            .with_tunnel(Some(super::Tunnel {
+                host: "127.0.0.1:47120".into(),
+                ws_port: None,
+            }));
+        let _ = client.get::<serde_json::Value>("/api/panel/status", &[]);
+        assert!(server.join().unwrap().contains("host: 127.0.0.1:47120"));
+    }
+
     #[test]
     fn a_plain_read_outlasts_the_five_second_default() {
         use std::io::{Read, Write};
