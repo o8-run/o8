@@ -162,18 +162,18 @@ pub fn link(id: &str) -> String {
     format!("{SCHEME}{id}")
 }
 
-/// The thread row menu's Copy items: (selector, label, clipboard text, toast).
+/// The thread row menu's Copy submenu: (selector, label, clipboard text, toast).
 pub fn copy_items(id: &str) -> [(&'static str, &'static str, String, &'static str); 2] {
     [
         (
             "sidebar-row-copy-id",
-            "Copy thread ID",
+            "Thread ID",
             id.to_owned(),
             "Thread ID copied",
         ),
         (
             "sidebar-row-copy-link",
-            "Copy link",
+            "Link",
             link(id),
             "Thread link copied",
         ),

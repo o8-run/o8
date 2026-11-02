@@ -28,8 +28,14 @@ pub(in crate::shell::sidebar) struct RowMenu {
     pub repo: Option<String>,
     pub id: String,
     pub position: Point<Pixels>,
+    pub copy_open: bool,
+    /// Where the Copy submenu painted: it hangs outside the menu's own bounds,
+    /// so a press on it must not read as a press outside.
+    pub copy_bounds: std::rc::Rc<std::cell::Cell<Option<gpui::Bounds<Pixels>>>>,
 }
 
+/// Lucide chevron-right: Copy opens a submenu.
+const SUBMENU: &str = "m9 18 6-6-6-6";
 /// Lucide list-filter: the trigger while every repository shows.
 const FILTER: &str = "M3 6h18M7 12h10M10 18h4";
 /// Lucide folder: the All repositories item.
@@ -469,8 +475,16 @@ impl ThreadList {
             repo,
             id: id.to_owned(),
             position,
+            copy_open: false,
+            copy_bounds: Default::default(),
         });
         cx.notify();
+    }
+    fn open_copy(&mut self, cx: &mut Context<Self>) {
+        if let Some(menu) = self.row_menu.as_mut().filter(|menu| !menu.copy_open) {
+            menu.copy_open = true;
+            cx.notify();
+        }
     }
     /// The row menu's Filter by <repository> / Show all repositories.
     pub(in crate::shell::sidebar) fn row_menu(
@@ -521,7 +535,6 @@ impl ThreadList {
                 .text_size(px(12.5))
                 .cursor_pointer()
                 .hover(|s| s.bg(theme().hover))
-                .child(crate::icon::stroke(COPY, theme().text_muted, 14., 1.7))
                 .child(label)
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -620,6 +633,53 @@ impl ThreadList {
                     cx.notify();
                 }))
         });
+        let copy_open = menu.copy_open;
+        let copy_bounds = menu.copy_bounds.clone();
+        let copy = div()
+            .id("sidebar-row-copy")
+            .debug_selector(|| "sidebar-row-copy".into())
+            .relative()
+            .h(px(28.))
+            .px(px(8.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .rounded(px(7.))
+            .text_size(px(12.5))
+            .cursor_pointer()
+            .hover(|s| s.bg(theme().hover))
+            .child(crate::icon::stroke(COPY, theme().text_muted, 14., 1.7))
+            .child(div().flex_1().child("Copy"))
+            .child(crate::icon::stroke(SUBMENU, theme().text_muted, 12., 1.7))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if *hovered { this.open_copy(cx) }
+            }))
+            .on_click(cx.listener(|this, _, _, cx| this.open_copy(cx)))
+            .when(copy_open, |row| {
+                row.child(
+                    div()
+                        .id("sidebar-row-copy-menu")
+                        .occlude()
+                        .absolute()
+                        .left(gpui::relative(1.))
+                        .top(px(-5.))
+                        .ml(px(10.))
+                        .min_w(px(130.))
+                        .rounded(px(12.))
+                        .p(px(5.))
+                        .bg(crate::theme::popover_background())
+                        .border_1()
+                        .border_color(theme().border)
+                        .shadow_lg()
+                        .child(
+                            gpui::canvas(move |bounds, _, _| copy_bounds.set(Some(bounds)), |_, _, _, _| {})
+                                .absolute()
+                                .size_full(),
+                        )
+                        .children(copy),
+                )
+            });
         Some(
             deferred(
                 anchored()
@@ -638,9 +698,18 @@ impl ThreadList {
                             .border_1()
                             .border_color(theme().border)
                             .shadow_lg()
-                            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                                this.row_menu = None;
-                                cx.notify();
+                            .on_mouse_down_out(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                                let on_copy = this.row_menu.as_ref().is_some_and(|menu| {
+                                    menu.copy_open
+                                        && menu
+                                            .copy_bounds
+                                            .get()
+                                            .is_some_and(|bounds| bounds.contains(&event.position))
+                                });
+                                if !on_copy {
+                                    this.row_menu = None;
+                                    cx.notify();
+                                }
                             }))
                             .children(pin)
                             .children(auto_settle)
@@ -650,7 +719,7 @@ impl ThreadList {
                             .children(mark_unread)
                             .children(editors)
                             .child(regenerate)
-                            .children(copy)
+                            .child(copy)
                             .child(archive),
                     ),
             )
