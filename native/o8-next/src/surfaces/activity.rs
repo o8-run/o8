@@ -39,7 +39,7 @@ fn create(
     window: &mut Window,
     cx: &mut Context<Shell>,
 ) -> Option<Content> {
-    let client = shell.client.in_workspace(&workspace);
+    let client = shell.panel_client(&workspace);
     let saved = shell
         .state
         .workspaces
@@ -64,7 +64,14 @@ fn create(
         seen.drain(..seen.len() - 200);
     }
     let activity = cx.new(|cx| {
-        ActivityPane::new_with_preferences(client, workspace.clone(), saved, open, seen, cx)
+        ActivityPane::new_with_preferences(
+            client,
+            crate::shell::session::workspace_path(&workspace).to_owned(),
+            saved,
+            open,
+            seen,
+            cx,
+        )
     });
     let created_for = workspace.clone();
     shell.subscriptions.push(cx.subscribe_in(

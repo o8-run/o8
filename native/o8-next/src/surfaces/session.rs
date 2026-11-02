@@ -32,6 +32,10 @@ pub(super) const REGISTRATION: Registration = Registration {
         _ => unreachable!(),
     })
 };
+/// The path a workspace has on its own machine.
+pub(crate) fn workspace_path(workspace: &str) -> &str {
+    machine_workspace(workspace).map_or(workspace, |(_, path)| path)
+}
 fn create(
     shell: &mut Shell,
     tab: Tab,
@@ -350,11 +354,7 @@ impl Client {
     pub fn history_page(&self, id: &str, before: Option<&str>) -> Result<History, String> {
         self.history_counted(id, before).map(|(history, _)| history)
     }
-    fn history_counted(
-        &self,
-        id: &str,
-        before: Option<&str>,
-    ) -> Result<(History, usize), String> {
+    fn history_counted(&self, id: &str, before: Option<&str>) -> Result<(History, usize), String> {
         let key = if id.contains(':') {
             id.to_owned()
         } else {
@@ -368,8 +368,7 @@ impl Client {
         if let Some(before) = before {
             query.push(("before", before));
         }
-        let (history, bytes): (History, usize) =
-            self.get_counted("/api/mobile/history", &query)?;
+        let (history, bytes): (History, usize) = self.get_counted("/api/mobile/history", &query)?;
         if history.session_key != key {
             return Err("Server returned history for a different session".into());
         }

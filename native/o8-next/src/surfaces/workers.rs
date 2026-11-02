@@ -14,11 +14,16 @@ pub(super) type View = pane::Workers;
 pub(super) const REGISTRATION: Registration = Registration {
     command: Some((9, || Command::Workers)),
     create: |shell, _, workspace, _, cx| {
-        let client = shell.client.in_workspace(&workspace);
+        let client = shell.panel_client(&workspace);
         let drafts = shell.file.with_extension("workers.json");
-        Some(Content::Workers(
-            cx.new(|cx| View::new(client, workspace, drafts, cx)),
-        ))
+        Some(Content::Workers(cx.new(|cx| {
+            View::new(
+                client,
+                crate::shell::session::workspace_path(&workspace).to_owned(),
+                drafts,
+                cx,
+            )
+        })))
     },
     ..Registration::new("Workers", "Open Workers", |_, _, _, _| {
         Some((Tab::Workers, false))

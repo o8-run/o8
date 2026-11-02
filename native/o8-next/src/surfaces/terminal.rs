@@ -17,10 +17,15 @@ pub(super) const REGISTRATION: Registration = Registration {
             .terminal
             .terminal_session
             .clone();
-        let client = shell.client.in_workspace(&workspace);
-        Some(Content::Terminal(
-            cx.new(|cx| View::new(client, workspace, selected, cx)),
-        ))
+        let client = shell.panel_client(&workspace);
+        Some(Content::Terminal(cx.new(|cx| {
+            View::new(
+                client,
+                crate::shell::session::workspace_path(&workspace).to_owned(),
+                selected,
+                cx,
+            )
+        })))
     },
     capture: |shell, _, cx| {
         if let Some(Tab::Terminal) = shell.active()

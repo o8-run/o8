@@ -422,15 +422,13 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
     }
     dock.scope = Some(workspace.clone());
     dock.loaded = Some(Instant::now());
-    let client = s.client.in_workspace(&workspace);
+    let client = s.panel_client(&workspace);
+    let path = crate::shell::session::workspace_path(&workspace).to_owned();
     type Apply = fn(&mut Data, &Value, &str);
     let side: [(&'static str, Vec<(&'static str, String)>, Apply); 5] = [
         (
             "/api/review/workspace",
-            vec![
-                ("workspace", workspace.clone()),
-                ("changesOnly", "1".into()),
-            ],
+            vec![("workspace", path.clone()), ("changesOnly", "1".into())],
             |data, body, _| read_snapshot(data, body),
         ),
         // Again with pull requests, the slow `gh` path.
@@ -463,7 +461,11 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
                 if dock.scope.as_deref() != Some(scope.as_str()) {
                     return;
                 }
-                apply(&mut dock.data, &body, &scope);
+                apply(
+                    &mut dock.data,
+                    &body,
+                    crate::shell::session::workspace_path(&scope),
+                );
                 // A pull request found on this branch loads its row for the card.
                 if route == "/api/review/workspace" && dock.data.pull_request.is_some() {
                     load_pull_details(this, scope.clone(), cx);
@@ -476,9 +478,9 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
 }
 
 fn load_pull_details(s: &mut Shell, workspace: String, cx: &mut Context<Shell>) {
-    let client = s.client.in_workspace(&workspace);
+    let client = s.panel_client(&workspace);
     let task = cx.background_executor().spawn({
-        let workspace = workspace.clone();
+        let workspace = crate::shell::session::workspace_path(&workspace).to_owned();
         async move {
             client.get::<Value>(
                 "/api/panel/prs",
@@ -569,22 +571,22 @@ pub(super) fn toggle_button(s: &Shell, cx: &mut Context<Shell>) -> gpui::Statefu
     // One label: a tooltip keeps the text it opened with while the pointer
     // stays, so a show/hide label read backwards right after each click.
     super::header::pill("header-activity", "Activity", true)
-    .w(px(30.))
-    .when(shown, |pill| pill.bg(theme().hover))
-    .child(crate::icon::stroke(
-        ACTIVITY,
-        if shown {
-            theme().text
-        } else {
-            theme().text_secondary
-        },
-        16.,
-        1.8,
-    ))
-    .on_click(cx.listener(|this, _, window, cx| {
-        this.capture(window, cx);
-        toggle(this, cx);
-    }))
+        .w(px(30.))
+        .when(shown, |pill| pill.bg(theme().hover))
+        .child(crate::icon::stroke(
+            ACTIVITY,
+            if shown {
+                theme().text
+            } else {
+                theme().text_secondary
+            },
+            16.,
+            1.8,
+        ))
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.capture(window, cx);
+            toggle(this, cx);
+        }))
 }
 
 fn mono(path: &str) -> String {

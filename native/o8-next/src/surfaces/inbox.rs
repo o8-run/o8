@@ -20,9 +20,15 @@ fn create(
     window: &mut Window,
     cx: &mut Context<Shell>,
 ) -> Option<Content> {
-    let client = shell.client.in_workspace(&workspace);
+    let client = shell.panel_client(&workspace);
 
-    let inbox = cx.new(|cx| Inbox::new(client, workspace, cx));
+    let inbox = cx.new(|cx| {
+        Inbox::new(
+            client,
+            crate::shell::session::workspace_path(&workspace).to_owned(),
+            cx,
+        )
+    });
     shell.subscriptions.push(cx.subscribe_in(
         &inbox,
         window,
