@@ -842,6 +842,11 @@ impl Render for Surface {
                     .child(
                         div()
                             .debug_selector(|| "conversation-column".into())
+                            // Anywhere in the chat takes a dropped file, as the card does.
+                            .on_drop(cx.listener(|s, paths: &gpui::ExternalPaths, _, cx| {
+                                s.composer
+                                    .update(cx, |i, cx| i.attach_paths(paths.paths().to_vec(), cx));
+                            }))
                             .flex()
                             .flex_col()
                             .flex_1()

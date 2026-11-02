@@ -215,6 +215,42 @@ impl Composer {
         self.images_changed(cx);
     }
 
+    /// Cmd-S: set the draft aside, or bring back the newest stash when empty.
+    pub(crate) fn toggle_stash(&mut self, cx: &mut Context<Self>) {
+        let draft = !self.text.trim().is_empty()
+            || !self.controls.images.is_empty()
+            || !self.controls.files.is_empty();
+        if draft {
+            self.controls.stash.push(super::controls::Stashed {
+                text: self.text.clone(),
+                images: std::mem::take(&mut self.controls.images),
+                files: std::mem::take(&mut self.controls.files),
+            });
+            self.clear(cx);
+        } else if let Some(stashed) = self.controls.stash.pop() {
+            self.controls.images = stashed.images;
+            self.controls.files = stashed.files;
+            self.set_text(&stashed.text, cx);
+        } else {
+            return;
+        }
+        self.images_changed(cx);
+        cx.notify();
+    }
+    /// How many drafts wait in the stash; Cmd-S brings the newest back.
+    pub(crate) fn stash_chip(&self) -> Option<AnyElement> {
+        let count = self.controls.stash.len();
+        (count > 0).then(|| {
+            div()
+                .debug_selector(|| "composer-stash".into())
+                .px(px(12.))
+                .pb(px(4.))
+                .text_size(px(11.))
+                .text_color(crate::theme::current().text_muted)
+                .child(format!("Stash {count} · ⌘S to restore"))
+                .into_any_element()
+        })
+    }
     pub(crate) fn image_chips(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let count = self.controls.images.len();
         let file_count = self.controls.files.len();

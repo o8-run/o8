@@ -677,6 +677,13 @@ impl Surface {
                         }
                         cx.stop_propagation();
                     }
+                    "s" if event.keystroke.modifiers.secondary()
+                        && !event.keystroke.modifiers.shift
+                        && s.composer.read(cx).focus.is_focused(window) =>
+                    {
+                        s.composer.update(cx, |i, cx| i.toggle_stash(cx));
+                        cx.stop_propagation();
+                    }
                     "escape" if s.composer.read(cx).controls.open.is_some() => {
                         s.dismiss_composer_picker(window, cx);
                         cx.stop_propagation();
@@ -695,13 +702,10 @@ impl Surface {
                     _ => {}
                 }
             }))
-            .on_drop(cx.listener(|s, paths: &gpui::ExternalPaths, _, cx| {
-                s.composer
-                    .update(cx, |i, cx| i.attach_paths(paths.paths().to_vec(), cx));
-            }))
             .child(self.composer.clone())
             .child(self.composer_control_view(cx))
             .child(self.composer.update(cx, |i, cx| i.image_chips(cx)))
+            .children(self.composer.read(cx).stash_chip())
             .child(footer)
             .child(
                 div()
