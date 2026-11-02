@@ -100,6 +100,25 @@ impl Settings {
                     |this, _, cx| this.load_diagnostics(true, cx),
                 ),
             );
+        let switches = crate::switch_receipt::recent();
+        if let Some(typical) = crate::switch_receipt::typical(&switches) {
+            content = content.child("Thread switches").child(panels::fact(
+                "settings-switch-typical",
+                "Typical read",
+                &typical,
+            ));
+            for (index, switch) in switches.iter().enumerate() {
+                content = content.child(panels::fact(
+                    &format!("settings-switch-{index}"),
+                    &switch.thread,
+                    &format!(
+                        "{} · {} ms",
+                        crate::switch_receipt::size(switch.bytes),
+                        switch.ms
+                    ),
+                ));
+            }
+        }
         if let Some(error) = &self.diagnostics.error {
             content = content.child(div().text_color(theme().danger).child(error.clone()));
         }
