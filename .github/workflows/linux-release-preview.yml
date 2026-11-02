@@ -24,7 +24,9 @@ concurrency:
 jobs:
   dispatch:
     name: Start Port Build for the stable tag
-    if: ${{ !github.event.release.prerelease && !github.event.release.draft }}
+    # Replaced by the GPUI download lane (#5182). Keep legacy WebKitGTK
+    # packages off releases while the new artifacts await operator review.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

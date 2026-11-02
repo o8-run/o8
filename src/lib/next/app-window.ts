@@ -81,6 +81,8 @@ async function start(startupResult?: string): Promise<void> {
     // launcher cancels with the same rename, so exactly one side wins.
     if (startupResult) {
       try {
+        const { writeLinuxWindowOwner } = await import('./linux-window-startup');
+        writeLinuxWindowOwner(dirname(startupResult));
         renameSync(join(dirname(startupResult), 'pending'), join(dirname(startupResult), 'claimed'));
       } catch { return; }
     }
