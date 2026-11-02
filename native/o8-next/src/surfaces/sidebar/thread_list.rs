@@ -67,6 +67,17 @@ pub struct Row {
     pub marker: &'static str,
     /// Set on a By repo folder row.
     pub folder: Option<folders::Folder>,
+    /// The other computer this thread lives on.
+    pub machine: Option<String>,
+}
+impl Row {
+    /// A place name, with the machine in front when it isn't this computer.
+    fn on_machine(&self, place: String) -> String {
+        match &self.machine {
+            Some(machine) => format!("{machine} · {place}"),
+            None => place,
+        }
+    }
 }
 fn label(path: &str) -> String {
     path.rsplit('/')
@@ -680,7 +691,7 @@ impl ThreadList {
             .dirty
             .is_some_and(|time| time.elapsed() >= Duration::from_millis(300))
             && self.last_attempt.elapsed() >= DIRTY_RELOAD_GAP
-            || self.last_load.elapsed() >= Duration::from_secs(300)
+            || self.last_load.elapsed() >= machine_threads::reload_gap()
         {
             self.load(cx);
         }

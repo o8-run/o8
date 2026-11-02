@@ -136,6 +136,8 @@ pub struct Session {
     /// The saved machine this thread lives on; None is this computer.
     #[serde(skip)]
     pub machine: Option<String>,
+    #[serde(skip)]
+    pub machine_label: Option<String>,
     #[serde(default)]
     pub parked_workspaces: Vec<ParkedWorkspace>,
     pub id: String,

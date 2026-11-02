@@ -6,9 +6,16 @@ pub(crate) use crate::shell::settings::machine_links::Links;
 use crate::shell::settings::machine_links::Reach;
 use crate::shell::settings::machines::{SSH_MACHINES, machine_window::Route};
 use serde_json::Value;
+use std::time::Duration;
 
 pub(crate) fn enabled() -> bool {
     !cfg!(test) && std::env::var("O8_NEXT_MACHINE_THREADS").is_ok_and(|value| value == "1")
+}
+
+/// How long a list may sit before it's read again. Far machines have no live
+/// feed here yet, so their rows and any tunnel that just came up wait on this.
+pub(super) fn reload_gap() -> Duration {
+    Duration::from_secs(if enabled() { 15 } else { 300 })
 }
 
 /// The saved machines worth a tunnel, with their labels.
@@ -42,6 +49,7 @@ pub(super) fn sessions(client: &Client, links: &Links) -> Vec<Session> {
         if let Ok((list, _)) = remote.sidebar_sessions_with_branches() {
             sessions.extend(list.into_iter().map(|mut session| {
                 session.machine = Some(machine.id.clone());
+                session.machine_label = Some(machine.label.clone());
                 session
             }));
         }
