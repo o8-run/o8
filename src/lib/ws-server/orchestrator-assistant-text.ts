@@ -12,7 +12,10 @@
  */
 export interface AssistantTextBuffer {
   /** Append a streamed token/segment to the CURRENT attempt. */
-  append(chunk: string): void;
+  /** Adds the chunk and returns what was added, with any separator a new block needs. */
+  append(chunk: string): string;
+  /** Marks a tool call: the next text starts a new block, not the same sentence. */
+  endBlock(): void;
   /**
    * Drop everything the discarded attempt streamed, including the record of
    * what was already written to disk — the caller removes that row separately,
@@ -44,8 +47,15 @@ export function createAssistantTextBuffer(): AssistantTextBuffer {
   let text = '';
   let persisted = '';
   let discarded = false;
+  let blockEnded = false;
   return {
-    append(chunk: string) { text += chunk; },
+    append(chunk: string) {
+      const separated = blockEnded && text && !/\s$/.test(text) && !/^\s/.test(chunk) ? `\n\n${chunk}` : chunk;
+      blockEnded = false;
+      text += separated;
+      return separated;
+    },
+    endBlock() { blockEnded = true; },
     discard() {
       text = '';
       persisted = '';

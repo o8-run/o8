@@ -73,4 +73,16 @@ describe('createAssistantTextBuffer', () => {
     expect(buffer.value).toBe('');
     expect(buffer.shouldPersist(true)).toBe(false);
   });
+
+  it('separates text blocks around a tool call and leaves stream deltas alone (#5209)', () => {
+    const buffer = createAssistantTextBuffer();
+    buffer.endBlock();
+    expect(buffer.append('I will ')).toBe('I will ');
+    expect(buffer.append('check.')).toBe('check.');
+    buffer.endBlock();
+    expect(buffer.append('The tree is clean.')).toBe('\n\nThe tree is clean.');
+    expect(buffer.value).toBe('I will check.\n\nThe tree is clean.');
+    buffer.endBlock();
+    expect(buffer.append('\nDone.')).toBe('\nDone.');
+  });
 });
