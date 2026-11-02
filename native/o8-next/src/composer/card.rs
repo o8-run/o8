@@ -315,6 +315,9 @@ impl Surface {
         );
         routing["pickedMode"] = json!(picked);
         routing["mode"] = json!("fleet");
+        // The composer shows the runtime it will send to, so sending is the choice.
+        // The server hands off only when the runtime really changed.
+        routing["handoffMode"] = json!("handoff");
         if let Some(tier) = super::composer_selector::service_tier(
             self.selected.as_deref(),
             routing["backend"].as_str().unwrap_or(""),

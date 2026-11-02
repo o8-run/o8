@@ -167,6 +167,14 @@ describe('durable composer queue API and persisted state', () => {
     } finally { Object.defineProperty(backend, 'liveSteer', { value: original, configurable: true }); }
   });
 
+  it('keeps an explicit runtime handoff on the saved routing and refuses an unknown mode', async () => {
+    const routing = { ...payload.routing, handoffMode: 'handoff' as const };
+    const accepted = await POST(request('POST', { ...target, id: 'queue-handoff', intent: 'send-next', payload: { ...payload, routing } }));
+    expect(accepted.status).toBe(200);
+    expect(queue.readComposerSend('queue-handoff')?.payload.routing.handoffMode).toBe('handoff');
+    expect((await POST(request('POST', { ...target, id: 'queue-bad-handoff', intent: 'send-next', payload: { ...payload, routing: { ...routing, handoffMode: 'silent' } } }))).status).toBe(400);
+  });
+
   it('deduplicates exact retries and refuses changing an accepted payload or its attachments', async () => {
     const first = await enqueue('queue-idempotent');
     expect((await enqueue('queue-idempotent')).sequence).toBe(first.sequence);

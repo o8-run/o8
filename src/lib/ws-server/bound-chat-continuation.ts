@@ -8,6 +8,7 @@ import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { appendMobileOrchestratorUserMessage, upsertMobileOrchestratorAssistantMessage, writeOrchestratorBackendSessionId } from '@/lib/mobile/orchestrator-thread-history';
 import type { MobileTurnReceipt } from '@/lib/mobile/types';
 import { terminalReceipt } from '@/lib/mobile/turn-receipt';
+import { prepareBackendSwitchHandoff, recordBackendSwitchHandoffAudit } from '@/lib/orchestrator/backend-switch-carry';
 import type { ReviewChatOrigin } from '@/lib/orchestrator/review-continuation-origin';
 import { withSessionRules } from '@/lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from '@/lib/orchestrator/turn-receipt-context';
@@ -30,6 +31,8 @@ export async function runBoundChatContinuation(
     /** Queued user sends carry explicit routing; automatic continuations inherit it. */
     source?: 'user' | 'system';
     displayMessage?: string; images?: ComposerImageAttachment[]; admit?: () => boolean;
+    /** The operator changed this chat's runtime; open the turn with the handoff packet. */
+    handoff?: boolean;
     serviceTier?: OrchestratorTurnOptions['serviceTier']; collideBaseBackend?: OrchestratorTurnOptions['collideBaseBackend'] },
   hooks: BoundChatContinuationHooks,
 ): Promise<void> {
@@ -65,7 +68,11 @@ export async function runBoundChatContinuation(
     if (input.claim && !input.claim()) return;
     const session = backend.ensureSession(input.repoPath, undefined, expected.threadId);
     const selection = await readPersistedOrchestratorProjectSelection(expected.threadId);
-    const project = await prepareOrchestratorProjectTurn({ message: withAttachmentFilePaths(modelFacingComposerMessage(message, expected.mode), input.images),
+    // Built before this turn is saved, so the packet holds prior work only.
+    const handoff = input.handoff
+      ? await prepareBackendSwitchHandoff({ threadId: expected.threadId, to: { backend: backend.id, model: expected.model } })
+      : null;
+    const project = await prepareOrchestratorProjectTurn({ message: (handoff ? `${handoff.prelude}\n\n` : '') + withAttachmentFilePaths(modelFacingComposerMessage(message, expected.mode), input.images),
       repoPath: input.repoPath, persistedProjectId: selection?.projectId });
     input.check();
     if (controller.signal.aborted) throw new Error('Parent continuation stopped.');
@@ -73,7 +80,11 @@ export async function runBoundChatContinuation(
     const media = input.images?.length ? persistComposerImages(input.images) : undefined;
     appendMobileOrchestratorUserMessage({ tabId: expected.threadId, repoPath: input.repoPath, message: input.displayMessage ?? message,
       ...(media ? { media } : {}),
+      ...(handoff ? { handoff: { handoffId: handoff.packet.handoffId, from: handoff.seam.from, to: handoff.seam.to,
+        lossless: handoff.seam.lossless, carries: handoff.packet.carries,
+        packet: handoff.packet as unknown as Record<string, unknown> } } : {}),
       messageId: `review-user-${assistantMessageId}`, backend: backend.id, timestampMs: startedAt });
+    if (handoff) recordBackendSwitchHandoffAudit(handoff);
     persist(null);
     hooks.publish(session.sessionName, 'turn-start', { ...data, userMessageId: `review-user-${assistantMessageId}`,
       message: input.displayMessage ?? message, timestamp: startedAt, media });
