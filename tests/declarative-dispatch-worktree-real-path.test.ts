@@ -12,7 +12,8 @@ import {
 } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 import { declarativeLaunchDeadlineTest } from './fixtures/declarative-launch-deadline';
 import { declarativeGovernanceRollbackTests } from './fixtures/declarative-governance-rollback';
@@ -144,8 +145,6 @@ vi.mock('@/lib/realtime/publisher', () => ({
 const root = realpathSync(mkdtempSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'declarative-dispatch-real-path-')));
 const dataDir = join(root, 'data');
 const ownedRoot = join(root, 'owned-qoder');
-// The launch only checks that the Pi write helper exists; the fake worker never uses it.
-process.env.O8_PI_WRITE_BIN = process.execPath;
 const capturePath = join(root, 'qoder-spawns.jsonl');
 const fakeQoderPath = join(root, 'qodercli');
 const bundledCliDir = join(root, 'bundled-cli');
@@ -318,6 +317,9 @@ async function waitFor<T>(
 
 describe('declarative packet dispatch worktree reachability', () => {
   declarativeLaunchDeadlineTest({ repo: createRemoteBackedRepo, packet, mission, capturePath });
+  // Dependency installs run under the real write helper.
+  beforeAll(() => { buildPiWriteHelper(); }, 600_000);
+
   beforeEach(() => {
     readinessBoundary.real = false;
     worktreeFailure.enabled = false;
