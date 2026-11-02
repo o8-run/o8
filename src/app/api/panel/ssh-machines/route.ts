@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const machines = listSavedSshMachines();
     const machineId = req.nextUrl.searchParams.get('machine');
     if (!machineId) {
-      return NextResponse.json({ schema: 'o8/panel/ssh-machines/v1', machines: machines.filter(machine => !machine.usageOnly).map(({ id, label, target, enabled }) => ({ id, label, target, enabled })) });
+      return NextResponse.json({ schema: 'o8/panel/ssh-machines/v1', machines: machines.filter(machine => !machine.usageOnly).map(({ id, label, target, port, sshConfig, enabled }) => ({ id, label, target, port, sshConfig, enabled })) });
     }
     const machine = machines.find((item) => item.id === machineId);
     if (!machine) {
