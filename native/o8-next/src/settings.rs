@@ -2,7 +2,7 @@
 use crate::{
     client::Client,
     composer::{Composer, Submit},
-    settings_fields::{FIELDS, Field, Kind},
+    settings_fields::{Field, Kind, fields},
     settings_secret::Secret,
 };
 use gpui::{AppContext, Context, Entity, EntityInputHandler, EventEmitter, FocusHandle, Window};
@@ -20,9 +20,19 @@ pub(crate) struct RequestError {
 #[derive(Deserialize)]
 pub(crate) struct Snapshot {
     pub values: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub bots: Vec<BotSetupCandidate>,
     pub sources: BTreeMap<String, String>,
     #[serde(rename = "settingsToml")]
     pub toml: Option<Toml>,
+}
+#[derive(Clone, Deserialize)]
+pub(crate) struct BotSetupCandidate {
+    pub id: String,
+    pub name: String,
+    pub house: String,
+    #[serde(rename = "selectionIds")]
+    pub selection_ids: Vec<String>,
 }
 #[derive(Deserialize)]
 pub(crate) struct Toml {
@@ -106,10 +116,18 @@ struct Editor {
     input: Input,
 }
 pub(crate) struct Close;
+pub(crate) enum Action {
+    Appearance(&'static str),
+    Shortcuts,
+}
+impl EventEmitter<Action> for Settings {}
 pub(crate) struct Settings {
     client: Client,
     pub snapshot: Option<Snapshot>,
     pub keys: Option<Inventory>,
+    /// Settings › Providers, owned by the settings surface module.
+    pub providers: Option<gpui::AnyView>,
+    pub limits: Option<gpui::AnyView>,
     section: &'static str,
     search: Entity<Composer>,
     editor: Option<Editor>,
@@ -128,11 +146,25 @@ pub(crate) struct Settings {
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     scroll: gpui::ScrollHandle,
+    navigation: navigation::State,
+    indexing: indexing::State,
+    storage: storage::State,
+    diagnostics: diagnostics::State,
+    connections: connections::State,
+    about_version: Option<String>,
+    about_busy: bool,
+    about_status: String,
+    about_error: Option<String>,
 }
 impl EventEmitter<Close> for Settings {}
 impl Settings {
     pub fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(Composer::new);
+        let search = cx.new(|cx| {
+            let mut input = Composer::new(cx);
+            input.focus = input.focus.clone().tab_stop(true);
+            input.placeholder = "Search settings".into();
+            input
+        });
         let subscription = cx.observe(&search, |this, _, cx| this.changed(cx));
         let focus = cx.focus_handle();
         focus.focus(window);
@@ -140,6 +172,8 @@ impl Settings {
             client,
             snapshot: None,
             keys: None,
+            providers: None,
+            limits: None,
             section: "general",
             search,
             editor: None,
@@ -158,6 +192,15 @@ impl Settings {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             scroll: gpui::ScrollHandle::new(),
+            navigation: navigation::State::default(),
+            indexing: indexing::State::default(),
+            storage: storage::State::default(),
+            diagnostics: diagnostics::State::default(),
+            connections: connections::State::default(),
+            about_version: None,
+            about_busy: false,
+            about_status: String::new(),
+            about_error: None,
         };
         view.load(false, cx);
         view
@@ -183,11 +226,16 @@ impl Settings {
                 match data {
                     Data::Defaults(mut snapshot) => {
                         // Never keep extra response fields as a native settings cache.
-                        snapshot
-                            .values
-                            .retain(|id, _| FIELDS.iter().any(|f| f.id == id));
+                        snapshot.values.retain(|id, _| fields().any(|f| f.id == id));
                         self.error = snapshot.toml.as_ref().and_then(|t| t.error.clone());
+                        let rail_changed = self.snapshot.as_ref().is_some_and(|old| {
+                            old.values.get("botRailEnabledIds")
+                                != snapshot.values.get("botRailEnabledIds")
+                        });
                         self.snapshot = Some(snapshot);
+                        if rail_changed && !mutation {
+                            crate::settings_fields::bot_rail_changed(&self.client);
+                        }
                         if mutation {
                             self.note = "Saved. New actions use these settings.".into();
                         }
@@ -220,6 +268,7 @@ impl Settings {
                 self.open_field = None;
             }
         }
+        self.load_panel(false, cx);
         self.changed(cx);
     }
     fn read(client: &Client, keys: bool) -> Result<Data, RequestError> {
@@ -278,11 +327,33 @@ impl Settings {
         self.editor = None;
         self.confirm = None;
         self.conflict = false;
+        self.navigation.remember(section);
         self.section = section;
         self.search.update(cx, |s, cx| s.clear(cx));
         self.scroll
             .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
         self.load(false, cx);
+        if section == "indexing" {
+            self.load_indexing_counts(true, cx);
+        }
+        self.load_panel(false, cx);
+    }
+    fn load_panel(&mut self, force: bool, cx: &mut Context<Self>) {
+        if self.section == "about" {
+            self.load_about(force, cx);
+        }
+        if self.section == "connections" {
+            self.load_connections(force, cx);
+        }
+        if self.section == "diagnostics" {
+            self.load_diagnostics(force, cx);
+        }
+        if self.section == "storage" {
+            self.load_storage(force, cx);
+        }
+        if self.section == "indexing" {
+            self.load_indexing(force, cx);
+        }
     }
     fn locked(&self, field: &Field) -> bool {
         self.busy
@@ -290,11 +361,7 @@ impl Settings {
             || self.snapshot.as_ref().is_none_or(|s| {
                 !s.values.contains_key(field.id)
                     || s.sources.get(field.id).is_some_and(|s| s == "env")
-                    || field.id == "notificationsReviewReady"
-                        && s.values
-                            .get("presentationQuietMode")
-                            .and_then(Value::as_bool)
-                            == Some(true)
+                    || field.dependency_reason(&s.values).is_some()
             })
     }
     fn begin(&mut self, target: Target, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -311,6 +378,7 @@ impl Settings {
         } else {
             let input = cx.new(Composer::new);
             input.update(cx, |input, cx| {
+                input.focus = input.focus.clone().tab_stop(true);
                 input.replace_text_in_range(None, text, window, cx)
             });
             input.read(cx).focus.focus(window);
@@ -339,6 +407,8 @@ impl Settings {
         self.busy = true;
         self.error = None;
         self.note = "Saving settings…".into();
+        let bot_choice_write = !keys
+            && (body.get("botRailEnabledIds").is_some() || body.get("settingsToml").is_some());
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             if keys {
@@ -352,6 +422,9 @@ impl Settings {
                 Ok(result)
             } else {
                 let _: serde::de::IgnoredAny = client.settings_request(method, DEFAULTS, body)?;
+                // Invalidate as soon as the save is accepted, independently
+                // of this view's lifetime and of the following readback.
+                if bot_choice_write { crate::settings_fields::bot_rail_changed(&client); }
                 Self::read(&client, false).map_err(|_| RequestError {
                     status: None, message: "The change was accepted, but current settings are unavailable. Refresh before trying again.".into(),
                 })
@@ -444,3 +517,33 @@ impl Settings {
 }
 #[path = "settings_view.rs"]
 mod view;
+
+#[path = "settings_panels.rs"]
+mod panels;
+
+#[path = "settings_render.rs"]
+mod render;
+
+#[path = "settings_about.rs"]
+mod about;
+#[cfg(test)]
+#[path = "settings_test_peer.rs"]
+mod test_peer;
+
+#[path = "settings_connections.rs"]
+mod connections;
+
+#[path = "settings_diagnostics.rs"]
+mod diagnostics;
+
+#[path = "settings_storage.rs"]
+mod storage;
+
+#[path = "settings_indexing.rs"]
+mod indexing;
+
+#[path = "settings_navigation.rs"]
+mod navigation;
+
+#[path = "settings_bots.rs"]
+mod bots;

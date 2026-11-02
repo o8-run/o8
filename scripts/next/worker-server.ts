@@ -136,12 +136,19 @@ export async function startWorkerServer() {
     rmSync(root, { recursive: true, force: true }); process.exit(0);
   }
   process.once('SIGTERM', () => { void close(); }); process.once('SIGINT', () => { void close(); });
-  setTimeout(() => { void close(); }, 120_000).unref();
+  if (process.argv.includes('--owned-stdio')) {
+    process.stdin.once('end', () => { void close(); });
+  } else {
+    setTimeout(() => { void close(); }, 120_000).unref();
+  }
   const deadline = Date.now() + 60_000;
   for (;;) {
     if (worker.exitCode !== null || worker.signalCode !== null) throw new Error('Fixture runtime exited before readiness');
     try { if ((await fetch(`http://127.0.0.1:${wsPort}/health`)).ok) break; } catch { /* booting */ }
-    if (Date.now() > deadline) { await close(); throw new Error('Fixture runtime did not become ready'); }
+    if (Date.now() > deadline) {
+      console.error(`Fixture runtime did not become ready\n${readFileSync(log, 'utf8').slice(-64 * 1024)}`);
+      await close(); throw new Error('Fixture runtime did not become ready');
+    }
     await new Promise(resolve => setTimeout(resolve, 25));
   }
   process.stdout.write(`${JSON.stringify({ origin, runtimeLog: log })}\n`);

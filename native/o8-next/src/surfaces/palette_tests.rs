@@ -211,7 +211,7 @@ fn palette_and_keyboard_workspace_frame_measurements(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn round1_focused_text_field_keeps_ctrl_and_cmd_k(cx: &mut TestAppContext) {
+fn round1_composer_keeps_ctrl_k_and_cmd_k_opens_the_palette(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -232,18 +232,24 @@ fn round1_focused_text_field_keeps_ctrl_and_cmd_k(cx: &mut TestAppContext) {
             }
         })
     });
-    for chord in ["ctrl-k", "cmd-k"] {
-        cx.simulate_keystrokes(chord);
-        assert!(
-            !shell.read_with(cx, |s, _| s.palette),
-            "a focused text field owns its shortcut"
-        );
-    }
+    cx.simulate_keystrokes("ctrl-k");
+    assert!(
+        !shell.read_with(cx, |s, _| s.palette),
+        "Ctrl+K stays with the composer (delete to end of line)"
+    );
     assert_eq!(
         observed.get(),
-        2,
-        "both keys must traverse the focused text field"
+        1,
+        "Ctrl+K must traverse the focused text field"
     );
+    // Classic's palette hotkey opens from any text field but the terminal.
+    cx.simulate_keystrokes("cmd-k");
+    assert!(
+        shell.read_with(cx, |s, _| s.palette),
+        "Cmd+K opens the palette from the composer"
+    );
+    cx.simulate_keystrokes("escape");
+    assert!(!shell.read_with(cx, |s, _| s.palette));
     cx.simulate_input(" retained");
     assert_eq!(
         shell.read_with(cx, |s, cx| match &s.content[&s.key(&s.active().unwrap())] {

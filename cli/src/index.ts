@@ -338,7 +338,7 @@ commands:
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
 ${OPERATOR_PACKET_COMMAND_LINES}
-  next --enable-next --binary PATH --server URL  opt-in native saved transcript
+  next                 open the native app shell; start or reuse a local server
   session show <key>   provider-native transform capabilities, lineage, and checkpoints
   session import <key> add a discovered provider session without claiming packet ownership
   session checkpoint <key> save a durable provider position for later forks
@@ -406,6 +406,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
   // `run` owns all flag parsing for its wrapped command (extractRunCommand reads
   // raw argv), so a `--help`/`-h` meant for the wrapped tool must NOT trigger o8's
   // global help here — otherwise `o8 run node --help` prints o8 USAGE + exit 0.
+  if (args.help && primary === 'next') return runNext(['--help']);
   if (args.help && primary !== 'run') {
     process.stdout.write((primary && commandUsage(primary, secondary)) || (primary && groupUsage(primary)) || USAGE);
     return 0;

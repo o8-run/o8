@@ -39,55 +39,24 @@ pub(super) const REGISTRATION: Registration = Registration {
         if position != NavPosition::BeforeWorkspaces {
             return vec![];
         }
-        if s.connected && !s.loading && !s.surfaces.setup.first_run_checked.replace(true) {
+        if s.connected
+            && !s.loading
+            && !s.surfaces.setup.first_run_checked.replace(true)
+            && !s.active().is_some_and(|tab| tab.registration().global)
+        {
             let shell = cx.weak_entity();
             cx.defer(move |cx| {
                 let _ = shell.update(cx, |s, cx| {
-                    if !s.sessions.iter().any(|session| session.repo_path.is_some()) {
+                    if !s.sessions.iter().any(|session| session.repo_path.is_some())
+                        && !s.active().is_some_and(|tab| tab.registration().global)
+                    {
                         s.open_setup(cx);
                     }
                 });
             });
         }
-        let mut nav = vec![
-            div()
-                .id("setup-open")
-                .debug_selector(|| "setup-open".into())
-                .cursor_pointer()
-                .p(px(6.))
-                .child("Setup")
-                .on_click(cx.listener(|s, _, window, cx| {
-                    s.capture(window, cx);
-                    s.execute(Command::Setup, window, cx);
-                }))
-                .into_any_element(),
-        ];
-        if s.surfaces.setup.view.is_some() {
-            nav.push(
-                div()
-                    .id("setup-close")
-                    .debug_selector(|| "setup-close".into())
-                    .cursor_pointer()
-                    .p(px(6.))
-                    .child("Close setup")
-                    .on_click(cx.listener(|s, _, window, cx| {
-                        if s.surfaces
-                            .setup
-                            .view
-                            .as_ref()
-                            .is_some_and(|v| v.read(cx).busy())
-                        {
-                            return;
-                        }
-                        s.surfaces.setup.view = None;
-                        s.restore_focus(window, cx);
-                        s.revision += 1;
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-            );
-        }
-        nav
+        // Setup opens from the rail's More menu; Home closes it unless it is busy.
+        vec![]
     },
     ..Registration::new("", "Open setup", |s, _, _, cx| {
         s.open_setup(cx);

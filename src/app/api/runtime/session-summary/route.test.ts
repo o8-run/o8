@@ -39,7 +39,7 @@ describe('owned session summary', () => {
       model: 'gpt-5.6-terra',
       runtime: 'codex',
       status: 'completed',
-    } });
+    }, recovery: null });
   });
 
   it('refuses a path-like session identifier', async () => {

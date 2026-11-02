@@ -171,11 +171,21 @@ export async function setCanvasBackdropBlur(radius: number): Promise<void> {
 // All no-ops outside Tauri/macOS — the iframe path stays the default there.
 
 export interface BrowserViewRect {
-  /** CSS logical px, relative to the main webview viewport (getBoundingClientRect). */
+  /** Native logical points, relative to the main content viewport (CSS page zoom already applied). */
   x: number;
   y: number;
   w: number;
   h: number;
+  /** Native page zoom, independent of the window bounds. */
+  pageZoom?: number;
+}
+
+/** Main content viewport in native logical points, independent of CSS/page zoom. */
+export async function browserViewViewportSize(): Promise<{ w: number; h: number }> {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
+  const window = getCurrentWindow();
+  const [size, scale] = await Promise.all([window.innerSize(), window.scaleFactor()]);
+  return { w: size.width / scale, h: size.height / scale };
 }
 
 /** Open/retarget the native browser-view window over `rect` + navigate to `url`.
@@ -192,13 +202,14 @@ export async function browserViewOpen(
     y: rect.y,
     w: rect.w,
     h: rect.h,
+    pageZoom: rect.pageZoom ?? 1,
     ...(initScript ? { initScript } : {}),
   });
 }
 
 /** Reposition/resize the native browser-view window (ResizeObserver / move). */
 export async function browserViewSetRect(rect: BrowserViewRect): Promise<void> {
-  await invoke<void>('browser_view_set_rect', { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+  await invoke<void>('browser_view_set_rect', { x: rect.x, y: rect.y, w: rect.w, h: rect.h, pageZoom: rect.pageZoom ?? 1 });
 }
 
 /** Navigate the native browser-view window to a new URL (URL bar / reload). */

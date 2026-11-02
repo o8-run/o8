@@ -19,11 +19,9 @@ import {
   type WorkspaceSnapshotState,
   type WorkspaceSnapshotTransitionReceipt,
 } from './snapshot-state-types';
-import { verifyWorkspaceSnapshotReceiptChain, type WorkspaceSnapshotChainReceipt } from './snapshot-receipt-chain';
+import { verifyWorkspaceSnapshotReceiptChain, type WorkspaceSnapshotChainReceipt, type WorkspaceSnapshotChainRow } from './snapshot-receipt-chain';
 export * from './snapshot-state-types';
-interface WorkspaceSnapshotRow {
-  repository_uuid: string;
-  packet_id: string;
+interface WorkspaceSnapshotRow extends WorkspaceSnapshotChainRow {
   mission_id: string | null;
   lane_id: string | null;
   original_path: string;
@@ -36,34 +34,10 @@ interface WorkspaceSnapshotRow {
   dependency_recipe_key: string | null;
   session_identity_json: string;
   reservation_json: string | null;
-  snapshot_fingerprint: string;
-  snapshot_generation: number;
-  state: string;
-  record_version: number;
-  last_transition_id: string;
-  transition_started_at: number;
-  state_entered_at: number;
-  last_error_json: string | null;
-  last_error_at: number | null;
-  created_at: number;
-  updated_at: number;
 }
 
-interface WorkspaceSnapshotTransitionRow extends WorkspaceSnapshotChainReceipt {
-  repository_uuid: string;
-  packet_id: string;
-  transition_id: string;
-  transition_kind: string;
-  from_state: string | null;
-  to_state: string;
-  prior_version: number;
-  resulting_version: number;
-  transition_started_at: number;
-  recorded_at: number;
-  receipt_json: string | null;
-  error_json: string | null;
-  snapshot_generation: number;
-}
+type WorkspaceSnapshotTransitionRow = WorkspaceSnapshotChainReceipt
+  & Pick<WorkspaceSnapshotChainRow, 'repository_uuid' | 'packet_id'>;
 
 export class WorkspaceSnapshotCorruptError extends Error {}
 export class WorkspaceSnapshotInputError extends Error {}
@@ -290,7 +264,7 @@ function readConsistentSnapshot<T>(read: () => T): T {
   return sqlite.inTransaction ? read() : sqlite.transaction(read).deferred();
 }
 
-function mapSnapshotRow(row: WorkspaceSnapshotRow): WorkspaceSnapshotRecord {
+function mapSnapshotRow(row: WorkspaceSnapshotRow, receipts?: WorkspaceSnapshotChainReceipt[]): WorkspaceSnapshotRecord {
   if (!isState(row.state)) {
     throw new WorkspaceSnapshotCorruptError(`Unknown workspace snapshot state: ${row.state}`);
   }
@@ -322,7 +296,7 @@ function mapSnapshotRow(row: WorkspaceSnapshotRow): WorkspaceSnapshotRecord {
     verifyWorkspaceSnapshotReceiptChain(
       row,
       recomputedFingerprint,
-      selectSnapshotReceiptChain(row.repository_uuid, row.packet_id),
+      receipts ?? selectSnapshotReceiptChain(row.repository_uuid, row.packet_id),
     );
   } catch (error) {
     throw new WorkspaceSnapshotCorruptError(error instanceof Error ? error.message : String(error));
@@ -686,6 +660,33 @@ export function getWorkspaceSnapshot(
   });
 }
 
+/** One statement keeps the snapshot and receipt chain consistent without a poll transaction. */
+export function listParkedWorkspaceReceipts(): Array<{
+  snapshot: WorkspaceSnapshotRecord; reclaimedAvailableBytes: number | null;
+}> {
+  const rows = getSqlite().prepare(`SELECT s.*, t.* FROM workspace_snapshots s
+    LEFT JOIN workspace_snapshot_transitions t ON s.repository_uuid = t.repository_uuid AND s.packet_id = t.packet_id
+    WHERE s.state = 'parked' ORDER BY s.repository_uuid, s.packet_id, t.resulting_version, t.transition_id`)
+    .expand(true).all() as Array<{ workspace_snapshots: WorkspaceSnapshotRow;
+      workspace_snapshot_transitions: WorkspaceSnapshotTransitionRow }>;
+  const grouped = new Map<string, { row: WorkspaceSnapshotRow; chain: WorkspaceSnapshotTransitionRow[] }>();
+  for (const { workspace_snapshots: row, workspace_snapshot_transitions: receipt } of rows) {
+    const key = JSON.stringify([row.repository_uuid, row.packet_id]);
+    const entry = grouped.get(key) ?? { row, chain: [] };
+    if (receipt.transition_id) entry.chain.push(receipt);
+    grouped.set(key, entry);
+  }
+  return [...grouped.values()].flatMap(({ row, chain }) => {
+    try {
+      const snapshot = mapSnapshotRow(row, chain);
+      const parked = chain.findLast(receipt => receipt.to_state === 'parked'
+        && receipt.from_state === 'hibernating' && receipt.snapshot_generation === snapshot.snapshotGeneration);
+      const value = parked ? parseReceipt(parked.receipt_json)?.reclaimedAvailableBytes : undefined;
+      return [{ snapshot, reclaimedAvailableBytes: typeof value === 'number' && Number.isSafeInteger(value) ? value : null }];
+    } catch { return []; } // Corrupt or ambiguous recovery truth is never projected as parked proof.
+  });
+}
+
 /** Packet-wide lookup for the pre-spawn materialization guard. Multiple rows are ambiguous. */
 export function listWorkspaceSnapshotsByPacketId(packetId: string): WorkspaceSnapshotRecord[] {
   return readConsistentSnapshot(() => {
@@ -694,7 +695,7 @@ export function listWorkspaceSnapshotsByPacketId(packetId: string): WorkspaceSna
       WHERE packet_id = ?
       ORDER BY repository_uuid ASC
     `).all(requiredText(packetId, 'packetId')) as WorkspaceSnapshotRow[];
-    return rows.map(mapSnapshotRow);
+    return rows.map(row => mapSnapshotRow(row));
   });
 }
 
@@ -706,7 +707,7 @@ export function listWorkspaceSnapshotsByOriginalPath(originalPath: string): Work
       WHERE original_path = ?
       ORDER BY repository_uuid ASC, packet_id ASC
     `).all(originalPath.trim()) as WorkspaceSnapshotRow[];
-    return rows.map(mapSnapshotRow);
+    return rows.map(row => mapSnapshotRow(row));
   });
 }
 
@@ -729,7 +730,7 @@ function selectWorkspaceSnapshotsForReconciliation(): WorkspaceSnapshotRow[] {
 }
 
 export function listWorkspaceSnapshotsForReconciliation(): WorkspaceSnapshotRecord[] {
-  return readConsistentSnapshot(() => selectWorkspaceSnapshotsForReconciliation().map(mapSnapshotRow));
+  return readConsistentSnapshot(() => selectWorkspaceSnapshotsForReconciliation().map(row => mapSnapshotRow(row)));
 }
 
 function selectRetiredSnapshotsPendingLaneSettlement(): WorkspaceSnapshotRow[] {

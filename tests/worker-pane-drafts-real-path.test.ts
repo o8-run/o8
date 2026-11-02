@@ -54,7 +54,7 @@ describe.skipIf(!executablePath)('persisted worker draft workspace in a browser'
     page = await browser.newPage();
     page.setDefaultTimeout(5_000);
     page.on('pageerror', error => errors.push(error.message));
-    await page.route('http://fixture/**', async route => {
+    await page.route('http://localhost/**', async route => {
       const request = route.request();
       if (request.isNavigationRequest()) {
         await route.fulfill({ contentType: 'text/html', body: '<div id="root"></div><script src="/bundle.js"></script>' });
@@ -66,7 +66,9 @@ describe.skipIf(!executablePath)('persisted worker draft workspace in a browser'
         await route.fulfill({ json: { transcript: [{ id: 'result-' + session, role: 'assistant', text: 'Existing result for ' + session }] } });
       }
     });
-    await page.goto('http://fixture/');
+    await page.goto('http://localhost/');
+    expect(await page.evaluate(() => ({ secure: isSecureContext, uuid: typeof crypto.randomUUID })))
+      .toEqual({ secure: true, uuid: 'function' });
   }, 60_000);
 
   afterAll(async () => { await browser?.close(); });

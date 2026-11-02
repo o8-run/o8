@@ -27,7 +27,7 @@ import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
-import { DEFAULT_CLAUDE_ORCHESTRATOR_MODEL, resolveClaudeOrchestratorModel } from './orchestrator-model-guard';
+import { DEFAULT_CLAUDE_ORCHESTRATOR_MODEL, resolveClaudeOrchestratorModel, selectedOrchestratorModel } from './orchestrator-model-guard';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import { fingerprintMcpConfig } from '@/lib/lane/orchestrator-mcp-fingerprint';
@@ -574,7 +574,7 @@ export async function sendToOrchestrator(
   }
   const model = carrier.model;
   const effortPin = resolveEffortPin({ runtime: 'claude-code', model,
-    explicitModel: options.model, requestedEffort: options.thinkingEffort });
+    explicitModel: selectedOrchestratorModel(options.model), requestedEffort: options.thinkingEffort });
   if (!effortPin.ok) throw new EffortPinRejectionError(effortPin.code, effortPin.message);
   const thinkingEffort = effortPin.selectedEffort ?? 'adaptive';
   if (options.serviceTier && options.serviceTier !== 'default' && (options.serviceTier !== 'fast' || carrier.source !== 'native' || !claudeModelSupportsFast(model) || process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1')) {

@@ -4,7 +4,6 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
-import { parse as parseToml } from 'smol-toml';
 import { releaseCargoTarget } from './lib/release-cargo-target.mjs';
 import { resolveReleaseBuildEnvironment } from './lib/release-config.mjs';
 import { compilerEnvironment } from './lib/release-native-inputs.mjs';
@@ -31,16 +30,9 @@ const requestedTarget = targetFlagIndex >= 0 ? cargoTauriArgs[targetFlagIndex + 
 const nativeArtifact = (requestedTarget?.endsWith('-apple-darwin') || (!requestedTarget && process.platform === 'darwin'))
   && !cargoTauriArgs.some(arg => arg === '--debug' || arg === '--runner' || arg.startsWith('--runner=') || arg.startsWith('--profile') || arg.startsWith('--target-dir'));
 const persistentTarget = nativeArtifact ? releaseCargoTarget(root, cacheRoot).path : undefined;
-const nativeBuildOptions = { cargoTauriArgs, ...(nativeArtifact ? {
-  nativeArtifact: true,
-  // Until native runtime version reporting is externalized, a cached executable
-  // must retain its embedded Cargo/Tauri version identity.
-  binaryVersions: {
-    package: JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version,
-    cargo: parseToml(readFileSync(join(root, 'src-tauri/Cargo.toml'), 'utf8')).package.version,
-    tauri: JSON.parse(readFileSync(join(root, 'src-tauri/tauri.conf.json'), 'utf8')).version,
-  },
-} : {}) };
+// The packaged shell reads its version from the bundle's Info.plist
+// (src-tauri/src/app_version.rs), so a version bump alone reuses the executable.
+const nativeBuildOptions = { cargoTauriArgs, ...(nativeArtifact ? { nativeArtifact: true } : {}) };
 const prebuildMarker = join(cacheRoot, 'runs', runId, 'prebuild-completed-at');
 const nativeContext = join(cacheRoot, 'runs', runId, '.native-context');
 const nativeState = join(cacheRoot, 'runs', runId, '.native-state');

@@ -1,6 +1,6 @@
 {
   "name": "o8",
-  "version": "0.1.811",
+  "version": "0.1.815",
   "description": "o8 — governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
   "license": "MIT",
   "productName": "o8",
@@ -76,6 +76,7 @@
     "tauri:build:signed": "sh -c 'TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD= node scripts/tauri-build.mjs -- --features dev-mcp-plugin'",
     "gate:webview": "node scripts/preship-webview-gate.mjs",
     "release": "node scripts/release.mjs",
+    "promote": "node scripts/promote.mjs",
     "ship": "node scripts/ship.mjs",
     "ship:linux-sig": "node scripts/sign-linux-appimage.mjs",
     "postinstall": "node scripts/postinstall.mjs",
@@ -176,6 +177,7 @@
     "monaco-editor": "^0.55.1",
     "next": "^16.4.1",
     "parse5": "8.0.1",
+    "perfect-freehand": "^1.2.3",
     "playwright-core": "^1.60.0",
     "prosemirror-commands": "1.7.2",
     "prosemirror-history": "1.5.0",

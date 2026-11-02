@@ -79,7 +79,7 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
     }
     const mint = url.pathname.match(/^\/app\/installations\/(\d+)\/access_tokens$/);
     if (mint) { send(201, { token: `fixture-installation-${mint[1]}`, expires_at: '2099-01-01T00:00:00Z' }); return; }
-    const target = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/(issues|labels)(?:\/(\d+))?(\/comments)?$/);
+    const target = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/(issues|labels)(?:\/(\d+))?(\/comments|\/timeline)?$/);
     if (!target || !records.has(target[1])) { send(404, { message: 'Outside fixture installation' }); return; }
     const [, slug, resource, number] = target;
     const account = managedMode ? req.headers.authorization === 'Bearer fixture-managed-a' ? 'a'
@@ -88,7 +88,20 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
       : req.headers.authorization !== `Bearer fixture-installation-${101 + slugs.indexOf(slug)}`) {
       send(403, { message: 'Wrong installation credential' }); return;
     }
-    if (target[4]) { send(200, []); return; }
+    if (target[4] === '/timeline') {
+      send(200, number === '7' ? [{ event: 'cross-referenced', source: { issue: {
+        number: 12, title: 'Repair the fixture', state: 'closed', html_url: `https://github.com/${slug}/pull/12`,
+        repository: { full_name: slug }, pull_request: { merged_at: '2026-10-02T00:00:00Z' },
+      } } }, { event: 'labeled' }] : []);
+      return;
+    }
+    if (target[4]) {
+      send(200, number === '7' && req.method === 'GET' ? ['First', 'Second'].map((word, index) => ({
+        id: index + 1, body: `${word} fixture comment`, user: { login: `fixture-${index}` },
+        created_at: '2026-10-02T00:00:00Z', html_url: `https://github.com/${slug}/issues/7#issuecomment-${index + 1}`,
+      })) : []);
+      return;
+    }
     if ((mode === 'detail-error' && number) || (mode === 'mutation-error' && req.method === 'POST')) {
       send(mode === 'mutation-error' ? 422 : 503, { message: 'Fixture request refused' }); return;
     }

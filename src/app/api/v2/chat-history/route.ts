@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { projectNetworkThread } from '@/lib/bots/network-projection';
+import { networkProjectionError } from '@/lib/bots/network-health';
+import { isNetworkThread } from '@/lib/bots/network-store';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -18,7 +21,7 @@ import {
   OrchestratorThreadProjectError,
   resolveOrchestratorThreadProjectId,
 } from '@/lib/mobile/orchestrator-thread-project';
-import { maybeQueueThreadAutoTitle } from '@/lib/llm/thread-auto-title';
+import { maybeQueueThreadAutoTitle, regenerateThreadTitle } from '@/lib/llm/thread-auto-title';
 import {
   deleteCanonicalChatHistoryRecord,
   getCanonicalChatHistoryPath,
@@ -27,10 +30,11 @@ import {
   withCanonicalChatHistoryLock,
 } from '@/lib/llm/chat-history-store';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
+import { redactToolCallForRest } from '@/lib/threads/redaction';
 import { resolveThreadRepoMetadata } from '@/lib/llm/thread-repo-metadata';
 import { matchesMutationWorkspace, mutationWorkspace } from '@/lib/repos/mutation-workspace';
 import { normalizePersistedChatTitle, resolvePersistedChatHistoryTitle } from '@/lib/llm/chat-history-title';
-import type { MobilePendingTurnWorkers } from '@/lib/mobile/types';
+import type { MobilePendingTurnWorkers, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { consumePendingTurnWorkers } from '@/lib/mobile/turn-receipt';
 import {
   chatHistoryRevision,
@@ -163,6 +167,7 @@ export async function GET(request: NextRequest) {
   const startedAt = performance.now();
   const tabId = request.nextUrl.searchParams.get('tabId');
   if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400, headers: serverTimingHeader(startedAt) });
+  try { projectNetworkThread(tabId, undefined, { waitForLock: false }); } catch { /* Keep readable history and expose its projection health. */ }
 
   const filePath = safePath(tabId);
   let parsed: Record<string, unknown>;
@@ -173,6 +178,8 @@ export async function GET(request: NextRequest) {
     parsed = emptyHistoryRecord();
   }
 
+  const projectionError = networkProjectionError(tabId);
+  if (parsed.source === 'bot-network' && projectionError) parsed.network = { ...parsed.network as object, projectionError };
   const stableRecord = {
     ...parsed,
     messages: ensureStableChatMessageIds(Array.isArray(parsed.messages) ? parsed.messages : []),
@@ -225,6 +232,7 @@ export async function POST(request: NextRequest) {
     || ((body.repoPath !== undefined || !prior) && !matchesMutationWorkspace(workspace, body.repoPath))) {
     return NextResponse.json({ error: 'History was not found' }, { status: 404 });
   }
+  if (isNetworkThread(body.tabId)) return NextResponse.json({ error: 'Network messages are recorded through the agent bus. Use the network composer to send.' }, { status: 409 });
 
   // Don't save images in history (too large) — strip data URIs
   const messages = ensureStableChatMessageIds(body.messages.map((m: Record<string, unknown>) => ({
@@ -234,6 +242,8 @@ export async function POST(request: NextRequest) {
     content: typeof m.content === 'string'
       ? (m.content as string).replace(/!\[[^\]]*\]\(data:[^)]+\)/g, '[image]')
       : m.content,
+    // Client-supplied tool args/results get the same at-rest redaction as server writes.
+    ...(Array.isArray(m.toolCalls) ? { toolCalls: (m.toolCalls as MobileTranscriptToolCall[]).map(redactToolCallForRest) } : {}),
   })));
   // Preserve starred status from existing file
   let starred = false;
@@ -390,7 +400,24 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   const body = await request.json().catch(() => null);
+  if (body?.inboxAction !== undefined || body?.sessionKey !== undefined) {
+    const { patchInboxSettlement } = await import('@/lib/inbox/mutation');
+    return patchInboxSettlement(request, body);
+  }
   if (!body?.tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
+  if (body.regenerateTitle === true) {
+    // Runs the titler outside the history lock; it takes the lock to write.
+    const saved = readPersistedLlmChat(body.tabId);
+    if (!saved || !matchesMutationWorkspace(mutationWorkspace(request), saved.history.repoPath)) {
+      return NextResponse.json({ error: 'History was not found' }, { status: 404 });
+    }
+    const title = await regenerateThreadTitle(safePath(body.tabId));
+    return title
+      ? NextResponse.json({ ok: true, title })
+      : NextResponse.json({ ok: false, error: 'No title could be generated yet.' }, { status: 409 });
+  }
+  if (body.pinned !== undefined && typeof body.pinned !== 'boolean') return NextResponse.json({ error: 'pinned must be boolean' }, { status: 400 });
+  const recordPin = body.pinned === undefined ? null : (await import('@/lib/inbox/mutation')).recordLegacyInboxPin;
 
   // Full read-modify-write: hold the history lock like POST does, or a PATCH
   // racing a turn-receipt write would put the pre-race snapshot back on disk.
@@ -435,7 +462,9 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    persistCanonicalChatHistoryRecord(body.tabId, data as { messages: unknown[]; [key: string]: unknown });
+    const persist = () => persistCanonicalChatHistoryRecord(body.tabId, data as { messages: unknown[]; [key: string]: unknown });
+    if (recordPin) recordPin(body.tabId, saved?.history ?? {}, body.pinned, persist);
+    else persist();
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'chat update failed';
@@ -455,6 +484,7 @@ export async function DELETE(request: NextRequest) {
     if (!saved || !matchesMutationWorkspace(mutationWorkspace(request), saved.history.repoPath)) {
       return NextResponse.json({ error: 'History was not found' }, { status: 404 });
     }
+    if (isNetworkThread(tabId)) return NextResponse.json({ error: 'Archive this network thread to hide it. Its durable bus exchange is retained.' }, { status: 409 });
     deleteCanonicalChatHistoryRecord(tabId);
     return NextResponse.json({ ok: true });
   } catch (error) {

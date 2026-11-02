@@ -20,7 +20,7 @@ interface ReportResponse {
   ok?: boolean;
   error?: string;
   message?: string;
-  /** Short id the fix reaches back through — a commit trailer publishes it to #fixed. */
+  /** Short id the fix reaches back through — a commit trailer records it in the fix manifest. */
   reportId?: string;
 }
 
@@ -396,7 +396,7 @@ export function ReportIssueSection() {
           {state === 'sent' ? (
             <StatusLine tone="success">
               {reportId
-                ? `Sent — report ${reportId}. When it ships fixed, it lands in #fixed with your name on it.`
+                ? `Sent — report ${reportId}. When a fix ships, o8 tells you here.`
                 : 'Sent — thanks. We’ll pick it up from the report channel.'}
             </StatusLine>
           ) : null}

@@ -30,7 +30,7 @@ import {
 } from '@/lib/runtimes/compaction-detector';
 import { readClaudeRuntimeTelemetry } from '@/lib/runtimes/claude-cost-attribution';
 import { readOwnedClaudeRuntimeTelemetry } from '@/lib/runtimes/claude-owned-telemetry';
-import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
+import { ownedTailToRuntimeTranscript, runtimeTranscriptTime } from '@/lib/runtimes/shared/owned-transcript';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 import {
   getOwnedClaudeCodeFleetAdditions,
@@ -1025,7 +1025,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         role: parsed.type === 'user' ? 'user' : 'assistant',
         ...(parsed.type === 'assistant' && parsed.message.usage ? { tokens: observedCacheTokens(parsed.message.usage), model: parsed.message.model } : {}),
         text,
-        timestamp: parsed.timestamp ? new Date(parsed.timestamp) : new Date(),
+        ...runtimeTranscriptTime(parsed.timestamp),
         type: 'message',
         toolName: parsed.type === 'assistant' ? extractToolName(parsed.message.content) : undefined,
         filePath: parsed.type === 'assistant' ? extractFilePath(parsed.message.content) : undefined,

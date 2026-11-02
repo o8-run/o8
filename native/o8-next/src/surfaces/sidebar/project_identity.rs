@@ -3,7 +3,7 @@ use crate::theme::current as theme;
 use gpui::{prelude::*, *};
 use std::sync::{Arc, OnceLock};
 
-pub(super) fn identity(name: &str, color: Option<&str>, size: f32, selector: &str) -> Div {
+pub(crate) fn identity(name: &str, color: Option<&str>, size: f32, selector: &str) -> Div {
     let lower = name.to_lowercase();
     let brand = lower == "o8"
         || lower.strip_prefix("o8").is_some_and(|tail| {
@@ -76,17 +76,5 @@ pub(super) fn glyph(add: bool, size: f32, color: Rgba) -> impl IntoElement {
     } else {
         "m8 10 4 4 4-4"
     };
-    let svg = format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#{:02x}{:02x}{:02x}" stroke-opacity="{}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{path}"/></svg>"##,
-        (color.r * 255.) as u8,
-        (color.g * 255.) as u8,
-        (color.b * 255.) as u8,
-        color.a
-    );
-    img(Arc::new(Image::from_bytes(
-        ImageFormat::Svg,
-        svg.into_bytes(),
-    )))
-    .size(px(size))
-    .flex_shrink_0()
+    crate::icon::stroke(path, color, size, 1.7)
 }

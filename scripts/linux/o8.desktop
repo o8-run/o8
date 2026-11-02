@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=o8
+Comment=Build with o8
+Exec=/usr/bin/o8
+Icon=o8
+Terminal=false
+Categories=Development;

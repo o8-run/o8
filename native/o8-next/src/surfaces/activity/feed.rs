@@ -67,7 +67,6 @@ pub struct Row {
     pub repo: Option<String>,
     pub repo_identity: String,
     pub title: String,
-    pub meta: String,
     pub date: String,
     pub data: Value,
     pub ci: Option<Box<Row>>,
@@ -116,7 +115,7 @@ fn rows(
         .iter()
         .take(limit)
         .map(|v| {
-            let (identity, title, meta, date) = match kind {
+            let (identity, title, date) = match kind {
                 "commit" => (
                     v["hash"]
                         .as_str()
@@ -128,43 +127,21 @@ fn rows(
                         .or(v["subject"].as_str())
                         .unwrap_or("")
                         .to_owned(),
-                    String::new(),
                     text(v, "date"),
                 ),
                 "pr" => (
                     id(v, "number"),
                     format!("#{} {}", id(v, "number"), text(v, "title")),
-                    format!(
-                        "{} · {} · +{} -{}",
-                        text(v, "state"),
-                        text(v, "headRefName"),
-                        v["additions"].as_u64().unwrap_or(0),
-                        v["deletions"].as_u64().unwrap_or(0)
-                    ),
                     text(v, "createdAt"),
                 ),
                 "issue" => (
                     id(v, "number"),
                     format!("#{} {}", id(v, "number"), text(v, "title")),
-                    format!(
-                        "{} · {}",
-                        text(v, "state"),
-                        v["author"]["login"].as_str().unwrap_or("")
-                    ),
                     text(v, "createdAt"),
                 ),
                 _ => (
                     id(v, "databaseId"),
                     text(v, "displayTitle"),
-                    format!(
-                        "{} · {} · {}",
-                        text(v, "workflowName"),
-                        text(v, "headBranch"),
-                        v["conclusion"]
-                            .as_str()
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or(v["status"].as_str().unwrap_or(""))
-                    ),
                     text(v, "createdAt"),
                 ),
             };
@@ -177,7 +154,6 @@ fn rows(
                 repo: repo.clone(),
                 repo_identity: repo_identity.into(),
                 title,
-                meta,
                 date,
                 data: v.clone(),
                 ci: None,
@@ -188,6 +164,9 @@ fn rows(
 #[derive(Clone, Default)]
 pub struct Streams {
     pub remote: HashMap<&'static str, Vec<Row>>,
+    /// When each remote stream last read successfully, in epoch seconds.
+    pub updated: HashMap<&'static str, u64>,
+    pub retry_at: HashMap<&'static str, u64>,
 }
 #[derive(Default)]
 pub struct Snapshot {
@@ -195,13 +174,29 @@ pub struct Snapshot {
     pub errors: Vec<String>,
     pub cache: HashMap<String, Streams>,
     pub mission: Value,
+    /// The oldest successful remote read among the targets (classic remoteUpdatedAt).
+    pub remote_updated: Option<u64>,
 }
 
-pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams>) -> Snapshot {
+pub struct ReadOptions {
+    pub fresh: bool,
+    pub manual: bool,
+    pub mission: Value,
+    pub packet_fallback: String,
+}
+
+pub fn load(
+    client: &Client,
+    targets: &[Repo],
+    previous: HashMap<String, Streams>,
+    options: ReadOptions,
+) -> Snapshot {
     let mut out = Snapshot {
         cache: previous,
+        mission: options.mission,
         ..Default::default()
     };
+    let mut stamps = vec![];
     for target in targets {
         let slug = target.slug();
         let identity = target.identity();
@@ -214,29 +209,62 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
             ("ci", "runs", "ci", 6),
         ] {
             let read = slug.as_ref().map(|slug| {
+                if !options.manual && cache.retry_at.values().any(|at| *at > crate::clock::now()) {
+                    return Err(ReadError {
+                        message: "GitHub refresh paused".into(),
+                        status: None,
+                        retry: 0,
+                    });
+                }
+                let mut query = vec![("repo", slug.as_str())];
+                if options.fresh {
+                    query.push(("fresh", "1"));
+                }
                 client
-                    .activity_request(
-                        "GET",
-                        &format!("/api/panel/{endpoint}"),
-                        &[("repo", slug)],
-                        None,
-                    )
-                    .and_then(|v| rows(&v, field, kind, Some(slug.clone()), &identity, limit))
+                    .activity_request("GET", &format!("/api/panel/{endpoint}"), &query, None)
+                    .and_then(|v| {
+                        let updated = v["lastSuccessfulAt"]
+                            .as_str()
+                            .and_then(crate::clock::timestamp)
+                            .unwrap_or_else(crate::clock::now)
+                            .min(crate::clock::now());
+                        let stale = v["stale"] == true;
+                        let retry_at = v["retryAt"].as_u64().unwrap_or(0) / 1000;
+                        rows(&v, field, kind, Some(slug.clone()), &identity, limit)
+                            .map(|rows| (rows, updated, stale, retry_at))
+                    })
             });
             match read {
-                Some(Ok(rows)) => {
+                Some(Ok((rows, updated, stale, retry_at))) => {
                     cache.remote.insert(kind, rows);
+                    cache.updated.insert(kind, updated);
+                    if retry_at > crate::clock::now() {
+                        cache.retry_at.insert(kind, retry_at);
+                    } else {
+                        cache.retry_at.remove(kind);
+                    }
+                    if stale && !out.errors.iter().any(|s| s.starts_with("GitHub")) {
+                        out.errors.push("GitHub sync delayed. Showing last successful activity where available.".into());
+                    }
                 }
-                Some(Err(_)) => {
+                Some(Err(error)) => {
+                    if matches!(error.status, Some(403 | 429)) {
+                        cache
+                            .retry_at
+                            .insert(kind, crate::clock::now() + error.retry);
+                    }
                     if !out.errors.iter().any(|s| s.starts_with("GitHub")) {
                         out.errors.push("GitHub sync delayed. Showing last successful activity where available.".into());
                     }
                 }
                 None => {
                     cache.remote.remove(kind);
+                    cache.updated.remove(kind);
+                    cache.retry_at.remove(kind);
                 }
             }
         }
+        stamps.extend(cache.updated.values().copied());
         let mut commits = cache.remote.get("commit").cloned().unwrap_or_default();
         if !target.local_path.is_empty() {
             let local = client
@@ -263,37 +291,36 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
         }
     }
     match client.activity_request("GET", "/api/orchestrator/state", &[], None) {
-        Ok(state) => {
-            out.mission = state["mission"].clone();
-            for packet in out.mission["packets"].as_array().into_iter().flatten() {
-                if packet["archivedAt"].as_str().is_some_and(|s| !s.is_empty())
-                    || packet["comparisonIndex"].as_u64().is_some_and(|n| n > 0)
-                {
-                    continue;
-                }
-                out.rows.push(Row {
-                    kind: "packet",
-                    id: text(packet, "id"),
-                    repo: None,
-                    repo_identity: "local".into(),
-                    title: text(packet, "title"),
-                    meta: format!(
-                        "{} · {} · {}",
-                        text(packet, "status"),
-                        text(packet, "runtime"),
-                        text(packet, "branchTarget")
-                    ),
-                    date: packet["lane"]["lastEventAt"]
-                        .as_str()
-                        .or(packet["lastEventAt"].as_str())
-                        .unwrap_or("")
-                        .into(),
-                    data: packet.clone(),
-                    ci: None,
-                });
-            }
-        }
+        Ok(state) => out.mission = state["mission"].clone(),
         Err(error) => out.errors.push(error.message),
+    }
+    for packet in out.mission["packets"].as_array().into_iter().flatten() {
+        if packet["archivedAt"].as_str().is_some_and(|s| !s.is_empty())
+            || packet["comparisonGroupId"]
+                .as_str()
+                .is_some_and(|group| !group.is_empty())
+                && packet["comparisonIndex"].as_u64().is_some_and(|n| n > 0)
+        {
+            continue;
+        }
+        out.rows.push(Row {
+            kind: "packet",
+            id: text(packet, "id"),
+            repo: None,
+            repo_identity: "local".into(),
+            title: text(packet, "title"),
+            date: [
+                packet["lane"]["lastEventAt"].as_str(),
+                packet["lastEventAt"].as_str(),
+            ]
+            .into_iter()
+            .flatten()
+            .find(|date| crate::clock::timestamp(date).is_some())
+            .unwrap_or(&options.packet_fallback)
+            .into(),
+            data: packet.clone(),
+            ci: None,
+        });
     }
     // Group only matching stable repository/SHA pairs, including local roots.
     let mut grouped = vec![];
@@ -309,7 +336,7 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
                 })
             {
                 commit.ci = Some(Box::new(row.clone()));
-                if row.date > commit.date {
+                if crate::clock::timestamp(&row.date) > crate::clock::timestamp(&commit.date) {
                     commit.date = row.date.clone();
                 }
                 continue;
@@ -323,9 +350,10 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
             grouped.push(row.clone());
         }
     }
-    grouped.sort_by(|a, b| b.date.cmp(&a.date));
+    grouped.sort_by_key(|row| std::cmp::Reverse(crate::clock::timestamp(&row.date).unwrap_or(0)));
     grouped.truncate(50);
     out.rows = grouped;
+    out.remote_updated = stamps.into_iter().min();
     out
 }
 

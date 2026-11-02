@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorLaneBinding, OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -40,6 +40,7 @@ const { prepareMissionBranches } = await import('@/lib/orchestrator/operator-mis
 const { withPacketLifecycleMutationLock } = await import('@/lib/orchestrator/lifecycle-mutation-lock');
 const { createWorkspaceSnapshot, transitionWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
 const { listInboxItems } = await import('@/lib/supervisor/inbox');
+const { resolveGitBinary } = await import('@/lib/git/binary');
 
 const tempDirs: string[] = [];
 const laneIds: string[] = [];
@@ -503,6 +504,78 @@ describe('merged-by-ancestry reconciliation', () => {
     await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 1 });
     expect(getLane(lane.id)).toMatchObject({ status: 'archived', outcome: 'no_changes' });
   }, 20_000);
+
+  // #5064 — counts the real git processes a sweep starts. The shim on PATH
+  // logs each call and then runs the real binary.
+  function logGitCalls() {
+    const realGit = resolveGitBinary();
+    const shimDir = mkdtempSync(join(tmpdir(), 'o8-git-call-log-'));
+    tempDirs.push(shimDir);
+    const log = join(shimDir, 'calls.log');
+    writeFileSync(log, '');
+    writeFileSync(join(shimDir, 'git'), `#!/bin/sh\nprintf '%s\\n' "$1" >> '${log}'\nexec '${realGit}' "$@"\n`, { mode: 0o755 });
+    const priorPath = process.env.PATH;
+    process.env.PATH = `${shimDir}${delimiter}${priorPath ?? ''}`;
+    return {
+      take(subcommand: string): number {
+        const count = readFileSync(log, 'utf8').split('\n').filter((line) => line === subcommand).length;
+        writeFileSync(log, '');
+        return count;
+      },
+      restore() {
+        process.env.PATH = priorPath;
+      },
+    };
+  }
+
+  it('computes each main commit patch id once across sweeps (#5064)', async () => {
+    const { clone, seed } = makeRepo('o8-ancestry-patch-cache');
+    writeFileSync(join(clone, 'lane.txt'), 'lane\n');
+    commitAll(clone, 'lane work');
+    for (let index = 0; index < 12; index += 1) {
+      writeFileSync(join(seed, `main-${index}.txt`), `${index}\n`);
+      commitAll(seed, `main ${index}`);
+    }
+    git(seed, ['push', 'origin', 'main']);
+    const lane = seedLaneOnly(clone);
+    const gitCalls = logGitCalls();
+    try {
+      await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 1, merged: 0 });
+      expect(gitCalls.take('show')).toBe(12);
+
+      writeFileSync(join(seed, 'main-late.txt'), 'late\n');
+      commitAll(seed, 'main late');
+      git(seed, ['push', 'origin', 'main']);
+
+      // Only the new main commit is diffed; the twelve known ones are not.
+      await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 1, merged: 0 });
+      expect(gitCalls.take('show')).toBe(1);
+      expect(getLane(lane.id)?.status).toBe('reviewing');
+    } finally {
+      gitCalls.restore();
+    }
+  }, 30_000);
+
+  it('fetches a repository base once per sweep and shares an overlapping sweep (#5064)', async () => {
+    const { clone } = makeRepo('o8-ancestry-one-fetch');
+    writeFileSync(join(clone, 'lane.txt'), 'lane\n');
+    commitAll(clone, 'lane work');
+    const worktree = join(dirname(clone), 'second-lane');
+    git(clone, ['worktree', 'add', '-b', 'packet-b', worktree, 'main']);
+    writeFileSync(join(worktree, 'second.txt'), 'second\n');
+    commitAll(worktree, 'second lane work');
+    seedLaneOnly(clone);
+    seedLaneOnly(worktree, 'packet-b');
+    const gitCalls = logGitCalls();
+    try {
+      const [first, second] = await Promise.all([sweepPacketsMergedByAncestry(), sweepPacketsMergedByAncestry()]);
+      expect(first).toMatchObject({ scanned: 2, merged: 0 });
+      expect(gitCalls.take('fetch')).toBe(1);
+      expect(second).toBe(first);
+    } finally {
+      gitCalls.restore();
+    }
+  }, 30_000);
 
   it('never reports no changes for an idle lane with no launched session', async () => {
     const { clone } = makeRepo('o8-lane-never-launched');

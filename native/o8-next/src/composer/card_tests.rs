@@ -1,4 +1,15 @@
 use super::*;
+#[path = "context_card_tests.rs"]
+mod context_tests;
+mod image_tests;
+#[path = "picker_dismiss_tests.rs"]
+mod picker_dismiss_tests;
+#[path = "prompt_acceptance_tests.rs"]
+mod prompt_acceptance_tests;
+#[path = "prompt_persistence_tests.rs"]
+mod prompt_persistence_tests;
+#[path = "prompt_tests.rs"]
+mod prompt_tests;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use std::{
     io::{BufRead, BufReader},
@@ -24,6 +35,7 @@ impl Fixture {
                 "scripts/next/dev-server.ts",
                 "--composer",
                 "--settings",
+                "--composer-controls",
             ])
             .args(if loaded {
                 vec!["--composer-loaded"]
@@ -114,6 +126,36 @@ if (composeComposerWireMessage(payload.text, payload.routing.pickedMode).wireMes
 }
 
 #[gpui::test]
+fn native_composer_remove_queue_while_attachment_loads(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    surface.update(cx, |s, _| s.send_next = true);
+    click("composer-input", cx);
+    cx.simulate_input("Remove this queued message");
+    click("send", cx);
+    let session = surface.read_with(cx, |s, _| {
+        assert_eq!(s.queue["items"].as_array().unwrap().len(), 1);
+        s.sessions
+            .iter()
+            .find(|s| s.id == "thoughts-composer-first")
+            .unwrap()
+            .clone()
+    });
+    surface.update(cx, |s, cx| {
+        s.composer.update(cx, |i, _| i.controls.pending_images = 1);
+        cx.notify();
+    });
+    click("remove-queued", cx);
+    assert!(
+        fixture.client.queue(&session).unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "a pending attachment in the next draft must not block Remove"
+    );
+}
+
+#[gpui::test]
 fn native_composer_idle_card_avoids_viewport_path_targets(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (_surface, cx) = open(cx, &fixture);
@@ -140,27 +182,42 @@ fn native_composer_idle_card_avoids_viewport_path_targets(cx: &mut TestAppContex
 fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
+    // The Thinking chip shows only for leads with effort stops, as in classic.
+    surface.update(cx, |s, _| {
+        s.routing.as_mut().unwrap()["backend"] = json!("codex");
+    });
+    draw(cx);
     let mut previous = gpui::px(0.);
     for selector in [
-        "composer-mode",
-        "composer-access",
         "composer-attach",
         "composer-model",
         "composer-effort",
+        // Empty composer: the primary button is the dictation mic.
         "composer-microphone",
-        "send",
     ] {
         let bounds = cx.debug_bounds(selector).expect(selector);
         assert!(bounds.left() >= previous, "footer order: {selector}");
         previous = bounds.right();
     }
+    // A chat with turns offers fork in the placeholder once nothing is
+    // steerable; the checkout wording is for an empty chat.
+    surface.update(cx, |s, cx| {
+        s.queue["canSteer"] = json!(false);
+        cx.notify();
+    });
+    draw(cx);
     surface.read_with(cx, |s, cx| {
-        assert_eq!(s.composer.read(cx).placeholder, "Message Solo…");
+        assert_eq!(
+            s.composer.read(cx).placeholder,
+            "↵ to send, ⌥⌘↵ to fork into a new thread"
+        );
     });
     assert!(cx.debug_bounds("composer-hint").is_none());
-    click("composer-mode", cx);
+    click("composer-attach", cx);
+    click("attach-mode", cx);
     click("mode-multitask", cx);
-    click("composer-access", cx);
+    click("composer-attach", cx);
+    click("attach-permission", cx);
     click("access-full", cx);
     click("composer-effort", cx);
     click("effort-high", cx);
@@ -198,8 +255,9 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
         assert!(s.composer.read(cx).text.is_empty());
         production_wire_oracle(&s.queue["items"][0]["payload"]);
     });
-    for (mode, selector) in [("solo", "mode-solo"), ("fast", "mode-fast")] {
-        click("composer-mode", cx);
+    for (mode, selector) in [("fast", "mode-fast")] {
+        click("composer-attach", cx);
+        click("attach-mode", cx);
         click(selector, cx);
         cx.simulate_input(mode);
         cx.simulate_keystrokes("enter");
@@ -217,11 +275,69 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
     }
 }
 
+/// Classic offers only Shared and Worktrees. A chat saved on Solo (or with no
+/// saved mode) reads and sends Shared, so it never routes into Solo's private
+/// Codex home (#5165).
+#[gpui::test]
+fn native_composer_modes_match_classic_and_saved_solo_sends_shared(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-attach", cx);
+    click("attach-mode", cx);
+    assert!(
+        cx.debug_bounds("mode-solo").is_none(),
+        "classic has no Solo choice"
+    );
+    assert!(cx.debug_bounds("mode-fast").is_some());
+    assert!(cx.debug_bounds("mode-multitask").is_some());
+    cx.simulate_keystrokes("escape");
+    surface.update(cx, |s, cx| {
+        s.composer.update(cx, |i, _| {
+            i.controls.overrides["pickedMode"] = json!("solo");
+            i.controls.overrides["mode"] = json!("single");
+        });
+        s.queue["canSteer"] = json!(false);
+        cx.notify();
+    });
+    draw(cx);
+    surface.read_with(cx, |s, cx| {
+        let routing = s.composer_routing(cx).unwrap();
+        assert_eq!(routing["pickedMode"], "fast");
+        assert_eq!(routing["mode"], "fleet");
+        assert_eq!(
+            s.composer.read(cx).placeholder,
+            "↵ to send, ⌥⌘↵ to fork into a new thread"
+        );
+    });
+    surface.update_in(cx, |s, window, cx| {
+        s.queue["canSteer"] = json!(true);
+        s.send_next = true;
+        s.composer.read(cx).focus.focus(window);
+    });
+    cx.simulate_input("Saved solo chat");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    surface.read_with(cx, |s, _| {
+        let item = s.queue["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["payload"]["text"] == "Saved solo chat")
+            .unwrap();
+        assert_eq!(item["payload"]["routing"]["pickedMode"], "fast");
+        assert_eq!(item["payload"]["routing"]["mode"], "fleet");
+        production_wire_oracle(&item["payload"]);
+    });
+}
+
+include!("lead_picker_tests.rs");
+
 #[gpui::test]
 fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    click("composer-mode", cx);
+    click("composer-attach", cx);
+    click("attach-mode", cx);
     click("mode-multitask", cx);
     surface.update_in(cx, |s, window, cx| {
         assert!(s.composer.read(cx).focus.is_focused(window))
@@ -229,14 +345,34 @@ fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut Te
     surface.update(cx, |s, cx| s.select("thoughts-composer-second".into(), cx));
     cx.run_until_parked();
     draw(cx);
+    // A chat with turns offers fork in the placeholder once nothing is
+    // steerable; the checkout wording is for an empty chat.
+    surface.update(cx, |s, cx| {
+        s.queue["canSteer"] = json!(false);
+        cx.notify();
+    });
+    draw(cx);
     surface.read_with(cx, |s, cx| {
-        assert_eq!(s.composer.read(cx).placeholder, "Message Solo…")
+        assert_eq!(
+            s.composer.read(cx).placeholder,
+            "↵ to send, ⌥⌘↵ to fork into a new thread"
+        )
     });
     surface.update(cx, |s, cx| s.select("thoughts-composer-first".into(), cx));
     cx.run_until_parked();
     draw(cx);
+    // A chat with turns offers fork in the placeholder once nothing is
+    // steerable; the checkout wording is for an empty chat.
+    surface.update(cx, |s, cx| {
+        s.queue["canSteer"] = json!(false);
+        cx.notify();
+    });
+    draw(cx);
     surface.read_with(cx, |s, cx| {
-        assert_eq!(s.composer.read(cx).placeholder, "Message Worktrees…")
+        assert_eq!(
+            s.composer.read(cx).placeholder,
+            "↵ to send, ⌥⌘↵ to fork into a new thread"
+        )
     });
 }
 
@@ -244,18 +380,18 @@ fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut Te
 fn native_composer_review_escape_restores_chip_focus(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    click("composer-access", cx);
+    click("composer-attach", cx);
     cx.simulate_keystrokes("escape");
     surface.update_in(cx, |s, window, cx| {
         assert!(
-            s.composer.read(cx).controls.focus["composer-access"].is_focused(window),
+            s.composer.read(cx).controls.focus["composer-attach"].is_focused(window),
             "Escape returns to the control that opened the picker"
         );
     });
     cx.simulate_keystrokes("enter");
     draw(cx);
     assert!(
-        cx.debug_bounds("access-plan").is_some(),
+        cx.debug_bounds("attach-permission").is_some(),
         "the focused chip opens with Enter"
     );
 }
@@ -381,7 +517,8 @@ fn native_composer_card_controls_fit_compact_and_wide_windows(cx: &mut TestAppCo
         cx.simulate_resize(gpui::size(gpui::px(width), gpui::px(height)));
         draw(cx);
         let card = cx.debug_bounds("composer-card").unwrap();
-        let send = cx.debug_bounds("send").unwrap();
+        // Empty composer: the round primary button is the mic.
+        let send = cx.debug_bounds("composer-microphone").unwrap();
         assert!(send.right() <= card.right() && send.bottom() <= card.bottom());
         assert!(card.left() >= gpui::px(0.) && card.right() <= gpui::px(width));
     }
@@ -644,6 +781,7 @@ fn native_composer_loaded_wrapping_keeps_transcript_geometry(cx: &mut TestAppCon
     let fixture = Fixture::with_loaded(true);
     let (surface, cx) = loaded(cx, &fixture);
     let before = cx.debug_bounds("composer-card").unwrap();
+    let space = cx.debug_bounds("composer-space").unwrap();
     let regions = surface.read_with(cx, |s, cx| s.regions.renders(cx));
     cx.write_to_clipboard(gpui::ClipboardItem::new_string(
         "a long draft line\n".repeat(20),
@@ -652,10 +790,18 @@ fn native_composer_loaded_wrapping_keeps_transcript_geometry(cx: &mut TestAppCon
     for _ in 0..2 {
         cx.update(|window, cx| window.draw(cx).clear());
     }
+    // Classic's composer grows with a long draft, up to its cap, by rising
+    // over the transcript; the conversation keeps its size.
+    let after = cx.debug_bounds("composer-card").unwrap();
+    assert!(
+        after.size.height > before.size.height,
+        "a long draft grows the card"
+    );
+    assert_eq!(after.bottom(), before.bottom(), "the card grows upward");
     assert_eq!(
-        cx.debug_bounds("composer-card").unwrap(),
-        before,
-        "growing a draft must scroll inside the composer, without resizing the conversation"
+        cx.debug_bounds("composer-space").unwrap(),
+        space,
+        "growing a draft must not resize the conversation"
     );
     surface.read_with(cx, |s, cx| assert_eq!(s.regions.renders(cx), regions));
     let viewport = cx.debug_bounds("composer-input").unwrap();
@@ -734,4 +880,35 @@ fn native_composer_loaded_focus_and_pending_switch_keep_current_scene(cx: &mut T
         assert_eq!(s.regions.renders(cx), renders);
         assert_eq!(old_editor.read(cx).text, "Late draft");
     });
+}
+
+#[test]
+fn model_names_read_like_the_desktop() {
+    use crate::composer::controls::model_label;
+    for (id, label) in [
+        ("gpt-6.1-sol", "GPT-6.1 Sol"),
+        ("gpt-5.6-terra", "GPT-5.6 Terra"),
+        ("gpt-5.5", "GPT-5.5"),
+        ("gpt-5.3-codex", "Codex 5.3"),
+        ("claude-opus-5-5", "Opus 5.5"),
+        ("claude-fable-5[1m]", "Fable 5 (1M)"),
+        ("claude-sonnet-4-20250514", "Sonnet 4"),
+        ("gemini-3-flash-preview", "Gemini 3 Flash"),
+        ("local-model", "local-model"),
+    ] {
+        assert_eq!(model_label(id), label);
+    }
+}
+
+#[gpui::test]
+fn native_composer_model_search_on_favorites_searches_every_house(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (_surface, cx) = open(cx, &fixture);
+    click("composer-model", cx);
+    click("lead-house-favorites", cx);
+    click("composer-model-input", cx);
+    cx.simulate_input("son");
+    draw(cx);
+    // Sonnet lives on the Claude tab; typing on Favorites must still find it.
+    assert!(cx.debug_bounds("model-claude-sonnet-5").is_some());
 }

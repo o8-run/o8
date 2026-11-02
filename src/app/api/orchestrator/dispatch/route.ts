@@ -8,6 +8,7 @@ import {
   resolveMissionDispatchTarget,
 } from '@/lib/orchestrator/operator-mission-service';
 import { DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
+import { PacketStorageAdmissionError } from '@/lib/orchestrator/storage-admission';
 import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import { DispatchRegistryConflictError } from '@/lib/orchestrator/operator-mission-service/dispatch-registry-publication';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
@@ -37,6 +38,66 @@ function repoAdmissionErrorResponse(error: RepoDispatchAdmissionError) {
     status: 400,
     headers: { 'Cache-Control': 'no-store, max-age=0' },
   });
+}
+
+/**
+ * #4965 failure 1: a lifecycle-lock hold (dispatchPacketLaunch throws
+ * PacketStorageAdmissionError with state:'held') must surface as a recoverable
+ * card — a named reason and a retry — not a bare HTTP 500 that the operator
+ * reads as "still loading". 409 keeps the real message visible (operatorError
+ * masks any status >= 500 as "o8 API error (n)").
+ */
+function admissionHeldResponse(error: PacketStorageAdmissionError) {
+  const { state } = error.receipt;
+  // Some admission reasons are free-form strings that interpolate a caught
+  // error (e.g. `post_launch_accounting_failed: <error>`), which can carry an
+  // internal path or message. Expose only the stable enum-like prefix to the
+  // client — it is a better machine-readable signal and leaks no internal text.
+  const reason = error.receipt.reason.split(':')[0].trim();
+  let message: string;
+  let nextAction: 'retry_packet' | 'reset_packet' | 'wait';
+  if (reason === 'launch_in_progress') {
+    message = 'This packet generation is already launching. Retry once the current launch settles.';
+    nextAction = 'wait';
+  } else if (reason === 'launch_effect_unknown') {
+    message = 'The prior launch owner ended before its result was reconciled. Reset the packet, then dispatch again.';
+    nextAction = 'reset_packet';
+  } else {
+    message = `Dispatch is held (${reason}). Retry the packet once the hold clears.`;
+    nextAction = 'retry_packet';
+  }
+  return NextResponse.json({
+    ok: false,
+    error: { code: 'dispatch_held', message, reason, state, nextAction },
+  }, {
+    status: 409,
+    headers: { 'Cache-Control': 'no-store, max-age=0' },
+  });
+}
+
+/**
+ * Single translator for every known dispatch failure, shared by the wait:true
+ * and wait:false branches so they cannot diverge (the divergence is exactly how
+ * #4965 failure 1 slipped through: PacketStorageAdmissionError was handled by
+ * neither branch, and DispatchPreflightError was missing from wait:false).
+ * Returns null for an unrecognized error so the caller emits the generic 500.
+ */
+function dispatchErrorResponse(error: unknown): NextResponse | null {
+  if (error instanceof RepoDispatchAdmissionError) return repoAdmissionErrorResponse(error);
+  if (error instanceof PacketStorageAdmissionError) return admissionHeldResponse(error);
+  if (error instanceof EffortPinRejectionError) return operatorError(error.code, error.message, 400);
+  if (error instanceof DispatchRegistryConflictError) return operatorError('dispatch_registry_conflict', error.message, 409);
+  if (error instanceof DispatchPreflightError) {
+    return operatorError(error.code, `${error.status.detail} ${error.status.fix}`, 400, {
+      runtime: error.status.runtime,
+      house: error.status.house,
+      installed: error.status.installed,
+      authenticated: error.status.authenticated,
+      unavailableReason: error.status.unavailableReason,
+    });
+  }
+  if (error instanceof MissionNotFoundError) return operatorError('not_found', error.message, 404);
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -145,9 +206,8 @@ export async function POST(request: NextRequest) {
       return operatorSuccess({ initiated: true, async: true, missionId: targetMissionId, status: 'queued', queued: admitted.queued,
         note: 'Dispatch admitted; this response does not confirm a worker launch. Check mission status.' });
     } catch (error) {
-      if (error instanceof RepoDispatchAdmissionError) return repoAdmissionErrorResponse(error);
-      if (error instanceof EffortPinRejectionError) return operatorError(error.code, error.message, 400);
-      if (error instanceof DispatchRegistryConflictError) return operatorError('dispatch_registry_conflict', error.message, 409);
+      const translated = dispatchErrorResponse(error);
+      if (translated) return translated;
       const message = error instanceof Error ? error.message : 'Unable to dispatch mission.';
       return operatorError('dispatch_failed', message, 500, error);
     }
@@ -170,21 +230,8 @@ export async function POST(request: NextRequest) {
     const result = await dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime });
     return operatorSuccess(result);
   } catch (error) {
-    if (error instanceof RepoDispatchAdmissionError) return repoAdmissionErrorResponse(error);
-    if (error instanceof EffortPinRejectionError) return operatorError(error.code, error.message, 400);
-    if (error instanceof DispatchRegistryConflictError) return operatorError('dispatch_registry_conflict', error.message, 409);
-    if (error instanceof DispatchPreflightError) {
-      return operatorError(error.code, `${error.status.detail} ${error.status.fix}`, 400, {
-        runtime: error.status.runtime,
-        house: error.status.house,
-        installed: error.status.installed,
-        authenticated: error.status.authenticated,
-        unavailableReason: error.status.unavailableReason,
-      });
-    }
-    if (error instanceof MissionNotFoundError) {
-      return operatorError('not_found', error.message, 404);
-    }
+    const translated = dispatchErrorResponse(error);
+    if (translated) return translated;
     const message = error instanceof Error ? error.message : 'Unable to dispatch mission.';
     return operatorError('dispatch_failed', message, 500, error);
   }

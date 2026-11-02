@@ -1,4 +1,5 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { activeProviderInstance } from '@/lib/providers/instance-context';
 /**
  * Shared CLI binary resolver for o8 runtime adapters.
  *
@@ -398,6 +399,9 @@ async function resolveViaStaticFallbacks(
  * Throws CliNotFoundError when the binary cannot be located anywhere.
  */
 export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
+  // A provider instance's binary override bypasses discovery and the cache.
+  const instanceBinary = activeProviderInstance(spec.runtimeId)?.binaryPath;
+  if (instanceBinary) return { path: instanceBinary, source: 'env', detectedAt: Date.now(), envHint: 'provider instance' };
   // Cache hit check
   const cached = getCachedCli(spec.runtimeId);
   if (cached) {

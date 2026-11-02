@@ -91,7 +91,7 @@ export interface OwnedRunController {
   reconcilePreparedRuns(session: OwnedSessionRecord): Promise<OwnedSessionRecord>;
   spawnOwnedRun(
     session: OwnedSessionRecord,
-    prompt: string, mode: OwnedRunMode, options?: { freshRequest?: boolean },
+    prompt: string, mode: OwnedRunMode, options?: { freshRequest?: boolean; operatorRequest?: string },
   ): Promise<OwnedRunRecord>;
 }
 
@@ -396,16 +396,16 @@ export function createOwnedRunController({
     return session;
   }
 
-  async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode, options?: { freshRequest?: boolean }) {
+  async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode, options?: { freshRequest?: boolean; operatorRequest?: string }) {
     return withOwnedArtifactAdmission(root, () => (
       withPacketLifecycleSpawnLock(session.packetId ?? session.workspaceBinding?.packetId ?? null, () => (
-        spawnOwnedRunInner(session, prompt, mode, options?.freshRequest)
+        spawnOwnedRunInner(session, prompt, mode, options)
       ))
     ));
   }
 
-  async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode, freshRequest = false) {
-    ({ prompt, mode } = await refreshOwnedWorkerMemory(session, prompt, mode, freshRequest));
+  async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode, options?: { freshRequest?: boolean; operatorRequest?: string }) {
+    ({ prompt, mode } = await refreshOwnedWorkerMemory(session, prompt, mode, options?.freshRequest, options?.operatorRequest));
     await assertRuntimeModelEffortPin(runtimeId, session.model, session.effort, { cwd: session.repoPath,
       configHome: session.identity?.configHomeRef ?? (runtimeId === 'muse' ? session.runtimeConfig?.museConfigRoot : adapter.defaultConfigHome?.()), runtimeConfig: session.runtimeConfig });
     assertOwnedSingleAttemptSpawn(session, runtimeId, mode);

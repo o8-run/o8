@@ -23,6 +23,9 @@ fn create(fixture: &Fixture, id: &str, title: &str, archived: bool, timestamp: u
         .unwrap();
 }
 fn search(shell: &Entity<Shell>, cx: &mut VisualTestContext, query: &str) {
+    // The initial socket checkpoint can request a catalog read. Let it finish
+    // before typing: its completion legitimately restarts message search.
+    wait(shell, cx, |s, _| !s.loading && s.dirty.is_none());
     cx.simulate_keystrokes("ctrl-f ctrl-a");
     cx.simulate_input(query);
     cx.simulate_keystrokes("f8");

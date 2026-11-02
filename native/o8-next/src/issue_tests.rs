@@ -54,7 +54,7 @@ impl Fixture {
         if worker {
             command.arg("--worker");
         }
-        command.args(flags);
+        command.args(flags).arg("--owned-stdio");
         let mut server = command
             .env("O8_NEXT_API_TOKEN", "fixture-next-issues-operator")
             .stdin(Stdio::piped())
@@ -62,14 +62,16 @@ impl Fixture {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        let origin = BufReader::new(server.stdout.take().unwrap())
-            .lines()
+        let mut output = BufReader::new(server.stdout.take().unwrap()).lines();
+        let origin = output.by_ref()
             .find_map(|line| {
                 serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
                     .as_str()
                     .map(str::to_owned)
             })
             .expect("fixture origin");
+        // Keep late production logs from writing into a closed readiness pipe.
+        std::thread::spawn(move || for _ in output {});
         Self {
             server,
             root,
@@ -92,8 +94,10 @@ fn issues_worker_receives_linked_context_through_stream(cx: &mut TestAppContext)
     let cx = &mut visual;
     click(cx, "issue-view-7");
     click(cx, "issue-work");
-    wait(cx, "issue-worker");
-    let deadline = Instant::now() + Duration::from_secs(35);
+    // Starting the worker and streaming its first reply take about 34s on a
+    // loaded Linux box, so this test allows 90s for each.
+    wait_with_bound(cx, "issue-worker", Duration::from_secs(90));
+    let deadline = Instant::now() + Duration::from_secs(90);
     while Instant::now() < deadline {
         draw(cx);
         let history = fixture.client.history("thoughts-composer-first").unwrap();
@@ -264,7 +268,7 @@ fn issues_missing_paint_reports_elapsed_and_bound(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn issues_view_search_link_clear_and_worker_task(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = Fixture::start(true);
     let (_shell, mut visual, open_ms) = open(&fixture, cx);
     let cx = &mut visual;
     input(cx, "issue-search", "unmatched");
@@ -290,6 +294,16 @@ fn issues_view_search_link_clear_and_worker_task(cx: &mut TestAppContext) {
     wait(cx, "issue-unlinked");
     click(cx, "issue-view-7");
     wait(cx, "issue-detail-7");
+    // The page carries the whole conversation and the work that answers it.
+    for part in [
+        "issue-body",
+        "issue-comment-0",
+        "issue-comment-1",
+        "issue-linked-item-12",
+    ] {
+        wait(cx, part);
+    }
+    assert!(cx.debug_bounds("issue-discussion-incomplete").is_none());
     click(cx, "issue-github");
     assert_eq!(
         cx.opened_url().as_deref(),
@@ -297,45 +311,43 @@ fn issues_view_search_link_clear_and_worker_task(cx: &mut TestAppContext) {
     );
     click(cx, "issue-work");
     wait(cx, "issue-worker");
-    // Work on issue goes through the existing native composer queue. Read its
-    // durable receipt through the production route, with canonical workspace identity.
+    // The fixture provider emits this reply only when its delivered user turn
+    // contains both "Linked GitHub issue #7 in fixture/alpha" and
+    // "Issue fixture context." (scripts/next/worker-runtime.ts).
+    // Confirm delivery through history; terminal queue receipts compact wireMessage.
     let sessions = fixture.client.sessions().unwrap();
     let worker = sessions
         .iter()
         .find(|s| s.id == "thoughts-composer-first")
         .unwrap();
-    let mut persisted = Value::Null;
-    for _ in 0..40 {
+    let mut context_received = false;
+    let deadline = Instant::now() + Duration::from_secs(35);
+    while Instant::now() < deadline {
         draw(cx);
-        persisted = fixture.client.queue(worker).unwrap();
-        if persisted["items"].as_array().unwrap().iter().any(|i| {
-            i["payload"]["wireMessage"]
-                .as_str()
-                .unwrap_or("")
-                .contains("Linked GitHub issue #7 in fixture/alpha")
-        }) {
+        context_received = fixture
+            .client
+            .history(&worker.id)
+            .unwrap()
+            .transcript
+            .iter()
+            .any(|entry| {
+                entry.role == "assistant" && entry.text == "Linked issue context received"
+            });
+        if context_received {
             break;
         }
+        std::thread::sleep(Duration::from_millis(20));
     }
-    let item = persisted["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|i| {
-            i["payload"]["wireMessage"]
-                .as_str()
-                .unwrap_or("")
-                .contains("Linked GitHub issue #7 in fixture/alpha")
-        })
-        .expect("issue context persisted in worker task");
     assert!(
-        item["payload"]["wireMessage"]
-            .as_str()
-            .unwrap()
-            .contains("Issue fixture context.")
+        context_received,
+        "fixture provider must receive the linked issue and its body"
     );
+    let history: Value = fixture
+        .client
+        .get("/api/v2/chat-history", &[("tabId", &worker.id)])
+        .unwrap();
     assert_eq!(
-        fs::canonicalize(item["repoPath"].as_str().unwrap()).unwrap(),
+        fs::canonicalize(history["repoPath"].as_str().unwrap()).unwrap(),
         fs::canonicalize(worker.repo_path.as_ref().unwrap()).unwrap()
     );
     println!(
@@ -492,6 +504,9 @@ fn issues_link_follows_worker_selection(cx: &mut TestAppContext) {
     cx.simulate_click(center, gpui::Modifiers::default());
     cx.simulate_keystrokes("tab down");
     wait(cx, "issue-unlinked");
+    // Tab now reaches the composer toolbar; leave from the editor (#5152).
+    let center = cx.debug_bounds("composer-input").unwrap().center();
+    cx.simulate_click(center, gpui::Modifiers::default());
     cx.simulate_keystrokes("escape");
     click(cx, "issue-link-7");
     click(cx, "issue-task-composer");

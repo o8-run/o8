@@ -59,10 +59,16 @@ to the existing server payload limits.
 
 The model chip opens a server-validated model-ID editor, rather than the complete
 current model catalogue. The microphone occupies its footer slot but is disabled;
-native recording and transcription are not implemented. Attach opens a native
-image picker for image-capable runtimes, with up to eight images and a 512 KiB
-per-image limit. The platform file dialog and actual audio hardware are not
-exercised by the headless fixture host.
+native recording and transcription are not implemented. Image-capable runtimes
+accept clipboard images with Command+V, platform image-file drops onto the card,
+and the native image picker. Thumbnail chips have a remove control. All three
+paths share the desktop manual limit of four images and 5 MiB per image, preserving
+original bytes without downscaling. The separate agent upload bridge retains its
+1 MiB cap. Sending is still subject to the existing queue route's data-URI limit
+of fewer than 5,000,000 characters per image. Oversized or unreadable uploads
+show an error. Pending reads belong to their originating draft and block Send.
+The platform file dialog and actual audio hardware are not exercised by the
+headless fixture host.
 
 The tests use GPUI's headless test text system. They establish logical Unicode,
 UTF-16, composition and selection behavior, CPU paint acknowledgement and compact /

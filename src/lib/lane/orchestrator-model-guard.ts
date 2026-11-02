@@ -1,4 +1,4 @@
-import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
+import { ORCHESTRATOR_RUNTIMES, getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { MODEL_IDS } from '@/lib/models';
 
@@ -35,6 +35,17 @@ export function modelBelongsToRuntime(model: string, runtimeId: OrchestratorRunt
 }
 
 /**
+ * The operator's model selection, if any. Threads created without a lead saved
+ * a runtime id ("claude-code", "codex") as their model, and a thread can switch
+ * houses afterwards; a runtime id is no selection, so it neither reaches a CLI
+ * nor counts as an explicit model for effort pins.
+ */
+export function selectedOrchestratorModel(requested: string | undefined): string | undefined {
+  const trimmed = requested?.trim();
+  return trimmed && !Object.hasOwn(ORCHESTRATOR_RUNTIMES, trimmed.toLowerCase()) ? trimmed : undefined;
+}
+
+/**
  * The model an orchestrator turn on `runtimeId` should launch with.
  *
  * A model from another house is a backend mismatch, not an operator choice, so
@@ -48,7 +59,7 @@ export function resolveRuntimeOrchestratorModel(
   defaultModel: string,
   onReject?: (rejected: string, replacement: string, runtimeId: OrchestratorRuntime) => void,
 ): string {
-  const trimmed = requested?.trim();
+  const trimmed = selectedOrchestratorModel(requested);
   if (!trimmed) return defaultModel;
   if (modelBelongsToRuntime(trimmed, runtimeId)) return trimmed;
   onReject?.(trimmed, defaultModel, runtimeId);

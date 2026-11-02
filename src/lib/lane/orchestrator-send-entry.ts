@@ -1,4 +1,6 @@
 import { observeSteerTranscript } from '@/lib/ws-server/steer-transcript-anchor';
+import { assertLlmThread } from '@/lib/bots/network-kind';
+import { observeOrchestratorToolHistory } from '@/lib/orchestrator/tool-history';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { createBackendRoleRouteChoice } from '@/lib/operator/role-routing';
 import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
@@ -45,6 +47,7 @@ export async function sendOrchestratorBackendTurn(
   rawOrchestrationMode: unknown,
   leadingEvents: readonly OrchestratorEvent[] = [],
 ): Promise<void> {
+  assertLlmThread(options.threadId);
   try {
     assertOrchestratorPermissionMode(backend.id, options.permissionMode, options.toolProfile);
   } catch (error) {
@@ -79,8 +82,10 @@ export async function sendOrchestratorBackendTurn(
     });
   };
   const transcript = observeSteerTranscript(repoPath, options.threadId, options.transcriptMessageId ?? options.crashSurvival?.assistantMessageId);
+  const toolHistory = observeOrchestratorToolHistory(repoPath, options.threadId,
+    options.transcriptMessageId ?? options.crashSurvival?.assistantMessageId, backend.id);
   try {
-    return await backend.sendTurn(repoPath, message, event => { transcript.event(event); onEvent(event); }, routedOptions)
+    return await backend.sendTurn(repoPath, message, event => { transcript.event(event); toolHistory.event(event); onEvent(event); }, routedOptions)
       .then(() => {
         record('selected', `${backend.label} completed the orchestrator turn.`);
       })
@@ -88,5 +93,5 @@ export async function sendOrchestratorBackendTurn(
         record('failed', `${backend.label} failed the orchestrator turn: ${error instanceof Error ? error.message : String(error)}`);
         throw error;
       });
-  } finally { transcript.close(); }
+  } finally { transcript.close(); toolHistory.flush(); }
 }

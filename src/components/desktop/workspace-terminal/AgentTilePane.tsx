@@ -16,6 +16,7 @@ import { shortWorkerTitle, workerAttention } from './worker-pane-chrome';
 import { useWorkerPaneSize } from './useWorkerPaneSize';
 import { WorkerPaneHeader, WORKER_ICON_BUTTON } from './WorkerPaneHeader';
 import { WorkerPaneComposer } from './WorkerPaneComposer';
+import { SavedWorkerActions } from '../thoughts/chat-panel/SavedWorkerActions';
 import { useComposerDraftValue } from '../thoughts/chat-panel/composer-draft-store';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import {
@@ -498,7 +499,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       <WorkerPaneHeader title={displayTitle} branch={packet?.branchTarget} issueNumber={packet?.issue?.number}
         runtime={getRuntimeCapability(runtime).label} model={modelLabel} compact={compact} status={status} outcome={Boolean(outcomeState)}
         statusLabel={statusEvidence ? terminalStatusCaption(statusEvidence)
-          : packet?.status === 'archived' ? 'Archived' : packet?.status === 'released' ? 'Complete' : STATUS_META[status].label}
+          : packet?.status === 'archived' ? 'Archived' : packet?.status === 'released' ? 'Complete'
+          : !packet && agent?.status === 'interrupted' ? 'Interrupted' : !packet && agent?.status === 'retired' ? 'Retired' : STATUS_META[status].label}
         actions={<>
           {!outcomeState ? <WorkerReviewAction packet={packet} onOpenReview={onOpenReview} size={24} /> : null}
           <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} size={24} />
@@ -597,6 +599,13 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
             </div>
           ) : null}
         </form>
+      ) : !outcomeState && !packet && sessionKey.includes('-owned:') ? (
+        // A stopped owned worker cannot take a steer, so its pane offers the same saved-session
+        // Resume and Retire controls as its thread card, or says why it cannot continue (#3988).
+        <div data-worker-recovery style={{ flexShrink: 0 }}>
+          <SavedWorkerActions sessionKey={sessionKey} name={displayTitle} status={agent?.status ?? ''}
+            unavailableNote="Stopped. This worker cannot take new messages." />
+        </div>
       ) : null}
     </div>
   );

@@ -1,5 +1,8 @@
 //! Small, ordered shell registries. Contributions and their state live in modules.
 use super::*;
+pub(super) use window_state::persist as persist_window_state;
+#[cfg(test)]
+pub(super) use window_state::settle_test_window;
 use crate::theme::current as theme;
 use gpui::AnyElement;
 use registry::{Frame, KeyResult};
@@ -31,6 +34,11 @@ pub(super) struct PaletteCommands {
     pub order: i32,
     pub collect: fn(&Shell) -> Vec<Command>,
 }
+/// A control in the rail's bottom group, under the usage gauge.
+pub(super) struct RailItem {
+    pub order: i32,
+    pub render: fn(&mut Shell, &mut Window, &mut Context<Shell>) -> Option<AnyElement>,
+}
 pub(super) struct PreferenceObserver {
     pub order: i32,
     pub install: Hook,
@@ -44,6 +52,10 @@ pub(super) struct PaletteCommand {
 }
 
 pub(super) trait ShellFeature: Sync {
+    // Feature-owned connection policy uses the same lifecycle dispatch as surfaces.
+    fn extension(&self) -> Option<&'static dyn registry::ShellExtension> {
+        None
+    }
     fn ticks(&self) -> &'static [TickHook] {
         &[]
     }
@@ -68,6 +80,9 @@ pub(super) trait ShellFeature: Sync {
     fn observers(&self) -> &'static [PreferenceObserver] {
         &[]
     }
+    fn rail(&self) -> &'static [RailItem] {
+        &[]
+    }
 }
 macro_rules! register_shell_feature {
     ($feature:expr) => {
@@ -76,10 +91,28 @@ macro_rules! register_shell_feature {
 }
 include!(concat!(env!("OUT_DIR"), "/shell_features.rs"));
 
+pub(super) use rail_drag::{Pane as RailPane, start_chat};
+pub(super) use rail_more::button as rail_more;
+pub(super) use header::toggle_sidebar;
+
+/// Stable public API; the host remains one discovered shell feature.
+pub(crate) mod toasts_api {
+    #[cfg(test)]
+    pub(crate) use super::toasts::texts;
+    pub(crate) use super::toasts::{
+        Action, CHAT_TIMEOUT, ERROR_TIMEOUT, Kind, NOTICE_TIMEOUT, ToastId, dismiss, show,
+    };
+}
+
 // GPUI entities and subscriptions stay window-local, never in the static registry.
 #[derive(Default)]
 pub(super) struct State(HashMap<TypeId, Box<dyn Any>>);
 impl State {
+    pub fn read<T: Default + 'static>(&self) -> Option<&T> {
+        self.0
+            .get(&TypeId::of::<T>())
+            .and_then(|state| state.downcast_ref())
+    }
     pub fn get<T: Default + 'static>(&mut self) -> &mut T {
         self.0
             .entry(TypeId::of::<T>())
@@ -87,6 +120,11 @@ impl State {
             .downcast_mut()
             .expect("feature state type")
     }
+}
+pub(super) fn extensions() -> impl Iterator<Item = &'static dyn registry::ShellExtension> {
+    modules()
+        .iter()
+        .filter_map(|(_, feature)| feature.extension())
 }
 fn ordered<T: 'static>(
     select: impl Fn(&dyn ShellFeature) -> &'static [T],
@@ -114,6 +152,13 @@ static COMMANDS: LazyLock<Vec<&'static PaletteCommands>> =
     LazyLock::new(|| ordered(|f| f.commands(), |h| h.order));
 static OBSERVERS: LazyLock<Vec<&'static PreferenceObserver>> =
     LazyLock::new(|| ordered(|f| f.observers(), |h| h.order));
+static RAIL: LazyLock<Vec<&'static RailItem>> =
+    LazyLock::new(|| ordered(|f| f.rail(), |h| h.order));
+pub(super) fn rail(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) -> Vec<AnyElement> {
+    RAIL.iter()
+        .filter_map(|item| (item.render)(s, w, cx))
+        .collect()
+}
 pub(super) fn observe(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
     for observer in OBSERVERS.iter() {
         (observer.install)(s, w, cx);

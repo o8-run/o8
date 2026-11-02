@@ -124,7 +124,7 @@ async function main() {
     : surfaceSocket ? await surfaceSocket(server, wsToken, requests)
     : (transcriptFixtures ? attachTranscriptSocket : attachReplaySocket)(server, wsToken, requests);
   let closeTerminal = async () => {};
-  server.listen(0, '127.0.0.1', async () => {
+  server.listen(Number(process.env.O8_NEXT_FIXTURE_PORT || 0), '127.0.0.1', async () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing fixture port');
     Object.assign(process.env, { O8_WS_PORT:String(address.port), WS_PORT:String(address.port), O8_API_PORT:String(address.port) });
@@ -163,4 +163,6 @@ async function main() {
   } else setTimeout(close, 120_000).unref();
 
 }
-void main().catch(error => { console.error('[o8-next]', error); process.exitCode = 1; });
+// A listener opened before the failure would keep this process alive with the
+// receipt never written, leaving the native test blocked on stdout forever.
+void main().catch(error => { console.error('[o8-next]', error); process.exit(1); });

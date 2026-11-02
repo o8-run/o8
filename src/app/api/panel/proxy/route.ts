@@ -122,17 +122,25 @@ function rewriteHtml(html: string, currentUrl: URL, appOrigin: string, xhtml: bo
     XMLHttpRequest.prototype.open = function(method, url, ...rest) { return nativeOpen.call(this, method, resolve(url), ...rest); };
   })();`;
   const bootstrap = `<script>${xhtml ? `//<![CDATA[\n${source}\n//]]>` : source}</script>`;
-  // Only a parsed start tag is an insertion boundary. Head-like page text must
-  // stay inert, and an implied head needs the bootstrap before any page node.
+  // Use parsed boundaries so head-like page text stays inert. With an implied
+  // head, keep the doctype and leading comments ahead of the bootstrap.
   const document = parse(rewritten, { sourceCodeLocationInfo: true });
   const root = document.childNodes.find(node => 'tagName' in node && node.tagName === 'html');
   const head = root && 'childNodes' in root
     ? root.childNodes.find(node => 'tagName' in node && node.tagName === 'head')
     : undefined;
   const headLocation = head && 'tagName' in head ? head.sourceCodeLocation : undefined;
+  let fallbackOffset = document.childNodes[0]?.sourceCodeLocation?.startOffset ?? 0;
+  if (document.childNodes.some(node => node.nodeName === '#documentType')) {
+    for (const node of document.childNodes) {
+      if (node === root) break;
+      fallbackOffset = node.sourceCodeLocation?.endOffset ?? fallbackOffset;
+    }
+    // Whitespace before <html> is not represented in the document's children.
+    fallbackOffset += rewritten.slice(fallbackOffset).match(/^[\t\n\f\r ]*/)?.[0].length ?? 0;
+  }
   const offset = headLocation?.startTag?.endOffset
-    ?? document.childNodes[0]?.sourceCodeLocation?.startOffset
-    ?? 0;
+    ?? fallbackOffset;
   // Insertion can change parsing too. Return only the final document verified
   // by the neutralizer, with no subsequent markup edits.
   return neutralizePreviewRefresh(rewritten.slice(0, offset) + bootstrap + rewritten.slice(offset), xhtml);

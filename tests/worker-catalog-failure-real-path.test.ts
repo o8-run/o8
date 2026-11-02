@@ -2,6 +2,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NextRequest } from 'next/server';
@@ -97,4 +98,42 @@ it('names an invalid catalog request without retrying its client error', async (
   expect(result.content[0]!.text).toContain('HTTP 400');
   expect(result.content[0]!.text).toContain('Unknown worker runtime.');
   expect(fixtures.inventory).not.toHaveBeenCalled();
+});
+
+it.each([400, 408, 429, null])('handles a real HTTP catalog failure (%s) with bounded requests', async status => {
+  vi.unstubAllGlobals();
+  const requests: Array<{ method: string | undefined; url: string | undefined }> = [];
+  const server = createServer((request, response) => {
+    requests.push({ method: request.method, url: request.url });
+    if (status === null) { request.socket.destroy(); return; }
+    response.writeHead(status, { 'Content-Type': 'text/plain' });
+    response.end('Bad Request');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing catalog fixture port');
+    const client = createCortexDelegationHandlers({ apiFetch: async () => ({}),
+      apiBase: `http://127.0.0.1:${address.port}`, repoPath: dataDir,
+      parentThreadId: '', fastCapability: '', wsToken: '' });
+    const result = await client.handleWorkerCatalog({});
+    expect(requests).toHaveLength(status === null ? 3 : 1);
+    expect(requests.every(request => request.method === 'GET'
+      && request.url === `/api/orchestrator/delegate?${new URLSearchParams({ repoPath: dataDir })}`)).toBe(true);
+    expect(delays).toEqual(status === null ? [250, 500] : []);
+    expect(result.isError).toBe(true);
+    const text = result.content[0]!.text;
+    expect(text).toContain('GET /api/orchestrator/delegate');
+    if (status === null) {
+      expect(text).toContain('network; no HTTP response');
+      expect(text).toContain('3 attempts');
+    } else {
+      expect(text).toContain(`HTTP ${status}`);
+      expect(text).toContain('Bad Request');
+      expect(text).not.toContain('3 attempts');
+    }
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 });

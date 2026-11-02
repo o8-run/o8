@@ -1,3 +1,4 @@
+import { assertSettledCompletedWorkspace, canRestoreCompletedWorkspace } from '@/lib/workspace/completed-packet';
 import { lstat } from 'node:fs/promises';
 
 import { NextRequest } from 'next/server';
@@ -297,6 +298,11 @@ export async function GET(request: NextRequest) {
       : restorePath === 'unknown'
         ? 'The original workspace path could not be verified absent; restore remains unavailable.'
         : null;
+    let completedCanPark = false;
+    if (target.lane.status === 'completed') {
+      try { assertSettledCompletedWorkspace(target.lane, undefined, target.snapshot); completedCanPark = true; }
+      catch { /* Fresh settled ownership is required for completed parking. */ }
+    }
     return operatorSuccess({
       schema: 'o8/workspace-control-status/v1',
       packetId,
@@ -306,12 +312,13 @@ export async function GET(request: NextRequest) {
       branch: target.snapshot?.branch ?? target.lane.branch,
       reviewedHead: target.snapshot?.headCommit ?? null,
       reviewFingerprint: target.snapshot?.diffFingerprint ?? null,
-      canPark: target.lane.status === 'reviewing'
+      canPark: (target.lane.status === 'reviewing' || completedCanPark)
         && target.lane.ownership === 'managed'
         && Boolean(target.lane.sessionKey)
         && Boolean(target.lane.worktreePath)
         && state === 'materialized',
-      canRestore: state === 'parked' && restorePath === 'absent',
+      canRestore: state === 'parked' && restorePath === 'absent'
+        && (target.lane.status !== 'completed' || Boolean(target.snapshot && canRestoreCompletedWorkspace(target.lane, target.snapshot))),
       reviewable: state === 'materialized' || state === 'parkable' || state === 'parked',
       note: restorePathNote ?? target.snapshot?.lastError?.message ?? null,
     });

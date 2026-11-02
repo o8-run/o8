@@ -1,0 +1,17 @@
+running 1 test
+test shell::workers::review_tests::workers_restart_outcome_unknown_retry_keeps_one_steer ...
+thread 'shell::workers::review_tests::workers_restart_outcome_unknown_retry_keeps_one_steer' (fixture) panicked at src/surfaces/workers/review_tests.rs:218:5:
+assertion `left == right` failed: retry after a headerless outcome_unknown must not deliver the steer twice
+  left: 2
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::workers::review_tests::workers_restart_outcome_unknown_retry_keeps_one_steer
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 322 filtered out; finished in 6.76s
+
+error: test failed, to rerun pass `--bin o8-next`

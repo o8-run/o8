@@ -12,6 +12,11 @@ export async function installActivityFixture(repo: string) {
   writeFileSync(join(repo, 'activity.txt'), 'Fixture activity\n');
   execFileSync('git', ['-C', repo, 'add', '.']);
   execFileSync('git', ['-C', repo, 'commit', '-qm', 'Fixture local commit']);
+  if (process.argv.includes('--activity-commit')) {
+    writeFileSync(join(repo, 'activity.txt'), 'Fixture activity\nNative commit detail\n');
+    execFileSync('git', ['-C', repo, 'add', 'activity.txt']);
+    execFileSync('git', ['-C', repo, 'commit', '-qm', 'Fixture commit detail']);
+  }
   execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://github.com/example/activity.git']);
   const localClones = process.argv.includes('--activity-local-clones');
   const worktrees = process.argv.includes('--activity-worktrees');
@@ -53,6 +58,10 @@ export async function installActivityFixture(repo: string) {
   }
   let dropped = false;
   const mutations: string[] = [];
+  const closes: string[] = [];
+  const packetReads: string[] = [];
+  const reviews: string[] = [];
+  let slowed = false;
   const calls: string[] = [];
   const date = '2026-10-24T12:00:00Z';
   const pull = { id: 71, number: 7, title: 'Fixture pull request', state: 'open', user: { login: 'fixture' },
@@ -73,10 +82,10 @@ export async function installActivityFixture(repo: string) {
     if (mode === 'refused') return Response.json({ message: 'Fixture rate limit' }, { status: 429, headers: { 'Retry-After': '300' } });
     if (path.endsWith('/actions/runs/91/jobs')) return Response.json({ jobs: [{ id: 92, name: 'Typecheck', conclusion: 'failure', steps: [{ name: 'Compile', conclusion: 'failure' }] }] });
     if (path.endsWith('/actions/runs/91')) return Response.json(mode === 'malformed' ? { ...run, id: 999 } : run);
-    if (path.endsWith('/actions/runs')) return Response.json({ workflow_runs: mode === 'empty' ? [] : [{ ...run, id: fork ? 93 : run.id, conclusion: fork ? 'success' : run.conclusion, head_sha: mode === 'forks' ? 'd'.repeat(7) : mode === 'prefix' ? 'd'.repeat(40) : run.head_sha }] });
+    if (path.endsWith('/actions/runs')) return Response.json({ workflow_runs: mode === 'empty' ? [] : [{ ...run, created_at: mode === 'offset' ? '2026-10-24T15:00:00+04:00' : date, id: fork ? 93 : run.id, conclusion: fork ? 'success' : run.conclusion, head_sha: mode === 'forks' ? 'd'.repeat(7) : mode === 'prefix' ? 'd'.repeat(40) : run.head_sha }] });
     if (path.endsWith('/commits')) return Response.json(mode === 'empty' ? [] : [{ sha: 'd'.repeat(40), commit: { message: 'Fixture remote commit', committer: { date } } }]);
     if (path.endsWith('/pulls/7')) return Response.json(pull);
-    if (path.endsWith('/pulls/7/files')) return Response.json([{ filename: 'activity.txt', additions: 2, deletions: 1 }]);
+    if (path.endsWith('/pulls/7/files')) return Response.json(mode === 'many-files' ? Array.from({ length: 8 }, (_, i) => ({ filename: `activity-${i}.txt`, additions: 2, deletions: 1 })) : [{ filename: 'activity.txt', additions: 2, deletions: 1 }]);
     if (path.endsWith('/pulls')) return Response.json(url.searchParams.get('state') === 'closed' || mode === 'empty' ? [] : [pull]);
     if (path.endsWith('/issues')) return Response.json(url.searchParams.get('state') === 'closed' || mode === 'empty' ? [] : [{ id: 81, number: 8, title: 'Fixture issue', state: 'open', body: 'Fixture issue body', html_url: 'https://github.com/example/activity/issues/8', user: { login: 'fixture' }, labels: [], assignees: [], comments: 0, created_at: date, updated_at: date }]);
     if (path.endsWith('/stack')) return Response.json({}, { status: 404 });
@@ -94,19 +103,56 @@ export async function installActivityFixture(repo: string) {
       workspaceTargetPath: repo, branchTarget: 'fixture', runtime: 'codex', dependencyLabels: [], dependencyPacketIds: [],
       queueState: 'held', releaseState: 'pending', status: 'awaiting_review', blockedReason: null, lane: null, review: null, attemptCount: 1 }], updatedAt: date });
   const commits = await import('../../../src/app/api/panel/commits/route');
+  const commitDetail = await import('../../../src/app/api/panel/commits/[hash]/route');
+  const localHash = execFileSync('git', ['-C', repo, 'rev-parse', '--short=7', 'HEAD'], { encoding: 'utf8' }).trim();
   const prs = await import('../../../src/app/api/panel/prs/route');
   const issues = await import('../../../src/app/api/panel/issues/route');
   const ci = await import('../../../src/app/api/panel/ci/route');
   const detail = await import('../../../src/app/api/panel/ci/[id]/route');
   const pr = await import('../../../src/app/api/panel/pr/route');
+  const prDetail = await import('../../../src/app/api/panel/prs/[number]/route');
   const repos = await import('../../../src/app/api/panel/repos/route');
   const state = await import('../../../src/app/api/orchestrator/state/route');
   const stop = await import('../../../src/app/api/orchestrator/stop-mission/route');
+  const discard = await import('../../../src/app/api/orchestrator/discard-packet/route');
   const routes: Record<string, (request: NextRequest) => Promise<Response>> = {
+    [`GET /api/panel/commits/${localHash}`]: request => commitDetail.GET(request, { params: Promise.resolve({ hash: localHash }) }),
+    [`GET /api/lanes/${laneId}`]: async () => { packetReads.push('lane'); return Response.json({ lane: { worktreePath: repo, repoPath: repo } }); },
+    [`GET /api/lanes/${laneId}/diff`]: async () => {
+      packetReads.push('diff'); if (mode === 'packet-refused') return Response.json({ error: 'Fixture branch read refused' }, { status: 403 });
+      if (mode === 'packet-slow') await new Promise(resolve => setTimeout(resolve, 700));
+      return Response.json({ ok: true, laneId, headSha: 'a'.repeat(40), base: 'main', branch: 'fixture', stat: '6 files changed, 6 insertions(+)',
+        diff: Array.from({ length: 6 }, (_, i) => `diff --git a/src/file-${i}.ts b/src/file-${i}.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/file-${i}.ts\n@@ -0,0 +1 @@\n+export const value${i} = ${i};\n`).join('') });
+    },
+    'GET /api/cortex/directives': async () => Response.json({ directives: [{ id: 'fixture-scope', title: 'Packet scope', body: 'Keep the change within the packet scope.', scope: 'repo', repoName: 'fixture-repo', priority: null, projects: [], recentMerges: [], file: null }] }),
     'GET /api/panel/commits': commits.GET, 'GET /api/panel/prs': prs.GET, 'GET /api/panel/issues': issues.GET,
-    'GET /api/panel/ci': ci.GET, 'GET /api/panel/pr': pr.GET, 'GET /api/panel/repos': repos.GET,
+    'GET /api/panel/ci': ci.GET, 'GET /api/panel/pr': pr.GET,
+    'GET /api/panel/operator-defaults': async () => Response.json({ values: { prLinkDestination: mode === 'browser-pr' ? 'browser' : 'in-app' } }),
+    'GET /api/panel/prs/7': request => prDetail.GET(request, { params: Promise.resolve({ number: '7' }) }),
+    'GET /api/panel/repos': request => mode === 'repos-refused' ? Promise.resolve(Response.json({ error: 'Repository registry temporarily unavailable' }, { status: 503 })) : repos.GET(request),
     'GET /api/panel/ci/91': request => detail.GET(request, { params: Promise.resolve({ id: '91' }) }),
-    'PATCH /api/orchestrator/state': state.PATCH, 'POST /api/orchestrator/stop-mission': stop.POST,
+     'PATCH /api/orchestrator/state': async request => {
+      if (mode === 'packet-hold-slow') await new Promise(resolve => setTimeout(resolve, 500));
+      if (mode === 'packet-hold-refused') return Response.json({ error: 'Fixture packet hold refused' }, { status: 403 });
+      return state.PATCH(request);
+    }, 'POST /api/orchestrator/stop-mission': stop.POST,
+    // `slow-close` answers the first close as still running after the real
+    // route applied it, so the client must replay the same receipt.
+    'POST /api/orchestrator/discard-packet': async request => {
+      closes.push(await request.clone().text());
+      const response = await discard.POST(request);
+      if (mode !== 'slow-close' || slowed) return response;
+      slowed = true;
+      return Response.json({ ok: true, result: { inProgress: true, status: 'in_progress' } }, { status: 202 });
+    },
+    // Real lane verbs drive git and worker processes; the fixture records the
+    // packet card's command and answers like the lanes route does.
+    'POST /api/lanes': async request => {
+      const body = await request.json() as { verb?: string };
+      mutations.push(JSON.stringify(body));
+      if (body.verb === 'merge') return Response.json({ ok: false, note: 'Merge conflict in fixture.ts.' }, { status: 422 });
+      return Response.json({ ok: true, note: body.verb === 'create_pr' ? 'Opened https://github.com/example/activity/pull/8.' : `Lane ${body.verb} sent.` });
+    },
     'GET /api/activity-fixture': async request => {
       mode = request.nextUrl.searchParams.get('mode') ?? mode;
       if (mode === 'drop-stop' || mode === 'stop-ready') updateLane(laneId, { sessionKey: null });
@@ -115,7 +161,7 @@ export async function installActivityFixture(repo: string) {
         const { invalidateGitHubSync } = await import('../../../src/lib/github-broker/store');
         invalidateGitHubSync('example/activity', 'issues'); invalidateGitHubSync('example/activity', 'pull_requests');
       }
-      return Response.json({ mode, calls, repo, laneId, mutations, identityRepos: identityRepos.map(entry => ({
+      return Response.json({ mode, calls, repo, laneId, mutations, closes, packetReads, reviews, identityRepos: identityRepos.map(entry => ({
         id: entry.id, localPath: entry.localPath, remoteUrl: entry.remoteUrl,
         sha: execFileSync('git', ['-C', entry.localPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
         commonDir: execFileSync('git', ['-C', entry.localPath, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' }).trim(),

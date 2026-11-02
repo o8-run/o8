@@ -132,7 +132,7 @@ pub fn init() -> Option<sentry::ClientInitGuard> {
     let guard = sentry::init((
         dsn,
         sentry::ClientOptions {
-            release: Some(env!("CARGO_PKG_VERSION").into()),
+            release: Some(crate::app_version::app_version().into()),
             environment: Some("production".into()),
             send_default_pii: false,
             // Errors only — no performance/tracing.
@@ -160,7 +160,7 @@ pub fn init() -> Option<sentry::ClientInitGuard> {
     ));
 
     sentry::configure_scope(|scope| {
-        scope.set_tag("app_version", env!("CARGO_PKG_VERSION"));
+        scope.set_tag("app_version", crate::app_version::app_version());
         // Plan/founder come from the macOS-gated entitlement module (#1673) —
         // off-macOS builds tag the version + surface only.
         #[cfg(target_os = "macos")]

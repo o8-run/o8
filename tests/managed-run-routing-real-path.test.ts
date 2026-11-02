@@ -139,7 +139,7 @@ await runVersion({ human: false, verbose: false });
     const bundle = join(root, 'o8.mjs');
     await build({ entryPoints: [cli], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
       define: { __O8_CLI_VERSION__: JSON.stringify('test-fixture') },
-      banner: { js: `import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); globalThis.require = require;` } });
+      banner: { js: `import { createRequire as __o8_createRequire } from 'node:module'; const require = __o8_createRequire(import.meta.url); globalThis.require = require;` } });
     const data = join(root, 'data'), bin = join(root, 'bin'), socket = `/tmp/o8-rg-${process.pid}-${Date.now()}`;
     mkdirSync(data); mkdirSync(bin);
     sockets.push(socket);

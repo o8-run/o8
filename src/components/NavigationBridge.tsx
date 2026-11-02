@@ -23,7 +23,7 @@ export default function NavigationBridge() {
   const router = useRouter();
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || (window as Window & { __O8_VOICE_HOST__?: boolean }).__O8_VOICE_HOST__) return;
 
     const navigate = (path: string) => {
       // router.push handles same-origin paths; absolute URLs fall back

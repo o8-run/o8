@@ -53,7 +53,7 @@ pub fn open(app: &tauri::AppHandle, args: Value) -> Result<Value, String> {
 
     // A spoken "open …" implies "show me" — surface the main window first so
     // the change is visible even when o8 was hidden to the tray.
-    if let Some(win) = app.get_webview_window("main") {
+    if let Some(win) = crate::voice_host::classic_window(&app) {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
@@ -119,7 +119,7 @@ pub fn set_setting(app: &tauri::AppHandle, args: Value) -> Result<Value, String>
 
     // A spoken "switch to …" implies "show me" — bring the window forward so the
     // change is visible, same as `open`.
-    if let Some(win) = app.get_webview_window("main") {
+    if let Some(win) = crate::voice_host::classic_window(&app) {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
@@ -147,7 +147,7 @@ pub fn orchestrator_draft(app: &tauri::AppHandle, args: Value) -> Result<Value, 
     if message.is_empty() {
         return Err("o8_orchestrator_draft needs a 'message'".into());
     }
-    if let Some(win) = app.get_webview_window("main") {
+    if let Some(win) = crate::voice_host::classic_window(&app) {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();

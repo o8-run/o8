@@ -113,7 +113,8 @@ it.each([
   const command = async (control = false) => act(async () => input.dispatchEvent(new KeyboardEvent('keydown', {
     key: 'b', metaKey: !control, ctrlKey: control, bubbles: true, cancelable: true,
   })));
-  expect(aside.style.display).toBe(initiallyOpen && width >= 1280 ? 'flex' : 'none');
+  // A saved open preference restores the compact drawer as well as the wide column.
+  expect(aside.style.display).toBe(initiallyOpen ? 'flex' : 'none');
   if (aside.style.display === 'flex') await act(async () => toggle().click());
   expect(aside.style.display).toBe('none');
   // Hover and pointer departure do not turn a collapsed list into a pinned list.

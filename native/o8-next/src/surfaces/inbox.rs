@@ -1,7 +1,7 @@
 use super::*;
 use serde_json::{Value, json};
 
-use crate::inbox::{Inbox, OpenSession};
+use crate::inbox::{Inbox, OpenSession, ReplyContext};
 pub(super) type Slice = EmptyState;
 pub(super) type Runtime = ();
 pub(super) type View = Inbox;
@@ -46,11 +46,22 @@ fn create(
                 this.capture(window, cx);
                 this.persist();
             } else {
-                this.notice =
-                    "Related session is unavailable. Refresh the server connection and try again."
-                        .into();
+                toasts::show(
+                    toasts::Kind::Info,
+                    "Related session is unavailable. Refresh the server connection and try again.",
+                    vec![],
+                    Some(toasts::NOTICE_TIMEOUT),
+                    cx,
+                );
                 cx.notify();
             }
+        },
+    ));
+    shell.subscriptions.push(cx.subscribe_in(
+        &inbox,
+        window,
+        |this, _, request: &ReplyContext, window, cx| {
+            this.inbox_prepare_reply(request.clone(), window, cx)
         },
     ));
     Some(Content::Inbox(inbox))
@@ -100,3 +111,7 @@ mod tests;
 #[cfg(test)]
 #[path = "../inbox_tests.rs"]
 mod tests1;
+
+#[cfg(test)]
+#[path = "inbox_reply_tests.rs"]
+mod reply_tests;

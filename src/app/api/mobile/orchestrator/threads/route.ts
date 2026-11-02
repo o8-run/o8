@@ -1,3 +1,4 @@
+import { createParkedWorkspaceContext, parkedWorkspaceProjection } from '@/lib/inbox/parked-workspaces';
 export const dynamic = 'force-dynamic';
 
 /**
@@ -15,6 +16,9 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { legacyInboxPin } from '@/lib/inbox/preferences';
+import { inboxProjection, inboxRunStartedAt, inboxSubject } from '@/lib/inbox/store';
+import { threadGitContext } from '@/lib/repos/thread-git-context';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileOrchestratorBackend } from '@/lib/mobile/types';
 import { OrchestratorThreadProjectError } from '@/lib/mobile/orchestrator-thread-project';
@@ -59,7 +63,16 @@ export async function GET(request: NextRequest) {
 
   try {
     const threads = listMobileOrchestratorThreads({ backend, limit, ...(offset === undefined ? {} : { offset }) });
-    return NextResponse.json({ threads }, { headers: NO_STORE });
+    const parked = createParkedWorkspaceContext();
+    return NextResponse.json({ threads: threads.map(thread => {
+      const subject = inboxSubject('conversation', thread.id, thread.repoPath, thread.projectId);
+      const projection = inboxProjection(subject, null, undefined, legacyInboxPin(thread));
+      // Additive sidebar context: owner/repo (or folder) and the worktree's live branch.
+      const git = threadGitContext(thread.repoPath);
+      const remoteSlug = thread.githubOwner && thread.githubRepo ? `${thread.githubOwner}/${thread.githubRepo}` : null;
+      return { ...thread, ...projection, ...parkedWorkspaceProjection(subject, parked), pinned: projection.pinnedAt != null,
+        repoSlug: remoteSlug ?? git.repoSlug ?? thread.repoName, branch: git.branch ?? thread.repoBranch, runStartedAt: inboxRunStartedAt(subject) };
+    }) }, { headers: NO_STORE });
   } catch (error) {
     console.log('[mobile-orchestrator] thread list failed', error);
     return NextResponse.json({ threads: [] }, { headers: NO_STORE });

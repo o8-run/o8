@@ -56,6 +56,13 @@ export function visibleRuntimeInventory<T extends SetupRuntime>(
     || selected.includes(item.id));
 }
 
+/** Drop runtimes turned off in Settings › Providers from new-session pickers. */
+export function enabledRuntimeInventory<T extends SetupRuntime>(
+  inventory: readonly T[], disabled: readonly string[] = [],
+): T[] {
+  return inventory.filter((item) => !disabled.includes(item.id));
+}
+
 export function runtimeForLead(backend: OrchestratorBackendSetting | null, inventory: readonly SetupRuntime[] = []): OrchestratorRuntime | null {
   const builtIn = builtInAgentFromInventory(inventory);
   if (builtIn?.builtIn?.backend === backend) return builtIn.id;

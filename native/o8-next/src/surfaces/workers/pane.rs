@@ -11,6 +11,7 @@ use std::time::Instant;
 pub struct Workers {
     client: Client,
     workspace: String,
+    drafts: std::path::PathBuf,
     pub cards: HashMap<String, Entity<Card>>,
     order: Vec<String>,
     pub filter: usize,
@@ -26,10 +27,16 @@ pub struct Workers {
     pub notice: String,
 }
 impl Workers {
-    pub fn new(client: Client, workspace: String, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        client: Client,
+        workspace: String,
+        drafts: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut this = Self {
             client,
             workspace,
+            drafts,
             cards: HashMap::new(),
             order: vec![],
             filter: 0,
@@ -123,6 +130,27 @@ impl Workers {
                     });
                 }
             }
+            "tab" => {
+                let id = self
+                    .selected
+                    .as_ref()
+                    .filter(|id| {
+                        self.cards
+                            .get(*id)
+                            .is_some_and(|c| c.read(cx).task.filter == self.filter)
+                    })
+                    .cloned()
+                    .or_else(|| {
+                        self.order
+                            .iter()
+                            .find(|id| self.cards[*id].read(cx).task.filter == self.filter)
+                            .cloned()
+                    });
+                if let Some(id) = id {
+                    self.select(Some(id.clone()), cx);
+                    self.cards[&id].read(cx).focus_actions(window);
+                }
+            }
             "f5" => self.load(cx),
             _ => return,
         }
@@ -162,7 +190,12 @@ impl Workers {
                                 this.cards.insert(
                                     task.id.clone(),
                                     cx.new(|cx| {
-                                        Card::new(this.client.clone(), task, this.compact, cx)
+                                        let slot = super::drafts::Slot::new(
+                                            this.drafts.clone(),
+                                            &this.workspace,
+                                            &task.id,
+                                        );
+                                        Card::new(this.client.clone(), task, this.compact, slot, cx)
                                     }),
                                 );
                             }
@@ -274,7 +307,8 @@ impl Render for Workers {
                     })
                     .cursor_pointer()
                     .child(format!("{label} {}", counts[filter]))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.focus.focus(window);
                         this.filter = filter;
                         cx.notify();
                     })),
@@ -348,6 +382,9 @@ impl Render for Workers {
             .debug_selector(|| "workers-pane".into())
             .size_full()
             .track_focus(&self.focus)
+            .tab_group()
+            .tab_index(-1)
+            .tab_stop(false)
             .on_key_down(cx.listener(Self::key_down))
             .font_family(theme().font_ui)
             .font_weight(gpui::FontWeight::LIGHT)

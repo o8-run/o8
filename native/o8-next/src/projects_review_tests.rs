@@ -44,7 +44,8 @@ fn review_p1_rejects_duplicate_rename_before_deleting_alpha(cx: &mut TestAppCont
     );
     let cx = &mut visual;
     settle(cx);
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     click(cx, "project-edit-review-alpha");
     fill(cx, "project-name", "  Review beta  ");
     click(cx, "project-save");
@@ -100,7 +101,8 @@ fn review_p1_deletes_existing_duplicate_by_stable_id(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     settle(cx);
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     click(cx, "project-delete-review-beta-2");
     click(cx, "projects-confirm");
     assert!(
@@ -161,7 +163,8 @@ fn repointed_open(cx: &mut TestAppContext, selector: &'static str) {
     );
     let cx = &mut visual;
     settle(cx);
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     // Change the production registry after the native controls captured their snapshot.
     fixture
         .client
@@ -221,7 +224,8 @@ fn round2_project_delete_refuses_unconfirmed_runtime(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     settle(cx);
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     click(cx, "project-delete-review-alpha");
     click(cx, "projects-confirm");
     assert!(
@@ -271,7 +275,8 @@ fn legacy_shell(cx: &mut TestAppContext) -> (Fixture, Entity<Shell>, VisualTestC
         cx,
     );
     settle(&mut visual);
-    click(&mut visual, "shell-projects");
+    click(&mut visual, "rail-more");
+    click(&mut visual, "rail-more-projects");
     (fixture, shell, visual, id)
 }
 
@@ -368,7 +373,8 @@ fn round2_legacy_desktop_rename_before_native_read_keeps_one_pair(cx: &mut TestA
     );
     let cx = &mut visual;
     settle(cx);
-    click(cx, "shell-projects");
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     assert_eq!(
         projects(&fixture).len(),
         2,

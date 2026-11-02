@@ -9,6 +9,7 @@ import { sharedConditionalGitHubRead } from './conditional-read';
 import { isSecondaryGitHubLimit } from './rate-limit-response';
 import { GitHubOrgNotCoveredError, githubRepoAccessKey, managedGitHubOwnerMatches, publicGitHubDecision } from './repo-access';
 import { publicGitHubRead } from './public-read';
+import { withGitHubAbort } from './abort';
 
 const INSTALLATION_TOKEN_TTL_SKEW_MS = 60_000;
 const installationTokenCache = new Map<number, { token: string; expiresAtMs: number }>();
@@ -93,6 +94,7 @@ async function createAppJwt() {
 async function githubAppFetch(path: string, init?: RequestInit) {
   const config = requireGitHubAppConfig();
   const jwt = await createAppJwt();
+  init?.signal?.throwIfAborted();
   return fetch(`${config.apiBaseUrl}${path}`, {
     ...init,
     headers: githubHeaders(jwt, init?.headers),
@@ -133,6 +135,7 @@ export async function getInstallationForRepo(repoFullName: string, signal?: Abor
   }
   const response = await githubAppFetch(`/repos/${repoFullName}/installation`, { signal });
   const text = await response.text();
+  signal?.throwIfAborted();
   if (!response.ok) {
     throw buildGitHubError(response, text);
   }
@@ -163,6 +166,7 @@ export async function getInstallationToken(installationId: number, signal?: Abor
     signal,
   });
   const text = await response.text();
+  signal?.throwIfAborted();
   if (!response.ok) {
     throw buildGitHubError(response, text);
   }
@@ -177,6 +181,7 @@ export async function getInstallationToken(installationId: number, signal?: Abor
 
 export async function githubInstallationFetch(repoFullName: string, path: string, init?: RequestInit,
   readOptions: { priority?: GitHubReadPriority; share?: boolean; authorization?: GitHubInstallationAuthorization } = {}) {
+  init?.signal?.throwIfAborted();
   const authorization = readOptions.authorization;
   const isRead = !init?.method || init.method === 'GET';
   const config = getGitHubAppConfig();
@@ -202,26 +207,27 @@ export async function githubInstallationFetch(repoFullName: string, path: string
     if (!isRead || authorization) throw new GitHubOrgNotCoveredError();
     return anonymousRead();
   }
-  const installation = authorization ? authorization.installation : await getInstallationForRepo(repoFullName, init?.signal ?? undefined);
-  const token = authorization ? authorization.token : await getInstallationToken(installation.id, init?.signal ?? undefined);
+  const installation = authorization ? authorization.installation : await withGitHubAbort(init?.signal, () => getInstallationForRepo(repoFullName, init?.signal ?? undefined));
+  const token = authorization ? authorization.token : await withGitHubAbort(init?.signal, () => getInstallationToken(installation.id, init?.signal ?? undefined));
   // Managed mode has NO BYO config — requireGitHubAppConfig() would throw here
   // even though we hold a valid token (audit #1, the bug that made every managed
   // GitHub call fail). The API base is always public GitHub in managed mode.
   const scope = githubCredentialScope(apiBaseUrl, installation.id, token);
   const budgetScope = githubCredentialScope(apiBaseUrl, installation.id, 'installation-budget');
   const resource = path === '/graphql' ? 'graphql' : path.startsWith('/search/') ? 'search' : 'core';
-  const read = async (etag?: string) => {
+  const read = async (etag?: string, signal = init?.signal) => {
+    signal?.throwIfAborted();
     assertGitHubRequestBudget(budgetScope, resource, readOptions.priority ?? 'interactive');
     const headers = new Headers(githubHeaders(token, init?.headers)); if (etag) headers.set('If-None-Match', etag);
     // No await between this guard and dispatch. Never resolve another account's
     // token after a creation has been reserved for the captured account.
     if (authorization) requireGitHubAccount(authorization.account);
-    const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, cache: 'no-store', redirect: 'manual' });
-    observeGitHubRequestBudget(budgetScope, resource, response, Date.now(), await isSecondaryGitHubLimit(response));
+    const response = await withGitHubAbort(signal, () => fetch(`${apiBaseUrl}${path}`, { ...init, signal, headers, cache: 'no-store', redirect: 'manual' }));
+    observeGitHubRequestBudget(budgetScope, resource, response, Date.now(), await withGitHubAbort(signal, () => isSecondaryGitHubLimit(response)));
     if (response.status === 403 || response.status === 429) assertGitHubRequestBudget(budgetScope, resource, 'interactive');
     // Retry only reads. Never use public fallback to authorize a mutation.
     if (isRead && !authorization && (response.status === 404 || response.status === 301 || response.status === 308)) {
-      await response.body?.cancel().catch(() => {});
+      void response.body?.cancel().catch(() => {});
       // Leave the installation cache before changing transport/credential scope.
       throw new AnonymousReadRequired();
     }
@@ -229,7 +235,7 @@ export async function githubInstallationFetch(repoFullName: string, path: string
   };
   try {
     const response = readOptions.share && (!init?.method || init.method === 'GET')
-      ? await sharedConditionalGitHubRead(JSON.stringify([scope, repoFullName.toLowerCase(), path]), read) : await read();
+      ? await sharedConditionalGitHubRead(JSON.stringify([scope, repoFullName.toLowerCase(), path]), read, { signal: init?.signal }) : await read();
     // A concurrent public decision cannot relabel an installation response.
     return { response, installation, scope, anonymous: false };
   } catch (error) {

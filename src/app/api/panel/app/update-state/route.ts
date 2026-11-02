@@ -1,7 +1,7 @@
 import { recoverStoppedNativeTask } from '@/lib/app-update/native-task';
 import { NextResponse } from 'next/server';
 import { getRequestedCheckTime } from '@/lib/app-update/fresh-check';
-import { controlAutoApply } from '@/lib/app-update/auto-apply';
+import { controlAutoApply, getNativeApplyRequestTime } from '@/lib/app-update/auto-apply';
 import { updateCheckTicket } from '@/lib/app-update/check-order';
 
 import {
@@ -26,7 +26,8 @@ function invalidState(code: string, message: string) {
 }
 
 export async function GET() {
-  return NextResponse.json({ ok: true, state: getAppUpdateState(), checkRequestedAt: getRequestedCheckTime() }, { headers: NO_STORE_HEADERS });
+  return NextResponse.json({ ok: true, state: getAppUpdateState(), checkRequestedAt: getRequestedCheckTime(),
+    applyRequestedAt: getNativeApplyRequestTime() }, { headers: NO_STORE_HEADERS });
 }
 
 export async function POST(request: Request) {

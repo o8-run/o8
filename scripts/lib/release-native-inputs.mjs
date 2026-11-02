@@ -112,7 +112,8 @@ export function nativeBuildSettings(root, buildOptions = {}, env = process.env) 
     }
   }
   if (!hasOverrides && env.TAURI_CONFIG) apply(parseConfig(env.TAURI_CONFIG));
-  if (!buildOptions.nativeArtifact) delete effective.version;
+  // The executable reads its version at runtime; the bundle step stamps it.
+  delete effective.version;
   const frontendDist = effective.build?.frontendDist;
   const files = Array.isArray(frontendDist);
   const embedded = (files ? frontendDist : frontendDist ? [frontendDist] : [])

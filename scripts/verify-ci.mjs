@@ -23,7 +23,7 @@ function run(step) {
   const dataDir = step.temporaryData ? mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-smoke-')) : null;
   const env = { ...environment(), ...step.env, ...(dataDir ? { CORTEX_IDE_DATA_DIR: dataDir } : {}) };
   let command = step.command;
-  if (step.selectedFiles || step.requiresBrowser) {
+  if (step.selectedFiles || step.requiresBrowser || step.requiresIntegration) {
     const selected = spawnSync(process.execPath, ['scripts/ci/resource-owning-changed.mjs', 'origin/main', '--worktree'], {
       cwd: root, env, encoding: 'utf8', timeout: step.timeoutMs, maxBuffer: 4 * 1024 * 1024,
     });
@@ -134,7 +134,10 @@ try {
             deadline += waitMs;
             if (waitMs > 0) console.log(`[verify:ci] excludes local queue wait from ${check.name}: ${waitMs}ms`);
           }
-        })) passed = false;
+        })) {
+          passed = false;
+          if (step.stopOnFailure) break;
+        }
         if (interrupted) break;
       }
       const required = await Promise.all((check.requiredResults ?? []).map(id => tasks.get(id)));

@@ -14,7 +14,7 @@ use block::ConcreteBlock;
 use cocoa::{
     appkit::{
         NSAppKitVersionNumber, NSAppKitVersionNumber12_0, NSApplication, NSBackingStoreBuffered,
-        NSColor, NSEvent, NSEventModifierFlags, NSFilenamesPboardType, NSPasteboard, NSScreen,
+        NSColor, NSEvent, NSEventModifierFlags, NSEventType, NSFilenamesPboardType, NSPasteboard, NSScreen,
         NSView, NSViewHeightSizable, NSViewWidthSizable, NSVisualEffectMaterial,
         NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowButton,
         NSWindowCollectionBehavior, NSWindowOcclusionState, NSWindowOrderingMode,
@@ -131,6 +131,10 @@ unsafe fn build_classes() {
                 decl.add_method(
                     sel!(mouseDown:),
                     handle_view_event as extern "C" fn(&Object, Sel, id),
+                );
+                decl.add_method(
+                    sel!(_opaqueRectForWindowMoveWhenInTitlebar),
+                    opaque_rect_for_window_move as extern "C" fn(&Object, Sel) -> NSRect,
                 );
                 decl.add_method(
                     sel!(mouseUp:),
@@ -408,6 +412,7 @@ struct MacWindowState {
     should_close_callback: Option<Box<dyn FnMut() -> bool>>,
     close_callback: Option<Box<dyn FnOnce()>>,
     appearance_changed_callback: Option<Box<dyn FnMut()>>,
+    hit_test_window_control_callback: Option<Box<dyn FnMut() -> Option<WindowControlArea>>>,
     input_handler: Option<PlatformInputHandler>,
     last_key_equivalent: Option<KeyDownEvent>,
     synthetic_drag_counter: usize,
@@ -718,6 +723,7 @@ impl MacWindow {
                 should_close_callback: None,
                 close_callback: None,
                 appearance_changed_callback: None,
+                hit_test_window_control_callback: None,
                 input_handler: None,
                 last_key_equivalent: None,
                 synthetic_drag_counter: 0,
@@ -1447,7 +1453,8 @@ impl PlatformWindow for MacWindow {
         self.0.as_ref().lock().close_callback = Some(callback);
     }
 
-    fn on_hit_test_window_control(&self, _callback: Box<dyn FnMut() -> Option<WindowControlArea>>) {
+    fn on_hit_test_window_control(&self, callback: Box<dyn FnMut() -> Option<WindowControlArea>>) {
+        self.0.lock().hit_test_window_control_callback = Some(callback);
     }
 
     fn on_appearance_changed(&self, callback: Box<dyn FnMut()>) {
@@ -1543,45 +1550,7 @@ impl PlatformWindow for MacWindow {
         let this = self.0.lock();
         let window = this.native_window;
         this.executor
-            .spawn(async move {
-                unsafe {
-                    let defaults: id = NSUserDefaults::standardUserDefaults();
-                    let domain = NSString::alloc(nil).init_str("NSGlobalDomain");
-                    let key = NSString::alloc(nil).init_str("AppleActionOnDoubleClick");
-
-                    let dict: id = msg_send![defaults, persistentDomainForName: domain];
-                    let action: id = if !dict.is_null() {
-                        msg_send![dict, objectForKey: key]
-                    } else {
-                        nil
-                    };
-
-                    let action_str = if !action.is_null() {
-                        CStr::from_ptr(NSString::UTF8String(action)).to_string_lossy()
-                    } else {
-                        "".into()
-                    };
-
-                    match action_str.as_ref() {
-                        "None" => {
-                            // "Do Nothing" selected, so do no action
-                        }
-                        "Minimize" => {
-                            window.miniaturize_(nil);
-                        }
-                        "Maximize" => {
-                            window.zoom_(nil);
-                        }
-                        "Fill" => {
-                            // There is no documented API for "Fill" action, so we'll just zoom the window
-                            window.zoom_(nil);
-                        }
-                        _ => {
-                            window.zoom_(nil);
-                        }
-                    }
-                }
-            })
+            .spawn(async move { titlebar_double_click_action(window) })
             .detach();
     }
 }
@@ -1624,6 +1593,89 @@ fn get_scale_factor(native_window: id) -> f32 {
     // it was rendered for real.
     // Regardless, attempt to avoid the issue here.
     if factor == 0.0 { 2. } else { factor }
+}
+
+/// Runs the system title bar double-click action (AppleActionOnDoubleClick).
+fn titlebar_double_click_action(window: id) {
+    unsafe {
+        let defaults: id = NSUserDefaults::standardUserDefaults();
+        let domain = NSString::alloc(nil).init_str("NSGlobalDomain");
+        let key = NSString::alloc(nil).init_str("AppleActionOnDoubleClick");
+
+        let dict: id = msg_send![defaults, persistentDomainForName: domain];
+        let action: id = if !dict.is_null() {
+            msg_send![dict, objectForKey: key]
+        } else {
+            nil
+        };
+
+        let action_str = if !action.is_null() {
+            CStr::from_ptr(NSString::UTF8String(action)).to_string_lossy()
+        } else {
+            "".into()
+        };
+
+        match action_str.as_ref() {
+            "None" => {
+                // "Do Nothing" selected, so do no action
+            }
+            "Minimize" => {
+                window.miniaturize_(nil);
+            }
+            "Maximize" => {
+                window.zoom_(nil);
+            }
+            "Fill" => {
+                // There is no documented API for "Fill" action, so we'll just zoom the window
+                window.zoom_(nil);
+            }
+            _ => {
+                window.zoom_(nil);
+            }
+        }
+    }
+}
+
+/// AppKit moves a transparent-titlebar window from any drag in its title band,
+/// including drags meant for content laid over it, unless the view under the
+/// band reports itself opaque through this private method (as WKWebView does).
+/// Drag areas move the window instead (see `begin_window_drag`).
+extern "C" fn opaque_rect_for_window_move(this: &Object, _: Sel) -> NSRect {
+    unsafe { msg_send![this, bounds] }
+}
+
+/// A left press whose topmost hitbox is a `WindowControlArea::Drag` moves the
+/// window, and a double press runs the title bar's double-click action.
+unsafe fn begin_window_drag(window_state: &Arc<Mutex<MacWindowState>>, native_event: id) -> bool {
+    unsafe {
+        if native_event.eventType() != NSEventType::NSLeftMouseDown
+            || native_event
+                .modifierFlags()
+                .contains(NSEventModifierFlags::NSControlKeyMask)
+        {
+            return false;
+        }
+        let Some(mut callback) = window_state.lock().hit_test_window_control_callback.take() else {
+            return false;
+        };
+        let area = callback();
+        window_state.lock().hit_test_window_control_callback = Some(callback);
+        if area != Some(WindowControlArea::Drag) {
+            return false;
+        }
+        let (window, executor) = {
+            let lock = window_state.lock();
+            (lock.native_window, lock.executor.clone())
+        };
+        if native_event.clickCount() == 2 {
+            executor
+                .spawn(async move { titlebar_double_click_action(window) })
+                .detach();
+        } else {
+            let _: () = msg_send![window, performWindowDragWithEvent: native_event];
+        }
+        true
+    }
 }
 
 unsafe fn get_window_state(object: &Object) -> Arc<Mutex<MacWindowState>> {
@@ -1817,6 +1869,9 @@ extern "C" fn handle_key_event(this: &Object, native_event: id, key_equivalent: 
 
 extern "C" fn handle_view_event(this: &Object, _: Sel, native_event: id) {
     let window_state = unsafe { get_window_state(this) };
+    if unsafe { begin_window_drag(&window_state, native_event) } {
+        return;
+    }
     let weak_window_state = Arc::downgrade(&window_state);
     let mut lock = window_state.as_ref().lock();
     let window_height = lock.content_size().height;

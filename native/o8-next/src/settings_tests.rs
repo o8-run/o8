@@ -6,7 +6,8 @@ use gpui::Modifiers;
 fn click(cx: &mut VisualTestContext, selector: &str) {
     draw(cx);
     let selector: &'static str = Box::leak(selector.to_owned().into_boxed_str());
-    if selector.starts_with("key-")
+    if selector.starts_with("settings-nav-")
+        || selector.starts_with("key-")
         || selector.starts_with("setting-")
         || selector.starts_with("edit-")
         || selector.starts_with("settings-confirm-")
@@ -17,16 +18,23 @@ fn click(cx: &mut VisualTestContext, selector: &str) {
                 .debug_bounds(selector)
                 .unwrap_or_else(|| panic!("missing native control: {selector}"));
             let viewport = cx
-                .debug_bounds("settings-scroll")
+                .debug_bounds(if selector.starts_with("settings-nav-") {
+                    "settings-navigation"
+                } else {
+                    "settings-scroll"
+                })
                 .expect("settings scroll viewport");
-            if viewport.contains(&target.center()) {
+            if viewport.contains(&target.center())
+                && target.top() >= viewport.top()
+                && target.bottom() <= viewport.bottom()
+            {
                 break;
             }
             cx.simulate_event(gpui::ScrollWheelEvent {
                 position: viewport.center(),
                 delta: gpui::ScrollDelta::Pixels(gpui::point(
                     gpui::px(0.),
-                    gpui::px(if target.center().y > viewport.bottom() {
+                    gpui::px(if target.bottom() > viewport.bottom() {
                         -200.
                     } else {
                         200.
@@ -185,9 +193,26 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
     search(cx, "presentationQuietMode");
     click(cx, "setting-presentationQuietMode");
     settle(cx);
+    // An Off/On choice is a switch: one click flips the saved word.
+    search(cx, "notificationsReviewReady");
+    let review = values(&fixture)["notificationsReviewReady"].clone();
+    frames.push(timed_action(&shell, cx, "setting-notificationsReviewReady"));
+    assert_eq!(
+        error(&shell, cx),
+        None,
+        "native switch notificationsReviewReady"
+    );
+    assert_eq!(
+        values(&fixture)["notificationsReviewReady"],
+        if review == "on" {
+            json!("off")
+        } else {
+            json!("on")
+        },
+        "persisted notificationsReviewReady"
+    );
     // Selectors are the choices shown by desktop Settings, not arbitrary JSON writes.
     for (field, index, expected) in [
-        ("notificationsReviewReady", 0, json!("off")),
         ("overlapGate", 1, json!("strict")),
         ("requireApproval", 0, json!("always")),
         ("updateAutoApply", 0, json!("off")),
@@ -206,6 +231,7 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
             cx,
             &format!("setting-{field}-{index}"),
         ));
+        assert_eq!(error(&shell, cx), None, "native selector {field}");
         assert_eq!(values(&fixture)[field], expected, "persisted {field}");
     }
     for (field, text, expected) in [
@@ -226,6 +252,11 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
     ] {
         edit(cx, field, text);
         frames.push(timed_action(&shell, cx, "settings-save"));
+        assert_eq!(error(&shell, cx), None, "native save {field}");
+        assert!(
+            cx.debug_bounds("settings-editor").is_none(),
+            "saved editor must close: {field}"
+        );
         assert_eq!(values(&fixture)[field], expected, "persisted {field}");
     }
     // A second desktop-shaped client changes the same file. The next native
@@ -271,14 +302,7 @@ fn settings_fixture_validation_locks_loading_errors_and_empty(cx: &mut TestAppCo
     frame(&shell, cx);
     let notifications = values(&fixture)["notificationsReviewReady"].clone();
     search(cx, "notificationsReviewReady");
-    click(
-        cx,
-        if notifications == "on" {
-            "setting-notificationsReviewReady-0"
-        } else {
-            "setting-notificationsReviewReady-1"
-        },
-    );
+    click(cx, "setting-notificationsReviewReady");
     settle(cx);
     assert_eq!(
         values(&fixture)["notificationsReviewReady"],
@@ -349,9 +373,6 @@ fn settings_fixture_validation_locks_loading_errors_and_empty(cx: &mut TestAppCo
         "/__fixture/settings",
         json!({"delayMs":150}),
     );
-    // simulate_click drains background work before returning. Observe the
-    // notified pending state during the real click, rather than checking it
-    // after the fixture response has already arrived.
     let pending = std::rc::Rc::new(std::cell::Cell::new(false));
     let observed = pending.clone();
     let settings = shell.read_with(cx, |s, _| {
@@ -364,14 +385,32 @@ fn settings_fixture_validation_locks_loading_errors_and_empty(cx: &mut TestAppCo
             }
         })
     });
-    click(cx, "settings-refresh");
+    // Dispatch the real mouse events without simulate_click's executor drain,
+    // so the pending scene is inspected before the HTTP response is consumed.
     draw(cx);
+    let position = cx.debug_bounds("settings-refresh").unwrap().center();
+    cx.simulate_event_without_wait(gpui::MouseDownEvent {
+        position,
+        button: gpui::MouseButton::Left,
+        click_count: 1,
+        ..Default::default()
+    });
+    cx.simulate_event_without_wait(gpui::MouseUpEvent {
+        position,
+        button: gpui::MouseButton::Left,
+        click_count: 1,
+        ..Default::default()
+    });
+    draw(cx);
+    assert!(shell.read_with(cx, |s, cx| {
+        s.surfaces.settings.view.as_ref().unwrap().read(cx).busy
+    }));
     assert!(
         pending.get(),
         "the pending read must notify a loading state"
     );
-    drop(subscription);
     assert!(cx.debug_bounds("settings-loading").is_some());
+    drop(subscription);
     settle(cx);
     request(
         &fixture,
@@ -562,3 +601,27 @@ fn settings_fixture_toml_save_reload_conflict_and_cancel(cx: &mut TestAppContext
 
 #[path = "settings_review_tests.rs"]
 mod review;
+
+#[gpui::test]
+fn settings_fixture_controls_and_toml_editor_fit_the_workspace(cx: &mut TestAppContext) {
+    let (_fixture, _shell, mut visual, _) = start(cx);
+    for (width, height) in [(900., 700.), (1200., 816.), (1680., 1050.)] {
+        visual.simulate_resize(gpui::size(gpui::px(width), gpui::px(height)));
+        draw(&mut visual);
+        let page = visual.debug_bounds("settings-page").unwrap();
+        assert!(
+            page.right() <= gpui::px(width),
+            "settings must stay in the workspace: {page:?}"
+        );
+    }
+    click(&mut visual, "settings-file-open");
+    settle(&mut visual);
+    let editor = visual.debug_bounds("settings-editor").unwrap();
+    assert!(
+        editor.right() <= gpui::px(1680.),
+        "the TOML input must receive real pointer input inside the window"
+    );
+}
+
+#[path = "settings_parity_tests.rs"]
+mod parity;

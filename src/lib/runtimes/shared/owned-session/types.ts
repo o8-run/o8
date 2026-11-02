@@ -159,6 +159,8 @@ export interface OwnedSessionRecord {
   /** Packet ownership ended without process-exit proof; keep recovery data but hide active discovery. */
   detachedAt?: string;
   detachedReason?: string;
+  /** Explicit operator retirement; the checkout, branch and transcript are retained. */
+  retiredAt?: string;
 }
 
 export interface OwnedWorkspaceBinding {
@@ -500,14 +502,16 @@ export interface OwnedSessionStore {
   getFleetAdditions(options?: { fresh?: boolean }): Promise<OwnedFleetAdditions>;
   sessionState(surfaceId: string): Promise<OwnedSessionState>;
   archiveSession(surfaceId: string, workspace?: string): Promise<OwnedArchiveResponse>;
+  retireSession?(surfaceId: string): Promise<{ retired: boolean; note: string }>;
   setDetachedSession?(surfaceId: string, reason: string | null): Promise<{
     updated: boolean;
     previouslyDetached: boolean;
     note: string;
   }>;
   /** #1292 — archive owned-session dirs not bound to an active lane (orphans) so
-   *  discovery can't re-spawn phantom lanes. Skips active/in-flight sessions. */
-  sweepOrphanedSessions(activeSurfaceIds: Set<string>, maxAgeMs: number): Promise<number>;
+   *  discovery can't re-spawn phantom lanes. Skips active/in-flight sessions, and never
+   *  interrupts the live run of a surface in `chatOwnedSurfaceIds`. */
+  sweepOrphanedSessions(activeSurfaceIds: Set<string>, maxAgeMs: number, chatOwnedSurfaceIds?: ReadonlySet<string>): Promise<number>;
   getTelemetrySources(surfaceId: string): Promise<{
     threadId?: string;
     model?: string;

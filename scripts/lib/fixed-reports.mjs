@@ -2,7 +2,7 @@
  * Shared machinery for the "publish only wins" loop.
  *
  * Two consumers, one source of truth:
- *   - scripts/publish-fixed.mjs  → announces fixes in the public #fixed channel
+ *   - scripts/publish-fixed.mjs  → records shipped fixes in published.json
  *   - scripts/release.mjs        → ships fixed.json next to latest.json so the
  *                                  reporter's own app can tell them
  *
@@ -12,8 +12,8 @@
  * always resolves to the newest release, so one rolling file always carries
  * everything.
  *
- * Nothing here is identifying: a report id is an opaque 6-char code, and the
- * exact same ids are already public in #fixed. The reporter's app does the join
+ * Nothing here is identifying: a report id is an opaque 6-char code. The
+ * reporter's app does the join
  * LOCALLY against its own ledger — it never uploads anything.
  */
 

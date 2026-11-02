@@ -86,6 +86,8 @@ const TranscriptTurn = memo(function TranscriptTurn({ entries, nodes, busy, repo
   // heights without a second message cache or a scroll-driven React remount.
   return <div data-o8-turn-id={entries[0].id} style={{
     minWidth: 0, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 18,
+    // The live edge owns native bottom anchoring; history uses its saved row.
+    overflowAnchor: 'none',
     contentVisibility: deferLayout ? 'auto' : undefined, containIntrinsicSize: deferLayout ? 'auto 240px' : undefined,
   }}>{body}</div>;
 }, (previous, next) => previous.deferLayout === next.deferLayout && previous.busy === next.busy && previous.repoPath === next.repoPath

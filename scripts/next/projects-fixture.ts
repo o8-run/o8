@@ -52,8 +52,8 @@ export async function projectsFixture(root: string) {
   const ownedRoot = realpathSync(root);
   const registryPost: Route = async request => {
     const body = await request.clone().json() as { action?: string; localPath?: unknown };
-    if (!['add', 'validate', 'update'].includes(body.action ?? 'add')) {
-      return Response.json({ error: 'This fixture only registers, validates or repoints owned folders.' }, { status: 400 });
+    if (!['add', 'validate', 'update', 'update-icon'].includes(body.action ?? 'add')) {
+      return Response.json({ error: 'This fixture only registers, validates, repoints or sets icons for owned folders.' }, { status: 400 });
     }
     if (typeof body.localPath === 'string' && body.localPath.trim()) {
       let candidate = resolve(body.localPath);

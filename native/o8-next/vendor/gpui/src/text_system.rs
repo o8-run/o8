@@ -414,6 +414,19 @@ impl WindowTextSystem {
         wrap_width: Option<Pixels>,
         line_clamp: Option<usize>,
     ) -> Result<SmallVec<[WrappedLine; 1]>> {
+        self.shape_text_with_tracking(text, font_size, runs, wrap_width, line_clamp, px(0.))
+    }
+
+    /// Shape text with an explicit cluster spacing, leaving the shared cache unmodified.
+    pub fn shape_text_with_tracking(
+        &self,
+        text: SharedString,
+        font_size: Pixels,
+        runs: &[TextRun],
+        wrap_width: Option<Pixels>,
+        line_clamp: Option<usize>,
+        tracking: Pixels,
+    ) -> Result<SmallVec<[WrappedLine; 1]>> {
         let mut runs = runs.iter().filter(|run| run.len > 0).cloned().peekable();
         let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
 
@@ -483,6 +496,38 @@ impl WindowTextSystem {
                 wrap_width,
                 Some(max_wrap_lines - wrapped_lines),
             );
+            let layout = if tracking == px(0.) {
+                layout
+            } else {
+                let mut shaped = (*layout.unwrapped_layout).clone();
+                let mut clusters = Vec::new();
+                for glyph in shaped.runs.iter().flat_map(|run| &run.glyphs) {
+                    if !clusters.contains(&glyph.index) {
+                        clusters.push(glyph.index);
+                    }
+                }
+                clusters.sort_unstable();
+                for glyph in shaped.runs.iter_mut().flat_map(|run| &mut run.glyphs) {
+                    let offset = clusters.binary_search(&glyph.index).unwrap_or(0);
+                    glyph.position.x += tracking * offset as f32;
+                }
+                shaped.width =
+                    (shaped.width + tracking * clusters.len().saturating_sub(1) as f32).max(px(0.));
+                let boundaries = wrap_width
+                    .map(|width| {
+                        shaped.compute_wrap_boundaries(
+                            &line_text,
+                            width,
+                            Some(max_wrap_lines - wrapped_lines),
+                        )
+                    })
+                    .unwrap_or_default();
+                Arc::new(WrappedLineLayout {
+                    unwrapped_layout: Arc::new(shaped),
+                    wrap_boundaries: boundaries,
+                    wrap_width,
+                })
+            };
             wrapped_lines += layout.wrap_boundaries.len();
 
             lines.push(WrappedLine {

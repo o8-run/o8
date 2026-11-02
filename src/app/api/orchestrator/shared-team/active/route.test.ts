@@ -89,6 +89,8 @@ it('reads finished Shared membership after restart, deduplicates receipts, and e
     expect(await response.json()).toEqual({ threadId: 'thoughts-parent', workers: [{
       sessionKey: member.surfaceId, name: member.taskName, runtime: 'codex', status: 'completed',
       parentTurnId: null, returnStatus: null, returnReason: null, model: null, effort: null,
+      recovery: { worktreePath: repoPath, worktreeExists: true, branch: null, runId: null,
+        actions: [], retired: false },
     }] });
   }
 });

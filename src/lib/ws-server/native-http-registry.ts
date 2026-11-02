@@ -14,11 +14,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
     route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),
     route('/api/orchestrator/state', 'GET PATCH', () => import('@/app/api/orchestrator/state/route')),
+    route('/api/orchestrator/shared-team/active', 'GET', () => import('@/app/api/orchestrator/shared-team/active/route')),
     route('/api/runtime/inventory', 'GET', () => import('@/app/api/runtime/inventory/route')),
     route('/api/mobile/history', 'GET', () => import('@/app/api/mobile/history/route')),
     route('/api/v2/chat-history', 'GET POST PATCH', () => import('@/app/api/v2/chat-history/route')),
     route('/api/orchestrator/composer-queue', 'GET POST PATCH DELETE', () => import('@/app/api/orchestrator/composer-queue/route')),
     route('/api/panel/ws-info', 'GET', () => import('@/app/api/panel/ws-info/route')),
+    route('/api/panel/ports', 'GET', () => import('@/app/api/panel/ports/route')),
   ],
   brain: [route('/api/cortex/ask', 'POST', () => import('@/app/api/cortex/ask/route'))],
   activity: [
@@ -34,9 +36,21 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/github-status', 'GET', () => import('@/app/api/panel/github-status/route')),
     route('/api/orchestrator/merge-preview', 'GET', () => import('@/app/api/orchestrator/merge-preview/route')),
   ],
+  bots: [
+    route('/api/bots', 'GET', () => import('@/app/api/bots/route')),
+    route('/api/bots/[id]/thread', 'GET', () => import('@/app/api/bots/[id]/thread/route')),
+  ],
   grid: [],
   shortcuts: [], // Local shortcut reference has no HTTP transport.
   terminal: [route('/api/mobile/terminal-sessions', 'GET', () => import('@/app/api/mobile/terminal-sessions/route'))],
+  scheduled: [
+    route('/api/automations', 'GET POST', () => import('@/app/api/automations/route')),
+    route('/api/automations/[id]', 'PATCH DELETE', () => import('@/app/api/automations/[id]/route')),
+    route('/api/automations/[id]/run', 'POST', () => import('@/app/api/automations/[id]/run/route')),
+    route('/api/automations/connected', 'GET POST PATCH', () => import('@/app/api/automations/connected/route')),
+    route('/api/panel/repos', 'GET', () => import('@/app/api/panel/repos/route')),
+  ],
+  usage: [route('/api/runtime/usage', 'GET', () => import('@/app/api/runtime/usage/route'))],
   palette: [], // Local commands and workspace navigation reuse the selected surface's transport.
   sidebar: [
     route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),
@@ -85,6 +99,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   ],
   customize: [
     route('/api/customize/inventory', 'GET', () => import('@/app/api/customize/inventory/route')),
+    route('/api/customize/actions', 'GET POST', () => import('@/app/api/customize/actions/route')),
     route('/api/cortex/directives', 'GET', () => import('@/app/api/cortex/directives/route')),
     route('/api/setup/mcp-servers', 'GET', () => import('@/app/api/setup/mcp-servers/route')),
     route('/api/prompt-library', 'GET POST', () => import('@/app/api/prompt-library/route')),
@@ -94,6 +109,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
 
 // Authoritative producers requested by the existing WS checkpoint/command path.
 const producers = [
+  route('/api/next/voice-host', 'GET POST', () => import('@/app/api/next/voice-host/route')),
   route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
   route('/api/setup/identity', 'GET', () => import('@/app/api/setup/identity/route')),
   route('/api/mobile/sync', 'POST', () => import('@/app/api/mobile/sync/route')),
@@ -121,6 +137,7 @@ function parameters(pattern: string, pathname: string): Record<string, string> |
 }
 
 export function matchNativeHttpRoute(pathname: string, method?: string) {
-  const match = routes.map(route => ({ route, params: parameters(route.path, pathname) })).find(entry => entry.params !== null);
-  return match && (method === undefined || match.route.methods.includes(method)) ? match : undefined;
+  const matches = routes.map(route => ({ route, params: parameters(route.path, pathname) })).filter(entry => entry.params !== null);
+  // Surfaces can share a path with different methods, so match on both.
+  return method === undefined ? matches[0] : matches.find(entry => entry.route.methods.includes(method));
 }

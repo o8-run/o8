@@ -23,7 +23,7 @@ import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { listOwnedSessionLifecycles } from './owned-session-lifecycle';
 import { archiveRootForOwnedSessionRoot } from './owned-session/archive';
-import { readOwnedSessionMetadata } from './owned-session/metadata-read';
+import { OWNED_SESSION_METADATA_CHANGED, readOwnedSessionMetadata } from './owned-session/metadata-read';
 import type { OwnedSessionRecord } from './owned-session/types';
 import type { MetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import type { OwnedIdentitySource } from './owned-session/process-identity';
@@ -61,7 +61,7 @@ export interface OwnedSessionDisplay {
   name: string;
   model: string | null;
   runtime: string;
-  status: 'running' | 'completed' | 'failed' | 'interrupted' | 'idle';
+  status: 'running' | 'completed' | 'failed' | 'interrupted' | 'idle' | 'retired';
 }
 
 /** Resolve the owned roots FRESH per call — env may be set after import (tests),
@@ -138,7 +138,7 @@ export async function readOwnedSessionDisplay(surfaceId: string): Promise<OwnedS
   const outcome = Array.isArray(parsed.recentRuns)
     ? [...parsed.recentRuns].sort((left, right) => String(right.startedAt ?? '').localeCompare(String(left.startedAt ?? '')))[0]?.outcome
     : null;
-  const status = parsed.activeRun ? 'running'
+  const status = parsed.retiredAt ? 'retired' : parsed.activeRun ? 'running'
     : outcome === 'finished' ? 'completed'
       : outcome === 'failed' ? 'failed'
         : outcome === 'interrupted' ? 'interrupted'
@@ -164,6 +164,17 @@ interface RootIndex {
 }
 const rootCache = new Map<string, { builtAt: number; index: RootIndex }>();
 
+/** A session rewriting its record is healthy; only a stable failure counts as unreadable. */
+async function readRewrittenOwnedMetadata<T>(metadataPath: string): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await readOwnedSessionMetadata<T>(metadataPath); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== OWNED_SESSION_METADATA_CHANGED || attempt >= 4) throw error;
+      await new Promise(resolve => setTimeout(resolve, 5 * (attempt + 1)));
+    }
+  }
+}
+
 async function buildRootIndex(root: string): Promise<RootIndex> {
   const index: RootIndex = { runs: new Map(), unreadable: false };
   let entries: Awaited<ReturnType<typeof readdir>>;
@@ -178,7 +189,7 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
     const metadataPath = path.join(root, entry.name, 'session.json');
     let parsed: { surfaceId?: string; packetId?: string; activeRun?: OwnedActiveRun };
     try {
-      parsed = await readOwnedSessionMetadata(metadataPath);
+      parsed = await readRewrittenOwnedMetadata(metadataPath);
       if (!parsed || typeof parsed.surfaceId !== 'string') throw new Error('Missing owned session identity.');
     } catch {
       index.unreadable = true;

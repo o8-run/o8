@@ -303,7 +303,7 @@ export function ExtraAgentRowView({
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, height: 17, minWidth: 0 }}>
           <span style={{ minWidth: 0, maxWidth: SIDEBAR_TITLE_MAX_WIDTH, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</span>
           {repoLabel && dotState !== 'running' ? (
-            <span style={{ minWidth: 0, maxWidth: SIDEBAR_REPO_MAX_WIDTH, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            <span data-chat-row-repo style={{ maxWidth: SIDEBAR_REPO_MAX_WIDTH, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               fontSize: 11.5, color: 'var(--t-text-faint)', fontWeight: 260 }}>{repoLabel}</span>
           ) : null}
         </span>

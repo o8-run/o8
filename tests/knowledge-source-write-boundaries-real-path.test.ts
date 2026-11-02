@@ -305,7 +305,8 @@ it.each([['long s', 'ſ', 's'], ['sharp s', 'ß', 'ss'], ['normalization', 'Caf�
       // Registration accepts existing folders; it does not create missing
       // directories on a volume where this spelling is genuinely distinct.
       const missing = await reposPost(request('/api/panel/repos', { action: 'add', localPath: target }));
-      expect(missing.status).toBe(500);
+      expect(missing.status).toBe(400);
+      expect(await missing.json()).toEqual({ error: 'Folder not found. Choose an existing folder or check the pasted path.' });
       expect(existsSync(target)).toBe(false);
       mkdirSync(target); git(target, 'init', '-b', 'main');
     }

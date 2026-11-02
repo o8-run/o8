@@ -12,6 +12,7 @@ import { POST as api_runtime_archive_POST } from '@/app/api/runtime/archive/rout
 import { GET as api_setup_config_GET, POST as api_setup_config_POST } from '@/app/api/setup/config/route';
 import { GET as api_orchestrator_composer_queue_GET, POST as api_orchestrator_composer_queue_POST, PATCH as api_orchestrator_composer_queue_PATCH, DELETE as api_orchestrator_composer_queue_DELETE } from '@/app/api/orchestrator/composer-queue/route';
 import { GET as api_panel_ws_info_GET } from '@/app/api/panel/ws-info/route';
+import { GET as api_panel_ports_GET } from '@/app/api/panel/ports/route';
 import { POST as api_cortex_ask_POST } from '@/app/api/cortex/ask/route';
 import { GET as api_panel_commits_GET } from '@/app/api/panel/commits/route';
 import { GET as api_panel_ci_GET } from '@/app/api/panel/ci/route';
@@ -72,6 +73,7 @@ export const api_runtime_archive = { POST: api_runtime_archive_POST };
 export const api_setup_config = { GET: api_setup_config_GET, POST: api_setup_config_POST };
 export const api_orchestrator_composer_queue = { GET: api_orchestrator_composer_queue_GET, POST: api_orchestrator_composer_queue_POST, PATCH: api_orchestrator_composer_queue_PATCH, DELETE: api_orchestrator_composer_queue_DELETE };
 export const api_panel_ws_info = { GET: api_panel_ws_info_GET };
+export const api_panel_ports = { GET: api_panel_ports_GET };
 export const api_cortex_ask = { POST: api_cortex_ask_POST };
 export const api_panel_commits = { GET: api_panel_commits_GET };
 export const api_panel_ci = { GET: api_panel_ci_GET };

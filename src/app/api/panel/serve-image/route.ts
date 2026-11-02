@@ -1,4 +1,5 @@
 import { viewerBytes } from '@/lib/viewers/bytes';
+import { isVerifiableRasterType, viewerImageBytes } from '@/lib/viewers/image-bytes';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
@@ -62,7 +63,10 @@ export async function GET(request: Request) {
     }
 
     const buffer = await opened.handle.readFile();
-    return viewerBytes(buffer, mimeType);
+    // #4773 routed every image through the UTF-8 text viewer, which refuses all
+    // non-UTF-8 bytes, so raster previews broke. Serve the four verifiable raster
+    // types through the image path; SVG and other formats keep the text-viewer path.
+    return isVerifiableRasterType(mimeType) ? viewerImageBytes(buffer, mimeType) : viewerBytes(buffer, mimeType);
   } catch (error) {
     if (isWorkspaceFileError(error)) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });

@@ -1,4 +1,5 @@
 import { isUnmappedEffortLead, unmappedEffortError } from '@/lib/lane/orchestrator-backends/unmapped-effort';
+import { assertLlmThread } from '@/lib/bots/network-kind';
 import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
 import { sendOrchestratorBackendTurn, resolveTurnReceiptMode } from '@/lib/lane/orchestrator-send-entry';
@@ -6,6 +7,7 @@ import type { OrchestratorTurnOptions } from '@/lib/lane/orchestrator-backends/t
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { appendMobileOrchestratorUserMessage, upsertMobileOrchestratorAssistantMessage, writeOrchestratorBackendSessionId } from '@/lib/mobile/orchestrator-thread-history';
 import type { MobileTurnReceipt } from '@/lib/mobile/types';
+import { terminalReceipt } from '@/lib/mobile/turn-receipt';
 import type { ReviewChatOrigin } from '@/lib/orchestrator/review-continuation-origin';
 import { withSessionRules } from '@/lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from '@/lib/orchestrator/turn-receipt-context';
@@ -32,6 +34,7 @@ export async function runBoundChatContinuation(
   hooks: BoundChatContinuationHooks,
 ): Promise<void> {
   const { origin: expected, message, assistantMessageId } = input;
+  assertLlmThread(expected.threadId);
   const permissionMode = input.permissionMode ?? expected.permissionMode;
   input.check();
   const unmapped = isUnmappedEffortLead(expected.backend);
@@ -91,8 +94,8 @@ export async function runBoundChatContinuation(
         case 'plan': hooks.publish(session.sessionName, 'plan-update', { ...data, turnId: assistantMessageId, explanation: event.explanation, steps: event.steps }); break;
         case 'done':
           completed = true;
-          receipt = { ...receipt, terminal: { userMessageId: `review-user-${assistantMessageId}`,
-            outcome: controller.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed' } };
+          receipt = { ...receipt, terminal: terminalReceipt(`review-user-${assistantMessageId}`,
+            controller.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed') };
           if (event.sessionId && (backend.id === 'codex' || backend.id === 'claude')) writeOrchestratorBackendSessionId(expected.threadId, backend.id, event.sessionId);
           persist(event.sessionId, event);
           hooks.publish(session.sessionName, 'status', { ...data, status: controller.signal.aborted ? 'stopped' : 'ready', receipt,

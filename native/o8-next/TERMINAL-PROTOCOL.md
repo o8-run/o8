@@ -19,7 +19,13 @@ no server route or wire message type.
    provider inventories. The normal system acknowledgement is
    `{channel:"system",event:"connected",data:{...}}`.
 3. Send `{type:"terminal-attach",sessionName,cols,rows}` for an existing session.
-   The native pane never sends `terminal-create`, `/terminal-spawn` or kill.
+   The pane itself never sends `terminal-create`, `/terminal-spawn` or kill. The
+   Terminal surface opens the workspace's own shell the way the desktop does: one
+   `{type:"terminal-create",cols,rows,requestId,cwd,ownerKey}` on a short-lived
+   connection, with the stable owner key `o8-next:<workspace>:terminal`. The
+   server adopts the surviving session for that key, or reserves a new one in the
+   workspace, and replies `{channel:"terminal",event:"created",data:{sessionName,requestId}}`.
+   The pane then attaches to that name as below.
    Attach can materialize an existing pending dashboard reservation server-side.
    `readOnly:true` is the observer variant: it cannot write or resize, and the
    server returns source dimensions. The separate `control:true` CLI lease is
@@ -125,3 +131,18 @@ kernel PTY dimensions. `src/terminal_tests.rs` takes the same path through GPUI
 TestAppContext, platform text input, the Alacritty grid and actual paint callbacks.
 It checks ANSI colors, combining/wide characters, alternate screen, cursor,
 viewport resize, 10,000-line retention, scroll navigation and exact 50 MB delivery.
+
+`tests/terminal_own_shell_cli.rs` launches the production app shell against that
+same disposable ws-server on Linux. A private Xvfb display with Openbox and
+software Vulkan receives physical keyboard input through xdotool. Starting with
+no selected terminal, the test checks the workspace-scoped mobile inventory,
+types into the returned shell, opens the picker with Ctrl+Alt+O, closes the
+window normally, and reopens without a saved terminal selection to verify stable
+owner-key adoption. Run after `npm ci` with:
+
+```sh
+cargo test --locked --manifest-path native/o8-next/Cargo.toml --test terminal_own_shell_cli
+```
+
+The integration test rebuilds the ordinary debug app before launch because
+GPUI's `test-support` feature bypasses its native frame driver.

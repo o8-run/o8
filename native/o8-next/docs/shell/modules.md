@@ -86,3 +86,18 @@ source-directory inputs invalidate cached discovery after temporary worktree rem
 The test-first failure and pass are in
 [red.txt](../../evidence/shell-modules/red.txt) and
 [green.txt](../../evidence/shell-modules/green.txt).
+
+Connection recovery is a discovered feature with feature-local state. The optional
+`ShellFeature::extension` adapter contributes load, prepare, focus capture and
+content overlay policy to the existing surface lifecycle. Feature extensions use
+the same deterministic module order; no connection surface registration is needed.
+Palette input and rendering dispatch directly from the palette feature, while
+existing surface picker helpers remain available to Diff and Terminal.
+
+Window-state persistence is owned by `window_state`: its observer installs the
+coalescing writer, bounds subscription, error reporting, and asynchronous close
+callback in feature-local runtime state. `Shell::persist` is a forwarding bridge;
+no writer or closing flag lives in the shared shell state list. Disk encoding and
+atomic saves run on the writer thread. Close completion recaptures live bounds
+and registered surface state, compares all serialized fields with the submitted
+snapshot, and flushes again if anything changed before removing the window.

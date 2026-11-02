@@ -3,20 +3,32 @@ mod render_region;
 mod activity;
 mod app_parent;
 mod brain;
+mod browser_panel;
+#[path = "shell_features/connection/client.rs"]
 mod client;
+mod clock;
 mod composer;
+mod devices_panel;
 mod diff;
 #[cfg(test)]
 mod diff_tests;
 mod diff_ui;
+mod files_panel;
 mod grid_sessions;
+mod icon;
 mod inbox;
+mod lineage;
+#[cfg(test)]
+mod input_reuse_tests;
 mod issues;
 mod merge;
 mod model;
+mod motion;
 mod pane;
+mod pane_tree;
 mod pane_grid;
 mod pane_layout;
+mod project_icon;
 mod projects;
 mod projects_model;
 mod retained;
@@ -32,11 +44,16 @@ mod terminal;
 mod terminal_grid;
 mod terminal_transport;
 mod text;
+mod thread_messages;
 mod theme;
 #[cfg(test)]
 mod theme_tests;
+mod trace;
+mod subagents;
+mod transcript_actions;
 mod transport;
 mod ui;
+mod visualizations;
 mod wake;
 use crate::{
     client::Client,

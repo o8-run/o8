@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MODEL_IDS } from '@/lib/models';
 import { ORCHESTRATOR_RUNTIMES, getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import { modelBelongsToRuntime, resolveRuntimeOrchestratorModel } from './orchestrator-model-guard';
+import { modelBelongsToRuntime, resolveRuntimeOrchestratorModel, selectedOrchestratorModel } from './orchestrator-model-guard';
 
 const CLAUDE_DEFAULT = MODEL_IDS.orchestratorDefault;
 
@@ -70,6 +70,22 @@ describe('resolveRuntimeOrchestratorModel (#1807)', () => {
     expect(resolveRuntimeOrchestratorModel(MODEL_IDS.raw.anthropicClaudeOpus5, 'claude-code', CLAUDE_DEFAULT, onReject))
       .toBe(MODEL_IDS.raw.anthropicClaudeOpus5);
     expect(onReject).not.toHaveBeenCalled();
+  });
+
+  it('treats the runtime placeholder as no model, not a Claude id', () => {
+    // Threads created without a lead saved the runtime id "claude-code" as their
+    // model; it starts with "claude", so the CLI was handed --model claude-code
+    // and every turn failed with "There's an issue with the selected model".
+    expect(modelBelongsToRuntime('claude-code', 'claude-code')).toBe(false);
+    const onReject = vi.fn();
+    expect(resolveRuntimeOrchestratorModel('claude-code', 'claude-code', CLAUDE_DEFAULT, onReject)).toBe(CLAUDE_DEFAULT);
+    // No selection is not a mismatch, and it is not an explicit model for an effort pin.
+    expect(onReject).not.toHaveBeenCalled();
+    // Any house's id, in any casing: a thread can switch houses after saving one.
+    for (const placeholder of [' claude-code ', 'Claude-Code', 'codex', ' CODEX']) {
+      expect(selectedOrchestratorModel(placeholder)).toBeUndefined();
+    }
+    expect(selectedOrchestratorModel(MODEL_IDS.raw.anthropicClaudeOpus5)).toBe(MODEL_IDS.raw.anthropicClaudeOpus5);
   });
 
   it('falls back quietly when nothing was selected', () => {

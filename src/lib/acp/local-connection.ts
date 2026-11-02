@@ -6,6 +6,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { withProviderStoreLock } from '@/lib/providers/store-lock';
 import { acpEnvironmentId, readAcpEnvironment, resolveAcpEnvironment, saveAcpEnvironment, type AcpEnvironmentBinding } from './connection-environment';
 import { createAcpOutputRedactor } from './output-redaction';
+import { activeProviderInstance } from '@/lib/providers/instance-context';
 
 export interface LocalAcpConnection { name: string; command: string; args: string[]; useOpenRouter: boolean }
 const file = () => join(getDataDir(), 'local-acp.json');
@@ -38,6 +39,8 @@ export function saveLocalAcpConnection(value: unknown): LocalAcpConnection | nul
   });
 }
 export function resolveLocalAcpLaunch() {
+  const instance = activeProviderInstance('acp')?.acp;
+  if (instance) return instance;
   const command = process.env.O8_ACP_COMMAND?.trim();
   if (command) {
     const raw = process.env.O8_ACP_ARGS?.trim() ?? '';
@@ -49,6 +52,9 @@ export function resolveLocalAcpLaunch() {
 
 /** Resolve explicit credential forwarding at both probe and conversation spawns. */
 export function localAcpProcessLaunch() {
+  const active = activeProviderInstance('acp');
+  if (active?.acp) return { ...active.acp, env: active.env, localEnvironment: active.localEnvironment!,
+    omitEnv: active.acp.useOpenRouter ? [] : ['OPENROUTER_API_KEY'] };
   const connection = resolveLocalAcpLaunch();
   return connection ? { ...connection,
     ...(!process.env.O8_ACP_COMMAND?.trim() ? resolveAcpEnvironment(acpEnvironmentId(connection)) : {}),
@@ -56,6 +62,10 @@ export function localAcpProcessLaunch() {
 }
 
 export function assertLocalAcpEnvironmentCurrent(binding: AcpEnvironmentBinding): void {
+  if (activeProviderInstance('acp')?.acp && binding.connectionId.startsWith('instance:')) {
+    if (readAcpEnvironment(binding.connectionId).revision !== binding.revision) throw new Error('The connection environment changed during preparation. Retry the launch.');
+    return;
+  }
   const connection = readLocalAcpConnection();
   if (process.env.O8_ACP_COMMAND?.trim() || !connection || acpEnvironmentId(connection) !== binding.connectionId
     || readAcpEnvironment(binding.connectionId).revision !== binding.revision) {

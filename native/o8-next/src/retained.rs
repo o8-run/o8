@@ -8,15 +8,41 @@ use crate::{
 use gpui::{
     App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId, InspectorElementId,
     IntoElement, LayoutId, Pixels, Point, Size, Style, TextAlign, TextRun, Window, WrappedLine,
-    font, point, px, size,
+    point, px, size,
 };
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
+
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(crate) struct PaintedGeometry {
+    pub row: Bounds<Pixels>,
+    pub backdrop: Option<Bounds<Pixels>>,
+    pub text_origin: Option<Point<Pixels>>,
+}
+
+#[cfg(test)]
+#[path = "retained/geometry_tests.rs"]
+mod geometry_tests;
+
+#[path = "retained/user_bubble.rs"]
+mod user_bubble;
+
+#[path = "retained/text.rs"]
+mod row_text;
+use row_text::{is_item, link_target, text_run};
 
 pub struct RowState {
     pub row: Row,
     pub layouts: usize,
+    #[cfg(test)]
+    pub(crate) painted_geometry: RefCell<PaintedGeometry>,
     expanded: Option<bool>,
     cache: Option<Layout>,
+    pub(crate) images: crate::ui::images::Cache,
+    pub cards: crate::visualizations::Cards,
+    pub(crate) subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
+    pub(crate) subagent_agents: Rc<Vec<crate::subagents::model::Agent>>,
+    pub(crate) subagent_focus: std::collections::HashMap<String, gpui::FocusHandle>,
 }
 impl RowState {
     #[cfg(test)]
@@ -31,15 +57,89 @@ impl RowState {
                 .collect(),
         )
     }
+    pub(crate) fn invalidate_image_layout(&mut self) {
+        self.cache = None;
+    }
     pub fn new(row: Row) -> Self {
-        let expanded = matches!(&row, Row::Message { nodes, .. } if nodes.iter().any(crate::rich::system_event))
-            .then_some(false);
+        crate::trace::note(&row);
+        let expanded = (matches!(&row, Row::Activity { .. })
+            || matches!(&row, Row::Message { nodes, .. } if nodes.iter().any(crate::rich::system_event)))
+        .then_some(false);
         Self {
             row,
             layouts: 0,
+            #[cfg(test)]
+            painted_geometry: RefCell::new(PaintedGeometry::default()),
             expanded,
             cache: None,
+            images: Default::default(),
+            cards: Default::default(),
+            subagents: None,
+            subagent_agents: Default::default(),
+            subagent_focus: Default::default(),
         }
+    }
+    /// A row that changed in place (a tool step finished) keeps its disclosure;
+    /// a trace watched while live stays open once it finishes.
+    pub fn keep_disclosure(&mut self, previous: &RowState) {
+        self.subagent_focus = previous.subagent_focus.clone();
+        if self.expanded.is_some() && previous.expanded.is_some() {
+            self.expanded = previous.expanded;
+        }
+        if let (Row::Activity { .. }, Row::Activity { trace, .. }) = (&self.row, &previous.row)
+            && trace.live
+        {
+            self.expanded = Some(true);
+        }
+    }
+    pub(crate) fn bind_subagent_focus(&mut self, cx: &App) {
+        if let Row::Activity { steps, .. } = &self.row {
+            for reference in steps.iter().flat_map(|step| &step.delegations) {
+                self.subagent_focus
+                    .entry(reference.id.clone())
+                    .or_insert_with(|| cx.focus_handle());
+            }
+        }
+    }
+    pub(crate) fn disclosure(&self) -> bool {
+        self.expanded.unwrap_or(false)
+    }
+    pub(crate) fn toggle_disclosure(&mut self) {
+        if let Some(expanded) = self.expanded.as_mut() {
+            *expanded = !*expanded;
+            self.cache = None;
+        }
+    }
+    pub fn attach_visualizations(&mut self, client: &crate::client::Client) {
+        let mut keep = std::collections::HashSet::new();
+        if let Row::Message { nodes, .. } = &self.row {
+            for node in nodes.iter().filter(|n| n.kind == "visualization") {
+                if let Some(reference) = node
+                    .data
+                    .as_ref()
+                    .and_then(crate::visualizations::protocol::Reference::parse)
+                {
+                    keep.insert(reference.id.clone());
+                    self.cards.entry(reference.id.clone()).or_insert_with(|| {
+                        Rc::new(RefCell::new(crate::visualizations::Card::new(
+                            reference,
+                            client.clone(),
+                        )))
+                    });
+                }
+            }
+        }
+        self.cards.retain(|id, _| keep.contains(id));
+    }
+    pub fn poll_visualizations(&mut self) -> bool {
+        let mut changed = false;
+        for card in self.cards.values() {
+            changed |= card.borrow_mut().poll();
+        }
+        if changed {
+            self.cache = None;
+        }
+        changed
     }
 }
 struct Line {
@@ -51,20 +151,59 @@ struct Line {
 struct Backdrop {
     bounds: Bounds<Pixels>,
     color: gpui::Rgba,
+    radius: Pixels,
+}
+struct Thumbnail {
+    bounds: Bounds<Pixels>,
+    image: Option<std::sync::Arc<gpui::RenderImage>>,
+    selector: String,
+    name: String,
+    unavailable: bool,
+}
+/// Where a link sits in a row, one spot per wrapped line.
+struct LinkSpot {
+    bounds: Bounds<Pixels>,
+    url: String,
 }
 struct Layout {
     size: Size<Pixels>,
+    /// The appearance its colors were shaped in.
+    theme: u8,
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
+    images: Vec<Thumbnail>,
+    links: Vec<LinkSpot>,
+    cards: Vec<(String, Bounds<Pixels>)>,
 }
 struct Builder {
+    row_id: String,
+    image_cache: crate::ui::images::Cache,
     width: Pixels,
     y: Pixels,
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
+    images: Vec<Thumbnail>,
+    links: Vec<LinkSpot>,
+    /// Where the last paragraph gap ended, so blank lines collapse to one gap.
+    gap_end: Option<Pixels>,
+}
+// The desktop transcript's prose: 14px on a 23.8px line, with a paragraph gap.
+const PROSE: (f32, f32) = (14., 24.);
+const PARAGRAPH_GAP: f32 = 22.;
+/// A message's blocks without trailing blank lines, which would only pad its end.
+fn trimmed(nodes: &[Node]) -> &[Node] {
+    let end = nodes
+        .iter()
+        .rposition(|n| n.kind != "break")
+        .map_or(0, |i| i + 1);
+    &nodes[..end]
 }
 impl Builder {
     fn rich_node(&mut self, kind: &str, data: &serde_json::Value, expanded: bool, window: &Window) {
+        if kind == "media" && data["kind"] == "image" {
+            self.image(data);
+            return;
+        }
         let label = |value: &serde_json::Value| value.as_str().unwrap_or("").to_owned();
         if kind == "table" {
             let headers = data["headers"].as_array().cloned().unwrap_or_default();
@@ -82,10 +221,15 @@ impl Builder {
                 let mut bottom = top;
                 for (column, cell) in cells.iter().enumerate() {
                     let mut builder = Builder {
+                        row_id: self.row_id.clone(),
+                        image_cache: self.image_cache.clone(),
+                        images: vec![],
+                        links: vec![],
                         width: width + px(48.),
                         y: top,
                         lines: vec![],
                         backgrounds: vec![],
+                        gap_end: None,
                     };
                     let mut runs: Vec<Run> =
                         serde_json::from_value(cell.clone()).unwrap_or_default();
@@ -94,7 +238,18 @@ impl Builder {
                             run.style = "strong".into();
                         }
                     }
-                    builder.text(&runs, 13., 19.5, 0., window);
+                    builder.text(&runs, PROSE.0, PROSE.1, 0., window);
+                    let shift = point(width * column as f32, px(0.));
+                    if data["aligns"][column].as_str().is_none_or(|a| a == "left") {
+                        for mut link in builder.links {
+                            link.bounds.origin += shift;
+                            self.links.push(link);
+                        }
+                        for mut pill in builder.backgrounds {
+                            pill.bounds.origin += shift;
+                            self.backgrounds.push(pill);
+                        }
+                    }
                     for mut line in builder.lines {
                         line.origin.x += width * column as f32;
                         line.align = match data["aligns"][column].as_str() {
@@ -110,6 +265,7 @@ impl Builder {
                 self.backgrounds.push(Backdrop {
                     bounds: Bounds::new(point(px(24.), self.y), size(self.width - px(48.), px(1.))),
                     color: theme().border,
+                    radius: px(0.),
                 });
                 self.y += px(4.);
             }
@@ -121,33 +277,7 @@ impl Builder {
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
-            let text = format!("{} {summary}", if expanded { "⌄" } else { "›" });
-            let mut runs = vec![text_run(&Run {
-                style: "text".into(),
-                text: text.clone(),
-            })];
-            let text = window
-                .text_system()
-                .line_wrapper(runs[0].font.clone(), px(12.))
-                .truncate_line(
-                    text.into(),
-                    (self.width - px(48.)).max(px(1.)),
-                    "…",
-                    &mut runs,
-                );
-            for line in window
-                .text_system()
-                .shape_text(text, px(12.), &runs, None, None)
-                .expect("event summary")
-            {
-                self.lines.push(Line {
-                    line,
-                    origin: point(px(24.), self.y),
-                    height: px(18.),
-                    align: TextAlign::Left,
-                });
-                self.y += px(18.);
-            }
+            self.disclosure(&summary, "text", expanded, window);
             if expanded {
                 self.y += px(8.);
                 for field in crate::rich::event_fields(data) {
@@ -179,7 +309,81 @@ impl Builder {
                 size(self.width - px(48.), self.y - top),
             ),
             color: theme().surface,
+            radius: px(0.),
         });
+    }
+    /// One truncated summary line with a disclosure chevron.
+    fn disclosure(&mut self, summary: &str, style: &str, expanded: bool, window: &Window) {
+        let text = format!("{} {summary}", if expanded { "⌄" } else { "›" });
+        let mut runs = vec![text_run(&Run {
+            style: style.into(),
+            text: text.clone(),
+        })];
+        let text = window
+            .text_system()
+            .line_wrapper(runs[0].font.clone(), px(12.))
+            .truncate_line(
+                text.into(),
+                (self.width - px(48.)).max(px(1.)),
+                "…",
+                &mut runs,
+            );
+        for line in window
+            .text_system()
+            .shape_text(text, px(12.), &runs, None, None)
+            .expect("disclosure summary")
+        {
+            self.lines.push(Line {
+                line,
+                origin: point(px(24.), self.y),
+                height: px(18.),
+                align: TextAlign::Left,
+            });
+            self.y += px(18.);
+        }
+    }
+    /// Finds a link on one shaped line and marks each wrapped piece of it.
+    fn link(
+        &mut self,
+        line: &WrappedLine,
+        offset: usize,
+        span: &std::ops::Range<usize>,
+        url: &str,
+        (inset, line_height): (Pixels, f32),
+    ) {
+        let start = span.start.max(offset) - offset;
+        let end = span.end.min(offset + line.len()).saturating_sub(offset);
+        let pill = is_item(url);
+        let mut pieces: Vec<(Pixels, Pixels, Pixels)> = vec![];
+        for (index, _) in line.text.char_indices().chain([(line.len(), ' ')]) {
+            if index < start || index > end {
+                continue;
+            }
+            let Some(at) = line.position_for_index(index, px(line_height)) else {
+                continue;
+            };
+            match pieces.last_mut() {
+                Some(piece) if piece.2 == at.y => piece.1 = at.x,
+                _ => pieces.push((at.x, at.x, at.y)),
+            }
+        }
+        for (from, to, y) in pieces.into_iter().filter(|(from, to, _)| to > from) {
+            let bounds = Bounds::new(
+                point(inset + from - px(4.), self.y + y + px(2.)),
+                size(to - from + px(8.), px(line_height - 4.)),
+            );
+            if pill {
+                self.backgrounds.push(Backdrop {
+                    bounds,
+                    color: theme().selection,
+                    radius: px(6.),
+                });
+            }
+            self.links.push(LinkSpot {
+                bounds,
+                url: url.to_owned(),
+            });
+        }
     }
     fn text(
         &mut self,
@@ -199,16 +403,72 @@ impl Builder {
         if lines.is_empty() {
             self.y += px(line_height);
         }
+        let origin = px(24. + inset);
+        let (mut start, mut offset) = (0, 0);
+        let spans: Vec<_> = runs
+            .iter()
+            .map(|run| {
+                let at = start..start + run.text.len();
+                start = at.end;
+                at
+            })
+            .collect();
         for line in lines {
             let height = line.size(px(line_height)).height;
+            for (run, span) in runs.iter().zip(&spans) {
+                if let Some(url) = link_target(run) {
+                    self.link(&line, offset, span, url, (origin, line_height));
+                }
+            }
+            offset += line.len() + 1;
             self.lines.push(Line {
                 line,
-                origin: point(px(24. + inset), self.y),
+                origin: point(origin, self.y),
                 height: px(line_height),
                 align: TextAlign::Left,
             });
             self.y += height;
         }
+    }
+    fn image(&mut self, data: &serde_json::Value) {
+        use crate::ui::images::ImageState;
+        let state = self
+            .image_cache
+            .borrow()
+            .get(data["path"].as_str().unwrap_or(""))
+            .cloned();
+        let unavailable = matches!(state, Some(ImageState::Unavailable));
+        let image = match state {
+            Some(ImageState::Ready(image)) => Some(image),
+            _ => None,
+        };
+        let width = (self.width - px(48.)).max(px(1.));
+        let dimensions = image.as_ref().map(|image| {
+            let pixels = image.size(0);
+            let scale = (f32::from(width) / pixels.width.0 as f32)
+                .min(240. / pixels.height.0 as f32)
+                .min(1.);
+            size(
+                pixels.width.0 as f32 * scale,
+                pixels.height.0 as f32 * scale,
+            )
+        });
+        let dimensions = dimensions
+            .map(|s| s.map(px))
+            .unwrap_or(size(width, px(18.)));
+        let index = self.images.len();
+        self.images.push(Thumbnail {
+            bounds: Bounds::new(point(px(24.), self.y + px(4.)), dimensions),
+            selector: format!(
+                "transcript-image-{}{}-{index}",
+                if unavailable { "error-" } else { "" },
+                self.row_id
+            ),
+            name: data["name"].as_str().unwrap_or("Image").to_owned(),
+            image,
+            unavailable,
+        });
+        self.y += dimensions.height + px(12.);
     }
     fn plain(&mut self, text: String, font_size: f32, line_height: f32, window: &Window) {
         self.text(
@@ -228,7 +488,14 @@ impl Builder {
             return;
         }
         if node.kind == "break" {
-            self.y += px(6.);
+            // A blank line is classic's paragraph margin: once, and never
+            // before the first block.
+            if self.gap_end != Some(self.y)
+                && (!self.lines.is_empty() || !self.backgrounds.is_empty())
+            {
+                self.y += px(PARAGRAPH_GAP);
+                self.gap_end = Some(self.y);
+            }
             return;
         }
         if node.kind == "rule" {
@@ -236,6 +503,7 @@ impl Builder {
             self.backgrounds.push(Backdrop {
                 bounds: Bounds::new(point(px(24.), self.y), size(self.width - px(48.), px(1.))),
                 color: theme().border,
+                radius: px(0.),
             });
             self.y += px(13.);
             return;
@@ -298,8 +566,8 @@ impl Builder {
         } else {
             self.text(
                 &runs,
-                if code { 12. } else { 13. },
-                19.5,
+                if code { 12. } else { PROSE.0 },
+                if code { 19.5 } else { PROSE.1 },
                 if code { 10. } else { 0. },
                 window,
             );
@@ -315,17 +583,31 @@ impl Builder {
                     size(self.width - px(48.), self.y - top - px(16.)),
                 ),
                 color: theme().code_background,
+                radius: px(0.),
             });
         }
     }
 }
-fn layout(row: &Row, width: Pixels, expanded: bool, window: &Window) -> Layout {
+fn layout(
+    row: &Row,
+    width: Pixels,
+    expanded: bool,
+    images: crate::ui::images::Cache,
+    cards: &crate::visualizations::Cards,
+    window: &Window,
+) -> Layout {
     let mut b = Builder {
+        row_id: row.id().into(),
+        image_cache: images,
+        images: vec![],
+        links: vec![],
         width,
         y: px(8.),
         lines: vec![],
         backgrounds: vec![],
+        gap_end: None,
     };
+    let mut placements = vec![];
     match row {
         Row::PacketHeader {
             prompt, details, ..
@@ -365,27 +647,94 @@ fn layout(row: &Row, width: Pixels, expanded: bool, window: &Window) -> Layout {
                 b.node(&node, expanded, window);
             }
         }
-        Row::Message { role, nodes, .. } => {
-            let top = b.y;
-            for node in nodes {
-                b.node(node, expanded, window);
-            }
-            if role == "user" {
-                b.backgrounds.insert(
-                    0,
-                    Backdrop {
-                        bounds: Bounds::new(
-                            point(px(16.), top),
-                            size((width - px(32.)).max(px(1.)), b.y - top + px(4.)),
-                        ),
-                        color: theme().selection,
-                    },
+        Row::Message {
+            role,
+            author,
+            nodes,
+            ..
+        } if role == "user" && author.as_ref().is_none_or(|a| a["kind"] != "bot") => {
+            user_bubble::layout(&mut b, width, nodes, expanded, window);
+        }
+        Row::Message { author, nodes, .. } => {
+            if let Some(author) = author.as_ref().filter(|a| a["kind"] == "bot") {
+                b.plain(
+                    crate::text::sanitize(author["name"].as_str().unwrap_or("Bot")),
+                    12.,
+                    18.,
+                    window,
                 );
+                b.y += px(4.);
+            }
+            for node in trimmed(nodes) {
+                let card = node
+                    .data
+                    .as_ref()
+                    .and_then(|data| data["id"].as_str())
+                    .and_then(|id| cards.get(id))
+                    .filter(|_| node.kind == "visualization");
+                if let Some(card) = card {
+                    let card = card.borrow();
+                    let top = b.y;
+                    if let Some(error) = &card.error {
+                        b.y += px(16.);
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            b.plain(
+                                crate::text::sanitize(&card.reference.title),
+                                13.,
+                                20.,
+                                window,
+                            );
+                            b.y += px(8.);
+                        }
+                        b.plain(crate::text::sanitize(error), 13., 20., window);
+                        b.y += px(10.);
+                        b.plain(
+                            crate::visualizations::protocol::RETRY.into(),
+                            12.,
+                            20.,
+                            window,
+                        );
+                        b.y += px(16.);
+                    } else if !card.ready {
+                        b.plain("Loading visualization…".into(), 12., 20., window);
+                    }
+                    b.y = (top + px(card.display_height())).max(b.y);
+                    placements.push((
+                        card.reference.id.clone(),
+                        Bounds::new(
+                            point(px(24.), top),
+                            size((width - px(48.)).max(px(1.)), b.y - top),
+                        ),
+                    ));
+                } else {
+                    b.node(node, expanded, window);
+                }
             }
             b.y += px(8.);
         }
         Row::Activity { steps, .. } => {
-            b.y += px(8.);
+            // The desktop's quiet counted rollup; each step opens under it.
+            b.y += px(2.);
+            b.disclosure(
+                &crate::text::sanitize(&crate::activity::summary(steps)),
+                "muted",
+                expanded,
+                window,
+            );
+            if !expanded {
+                b.y += px(2.);
+                return Layout {
+                    size: size(width, b.y + px(8.)),
+                    theme: crate::theme::generation(),
+                    lines: b.lines,
+                    backgrounds: b.backgrounds,
+                    images: vec![],
+                    links: b.links,
+                    cards: vec![],
+                };
+            }
+            b.y += px(4.);
             let mut previous = None;
             for step in steps {
                 if previous != Some(step.group) {
@@ -410,10 +759,17 @@ fn layout(row: &Row, width: Pixels, expanded: bool, window: &Window) -> Layout {
     }
     Layout {
         size: size(width, b.y + px(8.)),
+        theme: crate::theme::generation(),
         lines: b.lines,
         backgrounds: b.backgrounds,
+        images: b.images,
+        links: b.links,
+        cards: placements,
     }
 }
+// The desktop transcript's reading column: the composer width plus the 24px row insets.
+pub(crate) const COLUMN: f32 = crate::theme::GEOMETRY.composer_width + 48.;
+
 pub struct RetainedRow {
     pub state: Rc<RefCell<RowState>>,
     pub index: usize,
@@ -422,6 +778,48 @@ pub struct RetainedRow {
 impl RetainedRow {
     pub fn interactive(self, list: &gpui::ListState) -> gpui::AnyElement {
         use gpui::prelude::*;
+        if matches!(self.state.borrow().row, Row::Activity { .. }) {
+            return crate::trace::element(self.state.clone(), self.index, list);
+        }
+        if !self.state.borrow().cards.is_empty() {
+            let state = self.state.clone();
+            let list = list.clone();
+            let index = self.index;
+            let retry = move |position: Option<Point<Pixels>>, window: &mut Window| {
+                let mut state = state.borrow_mut();
+                let card = state
+                    .cards
+                    .values()
+                    .find(|card| {
+                        let card = card.borrow();
+                        card.error.is_some()
+                            && position.is_none_or(|p| card.bounds.is_some_and(|b| b.contains(&p)))
+                    })
+                    .cloned();
+                if let Some(card) = card {
+                    card.borrow_mut().retry();
+                    state.cache = None;
+                    list.splice(index..index + 1, 1);
+                    window.refresh();
+                }
+            };
+            let click = retry.clone();
+            return gpui::div()
+                .id(("visualization-message", self.index))
+                .focusable()
+                .debug_selector(move || format!("visualization-message-{index}").into())
+                .on_click(move |event, window, _| click(Some(event.position()), window))
+                .on_key_down(move |event, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        && !event.keystroke.modifiers.modified()
+                    {
+                        retry(None, window);
+                        cx.stop_propagation();
+                    }
+                })
+                .child(self)
+                .into_any_element();
+        }
         if self.state.borrow().expanded.is_none() {
             return self.into_any_element();
         }
@@ -430,7 +828,7 @@ impl RetainedRow {
         let index = self.index;
         let toggle = move |window: &mut Window| {
             let mut state = state.borrow_mut();
-            let expanded = state.expanded.as_mut().expect("system event");
+            let expanded = state.expanded.as_mut().expect("collapsible row");
             *expanded = !*expanded;
             state.cache = None;
             list.splice(index..index + 1, 1);
@@ -466,9 +864,11 @@ impl IntoElement for RetainedRow {
 }
 impl Element for RetainedRow {
     type RequestLayoutState = ();
-    type PrepaintState = ();
+    type PrepaintState = Vec<gpui::AnyElement>;
     fn id(&self) -> Option<ElementId> {
-        None
+        (!self.state.borrow().cards.is_empty()).then(|| {
+            ElementId::Name(format!("visualization-row:{}", self.state.borrow().row.id()).into())
+        })
     }
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
         None
@@ -488,33 +888,125 @@ impl Element for RetainedRow {
                 AvailableSpace::Definite(w) => w,
                 _ => px(1000.),
             });
+            // Rows wrap at the reading column and paint centred in wider panes.
+            let column = width.min(px(COLUMN));
             let mut state = state.borrow_mut();
-            if state
-                .cache
-                .as_ref()
-                .is_none_or(|cache| cache.size.width != width)
-            {
+            if state.cache.as_ref().is_none_or(|cache| {
+                cache.size.width != column || cache.theme != crate::theme::generation()
+            }) {
                 state.cache = Some(layout(
                     &state.row,
-                    width,
+                    column,
                     state.expanded.unwrap_or(false),
+                    state.images.clone(),
+                    &state.cards,
                     window,
                 ));
                 state.layouts += 1;
             }
-            state.cache.as_ref().unwrap().size
+            size(width, state.cache.as_ref().unwrap().size.height)
         });
         (id, ())
     }
     fn prepaint(
         &mut self,
-        _: Option<&GlobalElementId>,
+        global_id: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
+        row_bounds: Bounds<Pixels>,
         _: &mut (),
-        _: &mut Window,
-        _: &mut App,
-    ) {
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Vec<gpui::AnyElement> {
+        use gpui::{prelude::*, *};
+        if let Some(global_id) = global_id {
+            let cards: Vec<_> = self.state.borrow().cards.values().cloned().collect();
+            window.with_element_state::<crate::visualizations::Lease, _>(global_id, |lease, _| {
+                let lease = lease.filter(|lease| {
+                    lease.0.len() == cards.len()
+                        && lease.0.iter().zip(&cards).all(|(a, b)| Rc::ptr_eq(a, b))
+                });
+                (
+                    (),
+                    lease.unwrap_or_else(|| crate::visualizations::Lease::new(cards)),
+                )
+            });
+        }
+        let state = self.state.borrow();
+        let cache = state.cache.as_ref().expect("measured row");
+        let origin = row_bounds.origin
+            + point(
+                ((row_bounds.size.width - cache.size.width) / 2.).max(px(0.)),
+                px(0.),
+            );
+        for (id, placement) in &cache.cards {
+            if let Some(card) = state.cards.get(id) {
+                card.borrow_mut().paint(
+                    Bounds::new(origin + placement.origin, placement.size),
+                    window.content_mask().bounds,
+                    window,
+                );
+            }
+        }
+        cache
+            .images
+            .iter()
+            .map(|image| {
+                let selector = image.selector.clone();
+                let mut child = div()
+                    .id(SharedString::from(selector.clone()))
+                    .debug_selector(move || selector.clone())
+                    .w(image.bounds.size.width)
+                    .h(image.bounds.size.height);
+                if let Some(data) = &image.image {
+                    let data = data.clone();
+                    let name = image.name.clone();
+                    child = child
+                        .cursor_pointer()
+                        .child(
+                            img(data.clone())
+                                .size_full()
+                                .rounded(px(10.))
+                                .object_fit(ObjectFit::Contain),
+                        )
+                        .on_click(move |_, _, cx| {
+                            crate::ui::images::open(data.clone(), name.clone(), cx)
+                        });
+                } else {
+                    child = child
+                        .text_size(px(12.))
+                        .text_color(theme().text_muted)
+                        .child(if image.unavailable {
+                            "Image unavailable"
+                        } else {
+                            "Loading image..."
+                        });
+                }
+                let mut child = child.into_any_element();
+                child.layout_as_root(image.bounds.size.map(AvailableSpace::Definite), window, cx);
+                child.prepaint_at(origin + image.bounds.origin, window, cx);
+                child
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .chain(cache.links.iter().enumerate().map(|(index, link)| {
+                let url = link.url.clone();
+                // Unique across rows: elements sharing an id share click state,
+                // and one row's mouse-up then cancels another's press.
+                let selector = format!("transcript-link-{}-{index}", self.index);
+                let name = SharedString::from(selector.clone());
+                let mut child = div()
+                    .id(name)
+                    .debug_selector(move || selector.clone())
+                    .w(link.bounds.size.width)
+                    .h(link.bounds.size.height)
+                    .cursor_pointer()
+                    .on_click(move |_, window, cx| crate::ui::open_link(&url, window, cx))
+                    .into_any_element();
+                child.layout_as_root(link.bounds.size.map(AvailableSpace::Definite), window, cx);
+                child.prepaint_at(origin + link.bounds.origin, window, cx);
+                child
+            }))
+            .collect()
     }
     fn paint(
         &mut self,
@@ -522,87 +1014,53 @@ impl Element for RetainedRow {
         _: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _: &mut (),
-        _: &mut (),
+        images: &mut Vec<gpui::AnyElement>,
         window: &mut Window,
         cx: &mut App,
     ) {
         let state = self.state.borrow();
         let cache = state.cache.as_ref().expect("measured row");
+        let origin = bounds.origin
+            + point(
+                ((bounds.size.width - cache.size.width) / 2.).max(px(0.)),
+                px(0.),
+            );
+        #[cfg(test)]
+        state.painted_geometry.replace(PaintedGeometry {
+            row: bounds,
+            ..Default::default()
+        });
         for background in &cache.backgrounds {
-            window.paint_quad(gpui::fill(
-                Bounds::new(
-                    bounds.origin + background.bounds.origin,
-                    background.bounds.size,
-                ),
-                background.color,
-            ));
+            let painted_bounds =
+                Bounds::new(origin + background.bounds.origin, background.bounds.size);
+            #[cfg(test)]
+            state
+                .painted_geometry
+                .borrow_mut()
+                .backdrop
+                .get_or_insert(painted_bounds);
+            window.paint_quad(
+                gpui::fill(painted_bounds, background.color).corner_radii(background.radius),
+            );
         }
         for line in &cache.lines {
+            let painted_origin = origin + line.origin;
+            #[cfg(test)]
+            state
+                .painted_geometry
+                .borrow_mut()
+                .text_origin
+                .get_or_insert(painted_origin);
             line.line
-                .paint_background(
-                    bounds.origin + line.origin,
-                    line.height,
-                    line.align,
-                    None,
-                    window,
-                    cx,
-                )
+                .paint_background(painted_origin, line.height, line.align, None, window, cx)
                 .unwrap();
             line.line
-                .paint(
-                    bounds.origin + line.origin,
-                    line.height,
-                    line.align,
-                    None,
-                    window,
-                    cx,
-                )
+                .paint(painted_origin, line.height, line.align, None, window, cx)
                 .unwrap();
         }
+        for image in images {
+            image.paint(window, cx);
+        }
         self.painted.borrow_mut().insert(self.index);
-    }
-}
-
-fn text_run(run: &Run) -> TextRun {
-    let mut face = font(if run.style == "code" || run.style.starts_with("diff-") {
-        theme().font_mono
-    } else {
-        theme().font_ui
-    });
-    face.weight = if run.style == "strong" {
-        gpui::FontWeight::MEDIUM
-    } else {
-        gpui::FontWeight::LIGHT
-    };
-    if run.style == "em" {
-        face.style = gpui::FontStyle::Italic;
-    }
-    TextRun {
-        len: run.text.len(),
-        font: face,
-        color: (if run.style == "diff-add" {
-            theme().success
-        } else if run.style == "diff-remove" {
-            theme().danger
-        } else if run.style == "link" {
-            theme().accent
-        } else {
-            theme().text
-        })
-        .into(),
-        background_color: if run.style == "code" {
-            Some(theme().surface.into())
-        } else {
-            None
-        },
-        underline: None,
-        strikethrough: if run.style == "strike" {
-            Some(gpui::StrikethroughStyle {
-                thickness: px(1.),
-                color: None,
-            })
-        } else {
-            None
-        },
     }
 }

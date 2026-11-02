@@ -17,6 +17,7 @@ interface ThreadHistoryBackfillOptions<T> {
   fetchPage: (tabId: string, before: string) => Promise<ThreadHistoryPage<T> | null>;
   getScrollContainer: () => HTMLElement | null;
   onPrepend: (messages: T[]) => boolean | void;
+  onComplete?: (tabId: string) => void;
 }
 
 /**
@@ -28,6 +29,7 @@ export function useThreadHistoryBackfill<T>({
   fetchPage,
   getScrollContainer,
   onPrepend,
+  onComplete,
 }: ThreadHistoryBackfillOptions<T>) {
   const stateRef = useRef<{ tabId: string; before: string | null; hasMore: boolean; generation: number } | null>(null);
   const loadingRef = useRef(false);
@@ -70,10 +72,11 @@ export function useThreadHistoryBackfill<T>({
           }
         });
       }
+      if (!current.hasMore || !current.before) onComplete?.(tabId);
     } finally {
       loadingRef.current = false;
     }
-  }, [fetchPage, getScrollContainer, onPrepend]);
+  }, [fetchPage, getScrollContainer, onPrepend, onComplete]);
 
   const scheduleIdlePage = useCallback(() => {
     const state = stateRef.current;
@@ -94,8 +97,9 @@ export function useThreadHistoryBackfill<T>({
       hasMore: page?.hasMore === true,
       generation: (stateRef.current?.generation ?? 0) + 1,
     };
-    scheduleIdlePage();
-  }, [cancelIdle, scheduleIdlePage]);
+    if (!stateRef.current.hasMore || !stateRef.current.before) onComplete?.(tabId);
+    else scheduleIdlePage();
+  }, [cancelIdle, scheduleIdlePage, onComplete]);
 
   const cancelBackfill = useCallback(() => {
     cancelIdle();

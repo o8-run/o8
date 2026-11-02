@@ -96,14 +96,55 @@ fn click(cx: &mut VisualTestContext, id: &str) {
 }
 fn input(view: &Entity<PullRequests>, cx: &mut VisualTestContext, text: &str) {
     view.update_in(cx, |s, w, cx| {
+        // As choosing Write a comment: the composer opens on the draft.
+        if s.composer.is_empty() {
+            s.set_composer("comment", cx);
+        }
         s.editor.update(cx, |e, cx| e.clear(cx));
         s.editor.read(cx).focus.focus(w);
     });
     cx.simulate_input(text);
     draw(cx);
 }
+/// Header actions sit in the desktop's Check out and ··· menus: open the
+/// menu, choose, and dismiss it when the choice was unavailable.
+pub(super) fn choose(cx: &mut VisualTestContext, id: &str) {
+    let menu = if id == "pr-checkout" { "checkout-menu" } else { "actions" };
+    click(cx, &format!("pr-{menu}"));
+    click(cx, id);
+    if cx.debug_bounds(Box::leak(format!("pr-{menu}-items").into_boxed_str())).is_some() {
+        cx.simulate_click(gpui::point(gpui::px(2.), gpui::px(2.)), gpui::Modifiers::default());
+        settle(cx);
+    }
+}
+/// The composer posts comments and reviews; its mode and review choice come first.
+fn compose(cx: &mut VisualTestContext, action: &str) {
+    match action {
+        "comment" | "close-with-comment" => {
+            if cx.debug_bounds("pr-composer-comment").is_none() {
+                choose(cx, "pr-write-comment");
+            }
+            click(cx, "pr-composer-comment");
+        }
+        "review-comment" | "approve" | "request-changes" => {
+            if cx.debug_bounds("pr-composer-review").is_none() {
+                choose(cx, "pr-write-review");
+            }
+            click(cx, "pr-composer-review");
+            click(cx, &format!("pr-review-choice-{action}"));
+        }
+        _ => {}
+    }
+}
 fn perform(view: &Entity<PullRequests>, cx: &mut VisualTestContext, action: &str) {
-    click(cx, &format!("pr-{action}"));
+    match action {
+        "comment" | "close-with-comment" | "review-comment" | "approve" | "request-changes" => {
+            compose(cx, action);
+            click(cx, &format!("pr-{action}"));
+        }
+        "retry-close" => click(cx, "pr-retry-close"),
+        _ => choose(cx, &format!("pr-{action}")),
+    }
     assert!(
         view.read_with(cx, |s, _| s.confirmation.is_some()),
         "prepare {action}"
@@ -396,7 +437,7 @@ fn pull_requests_real_server_actions_and_paint(cx: &mut TestAppContext) {
         view.read_with(cx, |s, _| assert_eq!(s.painted.get(), s.revision));
     }
     for id in ["pr-link", "pr-number", "pr-checkout", "pr-open"] {
-        click(cx, id);
+        choose(cx, id);
     }
     input(&view, cx, "Fixture feedback");
     perform(&view, cx, "comment");
@@ -407,7 +448,7 @@ fn pull_requests_real_server_actions_and_paint(cx: &mut TestAppContext) {
     perform(&view, cx, "request-changes");
     perform(&view, cx, "draft");
     assert!(view.read_with(cx, |s, _| s.detail["draft"] == true));
-    click(cx, "pr-merge-squash");
+    choose(cx, "pr-merge-squash");
     assert!(view.read_with(cx, |s, _| s.confirmation.is_none()));
     perform(&view, cx, "ready");
     assert!(
@@ -421,9 +462,9 @@ fn pull_requests_real_server_actions_and_paint(cx: &mut TestAppContext) {
     click(cx, "pr-row-7");
     perform(&view, cx, "enable-auto-merge");
     perform(&view, cx, "disable-auto-merge");
-    click(cx, "pr-merge-rebase");
+    choose(cx, "pr-merge-rebase");
     assert!(view.read_with(cx, |s, _| s.confirmation.is_none()));
-    click(cx, "pr-merge-squash");
+    choose(cx, "pr-merge-squash");
     click(cx, "pr-cancel");
     assert!(view.read_with(cx, |s, _| s.confirmation.is_none()));
     perform(&view, cx, "merge-squash");
@@ -484,7 +525,7 @@ fn pull_requests_uncertain_delivery_and_partial_close(cx: &mut TestAppContext) {
         .filter(|r| r["method"] == "POST")
         .count();
     click(cx, "pr-comment");
-    click(cx, "pr-merge-squash");
+    choose(cx, "pr-merge-squash");
     assert_eq!(
         fixture
             .receipts()
@@ -524,20 +565,28 @@ fn pull_requests_filters_empty_retry_and_server_merge_refusal(cx: &mut TestAppCo
         PullRequests::new(fixture.client.clone(), fixture.workspace.clone(), w, cx)
     });
     settle(cx);
+    // Each picker opens its menu and takes a choice, as the desktop controls do.
     for id in [
-        "pr-filter-author",
-        "pr-filter-label",
-        "pr-filter-baseRefName",
+        "pr-filters",
         "pr-filter-draft",
+        "pr-filter-draft-ready",
         "pr-filter-checks",
-        "pr-scope",
+        "pr-filter-checks-unknown",
+        "pr-filters-done",
         "pr-layout",
+        "pr-layout-stacks",
         "pr-sort",
+        "pr-sort-oldest",
         "pr-state",
+        "pr-state-closed",
         "pr-refresh",
     ] {
         click(cx, id);
     }
+    assert_eq!(
+        view.read_with(cx, |s, _| (s.filters.get("draft").cloned(), s.layout.clone(), s.menu)),
+        (Some("ready".to_owned()), "stacks".to_owned(), None)
+    );
     view.update_in(cx, |s, w, cx| {
         s.search.read(cx).focus.focus(w);
     });
@@ -554,7 +603,7 @@ fn pull_requests_filters_empty_retry_and_server_merge_refusal(cx: &mut TestAppCo
     });
     settle(cx);
     click(cx, "pr-row-7");
-    click(cx, "pr-merge-squash");
+    choose(cx, "pr-merge-squash");
     fixture
         .client
         .pr_post(
@@ -576,7 +625,7 @@ fn pull_requests_filters_empty_retry_and_server_merge_refusal(cx: &mut TestAppCo
         .client
         .pr_post("/__fixture/pr-gates", &json!({"scenario":"merge-refused"}))
         .unwrap();
-    click(cx, "pr-merge-squash");
+    choose(cx, "pr-merge-squash");
     click(cx, "pr-confirm");
     assert!(
         view.read_with(cx, |s, cx| s.delivery(cx).uncertain),
@@ -609,7 +658,7 @@ fn pull_requests_linked_packet_preview_refuses_merge(cx: &mut TestAppContext) {
         7
     );
     click(cx, "pr-tab-checks");
-    click(cx, "pr-merge-squash");
+    choose(cx, "pr-merge-squash");
     assert!(view.read_with(cx, |s, _| s.confirmation.is_none()));
     assert!(!fixture.receipts().iter().any(|r| r["method"] == "POST"));
     // A contract fixture for the client-only refusal: even a passing preview
@@ -619,7 +668,7 @@ fn pull_requests_linked_packet_preview_refuses_merge(cx: &mut TestAppContext) {
             json!({"packetId":"next-pr-unwired","wouldMerge":true,"checks":[],"blockers":[]});
         s.changed(cx);
     });
-    click(cx, "pr-merge-squash");
+    choose(cx, "pr-merge-squash");
     assert!(
         view.read_with(cx, |s, _| s.confirmation.is_none()),
         "a passing preview cannot bypass the governed packet merge path"
@@ -637,6 +686,7 @@ fn pull_requests_loading_error_retry_and_unavailable(cx: &mut TestAppContext) {
     });
     settle(cx);
     click(cx, "pr-state");
+    click(cx, "pr-state-closed");
     assert!(
         view.read_with(cx, |s, _| !s.error.is_empty()),
         "closed-page fixture refusal must expose Retry"
@@ -649,6 +699,48 @@ fn pull_requests_loading_error_retry_and_unavailable(cx: &mut TestAppContext) {
     });
     settle(cx);
     assert!(view.read_with(cx, |s, _| s.page["unavailable"] == true));
+}
+
+#[gpui::test]
+fn pull_requests_hosted_open_survives_a_failed_list_and_checks_the_retry(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (view, cx) = cx.add_window_view(|w, cx| {
+        PullRequests::new(fixture.client.clone(), fixture.workspace.clone(), w, cx)
+    });
+    settle(cx);
+    let repo = view.read_with(cx, |s, _| string(&s.page, "repo").to_owned());
+    // The fixture refuses the first closed page, so the list fails with no page.
+    view.update(cx, |s, cx| {
+        s.hosted = true;
+        s.page = Value::Null;
+        s.state = "closed".into();
+        s.load(false, cx);
+    });
+    settle(cx);
+    assert!(view.read_with(cx, |s, _| !s.error.is_empty() && s.page.is_null()));
+    // Activity's Open PR still marks the request after a failed list...
+    view.update(cx, |s, cx| s.open("other/elsewhere", 7, cx));
+    assert_eq!(view.read_with(cx, |s, _| s.selected), Some(7));
+    // ...and the list that loads on retry drops another repository's mark.
+    view.update(cx, |s, cx| {
+        s.state = "open".into();
+        s.load(false, cx);
+    });
+    settle(cx);
+    assert_eq!(
+        view.read_with(cx, |s, _| s.selected),
+        None,
+        "a {repo} list must not mark another repository's pull request"
+    );
+    // A request for the list's own repository, made while it loads, keeps its mark.
+    view.update(cx, |s, cx| {
+        s.page = Value::Null;
+        s.load(false, cx);
+        s.open(&repo, 7, cx);
+    });
+    assert_eq!(view.read_with(cx, |s, _| s.selected), Some(7));
+    settle(cx);
+    assert_eq!(view.read_with(cx, |s, _| s.selected), Some(7));
 }
 
 #[gpui::test]
@@ -700,7 +792,7 @@ fn pull_requests_structured_preview_refusal_and_rebase(cx: &mut TestAppContext) 
     assert!(view.read_with(cx, |s, _| {
         array(&s.preview, "blockers").contains(&json!("worktree-branch"))
     }));
-    click(cx, "pr-merge-squash");
+    choose(cx, "pr-merge-squash");
     assert!(view.read_with(cx, |s, _| s.confirmation.is_none()));
     click(cx, "pr-row-10");
     perform(&view, cx, "merge-rebase");

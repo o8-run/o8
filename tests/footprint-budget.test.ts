@@ -105,7 +105,7 @@ describe('footprint budget', () => {
     });
     expect(receipt).toMatchObject({
       schemaVersion: 1,
-      budgetVersion: 4,
+      budgetVersion: 5,
       scenario: 'idle-hidden',
       verdict: 'PASS',
       metrics: {
@@ -475,7 +475,7 @@ describe('gate composition', () => {
 
     expect(receipt).toMatchObject({
       schemaVersion: 2,
-      budgetVersion: 4,
+      budgetVersion: 5,
       sampleCount: 2,
       artifactDigest,
       verdict: 'PASS',

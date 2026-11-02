@@ -230,10 +230,12 @@ export function performShipPreflight(options) {
   // so a stale manifest reaches the tag unnoticed and turns every open PR's
   // Hermetic Unit Tests job red for a reason unrelated to its diff (#2053).
   // Reuse the exact same script + remedy text CI prints on failure.
+  // The browser-declaration scan parses imports and takes about 60 s of CPU on
+  // the Intel release Mac, so 60 s failed the 0.1.814 ship twice (#5067).
   const classification = run(process.execPath, ['scripts/classify-tests.mjs', '--check-manifest'], {
     cwd: root,
     env,
-    timeoutMs: 60_000,
+    timeoutMs: 300_000,
   });
   if (classification.status !== 0) {
     throw new Error(`test classification check: ${

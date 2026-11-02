@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { syncBuiltinESMExports } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -24,9 +25,20 @@ export default async function register({ dataDir, repo }: SurfaceContext): Promi
     writeFileSync(join(base, '.claude', 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'fixture-hook --token fixture-sensitive-value' }] }] } }));
     writeFileSync(join(base, '.agents', 'skills', 'fixture', 'SKILL.md'), `---\nname: ${name} skill\ndescription: Read-only fixture skill\n---\nRead files.`);
   }
+  const plugin = join(repo, 'fixture-plugin');
+  mkdirSync(plugin, { recursive: true });
+  const script = '#!/bin/sh\nprintf "fixture action\\n"\n';
+  writeFileSync(join(plugin, 'run.sh'), script, { mode: 0o700 });
+  writeFileSync(join(plugin, 'o8-actions.json'), JSON.stringify({
+    format: 'o8-actions-v1', id: 'fixture', name: 'Fixture plugin', version: '1.0.0', description: 'Fixture action plugin',
+    supportedPlatforms: [process.platform], workspace: 'none',
+    files: [{ path: 'run.sh', sha256: createHash('sha256').update(script).digest('hex') }],
+    actions: [{ id: 'hello', description: 'Say hello', entry: 'run.sh', args: [], timeoutMs: 5000 }],
+  }));
   mkdirSync(join(dataDir, 'directives'), { recursive: true });
   writeFileSync(join(dataDir, 'directives', 'fixture.md'), '---\nid: fixture\ntitle: Fixture instruction\nscope: global\n---\nFixture instruction body.');
   const inventory = await import('../../../src/app/api/customize/inventory/route');
+  const actions = await import('../../../src/app/api/customize/actions/route');
   const directives = await import('../../../src/app/api/cortex/directives/route');
   const connections = await import('../../../src/app/api/setup/mcp-servers/route');
   const { insertExternalMcpServer } = await import('../../../src/lib/mcp/external-servers');
@@ -36,7 +48,7 @@ export default async function register({ dataDir, repo }: SurfaceContext): Promi
   const repos = await import('../../../src/app/api/panel/repos/route');
   const { panelGateMiddleware } = await import('../../../src/middleware');
   const gets: Record<string, Route> = {
-    '/api/panel/repos': repos.GET, '/api/customize/inventory': inventory.GET,
+    '/api/panel/repos': repos.GET, '/api/customize/inventory': inventory.GET, '/api/customize/actions': actions.GET,
     '/api/cortex/directives': directives.GET, '/api/setup/mcp-servers': connections.GET,
     '/api/prompt-library': prompts.GET,
   };
@@ -56,6 +68,7 @@ export default async function register({ dataDir, repo }: SurfaceContext): Promi
       if (id && method === 'GET') return request => entry.GET(request, { params: Promise.resolve({ id }) });
       if (id && method === 'PATCH') return request => entry.PATCH(request, { params: Promise.resolve({ id }) });
       if (id && method === 'DELETE') return request => entry.DELETE(request, { params: Promise.resolve({ id }) });
+      if (method === 'POST' && pathname === '/api/customize/actions') return actions.POST;
       return method === 'GET' ? gets[pathname] : method === 'POST' && pathname === '/api/prompt-library' ? prompts.POST : undefined;
     },
   };

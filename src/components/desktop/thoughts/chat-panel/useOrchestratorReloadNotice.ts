@@ -13,15 +13,16 @@
  */
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { RELOAD_BANNER_AUTO_DISMISS_MS } from './ReloadBanner';
 
 export interface OrchestratorReloadNotice {
   noticeId: string;
-  kind: 'mcp-reload' | 'cross-house-orchestrator-handoff';
+  kind: 'mcp-reload' | 'cross-house-orchestrator-handoff' | 'orchestrator-turn-retry';
   message: string;
   registered: string[];
   repoPath: string | null;
+  threadId: string | null;
   autoDismiss: boolean;
   receivedAt: number;
 }
@@ -32,12 +33,14 @@ interface NoticeDetail {
   message?: string;
   registered?: unknown;
   repoPath?: string;
+  threadId?: string;
 }
 
 function normalize(detail: NoticeDetail): OrchestratorReloadNotice | null {
-  if (detail.kind !== 'mcp-reload' && detail.kind !== 'cross-house-orchestrator-handoff') return null;
+  if (detail.kind !== 'mcp-reload' && detail.kind !== 'cross-house-orchestrator-handoff' && detail.kind !== 'orchestrator-turn-retry') return null;
   const noticeId = typeof detail.noticeId === 'string' ? detail.noticeId.trim() : '';
   if (!noticeId) return null;
+  if (detail.kind === 'orchestrator-turn-retry' && (typeof detail.message !== 'string' || !detail.message.trim())) return null;
   const message = typeof detail.message === 'string' && detail.message.trim()
     ? detail.message.trim()
     : detail.kind === 'cross-house-orchestrator-handoff'
@@ -53,7 +56,8 @@ function normalize(detail: NoticeDetail): OrchestratorReloadNotice | null {
     message,
     registered,
     repoPath,
-    autoDismiss: detail.kind === 'mcp-reload',
+    threadId: typeof detail.threadId === 'string' ? detail.threadId : null,
+    autoDismiss: detail.kind !== 'cross-house-orchestrator-handoff',
     receivedAt: Date.now(),
   };
 }
@@ -65,8 +69,10 @@ export interface UseOrchestratorReloadNoticeResult {
 
 export function useOrchestratorReloadNotice(
   repoPath?: string | null,
+  threadId?: string | null,
 ): UseOrchestratorReloadNoticeResult {
   const [notice, setNotice] = useState<OrchestratorReloadNotice | null>(null);
+  const seenRetries = useRef(new Set<string>());
 
   const dismiss = useCallback(() => {
     setNotice(null);
@@ -82,6 +88,12 @@ export function useOrchestratorReloadNotice(
       // Only show banners for the currently-active repo. If the caller
       // doesn't scope by repo (no repoPath prop), accept everything.
       if (repoPath && next.repoPath && next.repoPath !== repoPath) return;
+      if (next.kind === 'orchestrator-turn-retry') {
+        // The stream is thread-scoped, but this window event reaches every pane.
+        if (!repoPath || next.repoPath !== repoPath || !threadId || next.threadId !== threadId) return;
+        if (seenRetries.current.has(next.noticeId)) return;
+        seenRetries.current.add(next.noticeId);
+      }
       setNotice(next);
     };
 
@@ -89,7 +101,7 @@ export function useOrchestratorReloadNotice(
     return () => {
       window.removeEventListener('cortex:orchestrator-notice', handler);
     };
-  }, [repoPath]);
+  }, [repoPath, threadId]);
 
   // Safety net for transient reload notices. Cross-house handoffs are durable:
   // the operator must see and dismiss that stand-in card explicitly.
@@ -101,5 +113,7 @@ export function useOrchestratorReloadNotice(
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  return { notice, dismiss };
+  const visibleNotice = notice?.kind === 'orchestrator-turn-retry'
+    && (notice.threadId !== threadId || notice.repoPath !== repoPath) ? null : notice;
+  return { notice: visibleNotice, dismiss };
 }

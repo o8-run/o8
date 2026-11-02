@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+SELF="$(readlink -f -- "$0")"
+DIR="$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)"
+PAYLOAD="$(CDPATH= cd -- "$DIR/../lib/o8" && pwd)"
+export O8_NODE_BIN="$PAYLOAD/node"
+export PATH="$DIR:$PAYLOAD:$PATH"
+if [ "$#" -eq 0 ]; then
+  exec "$O8_NODE_BIN" "$PAYLOAD/server/cli/desktop.mjs"
+fi
+exec "$O8_NODE_BIN" "$PAYLOAD/server/cli/o8.mjs" "$@"

@@ -91,7 +91,7 @@ describe.skipIf(!tmux || process.platform === 'win32')('settlement reservation t
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('missing port');
     const bundle = join(directory, 'o8.mjs');
     await build({ entryPoints: [join(process.cwd(), 'cli/src/index.ts')], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
-      define: { __O8_CLI_VERSION__: '"fixture"' }, banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); globalThis.require = require;" } });
+      define: { __O8_CLI_VERSION__: '"fixture"' }, banner: { js: "import { createRequire as __o8_createRequire } from 'node:module'; const require = __o8_createRequire(import.meta.url); globalThis.require = require;" } });
     const bindingFile = join(directory, 'binding.json');
     writeFileSync(bindingFile, JSON.stringify({ schema: 'o8/managed-run-settlement-binding/v1', executionKey: 'fixture-cli', generation: 1,
       branch: 'fixture/cli', providerSessionId: null, profileDigest: 'b'.repeat(64), receiptId: 'fixture-cli-receipt' }));

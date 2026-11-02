@@ -10,7 +10,7 @@
  *
  * So the maintainer fixes it, commits `Fixes-Report: FYPPHK`, and publish-fixed
  * runs on the MAINTAINER's box, reads the MAINTAINER's ledger, finds nothing, and
- * drops it: no #fixed post, no manifest entry, no receipt. The loop worked only
+ * drops it: no manifest entry, no receipt. The loop worked only
  * for bugs you reported to yourself — exactly backwards.
  *
  * Discord is already the durable store: the report embed carries the id, the

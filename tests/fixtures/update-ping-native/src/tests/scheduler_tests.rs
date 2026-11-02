@@ -61,7 +61,7 @@ fn wait_for(read: impl Fn() -> bool) {
 
 #[test]
 fn scheduler_checks_and_retries_state_without_a_webview_then_honors_fresh_requests() {
-    let _serial = SCHEDULER_ENV.lock().unwrap();
+    let _serial = SCHEDULER_ENV.lock().unwrap_or_else(|error| error.into_inner());
     let primary = server("ok");
     let fallback = server("ok");
     let redirect_trap = server("ok");
@@ -239,7 +239,7 @@ fn scheduler_checks_and_retries_state_without_a_webview_then_honors_fresh_reques
 
 #[test]
 fn slow_local_state_transport_does_not_repeat_remote_checks_as_false_wakes() {
-    let _serial = SCHEDULER_ENV.lock().unwrap();
+    let _serial = SCHEDULER_ENV.lock().unwrap_or_else(|error| error.into_inner());
     let primary = server("ok");
     let fallback = server("ok");
     let settings = tempfile::tempdir().unwrap();

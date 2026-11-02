@@ -341,8 +341,9 @@ export interface MobileTranscriptCommand {
 }
 
 export interface MobileTurnReceipt {
-  /** Server-correlated outcome; idle state and assistant text are not completion. */
-  terminal?: { userMessageId: string; outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed' };
+  /** Server-correlated outcome; idle state and assistant text are not completion.
+   *  `completedAt` (epoch ms) is when the server saw it; absent on turns saved before 2026-10-29. */
+  terminal?: { userMessageId: string; outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed'; completedAt?: number };
   permissionMode?: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode;
   leadModel: string;
   effort: ThinkingEffort;
@@ -361,6 +362,9 @@ export type MobilePendingTurnWorkers = Record<string, NonNullable<MobileTurnRece
 
 // Shared transcript shape used across mobile history and runtime tails.
 export interface MobileTranscriptEntry {
+  author?: import('@/lib/bots/network-types').NetworkMessageAuthor;
+  network?: import('@/lib/bots/network-types').NetworkMessageReceipt;
+  runtime?: string;
   /** Spoken captions are display evidence, never a runtime completion receipt. */
   voice?: import('@/lib/transcripts/voice-captions').VoiceCaption;
   /** Matching send acknowledgement or live turn activity; not turn completion. */
@@ -406,6 +410,9 @@ export interface MobileTranscriptEntry {
     packet?: Record<string, unknown>;
   };
   compaction?: {
+    operationId?: string;
+    startedAt?: number;
+    completedAt?: number;
     timestamp: number;
     tokensBefore?: number;
     contextSource?: string;
@@ -520,6 +527,11 @@ export type MobileOrchestratorBackend = OrchestratorBackendId;
 export type MobileOrchestratorThreadStatus = 'idle' | 'ready' | 'busy' | 'failed';
 
 export interface MobileOrchestratorThread {
+  source?: 'bot-network';
+  /** Uses the existing native needs-input attention marker, independently of execution status. */
+  outcome?: 'asked';
+  networkQuestion?: import('@/lib/bots/network-types').NetworkQuestionSummary;
+  networkProjectionError?: string;
   id: string;
   title: string;
   lastMessageAt: string;

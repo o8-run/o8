@@ -18,6 +18,8 @@ export const dynamic = 'force-dynamic';
 // sibling /api/repo-spec GET/PUT/POST.
 
 const ASSET_MAX_BYTES = 10 * 1024 * 1024; // 10 MB per image
+const VIDEO_MAX_BYTES = 100 * 1024 * 1024; // GitHub refuses single files over 100 MB
+const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm']);
 const ASSETS_DIR = 'o8-assets';
 
 const EXT_BY_MIME: Record<string, string> = {
@@ -27,6 +29,9 @@ const EXT_BY_MIME: Record<string, string> = {
   'image/webp': 'webp',
   'image/avif': 'avif',
   'image/svg+xml': 'svg',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
 };
 
 /** Lowercase extension → canonical extension + MIME pair. Used by the
@@ -40,6 +45,10 @@ const PATH_EXT_TO_MIME: Record<string, { ext: string; mime: string }> = {
   '.webp': { ext: 'webp', mime: 'image/webp' },
   '.avif': { ext: 'avif', mime: 'image/avif' },
   '.svg':  { ext: 'svg',  mime: 'image/svg+xml' },
+  '.mp4':  { ext: 'mp4',  mime: 'video/mp4' },
+  '.m4v':  { ext: 'mp4',  mime: 'video/mp4' },
+  '.mov':  { ext: 'mov',  mime: 'video/quicktime' },
+  '.webm': { ext: 'webm', mime: 'video/webm' },
 };
 
 function repoDir(repoPath: string): string | null {
@@ -120,8 +129,10 @@ export async function POST(request: NextRequest) {
   if (buf.byteLength === 0) {
     return NextResponse.json({ ok: false, error: 'empty body' }, { status: 400 });
   }
-  if (buf.byteLength > ASSET_MAX_BYTES) {
-    return NextResponse.json({ ok: false, error: `image exceeds ${ASSET_MAX_BYTES} bytes` }, { status: 413 });
+  const video = VIDEO_EXTENSIONS.has(ext);
+  const limit = video ? VIDEO_MAX_BYTES : ASSET_MAX_BYTES;
+  if (buf.byteLength > limit) {
+    return NextResponse.json({ ok: false, error: `${video ? 'video' : 'image'} exceeds ${limit} bytes` }, { status: 413 });
   }
 
   // Hash for uniqueness; slug is human-readable context. Re-dropping the exact

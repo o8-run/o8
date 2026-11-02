@@ -208,7 +208,8 @@ jobs:
   integration-changed:
     name: Integration Tests (changed files)
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.integration_base != '')
-    runs-on: ubuntu-latest
+    # ubuntu-26.04 pulls amd64v3 package variants that the signed APT check rejects (#5140).
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -228,12 +229,14 @@ jobs:
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - if: steps.select.outputs.count != '0'
         run: npm ci --prefer-offline
+      - name: Prepare immutable integration policy
+        if: steps.select.outputs.count != '0'
+        run: node scripts/ci/prepare-integration-policy.mjs
       - name: Install resource-test prerequisites
         if: steps.select.outputs.count != '0'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ripgrep openssh-server
-          rg --version
+        uses: ./.github/actions/linux-package-prerequisites
+        with:
+          group: resources
       - name: Install touched browser-test prerequisites
         if: steps.select.outputs.browser == 'true'
         run: npx --no-install playwright-core install --with-deps chromium
@@ -258,7 +261,7 @@ jobs:
   # when no Sunday run passed, and closes the issue once one has.
   integration-weekly:
     name: Weekly Integration Tests (shard ${{ matrix.shard }}/6)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: test
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.schedule == '17 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.integration_base == '')
     timeout-minutes: 40
@@ -274,11 +277,12 @@ jobs:
           cache: npm
       - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - run: npm ci --prefer-offline
+      - name: Prepare immutable integration policy
+        run: node scripts/ci/prepare-integration-policy.mjs
       - name: Install resource-test prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ripgrep openssh-server
-          rg --version
+        uses: ./.github/actions/linux-package-prerequisites
+        with:
+          group: resources
       - if: matrix.shard == 1
         run: npm run test:classification:check
       - name: Install full-suite browser prerequisites
@@ -485,7 +489,8 @@ jobs:
   rust-check-linux:
     name: Rust Compile Gate (Linux)
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    # ubuntu-26.04 pulls amd64v3 package variants that the signed APT check rejects (#5140).
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -497,9 +502,10 @@ jobs:
         run: node scripts/ci/native-changes.mjs
       # Tauri v2 system deps for linux builds (webkit2gtk 4.1 line). No ALSA
       # headers needed — the audio crates are target-gated to macOS.
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf libssl-dev build-essential
+      - name: Install Linux Rust prerequisites
+        uses: ./.github/actions/linux-package-prerequisites
+        with:
+          group: rust
         if: steps.native.outputs.changed == 'true'
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         if: steps.native.outputs.changed == 'true'
@@ -535,7 +541,9 @@ jobs:
     name: o8 next Native Tests (Linux)
     if: github.event.schedule != '41 13 * * 1'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # A cold build plus a regular shard takes about 14 to 17 minutes, so 20
+    # left no room for the timed terminal probes.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -545,6 +553,7 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/native/o8-next/target
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_INCREMENTAL: '0'
+      O8_NATIVE_REAL_WINDOW_TESTS: 'true'
       O8D_HTTP_TEST_BINARY: ${{ github.workspace }}/native/o8-next/target/debug/o8d
       O8_NATIVE_TEST_SHARD: ${{ matrix.shard }}/4
     steps:

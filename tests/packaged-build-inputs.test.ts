@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 import { prunePackagedBuildInputs } from '../scripts/lib/packaged-build-inputs.mjs';
+import { RUNTIME_INPUT_FILES, stageRuntimeInputs } from './helpers/packaged-runtime-inputs';
 
 const roots: string[] = [];
 function fixture() {
@@ -25,6 +26,7 @@ function fixture() {
     'node_modules/better-sqlite3/deps/sqlite3/sqlite3.c', 'node_modules/better-sqlite3/binding.gyp',
     'node_modules/node-pty/src/unix/pty.cc', 'node_modules/node-pty/third_party/conpty/OpenConsole.exe'];
   for (const path of [...runtime, ...buildOnly]) put(path);
+  stageRuntimeInputs(server);
   return { root, server, put, runtime, buildOnly };
 }
 
@@ -37,7 +39,9 @@ describe('packaged build inputs', () => {
     expect(result.removedFiles).toBe(f.buildOnly.length);
     expect(result.removedBytes).toBeGreaterThan(0);
     for (const path of f.buildOnly) expect(existsSync(join(f.server, path)), path).toBe(false);
-    for (const path of f.runtime) expect(readFileSync(join(f.server, path), 'utf8')).toBe(path);
+    for (const path of [...f.runtime, ...Object.keys(RUNTIME_INPUT_FILES)]) {
+      expect(readFileSync(join(f.server, path), 'utf8')).toBe(RUNTIME_INPUT_FILES[path] ?? path);
+    }
     expect(prunePackagedBuildInputs(f.server, 'darwin').removedFiles).toBe(0);
   });
 

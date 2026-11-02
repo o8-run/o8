@@ -1,0 +1,20 @@
+Clean main: 320 passed / 0 failed / 8 ignored
+Clean head: 331 passed / 0 failed / 8 ignored
+Head in local CI: 331 passed / 0 failed / 8 ignored
+Main cases retained: 328/328; head: 339/339; identical ignored cases
+Failing native cases: none
+Workers focused: 20 passed / 0 failed / 0 ignored
+Locked all-target checks: main PASS; head PASS
+
+Local CI:
+PASS: Lint
+PASS: Security Audit
+PASS: Test Classification
+FAIL: Integration Tests (changed files)
+PASS: Server Bundle Size
+PASS: Type Check
+PASS: Governance Smoke
+PASS: o8 next Native Tests (Linux)
+FAIL: Hermetic Unit Tests
+Hermetic: 9805 passed / 1 failed / 5 skipped
+Both non-native residuals reproduced on current main; see failures.md.

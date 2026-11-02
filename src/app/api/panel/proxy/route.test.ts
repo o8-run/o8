@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { runInNewContext } from 'node:vm';
+import { createRequire } from 'node:module';
 import * as parse5 from 'parse5';
 import { neutralizePreviewRefresh } from '@/lib/panel/neutralize-preview-refresh';
 
@@ -15,6 +16,9 @@ vi.mock('@/lib/panel/api-port', () => ({
 
 const { GET } = await import('./route');
 const { parse: freshParse } = await vi.importActual<typeof import('parse5')>('parse5');
+const { JSDOM } = createRequire(import.meta.url)('jsdom') as {
+  JSDOM: new (html: string) => { window: Window };
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -77,6 +81,32 @@ describe('preview bootstrap final document', () => {
     expect(scripts[0]).toBe(bootstraps[0]);
     return scripts;
   }
+
+  it.each([
+    ['doctype without a head', '<!doctype html>', '<title>x</title><p>y</p>', 'CSS1Compat'],
+    ['uppercase doctype', '<!DOCTYPE html>', '<title>x</title><p>y</p>', 'CSS1Compat'],
+    ['leading whitespace', ' \n\t<!doctype html>\n ', '<title>x</title><p>y</p>', 'CSS1Compat'],
+    ['leading BOM and whitespace', '\uFEFF \n<!doctype html>\n ', '<title>x</title><p>y</p>', 'CSS1Compat'],
+    ['leading comments', '<!--before-->\n<!doctype html>\n<!--after--> \n', '<html><title>x</title><p>y</p></html>', 'CSS1Compat'],
+    ['implied html and leading comments', '<!doctype html><!--kept-->\n', '<title>x</title><p>y</p>', 'CSS1Compat'],
+    ['explicit html without a head', '<!doctype html>\n', '<html><title>x</title><p>y</p></html>', 'CSS1Compat'],
+    ['explicit head', '<!doctype html><html><head>', '<title>x</title></head><body>y</body></html>', 'CSS1Compat'],
+    ['explicit head without a doctype', '<html><head>', '<title>x</title></head><body>y</body></html>', 'BackCompat'],
+    ['no doctype', '', '<title>x</title><p>y</p>', 'BackCompat'],
+    ['no doctype with a leading comment', ' \n', '<!--kept--><title>x</title><p>y</p>', 'BackCompat'],
+  ])('preserves bootstrap placement and document mode with %s', async (_name, prefix, content, mode) => {
+    const output = await rewrite(prefix + content);
+    // The route's UTF-8 Response decoder consumes an initial BOM.
+    expect(output.startsWith(prefix.replace(/^\uFEFF/, '') + '<script>')).toBe(true);
+    expect(output).toContain('</script>' + content);
+    expect(verifiedScripts(output)).toHaveLength(1);
+    const dom = new JSDOM(output);
+    try {
+      expect(dom.window.document.compatMode).toBe(mode);
+    } finally {
+      dom.window.close();
+    }
+  });
 
   it.each(contexts)('keeps head-like text in a %s inert without a real head', async (_name, content) => {
     const document = await rewrite(`${content}${pageScript}`);

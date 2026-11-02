@@ -12,12 +12,15 @@ impl Inbox {
                 let controls = self.cards[self.lane]
                     .iter()
                     .enumerate()
-                    .filter(|(_, card)| self.can_resolve(card))
                     .flat_map(|(index, card)| {
-                        self.action_focus[&card.id]
-                            .iter()
-                            .cloned()
-                            .map(move |handle| (index, handle))
+                        let mut handles = Vec::new();
+                        if card.can_respond() {
+                            handles.push(self.reply_focus[&card.id].clone());
+                        }
+                        if self.can_resolve(card) {
+                            handles.extend(self.action_focus[&card.id].iter().cloned());
+                        }
+                        handles.into_iter().map(move |handle| (index, handle))
                     })
                     .collect::<Vec<_>>();
                 if !controls.is_empty() {
@@ -74,6 +77,7 @@ impl Inbox {
         let status_id = format!("inbox-status-{}-{}", card.id, card.status);
         let can_resolve = self.can_resolve(&card);
         let open = card.clone();
+        let reply = card.clone();
         let status = format!(
             "{}{}{}",
             label(&card.status),
@@ -104,8 +108,15 @@ impl Inbox {
                     div().id(("inbox-open", index)).debug_selector({ let id = card.id.clone(); move || format!("inbox-open-{id}") })
                         .cursor_pointer().p(px(6.)).rounded(px(7.)).text_size(px(11.))
                         .hover(|s| s.bg(palette().surface_raised))
-                        .child(if card.session.is_empty() { "Open on GitHub" } else { "Open session" })
+                        .child(if card.source == "bot_question" { "Answer in thread" } else if card.session.is_empty() { "Open on GitHub" } else { "Open session" })
                         .on_click(cx.listener(move |this, _, _, cx| this.open(&open, cx)))))
+                .when(card.can_respond(), |v| v.child(
+                    div().id(("inbox-respond",index)).debug_selector({let id=card.id.clone();move ||format!("inbox-respond-{id}")})
+                        .track_focus(&self.reply_focus[&card.id]).tab_index((index*3) as isize).cursor_pointer().p(px(6.)).rounded(px(7.)).text_size(px(11.))
+                        .hover(|s|s.bg(palette().surface_raised)).active(|s|s.bg(palette().selection)).focus(|s|s.bg(palette().selection))
+                        .child(if card.approval {"Discuss in chat"} else if github_url(&card.url).is_some() {"Draft reply in chat"} else {"Respond in chat"})
+                        .on_click(cx.listener({let reply=reply.clone();move |this,_,_,cx|this.respond(&reply,cx)}))
+                        .on_key_down(cx.listener(move |this,event:&KeyDownEvent,_,cx|{if matches!(event.keystroke.key.as_str(),"enter"|"space"){this.respond(&reply,cx);cx.stop_propagation();}}))))
                 .when(card.approval, |v| v.children([false, true].map(|approve| {
                     self.decision_button(card.clone(), index, approve, can_resolve, window, cx)
                 }))))
@@ -135,7 +146,7 @@ impl Inbox {
             })
             .relative()
             .track_focus(&focus)
-            .tab_index((index * 2 + usize::from(approve)) as isize)
+            .tab_index((index * 3 + 1 + usize::from(approve)) as isize)
             .tab_stop(enabled)
             .p(px(10.))
             .min_h(px(44.))

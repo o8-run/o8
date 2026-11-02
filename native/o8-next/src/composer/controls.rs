@@ -1,10 +1,16 @@
 //! Composer-only view state. Routing uses the existing durable queue schema.
 use super::Composer;
-use gpui::{Entity, FocusHandle};
+use gpui::{Entity, FocusHandle, RenderImage};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
+#[path = "context.rs"]
+pub(crate) mod context;
+
 pub(crate) struct State {
+    pub context: context::MeterState,
+    pub slash: super::commands::Slash,
+    pub prompt: super::prompt_state::State,
     pub open: Option<&'static str>,
     pub model: Option<Entity<Composer>>,
     pub busy: bool,
@@ -12,10 +18,35 @@ pub(crate) struct State {
     pub overrides: Value,
     pub focus: HashMap<String, FocusHandle>,
     pub images: Vec<Value>,
+    /// Non-image attachments (a video, a log, a PDF), sent to the agent as paths.
+    pub files: Vec<std::path::PathBuf>,
+    pub previews: HashMap<String, std::sync::Arc<RenderImage>>,
+    pub attachment_target: bool,
+    pub images_enabled: bool,
+    pub pending_images: usize,
+    /// The model picker's selected house: favorites, a lead house or a runtime id.
+    pub lead_house: String,
+    /// dispatchableRuntimes from operator defaults; Null until first asked.
+    pub inventory: Value,
+    /// A background thumbnail pass for the "+" drawer is running.
+    pub thumbs_pending: bool,
+    /// The cached mic/Send view, redrawn when the draft empties or fills.
+    pub send_view: Option<gpui::AnyView>,
+    /// Mic-to-Send morph of the primary button: open while there is a draft.
+    pub send_morph: crate::motion::Transition,
+    /// Live model catalogs of searchable houses; Null while loading.
+    pub catalogues: HashMap<String, Value>,
+    /// The effort stop under the pointer while the slider is dragged.
+    pub effort_preview: Option<usize>,
+    /// Service tier answers by backend:model; Null while a check is running.
+    pub tiers: HashMap<String, Value>,
 }
 impl Default for State {
     fn default() -> Self {
         Self {
+            context: Default::default(),
+            slash: Default::default(),
+            prompt: Default::default(),
             open: None,
             model: None,
             busy: false,
@@ -23,15 +54,79 @@ impl Default for State {
             overrides: json!({}),
             focus: HashMap::new(),
             images: vec![],
+            files: vec![],
+            previews: HashMap::new(),
+            attachment_target: false,
+            images_enabled: false,
+            pending_images: 0,
+            lead_house: "codex".into(),
+            inventory: Value::Null,
+            catalogues: HashMap::new(),
+            thumbs_pending: false,
+            send_view: None,
+            // Tests click Send right after typing; the morph is instant there.
+            send_morph: crate::motion::Transition::settled(if cfg!(test) { 0 } else { 180 }, false),
+            effort_preview: None,
+            tiers: HashMap::new(),
         }
     }
 }
 pub(crate) fn mode_label(mode: &str) -> &'static str {
     match mode {
         "multitask" => "Worktrees",
-        "fast" => "Shared",
-        _ => "Solo",
+        _ => "Shared",
     }
+}
+/// Classic shows only Shared and Worktrees (VISIBLE_COMPOSER_SELECTOR_MODES);
+/// Solo and the advanced modes are internal. Any other saved mode reads the way
+/// classic's cycleComposerSelectorMode maps it: Shared when the backend can
+/// share a checkout (composerSupportsFastMode), otherwise Worktrees.
+pub(crate) fn visible_mode(mode: Option<&str>, backend: Option<&str>) -> &'static str {
+    let shares = shares_checkout(backend);
+    match mode {
+        Some("multitask") => "multitask",
+        _ if shares => "fast",
+        _ => "multitask",
+    }
+}
+/// composerSupportsFastMode: the backends whose workers can share a checkout.
+/// Shared is unavailable for the rest, as classic disables it.
+pub(crate) fn shares_checkout(backend: Option<&str>) -> bool {
+    backend.is_none_or(|b| matches!(b, "codex" | "claude" | "fable" | "pi" | "o8"))
+}
+/// The desktop's model names (formatModelLabel): "gpt-6.1-sol" reads "GPT-6.1 Sol",
+/// "claude-opus-5-5" reads "Opus 5.5". Unknown ids pass through.
+pub(crate) fn model_label(id: &str) -> String {
+    let id = id.rsplit('/').next().unwrap_or(id);
+    let title = |word: &str| {
+        let mut chars = word.chars();
+        chars
+            .next()
+            .map_or(String::new(), |c| c.to_uppercase().chain(chars).collect())
+    };
+    let (long, id) = match id.strip_suffix("[1m]") {
+        Some(id) => (" (1M)", id),
+        None => ("", id),
+    };
+    let words: Vec<&str> = id
+        .split('-')
+        .filter(|w| *w != "preview" && !(w.len() == 8 && w.chars().all(|c| c.is_ascii_digit())))
+        .collect();
+    let label = match words.as_slice() {
+        ["gpt", version, "codex"] => format!("Codex {version}"),
+        ["gpt", version, rest @ ..] => {
+            let rest: Vec<String> = rest.iter().map(|w| title(w)).collect();
+            format!("GPT-{version} {}", rest.join(" "))
+                .trim_end()
+                .to_owned()
+        }
+        ["claude", family, version @ ..] if !version.is_empty() => {
+            format!("{} {}", title(family), version.join("."))
+        }
+        ["gemini" | "grok", ..] => words.iter().map(|w| title(w)).collect::<Vec<_>>().join(" "),
+        _ => return format!("{id}{long}"),
+    };
+    format!("{label}{long}")
 }
 pub(crate) fn wire(text: &str, mode: &str) -> String {
     if text.starts_with('/') {
@@ -49,4 +144,17 @@ pub(crate) fn wire(text: &str, mode: &str) -> String {
         }
     };
     format!("{directive}\n\n{text}")
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use super::*;
+    #[test]
+    fn shared_is_offered_only_where_workers_can_share_a_checkout() {
+        assert!(shares_checkout(Some("codex")) && shares_checkout(None));
+        assert!(!shares_checkout(Some("openclaw")));
+        assert_eq!(visible_mode(Some("fast"), Some("openclaw")), "multitask");
+        assert_eq!(visible_mode(Some("solo"), Some("claude")), "fast");
+        assert_eq!(visible_mode(Some("multitask"), Some("codex")), "multitask");
+    }
 }

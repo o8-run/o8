@@ -9,7 +9,6 @@ import { collectCrashDigest, type CrashDigest } from '@/lib/telemetry/crash-dige
 import { redactSecrets } from '@/lib/telemetry/scrub';
 import { REPORT_DATA_SHARING_OFF_ERROR, REPORT_DATA_SHARING_OFF_MESSAGE } from '@/lib/feedback/data-sharing';
 import { newReportId, recordReport, reportTitle } from '@/lib/feedback/report-ledger';
-import { verifyToken } from '@/lib/auth/jwt';
 import { resolveCrashReportsEnabledSync } from '@/lib/operator/defaults';
 import { postHostedPayload } from '@/lib/feedback/hosted-report';
 import { sendMinimalFeedback } from '@/lib/feedback/minimal-feedback';
@@ -182,23 +181,10 @@ interface ReportDiagnostics {
   timestamp: string;
 }
 
-/**
- * The GitHub login of whoever filed this, when they've connected GitHub — the
- * device flow already signs it into the `o8-token` cookie, so attribution costs
- * nothing and needs no second prompt. Anonymous is a perfectly fine outcome; it
- * only means the eventual #fixed post carries no credit line.
- */
-async function resolveReporter(request: NextRequest): Promise<string | null> {
-  try {
-    const token = request.cookies.get('o8-token')?.value;
-    if (!token) return null;
-    const payload = await verifyToken(token);
-    const login = payload?.ghUser?.trim();
-    return login ? truncate(login, 64) : null;
-  } catch {
-    return null;
-  }
-}
+// Data minimization: feedback reports no longer record who filed them. The
+// `#fixed` credit loop that once needed the reporter's GitHub login is retired,
+// so the login is never read from the `o8-token` cookie or stored. Reports are
+// always anonymous.
 
 let cachedVersion: string | null = null;
 
@@ -373,7 +359,6 @@ async function buildDiagnostics(route: string, userAgent: string): Promise<Repor
 
 interface Report {
   id: string;
-  reporter: string | null;
 }
 
 function field(name: string, value: string) {
@@ -391,7 +376,6 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
     field('Node', diagnostics.nodeVersion),
     field('Route', diagnostics.route),
     ...(diagnostics.projectLabel ? [field('Project', diagnostics.projectLabel)] : []),
-    field('Reported by', report.reporter ? `@${report.reporter}` : 'anonymous'),
     field('Timestamp', diagnostics.timestamp),
     // Full-width: geometry + drift + buffered-error count. Triage starts here —
     // a healthy shell reads `bodyScroll 0 · dashTop 0`; the full ring buffer
@@ -506,7 +490,7 @@ export async function POST(request: NextRequest) {
       ? collectCrashDigest()
       : { count: 0, records: [], summary: '', text: '' };
     const client = body.includeDiagnostics === true ? parseClientDiagnostics(body.client) : null;
-    const report: Report = { id: newReportId(), reporter: await resolveReporter(request) };
+    const report: Report = { id: newReportId() };
 
     const posted = await postHostedReport(validated.category, validated.message, diagnostics, parsedImages.images, crashes, client, report);
     if (!posted.ok) return jsonError(posted.error, 502);
@@ -518,7 +502,7 @@ export async function POST(request: NextRequest) {
       ts: Date.now(),
       category: validated.category,
       title: reportTitle(validated.message),
-      reporter: report.reporter,
+      reporter: null,
       version: diagnostics.version,
     });
 

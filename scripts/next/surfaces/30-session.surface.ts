@@ -1,5 +1,6 @@
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 export default async function register({ seeds, transcriptFixtures }: SurfaceContext): Promise<SurfaceRoutes> {
+  const { GET: identity } = await import('../../../src/app/api/setup/identity/route');
   const { GET: sessions } = await import('../../../src/app/api/mobile/orchestrator/threads/route');
   const { GET: history } = await import('../../../src/app/api/mobile/history/route');
   const { GET: wsInfo } = await import('../../../src/app/api/panel/ws-info/route');
@@ -17,6 +18,7 @@ export default async function register({ seeds, transcriptFixtures }: SurfaceCon
       return route(request);
     },
     routes: {
+      'GET /api/setup/identity': async () => identity(),
       'GET /api/mobile/orchestrator/threads': sessions, 'GET /api/mobile/history': history,
       'GET /api/v2/chat-history': context, 'GET /api/orchestrator/state': state,
       'GET /api/panel/ws-info': wsInfo, 'GET /api/runtime/inventory': inventory,

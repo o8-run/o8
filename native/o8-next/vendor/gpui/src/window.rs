@@ -702,6 +702,8 @@ pub(crate) struct Frame {
     pub(crate) cursor_styles: Vec<CursorStyleRequest>,
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) debug_bounds: FxHashMap<String, Bounds<Pixels>>,
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) debug_opacities: FxHashMap<String, f32>,
     #[cfg(any(feature = "inspector", debug_assertions))]
     pub(crate) next_inspector_instance_ids: FxHashMap<Rc<crate::InspectorElementPath>, usize>,
     #[cfg(any(feature = "inspector", debug_assertions))]
@@ -749,6 +751,8 @@ impl Frame {
 
             #[cfg(any(test, feature = "test-support"))]
             debug_bounds: FxHashMap::default(),
+            #[cfg(any(test, feature = "test-support"))]
+            debug_opacities: FxHashMap::default(),
 
             #[cfg(any(feature = "inspector", debug_assertions))]
             next_inspector_instance_ids: FxHashMap::default(),
@@ -773,6 +777,11 @@ impl Frame {
         self.deferred_draws.clear();
         self.tab_stops.clear();
         self.focus = None;
+
+        #[cfg(any(feature = "test-support", test))]
+        self.debug_bounds.clear();
+        #[cfg(any(feature = "test-support", test))]
+        self.debug_opacities.clear();
 
         #[cfg(any(feature = "inspector", debug_assertions))]
         {
@@ -1167,8 +1176,16 @@ impl Window {
             Box::new(move || {
                 handle
                     .update(&mut cx, |_, window, _cx| {
+                        // macOS moves the window from a drag area only when it is the
+                        // topmost hitbox, so tabs and buttons laid over it keep the press.
+                        let ids = &window.mouse_hit_test.ids;
+                        let ids = if cfg!(target_os = "macos") {
+                            &ids[..ids.len().min(1)]
+                        } else {
+                            &ids[..]
+                        };
                         for (area, hitbox) in &window.rendered_frame.window_control_hitboxes {
-                            if window.mouse_hit_test.ids.contains(&hitbox.id) {
+                            if ids.contains(&hitbox.id) {
                                 return Some(*area);
                             }
                         }
@@ -1988,10 +2005,10 @@ impl Window {
         self.dirty_views.clear();
         self.next_frame.window_active = self.active.get();
 
-        // Register requested input handler with the platform window.
-        if let Some(input_handler) = self.next_frame.input_handlers.pop() {
-            self.platform_window
-                .set_input_handler(input_handler.unwrap());
+        // Register requested input handler with the platform window. An empty
+        // slot means the platform still holds it and gets it back on return.
+        if let Some(Some(input_handler)) = self.next_frame.input_handlers.pop() {
+            self.platform_window.set_input_handler(input_handler);
         }
 
         self.layout_engine.as_mut().unwrap().clear();
@@ -2359,11 +2376,13 @@ impl Window {
                 .iter()
                 .cloned(),
         );
+        // o8: a frame drawn while the platform holds the input handler leaves
+        // the rendered list without the entry this range recorded. Keep the
+        // slots aligned with an empty entry instead of slicing past the end.
+        let handlers = &mut self.rendered_frame.input_handlers;
         self.next_frame.input_handlers.extend(
-            self.rendered_frame.input_handlers
-                [range.start.input_handlers_index..range.end.input_handlers_index]
-                .iter_mut()
-                .map(|handler| handler.take()),
+            (range.start.input_handlers_index..range.end.input_handlers_index)
+                .map(|index| handlers.get_mut(index).and_then(Option::take)),
         );
         self.next_frame.mouse_listeners.extend(
             self.rendered_frame.mouse_listeners

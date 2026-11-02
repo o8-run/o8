@@ -1,0 +1,321 @@
+use super::*;
+use std::{
+    io::{BufRead, BufReader},
+    process::{Child, Stdio},
+};
+struct Host(Child);
+impl Drop for Host {
+    fn drop(&mut self) {
+        let _ = Command::new("kill")
+            .args(["-TERM", &self.0.id().to_string()])
+            .status();
+        let _ = self.0.wait();
+    }
+}
+fn fixture() -> (Host, Client) {
+    fixture_args(&[])
+}
+fn fixture_args(extra: &[&str]) -> (Host, Client) {
+    let mut child = Command::new("node")
+        .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .args([
+            "--import",
+            "./scripts/register-server-only-stub.mjs",
+            "--import",
+            "tsx",
+            "scripts/next/dev-server.ts",
+            "--visualizations",
+        ])
+        .args(extra)
+        .env("O8_NEXT_API_TOKEN", "visualization-fixture-token")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let origin = lines
+        .find_map(|line| {
+            serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .expect("fixture origin");
+    std::thread::spawn(move || for _ in lines {});
+    (
+        Host(child),
+        Client::authenticated(&origin, Some("visualization-fixture-token".into())).unwrap(),
+    )
+}
+
+#[gpui::test]
+fn fresh_panes_restore_saved_references_without_tool_results(cx: &mut gpui::TestAppContext) {
+    let (_host, client) = fixture_args(&["--visualizations-restored"]);
+    let history = client.history("thoughts-visualization").unwrap();
+    assert!(crate::model::render_tree(&history.transcript).iter().all(|row|
+        !matches!(row, Row::Message { nodes, .. } if nodes.iter().any(|node| node.kind == "visualization"))));
+    for _ in 0..2 {
+        let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client.clone(), window, cx));
+        view.update(cx, |s, cx| s.load_sessions(cx));
+        cx.run_until_parked();
+        view.update(cx, |s, cx| s.select("thoughts-visualization".into(), cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let until = Instant::now() + std::time::Duration::from_secs(10);
+        let index = loop {
+            view.update(cx, |s, cx| {
+                s.poll_stream(cx);
+            });
+            if let Some(index) = view.read_with(cx, |s, _| {
+                s.rows.iter().position(|row| {
+                    row.borrow()
+                        .cards
+                        .contains_key("vis-49720000-0000-4000-8000-000000000001")
+                })
+            }) {
+                break index;
+            }
+            assert!(
+                Instant::now() < until,
+                "the production list route must restore saved references"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        view.update(cx, |s, cx| {
+            s.list.scroll_to(ListOffset {
+                item_ix: index,
+                offset_in_item: px(0.),
+            });
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let card = view.read_with(cx, |s, _| {
+            s.rows[index].borrow().cards["vis-49720000-0000-4000-8000-000000000001"].clone()
+        });
+        assert_eq!(card.borrow().reference.version, Some(1));
+        assert_eq!(
+            card.borrow().reference.state_id(),
+            card.borrow().reference.id
+        );
+        #[cfg(target_os = "macos")]
+        {
+            let until = Instant::now() + std::time::Duration::from_secs(10);
+            while !card.borrow().ready && card.borrow().error.is_none() && Instant::now() < until {
+                view.update(cx, |s, cx| {
+                    s.poll_stream(cx);
+                    cx.notify();
+                });
+                cx.update(|window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear();
+                });
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(
+                card.borrow().ready,
+                "a restored document must load after its delayed read: {:?}",
+                card.borrow().error
+            );
+        }
+    }
+}
+#[gpui::test]
+fn visualization_at_its_message_and_reference_height(cx: &mut gpui::TestAppContext) {
+    let (_host, client) = fixture();
+    let history = client.history("thoughts-visualization").unwrap();
+    let rows = crate::model::render_tree(&history.transcript);
+    let card = rows
+        .iter()
+        .find_map(|row| match row {
+            Row::Message { id, nodes, .. } if id == "visual-3" => Some(nodes),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        card.last().unwrap().kind,
+        "visualization",
+        "the reference must follow its message prose"
+    );
+    assert_eq!(
+        card.last().unwrap().data.as_ref().unwrap()["height"].as_f64(),
+        Some(320.)
+    );
+    assert_eq!(card.first().unwrap().kind, "p");
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| s.load_sessions(cx));
+    cx.run_until_parked();
+    view.update(cx, |s, cx| s.select("thoughts-visualization".into(), cx));
+    cx.run_until_parked();
+    let index = view.read_with(cx, |s, _| {
+        s.rows
+            .iter()
+            .position(|r| r.borrow().row.id() == "visual-3")
+            .unwrap()
+    });
+    view.update(cx, |s, cx| {
+        s.list.scroll_to(ListOffset {
+            item_ix: index,
+            offset_in_item: px(0.),
+        });
+        cx.notify();
+    });
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    #[cfg(target_os = "macos")]
+    assert!(view.read_with(cx, |s, _| s.rows[index].borrow().rendered().0) >= px(320.));
+    #[cfg(not(target_os = "macos"))]
+    view.read_with(cx, |s, _| {
+        let (_, lines) = s.rows[index].borrow().rendered();
+        assert!(lines.iter().any(|line| line.contains("Weekly activity")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains(crate::visualizations::protocol::UNAVAILABLE))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains(crate::visualizations::protocol::RETRY))
+        );
+    });
+}
+
+#[gpui::test]
+fn missing_visualization_shows_error_and_retries_from_transcript(cx: &mut gpui::TestAppContext) {
+    let (_host, client) = fixture();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| s.load_sessions(cx));
+    cx.run_until_parked();
+    view.update(cx, |s, cx| s.select("thoughts-visualization".into(), cx));
+    cx.run_until_parked();
+    let index = view.read_with(cx, |s, _| {
+        s.rows
+            .iter()
+            .position(|r| r.borrow().row.id() == "visual-7")
+            .unwrap()
+    });
+    view.update(cx, |s, cx| {
+        s.list.scroll_to(ListOffset {
+            item_ix: index,
+            offset_in_item: px(0.),
+        });
+        cx.notify();
+    });
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    let card = view.read_with(cx, |s, _| {
+        s.rows[index]
+            .borrow()
+            .cards
+            .values()
+            .next()
+            .unwrap()
+            .clone()
+    });
+    let started = Instant::now();
+    while card.borrow().error.is_none() && started.elapsed().as_secs() < 8 {
+        view.update(cx, |s, cx| {
+            s.poll_stream(cx);
+        });
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    view.update(cx, |s, cx| {
+        s.poll_stream(cx);
+        cx.notify();
+    });
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    let expected = if cfg!(target_os = "macos") {
+        "Visualization not found."
+    } else {
+        crate::visualizations::protocol::UNAVAILABLE
+    };
+    assert_eq!(card.borrow().error.as_deref(), Some(expected));
+    let (_, lines) = view.read_with(cx, |s, _| s.rows[index].borrow().rendered());
+    assert!(
+        lines.iter().any(|line| line.contains(expected)),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Retry visualization")),
+        "{lines:?}"
+    );
+    let nonce = card.borrow().nonce.clone();
+    let bounds = card.borrow().bounds.unwrap();
+    cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    assert_ne!(
+        nonce,
+        card.borrow().nonce,
+        "the transcript retry must start a fresh sealed document load"
+    );
+}
+
+#[gpui::test]
+fn visualization_card_moves_with_the_centred_reading_column(cx: &mut gpui::TestAppContext) {
+    let (_host, client) = fixture();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| s.load_sessions(cx));
+    cx.run_until_parked();
+    view.update(cx, |s, cx| s.select("thoughts-visualization".into(), cx));
+    cx.run_until_parked();
+    let index = view.read_with(cx, |s, _| {
+        s.rows
+            .iter()
+            .position(|r| r.borrow().row.id() == "visual-3")
+            .unwrap()
+    });
+    let mut centres = vec![];
+    for width in [1680., 2080.] {
+        cx.simulate_resize(gpui::size(px(width), px(1050.)));
+        view.update(cx, |s, cx| {
+            s.list.scroll_to(ListOffset {
+                item_ix: index,
+                offset_in_item: px(0.),
+            });
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let card = view.read_with(cx, |s, _| {
+            s.rows[index]
+                .borrow()
+                .cards
+                .values()
+                .next()
+                .unwrap()
+                .clone()
+        });
+        let card = card.borrow().bounds.expect("card painted").center().x;
+        let composer = cx
+            .debug_bounds("composer-card")
+            .expect("composer")
+            .center()
+            .x;
+        centres.push((card, composer));
+    }
+    let card_shift = centres[1].0 - centres[0].0;
+    let composer_shift = centres[1].1 - centres[0].1;
+    assert!(
+        composer_shift > px(100.),
+        "the reading column must recentre in a wider pane: {centres:?}"
+    );
+    assert!(
+        (card_shift - composer_shift).abs() < px(1.),
+        "the card must move with the centred text column, not stay at the row's left edge: {centres:?}"
+    );
+}

@@ -38,7 +38,7 @@ pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --ser
 #[path = "surface_registry.rs"]
 mod registry;
 use registry::{
-    EmptyState, NavPosition, Registration, ShellView, WorkspaceLoad, register_surfaces,
+    EmptyState, NavPosition, Registration, ShellView, WorkspaceLoad, github_item, register_surfaces,
 };
 
 register_surfaces! {
@@ -49,10 +49,13 @@ register_surfaces! {
         activity: Activity = "surfaces/activity.rs";
         workers: Workers = "surfaces/workers.rs";
         pull_requests: PullRequests = "surfaces/pull_requests.rs";
+        bots: Bot(String) = "surfaces/bots.rs";
         inbox: Inbox = "surfaces/inbox.rs";
         issues: Issues = "surfaces/issues.rs";
         diff: Diff = "surfaces/diff.rs";
         terminal: Terminal = "surfaces/terminal.rs";
+        scheduled: Scheduled = "surfaces/scheduled.rs";
+        usage: Usage = "surfaces/usage.rs";
         #[cfg(test)] fake: Fake = "surfaces/fake.rs";
     }
     commands {
@@ -68,10 +71,13 @@ register_surfaces! {
 
 #[path = "shell_features.rs"]
 mod features;
+pub(crate) use features::toasts_api as toasts;
 
 pub struct Shell {
     features: features::State,
     system_glass: bool,
+    /// A window drawn without being shown keeps an opaque root.
+    offscreen: bool,
     chrome: crate::render_region::Regions<Shell>,
     client: Client,
     file: PathBuf,
@@ -107,6 +113,7 @@ impl Shell {
         let mut shell = Self {
             features: features::State::default(),
             system_glass: false,
+            offscreen: false,
             chrome: crate::render_region::Regions::default(),
             client,
             file,
@@ -134,9 +141,7 @@ impl Shell {
         shell
     }
     fn persist(&mut self) {
-        if let Err(error) = self.state.save(&self.file) {
-            self.notice = format!("{error}. View state remains in memory.");
-        }
+        features::persist_window_state(self);
     }
     fn load(&mut self, cx: &mut Context<Self>) {
         if registry::extensions().any(|extension| extension.load(self, cx)) {
@@ -149,7 +154,10 @@ impl Shell {
             return;
         }
         self.loading = true;
-        self.notice = "Connecting to local o8 server…".into();
+        // Background refreshes run on every stream wakeup; only the first connect is announced.
+        if !self.connected {
+            self.notice = "Connecting to local o8 server…".into();
+        }
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let sessions = client.sessions()?;
@@ -183,6 +191,14 @@ impl Shell {
                         }
                         this.notice.clear();
                         this.persist();
+                    }
+                    // A busy server keeps the shell connected; a hung one is down.
+                    Err(error)
+                        if this.connected
+                            && crate::client::transient(&error)
+                            && !error.ends_with("Request timed out") =>
+                    {
+                        this.notice = crate::client::stale_notice(&error);
                     }
                     Err(error) => {
                         this.connected = false;
@@ -291,7 +307,10 @@ impl Shell {
         cx.notify();
     }
     fn capture(&mut self, window: &Window, cx: &App) {
-        if self.palette || registrations().iter().any(|r| (r.overlay_open)(self)) {
+        if self.palette
+            || registrations().iter().any(|r| (r.overlay_open)(self))
+            || registry::extensions().any(|extension| extension.capture_blocked(self))
+        {
             return;
         }
         for registration in registrations() {
@@ -312,6 +331,50 @@ impl Shell {
                         .contains(&self.query.to_lowercase())
             })
             .collect()
+    }
+    /// Opens a registered surface by its tab label, for callers that must keep
+    /// compiling when that registration is removed. False when it is absent.
+    pub(super) fn open_registered(
+        &mut self,
+        tab_label: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let command = registrations()
+            .iter()
+            .find(|registration| registration.tab_label == tab_label)
+            .and_then(|registration| registration.command)
+            .map(|(_, command)| command());
+        command.is_some_and(|command| {
+            self.execute(command, window, cx);
+            true
+        })
+    }
+    /// Opens a GitHub link in the surface that claims it, else in the browser.
+    pub(super) fn open_link(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !registrations()
+            .iter()
+            .any(|registration| (registration.claim_link)(self, url, window, cx))
+        {
+            cx.open_url(url);
+        }
+    }
+    /// Issues and pull requests open beside the chat; other web links leave o8.
+    pub(super) fn open_transcript_link(
+        &mut self,
+        url: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(number) = url.strip_prefix('#').and_then(|n| n.parse().ok()) {
+            self.open_issue_in_panel(None, number, window, cx);
+        } else if let Some((repo, number)) = github_item(url, "issues") {
+            self.open_issue_in_panel(Some(repo), number, window, cx);
+        } else if let Some((repo, number)) = github_item(url, "pull") {
+            self.open_pr_in_panel(repo, number, window, cx);
+        } else if url.starts_with("https://") || url.starts_with("http://") {
+            cx.open_url(url);
+        }
     }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
@@ -344,7 +407,13 @@ impl Shell {
             let saved = self.state.workspaces.entry(workspace).or_default();
             let index = saved.tabs.iter().position(|t| t == &tab);
             if index.is_none() && saved.tabs.len() >= 32 {
-                self.notice = "Close a surface before opening another.".into();
+                toasts::show(
+                    toasts::Kind::Info,
+                    "Close a surface before opening another.",
+                    vec![],
+                    Some(toasts::NOTICE_TIMEOUT),
+                    cx,
+                );
                 return;
             }
             saved.active = index.unwrap_or_else(|| {
@@ -373,6 +442,8 @@ impl Shell {
 }
 #[path = "shell_material.rs"]
 mod material;
+#[path = "shell_rail.rs"]
+mod rail;
 #[path = "shell_view.rs"]
 mod view;
 pub use view::try_launch;
@@ -396,3 +467,14 @@ mod feature_tests;
 #[cfg(test)]
 #[path = "startup_tests.rs"]
 mod startup_tests;
+
+// UI tests use the production shell without exposing its private view type.
+#[cfg(test)]
+pub(crate) fn notes_test_window(
+    client: Client,
+    file: PathBuf,
+    state: State,
+    cx: &mut gpui::App,
+) -> gpui::AnyWindowHandle {
+    view::open_window(client, file, state, true, cx).into()
+}

@@ -1,3 +1,4 @@
+import { isAutoSettleIdleDays } from '@/lib/operator/auto-settle-idle-days';
 import { parseKnowledgeSources } from '@/lib/operator/knowledge-source-defaults';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
@@ -34,6 +35,7 @@ import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED
 import { isSubscriptionProfile } from '@/lib/operator/subscription-profile';
 import { isTargetingTier } from '@/lib/operator/targeting-tier';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
+import { isBotRailEnabledIds } from '@/lib/operator/presentation-defaults';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { AUTHENTICATED_ENDPOINT_GUIDANCE, credentialBearingUrlPart } from './credential-safe-url';
 import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
@@ -225,6 +227,15 @@ function dispatchRuntimeListField(section: string, key: string): TomlField<Opera
   };
 }
 
+function optionalDispatchRuntimeListField(section: string, key: string): TomlField<OperatorDefaults['disabledRuntimes']> {
+  return {
+    path: [section, key],
+    parse: (value, tomlKey) => Array.isArray(value) && value.every(isDispatchRuntime)
+      ? [...new Set(value)]
+      : invalid(tomlKey, 'an array of dispatchable runtime names'),
+  };
+}
+
 function branchPrefixField(section: string, key: string): TomlField<string> {
   return {
     path: [section, key],
@@ -285,12 +296,16 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   broadcastVoiceCalendar: booleanField('broadcast', 'voice_calendar'),
   broadcastVoiceCalendarLeadMinutes: numberField('broadcast', 'voice_calendar_lead_minutes', 'an integer from 1 through 1440', (value) => Number.isInteger(value) && value >= 1 && value <= 1_440),
   broadcastVoiceTimeCheckins: booleanField('broadcast', 'voice_time_checkins'),
+  botRailEnabledIds: { path: ['bots', 'rail_enabled'], parse: (value, key) => isBotRailEnabledIds(value) ? [...new Set(value)] : invalid(key, 'an array of non-empty bot ids') },
   presentationQuietMode: booleanField('presentation', 'quiet_mode'),
+  composerEnterQueues: booleanField('chat', 'enter_queues'),
   notificationsReviewReady: enumField('notifications', 'review_ready', '"off" or "on"', (value): value is OperatorDefaults['notificationsReviewReady'] => value === 'off' || value === 'on'),
   apfsDependencyImages: booleanField('git', 'apfs_dependency_images'),
   thinkingEffort: enumField('models', 'thinking_effort', 'a valid thinking effort', isThinkingEffort),
   promptCachingEnabled: booleanField('models', 'prompt_caching_enabled'),
   autoTitleInferenceEnabled: booleanField('chat', 'auto_title_inference_enabled'),
+  autoSettleEnabled: booleanField('inbox', 'auto_settle'),
+  autoSettleIdleDays: numberField('inbox', 'auto_settle_idle_days', 'a whole number of days from 0 to 365', isAutoSettleIdleDays),
   mergeTestReplayEnabled: booleanField('review', 'merge_test_replay_enabled'),
   requireApproval: enumField('review', 'require_approval', 'one of "high-risk", "surface", "always", or "never"', (value): value is OperatorDefaults['requireApproval'] => value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'),
   orchestratorModel: orchestratorModelField('models', 'orchestrator_model'),
@@ -301,6 +316,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   workerExecutionCarrier: executionCarrierField('models', 'worker_execution_carrier'),
   workerStartMode: enumField('operator', 'worker_start_mode', 'one of "autonomous", "huddle", or "adaptive"', isWorkerStartMode),
   workerRuntimes: dispatchRuntimeListField('models', 'worker_runtimes'),
+  disabledRuntimes: optionalDispatchRuntimeListField('providers', 'disabled_runtimes'),
   codexWorkerEffort: enumField('models', 'codex_worker_effort', 'a valid thinking effort', isThinkingEffort),
   claudeWorkerEffort: enumField('models', 'claude_worker_effort', 'a valid thinking effort', isThinkingEffort),
   brainCodexModel: codexModelField('brain', 'codex_model'),
@@ -309,6 +325,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   localInferenceBaseUrl: credentialSafeUrlField('local_models', 'inference_base_url'),
   localEmbedModel: stringField('local_models', 'embed_model'),
   localChatModel: stringField('local_models', 'chat_model'),
+  textGenerationTitleModel: stringField('text_generation', 'title_model'),
   experimentalOpencode: booleanField('experimental', 'opencode_enabled'),
   experimentalGemini: booleanField('experimental', 'gemini_enabled'),
   experimentalChat: booleanField('experimental', 'chat_enabled'),
@@ -350,7 +367,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   worktreeMaxTotalGb: numberField('git', 'worktree_max_total_gb', 'a number between 0 and 10000', (value) => value >= 0 && value <= 10000),
   storageReserveRatio: numberField('git', 'storage_reserve_ratio', 'a number between 0 and 1', (value) => value >= 0 && value <= 1),
   storageReserveFloorGb: numberField('git', 'storage_reserve_floor_gb', 'a number greater than 0 and no more than 10000', (value) => value > 0 && value <= 10000),
-  workspaceParkingMode: enumField('git', 'workspace_parking_mode', '"manual" or "pressure"', (value): value is OperatorDefaults['workspaceParkingMode'] => value === 'manual' || value === 'pressure'),
+  workspaceParkingMode: enumField('git', 'workspace_parking_mode', '"manual", "pressure" or "settled"', (value): value is OperatorDefaults['workspaceParkingMode'] => value === 'manual' || value === 'pressure' || value === 'settled'),
 } satisfies { [K in keyof OperatorDefaults]: TomlField<OperatorDefaults[K]> };
 
 export const OPERATOR_DEFAULTS_TOML_KEYS = Object.freeze(

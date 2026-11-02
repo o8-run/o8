@@ -80,6 +80,7 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
     let mut schedule = UpdateSchedule::default();
     let mut report: Option<serde_json::Value> = None;
     let mut served_request = String::new();
+    let mut served_apply = String::new();
     let mut auto_apply = auto_apply::AutoApply::new(auto_interval);
     loop {
         // Only the deliberate sleep contributes to gap detection, not awaited I/O.
@@ -130,6 +131,16 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
                     .send()
                     .await;
             }
+        }
+        // An Update click with o8 next as the window: try the install now, not
+        // at the next automatic interval.
+        let apply = control
+            .as_ref()
+            .and_then(|v| v["applyRequestedAt"].as_str())
+            .unwrap_or_default();
+        if !apply.is_empty() && apply != served_apply {
+            auto_apply.expedite();
+            served_apply = apply.to_string();
         }
         if let Some(url) = &url {
             let effects = factory(

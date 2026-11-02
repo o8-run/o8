@@ -1,3 +1,5 @@
+import type { ProjectIconOverride, ProjectIconProjection } from './project-icon-types';
+
 export type RepoSetupEnvMode = 'copy' | 'symlink' | 'skip';
 
 export const REPO_WORKSPACE_ISOLATION_PREFERENCES = [
@@ -63,6 +65,8 @@ export interface RepoRegistryEntry {
   setup: RepoSetupConfig;
   manifest?: RepoWorkspaceManifestCache;
   readiness?: RepoReadiness;
+  /** Read projection, not part of the registry JSON authority. */
+  icon?: ProjectIconProjection;
 }
 
 export interface RepoRegistryStore {
@@ -114,9 +118,17 @@ export interface RepoRegistryTouchBody {
   lastOpenedAt?: string | null;
 }
 
+export interface RepoRegistryIconBody {
+  action: 'update-icon';
+  id: string;
+  faviconPath?: string | null;
+  projectIcon?: ProjectIconOverride | null;
+}
+
 export type RepoRegistryPostBody =
   | RepoRegistryValidateBody
   | RepoRegistryAddBody
   | RepoRegistryCloneBody
   | RepoRegistryUpdateBody
+  | RepoRegistryIconBody
   | RepoRegistryTouchBody;

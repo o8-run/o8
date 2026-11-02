@@ -1,3 +1,4 @@
+import { removeTranscriptReadingPositions } from '@/components/desktop/thoughts/chat-panel/transcript-reading-position';
 import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { useRepoIssues, useRepoPullRequests } from '@/lib/github-client';
@@ -72,9 +73,11 @@ export function useHistoryAndMission({
 
   const deleteHistory = useCallback(async (historyTabId: string) => {
     try {
-      await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(historyTabId)}`, { method: 'DELETE' });
+      const response = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(historyTabId)}`, { method: 'DELETE' });
+      if (!response.ok) return;
       setHistoryItems((current) => current.filter((item) => item.tabId !== historyTabId));
       if (typeof window !== 'undefined') {
+        removeTranscriptReadingPositions(historyTabId);
         window.dispatchEvent(new CustomEvent(HISTORY_DELETED_EVENT, { detail: { tabId: historyTabId } }));
       }
     } catch {}

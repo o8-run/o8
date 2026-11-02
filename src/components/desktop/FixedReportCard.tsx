@@ -7,9 +7,8 @@
  * instead of orange. Shows only when a report THIS machine filed appears in the
  * public fix manifest (see src/lib/feedback/fixed-feed.ts).
  *
- * It is the other half of #fixed: that channel only reaches people who joined the
- * Discord; this reaches everyone who ever filed a report. Dismissing acknowledges
- * it for good — a receipt that nags is not a thank-you.
+ * It reaches everyone who ever filed a report. Dismissing acknowledges it for
+ * good — a receipt that nags is not a thank-you.
  */
 
 import { useCallback, useEffect, useState } from 'react';

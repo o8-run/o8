@@ -1,16 +1,17 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { smokePackagedServer } from '../scripts/lib/packaged-server-smoke.mjs';
+import { stageRuntimeInputs } from './helpers/packaged-runtime-inputs';
 
 const roots: string[] = [];
 
 function fixture(source: string): string {
   const root = mkdtempSync(join(tmpdir(), 'o8-packaged-server-fixture-'));
   roots.push(root);
-  mkdirSync(join(root, 'node_modules'));
+  stageRuntimeInputs(root);
   writeFileSync(join(root, 'server.js'), source);
   return root;
 }

@@ -5,6 +5,15 @@ import type {
 
 type TurnReceiptWorker = NonNullable<MobileTurnReceipt['workers']>[number];
 
+/** The turn's outcome and when the server saw it, so a saved turn knows how long it ran. */
+export function terminalReceipt(
+  userMessageId: string,
+  outcome: NonNullable<MobileTurnReceipt['terminal']>['outcome'],
+  completedAt = Date.now(),
+): NonNullable<MobileTurnReceipt['terminal']> {
+  return { userMessageId, outcome, completedAt };
+}
+
 export function mergeMobileTurnReceipts(
   existing: MobileTurnReceipt | undefined,
   incoming: MobileTurnReceipt | undefined,

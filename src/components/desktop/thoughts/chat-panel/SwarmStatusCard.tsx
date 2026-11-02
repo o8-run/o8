@@ -10,6 +10,9 @@ import type { OrchestratorPacket, OrchestratorPacketStatus } from '@/lib/orchest
 import { useWorkerDisclosure } from './WorkerDisclosure';
 import { ProviderMarkGlyph } from '../composer-selector/provider-marks';
 import { providerMarkForRuntime } from '../composer-selector/state';
+import type { WorkerRecovery } from '@/lib/agent-control/types';
+import { InterruptedWorkerActions } from './InterruptedWorkerActions';
+import { SavedWorkerActions } from './SavedWorkerActions';
 
 const FOCUS_LANE_EVENT = 'o8:focus-spawned-agent-lane';
 export const SWARM_CREW_SCROLL_STYLE = {
@@ -40,6 +43,7 @@ export interface SwarmSessionView {
   name: string;
   runtime: string;
   status: string;
+  recovery?: WorkerRecovery | null;
 }
 
 function sessionReturnState(session: SwarmSessionView) {
@@ -55,7 +59,8 @@ function sessionReturnState(session: SwarmSessionView) {
 export function swarmSessionStatus(status: string): StatusTone {
   if (status === 'waiting' || status === 'awaiting_input' || status === 'needs-input') return { label: 'Waiting for input', state: 'review' };
   if (status === 'finished' || status === 'completed') return { label: 'Completed', state: 'idle' };
-  if (status === 'interrupted') return { label: 'Stopped', state: 'idle' };
+  if (status === 'interrupted') return { label: 'Interrupted', state: 'review' };
+  if (status === 'retired') return { label: 'Retired', state: 'idle' };
   if (status === 'idle') return { label: 'Idle', state: 'idle' };
   if (status === 'running') return { label: 'Running', state: 'running' };
   if (status === 'failed') return { label: 'Failed', state: 'failed' };
@@ -256,16 +261,22 @@ export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSe
       {participants.map(participant => {
         const packet = byId.get(participant.id)!;
         const detail = packet.blockedReason?.trim() || participant.lifecycle.lastEventLabel;
-        return <CrewRow key={participant.id} title={packet.title?.trim() || 'Worker'}
+        return <div key={participant.id}><CrewRow title={packet.title?.trim() || 'Worker'}
           sub={`${packetRuntimeModelDisplayLabel(packet)}${detail ? ` · ${detail}` : ''}`}
-          status={swarmPacketStatus(packet)} selection={selectionFor(participant.sessionKey)} onClick={() => focusSwarmPacket(packet, onFocusPacket)} />;
+          status={swarmPacketStatus(packet)} selection={selectionFor(participant.sessionKey)} onClick={() => focusSwarmPacket(packet, onFocusPacket)} />
+          {participant.sessionKey ? <SavedWorkerActions sessionKey={participant.sessionKey} name={packet.title?.trim() || 'Worker'} status={packet.status} /> : null}
+        </div>;
       })}
       {native.map(scout => <CrewRow key={`native:${scout.id}`} title={scout.label}
         sub="Claude Code · Native subagent · Managed by this conversation"
         status={scoutTone(scout.status)} />)}
-      {shared.map(session => <CrewRow key={session.sessionKey} title={session.name}
+      {shared.map(session => <div key={session.sessionKey}><CrewRow title={session.name}
         sub={`${runtimeModelDisplayLabel(session.runtime || runtimeFromWorkerSessionKey(session.sessionKey), session.model)} · Shared checkout`} status={swarmSessionStatus(session.status)} selection={selectionFor(session.sessionKey)} detail={sessionReturnState(session)?.detail}
-        onClick={() => onFocusSession ? onFocusSession(session.sessionKey) : window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, { detail: { sessionKey: session.sessionKey, title: session.name } }))} />)}
+        onClick={() => onFocusSession ? onFocusSession(session.sessionKey) : window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, { detail: { sessionKey: session.sessionKey, title: session.name } }))} />
+        {session.recovery && (session.recovery.actions.length || session.recovery.retired) ? <div style={{ paddingTop: 4, paddingRight: 12, paddingBottom: 10, paddingLeft: 12 }}>
+          <InterruptedWorkerActions key={session.recovery.runId} sessionKey={session.sessionKey} name={session.name} recovery={session.recovery} status={session.status} />
+        </div> : null}
+      </div>)}
     </div> : null}
   </div>;
 }

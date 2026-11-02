@@ -282,7 +282,7 @@ fn reposition(
             }
             return;
         }
-        let main = app.get_webview_window("main");
+        let main = crate::voice_host::classic_window(&app);
 
         // The explicitly selected legacy HUD retains its window/screen anchor.
         let monitor = main.as_ref().and_then(|m| m.current_monitor().ok().flatten())
