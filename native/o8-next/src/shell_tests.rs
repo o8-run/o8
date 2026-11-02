@@ -690,5 +690,29 @@ fn each_clicked_issue_gets_its_own_panel_tab(cx: &mut TestAppContext) {
     );
 }
 
+#[gpui::test]
+fn a_thread_link_stays_in_the_app(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let state = State {
+        selected: fixture.folders.first().cloned(),
+        ..State::default()
+    };
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("thread-link.json"),
+        state,
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    shell.update_in(cx, |s, window, cx| {
+        s.open_transcript_link("o8://thread/not-listed", window, cx)
+    });
+    cx.run_until_parked();
+    let toasts = cx.update(|_, cx| crate::shell::toasts::texts(cx)).join("
+");
+    assert!(toasts.contains("That thread is not on this machine yet."), "{toasts}");
+}
+
 #[path = "shell_look_tests.rs"]
 mod look;
