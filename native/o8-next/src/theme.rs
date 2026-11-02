@@ -96,6 +96,54 @@ pub fn set_appearance(mode: &str) -> bool {
     CHOSEN.store(appearance_id(next), Ordering::Relaxed);
     true
 }
+/// The chat widths Settings offers: saved name, label and width. Comfortable
+/// is the composer's designed width.
+pub const CHAT_WIDTHS: [(&str, &str, f32); 3] = [
+    ("compact", "Compact", 640.),
+    ("comfortable", "Comfortable", GEOMETRY.composer_width),
+    ("wide", "Wide", 960.),
+];
+const DEFAULT_CHAT_WIDTH: usize = 1;
+static LAUNCH_CHAT_WIDTH: LazyLock<usize> = LazyLock::new(|| {
+    saved_chat_width()
+        .and_then(|name| chat_width_index(name.trim()))
+        .unwrap_or(DEFAULT_CHAT_WIDTH)
+});
+static CHOSEN_CHAT_WIDTH: AtomicU8 = AtomicU8::new(u8::MAX);
+fn chat_width_index(name: &str) -> Option<usize> {
+    CHAT_WIDTHS.iter().position(|(id, _, _)| *id == name)
+}
+fn selected_chat_width() -> usize {
+    match CHOSEN_CHAT_WIDTH.load(Ordering::Relaxed) {
+        u8::MAX => *LAUNCH_CHAT_WIDTH,
+        index => index as usize,
+    }
+}
+/// The transcript and composer width, without the row insets.
+pub fn chat_width() -> f32 {
+    CHAT_WIDTHS[selected_chat_width()].2
+}
+pub fn chat_width_name() -> &'static str {
+    CHAT_WIDTHS[selected_chat_width()].0
+}
+/// Switches the chat width and saves it. True when it changed.
+pub fn set_chat_width(name: &str) -> bool {
+    let Some(index) = chat_width_index(name) else {
+        return false;
+    };
+    if let Some(path) = chat_width_path() {
+        let _ = std::fs::write(path, name);
+    }
+    let changed = index != selected_chat_width();
+    CHOSEN_CHAT_WIDTH.store(index as u8, Ordering::Relaxed);
+    changed
+}
+fn chat_width_path() -> Option<std::path::PathBuf> {
+    Some(saved_path()?.with_file_name("next-chat-width"))
+}
+fn saved_chat_width() -> Option<String> {
+    std::fs::read_to_string(chat_width_path()?).ok()
+}
 /// Changes with the appearance, for caches that keep painted colors.
 pub fn generation() -> u8 {
     appearance_id(selected())
@@ -580,4 +628,18 @@ pub fn visualization() -> serde_json::Value {
         "--chart-4":"#a599d8", "--chart-5":"#69bea6", "--chart-6":"#d8b16d",
         "--font-sans":"-apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", "--font-mono":"ui-monospace, SFMono-Regular, Consolas, monospace",
     }})
+}
+
+#[cfg(test)]
+mod chat_width_tests {
+    use super::*;
+
+    #[test]
+    fn comfortable_is_the_default_chat_width_and_the_designed_one() {
+        assert_eq!(CHAT_WIDTHS[DEFAULT_CHAT_WIDTH].0, "comfortable");
+        assert_eq!(CHAT_WIDTHS[DEFAULT_CHAT_WIDTH].2, GEOMETRY.composer_width);
+        assert_eq!(chat_width_index("wide"), Some(2));
+        assert_eq!(chat_width_index("huge"), None);
+        assert!(!set_chat_width("huge"));
+    }
 }

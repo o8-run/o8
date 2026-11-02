@@ -770,8 +770,10 @@ fn layout(
         cards: placements,
     }
 }
-// The desktop transcript's reading column: the composer width plus the 24px row insets.
-pub(crate) const COLUMN: f32 = crate::theme::GEOMETRY.composer_width + 48.;
+/// The desktop transcript's reading column: the chat width plus the 24px row insets.
+pub(crate) fn reading_column() -> f32 {
+    crate::theme::chat_width() + 48.
+}
 
 /// Whether the reader sits at the end of the transcript, so new rows follow.
 pub(crate) fn at_end(list: &gpui::ListState) -> bool {
@@ -965,7 +967,7 @@ impl Element for RetainedRow {
                 _ => px(1000.),
             });
             // Rows wrap at the reading column and paint centred in wider panes.
-            let column = width.min(px(COLUMN));
+            let column = width.min(px(reading_column()));
             let mut state = state.borrow_mut();
             if state.cache.as_ref().is_none_or(|cache| {
                 cache.size.width != column || cache.theme != crate::theme::generation()

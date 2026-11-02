@@ -610,7 +610,7 @@ impl Surface {
         let rise = self.composer.read(cx).rise(window);
         div()
             .w_full()
-            .max_w(px(crate::theme::GEOMETRY.composer_width))
+            .max_w(px(crate::theme::chat_width()))
             .mx_auto()
             // A growing draft lifts the card over the transcript rather than
             // shrinking it, so the transcript region is reused while typing.

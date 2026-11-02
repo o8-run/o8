@@ -348,7 +348,7 @@ pub(crate) fn row<V: 'static>(
     let actions = div()
         .debug_selector(move || format!("message-actions-{index}"))
         .w_full()
-        .max_w(px(crate::retained::COLUMN))
+        .max_w(px(crate::retained::reading_column()))
         .pl(px(18.))
         .pb(px(10.))
         .flex()
