@@ -114,6 +114,7 @@ impl Client {
             }));
             sessions.push(Session {
                 machine: None,
+                machine_label: None,
                 parked_workspaces: serde_json::from_value(agent["parkedWorkspaces"].clone()).unwrap_or_default(),
                 repo_slug: None,
                 pinned_at: agent["pinnedAt"].as_str().map(str::to_owned),

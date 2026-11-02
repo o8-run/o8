@@ -22,6 +22,7 @@ fn header(kind: &str, title: &str, _status: &str) -> Row {
         attention: false,
         marker: "",
         folder: None,
+        machine: None,
     }
 }
 fn thread(id: &str, running: bool) -> Row {

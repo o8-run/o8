@@ -174,12 +174,12 @@ impl ThreadList {
                     .whitespace_nowrap()
                     .overflow_hidden()
                     .text_ellipsis()
-                    .child(label(
+                    .child(row.on_machine(label(
                         session
                             .and_then(|s| s.repo_slug.as_deref())
                             .filter(|r| !r.is_empty())
                             .unwrap_or(&row.workspace),
-                    )),
+                    ))),
             );
         first = first.children(self.pin_mark(&id));
         first = first.children(self.auto_off_mark(&id));

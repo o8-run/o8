@@ -299,13 +299,13 @@ impl ThreadList {
                                     view.when(!by_repo, |view| {
                                         view.child(
                                             div()
-                                                .max_w(px(65.))
+                                                .max_w(px(if row.machine.is_some() { 120. } else { 65. }))
                                                 .min_w_0()
                                                 .text_ellipsis()
                                                 .font_weight(gpui::FontWeight(260.))
                                                 .text_size(px(11.5))
                                                 .text_color(theme().text_faint)
-                                                .child(label(&row.workspace)),
+                                                .child(row.on_machine(label(&row.workspace))),
                                         )
                                     })
                                     .child(
