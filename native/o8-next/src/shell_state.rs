@@ -77,6 +77,10 @@ pub struct State {
     pub version: u32,
     pub bounds: [f32; 4],
     pub selected: Option<String>,
+    /// The last workspace on this computer, for a launch that can't reach a
+    /// far machine yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_selected: Option<String>,
     pub workspaces: BTreeMap<String, Workspace>,
     /// The chat list width the person dragged; absent keeps the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -131,6 +135,7 @@ impl Default for State {
             version: 1,
             bounds: [100., 100., 1200., 816.],
             selected: None,
+            local_selected: None,
             workspaces: BTreeMap::new(),
             sidebar_width: None,
             right_panel_width: None,

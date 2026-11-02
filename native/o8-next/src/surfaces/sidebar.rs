@@ -400,7 +400,12 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     }
                     super::palette::open_workspaces(shell, window, cx);
                 }
-                ThreadEvent::Selected(id) => shell.open_thread(id.clone(), window, cx),
+                ThreadEvent::Selected(id) => match shell.unreachable_machine(id) {
+                    Some(machine) => {
+                        toasts::info(format!("{machine} can't be reached right now."), cx);
+                    }
+                    None => shell.open_thread(id.clone(), window, cx),
+                },
                 ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),
                 ThreadEvent::Scope(project, keys) => {
                     if keys.is_empty() {
@@ -497,7 +502,12 @@ impl Shell {
                     .as_ref()
                     .is_some_and(|w| self.workspaces.contains(w))
                 {
-                    self.state.selected = self.workspaces.first().cloned();
+                    // Choosing for the person stays on this computer.
+                    self.state.selected = self
+                        .workspaces
+                        .iter()
+                        .find(|workspace| session::machine_workspace(workspace).is_none())
+                        .cloned();
                 }
             }
         }

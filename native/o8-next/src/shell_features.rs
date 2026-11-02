@@ -100,7 +100,7 @@ pub(crate) mod toasts_api {
     #[cfg(test)]
     pub(crate) use super::toasts::texts;
     pub(crate) use super::toasts::{
-        Action, CHAT_TIMEOUT, ERROR_TIMEOUT, Kind, NOTICE_TIMEOUT, ToastId, dismiss, show,
+        Action, CHAT_TIMEOUT, ERROR_TIMEOUT, Kind, NOTICE_TIMEOUT, ToastId, dismiss, info, show,
     };
 }
 

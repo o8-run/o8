@@ -145,7 +145,7 @@ impl ThreadList {
     fn thread_card(&self, id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.thread_hover
             .as_ref()
-            .filter(|hover| hover.open && hover.id == id)?;
+            .filter(|hover| hover.open && hover.id == id && self.row_menu.is_none())?;
         let session = self.sessions.iter().find(|s| s.id == id)?;
         let repo = session
             .repo_slug

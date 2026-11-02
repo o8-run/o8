@@ -78,11 +78,11 @@ impl ThreadList {
             cx.notify();
             return;
         }
-        let client = self.client.clone();
+        let targets = self.routed(targets);
         let task = cx.background_executor().spawn(async move {
             targets
                 .into_iter()
-                .map(|(id, repo)| {
+                .map(|(client, id, repo)| {
                     let state = client.inbox_action(repo.as_deref(), &id, "settle");
                     (id, state)
                 })
@@ -186,11 +186,11 @@ impl ThreadList {
             })
             .collect();
         self.generation += 1;
-        let client = self.client.clone();
+        let targets = self.routed(targets);
         let task = cx.background_executor().spawn(async move {
             targets
                 .iter()
-                .filter(|(id, repo)| {
+                .filter(|(client, id, repo)| {
                     client
                         .mutate_sidebar(repo.as_deref(), id, json!({"archivedAt":date}))
                         .is_ok()
@@ -228,9 +228,9 @@ impl ThreadList {
             })
             .collect();
         self.generation += 1;
-        let client = self.client.clone();
+        let targets = self.routed(targets);
         let task = cx.background_executor().spawn(async move {
-            for (id, repo) in &targets {
+            for (client, id, repo) in &targets {
                 let _ = client.mutate_sidebar(repo.as_deref(), id, json!({"regenerateTitle":true}));
             }
         });

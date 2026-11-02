@@ -48,7 +48,7 @@ impl ThreadList {
         let Some(session) = self.pinnable(&id) else { return };
         let enabled = session.auto_settle_disabled_at.is_some();
         let (workspace, revision) = (session.repo_path.clone(), session.inbox_revision.unwrap_or(0));
-        let client = self.client.clone();
+        let client = self.client_for(&id);
         let target = id.clone();
         let task = cx.background_executor().spawn(async move {
             client.inbox_auto_settle(workspace.as_deref(), &target, enabled, revision)
