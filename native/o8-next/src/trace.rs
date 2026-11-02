@@ -1159,7 +1159,13 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
     seen(&format!("trace:{id}"), true);
     let now = now_ms();
     let timed = clock(trace.turn.as_deref().unwrap_or(&id), &trace, now);
-    let lines = lines(&steps, &timed);
+    // While a turn runs its agents show as cards; the finished trace lists them.
+    let timeline: Vec<Step> = steps
+        .iter()
+        .filter(|s| !(s.delegate && trace.live))
+        .cloned()
+        .collect();
+    let lines = lines(&timeline, &timed);
     let expandable = !lines.is_empty();
     let mut animating = trace.live;
 

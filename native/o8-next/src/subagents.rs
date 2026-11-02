@@ -38,6 +38,9 @@ pub(crate) struct Inspector {
     /// What a subagent's own chat last read as, and when; it has no session.
     native_read: Option<(String, std::time::Instant)>,
     native_entries: Vec<crate::model::Entry>,
+    native_status: String,
+    native_sent: u64,
+    native_applied: u64,
     detail_error: Option<String>,
     detail: Option<crate::pane::Pane>,
     detail_key: Option<String>,
@@ -76,6 +79,9 @@ impl Inspector {
             detail_pending: false,
             native_read: None,
             native_entries: Vec::new(),
+            native_status: String::new(),
+            native_sent: 0,
+            native_applied: 0,
             detail_error: None,
             detail: None,
             detail_key: None,
@@ -366,8 +372,10 @@ impl Inspector {
     /// A house's own subagent: what it was asked and what it gave back, read
     /// like any transcript. It redraws when the answer lands.
     fn show_native(&mut self, agent: &Agent) {
-        let key = format!("native:{}:{}", agent.id, agent.status);
-        if self.detail_key.as_ref() == Some(&key) {
+        let key = format!("native:{}", agent.id);
+        let same = self.detail_key.as_ref() == Some(&key);
+        // Its own chat survives a status change; only the placeholder rebuilds.
+        if same && (!self.native_entries.is_empty() || self.native_status == agent.status) {
             return;
         }
         let entry = |id: &str, role: &str, text: &str| crate::model::Entry {
@@ -392,21 +400,27 @@ impl Inspector {
         });
         self.detail = Some(detail);
         self.detail_key = Some(key);
-        self.native_read = None;
-        self.native_entries.clear();
+        self.native_status.clone_from(&agent.status);
+        if !same {
+            self.native_read = None;
+            self.native_entries.clear();
+        }
     }
     /// Replaces the prompt and answer with the agent's whole chat when the
     /// server has one, and keeps it current while the agent works.
     fn read_native(&mut self, agent: &Agent, cx: &mut Context<Self>) {
         let working = agent.group == model::Group::Working;
-        let key = format!("native:{}:{}", agent.id, agent.status);
-        let due = self.native_read.as_ref().is_none_or(|(read, at)| {
-            *read != key || (working && at.elapsed() >= std::time::Duration::from_secs(2))
+        let key = format!("native:{}", agent.id);
+        let read = format!("{key}:{}", agent.status);
+        let due = self.native_read.as_ref().is_none_or(|(last, at)| {
+            *last != read || (working && at.elapsed() >= std::time::Duration::from_secs(2))
         });
         if !due {
             return;
         }
-        self.native_read = Some((key.clone(), std::time::Instant::now()));
+        self.native_read = Some((read, std::time::Instant::now()));
+        self.native_sent += 1;
+        let sent = self.native_sent;
         let client = self.client.clone();
         let target = format!("subagent:{}", agent.id);
         let prompt = agent.prompt.clone();
@@ -421,11 +435,11 @@ impl Inspector {
             let _ = this.update(cx, |this, cx| {
                 if this.detail_key.as_ref() != Some(&key)
                     || history.transcript.is_empty()
-                    || this.native_entries == history.transcript
+                    || sent < this.native_applied
                 {
                     return;
                 }
-                this.native_entries.clone_from(&history.transcript);
+                this.native_applied = sent;
                 // A finished agent's saved rows are settled, not a turn in progress.
                 if let Some(last) = history.transcript.last_mut().filter(|_| !working) {
                     last.extra
@@ -443,8 +457,16 @@ impl Inspector {
                         },
                     );
                 }
+                if this.native_entries == history.transcript {
+                    return;
+                }
+                this.native_entries.clone_from(&history.transcript);
                 if let Some(detail) = &mut this.detail {
+                    let following = crate::retained::at_end(&detail.list);
                     detail.install_saved(history);
+                    if following {
+                        crate::retained::pin_end(&detail.list);
+                    }
                 }
                 cx.notify();
             });

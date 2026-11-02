@@ -1,4 +1,5 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -8,6 +9,7 @@ import { redactThreadText, redactToolCallForRest } from '@/lib/threads/redaction
 type Json = Record<string, unknown>;
 
 const SESSION_PREFIX = 'subagent:';
+const MAX_RESULT_CHARS = 20_000;
 
 export function subagentSessionId(sessionKey: string | null): string | null {
   return sessionKey?.startsWith(SESSION_PREFIX) ? sessionKey.slice(SESSION_PREFIX.length) : null;
@@ -24,10 +26,20 @@ export function recordSubagentEvent(event: Json): void {
   if (!file) return;
   try {
     mkdirSync(join(getDataDir(), 'subagent-transcripts'), { recursive: true });
-    appendFileSync(file, `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
+    appendFileSync(file, `${JSON.stringify(event, boundToolResults)}\n`, { encoding: 'utf8', mode: 0o600 });
   } catch (error) {
     console.warn('[subagent-transcript] failed to record an event', error);
   }
+}
+
+/** A chat is read whole on every poll, so a huge tool result stays out of it. */
+function boundToolResults(key: string, value: unknown): unknown {
+  if (key !== 'content' || !Array.isArray(value)) return value;
+  return value.map((block: Json) => (
+    block?.type === 'tool_result'
+      ? { ...block, content: resultText(block.content).slice(0, MAX_RESULT_CHARS) }
+      : block
+  ));
 }
 
 function contentOf(event: Json): Json[] {
@@ -48,14 +60,15 @@ function timeOf(event: Json): number | undefined {
 }
 
 /** One subagent's chat in saved transcript form. A replayed turn records events twice. */
-export function readSubagentTranscript(id: string): MobileTranscriptEntry[] {
+export async function readSubagentTranscript(id: string): Promise<MobileTranscriptEntry[]> {
   const file = logPath(id);
-  if (!file || !existsSync(file)) return [];
+  if (!file) return [];
+  const log = await readFile(file, 'utf8').catch(() => '');
   const entries: MobileTranscriptEntry[] = [];
   const tools = new Map<string, MobileTranscriptToolCall>();
   const seen = new Set<unknown>();
   let reply: MobileTranscriptEntry | null = null;
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
+  for (const line of log.split('\n')) {
     if (!line) continue;
     let event: Json;
     try { event = JSON.parse(line) as Json; } catch { continue; }
@@ -84,7 +97,7 @@ export function readSubagentTranscript(id: string): MobileTranscriptEntry[] {
         } else if (block.type === 'tool_use') {
           const tool = redactToolCallForRest({
             id: String(block.id), name: String(block.name), args: (block.input ?? {}) as Json,
-            status: 'running', startedAt: timestamp, textAt: reply.text.length,
+            status: 'running', startedAt: timestamp, textAt: Buffer.byteLength(reply.text),
           } as MobileTranscriptToolCall);
           tools.set(tool.id as string, tool);
           reply.toolCalls?.push(tool);
