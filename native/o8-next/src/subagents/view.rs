@@ -69,7 +69,7 @@ impl Inspector {
             .pb(px(16.));
         let mut count = 0;
         for (group, slug, label) in [
-            (Group::Working, "working", "Working"),
+            (Group::Working, "working", "Active"),
             (Group::Attention, "attention", "Needs attention"),
             (Group::Done, "done", "Done"),
         ] {
@@ -85,6 +85,12 @@ impl Inspector {
                 })
                 .cloned()
                 .collect::<Vec<_>>();
+            // Newest first, so the latest work is at the top of each group.
+            let mut agents = agents;
+            agents.sort_by(|a, b| {
+                let at = |agent: &Agent| agent.finished.or(agent.started).unwrap_or(0.);
+                at(b).total_cmp(&at(a))
+            });
             if agents.is_empty() {
                 continue;
             }
@@ -95,26 +101,35 @@ impl Inspector {
                     .debug_selector(move || selector.clone())
                     .pt(px(16.))
                     .pb(px(6.))
-                    .text_size(px(10.))
+                    .text_size(px(11.))
+                    .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(theme().text_muted)
-                    .child(format!("{label} · {}", agents.len())),
+                    .child(format!("{label} ({})", agents.len())),
             );
             for agent in agents {
                 let id = agent.id.clone();
-                let time = timing(&agent);
+                let label = row_label(&agent);
+                let meta = [
+                    agent.runtime.clone(),
+                    agent.model.clone().unwrap_or_default(),
+                ]
+                .into_iter()
+                .filter(|v| !v.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
                 list = list.child(
                     self.button(
                         format!("subagent-row-{id}"),
-                        format!("Inspect {}", agent.title),
+                        format!("Open {}", agent.title),
                         cx,
                         move |s, w, cx| s.inspect(Some(id.clone()), w, cx),
                     )
                     .w_full()
                     .px(px(12.))
-                    .py(px(9.))
+                    .py(px(8.))
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(px(10.))
                     .child(
                         div()
                             .size(px(6.))
@@ -126,29 +141,32 @@ impl Inspector {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(div().text_size(px(13.5)).child(agent.title))
                             .child(
                                 div()
-                                    .mt(px(4.))
-                                    .text_size(px(9.5))
-                                    .font_weight(gpui::FontWeight(260.))
-                                    .text_color(theme().text_muted)
-                                    .child(
-                                        [agent.runtime, agent.model.unwrap_or_default()]
-                                            .into_iter()
-                                            .filter(|v| !v.is_empty())
-                                            .collect::<Vec<_>>()
-                                            .join(" · "),
-                                    ),
-                            ),
+                                    .text_size(px(13.))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .child(agent.title),
+                            )
+                            .when(!meta.is_empty(), |v| {
+                                v.child(
+                                    div()
+                                        .mt(px(3.))
+                                        .text_size(px(10.))
+                                        .font_weight(gpui::FontWeight(260.))
+                                        .text_color(theme().text_muted)
+                                        .child(meta),
+                                )
+                            }),
                     )
                     .child(
                         div()
                             .flex_shrink_0()
-                            .text_size(px(10.))
+                            .whitespace_nowrap()
+                            .text_size(px(11.))
                             .text_color(theme().text_muted)
-                            .child(agent.status)
-                            .when(!time.is_empty(), |v| v.child(div().mt(px(3.)).child(time))),
+                            .child(label),
                     ),
                 );
             }
@@ -333,10 +351,10 @@ impl Inspector {
 impl Render for Inspector {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let title = if self.selected.is_some() {
-            self.button("subagents-back", "Back to all subagents", cx, |s, w, cx| {
+            self.button("subagents-back", "All subagents", cx, |s, w, cx| {
                 s.back(w, cx)
             })
-            .child("‹ Subagents")
+            .child(icon("m15 18-6-6 6-6"))
         } else {
             self.button("subagents-title", "Subagents", cx, |_, _, _| {})
                 .child("Subagents")
@@ -387,58 +405,63 @@ impl Render for Inspector {
                     .gap(px(4.))
                     .child(title)
                     .child(div().flex_1())
-                    .child(
-                        self.button("subagents-search", "Search subagents", cx, |s, w, cx| {
-                            s.search = !s.search;
-                            if s.search {
-                                s.back(w, cx);
-                                s.query.read(cx).focus.focus(w);
-                            } else {
-                                s.query.update(cx, |q, cx| q.set_text("", cx));
-                                s.focus.focus(w);
-                            }
-                            cx.notify();
-                        })
-                        .child("Search"),
-                    )
-                    .child(
-                        self.button("subagents-refresh", "Refresh subagents", cx, |s, _, cx| {
-                            s.refresh(cx)
-                        })
-                        .child(if self.pending {
-                            "Reading…"
-                        } else {
-                            "Refresh"
-                        }),
-                    )
+                    .when(self.selected.is_none(), |row| {
+                        row.child(
+                            self.button("subagents-search", "Search subagents", cx, |s, w, cx| {
+                                s.search = !s.search;
+                                if s.search {
+                                    s.back(w, cx);
+                                    s.query.read(cx).focus.focus(w);
+                                } else {
+                                    s.query.update(cx, |q, cx| q.set_text("", cx));
+                                    s.focus.focus(w);
+                                }
+                                cx.notify();
+                            })
+                            .child(icon("M21 21l-4.3-4.3M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z")),
+                        )
+                    })
+                    .when(self.selected.is_none(), |row| {
+                        row.child(
+                            self.button(
+                                "subagents-refresh",
+                                "Refresh subagents",
+                                cx,
+                                |s, _, cx| s.refresh(cx),
+                            )
+                            .child(icon("M21 12a9 9 0 1 1-2.6-6.4L21 8M21 3v5h-5")),
+                        )
+                    })
                     .child(
                         self.button("subagents-close", "Close subagents", cx, |s, w, cx| {
                             s.close(w, cx)
                         })
-                        .child("×"),
+                        .child(icon("M18 6 6 18M6 6l12 12")),
                     ),
             )
-            .child(
-                div()
-                    .debug_selector(|| "subagents-summary".into())
-                    .px(px(16.))
-                    .pb(px(10.))
-                    .text_size(px(10.))
-                    .text_color(theme().text_muted)
-                    .child(if self.loaded {
-                        format!(
-                            "{} · {}",
-                            if self.scope.parent.is_some() {
-                                "This conversation"
-                            } else {
-                                "This workspace"
-                            },
-                            self.summary()
-                        )
-                    } else {
-                        "Reading subagents…".into()
-                    }),
-            );
+            .when(self.selected.is_none(), |body| {
+                body.child(
+                    div()
+                        .debug_selector(|| "subagents-summary".into())
+                        .px(px(16.))
+                        .pb(px(10.))
+                        .text_size(px(10.))
+                        .text_color(theme().text_muted)
+                        .child(if self.loaded {
+                            format!(
+                                "{} · {}",
+                                if self.scope.parent.is_some() {
+                                    "This conversation"
+                                } else {
+                                    "This workspace"
+                                },
+                                self.summary()
+                            )
+                        } else {
+                            "Reading subagents…".into()
+                        }),
+                )
+            });
         if self.search {
             body = body.child(
                 div()
@@ -475,11 +498,28 @@ impl Render for Inspector {
         body.child(content)
     }
 }
+fn icon(path: &'static str) -> AnyElement {
+    crate::icon::stroke(path, theme().text_muted, 14., 1.8).into_any_element()
+}
 fn color(group: Group) -> gpui::Rgba {
     match group {
         Group::Working => theme().accent,
         Group::Attention => theme().warning,
         Group::Done => theme().text_muted,
+    }
+}
+/// The row's right side: "Working · 12s", "just now", or what needs attention.
+fn row_label(agent: &Agent) -> String {
+    match (agent.group, agent.started, agent.finished) {
+        (Group::Working, Some(start), _) => format!(
+            "{} · {}s",
+            agent.status,
+            ((crate::clock::now() as f64 * 1000. - start).max(0.) / 1000.) as u64
+        ),
+        (Group::Done, _, Some(end)) => {
+            crate::clock::age(Some((end / 1000.) as u64), crate::clock::now())
+        }
+        _ => agent.status.clone(),
     }
 }
 fn timing(agent: &Agent) -> String {

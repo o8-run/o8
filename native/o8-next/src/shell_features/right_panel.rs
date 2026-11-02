@@ -153,7 +153,6 @@ impl Tool {
         (
             "More",
             &[
-                Tool::Subagents,
                 Tool::Threads,
                 Tool::Activity,
                 Tool::SideChat,

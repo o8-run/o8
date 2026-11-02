@@ -41,6 +41,11 @@ pub struct Step {
     /// The thread a launch or delegate call created, read from its result.
     #[serde(skip)]
     pub thread: Option<String>,
+    /// What a delegate call asked for and what came back, for its own tab.
+    #[serde(skip)]
+    pub delegate_prompt: Option<String>,
+    #[serde(skip)]
+    pub delegate_result: Option<String>,
     /// Messages this call sent to or read from other threads.
     #[serde(skip)]
     pub messages: Vec<crate::thread_messages::Bubble>,
@@ -742,6 +747,14 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
         } else {
             None
         },
+        delegate_prompt: delegate
+            .then(|| args["prompt"].as_str().map(str::to_owned))
+            .flatten(),
+        // A background agent's launch notice is not its answer.
+        delegate_result: (delegate
+            && !output.trim().is_empty()
+            && !output.starts_with("Async agent launched"))
+        .then(|| output.to_owned()),
         status,
         reason,
         group: 0,
@@ -907,6 +920,8 @@ mod tests {
             finished: None,
             delegate: false,
             thread: None,
+            delegate_prompt: None,
+            delegate_result: None,
             messages: vec![],
             todos: vec![],
         }

@@ -26,10 +26,12 @@ impl Surface {
         let Some(view) = self.subagents.clone() else {
             return;
         };
+        let native = crate::subagents::trace::native_agents(&self.rows);
+        view.update(cx, |v, cx| v.set_native(native, cx));
         let agents = Rc::new(view.read(cx).agents.clone());
         for (index, row) in self.rows.iter().enumerate() {
             let mut row = row.borrow_mut();
-            if !matches!(&row.row,Row::Activity{steps,..} if steps.iter().any(|s|!s.delegations.is_empty()))
+            if !crate::subagents::trace::delegates(&row.row)
             {
                 continue;
             }

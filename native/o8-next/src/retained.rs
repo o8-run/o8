@@ -43,6 +43,8 @@ pub struct RowState {
     pub(crate) subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
     pub(crate) subagent_agents: Rc<Vec<crate::subagents::model::Agent>>,
     pub(crate) subagent_focus: std::collections::HashMap<String, gpui::FocusHandle>,
+    /// The steps of a reply still fading in, oldest first.
+    pub(crate) fading: Vec<crate::stream::RevealStep>,
 }
 impl RowState {
     #[cfg(test)]
@@ -77,6 +79,7 @@ impl RowState {
             subagents: None,
             subagent_agents: Default::default(),
             subagent_focus: Default::default(),
+            fading: vec![],
         }
     }
     /// A row that changed in place (a tool step finished) keeps its disclosure;
@@ -93,10 +96,10 @@ impl RowState {
         }
     }
     pub(crate) fn bind_subagent_focus(&mut self, cx: &App) {
-        if let Row::Activity { steps, .. } = &self.row {
-            for reference in steps.iter().flat_map(|step| &step.delegations) {
+        if let Row::Activity { steps, trace, .. } = &self.row {
+            for item in crate::subagents::trace::items(steps, trace, &self.subagent_agents) {
                 self.subagent_focus
-                    .entry(reference.id.clone())
+                    .entry(item.id)
                     .or_insert_with(|| cx.focus_handle());
             }
         }
@@ -772,6 +775,90 @@ pub(crate) fn reading_column() -> f32 {
     crate::theme::chat_width() + 48.
 }
 
+/// Whether the reader sits at the end of the transcript, so new rows follow.
+pub(crate) fn at_end(list: &gpui::ListState) -> bool {
+    let end = list.max_offset_for_scrollbar().height;
+    (-list.scroll_px_offset_for_scrollbar().y) >= end - px(48.)
+}
+
+/// Keeps the last row's end at the bottom; the list settles the overshoot once
+/// it has measured the row, however tall.
+pub(crate) fn pin_end(list: &gpui::ListState) {
+    if let Some(item_ix) = list.item_count().checked_sub(1) {
+        list.scroll_to(gpui::ListOffset {
+            item_ix,
+            offset_in_item: px(1_000_000.),
+        });
+    }
+}
+
+/// Hands the steps still fading in to the row holding the end of the reply.
+pub(crate) fn mark_fading(rows: &[Rc<RefCell<RowState>>], fading: Vec<crate::stream::RevealStep>) {
+    let last = rows.iter().rposition(
+        |row| matches!(&row.borrow().row, Row::Message { role, .. } if role == "assistant"),
+    );
+    for (index, row) in rows.iter().enumerate() {
+        let mut row = row.borrow_mut();
+        if Some(index) == last {
+            row.fading.clone_from(&fading);
+        } else if !row.fading.is_empty() {
+            row.fading.clear();
+        }
+    }
+}
+
+/// How visible each of the last characters is: every step fades in on its own
+/// clock, and its words follow one another across the stagger.
+fn tail_alphas(steps: &[crate::stream::RevealStep], now: std::time::Instant) -> Vec<f32> {
+    use crate::stream::{REVEAL_FADE, REVEAL_STAGGER};
+    let mut alphas = Vec::new();
+    for step in steps.iter().rev() {
+        let age = now.saturating_duration_since(step.at).as_secs_f32();
+        for char in (0..step.chars).rev() {
+            let delay = REVEAL_STAGGER.as_secs_f32() * char as f32 / step.chars.max(1) as f32;
+            let t = ((age - delay) / REVEAL_FADE.as_secs_f32()).clamp(0., 1.);
+            alphas.push(1. - (1. - t) * (1. - t));
+        }
+    }
+    alphas
+}
+
+/// The lines at the end of the row with what is still fading in them, as byte
+/// spans. The tail is counted in characters from the end, so Markdown's marks
+/// shift it by at most a few characters.
+fn tail_fades(
+    steps: &[crate::stream::RevealStep],
+    lines: &[Line],
+) -> Vec<(usize, Vec<(std::ops::Range<usize>, f32)>)> {
+    if steps.is_empty() {
+        return vec![];
+    }
+    let mut alphas = tail_alphas(steps, std::time::Instant::now()).into_iter();
+    let mut fades = Vec::new();
+    for (index, line) in lines.iter().enumerate().rev() {
+        let mut spans: Vec<(std::ops::Range<usize>, f32)> = Vec::new();
+        let text = line.line.text.as_ref();
+        let mut exhausted = false;
+        for (at, char) in text.char_indices().rev() {
+            let Some(alpha) = alphas.next() else {
+                exhausted = true;
+                break;
+            };
+            if alpha < 1. {
+                spans.push((at..at + char.len_utf8(), alpha));
+            }
+        }
+        if !spans.is_empty() {
+            spans.reverse();
+            fades.push((index, spans));
+        }
+        if exhausted {
+            break;
+        }
+    }
+    fades
+}
+
 pub struct RetainedRow {
     pub state: Rc<RefCell<RowState>>,
     pub index: usize,
@@ -1045,7 +1132,11 @@ impl Element for RetainedRow {
                 gpui::fill(painted_bounds, background.color).corner_radii(background.radius),
             );
         }
-        for line in &cache.lines {
+        let fades = tail_fades(&state.fading, &cache.lines);
+        if !fades.is_empty() {
+            window.request_animation_frame();
+        }
+        for (index, line) in cache.lines.iter().enumerate() {
             let painted_origin = origin + line.origin;
             #[cfg(test)]
             state
@@ -1053,11 +1144,14 @@ impl Element for RetainedRow {
                 .borrow_mut()
                 .text_origin
                 .get_or_insert(painted_origin);
-            line.line
-                .paint_background(painted_origin, line.height, line.align, None, window, cx)
+            let faded = fades
+                .iter()
+                .find(|(line, _)| *line == index)
+                .map(|(_, spans)| line.line.with_alpha(spans));
+            let text = faded.as_ref().unwrap_or(&line.line);
+            text.paint_background(painted_origin, line.height, line.align, None, window, cx)
                 .unwrap();
-            line.line
-                .paint(painted_origin, line.height, line.align, None, window, cx)
+            text.paint(painted_origin, line.height, line.align, None, window, cx)
                 .unwrap();
         }
         for image in images {

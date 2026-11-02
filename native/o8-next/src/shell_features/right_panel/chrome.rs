@@ -15,7 +15,7 @@ pub(super) fn button(
     bare(s, id, tip, cx, action).hover(|b| b.bg(theme().hover).text_color(theme().text))
 }
 /// A panel control without a hover box; GPUI allows one hover style per element.
-fn bare(
+pub(super) fn bare(
     s: &Shell,
     id: impl Into<String>,
     tip: impl Into<SharedString>,
@@ -199,7 +199,7 @@ pub(super) fn toggle(s: &Shell, open: bool, cx: &mut Context<Shell>) -> gpui::St
     b
 }
 
-fn tool_tab(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement {
+pub(super) fn tool_tab(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement {
     let p = s.features.read::<Panel>().unwrap();
     let active = p.selected == tool;
     let scroll = p.scroll.clone();
@@ -326,7 +326,13 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
             .flex()
             .items_center()
             .gap(px(4.))
-            .children(p.tabs.iter().map(|t| tool_tab(s, *t, cx)))
+            .children(p.tabs.iter().flat_map(|t| {
+                if *t == Tool::Subagents {
+                    subagents::tabs(s, cx)
+                } else {
+                    vec![tool_tab(s, *t, cx)]
+                }
+            }))
             .children(contextual::issue_tabs(s, cx))
             .when(selected == Tool::Launcher, |v| {
                 v.child(

@@ -38,6 +38,13 @@ impl Grid {
                 self.subagents.insert(key.clone(), (view, observer));
             }
             let view = self.subagents[&key].0.clone();
+            let native = self
+                .panes
+                .iter()
+                .filter(|p| p.key.as_ref() == Some(&key))
+                .flat_map(|p| p.native_subagents())
+                .collect();
+            view.update(cx, |v, cx| v.set_native(native, cx));
             let agents = std::rc::Rc::new(view.read(cx).agents.clone());
             for pane in self
                 .panes

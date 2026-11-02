@@ -14,6 +14,9 @@ pub(crate) enum Group {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Agent {
     pub shared: bool,
+    /// Read from the house's own delegate call in the transcript, with no packet.
+    pub native: bool,
+    pub prompt: Option<String>,
     pub run: String,
     pub id: String,
     pub title: String,
@@ -87,6 +90,8 @@ pub(crate) fn agents(state: &Value, scope: &Scope) -> Result<Vec<Agent>, String>
         let started = inventory.and_then(|a| timestamp(&a["startedAt"]));
         agents.push(Agent {
             shared: false,
+            native: false,
+            prompt: None,
             run: format!(
                 "{}:{}:{}",
                 packet["lane"]["sessionKey"],
@@ -174,6 +179,8 @@ fn shared_agents(response: &Value, parent: &str) -> Result<Vec<Agent>, String> {
             }
             Some(Ok(Agent {
                 shared: true,
+                native: false,
+                prompt: None,
                 run: worker["recovery"]["runId"].as_str().unwrap_or("").into(),
                 id: session.clone(),
                 session: Some(session),

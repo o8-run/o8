@@ -97,7 +97,8 @@ impl Surface {
         let open = lineage::is_open(&key);
         let waiting = lineage::waiting(&children);
         let summary =
-            lineage::card_label(&children).map(|(count, _)| {
+            // Finished helpers stay on their line in the reply; only waiting shows here.
+            lineage::card_label(&children).filter(|_| waiting.is_some()).map(|(count, _)| {
                 let (label, names) = waiting.clone().unwrap_or_else(|| (count, String::new()));
                 let toggle_key = key.clone();
                 div()

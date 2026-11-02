@@ -105,6 +105,7 @@ impl Surface {
             .flex_col()
             .on_scroll_wheel(cx.listener(|this, _: &gpui::ScrollWheelEvent, _, _| {
                 this.following = None;
+                this.pinned = false;
             }))
             .when(!self.notice.is_empty(), |view| {
                 view.child(
@@ -199,6 +200,7 @@ impl Surface {
                     .on_click(cx.listener(|this, _, _, cx| {
                         let last = this.list.item_count().saturating_sub(1);
                         this.list.scroll_to_reveal_item(last);
+                        this.pinned = true;
                         this.away_from_end = false;
                         cx.notify();
                     }))

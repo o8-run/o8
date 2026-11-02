@@ -296,7 +296,10 @@ fn subagents_grid_updated_trace_keeps_keyboard_return(cx: &mut TestAppContext) {
     // A click can land while the inspector still slides in on a slow runner.
     let deadline = Instant::now() + Duration::from_secs(20);
     while v.debug_bounds("subagents-inspector").is_some() {
-        assert!(Instant::now() < deadline, "Still visible: subagents-inspector");
+        assert!(
+            Instant::now() < deadline,
+            "Still visible: subagents-inspector"
+        );
         // The sliding panel outlives its close button by a frame.
         if let Some(close) = v.debug_bounds("subagents-close") {
             v.simulate_click(close.center(), gpui::Modifiers::default());
@@ -454,4 +457,95 @@ fn subagents_shared_panel_refreshes_counts_and_keeps_error_recovery(cx: &mut Tes
     draw(&mut v);
     assert!(v.debug_bounds("subagent-row-subagent-fruit").is_some());
     assert!(v.debug_bounds("subagent-row-subagent-sentence").is_none());
+}
+
+#[gpui::test]
+fn each_opened_subagent_gets_a_tab_and_none_are_in_the_tools(cx: &mut TestAppContext) {
+    assert!(
+        Tool::GROUPS
+            .iter()
+            .all(|(_, tools)| !tools.contains(&Tool::Subagents)),
+        "subagents open from a subagent, not from the tools"
+    );
+    let (_f, s, mut v) = setup(cx);
+    wait(&s, &mut v, "subagent-trace-subagent-calculation");
+    click(&mut v, "subagent-trace-subagent-calculation");
+    wait(&s, &mut v, "subagents-detail-subagent-calculation");
+    wait(&s, &mut v, "panel-subagent-tab-subagent-calculation");
+    click(&mut v, "subagents-back");
+    wait(&s, &mut v, "subagent-row-subagent-fruit");
+    assert!(
+        v.debug_bounds("panel-subagent-tab-subagent-calculation")
+            .is_some()
+    );
+    click(&mut v, "subagent-row-subagent-fruit");
+    wait(&s, &mut v, "subagents-detail-subagent-fruit");
+    wait(&s, &mut v, "panel-subagent-tab-subagent-fruit");
+    assert!(
+        v.debug_bounds("panel-subagent-tab-subagent-calculation")
+            .is_some()
+    );
+    click(&mut v, "panel-subagent-subagent-calculation");
+    wait(&s, &mut v, "subagents-detail-subagent-calculation");
+    assert!(
+        v.debug_bounds("panel-subagent-tab-subagent-fruit")
+            .is_some()
+    );
+}
+
+#[gpui::test]
+fn native_agents_out_of_title_order_settle_after_one_notify(cx: &mut TestAppContext) {
+    let agent = |id: &str, title: &str| crate::subagents::model::Agent {
+        shared: false,
+        native: true,
+        prompt: None,
+        run: id.into(),
+        id: id.into(),
+        title: title.into(),
+        runtime: String::new(),
+        model: None,
+        effort: None,
+        parent: None,
+        session: None,
+        group: crate::subagents::model::Group::Done,
+        status: "Done".into(),
+        progress: None,
+        result: None,
+        started: None,
+        finished: None,
+    };
+    // An inspector with no transcript behind it, so only this test feeds it.
+    let (f, _s, mut v) = setup(cx);
+    let client = f.client.clone();
+    let view = v.update(|_, cx| {
+        cx.new(|cx| {
+            crate::subagents::Inspector::new(
+                client,
+                crate::subagents::model::Scope {
+                    repo: "/nowhere".into(),
+                    parent: None,
+                },
+                cx,
+            )
+        })
+    });
+    v.run_until_parked();
+    let notified = std::rc::Rc::new(std::cell::Cell::new(0));
+    let count = notified.clone();
+    let _watch = v.update(|_, cx| cx.observe(&view, move |_, _| count.set(count.get() + 1)));
+    let agents = vec![agent("a", "Sort fruit"), agent("b", "Quick calculation")];
+    for _ in 0..3 {
+        let agents = agents.clone();
+        view.update(&mut v, |view, cx| view.set_native(agents, cx));
+        v.run_until_parked();
+    }
+    let titles: Vec<String> = view.read_with(&v, |view, _| {
+        view.agents
+            .iter()
+            .filter(|a| a.native)
+            .map(|a| a.title.clone())
+            .collect()
+    });
+    assert_eq!(titles, ["Quick calculation", "Sort fruit"]);
+    assert_eq!(notified.get(), 1, "the same agents must not notify again");
 }

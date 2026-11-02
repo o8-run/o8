@@ -5,7 +5,7 @@ use crate::{
 };
 use derive_more::{Deref, DerefMut};
 use smallvec::SmallVec;
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 
 /// Set the text decoration for a run of text.
 #[derive(Debug, Clone)]
@@ -118,6 +118,40 @@ pub struct WrappedLine {
 }
 
 impl WrappedLine {
+    /// A copy with the given byte ranges painted at a fraction of their alpha.
+    /// Ranges must be sorted and must not overlap.
+    pub fn with_alpha(&self, spans: &[(Range<usize>, f32)]) -> Self {
+        let mut runs = SmallVec::new();
+        let mut spans = spans.iter().peekable();
+        let mut offset = 0;
+        for run in &self.decoration_runs {
+            let end = offset + run.len as usize;
+            while offset < end {
+                while spans.peek().is_some_and(|(range, _)| range.end <= offset) {
+                    spans.next();
+                }
+                let (stop, alpha) = match spans.peek() {
+                    Some((range, alpha)) if range.start <= offset => (range.end.min(end), *alpha),
+                    Some((range, _)) => (range.start.min(end), 1.),
+                    None => (end, 1.),
+                };
+                let mut piece = run.clone();
+                piece.len = (stop - offset) as u32;
+                piece.color.a *= alpha;
+                piece.background_color = piece.background_color.map(|mut color| {
+                    color.a *= alpha;
+                    color
+                });
+                runs.push(piece);
+                offset = stop;
+            }
+        }
+        Self {
+            layout: self.layout.clone(),
+            text: self.text.clone(),
+            decoration_runs: runs,
+        }
+    }
     /// The length of the underlying, unwrapped layout, in utf-8 bytes.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {

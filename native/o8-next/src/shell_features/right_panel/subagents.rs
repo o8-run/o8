@@ -215,13 +215,142 @@ pub(super) fn probe(s: &Shell, cx: &App) -> serde_json::Value {
         .map(|view| view.read(cx).probe())
         .unwrap_or(serde_json::Value::Null)
 }
+/// One tab per opened subagent, named for it; the directory has a tab only
+/// while it is what shows.
+pub(super) fn tabs(s: &Shell, cx: &mut Context<Shell>) -> Vec<AnyElement> {
+    let p = s.features.read::<Panel>().unwrap();
+    let shown = p.selected == Tool::Subagents;
+    let view = s
+        .features
+        .read::<Inspectors>()
+        .and_then(|state| state.current.clone());
+    let Some(view) = view else {
+        return vec![chrome::tool_tab(s, Tool::Subagents, cx)];
+    };
+    let (selected, open) = {
+        let inspector = view.read(cx);
+        let open: Vec<(String, String, bool)> = inspector
+            .tabs
+            .iter()
+            .map(|id| {
+                let agent = inspector.title_of(id);
+                (
+                    id.clone(),
+                    agent.map_or("Subagent".to_string(), |a| a.title.clone()),
+                    agent.is_some_and(|a| a.group == crate::subagents::model::Group::Working),
+                )
+            })
+            .collect();
+        (inspector.selected.clone(), open)
+    };
+    let mut tabs: Vec<AnyElement> = open
+        .iter()
+        .map(|(id, title, working)| {
+            let (title, working) = (title.clone(), *working);
+            let active = shown && selected.as_ref() == Some(id);
+            let (open_id, close_id) = (id.clone(), id.clone());
+            let (open_view, close_view) = (view.clone(), view.clone());
+            let selector = format!("panel-subagent-tab-{id}");
+            div()
+                .id(SharedString::from(selector.clone()))
+                .debug_selector(move || selector.clone())
+                .relative()
+                .h(px(28.))
+                .max_w(px(180.))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .rounded(px(7.))
+                .when(active, |v| v.bg(theme().selection).child(p.scroll.probe()))
+                .child(
+                    chrome::button(
+                        s,
+                        format!("panel-subagent-{id}"),
+                        title.clone(),
+                        cx,
+                        move |_, w, cx| {
+                            open_view.update(cx, |v, cx| v.inspect(Some(open_id.clone()), w, cx))
+                        },
+                    )
+                    .h(px(28.))
+                    .min_w_0()
+                    .pl(px(8.))
+                    .pr(px(5.))
+                    .gap(px(6.))
+                    .when(active, |b| b.text_color(theme().text))
+                    .child(crate::icon::stroke(
+                        crate::subagents::trace::MARK,
+                        crate::subagents::trace::agent_color(&id),
+                        13.,
+                        1.6,
+                    ))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .whitespace_nowrap()
+                            .child(title),
+                    ),
+                )
+                .child(
+                    chrome::bare(
+                        s,
+                        format!("panel-subagent-close-{id}"),
+                        "Close subagent tab".to_string(),
+                        cx,
+                        move |s, w, cx| {
+                            let empty =
+                                close_view.update(cx, |v, cx| v.close_tab(&close_id, w, cx));
+                            if empty {
+                                close_directory(s, w, cx);
+                            }
+                        },
+                    )
+                    .w(px(16.))
+                    .h(px(16.))
+                    .mr(px(5.))
+                    .rounded(px(4.))
+                    .child(crate::icon::stroke(
+                        "M18 6 6 18M6 6l12 12",
+                        theme().text_faint,
+                        10.,
+                        2.5,
+                    )),
+                )
+                .into_any_element()
+        })
+        .collect();
+    if selected.is_none() || tabs.is_empty() {
+        tabs.insert(0, chrome::tool_tab(s, Tool::Subagents, cx));
+    }
+    tabs
+}
+fn close_directory(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
+    let selected = s.features.get::<Panel>().selected;
+    if let Some(index) = s
+        .features
+        .get::<Panel>()
+        .tabs
+        .iter()
+        .position(|t| *t == Tool::Subagents)
+    {
+        close_tab(s, index, w, cx);
+    }
+    if selected == Tool::Subagents && !restore_panel(s, cx) {
+        layout::focus(s, "panel-new-tab", w);
+    }
+}
 pub(super) fn summary_button(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
     let view = current(s, cx);
-    let summary = view
+    // Nothing to show until a subagent exists; the transcript opens them.
+    let Some(summary) = view
         .as_ref()
         .map(|v| v.read(cx).summary())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "Subagents".into());
+    else {
+        return div().into_any_element();
+    };
     let label = summary.clone();
     let keyboard_view = view.clone();
     super::super::header::pill("header-subagents", "Inspect subagents", view.is_some())

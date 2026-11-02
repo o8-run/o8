@@ -150,6 +150,9 @@ pub(crate) struct Surface {
     reconcile_revision: u64,
     reconcile_wait: u32,
     reconcile_live: bool,
+    /// The reader rests at the end of the transcript, so it stays there.
+    pub(crate) pinned: bool,
+    changed_at: std::time::Instant,
     chat_width: f32,
     list_generation: u64,
     history_loading: bool,
@@ -229,6 +232,8 @@ impl Surface {
             reconcile_revision: 0,
             reconcile_wait: 0,
             reconcile_live: false,
+            pinned: true,
+            changed_at: std::time::Instant::now(),
             chat_width: crate::theme::chat_width(),
             list_generation: 0,
             history_loading: false,
@@ -566,9 +571,9 @@ impl Surface {
     /// that opens its rows over a few frames scrolls with them. The reader
     /// scrolling the transcript ends the follow.
     pub(crate) fn follow_frame(&mut self) {
-        if self.following.is_some() && !self.rows.is_empty() {
-            self.list
-                .scroll_to_reveal_item(self.list.item_count().saturating_sub(1));
+        let live = self.transcript.as_ref().is_some_and(|t| t.context_snapshot().1);
+        if self.following.is_some() || (self.pinned && live) {
+            crate::retained::pin_end(&self.list);
         }
     }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
@@ -589,15 +594,10 @@ impl Surface {
         if visualizations_changed {
             cx.notify();
         }
-        let follow_tail = !self.rows.is_empty()
-            && self
-                .list
-                .bounds_for_item(self.rows.len() - 1)
-                .is_some_and(|bounds| {
-                    let viewport = self.list.viewport_bounds();
-                    bounds.bottom() <= viewport.bottom() + px(1.)
-                        && bounds.bottom() >= viewport.top()
-                });
+        // Rows measure on the next paint, so the end is only read once they rest.
+        if self.changed_at.elapsed() > std::time::Duration::from_millis(200) {
+            self.pinned = crate::retained::at_end(&self.list);
+        }
         let messages: Vec<_> = self
             .subscription
             .as_ref()
@@ -621,13 +621,17 @@ impl Surface {
                 }
             }
         }
+        if let Some(transcript) = &mut self.transcript {
+            changed |= transcript.pace();
+        }
         if changed {
             self.install_rows(self.transcript.as_ref().unwrap().rows.clone(), cx);
-            if follow_tail && !self.rows.is_empty() {
-                self.list.scroll_to(ListOffset {
-                    item_ix: self.rows.len() - 1,
-                    offset_in_item: px(0.),
-                });
+            if let Some(transcript) = &self.transcript {
+                crate::retained::mark_fading(&self.rows, transcript.fading());
+            }
+            self.changed_at = std::time::Instant::now();
+            if self.pinned {
+                crate::retained::pin_end(&self.list);
             }
             cx.notify();
         }
@@ -709,6 +713,7 @@ impl Surface {
                 item_ix: if end { self.rows.len() - 1 } else { 0 },
                 offset_in_item: px(0.),
             });
+            self.pinned = end;
             self.on_transcript_scroll(cx);
         }
         self.key_revision += 1;
