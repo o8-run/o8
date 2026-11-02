@@ -12,6 +12,10 @@ use super::*;
 use gpui::{Corner, MouseButton, Pixels, Point, anchored, deferred};
 
 const COPY: &str = "M9 9h10v10H9z M5 15V5h10";
+/// A filled-looking ring: the unread mark.
+const UNREAD: &str = "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z";
+/// Lucide refresh-cw.
+const RETITLE: &str = "M3 12a9 9 0 0 1 15-6.7L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-15 6.7L3 16 M3 21v-5h5";
 
 /// The open scope picker: its search text and highlighted item.
 #[derive(Default)]
@@ -474,10 +478,14 @@ impl ThreadList {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let id = self.row_menu.as_ref()?.id.clone();
+        if self.picked.len() > 1 && self.picked.contains(&id) {
+            return self.bulk_menu(cx);
+        }
         let snooze = self.snooze_items(&id, cx);
         let pin = self.pin_item(&id, cx);
         let auto_settle = self.auto_settle_item(&id, cx);
         let workspace_restores = self.workspace_restore_items(&id, cx);
+        let editors = self.editor_items(&id, cx);
         // Archive left the row's hover strip for the state mark (Q 2026-10-31).
         let archived = self.sessions.iter().any(|s| s.id == id && s.status == "archived");
         let archive_id = id.clone();
@@ -572,16 +580,46 @@ impl ThreadList {
             .px(px(8.))
             .flex()
             .items_center()
+            .gap(px(8.))
             .rounded(px(7.))
             .text_size(px(12.5))
             .cursor_pointer()
             .hover(|s| s.bg(theme().hover))
+            .child(crate::icon::stroke(RETITLE, theme().text_muted, 14., 1.7))
             .child("Regenerate title")
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.row_menu = None;
                 this.regenerate_title(thread.clone(), cx);
             }));
+        let unread_id = menu.id.clone();
+        let mark_unread = (self.selected.as_ref() != Some(&menu.id)
+            && self.sessions.iter().any(|s| s.id == menu.id && !s.unread))
+        .then(|| {
+            div()
+                .id("sidebar-row-mark-unread")
+                .debug_selector(|| "sidebar-row-mark-unread".into())
+                .h(px(28.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(7.))
+                .text_size(px(12.5))
+                .cursor_pointer()
+                .hover(|s| s.bg(theme().hover))
+                .child(crate::icon::stroke(UNREAD, theme().text_muted, 14., 1.7))
+                .child("Mark unread")
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.row_menu = None;
+                    if let Some(session) = this.sessions.iter_mut().find(|s| s.id == unread_id) {
+                        session.unread = true;
+                    }
+                    this.rebuild();
+                    cx.notify();
+                }))
+        });
         Some(
             deferred(
                 anchored()
@@ -609,6 +647,8 @@ impl ThreadList {
                             .children(workspace_restores)
                             .children(filter)
                             .children(snooze)
+                            .children(mark_unread)
+                            .children(editors)
                             .child(regenerate)
                             .children(copy)
                             .child(archive),

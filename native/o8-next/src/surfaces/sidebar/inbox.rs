@@ -18,8 +18,8 @@ use gpui::{AnyElement, div, px};
 /// The last Settle and its toast, which offers Undo until a newer Settle or
 /// its timeout.
 pub(super) struct Undo {
-    ids: Vec<String>,
-    toast: toasts::ToastId,
+    pub(super) ids: Vec<String>,
+    pub(super) toast: toasts::ToastId,
 }
 
 /// Threads the server just settled on its own (inbox/auto-settle.ts): seen
@@ -214,7 +214,7 @@ impl ThreadList {
     }
     /// Undo only un-settles still-settled threads. An old toast cannot settle
     /// a thread restored by another client or a new run.
-    fn undo_ids(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {
+    pub(super) fn undo_ids(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {
         let targets: Vec<_> = ids
             .into_iter()
             .filter_map(|id| {
