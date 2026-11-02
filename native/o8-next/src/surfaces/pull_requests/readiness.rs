@@ -55,6 +55,15 @@ pub fn readiness(row: &Value) -> (i32, Vec<&'static str>) {
     (score, reasons)
 }
 
+/// The reasons as one header line. A closed pull request has nothing to explain.
+pub fn reason_line(row: &Value) -> Option<String> {
+    if row["state"] != "open" {
+        return None;
+    }
+    let (_, reasons) = readiness(row);
+    (!reasons.is_empty()).then(|| reasons.join(" · "))
+}
+
 /// Stable: equal scores keep the server's (updated) order.
 pub fn sort_by_readiness(rows: &mut [Value]) {
     rows.sort_by_key(|row| std::cmp::Reverse(readiness(row).0));
@@ -87,6 +96,14 @@ mod tests {
         assert!(readiness(&with("reviewDecision", json!("CHANGES_REQUESTED"))).0 < base);
         assert!(readiness(&with("state", json!("merged"))).0 < base - 100);
         assert_eq!(readiness(&with("checks", json!("failure"))).1, vec!["Checks failing"]);
+        assert_eq!(
+            reason_line(&with("checks", json!("failure"))).as_deref(),
+            Some("Checks failing")
+        );
+        let mut ready = with("checks", json!("success"));
+        ready["reviewDecision"] = json!("APPROVED");
+        assert_eq!(reason_line(&ready).as_deref(), Some("Checks pass · Approved"));
+        assert_eq!(reason_line(&with("state", json!("merged"))), None);
     }
 
     #[test]
