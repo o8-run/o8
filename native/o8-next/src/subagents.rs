@@ -426,6 +426,11 @@ impl Inspector {
                     return;
                 }
                 this.native_entries.clone_from(&history.transcript);
+                // A finished agent's saved rows are settled, not a turn in progress.
+                if let Some(last) = history.transcript.last_mut().filter(|_| !working) {
+                    last.extra
+                        .insert("receipt".into(), serde_json::json!({ "terminal": {} }));
+                }
                 if let Some(prompt) = prompt.filter(|_| history.transcript[0].role != "user") {
                     history.transcript.insert(
                         0,

@@ -1159,9 +1159,7 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
     seen(&format!("trace:{id}"), true);
     let now = now_ms();
     let timed = clock(trace.turn.as_deref().unwrap_or(&id), &trace, now);
-    // Subagents report on their own line under the reply, not as trace steps.
-    let timeline: Vec<Step> = steps.iter().filter(|s| !s.delegate).cloned().collect();
-    let lines = lines(&timeline, &timed);
+    let lines = lines(&steps, &timed);
     let expandable = !lines.is_empty();
     let mut animating = trace.live;
 
