@@ -1024,6 +1024,7 @@ mod tests {
         let mut step = |t: &mut Transcript| {
             if let Some(reveal) = &mut t.reveal {
                 reveal.next = Instant::now();
+                reveal.grew = Instant::now();
             }
             t.pace();
         };
@@ -1031,8 +1032,10 @@ mod tests {
             step(&mut t);
         }
         assert_eq!(t.reveal.as_ref().unwrap().shown, "reports ".len());
-        t.reveal.as_mut().unwrap().grew = Instant::now() - REVEAL_QUIET;
-        step(&mut t);
+        let reveal = t.reveal.as_mut().unwrap();
+        reveal.next = Instant::now();
+        reveal.grew = Instant::now() - REVEAL_QUIET;
+        t.pace();
         assert_eq!(t.reveal.as_ref().unwrap().shown, "reports back.".len());
     }
 

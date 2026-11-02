@@ -116,6 +116,7 @@ export async function runBoundChatContinuation(
         case 'tool_result': hooks.publish(session.sessionName, 'tool-result', { ...data, name: event.name, args: event.input, output: event.output, toolUseId: event.id, isError: event.isError }); break;
         case 'plan': hooks.publish(session.sessionName, 'plan-update', { ...data, turnId: assistantMessageId, explanation: event.explanation, steps: event.steps }); break;
         case 'done':
+          trailingPersist.cancel();
           completed = true;
           receipt = { ...receipt, terminal: terminalReceipt(`review-user-${assistantMessageId}`,
             controller.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed') };
