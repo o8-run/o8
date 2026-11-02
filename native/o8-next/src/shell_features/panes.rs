@@ -447,6 +447,9 @@ fn leaf(
                 .take()
                 .filter(|(leaf, _)| *leaf == dropped)
                 .map_or(Zone::Center, |(_, zone)| zone);
+            if link_in_composer(s, pane, window.mouse_position(), cx) {
+                return;
+            }
             s.capture(window, cx);
             split(s, &dropped, zone, pane.clone(), cx);
         }))
@@ -493,6 +496,27 @@ fn track(
 }
 
 /// The conversation the main pane shows.
+/// A thread let go over the main chat's composer becomes context for the next
+/// prompt instead of a split. The main chat's own thread has nothing to add.
+fn link_in_composer(
+    s: &Shell,
+    pane: &super::RailPane,
+    position: gpui::Point<gpui::Pixels>,
+    cx: &mut Context<Shell>,
+) -> bool {
+    let super::RailPane::Thread { id, title } = pane else {
+        return false;
+    };
+    if main_thread(s, cx).as_ref() == Some(id) {
+        return false;
+    }
+    let Some(tab) = s.active() else { return false };
+    let Some(Content::Session(view)) = s.content.get(&s.key(&tab)) else {
+        return false;
+    };
+    view.update(cx, |view, cx| view.take_thread_drop(id, title, position, cx))
+}
+
 fn main_thread(s: &Shell, cx: &gpui::App) -> Option<String> {
     s.active().and_then(|tab| shown(s, &tab, cx))
 }
