@@ -11,6 +11,16 @@ mod prompt_persistence_tests;
 #[path = "prompt_tests.rs"]
 mod prompt_tests;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
+
+#[test]
+fn a_dropped_thread_joins_the_draft_as_a_link_on_its_own_line() {
+    use super::composer_card::with_thread_link;
+    assert_eq!(with_thread_link("", "Fix [login]", "t-1"), "[Fix login](o8://thread/t-1)");
+    assert_eq!(
+        with_thread_link("look at this\n", "Fix login", "t-1"),
+        "look at this\n[Fix login](o8://thread/t-1)"
+    );
+}
 use std::{
     io::{BufRead, BufReader},
     process::{Child, Stdio},

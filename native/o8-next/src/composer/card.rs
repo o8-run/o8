@@ -64,7 +64,33 @@ fn mic_glyph(color: gpui::Rgba, scale: f32) -> impl IntoElement {
     .h(px(20.))
 }
 
+/// The draft with a link to a dragged thread on its own line.
+pub(super) fn with_thread_link(draft: &str, title: &str, id: &str) -> String {
+    let title = title.replace(['[', ']'], "");
+    let link = format!("[{title}]({}{id})", crate::lineage::SCHEME);
+    if draft.trim().is_empty() {
+        link
+    } else {
+        format!("{}\n{link}", draft.trim_end())
+    }
+}
+
 impl Surface {
+    /// A sidebar thread let go over this composer joins the draft as a link.
+    pub(crate) fn take_thread_drop(
+        &mut self,
+        id: &str,
+        title: &str,
+        position: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.composer_card.get().is_some_and(|card| card.contains(&position)) {
+            return false;
+        }
+        let next = with_thread_link(&self.draft(cx), title, id);
+        self.composer.update(cx, |composer, cx| composer.set_text(&next, cx));
+        true
+    }
     fn primary_view(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let view = if let Some(view) = &self.composer.read(cx).controls.send_view {
             view.clone()
@@ -645,6 +671,12 @@ impl Surface {
             .border_color(theme().border)
             .rounded(px(crate::theme::GEOMETRY.composer_radius))
             .bg(theme().surface_raised)
+            .child({
+                let card = self.composer_card.clone();
+                gpui::canvas(move |bounds, _, _| card.set(Some(bounds)), |_, _, _, _| {})
+                    .absolute()
+                    .size_full()
+            })
             .capture_key_down(cx.listener(|s, event: &KeyDownEvent, window, cx| {
                 if s.prompt_picker_key(event, window, cx) {
                     return;
