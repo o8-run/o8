@@ -88,7 +88,10 @@ impl Drop for Link {
 impl Route {
     pub(crate) fn parse(machine: &Value) -> Option<Self> {
         Some(Self {
-            id: machine["id"].as_str()?.to_owned(),
+            id: machine["id"]
+                .as_str()
+                .filter(|id| usable_id(id))?
+                .to_owned(),
             target: machine["target"].as_str()?.to_owned(),
             port: machine["port"]
                 .as_u64()
@@ -219,6 +222,12 @@ impl Route {
     }
 }
 
+/// A machine id goes inside sidebar ids and workspace keys, so it can't hold
+/// their separators. The server only saves UUIDs; this holds for any other.
+fn usable_id(id: &str) -> bool {
+    !id.is_empty() && !id.chars().any(|c| c == '~' || c == '|' || c.is_control())
+}
+
 fn free_port() -> Result<u16, String> {
     TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .and_then(|listener| listener.local_addr())
@@ -295,6 +304,15 @@ mod tests {
         assert_eq!((remote.api, remote.ws), (47120, 47125));
         assert_eq!(Remote::parse("\n47100\n47105\n"), None);
         assert_eq!(Remote::parse(""), None);
+    }
+
+    #[test]
+    fn an_id_that_would_break_a_sidebar_id_is_refused() {
+        let with = |id: &str| json!({"id":id,"target":"me@box","port":22});
+        assert!(Route::parse(&with("1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed")).is_some());
+        for id in ["a~b", "a|b", "a\nb", ""] {
+            assert_eq!(Route::parse(&with(id)), None, "{id:?}");
+        }
     }
 
     #[test]

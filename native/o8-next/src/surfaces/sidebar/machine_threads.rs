@@ -2,7 +2,7 @@
 //! listed beside this computer's. Off unless `O8_NEXT_MACHINE_THREADS` is set,
 //! until every panel follows the thread's machine.
 use crate::client::{Client, Session};
-use crate::shell::session::{machine_thread, machine_thread_id};
+use crate::shell::session::{machine_thread, machine_thread_id, reserved_thread_id};
 pub(crate) use crate::shell::settings::machine_links::Links;
 use crate::shell::settings::machine_links::{Machine, Reach};
 use crate::shell::settings::machines::{SSH_MACHINES, machine_window::Route};
@@ -92,6 +92,7 @@ fn answer(machine: Machine) -> ((String, Option<String>), Option<Vec<Session>>) 
                 .ok()
                 .map(|(list, _)| {
                     list.into_iter()
+                        .filter(|session| !reserved_thread_id(&session.id))
                         .map(|mut session| {
                             session.id = machine_thread_id(&machine.id, &session.id);
                             session.machine = Some(machine.id.clone());
@@ -130,6 +131,12 @@ mod tests {
         let shell = crate::shell::session::with_server_ids(&[session]);
         assert_eq!(shell[0].id, "thoughts-1");
         assert_eq!(shell[0].list_id(), listed);
+    }
+
+    #[test]
+    fn a_server_thread_cannot_pose_as_a_machine_thread() {
+        assert!(reserved_thread_id(&machine_thread_id("box", "thoughts-1")));
+        assert!(!reserved_thread_id("thoughts-1"));
     }
 
     #[test]

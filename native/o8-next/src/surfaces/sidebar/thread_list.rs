@@ -462,7 +462,8 @@ impl ThreadList {
         let generation = self.generation;
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
-            let (sessions, branches) = client.sidebar_sessions_with_branches()?;
+            let (mut sessions, branches) = client.sidebar_sessions_with_branches()?;
+            sessions.retain(|s| !crate::shell::session::reserved_thread_id(&s.id));
             let header = match project_header::HeaderSnapshot::load(&client) {
                 Ok(header) => Some(header),
                 // Older session-only hosts do not provide project routes.
@@ -658,6 +659,7 @@ impl ThreadList {
                     )
                     && let Ok(mut incoming) =
                         serde_json::from_value::<Session>(frame["data"]["thread"].clone())
+                    && !crate::shell::session::reserved_thread_id(&incoming.id)
                 {
                     incoming.title = crate::text::sanitize(&incoming.title);
                     if incoming.status == "busy" {
