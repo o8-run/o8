@@ -323,13 +323,13 @@ export function createClaudeCodeStreamJsonParser(
     if (state.emittedDone) return;
     const subtype = asString(event.subtype);
     const isResult = event.type === 'result';
-    if (isResult && event.is_error !== true && backgroundAgents.holdsResult()) {
+    const isError = event.is_error === true
+      || (isResult && subtype !== undefined && subtype !== 'success');
+    if (isResult && !isError && backgroundAgents.holdsResult()) {
       // Its usage is reported above, so the end of a held turn must not repeat it.
       heldResult = { ...event, usage: undefined, total_cost_usd: undefined, cost_usd: undefined };
       return;
     }
-    const isError = event.is_error === true
-      || (isResult && subtype !== undefined && subtype !== 'success');
     const explicitResult = asString(event.result);
     const errorText = isError && Array.isArray(event.errors)
       ? event.errors.filter((value): value is string => typeof value === 'string').join('\n')

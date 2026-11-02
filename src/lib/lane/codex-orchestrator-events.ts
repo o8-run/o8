@@ -231,6 +231,7 @@ export function handleCodexJsonLine(
         id: typeof payload.call_id === 'string' ? payload.call_id : null,
         name: typeof payload.name === 'string' ? payload.name : 'function',
         output: shot ? shot[0] : output.slice(0, 4_000),
+        ...(payload.is_error === true ? { isError: true } : {}),
       });
       return true;
     }

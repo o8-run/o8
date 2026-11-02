@@ -96,6 +96,10 @@ interface ToolCallTracker {
   hasAnyStreamedText: () => boolean;
   recordThinkingDelta: () => void;
   hasAnyStreamedThinking: () => boolean;
+  /** A new message starts: its replay only repeats what it streamed itself. */
+  startMessage: () => void;
+  /** True once this turn has shown any text, so the next block needs a break. */
+  hasTurnText: () => boolean;
   backgroundAgents: ReturnType<typeof createBackgroundAgents>;
 }
 
@@ -127,6 +131,7 @@ export function createToolCallTracker(): ToolCallTracker {
   const streamedTextIndices = new Set<number>();
   let anyStreamedText = false;
   let anyStreamedThinking = false;
+  let turnText = false;
 
   return {
     backgroundAgents: createBackgroundAgents(),
@@ -157,6 +162,7 @@ export function createToolCallTracker(): ToolCallTracker {
     recordTextDelta(index) {
       streamedTextIndices.add(index);
       anyStreamedText = true;
+      turnText = true;
     },
     hasStreamedText(index) {
       return streamedTextIndices.has(index);
@@ -169,6 +175,14 @@ export function createToolCallTracker(): ToolCallTracker {
     },
     hasAnyStreamedThinking() {
       return anyStreamedThinking;
+    },
+    startMessage() {
+      streamedTextIndices.clear();
+      anyStreamedText = false;
+      anyStreamedThinking = false;
+    },
+    hasTurnText() {
+      return turnText;
     },
   };
 }
@@ -229,9 +243,11 @@ export function processStreamEvent(
     case 'stream_event': {
       const inner = event.event as Record<string, unknown> | undefined;
       const block = inner?.content_block as ContentBlock | undefined;
-      if (inner?.type === 'content_block_delta') {
+      if (inner?.type === 'message_start') {
+        tracker.startMessage();
+      } else if (inner?.type === 'content_block_delta') {
         processStreamEvent(inner, onEvent, onSessionId, onCost, tracker);
-      } else if (inner?.type === 'content_block_start' && block?.type === 'text' && tracker.hasAnyStreamedText()) {
+      } else if (inner?.type === 'content_block_start' && block?.type === 'text' && tracker.hasTurnText()) {
         onEvent({ type: 'text', text: '\n\n' });
       }
       break;
@@ -256,6 +272,7 @@ export function processStreamEvent(
               ? delta.text
               : '';
         if (summary) {
+          tracker.recordThinkingDelta();
           onEvent({ type: 'thinking', text: summary });
         }
       }
@@ -299,7 +316,6 @@ export function processStreamEvent(
           // skip it. Index-matching mis-fired when the replay's content array
           // shifted (thinking blocks), doubling the Collide aggregator's answer.
           if (tracker.hasAnyStreamedText()) {
-            console.log(`[stream-dedupe] skipping assistant text block ${index} (text already streamed via deltas this turn, ${block.text.length} chars)`);
             return;
           }
           onEvent({ type: 'text', text: block.text });

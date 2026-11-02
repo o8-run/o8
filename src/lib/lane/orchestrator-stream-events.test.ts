@@ -136,6 +136,25 @@ describe('processStreamEvent — a real Claude turn with background agents', () 
     expect(textsOf(run([startText, say('One.'), startText, say('Two.')])).join('')).toBe('One.\n\nTwo.');
   });
 
+  it('keeps a later message that arrives without deltas', () => {
+    const message = stream({ type: 'message_start', message: {} });
+    const out = run([
+      message, say('One.'),
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'One.' }] } },
+      message,
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Two.' }] } },
+    ]);
+    expect(textsOf(out)).toEqual(['One.', 'Two.']);
+  });
+
+  it('streams a thinking summary once', () => {
+    const out = run([
+      stream({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_summary', summary: 'Hmm' } }),
+      { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Hmm' }] } },
+    ]);
+    expect(out.filter((e) => e.type === 'thinking')).toHaveLength(1);
+  });
+
   it('keeps a subagent out of the parent reply', () => {
     const out = run([
       stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'inner' } }, 'a1'),

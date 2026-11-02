@@ -198,6 +198,12 @@ describe('stream-json parser background agents', () => {
     expect(results(events)[0]).not.toHaveProperty('isError', true);
   });
 
+  it('never holds a result with an error subtype', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const end = parser.pushChunk(lines(call, started, launched, { type: 'result', subtype: 'error_max_turns', result: 'Stopped.' }));
+    expect(end.find((e) => e.type === 'done')).toMatchObject({ isError: true });
+  });
+
   it('leaves a foreground agent alone', () => {
     const parser = createClaudeCodeStreamJsonParser();
     const events = parser.pushChunk(lines(call, { ...started, is_backgrounded: false }, { ...launched }, { type: 'result', result: 'ok' }));
