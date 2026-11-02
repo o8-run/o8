@@ -105,7 +105,7 @@ impl ThreadList {
                     .is_some_and(|until| *until <= now)
         })
     }
-    fn save_snoozes(&self, cx: &mut Context<Self>) {
+    pub(super) fn save_snoozes(&self, cx: &mut Context<Self>) {
         let mut snoozes: Vec<_> = self.snoozes.iter().map(|(k, v)| (k.clone(), *v)).collect();
         snoozes.sort();
         cx.emit(Event::Snoozes(snoozes));
