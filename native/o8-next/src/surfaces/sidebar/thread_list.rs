@@ -84,6 +84,7 @@ fn workspace_parked(frame: &Value) -> bool {
 
 pub struct ThreadList {
     client: Client,
+    pub(crate) links: machine_threads::Links,
     header: project_header::HeaderSnapshot,
     workspace: Option<String>,
     header_busy: bool,
@@ -211,6 +212,7 @@ impl ThreadList {
         Self {
             subscription: transport::subscribe_global(client.clone()),
             client,
+            links: Default::default(),
             header: project_header::HeaderSnapshot::default(),
             workspace: None,
             header_busy: false,
@@ -438,8 +440,10 @@ impl ThreadList {
         self.dirty = None;
         let generation = self.generation;
         let client = self.client.clone();
+        let links = self.links.clone();
         let task = cx.background_executor().spawn(async move {
-            let (sessions, branches) = client.sidebar_sessions_with_branches()?;
+            let (mut sessions, branches) = client.sidebar_sessions_with_branches()?;
+            sessions.extend(machine_threads::sessions(&client, &links));
             let header = match project_header::HeaderSnapshot::load(&client) {
                 Ok(header) => Some(header),
                 // Older session-only hosts do not provide project routes.
@@ -1043,6 +1047,9 @@ mod races;
 #[path = "project_header.rs"]
 mod project_header;
 pub(crate) use project_header::repo_identity;
+
+#[path = "machine_threads.rs"]
+pub(crate) mod machine_threads;
 
 #[path = "recents.rs"]
 pub(crate) mod recents;

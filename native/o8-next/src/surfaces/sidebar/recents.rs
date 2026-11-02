@@ -109,7 +109,7 @@ pub(super) fn header(kind: &str, title: &str, status: &str) -> Row {
 pub(super) fn thread_row(s: &Session, now: u64, branches: &HashSet<String>) -> Row {
     Row {
         kind: "thread".into(),
-        workspace: s.repo_path.clone().unwrap_or_else(|| "Unassigned".into()),
+        workspace: s.workspace(),
         id: Some(s.id.clone()),
         title: s.title.clone(),
         status: s.status.clone(),

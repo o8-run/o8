@@ -42,7 +42,7 @@ fn create(
     let Tab::Session(id) = tab else {
         return None;
     };
-    let client = shell.client.in_workspace(&workspace);
+    let client = shell.workspace_client(&workspace)?;
 
     let id = shell
         .current()
@@ -57,6 +57,22 @@ fn create(
     Some(Content::Session(cx.new(|cx| {
         Surface::shell_new(client, sessions, id, window, cx)
     })))
+}
+impl Session {
+    /// The workspace this thread opens in. A machine's threads get their own,
+    /// so the same path on two machines stays apart.
+    pub(crate) fn workspace(&self) -> String {
+        let repo = self.repo_path.as_deref().unwrap_or("Unassigned");
+        match &self.machine {
+            Some(machine) => format!("{MACHINE_WORKSPACE}{machine}|{repo}"),
+            None => repo.to_owned(),
+        }
+    }
+}
+const MACHINE_WORKSPACE: &str = "machine:";
+/// The machine and repository inside a machine workspace's key.
+pub(crate) fn machine_workspace(workspace: &str) -> Option<(&str, &str)> {
+    workspace.strip_prefix(MACHINE_WORKSPACE)?.split_once('|')
 }
 impl ShellView for Surface {
     fn focus(view: &Entity<Self>, composer: bool, window: &mut Window, cx: &mut Context<Shell>) {
@@ -117,6 +133,9 @@ pub struct ParkedWorkspace {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
+    /// The saved machine this thread lives on; None is this computer.
+    #[serde(skip)]
+    pub machine: Option<String>,
     #[serde(default)]
     pub parked_workspaces: Vec<ParkedWorkspace>,
     pub id: String,

@@ -348,7 +348,12 @@ pub(super) const REGISTRATION: Registration = Registration {
     })
 };
 fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
-    let sidebar = cx.new(|cx| ThreadList::new(shell.client.clone(), cx));
+    let links = shell.links.clone();
+    let sidebar = cx.new(|cx| {
+        let mut list = ThreadList::new(shell.client.clone(), cx);
+        list.links = links;
+        list
+    });
     let scopes = shell.state.sidebar_scope.clone();
     let (views, closed) = (
         shell.state.sidebar_view.clone(),
@@ -450,7 +455,7 @@ impl Shell {
         let mut workspaces = self
             .sessions
             .iter()
-            .map(|s| s.repo_path.clone().unwrap_or_else(|| "Unassigned".into()))
+            .map(Session::workspace)
             .collect::<BTreeSet<_>>();
         if let Some(ledger) = &self.surfaces.sidebar.workspace_ledger {
             workspaces.extend(ledger.projects.iter().flat_map(|p| p.repo_paths.clone()));
@@ -534,7 +539,7 @@ impl Shell {
             .sessions
             .iter()
             .find(|s| s.id == id)
-            .map(|s| s.repo_path.clone().unwrap_or_else(|| "Unassigned".into()))
+            .map(Session::workspace)
         else {
             return;
         };
