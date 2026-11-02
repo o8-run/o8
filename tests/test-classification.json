@@ -1371,6 +1371,13 @@
       ]
     },
     {
+      "path": "src/lib/worktree/committed-diff.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/worktree/create-auto-prune-serialization.test.ts",
       "reasons": [
         "child-process",
