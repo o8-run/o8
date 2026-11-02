@@ -781,6 +781,17 @@ pub(crate) fn at_end(list: &gpui::ListState) -> bool {
     (-list.scroll_px_offset_for_scrollbar().y) >= end - px(48.)
 }
 
+/// Keeps the last row's end at the bottom; the list settles the overshoot once
+/// it has measured the row, however tall.
+pub(crate) fn pin_end(list: &gpui::ListState) {
+    if let Some(item_ix) = list.item_count().checked_sub(1) {
+        list.scroll_to(gpui::ListOffset {
+            item_ix,
+            offset_in_item: px(1_000_000.),
+        });
+    }
+}
+
 /// Hands the steps still fading in to the row holding the end of the reply.
 pub(crate) fn mark_fading(rows: &[Rc<RefCell<RowState>>], fading: Vec<crate::stream::RevealStep>) {
     let last = rows.iter().rposition(

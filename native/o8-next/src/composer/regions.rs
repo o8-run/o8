@@ -105,6 +105,7 @@ impl Surface {
             .flex_col()
             .on_scroll_wheel(cx.listener(|this, _: &gpui::ScrollWheelEvent, _, _| {
                 this.following = None;
+                this.pinned = false;
             }))
             .when(!self.notice.is_empty(), |view| {
                 view.child(
