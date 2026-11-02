@@ -37,6 +37,14 @@ export interface WorktreeActivityInput {
 }
 
 /**
+ * `git diff` against a stale local base can name thousands of files per
+ * worktree, and the conflict scan repeats this every few seconds. Working-tree
+ * and staged paths come first in `changedPaths`; a commit that touches the
+ * rest already moves the HEAD and index mtimes checked below.
+ */
+export const MAX_CHANGED_PATH_PROBES = 256;
+
+/**
  * Truthful bounded activity signal for retention ordering. Root mtime catches
  * file creation/removal, git-admin mtimes catch commits, changed-file mtimes
  * catch edits, and owned transcripts catch worker output between git writes.
@@ -47,6 +55,7 @@ export async function worktreeActivityMtimeMs(input: WorktreeActivityInput): Pro
     await gitAdminPath(input.worktreePath, 'HEAD'),
     await gitAdminPath(input.worktreePath, 'index'),
     ...(input.changedPaths ?? [])
+      .slice(0, MAX_CHANGED_PATH_PROBES)
       .map((changedPath) => safeChangedPath(input.worktreePath, changedPath))
       .filter((candidate): candidate is string => candidate !== null),
   ];
