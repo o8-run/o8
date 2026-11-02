@@ -150,6 +150,7 @@ pub(crate) struct Surface {
     reconcile_revision: u64,
     reconcile_wait: u32,
     reconcile_live: bool,
+    chat_width: f32,
     list_generation: u64,
     history_loading: bool,
     history_error: Option<String>,
@@ -228,6 +229,7 @@ impl Surface {
             reconcile_revision: 0,
             reconcile_wait: 0,
             reconcile_live: false,
+            chat_width: crate::theme::chat_width(),
             list_generation: 0,
             history_loading: false,
             history_error: None,
@@ -717,6 +719,13 @@ impl Surface {
 impl Render for Surface {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.load_images(cx);
+        // Rows rewrap at a new chat width, so their measured heights are stale.
+        let chat_width = crate::theme::chat_width();
+        if self.chat_width != chat_width {
+            self.chat_width = chat_width;
+            let rows = self.list.item_count();
+            self.list.splice(0..rows, rows);
+        }
         let painted = self.painted.clone();
         let revision = self.key_revision;
         let geometry = &crate::theme::GEOMETRY;
