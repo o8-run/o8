@@ -90,6 +90,31 @@ describe('stream-json parser assistant-replay dedup', () => {
   });
 });
 
+describe('stream-json parser subagents', () => {
+  it('keeps a subagent out of its parent reply and keeps its result on the parent call', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const inside = { parent_tool_use_id: 'agent-1' };
+    const events = parser.pushChunk(lines(
+      wrap({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Started it.' } }),
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'agent-1', name: 'Agent', input: { description: 'Sum' } }] } },
+      { ...wrap({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '391' } }), ...inside },
+      { type: 'assistant', ...inside, message: { content: [
+        { type: 'text', text: '391' },
+        { type: 'tool_use', id: 'inner', name: 'Bash', input: {} },
+      ] } },
+      { type: 'user', ...inside, message: { content: [{ type: 'tool_result', tool_use_id: 'inner', content: 'ok' }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'agent-1', content: '391' }] } },
+      { type: 'result', result: 'Done.' },
+    ));
+    const text = events.flatMap((e) => (e.type === 'delta' ? [e.text] : []));
+    expect(text).toEqual(['Started it.']);
+    const tools = events.flatMap((e) => (e.type === 'tool_call' ? [e.id] : []));
+    expect(tools).toEqual(['agent-1']);
+    const results = events.flatMap((e) => (e.type === 'tool_result' ? [e.id] : []));
+    expect(results).toEqual(['agent-1']);
+  });
+});
+
 describe('stream-json parser usage truth', () => {
   it('preserves cache reads and writes on usage and terminal events', () => {
     const parser = createClaudeCodeStreamJsonParser();

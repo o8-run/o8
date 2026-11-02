@@ -350,6 +350,10 @@ export function createClaudeCodeStreamJsonParser(
     const events: ClaudeCodeStreamJsonParserEvent[] = [];
     const type = asString(event.type);
 
+    // A subagent streams inside its parent. Its words and tools are its own;
+    // the parent receives them once, as the result of the call that started it.
+    if (asString(event.parent_tool_use_id)) return events;
+
     if (type === 'system') {
       const id = asString(event.session_id);
       if (id) state.sessionId = id;
