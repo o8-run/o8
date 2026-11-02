@@ -12,7 +12,7 @@ import type { ReviewChatOrigin } from '@/lib/orchestrator/review-continuation-or
 import { withSessionRules } from '@/lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from '@/lib/orchestrator/turn-receipt-context';
 import { prepareOrchestratorProjectTurn, readPersistedOrchestratorProjectSelection } from '@/lib/ws-server/orchestrator-project-context';
-import { persistComposerImages } from '@/lib/mobile/orchestrator-image-media';
+import { persistComposerImages, withAttachmentFilePaths } from '@/lib/mobile/orchestrator-image-media';
 import type { ComposerImageAttachment } from '@/lib/mobile/composer-image-validation';
 import { modelFacingComposerMessage } from '@/lib/orchestrator/composer-wire';
 import type { OrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
@@ -65,7 +65,7 @@ export async function runBoundChatContinuation(
     if (input.claim && !input.claim()) return;
     const session = backend.ensureSession(input.repoPath, undefined, expected.threadId);
     const selection = await readPersistedOrchestratorProjectSelection(expected.threadId);
-    const project = await prepareOrchestratorProjectTurn({ message: modelFacingComposerMessage(message, expected.mode),
+    const project = await prepareOrchestratorProjectTurn({ message: withAttachmentFilePaths(modelFacingComposerMessage(message, expected.mode), input.images),
       repoPath: input.repoPath, persistedProjectId: selection?.projectId });
     input.check();
     if (controller.signal.aborted) throw new Error('Parent continuation stopped.');

@@ -62,6 +62,16 @@ export function persistComposerImages(attachments: readonly ComposerImageAttachm
   });
 }
 
+/** The model sees an image's pixels but not its bytes. The path lets an agent use the file itself, such as adding it to a PR. */
+export function withAttachmentFilePaths(
+  message: string,
+  attachments: readonly ComposerImageAttachment[] | undefined,
+): string {
+  const media = persistComposerImages(attachments ?? []);
+  if (media.length === 0) return message;
+  return `${message}\n\nAttached image files on this machine:\n${media.map((item) => `- ${item.path}`).join('\n')}`;
+}
+
 /** Codex reads initial-prompt images from disk; Solo can read only its runtime home. */
 export function codexComposerImagePaths(attachments: readonly ComposerImageAttachment[], codexHome: string): string[] {
   const media = persistComposerImages(attachments);
