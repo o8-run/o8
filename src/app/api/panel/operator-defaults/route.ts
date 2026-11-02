@@ -1,3 +1,4 @@
+import { parseUpdate as parseConversationDefaultsUpdate } from '@/lib/operator/conversation-defaults';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { parseKnowledgeSources } from '@/lib/operator/knowledge-source-defaults';
 import { NextResponse } from 'next/server';
@@ -31,7 +32,7 @@ import {
   isBroadcastVoiceClockTime,
   isBroadcastVoiceQuietHoursMode,
 } from '@/lib/operator/broadcast-commentary-defaults';
-import { isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
+import { botRailUpdate, isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
 import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/operator/judgment-default';
 import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED, JUDGMENT_BETA_END_DATE_EXPECTED } from '@/lib/operator/judgment-allowance-default';
 import { resolveJudgmentPath } from '@/lib/judgment/route';
@@ -143,14 +144,15 @@ function workspaceStorageValidationError(body: Record<string, unknown>): string 
   }
   if (body.workspaceParkingMode !== undefined
     && body.workspaceParkingMode !== 'manual'
-    && body.workspaceParkingMode !== 'pressure') {
-    return 'workspaceParkingMode must be "manual" or "pressure".';
+    && body.workspaceParkingMode !== 'pressure'
+    && body.workspaceParkingMode !== 'settled') {
+    return 'workspaceParkingMode must be "manual", "pressure" or "settled".';
   }
   return null;
 }
 
 function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefaults> {
-  const update: Partial<OperatorDefaults> = {};
+  const update: Partial<OperatorDefaults> = botRailUpdate(body);
 
   if (body.subscriptionProfile !== undefined) {
     if (!isSubscriptionProfile(body.subscriptionProfile)) {
@@ -286,6 +288,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update[field] = Number(value);
   }
 
+  if (body.composerEnterQueues !== undefined) {
+    if (typeof body.composerEnterQueues !== 'boolean') {
+      throw new Error('composerEnterQueues must be boolean.');
+    }
+    update.composerEnterQueues = body.composerEnterQueues;
+  }
   if (body.presentationQuietMode !== undefined) {
     if (typeof body.presentationQuietMode !== 'boolean') {
       throw new Error('presentationQuietMode must be boolean.');
@@ -320,12 +328,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     }
     update.promptCachingEnabled = body.promptCachingEnabled;
   }
-  if (body.autoTitleInferenceEnabled !== undefined) {
-    if (typeof body.autoTitleInferenceEnabled !== 'boolean') {
-      throw new Error('autoTitleInferenceEnabled must be boolean.');
-    }
-    update.autoTitleInferenceEnabled = body.autoTitleInferenceEnabled;
-  }
+  Object.assign(update, parseConversationDefaultsUpdate(body));
 
   if (body.requireApproval !== undefined) {
     if (!isRequireApproval(body.requireApproval)) {
@@ -382,6 +385,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 
   if (isWorkerRuntimeList(body.workerRuntimes)) {
     update.workerRuntimes = [...new Set(body.workerRuntimes)];
+  }
+
+  if (body.disabledRuntimes !== undefined) {
+    if (!Array.isArray(body.disabledRuntimes) || !body.disabledRuntimes.every(isDispatchRuntime)) {
+      throw new Error('disabledRuntimes must contain only dispatchable runtimes.');
+    }
+    update.disabledRuntimes = [...new Set(body.disabledRuntimes)];
   }
 
   if (body.codexWorkerEffort !== undefined) {
@@ -448,6 +458,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('localChatModel must be a string.');
     }
     update.localChatModel = body.localChatModel.trim();
+  }
+
+  if (body.textGenerationTitleModel !== undefined) {
+    if (typeof body.textGenerationTitleModel !== 'string') {
+      throw new Error('textGenerationTitleModel must be a string.');
+    }
+    update.textGenerationTitleModel = body.textGenerationTitleModel.trim();
   }
 
   for (const field of ['experimentalOpencode', 'experimentalGemini', 'experimentalChat', 'experimentalCanvas', 'experimentalNext', 'nativeBrowserView'] as const) {
@@ -685,7 +702,8 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     if (Number.isFinite(parsed) && parsed > 0 && parsed <= 10000) update.storageReserveFloorGb = parsed;
   }
 
-  if (body.workspaceParkingMode === 'manual' || body.workspaceParkingMode === 'pressure') {
+  if (body.workspaceParkingMode === 'manual' || body.workspaceParkingMode === 'pressure'
+    || body.workspaceParkingMode === 'settled') {
     update.workspaceParkingMode = body.workspaceParkingMode;
   }
 

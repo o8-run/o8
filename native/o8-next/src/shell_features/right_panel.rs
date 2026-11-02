@@ -9,6 +9,21 @@ mod contextual;
 mod layout;
 #[path = "../files_panel/spec_shell.rs"]
 mod notes;
+#[path = "right_panel/resources.rs"]
+mod resources;
+#[path = "right_panel/subagents.rs"]
+mod subagents;
+#[path = "right_panel/side_chat.rs"]
+mod side;
+#[cfg(test)]
+#[path = "right_panel/side_chat_tests.rs"]
+mod side_chat_tests;
+#[cfg(test)]
+#[path = "right_panel/resources_tests.rs"]
+mod resources_tests;
+#[cfg(test)]
+#[path = "right_panel/subagents_tests.rs"]
+mod subagents_tests;
 // The desktop's right panel (O8Panel). Its tools open as tabs in the panel's
 // own strip; "+" lists every desktop panel tool (o8-panel/panel-tools.tsx),
 // including the ones o8 next does not have yet, which open a placeholder.
@@ -20,15 +35,26 @@ mod notes;
 // apps/web/src/components/ui/panel-tab-close-button.tsx at
 // 5b4f2aa1532730d4dd51d2cb48a57ff74a0f54eb.
 struct RightPanel;
+pub(super) fn subagent_button(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
+    subagents::summary_button(s, cx)
+}
 register_shell_feature!(RightPanel);
 impl ShellFeature for RightPanel {
+    fn observers(&self) -> &'static [PreferenceObserver] {
+        &[PreferenceObserver {
+            order: 15,
+            install: subagents::watch,
+        }]
+    }
     fn ticks(&self) -> &'static [TickHook] {
         &[TickHook {
             order: 50,
             run: |s, _, window, cx| {
                 layout::sync(s, window, cx);
                 ensure_side_chat(s, window, cx);
-                move_inbox_tabs(s, window, cx)
+                move_inbox_tabs(s, window, cx);
+                resources::tick(s, cx);
+                subagents::tick(s, cx);
             },
         }]
     }
@@ -100,8 +126,10 @@ enum Tool {
     Spec,
     Threads,
     Activity,
+    Issues,
     SideChat,
     Resources,
+    Subagents,
     Targeting,
     Prs,
     Compare,
@@ -122,7 +150,15 @@ impl Tool {
                 Tool::Spec,
             ],
         ),
-        ("More", &[Tool::Threads, Tool::Activity, Tool::SideChat]),
+        (
+            "More",
+            &[
+                Tool::Subagents,
+                Tool::Threads,
+                Tool::Activity,
+                Tool::SideChat,
+            ],
+        ),
         ("Diagnostics", &[Tool::Resources, Tool::Targeting]),
     ];
     fn tab(self) -> Option<Tab> {
@@ -137,10 +173,7 @@ impl Tool {
     }
     /// Tools o8 next has not built yet open a placeholder tab.
     fn ready(self) -> bool {
-        !matches!(
-            self,
-            Tool::Threads | Tool::Resources | Tool::Targeting
-        )
+        !matches!(self, Tool::Threads | Tool::Targeting)
     }
     fn label(self) -> &'static str {
         match self {
@@ -154,8 +187,10 @@ impl Tool {
             Tool::Review => "Review",
             Tool::Threads => "Threads",
             Tool::Activity => "Activity",
+            Tool::Issues => "Issues",
             Tool::SideChat => "Side chat",
             Tool::Resources => "Resources",
+            Tool::Subagents => "Subagents",
             Tool::Targeting => "Targeting",
             Tool::Prs => "Pull requests",
             Tool::Compare => "Compare",
@@ -173,8 +208,10 @@ impl Tool {
             Tool::Review => "Working changes across your project",
             Tool::Threads => "Project tasks and agent exchanges",
             Tool::Activity => "Repository history and mission decisions",
+            Tool::Issues => "Read a GitHub issue beside the chat",
             Tool::SideChat => "A separate conversation with its own messages",
             Tool::Resources => "Live session CPU and memory",
+            Tool::Subagents => "Inspect delegated work, progress and agent transcripts",
             Tool::Targeting => "Find code to direct your agents toward",
             Tool::Prs => "Review a pull request",
             Tool::Compare => "Compare candidates",
@@ -192,8 +229,10 @@ impl Tool {
             Tool::Review => REVIEW,
             Tool::Threads => THREADS,
             Tool::Activity => ACTIVITY,
+            Tool::Issues => ISSUES,
             Tool::SideChat => SIDE_CHAT,
             Tool::Resources => RESOURCES,
+            Tool::Subagents => THREADS,
             Tool::Targeting => TARGETS,
             Tool::Prs => REVIEW,
             Tool::Compare => COLUMNS,
@@ -320,10 +359,10 @@ impl Shell {
             let Some(workspace) = self.state.selected.clone() else {
                 return;
             };
-            let Some(id) = self.start_thread(false, cx) else {
+            self.state.right_panel.side_chats.remove(&workspace);
+            let Some(_) = side::start(self, cx) else {
                 return;
             };
-            self.state.right_panel.side_chats.insert(workspace, id);
             let key = key(self, Tool::SideChat);
             self.content.remove(&key);
             Tool::SideChat
@@ -339,6 +378,17 @@ impl Shell {
         self.features.get::<Panel>().menu_lower = false;
     }
     /// Opens one pull request in the panel's PR tabs, as classic's PRs list does.
+    /// Opens one issue in its own right panel tab, as classic's Canvas did.
+    /// Without a repository it reads from the workspace's.
+    pub(crate) fn open_issue_in_panel(
+        &mut self,
+        repo: Option<String>,
+        number: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        contextual::open_issue(self, repo.unwrap_or_default(), number, window, cx);
+    }
     pub(crate) fn open_pr_in_panel(
         &mut self,
         repo: String,
@@ -399,7 +449,11 @@ fn width_bounds(s: &Shell, viewport: f32) -> (f32, f32) {
     } else {
         super::super::sidebar::width(s)
     };
-    let available = viewport - super::super::rail::WIDTH - sidebar;
+    let available = viewport
+        - super::super::rail::WIDTH
+        - super::content::FRAME_SPACE
+        - super::super::sidebar::workspace_inset(s)
+        - sidebar;
     let max = MAX_WIDTH.min(
         (available - WORKSPACE_RESERVE - if s.system_glass { COLUMN_CHROME } else { 1. }).max(0.),
     );
@@ -411,6 +465,8 @@ fn width_bounds(s: &Shell, viewport: f32) -> (f32, f32) {
 fn full_width(s: &Shell, viewport: f32) -> f32 {
     let available = viewport
         - super::super::rail::WIDTH
+        - super::content::FRAME_SPACE
+        - super::super::sidebar::workspace_inset(s)
         - if s.surfaces.sidebar.hidden {
             0.
         } else {
@@ -476,14 +532,12 @@ pub(super) fn edge(
         .get_or_insert_with(|| cx.focus_handle())
         .clone();
     let lit = s.features.get::<Panel>().resizing || focus.is_focused(window);
-    let accent = theme().accent;
     div()
         .id("panel-resize")
         .debug_selector(|| "panel-resize".into())
-        .group("panel-resize")
         .track_focus(&focus)
         .absolute()
-        .top_0()
+        .top(px(-crate::theme::GEOMETRY.header))
         .bottom_0()
         .right(px(shown - EDGE_SLOP - 0.5))
         .w(px(EDGE_SLOP * 2. + 1.))
@@ -496,63 +550,30 @@ pub(super) fn edge(
             }),
         )
         .on_drag(Resize, |_, _, _, cx| cx.new(|_| Resize))
-        .child(
-            div()
-                .absolute()
-                .top(px(if s.system_glass { 22. } else { 0. }))
-                .bottom(px(if s.system_glass { 22. } else { 0. }))
-                .left(px(EDGE_SLOP))
-                .w(px(1.))
-                .bg(accent)
-                .shadow(vec![gpui::BoxShadow {
-                    color: accent.into(),
-                    offset: gpui::point(px(0.), px(0.)),
-                    blur_radius: px(8.),
-                    spread_radius: px(0.),
-                }])
-                .opacity(if lit { 0.85 } else { 0. })
-                .group_hover("panel-resize", |style| style.opacity(0.85)),
-        )
+        .child(crate::theme::split_line(
+            "panel-resize",
+            true,
+            EDGE_SLOP,
+            lit,
+        ))
 }
 
 /// Opens the panel on one tool, creating that tool's view the first time.
 /// The side chat's conversation in the open workspace: a chat of its own,
 /// started on the operator's lead the first time the view opens.
 fn side_chat(s: &mut Shell, cx: &mut Context<Shell>) -> Option<String> {
-    let workspace = s.state.selected.clone()?;
-    if let Some(id) = s.state.right_panel.side_chats.get(&workspace) {
-        return Some(id.clone());
-    }
-    let id = s.start_thread(false, cx)?;
-    s.state.right_panel.side_chats.insert(workspace, id.clone());
-    s.persist();
-    Some(id)
+    side::start(s, cx)
 }
 
 /// Opens the side chat once its conversation is listed.
 fn ensure_side_chat(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
-    let Some(p) = s.features.read::<Panel>() else {
-        return;
-    };
-    if !(p.selected == Tool::SideChat || p.lower == Some(Tool::SideChat)) {
-        return;
-    }
-    let key = key(s, Tool::SideChat);
-    let workspace = s.state.selected.clone().unwrap_or_default();
-    let Some(id) = s.state.right_panel.side_chats.get(&workspace).cloned() else {
-        return;
-    };
-    if s.content.contains_key(&key) || !s.sessions.iter().any(|x| x.id == id) {
-        return;
-    }
-    let tab = Tab::Session(id);
-    if let Some(content) = (tab.registration().create)(s, tab, workspace, window, cx) {
-        s.content.insert(key, content);
-        cx.notify();
-    }
+    side::ensure(s, window, cx)
 }
 
 fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
+    if tool == Tool::Subagents {
+        subagents::prepare(s, cx);
+    }
     if tool == Tool::SideChat {
         side_chat(s, cx);
     }
@@ -562,7 +583,9 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         && !s.content.contains_key(&key)
     {
         // Workspace-scoped tools read their saved slice; Inbox also works before one exists.
-        if tab != Tab::Inbox && !s.state.workspaces.contains_key(&workspace) {
+        if !matches!(tab, Tab::Inbox | Tab::Activity)
+            && !s.state.workspaces.contains_key(&workspace)
+        {
             layout::select(s, tool, window, cx);
             return;
         }
@@ -613,8 +636,18 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         contextual::ensure_prs(s, window, cx);
     }
     layout::select(s, tool, window, cx);
+    if tool == Tool::Subagents {
+        subagents::focus(s, window, cx);
+    }
+    if tool == Tool::Subagents && f32::from(window.viewport_size().width) < 1180. {
+        let panel = s.features.get::<Panel>();
+        panel.maximized = true;
+        panel.motion.set(true);
+        panel.morph.set(true);
+        s.state.right_panel.visible = true;
+    }
     if let Some(content) = s.content.get(&key) {
-        content.focus(false, window, cx);
+        content.focus(tool == Tool::SideChat, window, cx);
     } else if let Some(view) = s
         .features
         .read::<Panel>()
@@ -681,6 +714,7 @@ pub(super) fn open_surface(
         "terminal" => Tool::Terminal,
         "browser" => Tool::Browser,
         "devices" => Tool::Devices,
+        "subagents" => Tool::Subagents,
         "prs" => Tool::Prs,
         "compare" => Tool::Compare,
         _ => return false,
@@ -855,8 +889,8 @@ fn cover_browsers(s: &Shell, cx: &mut Context<Shell>) {
         && panel.motion.is_open()
         && !panel.motion.value().1
         && !s.palette
-        && panel.menu.is_none()
-        && !super::header_tools::any_open(s);
+        && s.surfaces.settings.view.is_none()
+        && panel.menu.is_none();
     let current = panel.browsers.get(&key(s, Tool::Browser));
     for view in panel.browsers.values() {
         let covered = !visible || current != Some(view);
@@ -879,8 +913,8 @@ pub(super) fn devices_visible(s: &Shell) -> bool {
             && panel.motion.is_open()
             && !panel.motion.value().1
             && !s.palette
+            && s.surfaces.settings.view.is_none()
             && panel.menu.is_none()
-            && !super::header_tools::any_open(s)
     })
 }
 
@@ -893,7 +927,11 @@ fn close_lower_tab(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Cont
     };
     p.lower_tabs.remove(index);
     if p.lower == Some(tool) {
-        match p.lower_tabs.get(index.min(p.lower_tabs.len().saturating_sub(1))).copied() {
+        match p
+            .lower_tabs
+            .get(index.min(p.lower_tabs.len().saturating_sub(1)))
+            .copied()
+        {
             Some(next) => {
                 p.into_lower = true;
                 show(s, next, window, cx);
@@ -1034,6 +1072,7 @@ const DEVICES: &str =
     "M9 2h6a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z M10 5h4 M11 19h2";
 const THREADS: &str = "M4 4h16v13H9l-5 4V4Z M8 9h8 M8 13h5";
 const ACTIVITY: &str = "M2 12h4l3-9 6 18 3-9h4";
+const ISSUES: &str = "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18Z M12 8v5 M12 16h.01";
 const SIDE_CHAT: &str = "M11 5a8 8 0 1 0 0 16 8 8 0 1 0 0-16Z M19 2v6 M16 5h6";
 const RESOURCES: &str = "M4 15a8 8 0 0 1 16 0 M12 15l4-4 M12 14a1 1 0 1 0 0 2 1 1 0 1 0 0-2Z";
 const TARGETS: &str = "M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16Z M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M12 2v3 M12 19v3 M2 12h3 M19 12h3";

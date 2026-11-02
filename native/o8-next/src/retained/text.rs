@@ -22,7 +22,7 @@ pub(super) fn text_run(run: &Run) -> TextRun {
             theme().success
         } else if run.style == "diff-remove" {
             theme().danger
-        } else if run.style == "link" {
+        } else if run.style.starts_with("link") {
             theme().accent
         } else if run.style == "muted" {
             theme().text_muted
@@ -45,4 +45,14 @@ pub(super) fn text_run(run: &Run) -> TextRun {
             None
         },
     }
+}
+
+/// A link's target, for runs that carry one.
+pub(super) fn link_target(run: &Run) -> Option<&str> {
+    run.style.strip_prefix("link:")
+}
+
+/// Issues and pull requests read as pills, like the trace's chips.
+pub(super) fn is_item(url: &str) -> bool {
+    url.starts_with('#') || url.contains("/issues/") || url.contains("/pull/")
 }

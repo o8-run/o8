@@ -29,7 +29,7 @@ mod user_bubble;
 
 #[path = "retained/text.rs"]
 mod row_text;
-use row_text::text_run;
+use row_text::{is_item, link_target, text_run};
 
 pub struct RowState {
     pub row: Row,
@@ -40,6 +40,9 @@ pub struct RowState {
     cache: Option<Layout>,
     pub(crate) images: crate::ui::images::Cache,
     pub cards: crate::visualizations::Cards,
+    pub(crate) subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
+    pub(crate) subagent_agents: Rc<Vec<crate::subagents::model::Agent>>,
+    pub(crate) subagent_focus: std::collections::HashMap<String, gpui::FocusHandle>,
 }
 impl RowState {
     #[cfg(test)]
@@ -71,11 +74,15 @@ impl RowState {
             cache: None,
             images: Default::default(),
             cards: Default::default(),
+            subagents: None,
+            subagent_agents: Default::default(),
+            subagent_focus: Default::default(),
         }
     }
     /// A row that changed in place (a tool step finished) keeps its disclosure;
     /// a trace watched while live stays open once it finishes.
     pub fn keep_disclosure(&mut self, previous: &RowState) {
+        self.subagent_focus = previous.subagent_focus.clone();
         if self.expanded.is_some() && previous.expanded.is_some() {
             self.expanded = previous.expanded;
         }
@@ -83,6 +90,15 @@ impl RowState {
             && trace.live
         {
             self.expanded = Some(true);
+        }
+    }
+    pub(crate) fn bind_subagent_focus(&mut self, cx: &App) {
+        if let Row::Activity { steps, .. } = &self.row {
+            for reference in steps.iter().flat_map(|step| &step.delegations) {
+                self.subagent_focus
+                    .entry(reference.id.clone())
+                    .or_insert_with(|| cx.focus_handle());
+            }
         }
     }
     pub(crate) fn disclosure(&self) -> bool {
@@ -144,6 +160,11 @@ struct Thumbnail {
     name: String,
     unavailable: bool,
 }
+/// Where a link sits in a row, one spot per wrapped line.
+struct LinkSpot {
+    bounds: Bounds<Pixels>,
+    url: String,
+}
 struct Layout {
     size: Size<Pixels>,
     /// The appearance its colors were shaped in.
@@ -151,6 +172,7 @@ struct Layout {
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
     images: Vec<Thumbnail>,
+    links: Vec<LinkSpot>,
     cards: Vec<(String, Bounds<Pixels>)>,
 }
 struct Builder {
@@ -161,6 +183,20 @@ struct Builder {
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
     images: Vec<Thumbnail>,
+    links: Vec<LinkSpot>,
+    /// Where the last paragraph gap ended, so blank lines collapse to one gap.
+    gap_end: Option<Pixels>,
+}
+// The desktop transcript's prose: 14px on a 23.8px line, with a paragraph gap.
+const PROSE: (f32, f32) = (14., 24.);
+const PARAGRAPH_GAP: f32 = 22.;
+/// A message's blocks without trailing blank lines, which would only pad its end.
+fn trimmed(nodes: &[Node]) -> &[Node] {
+    let end = nodes
+        .iter()
+        .rposition(|n| n.kind != "break")
+        .map_or(0, |i| i + 1);
+    &nodes[..end]
 }
 impl Builder {
     fn rich_node(&mut self, kind: &str, data: &serde_json::Value, expanded: bool, window: &Window) {
@@ -188,10 +224,12 @@ impl Builder {
                         row_id: self.row_id.clone(),
                         image_cache: self.image_cache.clone(),
                         images: vec![],
+                        links: vec![],
                         width: width + px(48.),
                         y: top,
                         lines: vec![],
                         backgrounds: vec![],
+                        gap_end: None,
                     };
                     let mut runs: Vec<Run> =
                         serde_json::from_value(cell.clone()).unwrap_or_default();
@@ -200,7 +238,18 @@ impl Builder {
                             run.style = "strong".into();
                         }
                     }
-                    builder.text(&runs, 13., 19.5, 0., window);
+                    builder.text(&runs, PROSE.0, PROSE.1, 0., window);
+                    let shift = point(width * column as f32, px(0.));
+                    if data["aligns"][column].as_str().is_none_or(|a| a == "left") {
+                        for mut link in builder.links {
+                            link.bounds.origin += shift;
+                            self.links.push(link);
+                        }
+                        for mut pill in builder.backgrounds {
+                            pill.bounds.origin += shift;
+                            self.backgrounds.push(pill);
+                        }
+                    }
                     for mut line in builder.lines {
                         line.origin.x += width * column as f32;
                         line.align = match data["aligns"][column].as_str() {
@@ -293,6 +342,49 @@ impl Builder {
             self.y += px(18.);
         }
     }
+    /// Finds a link on one shaped line and marks each wrapped piece of it.
+    fn link(
+        &mut self,
+        line: &WrappedLine,
+        offset: usize,
+        span: &std::ops::Range<usize>,
+        url: &str,
+        (inset, line_height): (Pixels, f32),
+    ) {
+        let start = span.start.max(offset) - offset;
+        let end = span.end.min(offset + line.len()).saturating_sub(offset);
+        let pill = is_item(url);
+        let mut pieces: Vec<(Pixels, Pixels, Pixels)> = vec![];
+        for (index, _) in line.text.char_indices().chain([(line.len(), ' ')]) {
+            if index < start || index > end {
+                continue;
+            }
+            let Some(at) = line.position_for_index(index, px(line_height)) else {
+                continue;
+            };
+            match pieces.last_mut() {
+                Some(piece) if piece.2 == at.y => piece.1 = at.x,
+                _ => pieces.push((at.x, at.x, at.y)),
+            }
+        }
+        for (from, to, y) in pieces.into_iter().filter(|(from, to, _)| to > from) {
+            let bounds = Bounds::new(
+                point(inset + from - px(4.), self.y + y + px(2.)),
+                size(to - from + px(8.), px(line_height - 4.)),
+            );
+            if pill {
+                self.backgrounds.push(Backdrop {
+                    bounds,
+                    color: theme().selection,
+                    radius: px(6.),
+                });
+            }
+            self.links.push(LinkSpot {
+                bounds,
+                url: url.to_owned(),
+            });
+        }
+    }
     fn text(
         &mut self,
         runs: &[Run],
@@ -311,11 +403,27 @@ impl Builder {
         if lines.is_empty() {
             self.y += px(line_height);
         }
+        let origin = px(24. + inset);
+        let (mut start, mut offset) = (0, 0);
+        let spans: Vec<_> = runs
+            .iter()
+            .map(|run| {
+                let at = start..start + run.text.len();
+                start = at.end;
+                at
+            })
+            .collect();
         for line in lines {
             let height = line.size(px(line_height)).height;
+            for (run, span) in runs.iter().zip(&spans) {
+                if let Some(url) = link_target(run) {
+                    self.link(&line, offset, span, url, (origin, line_height));
+                }
+            }
+            offset += line.len() + 1;
             self.lines.push(Line {
                 line,
-                origin: point(px(24. + inset), self.y),
+                origin: point(origin, self.y),
                 height: px(line_height),
                 align: TextAlign::Left,
             });
@@ -380,7 +488,14 @@ impl Builder {
             return;
         }
         if node.kind == "break" {
-            self.y += px(6.);
+            // A blank line is classic's paragraph margin: once, and never
+            // before the first block.
+            if self.gap_end != Some(self.y)
+                && (!self.lines.is_empty() || !self.backgrounds.is_empty())
+            {
+                self.y += px(PARAGRAPH_GAP);
+                self.gap_end = Some(self.y);
+            }
             return;
         }
         if node.kind == "rule" {
@@ -451,8 +566,8 @@ impl Builder {
         } else {
             self.text(
                 &runs,
-                if code { 12. } else { 13. },
-                19.5,
+                if code { 12. } else { PROSE.0 },
+                if code { 19.5 } else { PROSE.1 },
                 if code { 10. } else { 0. },
                 window,
             );
@@ -485,10 +600,12 @@ fn layout(
         row_id: row.id().into(),
         image_cache: images,
         images: vec![],
+        links: vec![],
         width,
         y: px(8.),
         lines: vec![],
         backgrounds: vec![],
+        gap_end: None,
     };
     let mut placements = vec![];
     match row {
@@ -530,11 +647,25 @@ fn layout(
                 b.node(&node, expanded, window);
             }
         }
-        Row::Message { role, nodes, .. } if role == "user" => {
+        Row::Message {
+            role,
+            author,
+            nodes,
+            ..
+        } if role == "user" && author.as_ref().is_none_or(|a| a["kind"] != "bot") => {
             user_bubble::layout(&mut b, width, nodes, expanded, window);
         }
-        Row::Message { nodes, .. } => {
-            for node in nodes {
+        Row::Message { author, nodes, .. } => {
+            if let Some(author) = author.as_ref().filter(|a| a["kind"] == "bot") {
+                b.plain(
+                    crate::text::sanitize(author["name"].as_str().unwrap_or("Bot")),
+                    12.,
+                    18.,
+                    window,
+                );
+                b.y += px(4.);
+            }
+            for node in trimmed(nodes) {
                 let card = node
                     .data
                     .as_ref()
@@ -599,6 +730,7 @@ fn layout(
                     lines: b.lines,
                     backgrounds: b.backgrounds,
                     images: vec![],
+                    links: b.links,
                     cards: vec![],
                 };
             }
@@ -631,11 +763,12 @@ fn layout(
         lines: b.lines,
         backgrounds: b.backgrounds,
         images: b.images,
+        links: b.links,
         cards: placements,
     }
 }
 // The desktop transcript's reading column: the composer width plus the 24px row insets.
-const COLUMN: f32 = crate::theme::GEOMETRY.composer_width + 48.;
+pub(crate) const COLUMN: f32 = crate::theme::GEOMETRY.composer_width + 48.;
 
 pub struct RetainedRow {
     pub state: Rc<RefCell<RowState>>,
@@ -853,6 +986,26 @@ impl Element for RetainedRow {
                 child.prepaint_at(origin + image.bounds.origin, window, cx);
                 child
             })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .chain(cache.links.iter().enumerate().map(|(index, link)| {
+                let url = link.url.clone();
+                // Unique across rows: elements sharing an id share click state,
+                // and one row's mouse-up then cancels another's press.
+                let selector = format!("transcript-link-{}-{index}", self.index);
+                let name = SharedString::from(selector.clone());
+                let mut child = div()
+                    .id(name)
+                    .debug_selector(move || selector.clone())
+                    .w(link.bounds.size.width)
+                    .h(link.bounds.size.height)
+                    .cursor_pointer()
+                    .on_click(move |_, window, cx| crate::ui::open_link(&url, window, cx))
+                    .into_any_element();
+                child.layout_as_root(link.bounds.size.map(AvailableSpace::Definite), window, cx);
+                child.prepaint_at(origin + link.bounds.origin, window, cx);
+                child
+            }))
             .collect()
     }
     fn paint(

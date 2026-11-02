@@ -129,6 +129,51 @@ impl Pane {
         self.subscription = Some(transport::subscribe(client, key));
         self.notice.clear();
     }
+    pub(crate) fn prepend(&mut self, history: History) {
+        let anchor = self.list.logical_scroll_top();
+        let id = self
+            .rows
+            .get(anchor.item_ix)
+            .map(|r| r.borrow().row.id().to_owned());
+        if let Some(transcript) = &mut self.transcript {
+            transcript.prepend(history);
+        }
+        self.sync_rows();
+        self.list = self.list.clone().measure_all();
+        if let Some(index) =
+            id.and_then(|id| self.rows.iter().position(|r| r.borrow().row.id() == id))
+        {
+            self.list.scroll_to(ListOffset {
+                item_ix: index,
+                offset_in_item: anchor.offset_in_item,
+            });
+        }
+    }
+    pub(crate) fn attach_subagents(
+        &mut self,
+        view: gpui::Entity<crate::subagents::Inspector>,
+        agents: Rc<Vec<crate::subagents::model::Agent>>,
+        cx: &gpui::App,
+    ) {
+        let anchor = self.list.logical_scroll_top();
+        for (index, row) in self.rows.iter().enumerate() {
+            let mut row = row.borrow_mut();
+            if !matches!(&row.row,crate::model::Row::Activity{steps,..} if steps.iter().any(|s|!s.delegations.is_empty()))
+            {
+                continue;
+            }
+            row.bind_subagent_focus(cx);
+            if row.subagents.as_ref() != Some(&view) || *row.subagent_agents != *agents {
+                row.subagents = Some(view.clone());
+                row.subagent_agents = agents.clone();
+                self.list.splice(index..index + 1, 1);
+            }
+        }
+        let after = self.list.logical_scroll_top();
+        if after.item_ix != anchor.item_ix || after.offset_in_item != anchor.offset_in_item {
+            self.list.scroll_to(anchor);
+        }
+    }
     fn sync_rows(&mut self) {
         let rows = &self.transcript.as_ref().unwrap().rows;
         let old = &self.rows;
@@ -152,11 +197,14 @@ impl Pane {
                     .unwrap_or_else(|| {
                         let mut state = RowState::new(row.clone());
                         state.images = self.images.clone();
-                        state.cards = old
+                        if let Some(previous) = old
                             .iter()
-                            .find(|state| state.borrow().row.id() == row.id())
-                            .map(|state| state.borrow().cards.clone())
-                            .unwrap_or_default();
+                            .find(|previous| previous.borrow().row.id() == row.id())
+                        {
+                            let previous = previous.borrow();
+                            state.cards = previous.cards.clone();
+                            state.keep_disclosure(&previous);
+                        }
                         if let Some(client) = &self.client {
                             state.attach_visualizations(client);
                         }

@@ -205,6 +205,15 @@ fn warmth_uses_existing_clock_and_never_counts_below_zero() {
     )];
     let after_minute = estimate(&rows, "warm", "codex", "fixture", now + 60_000.).unwrap();
     assert_eq!(label("codex", Some(&after_minute), false), "Warm ~4m");
+    // Long estimates read in hours and days, not thousands of minutes.
+    let long = |minutes: f64| Estimate {
+        remaining: minutes * 60_000.,
+        requested: false,
+    };
+    assert_eq!(label("codex", Some(&long(90.)), false), "Warm ~2h");
+    assert_eq!(label("codex", Some(&long(5404.)), false), "Warm ~4d");
+    assert_eq!(label("codex", Some(&long(5404.)), true), "~4d");
+    assert!(explanation("codex", Some(&long(5404.))).contains("about 4 days left"));
     assert_eq!(label("codex", Some(&after_minute), true), "~4m");
     let expired = estimate(&rows, "warm", "codex", "fixture", now + 360_000.).unwrap();
     assert_eq!(expired.remaining, 0.);
@@ -212,6 +221,18 @@ fn warmth_uses_existing_clock_and_never_counts_below_zero() {
     assert_eq!(label("codex", Some(&expired), true), "~cold");
     assert_eq!(label("codex", None, true), "?");
     assert_eq!(label("unsupported", None, true), "n/a");
+}
+
+#[test]
+fn a_turn_without_usage_keeps_the_estimate_from_the_last_reported_turn() {
+    let now = 10_000_000.;
+    let rows = [
+        observation("warm", now - 660_000., now, Some(900.), Some(300_000.)),
+        // A failed resume reports no usage at all.
+        observation("warm", now + 10_000., now + 20_000., None, None),
+    ];
+    let status = estimate(&rows, "warm", "codex", "fixture", now + 60_000.);
+    assert_eq!(label("codex", status.as_ref(), false), "Warm ~4m");
 }
 
 #[test]

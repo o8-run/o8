@@ -1,3 +1,4 @@
+import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -7,6 +8,7 @@ import { promisify } from 'node:util';
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { controlLocalSchedule, readLocalSchedules } from '@/lib/automations/local-schedules';
 
 const execFileAsync = promisify(execFile);
 const JOB_ID = /^[a-zA-Z0-9_-]{1,128}$/;
@@ -75,17 +77,49 @@ async function sourceJobs(binary: string) {
 export async function GET(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
+  const local = await readLocalSchedules();
   try {
-    const jobs = await sourceJobs(await openclawBinary());
+    const jobs = [...await sourceJobs(await openclawBinary()), ...local];
     return NextResponse.json({ ok: true, available: true, jobs }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
+    // Local rows still show when the optional agent scheduler is missing or down.
+    if (local.length) return NextResponse.json({ ok: true, available: true, jobs: local }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
     if (error instanceof CliNotFoundError) {
       return NextResponse.json({ ok: true, installed: false, available: false, jobs: [] });
     }
     return NextResponse.json({ ok: false, available: false, jobs: [], error: 'Connected agent scheduler unavailable.' }, { status: 503 });
   }
+}
+
+/** launchd jobs belong to the person at the machine, not to a worker on it. */
+function operatorOnly() {
+  return NextResponse.json({ ok: false, error: 'operator_required' }, { status: 403 });
+}
+
+async function controlled(id: string, action: 'run' | 'pause' | 'resume') {
+  try {
+    const job = await controlLocalSchedule(id, action);
+    if (!job) return NextResponse.json({ ok: false, error: 'job not found' }, { status: 404 });
+    return NextResponse.json({ ok: true, job });
+  } catch {
+    return NextResponse.json({ ok: false, error: 'launchd refused that change.' }, { status: 502 });
+  }
+}
+
+/** Runs a launchd job now. Other sources run on their own schedule. */
+export async function POST(request: NextRequest) {
+  const denied = requirePanelAuth(request);
+  if (denied) return denied;
+  if (resolveRequestPrincipalContext(request).role !== 'operator') return operatorOnly();
+  const body = await request.json().catch(() => null) as { id?: unknown } | null;
+  if (!body || typeof body.id !== 'string' || !JOB_ID.test(body.id) || !body.id.startsWith('launchd-')) {
+    return NextResponse.json({ ok: false, error: 'invalid job' }, { status: 400 });
+  }
+  return controlled(body.id, 'run');
 }
 
 export async function PATCH(request: NextRequest) {
@@ -94,6 +128,10 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json().catch(() => null) as { id?: unknown; enabled?: unknown } | null;
   if (!body || typeof body.id !== 'string' || !JOB_ID.test(body.id) || typeof body.enabled !== 'boolean') {
     return NextResponse.json({ ok: false, error: 'invalid job update' }, { status: 400 });
+  }
+  if (body.id.startsWith('launchd-')) {
+    if (resolveRequestPrincipalContext(request).role !== 'operator') return operatorOnly();
+    return controlled(body.id, body.enabled ? 'resume' : 'pause');
   }
   try {
     const binary = await openclawBinary();

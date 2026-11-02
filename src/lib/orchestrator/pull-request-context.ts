@@ -22,6 +22,9 @@ export interface PullRequestContextLink extends PullRequestContextIdentity {
   createdAt: string;
   threadTitle?: string;
   threadAvailable?: boolean;
+  /** From the local GitHub mirror when it has this PR; absent otherwise. */
+  title?: string | null;
+  state?: string | null;
 }
 
 export class PullRequestContextError extends Error {
@@ -41,6 +44,7 @@ const SELECT_LINKS = `
   SELECT c.id, c.thread_id AS threadId, c.host, c.repository_id AS repositoryId,
     c.pull_request_id AS pullRequestId, c.number,
     c.repository_name AS repositoryFullName, p.url AS providerUrl,
+    p.title AS title, CASE WHEN p.merged_at IS NOT NULL THEN 'merged' ELSE p.state END AS state,
     c.kind, c.source, c.packet_id AS packetId, c.lane_id AS laneId, c.created_at AS createdAt
   FROM conversation_pr_context c
   LEFT JOIN github_pull_requests p ON p.pull_request_id = c.pull_request_id

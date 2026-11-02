@@ -19,8 +19,10 @@ pub(super) fn layout(
         lines: vec![],
         backgrounds: vec![],
         images: vec![],
+        links: vec![],
+        gap_end: None,
     };
-    for node in nodes {
+    for node in super::trimmed(nodes) {
         bubble.node(node, expanded, window);
     }
     let text = bubble
@@ -55,6 +57,10 @@ pub(super) fn layout(
     for mut line in bubble.lines {
         line.origin.x += shift;
         b.lines.push(line);
+    }
+    for mut link in bubble.links {
+        link.bounds.origin.x += shift;
+        b.links.push(link);
     }
     // Pictures share the text's left edge inside the bubble.
     for mut image in bubble.images {

@@ -612,13 +612,40 @@ fn activity_fork_keyboard_focus_stays_on_the_selected_row(cx: &mut TestAppContex
         view.read_with(&visual, |view, _| view.expanded.clone()),
         Some(rows[0].key())
     );
-    // Skip the first commit's link, then open the second row. Its position moves
-    // when the first detail closes; the next Space must still act on that row.
-    visual.simulate_keystrokes("tab tab enter");
+    // Detail actions can add Tab stops; follow the fork's stable row identity.
+    // Its position moves when the first detail closes, so Space must retain it.
+    let fork_control = rows[1].selector();
+    assert!(
+        visual
+            .debug_bounds(Box::leak(fork_control.clone().into_boxed_str()))
+            .is_some(),
+        "The fork's row control must be mounted before keyboard traversal"
+    );
+    let control_count = view.read_with(&visual, |view, _| view.controls.len());
+    for _ in 0..control_count {
+        visual.simulate_keystrokes("tab");
+        draw(&mut visual);
+        if view.read_with(&visual, |view, _| {
+            view.keyboard.as_ref() == Some(&fork_control)
+        }) {
+            break;
+        }
+    }
+    assert_eq!(
+        view.read_with(&visual, |view, _| view.keyboard.clone()),
+        Some(fork_control.clone()),
+        "Tab must reach the repository-qualified fork row through its preceding detail actions"
+    );
+    visual.simulate_keystrokes("enter");
     draw(&mut visual);
     assert_eq!(
         view.read_with(&visual, |view, _| view.expanded.clone()),
         Some(rows[1].key())
+    );
+    assert_eq!(
+        view.read_with(&visual, |view, _| view.keyboard.clone()),
+        Some(fork_control),
+        "Closing the first detail must preserve focus on the fork row"
     );
     visual.simulate_keystrokes("space");
     draw(&mut visual);

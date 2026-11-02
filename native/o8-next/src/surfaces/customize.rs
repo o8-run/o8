@@ -1,5 +1,9 @@
 use super::*;
 use serde_json::Value;
+#[path = "customize/inventory.rs"]
+mod inventory;
+#[path = "customize/plugins.rs"]
+mod plugins;
 #[path = "customize/view.rs"]
 mod view;
 pub(super) type Slice = EmptyState;
@@ -7,6 +11,7 @@ pub(super) type Slice = EmptyState;
 pub(super) struct Runtime {
     pub view: Option<Entity<view::Customize>>,
     pub open: bool,
+    closing: Option<gpui::Subscription>,
 }
 pub(super) const REGISTRATION: Registration = Registration {
     overlay_command: true,
@@ -23,7 +28,10 @@ pub(super) const REGISTRATION: Registration = Registration {
         if !s.surfaces.customize.open {
             return false;
         }
-        let _ = (window, cx);
+        if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
+            s.close_customize(window, cx);
+            return true;
+        }
         (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
             && ["k", "w", "tab"].contains(&event.keystroke.key.as_str())
     },
@@ -46,24 +54,47 @@ impl Shell {
             .as_ref()
             .is_some_and(|v| v.read(cx).belongs_to(self.state.selected.as_deref()))
         {
-            self.surfaces.customize.view = Some(cx.new(|cx| {
+            let view = cx.new(|cx| {
                 view::Customize::new(self.client.clone(), self.state.selected.clone(), cx)
-            }));
+            });
+            self.surfaces.customize.closing = Some(cx.subscribe_in(
+                &view,
+                window,
+                |this, _, _: &view::Close, window, cx| this.close_customize(window, cx),
+            ));
+            self.surfaces.customize.view = Some(view);
         }
         self.surfaces.customize.open = true;
+        // The menu that opened the page is gone; without this no key reaches it.
+        self.focus.focus(window);
         self.revision += 1;
         cx.notify();
     }
-    pub(crate) fn close_customize(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self
-            .surfaces
-            .customize
-            .view
-            .as_ref()
-            .is_some_and(|v| v.read(cx).busy())
-        {
-            return;
+    /// Opens the page on one tab; the rail's Plugins button lands on its tab.
+    pub(crate) fn show_customize_tab(
+        &mut self,
+        tab: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.surfaces.customize.open {
+            self.close_rail_overlays(window, cx);
+            self.execute(Command::Customize, window, cx);
         }
+        if let Some(view) = self.surfaces.customize.view.clone() {
+            view.update(cx, |view, cx| view.select_tab(tab, cx));
+        }
+    }
+    pub(crate) fn customize_tab_open(&self, tab: &str, cx: &App) -> bool {
+        self.surfaces.customize.open
+            && self
+                .surfaces
+                .customize
+                .view
+                .as_ref()
+                .is_some_and(|view| view.read(cx).tab_is(tab))
+    }
+    pub(crate) fn close_customize(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.surfaces.customize.open = false;
         self.restore_focus(window, cx);
         self.revision += 1;
@@ -84,7 +115,7 @@ impl Client {
             Ok(response) => Self::read(response),
             Err(ureq::Error::Status(status, response)) => {
                 let data = Self::read::<Value>(response).unwrap_or(Value::Null);
-                let message = data["error"].as_str().unwrap_or("Project request refused");
+                let message = data["error"]["message"].as_str().or(data["error"].as_str()).unwrap_or("Project request refused");
                 let note = data["note"].as_str().unwrap_or("");
                 Err(format!("{} (HTTP {status}). {}", message.chars().take(512).collect::<String>(), note.chars().take(512).collect::<String>()))
             }

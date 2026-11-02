@@ -42,7 +42,7 @@ fn spec_review_markup_rail_and_mixed_typography(cx: &mut TestAppContext) {
     let prose = cx.debug_bounds("spec-editor").unwrap();
     let comment = cx.debug_bounds("note-c1").unwrap();
     let suggestion = cx.debug_bounds("note-s1").unwrap();
-    assert!(comment.right() <= prose.right() && comment.size.width == px(134.));
+    assert!(comment.left() >= prose.left() && comment.right() <= prose.right());
     let lines = cx.update(|_, cx| cx.global::<ProseLines>().0.clone());
     for (needle, card) in [
         ("{==draft line.==}", comment),
@@ -54,8 +54,8 @@ fn spec_review_markup_rail_and_mixed_typography(cx: &mut TestAppContext) {
             .find(|(start, len, _)| *start <= at && at <= start + len)
             .unwrap();
         assert!(
-            (card.top() - (origin.y - px(3.))).abs() <= px(1.),
-            "margin cards align with the actual painted anchor row"
+            card.top() > origin.y,
+            "a note sits under the row it answers"
         );
     }
     assert!(
@@ -64,7 +64,7 @@ fn spec_review_markup_rail_and_mixed_typography(cx: &mut TestAppContext) {
     );
     assert!(
         cx.debug_bounds("note-s1-apply").unwrap().left()
-            < cx.debug_bounds("note-s1-act").unwrap().left()
+            < cx.debug_bounds("note-s1-reply").unwrap().left()
     );
     assert!(
         cx.debug_bounds("note-s1-reply").unwrap().left()
@@ -178,7 +178,9 @@ fn spec_review_adoption_and_failure(cx: &mut TestAppContext) {
 #[gpui::test]
 fn spec_act_reuses_correlated_receipt_and_only_then_resolves(cx: &mut TestAppContext) {
     let f = Fixture::new();
-    fs::write(path(&f), NOTES).unwrap();
+    let source =
+        format!("{NOTES}\nThe {{==second line.==}}{{>>Try this too.<<}}{{id=\"c2\" by=\"AI\"}}\n");
+    fs::write(path(&f), source).unwrap();
     fs::write(f.root.join("delegate-progress"), "1").unwrap();
     let (_, cx) = panel(&f, cx);
     wait(cx, "note-c1-act");
@@ -196,7 +198,7 @@ fn spec_act_reuses_correlated_receipt_and_only_then_resolves(cx: &mut TestAppCon
     assert!(prompt.contains("Anchor: draft line."));
     assert!(!prompt.contains("Old wording"));
     fs::write(f.root.join("delegate-error"), "1").unwrap();
-    click(cx, "note-s1-act");
+    click(cx, "note-c2-act");
     wait_requests(cx, &f, |r| {
         r.iter()
             .filter(|r| r.contains("/api/orchestrator/delegate"))
@@ -204,5 +206,5 @@ fn spec_act_reuses_correlated_receipt_and_only_then_resolves(cx: &mut TestAppCon
             >= 3
     });
     advance(cx, 100);
-    assert!(content(cx).contains("{~~Old wording~>New wording~~}"));
+    assert!(content(cx).contains("{>>Try this too.<<}{id=\"c2\" by=\"AI\"}"));
 }

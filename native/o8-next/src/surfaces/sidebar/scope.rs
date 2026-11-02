@@ -11,6 +11,8 @@
 use super::*;
 use gpui::{Corner, MouseButton, Pixels, Point, anchored, deferred};
 
+const COPY: &str = "M9 9h10v10H9z M5 15V5h10";
+
 /// The open scope picker: its search text and highlighted item.
 #[derive(Default)]
 pub(in crate::shell::sidebar) struct Menu {
@@ -19,7 +21,8 @@ pub(in crate::shell::sidebar) struct Menu {
 }
 /// A thread row's right-click menu, where it opened.
 pub(in crate::shell::sidebar) struct RowMenu {
-    pub repo: String,
+    pub repo: Option<String>,
+    pub id: String,
     pub position: Point<Pixels>,
 }
 
@@ -27,6 +30,8 @@ pub(in crate::shell::sidebar) struct RowMenu {
 const FILTER: &str = "M3 6h18M7 12h10M10 18h4";
 /// Lucide folder: the All repositories item.
 const FOLDER: &str = "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z";
+/// Lucide "archive".
+const ARCHIVE: &str = "M3 3h18v5H3z M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8 M10 12h4";
 /// Lucide check, drawn in the selection badge.
 const CHECK: &str = "M20 6 9 17l-5-5";
 
@@ -440,7 +445,8 @@ impl ThreadList {
             .into_any_element(),
         )
     }
-    /// A thread row's right-click: its repository's filter, when it has one.
+    /// A thread row's right-click: Archive, plus its repository's filter when
+    /// it has one.
     pub(in crate::shell::sidebar) fn open_row_menu(
         &mut self,
         id: &str,
@@ -448,13 +454,18 @@ impl ThreadList {
         cx: &mut Context<Self>,
     ) {
         let repos = self.scope_repos();
-        self.row_menu = self
+        let repo = self
             .sessions
             .iter()
             .find(|s| s.id == id)
             .and_then(|s| s.repo_path.clone())
-            .filter(|repo| repos.iter().any(|(path, _)| path == repo))
-            .map(|repo| RowMenu { repo, position });
+            .filter(|repo| repos.iter().any(|(path, _)| path == repo));
+        // Every thread row offers Archive or Restore.
+        self.row_menu = Some(RowMenu {
+            repo,
+            id: id.to_owned(),
+            position,
+        });
         cx.notify();
     }
     /// The row menu's Filter by <repository> / Show all repositories.
@@ -462,20 +473,115 @@ impl ThreadList {
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let id = self.row_menu.as_ref()?.id.clone();
+        let snooze = self.snooze_items(&id, cx);
+        let pin = self.pin_item(&id, cx);
+        let auto_settle = self.auto_settle_item(&id, cx);
+        let workspace_restores = self.workspace_restore_items(&id, cx);
+        // Archive left the row's hover strip for the state mark (Q 2026-10-31).
+        let archived = self.sessions.iter().any(|s| s.id == id && s.status == "archived");
+        let archive_id = id.clone();
+        let archive = div()
+            .id("sidebar-row-archive")
+            .debug_selector(|| "sidebar-row-archive".into())
+            .h(px(28.))
+            .px(px(8.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .rounded(px(7.))
+            .text_size(px(12.5))
+            .cursor_pointer()
+            .hover(|s| s.bg(theme().hover))
+            .child(crate::icon::stroke(ARCHIVE, theme().text_muted, 14., 1.7))
+            .child(if archived { "Restore" } else { "Archive" })
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.row_menu = None;
+                this.archive_id(archive_id.clone(), cx);
+            }));
+        let copy = crate::lineage::copy_items(&id).map(|(selector, label, text, toast)| {
+            div()
+                .id(selector)
+                .debug_selector(move || selector.into())
+                .h(px(28.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(7.))
+                .text_size(px(12.5))
+                .cursor_pointer()
+                .hover(|s| s.bg(theme().hover))
+                .child(crate::icon::stroke(COPY, theme().text_muted, 14., 1.7))
+                .child(label)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.row_menu = None;
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
+                    crate::shell::toasts::show(
+                        crate::shell::toasts::Kind::Success,
+                        toast,
+                        vec![],
+                        Some(crate::shell::toasts::NOTICE_TIMEOUT),
+                        cx,
+                    );
+                    cx.notify();
+                }))
+        });
         let menu = self.row_menu.as_ref()?;
-        let repo = menu.repo.clone();
-        let active = self.scope_keys().contains(&repo);
-        let name = self
-            .scope_repos()
-            .into_iter()
-            .find(|(path, _)| *path == repo)
-            .map(|(_, name)| name)
-            .unwrap_or_else(|| label(&repo));
-        let text = if active {
-            "Show all repositories".to_owned()
-        } else {
-            format!("Filter by {}", crate::text::sanitize(&name))
-        };
+        let filter = menu.repo.clone().map(|repo| {
+            let active = self.scope_keys().contains(&repo);
+            let name = self
+                .scope_repos()
+                .into_iter()
+                .find(|(path, _)| *path == repo)
+                .map(|(_, name)| name)
+                .unwrap_or_else(|| label(&repo));
+            let text = if active {
+                "Show all repositories".to_owned()
+            } else {
+                format!("Filter by {}", crate::text::sanitize(&name))
+            };
+            div()
+                .id("sidebar-row-filter")
+                .debug_selector(|| "sidebar-row-filter".into())
+                .h(px(28.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(7.))
+                .text_size(px(12.5))
+                .cursor_pointer()
+                .hover(|s| s.bg(theme().hover))
+                .child(crate::icon::stroke(FOLDER, theme().text_muted, 14., 1.7))
+                .child(text)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.row_menu = None;
+                    let keys = if active { vec![] } else { vec![repo.clone()] };
+                    this.set_scope(keys, cx);
+                }))
+        });
+        let thread = menu.id.clone();
+        let regenerate = div()
+            .id("sidebar-row-regenerate-title")
+            .debug_selector(|| "sidebar-row-regenerate-title".into())
+            .h(px(28.))
+            .px(px(8.))
+            .flex()
+            .items_center()
+            .rounded(px(7.))
+            .text_size(px(12.5))
+            .cursor_pointer()
+            .hover(|s| s.bg(theme().hover))
+            .child("Regenerate title")
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.row_menu = None;
+                this.regenerate_title(thread.clone(), cx);
+            }));
         Some(
             deferred(
                 anchored()
@@ -498,35 +604,14 @@ impl ThreadList {
                                 this.row_menu = None;
                                 cx.notify();
                             }))
-                            .child(
-                                div()
-                                    .id("sidebar-row-filter")
-                                    .debug_selector(|| "sidebar-row-filter".into())
-                                    .h(px(28.))
-                                    .px(px(8.))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.))
-                                    .rounded(px(7.))
-                                    .text_size(px(12.5))
-                                    .cursor_pointer()
-                                    .hover(|s| s.bg(theme().hover))
-                                    .child(crate::icon::stroke(
-                                        FOLDER,
-                                        theme().text_muted,
-                                        14.,
-                                        1.7,
-                                    ))
-                                    .child(text)
-                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                        cx.stop_propagation()
-                                    })
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.row_menu = None;
-                                        let keys = if active { vec![] } else { vec![repo.clone()] };
-                                        this.set_scope(keys, cx);
-                                    })),
-                            ),
+                            .children(pin)
+                            .children(auto_settle)
+                            .children(workspace_restores)
+                            .children(filter)
+                            .children(snooze)
+                            .child(regenerate)
+                            .children(copy)
+                            .child(archive),
                     ),
             )
             .with_priority(1)

@@ -14,8 +14,14 @@ mod browser_preview_geometry;
 mod conversation;
 #[path = "history.rs"]
 mod history;
+#[path = "lineage_view.rs"]
+mod lineage_view;
 #[path = "transcript_images.rs"]
 pub(crate) mod images;
+#[path = "prompt_actions.rs"]
+mod prompt_actions;
+#[path = "subagents/binding.rs"]
+mod subagent_binding;
 #[path = "session_sidebar.rs"]
 mod session_sidebar;
 #[path = "shell_session.rs"]
@@ -55,9 +61,26 @@ gpui::actions!(
         /// The composer waveform: start or stop chat Live voice, which the shell owns.
         ToggleVoice,
         /// The composer mic: start dictation, or stop it and send what was said.
-        ToggleDictation
+        ToggleDictation,
+        /// Opens the transcript link last clicked.
+        OpenTranscriptLink
     ]
 );
+
+thread_local! {
+    /// The link an OpenTranscriptLink dispatch opens; set just before dispatch.
+    static PENDING_LINK: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Asks the shell to open a transcript link.
+pub(crate) fn open_link(url: &str, window: &mut Window, cx: &mut App) {
+    PENDING_LINK.with(|pending| *pending.borrow_mut() = Some(url.to_owned()));
+    window.dispatch_action(Box::new(OpenTranscriptLink), cx);
+}
+
+pub(crate) fn take_pending_link() -> Option<String> {
+    PENDING_LINK.with(|pending| pending.borrow_mut().take())
+}
 
 /// Composer dictation as this chat's mic shows it; the shell sets it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -113,6 +136,8 @@ pub(crate) struct Surface {
     subscriptions: Vec<gpui::Subscription>,
     sessions: Vec<Session>,
     selected: Option<String>,
+    /// Embedded side conversations must not follow main-history navigation.
+    bound_session: Option<String>,
     rows: Rc<Vec<Rc<RefCell<RowState>>>>,
     images: images::Cache,
     transcript: Option<Transcript>,
@@ -131,11 +156,44 @@ pub(crate) struct Surface {
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
     voice: VoiceState,
     dictation: DictationState,
+    /// The primary button's press count and whether that press's hold
+    /// already started GPT Live.
+    voice_hold: (u64, bool),
+    /// The reader is scrolled well above the latest message.
+    away_from_end: bool,
+    /// Rows that end a finished turn and carry Play and Copy.
+    action_rows: BTreeSet<usize>,
+    action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
+    prompt_actions: prompt_actions::State,
+    subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
+    subagent_observer: Option<gpui::Subscription>,
+    /// A fork's new thread, whose carried draft sends once its queue is ready.
+    fork_send: Option<String>,
+    /// The dictation wave's level history.
+    wave: Rc<RefCell<conversation::dictation_wave::Wave>>,
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
+        let defaults = client.clone();
+        let task = cx.background_executor().spawn(async move {
+            defaults
+                .get::<Value>("/api/panel/operator-defaults", &[("include", "values")])
+                .ok()
+        });
+        cx.spawn(async move |this, cx| {
+            if let Some(values) = task.await {
+                // Only lift the default; never undo a toggle made meanwhile.
+                if enter_queues(&values) {
+                    let _ = this.update(cx, |this, cx| {
+                        this.send_next = true;
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
         Self {
             client,
             embedded: false,
@@ -154,6 +212,7 @@ impl Surface {
             subscriptions: vec![],
             sessions: vec![],
             selected: None,
+            bound_session: None,
             rows: Rc::new(vec![]),
             images: Default::default(),
             transcript: None,
@@ -172,10 +231,27 @@ impl Surface {
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
             voice: VoiceState::Off,
             dictation: DictationState::Off,
+            voice_hold: (0, false),
+            away_from_end: false,
+            action_rows: BTreeSet::new(),
+            action_feedback: Default::default(),
+            prompt_actions: Default::default(),
+            subagents: None,
+            subagent_observer: None,
+            fork_send: None,
+            wave: Default::default(),
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
+        if self
+            .bound_session
+            .as_ref()
+            .is_some_and(|bound| bound != &id)
+        {
+            return;
+        }
         if self.selected.as_ref() != Some(&id) {
+            self.prompt_actions.selection_changed();
             if let Some(brain) = self.selected.as_ref().and_then(|id| self.brains.get(id)) {
                 brain.update(cx, |brain, cx| {
                     brain.expanded = false;
@@ -195,11 +271,21 @@ impl Surface {
             );
             let mode = crate::composer::mode_store::load(store.as_deref());
             let prelude = crate::composer::mode_store::load_prelude(store.as_deref());
+            let prompt_draft = crate::composer::mode_store::take_prompt_draft(store.as_deref());
             let editor = cx.new(|cx| {
                 let mut editor = Composer::new(cx);
                 editor.controls.slash.enabled = true;
+                editor.send_intents = true;
                 editor.controls.prompt.store = store;
                 editor.controls.prompt.prelude = prelude;
+                match prompt_draft {
+                    Ok(Some(draft)) => {
+                        editor.set_text(&draft.text, cx);
+                        editor.controls.images = draft.images;
+                    }
+                    Err(error) => editor.controls.error = error,
+                    Ok(None) => {}
+                }
                 if let Some(mode) = mode {
                     editor.controls.overrides["mode"] =
                         json!(if mode == "solo" { "single" } else { "fleet" });
@@ -214,14 +300,15 @@ impl Surface {
                         if event.0 {
                             cx.notify();
                         } else {
-                            let view = editor
-                                .read(cx)
-                                .controls
-                                .prompt
-                                .view
-                                .as_ref()
-                                .map(|view| view.entity_id());
-                            if let Some(view) = view {
+                            // Presence and slash changes redraw only the cached
+                            // intent row and the mic/Send pair, not the session.
+                            let controls = &editor.read(cx).controls;
+                            let views: Vec<_> = [&controls.prompt.view, &controls.send_view]
+                                .into_iter()
+                                .flatten()
+                                .map(|view| view.entity_id())
+                                .collect();
+                            for view in views {
                                 App::notify(cx, view);
                             }
                         }
@@ -256,6 +343,30 @@ impl Surface {
                 }));
             self.subscriptions.push(cx.subscribe(
                 &editor,
+                |this, editor, event: &crate::composer::SendAs, cx| {
+                    if this.composer == editor {
+                        match event {
+                            crate::composer::SendAs::Queue => this.queue_prompt(cx),
+                            crate::composer::SendAs::QueueCommand(text, handle) => {
+                                let (entity, text) = (cx.entity().downgrade(), text.clone());
+                                let handle = *handle;
+                                cx.defer(move |cx| {
+                                    let _ = handle.update(cx, |_, window, cx| {
+                                        let _ = entity.update(cx, |s, cx| {
+                                            let steer = std::mem::replace(&mut s.send_next, true);
+                                            s.execute_composer_command(text, window, cx);
+                                            s.send_next = steer;
+                                        });
+                                    });
+                                });
+                            }
+                            crate::composer::SendAs::Fork => this.fork_prompt(cx),
+                        }
+                    }
+                },
+            ));
+            self.subscriptions.push(cx.subscribe(
+                &editor,
                 |this, editor, _: &crate::composer::images::ImagesChanged, cx| {
                     if this.composer == editor {
                         cx.notify();
@@ -285,6 +396,7 @@ impl Surface {
         cx.notify();
         let client = self.client.clone();
         let session = self.sessions.iter().find(|s| s.id == id).cloned();
+        self.bind_subagent_scope(session.as_ref(), cx);
         self.saved_visualizations
             .select(session.as_ref().and_then(|session| {
                 transcript_visualizations::Scope::new(
@@ -346,6 +458,10 @@ impl Surface {
                                 this.queue = queue;
                                 this.routing = Some(routing);
                                 this.queue_ready = true;
+                                if this.fork_send.is_some() && this.fork_send == this.selected {
+                                    this.fork_send = None;
+                                    this.send(None, cx);
+                                }
                             }
                             (Err(error), _) | (_, Err(error)) => {
                                 this.notice =
@@ -410,6 +526,7 @@ impl Surface {
         self.list
             .splice(prefix..old.len() - suffix, states.len() - prefix - suffix);
         self.rows = Rc::new(states);
+        self.attach_subagents(cx);
         self.load_images(cx);
         if initial {
             self.list = self.list.clone().measure_all();
@@ -418,7 +535,8 @@ impl Surface {
         if let Some(start) = self.following
             && let Some(last) = self.rows.last()
         {
-            self.list.scroll_to_reveal_item(self.rows.len() - 1);
+            self.list
+                .scroll_to_reveal_item(self.list.item_count().saturating_sub(1));
             let turn = self
                 .rows
                 .get(start.min(self.rows.len())..)
@@ -441,10 +559,17 @@ impl Surface {
     /// scrolling the transcript ends the follow.
     pub(crate) fn follow_frame(&mut self) {
         if self.following.is_some() && !self.rows.is_empty() {
-            self.list.scroll_to_reveal_item(self.rows.len() - 1);
+            self.list
+                .scroll_to_reveal_item(self.list.item_count().saturating_sub(1));
         }
     }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.embedded {
+            if let Some(view) = self.subagents.clone() {
+                view.update(cx, |v, cx| v.tick(false, cx));
+            }
+        }
+        self.prompt_clock(cx);
         self.poll_saved_visualizations(cx);
         let mut visualizations_changed = false;
         for (index, row) in self.rows.iter().enumerate() {
@@ -536,7 +661,14 @@ impl Surface {
                 }
                 match result {
                     Ok(sessions) => {
-                        this.sessions = sessions;
+                        this.sessions = sessions
+                            .into_iter()
+                            .filter(|session| {
+                                this.bound_session
+                                    .as_ref()
+                                    .is_none_or(|id| &session.id == id)
+                            })
+                            .collect();
                         if let Some(id) = this
                             .selected
                             .clone()
@@ -727,7 +859,29 @@ impl Render for Surface {
                                 })
                                 .child(self.history_control(cx))
                             })
-                            .when(!empty, |view| view.child(transcript))
+                            // The transcript fades out at its edges, as classic's
+                            // did into the composer below it.
+                            .when(!empty, |view| {
+                                view.child(
+                                    div()
+                                        .relative()
+                                        .flex()
+                                        .flex_col()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .child(transcript)
+                                        .child(crate::theme::edge_fade(
+                                            false,
+                                            16.,
+                                            theme().background,
+                                        ))
+                                        .child(crate::theme::edge_fade(
+                                            true,
+                                            24.,
+                                            theme().background,
+                                        )),
+                                )
+                            })
                             .child(
                                 div()
                                     .debug_selector(|| "composer-space".into())
@@ -740,7 +894,22 @@ impl Render for Surface {
                                     .child(self.composer_panel(window, cx)),
                             ),
                     )
-                    .child(self.brain_panel(px(right_width), cx)),
+                    .child(self.brain_panel(px(right_width), cx))
+                    .when(!self.embedded, |row| {
+                        row.when_some(
+                            self.subagents.as_ref().filter(|v| v.read(cx).open).cloned(),
+                            |row, view| {
+                                row.child(
+                                    div()
+                                        .w(px(420.))
+                                        .max_w(gpui::relative(0.6))
+                                        .h_full()
+                                        .flex_shrink_0()
+                                        .child(view),
+                                )
+                            },
+                        )
+                    }),
             )
             .child(transcript_visualizations::Visible(
                 self.saved_visualizations.visible.clone(),
@@ -1002,3 +1171,19 @@ mod image_cache_tests;
 #[cfg(test)]
 #[path = "visualization_tests.rs"]
 mod visualization_tests;
+
+/// Operator default `composerEnterQueues`: Enter queues instead of steering.
+pub(crate) fn enter_queues(defaults: &Value) -> bool {
+    defaults["values"]["composerEnterQueues"] == true
+}
+
+#[cfg(test)]
+mod enter_default_tests {
+    #[test]
+    fn enter_steers_unless_the_operator_default_queues() {
+        use serde_json::json;
+        assert!(!super::enter_queues(&json!({"values":{}})));
+        assert!(!super::enter_queues(&json!(null)));
+        assert!(super::enter_queues(&json!({"values":{"composerEnterQueues":true}})));
+    }
+}

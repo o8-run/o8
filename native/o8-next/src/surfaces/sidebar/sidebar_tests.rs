@@ -94,11 +94,16 @@ fn sidebar_selection_leaves_projects_and_settings(cx: &mut TestAppContext) {
             .clone()
             .unwrap()
     });
-    // Settings lives in the rail's profile menu, as in the desktop rail.
-    for (buttons, panel) in [
-        (&["shell-profile", "profile-settings"][..], "settings-page"),
-        (&["rail-more", "rail-more-projects"][..], "project-new"),
-    ] {
+    // Settings lives in the rail's profile menu and takes over the window.
+    click(cx, "shell-profile");
+    click(cx, "profile-settings");
+    settle(&shell, cx);
+    assert!(cx.debug_bounds("settings-page").is_some());
+    assert!(cx.debug_bounds("thread-row-2").is_none());
+    click(cx, "settings-close");
+    settle(&shell, cx);
+    assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()));
+    for (buttons, panel) in [(&["rail-more", "rail-more-projects"][..], "project-new")] {
         for button in buttons.iter().copied() {
             click(cx, button);
         }
@@ -572,10 +577,10 @@ fn sidebar_worker_archive_real_path(cx: &mut TestAppContext) {
     click(cx, "thread-row-2");
     ready(&shell, cx);
     // Opening the worker focuses its content. Focus the sidebar through its
-    // real shortcut, which shows the chosen row's Archive.
+    // real shortcut; Delete archives the chosen row.
     cx.simulate_keystrokes("f8");
     settle(&shell, cx);
-    click(cx, "thread-archive-pi-builtin-owned:grid-runtime");
+    cx.simulate_keystrokes("delete");
     wait_for(&shell, cx, |s, cx| {
         !s.surfaces
             .sidebar
@@ -722,6 +727,10 @@ mod scope_tests;
 mod folder_tests;
 #[path = "settle_tests.rs"]
 mod settle_tests;
+#[path = "pr_links_tests.rs"]
+mod pr_links_tests;
+#[path = "detailed_tests.rs"]
+mod detailed_tests;
 
 #[path = "icon_tests.rs"]
 mod icon_tests;
@@ -731,3 +740,8 @@ mod recents_tests;
 
 #[path = "archive_tests.rs"]
 mod archive_tests;
+
+#[path = "pin_reorder_tests.rs"]
+mod pin_reorder_tests;
+#[path = "copy_tests.rs"]
+mod copy_tests;

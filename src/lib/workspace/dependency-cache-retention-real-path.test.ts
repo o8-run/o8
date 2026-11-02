@@ -8,6 +8,7 @@ import { runDependencyInstall, type DependencyInstallInvocation } from './depend
 import { DEPENDENCY_CACHE_POLICY, pruneDependencyCaches } from './dependency-cache-retention';
 
 const roots: string[] = [];
+const managedName = process.platform === 'darwin' ? 'managed-v1.noindex' : 'managed-v1';
 function fixture() {
   const root = mkdtempSync(path.join(os.tmpdir(), 'o8-cache-retention-'));
   roots.push(root);
@@ -54,13 +55,13 @@ describe('dependency cache retention through the install entry point', { timeout
       cacheRoot, cachePolicy: { ...keep, maxBytes: 0 }, resolveVersion,
       run: async invocation => { cache = writeInstall(invocation); },
     });
-    expect(cache).toContain(`${path.sep}managed-v1${path.sep}npm${path.sep}`);
+    expect(cache).toContain(`${path.sep}${managedName}${path.sep}npm${path.sep}`);
     expect(existsSync(cache)).toBe(false);
     expect(readFileSync(path.join(repo, 'node_modules', 'fixture.js'), 'utf8')).toBe('private dependency');
     expect(readFileSync(path.join(legacy, 'keep'), 'utf8')).toBe('legacy');
     expect(receipt.cacheRetention).toMatchObject({ status: 'within-budget', retainedBytes: 0, retainedEntries: 0, legacyPreserved: true });
     expect(receipt.cacheRetention?.removed).toHaveLength(1);
-    expect(JSON.parse(readFileSync(path.join(cacheRoot, 'managed-v1', '.o8-retention.json'), 'utf8'))).toEqual(receipt.cacheRetention);
+    expect(JSON.parse(readFileSync(path.join(cacheRoot, managedName, '.o8-retention.json'), 'utf8'))).toEqual(receipt.cacheRetention);
   });
 
   it('evicts the least recently used recipe when the entry count is exceeded', async () => {
@@ -149,8 +150,8 @@ describe('dependency cache retention through the install entry point', { timeout
     const outside = path.join(root, 'outside');
     mkdirSync(outside);
     writeFileSync(path.join(outside, 'keep'), 'outside');
-    mkdirSync(path.join(cacheRoot, 'managed-v1'), { recursive: true, mode: 0o700 });
-    symlinkSync(outside, path.join(cacheRoot, 'managed-v1', 'npm'));
+    mkdirSync(path.join(cacheRoot, managedName), { recursive: true, mode: 0o700 });
+    symlinkSync(outside, path.join(cacheRoot, managedName, 'npm'));
     const result = await pruneDependencyCaches(cacheRoot, empty);
     expect(result.status).toBe('held');
     expect(result.held[0]?.reason).toBe('unsafe-manager-namespace');

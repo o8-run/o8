@@ -83,17 +83,21 @@ fn emit(
     true
 }
 /// Sends the desktop stop pill's `orchestrator-interrupt` for one chat over a
-/// one-shot socket; session sockets stay read-only.
+/// one-shot socket; session sockets stay read-only. The server answers only
+/// this socket, so it waits for the `interrupt-ack` and returns its state
+/// (`accepted`, `already-interrupted` or `not-running`).
 pub(crate) fn interrupt(
     client: &Client,
     repo: &str,
     thread: &str,
     backend: Option<&str>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let (url, address) = client.websocket()?;
     let tcp = TcpStream::connect_timeout(&address, Duration::from_secs(2))
         .map_err(|_| "Could not reach the chat server.".to_string())?;
     tcp.set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|_| "Could not reach the chat server.".to_string())?;
+    tcp.set_read_timeout(Some(Duration::from_secs(1)))
         .map_err(|_| "Could not reach the chat server.".to_string())?;
     let request = url
         .as_str()
@@ -108,9 +112,41 @@ pub(crate) fn interrupt(
     socket
         .send(Message::Text(frame.to_string().into()))
         .map_err(|_| "The stop request was not sent.".to_string())?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(4);
+    let mut answer = Err("The chat server did not confirm the stop.".to_string());
+    while std::time::Instant::now() < deadline {
+        let message = match socket.read() {
+            Ok(message) => message,
+            Err(tungstenite::Error::Io(_)) => continue,
+            Err(_) => break,
+        };
+        let Message::Text(text) = message else {
+            continue;
+        };
+        let Ok(reply) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        if reply["channel"] != "orchestrator" || reply["data"]["threadId"] != thread {
+            continue;
+        }
+        match reply["event"].as_str() {
+            Some("interrupt-ack") => {
+                answer = Ok(reply["data"]["state"].as_str().unwrap_or("accepted").into());
+                break;
+            }
+            Some("error") => {
+                answer = Err(reply["data"]["error"]
+                    .as_str()
+                    .unwrap_or("The stop failed.")
+                    .into());
+                break;
+            }
+            _ => {}
+        }
+    }
     let _ = socket.close(None);
     let _ = socket.flush();
-    Ok(())
+    answer
 }
 fn run(
     client: &Client,

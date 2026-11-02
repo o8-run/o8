@@ -3,7 +3,7 @@
 use crate::client::{Client, Session, same_workspace};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Deserialize)]
 struct Sessions {
@@ -113,6 +113,16 @@ impl Client {
                 "enabled":true,"title":packet["title"],"branch":packet["branchTarget"],"runtime":packet["runtime"],"status":packet["status"],"repo":packet["workspaceTargetPath"].as_str().and_then(|path| path.rsplit('/').find(|part| !part.is_empty())),"launchContext":packet["launchContext"]
             }));
             sessions.push(Session {
+                parked_workspaces: serde_json::from_value(agent["parkedWorkspaces"].clone()).unwrap_or_default(),
+                repo_slug: None,
+                pinned_at: agent["pinnedAt"].as_str().map(str::to_owned),
+                pin_order_key: agent["pinOrderKey"].as_str().map(str::to_owned),
+                inbox_revision: agent["inboxRevision"].as_u64(),
+                run_started_at: agent["startedAt"].as_str().map(str::to_owned),
+                branch: ["branch", "gitBranch"]
+                    .iter()
+                    .find_map(|k| agent[*k].as_str().filter(|b| !b.is_empty()))
+                    .map(str::to_owned),
                 tmux_session: agent["tmuxSession"].as_str().map(str::to_owned),
                 id: key.into(),
                 title: crate::text::sanitize(agent["name"].as_str().unwrap_or(key)),
@@ -138,6 +148,8 @@ impl Client {
                     .cloned(),
                 settled_override: agent["settledOverride"].as_str().map(str::to_owned),
                 settled_at: agent["settledAt"].as_str().map(str::to_owned),
+                auto_settled_reason: agent["autoSettledReason"].as_str().map(str::to_owned),
+                auto_settle_disabled_at: agent["autoSettleDisabledAt"].as_str().map(str::to_owned),
             });
         }
         if let Some(workspace) = self.workspace() {
@@ -174,6 +186,7 @@ impl Client {
             let key = agent["sessionKey"].as_str().filter(|key| key.contains(':'))?;
             Some(serde_json::from_value(json!({"id":key,"title":crate::text::sanitize(agent["name"].as_str().unwrap_or("Worker")),
                 "status":agent["status"].as_str().unwrap_or("idle"),"runtime":agent["runtime"],
+                "parkedWorkspaces":agent["parkedWorkspaces"].as_array().cloned().unwrap_or_default(),
                 "repoPath":agent["workspace"],"lastMessageAt":agent["lastActivityAt"].as_i64().map(|t| format!("{t:020}")).unwrap_or_default()
             })).map_err(|_| "Invalid worker inventory".to_string()))
         }).collect()
@@ -185,7 +198,7 @@ impl Client {
     }
     pub(crate) fn sidebar_sessions_with_branches(
         &self,
-    ) -> Result<(Vec<Session>, HashSet<String>), String> {
+    ) -> Result<(Vec<Session>, HashMap<String, String>), String> {
         let (mut sessions, state) = self.sidebar_threads_with_state()?;
         let archived: Value = self.get(
             "/api/v2/chat-history/list",
@@ -202,7 +215,8 @@ impl Client {
                 "id": id, "title": record["title"], "status": "archived",
                 "runtime": record["backend"].as_str().unwrap_or(""),
                 "repoPath": record["repoPath"], "backend": record["backend"],
-                "lastMessageAt": record["modifiedAt"], "messageCount": record["messageCount"]
+                "lastMessageAt": record["modifiedAt"], "messageCount": record["messageCount"],
+                "parkedWorkspaces": record["parkedWorkspaces"].as_array().cloned().unwrap_or_default()
             }))
             .map_err(|_| "Invalid archived thread")?;
             session.title = crate::text::sanitize(&session.title);
@@ -217,13 +231,15 @@ impl Client {
                     && p["branchTarget"].as_str().is_some_and(|b| !b.is_empty())
             })
             .flat_map(|p| {
+                let branch = p["branchTarget"].as_str().unwrap_or_default();
                 [
                     p["orchestratorThreadId"].as_str(),
                     p["lane"]["sessionKey"].as_str(),
                 ]
+                .into_iter()
+                .flatten()
+                .map(move |id| (id.strip_prefix("llm-chat:").unwrap_or(id).to_owned(), branch.to_owned()))
             })
-            .flatten()
-            .map(|id| id.strip_prefix("llm-chat:").unwrap_or(id).to_owned())
             .collect();
         Ok((sessions, branches))
     }

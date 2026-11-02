@@ -1,4 +1,5 @@
 import { isUnmappedEffortLead, unmappedEffortError } from '@/lib/lane/orchestrator-backends/unmapped-effort';
+import { assertLlmThread } from '@/lib/bots/network-kind';
 import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
 import { sendOrchestratorBackendTurn, resolveTurnReceiptMode } from '@/lib/lane/orchestrator-send-entry';
@@ -33,6 +34,7 @@ export async function runBoundChatContinuation(
   hooks: BoundChatContinuationHooks,
 ): Promise<void> {
   const { origin: expected, message, assistantMessageId } = input;
+  assertLlmThread(expected.threadId);
   const permissionMode = input.permissionMode ?? expected.permissionMode;
   input.check();
   const unmapped = isUnmappedEffortLead(expected.backend);

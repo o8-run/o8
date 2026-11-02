@@ -1,3 +1,4 @@
+import { pendingNetworkQuestionCards } from '@/lib/bots/question-store';
 import { NextResponse } from 'next/server';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
 import { bulkDismissInboxItems, dismissInboxItem, escalateInboxItem, listInboxItems, summarizeInboxItems } from '@/lib/supervisor/inbox';
@@ -10,6 +11,12 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const startedAt = performance.now();
   const { searchParams } = new URL(request.url);
+  let questions;
+  if (searchParams.get('includeQuestions') === '1') {
+    try { questions = pendingNetworkQuestionCards(searchParams.get('questionsRepoPath') || undefined); }
+    catch { questions = { questionError: 'Local questions are unavailable. Refresh to retry.' }; }
+  }
+  if (searchParams.get('questionsOnly') === '1') return NextResponse.json(questions ?? {});
   const includeDismissed = searchParams.get('includeDismissed') === '1';
   const includeAllProjects = searchParams.get('scope') === 'all';
   const projectId = searchParams.get('projectId');
@@ -21,7 +28,7 @@ export async function GET(request: Request) {
     catch { maintainerError = 'Connected GitHub data is unavailable. Try refreshing the inbox.'; }
   }
   return NextResponse.json(
-    { items, summary: summarizeInboxItems(items), ...(searchParams.get('includeMaintainer') === '1' ? { maintainer, maintainerError } : {}) },
+    { items, ...questions, summary: summarizeInboxItems(items), ...(searchParams.get('includeMaintainer') === '1' ? { maintainer, maintainerError } : {}) },
     { headers: serverTimingHeaders(startedAt) },
   );
 }

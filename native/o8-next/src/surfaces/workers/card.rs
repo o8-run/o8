@@ -28,7 +28,7 @@ pub struct Card {
     notice: String,
     diff: Option<Entity<DiffSurface>>,
     _subscriptions: Vec<gpui::Subscription>,
-    action_focus: [FocusHandle; 4],
+    action_focus: [FocusHandle; 5],
 }
 impl Card {
     pub fn new(
@@ -176,6 +176,7 @@ impl Card {
             if self.diff.is_some() {
                 handles.push(self.action_focus[3].clone());
             }
+            handles.push(self.action_focus[4].clone());
             let current = handles.iter().position(|handle| handle.is_focused(window));
             let next = if event.keystroke.modifiers.shift {
                 current
@@ -206,6 +207,44 @@ impl Render for Card {
             1 => theme().warning,
             _ => theme().danger,
         };
+        let inspect_id = format!("worker-inspect-agent-{}", self.task.id);
+        let inspect = div()
+            .id(SharedString::from(inspect_id.clone()))
+            .debug_selector(move || inspect_id.clone())
+            .focusable()
+            .track_focus(&self.action_focus[4])
+            .cursor_pointer()
+            .rounded(px(7.))
+            .px(px(8.))
+            .py(px(4.))
+            .text_size(px(12.))
+            .text_color(theme().text_muted)
+            .hover(|v| v.bg(theme().hover))
+            .focus(|v| v.bg(theme().selection))
+            .child("Inspect agent")
+            .on_click(cx.listener(|s, _, w, cx| {
+                s.action_focus[4].focus(w);
+                crate::subagents::open_packet(
+                    s.client.clone(),
+                    s.task.text("workspaceTargetPath"),
+                    s.task.id.clone(),
+                    w,
+                    cx,
+                );
+                cx.stop_propagation();
+            }))
+            .on_key_down(cx.listener(|s, e: &KeyDownEvent, w, cx| {
+                if matches!(e.keystroke.key.as_str(), "enter" | "space") {
+                    crate::subagents::open_packet(
+                        s.client.clone(),
+                        s.task.text("workspaceTargetPath"),
+                        s.task.id.clone(),
+                        w,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }
+            }));
         let header = div()
             .w_full()
             .flex()
@@ -242,6 +281,12 @@ impl Render for Card {
                     .text_color(tone)
                     .child(self.task.status()),
             );
+        let header = div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(header.flex_1().min_w_0())
+            .child(inspect);
         let disclosure = div()
             .id(SharedString::from(activity_id.clone()))
             .debug_selector(move || activity_id.clone())

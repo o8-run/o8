@@ -33,6 +33,34 @@ pub struct Issue {
     pub comments: u64,
     #[serde(default)]
     pub url: String,
+    #[serde(default)]
+    pub assignees: Vec<String>,
+    #[serde(default)]
+    pub discussion: Vec<IssueComment>,
+    #[serde(default)]
+    pub linked: Vec<LinkedItem>,
+    #[serde(default)]
+    pub discussion_incomplete: bool,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueComment {
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub created_at: String,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct LinkedItem {
+    pub kind: String,
+    pub number: u64,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub state: String,
+    pub url: String,
 }
 #[derive(Clone)]
 pub struct LinkedIssue {
@@ -145,6 +173,9 @@ pub struct Issues {
     issues: Vec<Issue>,
     detail: Option<Issue>,
     detail_number: Option<u64>,
+    opening_here: Option<u64>,
+    /// One issue beside the chat: no list, repository chips or link strip.
+    single: bool,
     linked: Option<LinkedIssue>,
     mode: Mode,
     title: Entity<Composer>,
@@ -169,6 +200,7 @@ pub struct Issues {
     revision: u64,
     painted: Rc<Cell<u64>>,
     painted_controls: Rc<RefCell<BTreeSet<String>>>,
+    rendered: RefCell<HashMap<String, Rc<RefCell<crate::retained::RowState>>>>,
 }
 impl Issues {
     #[cfg(test)]
@@ -202,6 +234,8 @@ impl Issues {
             issues: vec![],
             detail: None,
             detail_number: None,
+            opening_here: None,
+            single: false,
             linked: None,
             mode: Mode::List,
             title,
@@ -225,6 +259,7 @@ impl Issues {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_controls: Rc::new(RefCell::new(BTreeSet::new())),
+            rendered: RefCell::default(),
         };
         this.watch_label(cx);
         this.subscriptions
@@ -277,6 +312,35 @@ impl Issues {
             self.request(Action::Detail(number), cx);
         }
     }
+    /// A view of just one issue, for a right panel tab.
+    pub fn single(
+        client: Client,
+        workspace: Option<String>,
+        (repo, number): (String, u64),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut this = Self::new(client, workspace, window, cx);
+        this.single = true;
+        this.mode = Mode::Detail;
+        this.detail_number = Some(number);
+        if repo.is_empty() {
+            this.open_here(number, cx);
+        } else {
+            this.open(&repo, number, cx);
+        }
+        this
+    }
+    /// Opens a bare `#123` from the repository this view is on.
+    pub fn open_here(&mut self, number: u64, cx: &mut Context<Self>) {
+        match self.slug() {
+            Some(slug) => {
+                let slug = slug.to_owned();
+                self.open(&slug, number, cx)
+            }
+            None => self.opening_here = Some(number),
+        }
+    }
     fn repo_index(&self, slug: &str) -> Option<usize> {
         self.repos
             .iter()
@@ -325,6 +389,13 @@ impl Issues {
                                     .position(|r| same_workspace(&r.local_path, path))
                             })
                             .unwrap_or(0);
+                        if let Some((number, slug)) = this
+                            .opening_here
+                            .take()
+                            .zip(this.slug().map(|slug| slug.to_owned()))
+                        {
+                            this.opening = Some((slug, number));
+                        }
                         this.request(Action::List, cx);
                     }
                     Err(error) => this.fail(error),

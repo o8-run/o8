@@ -1,3 +1,4 @@
+import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z, ZodError } from 'zod';
 import { requirePanelAuth } from '@/lib/panel/auth';
@@ -43,6 +44,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
+  // Reviewing, linking and invoking run local code. The CLI calls this as a plain
+  // loopback request, so refuse the credentials that name someone else.
+  const { role } = resolveRequestPrincipalContext(request);
+  if (role !== 'operator' && role !== 'anonymous') {
+    return NextResponse.json({ ok: false, error: 'operator_required' }, { status: 403 });
+  }
   try {
     const input = inputSchema.parse(await readCustomizeBody(request));
     if (input.action === 'review') return NextResponse.json({ ok: true, review: await reviewActionSource(input.directory, input.repo, request.signal) });

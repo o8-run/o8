@@ -72,7 +72,32 @@ fn shortcuts_every_displayed_chord_has_a_live_binding(cx: &mut TestAppContext) {
             }
             visual.simulate_keystrokes(chord);
             shortcuts_draw(&mut visual);
-            let live = shell.read_with(&visual, |s, _| match *label {
+            // New chat lands once the server answers: the thread opens, or a
+            // repository that refuses it records the failed start; with no
+            // repository open it offers Setup.
+            let started = |s: &Shell, cx: &App| {
+                s.surfaces.setup.view.is_some()
+                    || s.surfaces.sidebar.view.as_ref().is_some_and(|list| {
+                        let list = list.read(cx);
+                        !list.failed_starts.is_empty()
+                            || list
+                                .selected
+                                .as_deref()
+                                .is_some_and(|id| id.starts_with("thoughts-next-"))
+                    })
+            };
+            if *label == "New chat" {
+                let since = std::time::Instant::now();
+                while !shell.read_with(&visual, |s, cx| started(s, cx))
+                    && since.elapsed() < std::time::Duration::from_secs(10)
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    shortcuts_draw(&mut visual);
+                }
+            }
+            let live = shell.read_with(&visual, |s, cx| match *label {
+                "New chat" => started(s, cx),
+                "Show or hide the sidebar" => s.surfaces.sidebar.hidden,
                 "Command palette" => s.palette,
                 "Cycle tabs" => s.current().unwrap().active == if index == 0 { 8 } else { 1 },
                 "Jump to tab 1–9" => s.current().unwrap().active == index,
@@ -117,7 +142,7 @@ fn shortcuts_every_displayed_chord_has_a_live_binding(cx: &mut TestAppContext) {
             visual.update(|window, _| window.remove_window());
         }
     }
-    assert_eq!(checked, 16, "exercise every expanded displayed chord");
+    assert_eq!(checked, 18, "exercise every expanded displayed chord");
     println!(
         "All {checked} displayed chords dispatch live actions in their advertised focus contexts."
     );

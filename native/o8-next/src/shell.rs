@@ -49,10 +49,13 @@ register_surfaces! {
         activity: Activity = "surfaces/activity.rs";
         workers: Workers = "surfaces/workers.rs";
         pull_requests: PullRequests = "surfaces/pull_requests.rs";
+        bots: Bot(String) = "surfaces/bots.rs";
         inbox: Inbox = "surfaces/inbox.rs";
         issues: Issues = "surfaces/issues.rs";
         diff: Diff = "surfaces/diff.rs";
         terminal: Terminal = "surfaces/terminal.rs";
+        scheduled: Scheduled = "surfaces/scheduled.rs";
+        usage: Usage = "surfaces/usage.rs";
         #[cfg(test)] fake: Fake = "surfaces/fake.rs";
     }
     commands {
@@ -190,6 +193,14 @@ impl Shell {
                         }
                         this.notice.clear();
                         this.persist();
+                    }
+                    // A busy server keeps the shell connected; a hung one is down.
+                    Err(error)
+                        if this.connected
+                            && crate::client::transient(&error)
+                            && !error.ends_with("Request timed out") =>
+                    {
+                        this.notice = crate::client::stale_notice(&error);
                     }
                     Err(error) => {
                         this.connected = false;
@@ -347,6 +358,23 @@ impl Shell {
             .iter()
             .any(|registration| (registration.claim_link)(self, url, window, cx))
         {
+            cx.open_url(url);
+        }
+    }
+    /// Issues and pull requests open beside the chat; other web links leave o8.
+    pub(super) fn open_transcript_link(
+        &mut self,
+        url: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(number) = url.strip_prefix('#').and_then(|n| n.parse().ok()) {
+            self.open_issue_in_panel(None, number, window, cx);
+        } else if let Some((repo, number)) = github_item(url, "issues") {
+            self.open_issue_in_panel(Some(repo), number, window, cx);
+        } else if let Some((repo, number)) = github_item(url, "pull") {
+            self.open_pr_in_panel(repo, number, window, cx);
+        } else if url.starts_with("https://") || url.starts_with("http://") {
             cx.open_url(url);
         }
     }

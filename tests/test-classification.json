@@ -1905,6 +1905,48 @@
       ]
     },
     {
+      "path": "tests/bot-membership-local-commands-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/bot-membership-roster-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/bot-network-ask-user-real-path.test.ts",
+      "reasons": [
+        "real-path",
+        "stdio-json-rpc-peer"
+      ]
+    },
+    {
+      "path": "tests/bot-network-mcp-binding-race-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/bot-network-mcp-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path",
+        "stdio-json-rpc-peer"
+      ]
+    },
+    {
+      "path": "tests/bot-network-thread-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path",
+        "stdio-json-rpc-peer"
+      ]
+    },
+    {
       "path": "tests/bounded-worktree-maintenance-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2979,6 +3021,12 @@
       ]
     },
     {
+      "path": "tests/dev-session-startup-memory-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dev-stack-cleanup-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3527,6 +3575,12 @@
       ]
     },
     {
+      "path": "tests/inbox-auto-settle-integration.test.ts",
+      "reasons": [
+        "integration"
+      ]
+    },
+    {
       "path": "tests/inbox-preferences.integration.test.ts",
       "reasons": [
         "child-process",
@@ -3823,6 +3877,14 @@
       "reasons": [
         "child-process",
         "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/linux-download-packages-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
         "real-path"
       ]
     },

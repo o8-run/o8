@@ -18,8 +18,13 @@ fn re(pattern: &str) -> Regex {
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Run {
+    #[serde(serialize_with = "wire_style")]
     pub style: String,
     pub text: String,
+}
+/// A link's target is native-only; the recorded tree keeps the web's style name.
+fn wire_style<S: serde::Serializer>(style: &str, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(if style.starts_with("link") { "link" } else { style })
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Node {
@@ -112,7 +117,7 @@ pub fn sanitize(text: &str) -> String {
 pub fn inline(text: &str) -> Vec<Run> {
     static INLINE: LazyLock<Regex> = LazyLock::new(|| {
         re(
-            r"(!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`([^`]+)`|\[(\d{1,2})\])",
+            r"(!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`([^`]+)`|\[(\d{1,2})\]|https://github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/(\d+)|\B#(\d{3,})\b)",
         )
     });
     let mut runs = Vec::new();
@@ -125,12 +130,27 @@ pub fn inline(text: &str) -> Vec<Run> {
                 text: text[cursor..m.start()].into(),
             });
         }
+        let target = c.get(5).map(|url| url.as_str()).unwrap_or(m.as_str());
+        let link = format!("link:{target}");
+        let number = c.get(11).map(|n| format!("#{}", n.as_str()));
         let (style, value) = if c.get(3).is_some() {
             ("image", c.get(2).unwrap().as_str())
         } else if c.get(5).is_some() {
-            ("link", &c[4])
+            (link.as_str(), &c[4])
+        } else if let Some(number) = &number {
+            (link.as_str(), number.as_str())
+        } else if c.get(12).is_some() {
+            (link.as_str(), m.as_str())
         } else if c.get(6).is_some() {
-            ("strong", &c[6])
+            // Links and issue numbers keep working inside bold text.
+            runs.extend(inline(&c[6]).into_iter().map(|mut run| {
+                if run.style == "text" {
+                    run.style = "strong".into();
+                }
+                run
+            }));
+            cursor = m.end();
+            continue;
         } else if c.get(7).is_some() {
             ("em", &c[7])
         } else if c.get(8).is_some() {
@@ -294,4 +314,52 @@ pub fn markdown(source: &str) -> Vec<Node> {
         }
     }
     nodes
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+    fn links(text: &str) -> Vec<(String, String)> {
+        inline(text)
+            .into_iter()
+            .filter(|run| run.style.starts_with("link"))
+            .map(|run| (run.style, run.text))
+            .collect()
+    }
+    #[test]
+    fn issue_links_keep_their_target_and_read_as_numbers() {
+        let url = "https://github.com/o8-run/o8/issues/5244";
+        assert_eq!(
+            links(&format!("see {url}.")),
+            [(format!("link:{url}"), "#5244".to_owned())]
+        );
+        assert_eq!(
+            links("fixes #5244 today"),
+            [("link:#5244".to_owned(), "#5244".to_owned())]
+        );
+        assert_eq!(
+            links("[the bug](https://example.com/a)"),
+            [(
+                "link:https://example.com/a".to_owned(),
+                "the bug".to_owned()
+            )]
+        );
+    }
+    #[test]
+    fn links_survive_bold_text() {
+        assert_eq!(
+            links("**[#5242: search](https://github.com/o8-run/o8/issues/5242)**"),
+            [(
+                "link:https://github.com/o8-run/o8/issues/5242".to_owned(),
+                "#5242: search".to_owned()
+            )]
+        );
+        assert_eq!(links("**#2952 and #5095**").len(), 2);
+        let runs = inline("**#2952 and #5095**");
+        assert_eq!(runs[1].style, "strong");
+    }
+    #[test]
+    fn short_numbers_and_anchors_stay_plain() {
+        assert!(links("step #2 of page#1234").is_empty());
+    }
 }

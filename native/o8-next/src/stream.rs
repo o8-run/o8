@@ -1,5 +1,5 @@
 //! Desktop sequence/capture rules + the dashboard transcript merger.
-use crate::model::{Entry, History, Row, render_tree_cached};
+use crate::model::{Entry, History, Row, keep_working_row, render_tree_cached};
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -183,13 +183,25 @@ impl Transcript {
                 None => shown.push(live.clone()),
             }
         }
-        let rows = render_tree_cached(&shown, &self.shown, &self.rows);
+        let mut rows = render_tree_cached(&shown, &self.shown, &self.rows);
+        if self.context_busy {
+            keep_working_row(&mut rows, &shown);
+        }
         self.shown = shown;
         rows
     }
     /// Desktop socket.ts: thinking markers, tool calls and reply text for this
     /// thread's in-flight turn, de-duplicated by the stream's seq.
     fn orchestrator(&mut self, message: &Value) -> bool {
+        let was_running = self.context_busy;
+        let changed = self.orchestrator_event(message);
+        // The working row follows the turn, whichever event moved it.
+        if was_running != self.context_busy {
+            return self.refresh() || changed;
+        }
+        changed
+    }
+    fn orchestrator_event(&mut self, message: &Value) -> bool {
         let data = &message["data"];
         let thread = self.key.strip_prefix("llm-chat:").unwrap_or(&self.key);
         if data["threadId"].as_str().is_some_and(|id| id != thread) {
@@ -200,7 +212,7 @@ impl Transcript {
             let changed = self.context_busy != (data["status"] == "busy");
             self.context_busy = data["status"] == "busy";
             // A subscribe snapshot reporting an idle session settles a stale reply.
-            let settled = matches!(data["status"].as_str(), Some("ready" | "dead"))
+            let settled = matches!(data["status"].as_str(), Some("ready" | "dead" | "stopped"))
                 && self.settle("completed");
             return settled || changed;
         }
@@ -312,6 +324,12 @@ impl Transcript {
                 );
                 tool["result"] = data["output"].clone();
             }
+            // A stopped lead ends its turn too; without it a replayed "busy"
+            // kept Stop showing on a finished chat.
+            "status" if data["status"] == "stopped" => {
+                self.context_busy = false;
+                return self.settle("interrupted") || was_running;
+            }
             "status" if matches!(data["status"].as_str(), Some("ready" | "dead")) => {
                 self.context_busy = false;
                 // Retain the classic terminal usage fields before history catches up.
@@ -373,6 +391,12 @@ impl Transcript {
         }
         Some(live)
     }
+    /// The server confirmed a stop: the stream to this client never reports
+    /// it, so the turn settles here, as the desktop stop pill does.
+    pub fn interrupted(&mut self) -> bool {
+        let was_running = std::mem::replace(&mut self.context_busy, false);
+        self.settle("interrupted") | self.refresh() || was_running
+    }
     /// The turn ended: stop the marker, close open tools and record the outcome
     /// until saved history arrives.
     fn settle(&mut self, outcome: &str) -> bool {
@@ -424,6 +448,13 @@ impl Transcript {
         let overlaps = entries
             .iter()
             .any(|entry| self.entries.iter().any(|current| current.id == entry.id));
+        // A send's echo can arrive as a one-turn window: one that is shorter and
+        // shares nothing with this chat extends it rather than wiping it.
+        if !overlaps && !entries.is_empty() && entries.len() < self.entries.len() {
+            let mut next = self.entries.clone();
+            next.extend(entries);
+            return self.merge(next, true);
+        }
         if replace && !overlaps {
             self.backfilled = false;
             self.page = None;
@@ -482,6 +513,132 @@ impl Transcript {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_confirmed_stop_settles_the_running_turn() {
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:thoughts-stop","transcript":[
+                    {"id":"reply","role":"assistant","text":"","timestamp":1}
+                ]}),
+            )
+            .unwrap(),
+        );
+        assert!(transcript.apply(
+            &serde_json::json!({"channel":"orchestrator","event":"tool-use","seq":1,
+            "data":{"threadId":"thoughts-stop","assistantMessageId":"reply",
+                    "toolUseId":"t1","name":"Bash","args":{"command":"sleep 60"}}})
+        ));
+        assert!(
+            transcript.context_snapshot().1,
+            "a tool call marks the turn running"
+        );
+        // The server answers the stop only on the stop request's socket.
+        assert!(transcript.interrupted());
+        assert!(!transcript.context_snapshot().1);
+        let live = transcript.live.as_ref().unwrap();
+        assert_eq!(live.extra["receipt"]["terminal"]["outcome"], "interrupted");
+        assert!(
+            live.tools
+                .iter()
+                .flatten()
+                .all(|tool| tool["status"] != "running")
+        );
+        assert!(!transcript.interrupted(), "a second stop changes nothing");
+    }
+    #[test]
+    fn a_replayed_stopped_turn_is_not_left_running() {
+        // The frames a reopened chat received (2026-10-31): an idle snapshot,
+        // then the since-0 replay of a turn that ended "stopped".
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:thoughts-replay","transcript":[]}),
+            )
+            .unwrap(),
+        );
+        let frame = |seq: u64, event: &str, data: Value| {
+            let mut data = data;
+            data["threadId"] = "thoughts-replay".into();
+            data["assistantMessageId"] = "reply".into();
+            serde_json::json!({"channel":"orchestrator","event":event,"seq":seq,"data":data})
+        };
+        transcript.apply(
+            &serde_json::json!({"channel":"orchestrator","event":"status",
+            "data":{"threadId":"thoughts-replay","status":"ready","snapshot":true}}),
+        );
+        transcript.apply(&frame(1, "status", serde_json::json!({"status":"busy"})));
+        transcript.apply(&frame(
+            2,
+            "tool-use",
+            serde_json::json!({"toolUseId":"t1","name":"Read"}),
+        ));
+        assert!(transcript.context_snapshot().1);
+        assert!(transcript.apply(&frame(3, "status", serde_json::json!({"status":"stopped"}))));
+        assert!(!transcript.context_snapshot().1, "Stop must not stay up");
+        let live = transcript.live.as_ref().unwrap();
+        assert_eq!(live.extra["receipt"]["terminal"]["outcome"], "interrupted");
+    }
+
+    #[test]
+    fn a_one_turn_replace_keeps_the_chat_it_arrives_in() {
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:window","transcript":[
+                    {"id":"a","role":"user","text":"One","timestamp":1},
+                    {"id":"b","role":"assistant","text":"Two","timestamp":2}
+                ]}),
+            )
+            .unwrap(),
+        );
+        let snapshot = |entries: Value| serde_json::json!({"sessionKey":"llm-chat:window","replace":true,"entries":entries});
+        assert!(transcript.history(&snapshot(serde_json::json!([
+            {"id":"c","role":"user","text":"Three","timestamp":3}
+        ]))));
+        assert_eq!(transcript.rows.len(), 3, "the send joins the chat");
+        // A window that overlaps still rules, so a shortened chat stays short.
+        assert!(transcript.history(&snapshot(serde_json::json!([
+            {"id":"a","role":"user","text":"One","timestamp":1}
+        ]))));
+        assert_eq!(transcript.rows.len(), 1);
+    }
+    #[test]
+    fn a_working_row_stays_under_every_message_of_the_turn() {
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:working","transcript":[]}),
+            )
+            .unwrap(),
+        );
+        let frame = |seq: u64, event: &str, mut data: Value| {
+            data["threadId"] = "working".into();
+            data["assistantMessageId"] = "reply".into();
+            serde_json::json!({"channel":"orchestrator","event":event,"seq":seq,"data":data})
+        };
+        let live_last = |transcript: &Transcript| matches!(transcript.rows.last(), Some(Row::Activity { trace, .. }) if trace.live);
+        transcript.apply(&frame(1, "status", serde_json::json!({"status":"busy"})));
+        assert!(live_last(&transcript), "shows before the first word");
+        transcript.apply(&frame(2, "output", serde_json::json!({"text":"First"})));
+        assert!(live_last(&transcript), "stays under the reply");
+        transcript.apply(&frame(
+            3,
+            "tool-use",
+            serde_json::json!({"toolUseId":"t","name":"Read"}),
+        ));
+        transcript.apply(&frame(
+            4,
+            "tool-result",
+            serde_json::json!({"toolUseId":"t","status":"ok"}),
+        ));
+        transcript.apply(&frame(5, "output", serde_json::json!({"text":"Second"})));
+        assert!(live_last(&transcript), "stays under the next message");
+        let live = transcript
+            .rows
+            .iter()
+            .filter(|row| matches!(row, Row::Activity { trace, .. } if trace.live))
+            .count();
+        assert_eq!(live, 1, "one indicator at a time");
+        transcript.apply(&frame(6, "status", serde_json::json!({"status":"stopped"})));
+        assert!(!live_last(&transcript), "the turn's end clears it");
+    }
     #[test]
     fn saved_tail_keeps_older_rows_and_yields_to_newer_websocket_history() {
         let history = |text: &str| {

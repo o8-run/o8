@@ -13,7 +13,7 @@ impl Tool {
     pub(super) fn utility(self) -> bool {
         !matches!(
             self,
-            Self::Launcher | Self::Browser | Self::Prs | Self::Compare
+            Self::Launcher | Self::Browser | Self::Prs | Self::Issues | Self::Compare
         )
     }
 }
@@ -56,13 +56,20 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         p.split_drag = false;
     }
     if !fresh {
-        if viewport < 1180. && p.motion.is_open() {
+        if viewport < 1180. && (p.selected == Tool::Subagents || p.lower == Some(Tool::Subagents)) {
+            p.maximized = true;
+        }
+        if viewport < 1180.
+            && p.motion.is_open()
+            && p.selected != Tool::Subagents
+            && p.lower != Some(Tool::Subagents)
+        {
             p.motion.set(false);
             p.morph.set(false);
             p.maximized = false;
             cx.notify();
         }
-        if viewport >= 1180.
+        if (viewport >= 1180. || subagents::in_panel(s))
             && s.state.right_panel.visible
             && !s.features.get::<Panel>().motion.is_open()
         {
@@ -357,7 +364,7 @@ pub(super) fn key(
     cx: &mut Context<Shell>,
 ) -> bool {
     let key = event.keystroke.key.as_str();
-    let overlays = s.palette || super::super::header_tools::any_open(s);
+    let overlays = s.palette;
     let p = s.features.get::<Panel>();
     if p.menu.is_some() {
         if matches!(key, "escape" | "tab") {
@@ -481,7 +488,7 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
     if s.state.selected.is_none()
         && matches!(
             tool,
-            Tool::Files | Tool::Review | Tool::Activity | Tool::Prs | Tool::Terminal
+            Tool::Files | Tool::Review | Tool::Activity | Tool::Prs | Tool::Issues | Tool::Terminal
         )
     {
         return div()
@@ -506,13 +513,12 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
         Tool::Devices => super::super::devices::element(s, cx),
         Tool::Compare => contextual::comparison(s, cx),
         Tool::Prs => contextual::pr(s, cx),
+        Tool::Issues => contextual::issue(s, cx),
         tool if !tool.ready() => placeholder(tool).into_any_element(),
         // The side chat opens once its new conversation is listed.
-        Tool::SideChat => s
-            .content
-            .get(&super::key(s, tool))
-            .map(Content::element)
-            .unwrap_or_else(|| div().child("Starting chat…").into_any_element()),
+        Tool::SideChat => side::element(s, cx),
+        Tool::Resources => resources::element(s, cx),
+        Tool::Subagents => subagents::element(s, cx),
         tool => s
             .content
             .get(&super::key(s, tool))
@@ -532,7 +538,25 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
 }
 pub(super) fn body(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
     let p = s.features.read::<Panel>().unwrap();
-    let upper = pane(s, p.selected, cx);
+    // Each pane fades out at the split and the panel's bottom edge; each
+    // pane's top is its tab strip or header, which stays crisp.
+    // o8.md fades inside its own card instead.
+    let faded = |body: AnyElement, tool: Tool| {
+        if tool == Tool::Spec {
+            return body;
+        }
+        let color = crate::theme::current().background;
+        div()
+            .relative()
+            .size_full()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .child(body)
+            .child(crate::theme::edge_fade(true, 24., color))
+            .into_any_element()
+    };
+    let upper = faded(pane(s, p.selected, cx), p.selected);
     let Some(lower) = p.lower else { return upper };
     let bounds = p.split_bounds.clone();
     let ratio = s.state.right_panel.ratio;
@@ -555,7 +579,7 @@ pub(super) fn body(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
         .flex_col()
         .child(share(upper, ratio))
         .child(chrome::divider(s, lower, cx))
-        .child(share(pane(s, lower, cx), 100. - ratio))
+        .child(share(faded(pane(s, lower, cx), lower), 100. - ratio))
         .child(
             canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
                 .absolute()

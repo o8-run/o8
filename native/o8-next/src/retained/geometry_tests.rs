@@ -13,6 +13,39 @@ impl Render for TranscriptRow {
 }
 
 #[gpui::test]
+fn bot_network_peer_author_uses_peer_layout_even_with_a_user_transport_role(
+    cx: &mut TestAppContext,
+) {
+    let state = Rc::new(RefCell::new(RowState::new(
+        crate::model::render_tree(&[serde_json::from_value(
+            serde_json::json!({ "id":"peer", "role":"user", "text":"A peer turn",
+            "author":{"kind":"bot","name":"OriginalPeer","id":"bot-peer"} }),
+        )
+        .unwrap()])
+        .remove(0),
+    )));
+    let (_, cx) = cx.add_window_view(|_, _| TranscriptRow(state.clone()));
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    let state = state.borrow();
+    assert_eq!(serde_json::to_value(&state.row).unwrap()["role"], "user");
+    assert_eq!(
+        serde_json::to_value(&state.row).unwrap()["author"]["name"],
+        "OriginalPeer"
+    );
+    let layout = state
+        .cache
+        .as_ref()
+        .expect("production retained row reached layout");
+    assert!(
+        layout.backgrounds.is_empty(),
+        "a peer turn must not receive the human bubble backdrop"
+    );
+}
+
+#[gpui::test]
 fn user_rich_backdrops_stay_inside_bubble_and_reading_column(cx: &mut TestAppContext) {
     let cases = [
         (
@@ -35,6 +68,7 @@ fn user_rich_backdrops_stay_inside_bubble_and_reading_column(cx: &mut TestAppCon
     let state = Rc::new(RefCell::new(RowState::new(Row::Message {
         id: "user-rich".into(),
         role: "user".into(),
+        author: None,
         nodes: vec![],
     })));
     let (_, cx) = cx.add_window_view(|_, _| TranscriptRow(state.clone()));
@@ -43,6 +77,7 @@ fn user_rich_backdrops_stay_inside_bubble_and_reading_column(cx: &mut TestAppCon
         *state.borrow_mut() = RowState::new(Row::Message {
             id: "user-rich".into(),
             role: "user".into(),
+            author: None,
             nodes,
         });
         cx.update(|window, cx| {

@@ -49,6 +49,16 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &crate::ui::ToggleDictation, _, cx| {
                 this.toggle_dictation(cx)
             }))
+            .on_action(cx.listener(|this, _: &crate::ui::OpenTranscriptLink, window, cx| {
+                if let Some(url) = crate::ui::take_pending_link() {
+                    this.open_transcript_link(&url, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &crate::lineage::OpenThreadLink, window, cx| {
+                if let Some(id) = crate::lineage::take_pending() {
+                    this.open_thread_by_id(id, window, cx);
+                }
+            }))
             .children(slots)
             // The traffic-light corner above the rail moves the window too.
             .child(

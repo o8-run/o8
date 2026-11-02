@@ -1,200 +1,25 @@
 //! Native customization inventories and the existing saved-prompt library.
+use super::{
+    inventory::{Inventory, Row},
+    plugins::Plugins,
+};
 use crate::{client::Client, composer::Composer, theme::current as theme};
 use gpui::{
     ClipboardItem, Context, Entity, Render, SharedString, Window, canvas, div, prelude::*, px,
 };
 use serde_json::{Value, json};
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, collections::HashSet, rc::Rc};
 
-const TABS: [(&str, &str); 6] = [
+const PAGE_WIDTH: f32 = 1040.;
+const TABS: [(&str, &str); 7] = [
     ("rules", "Instructions"),
     ("prompts", "Prompts"),
     ("skills", "Skills"),
     ("connections", "Connections"),
     ("agents", "Agents"),
     ("hooks", "Hooks"),
+    ("plugins", "Plugins"),
 ];
-#[derive(Clone)]
-struct Row {
-    id: String,
-    title: String,
-    body: String,
-    tags: Vec<String>,
-    scope: String,
-    updated_at: Option<u64>,
-    repo_path: Option<String>,
-}
-impl Row {
-    fn prompt(item: &Value) -> Result<Self, String> {
-        let text = |key: &str| {
-            item[key]
-                .as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| "Invalid saved prompt. Refresh before trying again.".to_owned())
-        };
-        let updated_at = item["updatedAt"]
-            .as_u64()
-            .filter(|v| *v > 0)
-            .ok_or("Invalid saved prompt revision. Refresh before trying again.")?;
-        Ok(Self {
-            id: text("id")?,
-            title: text("title")?,
-            body: text("body")?,
-            scope: text("scope")?,
-            tags: item["tags"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|v| v.as_str().map(str::to_owned))
-                .collect(),
-            updated_at: Some(updated_at),
-            repo_path: item["repoPath"].as_str().map(str::to_owned),
-        })
-    }
-}
-#[derive(Clone, Default)]
-struct Inventory {
-    rows: Vec<(String, Row)>,
-}
-impl Inventory {
-    fn load(client: &Client, repo: Option<&str>) -> Result<Self, String> {
-        let query = repo.map(|r| vec![("repo", r)]).unwrap_or_default();
-        let inventory: Value = client.get("/api/customize/inventory", &query)?;
-        if inventory["ok"] != true {
-            return Err("Could not load local customizations. Try again.".into());
-        }
-        let query = repo.map(|r| vec![("repoPath", r)]).unwrap_or_default();
-        let rules: Value = client.get("/api/cortex/directives", &query)?;
-        let connections: Value = client.get("/api/setup/mcp-servers", &[])?;
-        let mut prompt_query = vec![
-            (
-                "scope",
-                if repo.is_some() {
-                    "available"
-                } else {
-                    "global"
-                },
-            ),
-            ("limit", "100"),
-        ];
-        if let Some(repo) = repo {
-            prompt_query.push(("repoPath", repo));
-        }
-        let prompts: Value = client.get("/api/prompt-library", &prompt_query)?;
-        if ["agents", "skills", "hooks"]
-            .iter()
-            .any(|kind| !inventory[*kind].is_array())
-            || !rules["directives"].is_array()
-            || !connections["servers"].is_array()
-            || prompts["ok"] != true
-            || !prompts["prompts"].is_array()
-        {
-            return Err(
-                "The server returned an invalid customization inventory. Try again.".into(),
-            );
-        }
-        let mut result = Self::default();
-        for kind in ["agents", "skills", "hooks"] {
-            for item in inventory[kind].as_array().into_iter().flatten() {
-                if repo.is_none() && item["scope"] == "project" {
-                    continue;
-                }
-                let title = item[if kind == "hooks" { "event" } else { "name" }]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_owned();
-                let body = if kind == "hooks" {
-                    "command".to_owned()
-                } else {
-                    item["description"].as_str().unwrap_or("").to_owned()
-                };
-                result.rows.push((
-                    kind.into(),
-                    Row {
-                        id: item["file"].as_str().unwrap_or("").into(),
-                        title,
-                        body,
-                        tags: vec![],
-                        scope: item["scope"].as_str().unwrap_or("").into(),
-                        updated_at: None,
-                        repo_path: None,
-                    },
-                ));
-            }
-        }
-        for item in rules["directives"].as_array().into_iter().flatten() {
-            if repo.is_none() && item["scope"] != "global" && item["scope"] != "" {
-                continue;
-            }
-            // Indexed documentation is reference material, not authored guidance.
-            if item["id"]
-                .as_str()
-                .is_some_and(|id| id.starts_with("spec-ingest:"))
-            {
-                continue;
-            }
-            result.rows.push((
-                "rules".into(),
-                Row {
-                    id: item["id"].as_str().unwrap_or("").into(),
-                    title: item["title"].as_str().unwrap_or("").into(),
-                    body: item["body"].as_str().unwrap_or("").into(),
-                    tags: vec![],
-                    scope: item["scope"].as_str().unwrap_or("").into(),
-                    updated_at: None,
-                    repo_path: None,
-                },
-            ));
-        }
-        for (id, title) in [("o8-operator", "o8 operator"), ("cortex", "cortex")] {
-            result.rows.push((
-                "connections".into(),
-                Row {
-                    id: id.into(),
-                    title: title.into(),
-                    body: String::new(),
-                    tags: vec![],
-                    scope: "global".into(),
-                    updated_at: None,
-                    repo_path: None,
-                },
-            ));
-        }
-        for item in connections["servers"].as_array().into_iter().flatten() {
-            result.rows.push((
-                "connections".into(),
-                Row {
-                    id: item["id"].as_str().unwrap_or("").into(),
-                    title: item["name"].as_str().unwrap_or("").into(),
-                    body: if item["transport"] == "http" {
-                        let host = item["url"]
-                            .as_str()
-                            .or(item["command"].as_str())
-                            .and_then(|s| url::Url::parse(s).ok())
-                            .and_then(|u| u.host_str().map(str::to_owned));
-                        host.map(|host| format!("http · {host}"))
-                            .unwrap_or_else(|| "http".into())
-                    } else {
-                        "stdio".into()
-                    },
-                    tags: vec![],
-                    scope: "global".into(),
-                    updated_at: None,
-                    repo_path: None,
-                },
-            ));
-        }
-        for item in prompts["prompts"].as_array().into_iter().flatten() {
-            result.rows.push(("prompts".into(), Row::prompt(item)?));
-        }
-        result.rows.sort_by(|(_, a), (_, b)| {
-            (a.scope != "project")
-                .cmp(&(b.scope != "project"))
-                .then_with(|| a.title.cmp(&b.title))
-        });
-        Ok(result)
-    }
-}
 struct Editor {
     id: Option<String>,
     scope: String,
@@ -204,6 +29,9 @@ struct Editor {
     body: Entity<Composer>,
     tags: Entity<Composer>,
 }
+/// The page's Close button.
+pub struct Close;
+impl gpui::EventEmitter<Close> for Customize {}
 pub struct Customize {
     client: Client,
     repo: Option<String>,
@@ -211,8 +39,10 @@ pub struct Customize {
     tab: String,
     inventory: Inventory,
     query: Entity<Composer>,
+    plugins: Entity<Plugins>,
     editor: Option<Editor>,
     deleting: Option<Row>,
+    expanded: HashSet<String>,
     loading: bool,
     error: Option<String>,
     revision: u64,
@@ -221,7 +51,16 @@ pub struct Customize {
 }
 impl Customize {
     pub fn new(client: Client, repo: Option<String>, cx: &mut Context<Self>) -> Self {
-        let query = cx.new(Composer::new);
+        let query = cx.new(|cx| {
+            let mut query = Composer::new(cx);
+            query.placeholder = "Search".into();
+            query
+        });
+        let plugins = {
+            let (client, repo) = (client.clone(), repo.clone());
+            cx.new(|cx| Plugins::new(client, repo, cx))
+        };
+        let plugins_changed = cx.observe(&plugins, |_, _, cx| cx.notify());
         let subscription = cx.observe(&query, |this, _, cx| {
             this.revision += 1;
             cx.notify();
@@ -233,13 +72,15 @@ impl Customize {
             tab: "rules".into(),
             inventory: Inventory::default(),
             query,
+            plugins,
             editor: None,
             deleting: None,
+            expanded: HashSet::new(),
             loading: false,
             error: None,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
-            _subscriptions: vec![subscription],
+            _subscriptions: vec![subscription, plugins_changed],
         };
         this.load(None, cx);
         this
@@ -434,18 +275,30 @@ impl Customize {
 fn escape(id: &str) -> String {
     url::form_urlencoded::byte_serialize(id.as_bytes()).collect()
 }
-fn control(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Stateful<gpui::Div> {
+pub(super) fn control(
+    id: &str,
+    label: impl Into<SharedString>,
+    enabled: bool,
+) -> gpui::Stateful<gpui::Div> {
     let selector = id.to_owned();
     div()
         .id(SharedString::from(id.to_owned()))
         .debug_selector(move || selector.clone())
-        .p(px(8.))
-        .rounded(px(6.))
+        .h(px(26.))
+        .px(px(10.))
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .rounded(px(7.))
+        .text_size(px(12.))
+        .text_color(theme().text_secondary)
         .border_1()
         .border_color(theme().border)
         .bg(theme().surface_raised)
         .opacity(if enabled { 1. } else { 0.45 })
-        .when(enabled, |v| v.cursor_pointer())
+        .when(enabled, |v| {
+            v.cursor_pointer().hover(|v| v.bg(theme().hover))
+        })
         .child(label.into())
 }
 fn field(id: &'static str, input: &Entity<Composer>, busy: bool, cx: &gpui::App) -> gpui::Div {
@@ -461,6 +314,19 @@ fn field(id: &'static str, input: &Entity<Composer>, busy: bool, cx: &gpui::App)
     } else {
         input.clone().into_any_element()
     })
+}
+impl Customize {
+    pub fn tab_is(&self, id: &str) -> bool {
+        self.tab == id
+    }
+    pub fn select_tab(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.tab = id.into();
+        self.editor = None;
+        self.deleting = None;
+        self.error = None;
+        self.revision += 1;
+        cx.notify();
+    }
 }
 impl Render for Customize {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -485,243 +351,390 @@ impl Render for Customize {
             .collect();
         let painted = self.painted.clone();
         let revision = self.revision;
+        let page = div()
+            .w_full()
+            .max_w(px(PAGE_WIDTH))
+            .mx_auto()
+            .flex()
+            .flex_col()
+            .gap(px(14.))
+            .pt(px(44.))
+            .px(px(28.))
+            .pb(px(64.));
+        let row_count = rows.len();
         div()
             .id("customize")
             .size_full()
             .overflow_y_scroll()
-            .p(px(24.))
-            .flex()
-            .flex_col()
-            .gap(px(12.))
             .bg(theme().background)
             .text_color(theme().text)
             .font_family(theme().font_ui)
-            .child(div().text_size(px(24.)).child("Customize"))
+            .font_weight(gpui::FontWeight::LIGHT)
             .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(8.))
-                    .children(TABS.into_iter().map(|(id, label)| {
-                        let count = self
-                            .inventory
-                            .rows
-                            .iter()
-                            .filter(|(kind, _)| kind == id)
-                            .count();
-                        control(
-                            &format!("custom-tab-{id}"),
-                            format!("{label} ({count})"),
-                            !busy,
-                        )
-                        .bg(if self.tab == id {
-                            theme().selection
-                        } else {
-                            theme().surface_raised
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if !this.loading {
-                                this.tab = id.into();
-                                this.editor = None;
-                                this.deleting = None;
-                                this.error = None;
-                                this.revision += 1;
-                                cx.notify();
-                            }
-                        }))
-                    })),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(8.))
-                    .child(
-                        control("custom-personal", "Personal", !busy)
-                            .bg(if self.personal {
-                                theme().selection
-                            } else {
-                                theme().surface_raised
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| this.scope(true, cx))),
-                    )
-                    .when(self.repo.is_some(), |v| {
-                        v.child(
-                            control(
-                                "custom-workspace",
-                                self.repo
-                                    .as_deref()
-                                    .and_then(|repo| std::path::Path::new(repo).file_name())
-                                    .unwrap_or_default()
-                                    .to_string_lossy()
-                                    .to_string(),
-                                !busy,
-                            )
-                            .bg(if !self.personal {
-                                theme().selection
-                            } else {
-                                theme().surface_raised
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| this.scope(false, cx))),
-                        )
-                    })
-                    .child(
-                        control("custom-refresh", "Refresh", !busy)
-                            .on_click(cx.listener(|this, _, _, cx| this.load(None, cx))),
-                    ),
-            )
-            .child(
-                div()
-                    .debug_selector(|| "custom-search".into())
-                    .child(self.query.clone()),
-            )
-            .when(busy, |v| {
-                v.child(
-                    div()
-                        .debug_selector(|| "custom-loading".into())
-                        .child("Loading customizations…"),
-                )
-            })
-            .when_some(self.error.clone(), |v, error| {
-                v.child(
-                    div()
-                        .debug_selector(|| "custom-error".into())
-                        .text_color(theme().danger)
-                        .child(error),
-                )
-            })
-            .when(self.tab == "prompts" && self.editor.is_none(), |v| {
-                v.child(
-                    control("custom-new", "Save a prompt", !busy)
-                        .on_click(cx.listener(|this, _, window, cx| this.edit(None, window, cx))),
-                )
-            })
-            .when_some(self.editor.as_ref(), |v, editor| {
-                v.child(
+                page.child(
                     div()
                         .flex()
-                        .flex_col()
-                        .gap(px(8.))
-                        .child("Title")
-                        .child(field("custom-title", &editor.title, busy, cx))
-                        .child("Text")
-                        .child(field("custom-body", &editor.body, busy, cx))
-                        .child("Tags")
-                        .child(field("custom-tags", &editor.tags, busy, cx))
+                        .items_end()
+                        .justify_between()
+                        .gap(px(16.))
                         .child(
                             div()
                                 .flex()
-                                .gap(px(8.))
+                                .flex_col()
+                                .gap(px(6.))
+                                .child(div().text_size(px(24.)).child("Customize"))
                                 .child(
-                                    control("custom-save", "Save", !busy)
-                                        .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
+                                    div()
+                                        .text_size(px(13.))
+                                        .text_color(theme().text_muted)
+                                        .child("What your agents know, can do and connect to."),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_shrink_0()
+                                .gap(px(6.))
+                                .child(
+                                    control("custom-personal", "Personal", !busy)
+                                        .bg(if self.personal {
+                                            theme().selection
+                                        } else {
+                                            theme().surface_raised
+                                        })
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.scope(true, cx)),
+                                        ),
                                 )
-                                .child(control("custom-cancel", "Cancel", !busy).on_click(
-                                    cx.listener(|this, _, _, cx| {
-                                        if !this.loading {
-                                            this.editor = None;
-                                            this.error = None;
-                                            this.revision += 1;
-                                            cx.notify();
-                                        }
-                                    }),
-                                )),
-                        ),
-                )
-            })
-            .when(self.editor.is_none(), |v| {
-                v.when(all.is_empty() && !busy && self.error.is_none(), |v| {
-                    v.child(
-                        div()
-                            .debug_selector(|| "custom-empty".into())
-                            .child("Nothing here yet"),
-                    )
-                })
-                .when(!all.is_empty() && rows.is_empty(), |v| {
-                    v.child(
-                        div()
-                            .debug_selector(|| "custom-no-matches".into())
-                            .child("No matches"),
-                    )
-                })
-                .children(rows.into_iter().enumerate().map(|(i, row)| {
-                    let copy = row.clone();
-                    let edit = row.clone();
-                    let delete = row.clone();
-                    div()
-                        .debug_selector(move || format!("custom-row-{i}"))
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.))
-                        .p(px(12.))
-                        .border_1()
-                        .border_color(theme().border)
-                        .child(row.title)
-                        .child(row.body)
-                        .child(
-                            div()
-                                .flex()
-                                .gap(px(8.))
+                                .when(self.repo.is_some(), |v| {
+                                    v.child(
+                                        control(
+                                            "custom-workspace",
+                                            self.repo
+                                                .as_deref()
+                                                .and_then(|repo| {
+                                                    std::path::Path::new(repo).file_name()
+                                                })
+                                                .unwrap_or_default()
+                                                .to_string_lossy()
+                                                .to_string(),
+                                            !busy,
+                                        )
+                                        .bg(if !self.personal {
+                                            theme().selection
+                                        } else {
+                                            theme().surface_raised
+                                        })
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.scope(false, cx)),
+                                        ),
+                                    )
+                                })
                                 .child(
-                                    control(&format!("custom-copy-{i}"), "Copy", !busy).on_click(
-                                        cx.listener(move |this, _, _, cx| {
-                                            this.copy(copy.clone(), cx)
-                                        }),
+                                    control("custom-refresh", "Refresh", !busy).on_click(
+                                        cx.listener(|this, _, _, cx| this.load(None, cx)),
                                     ),
                                 )
-                                .when(self.tab == "prompts", |v| {
-                                    v.child(
-                                        control(&format!("custom-edit-{i}"), "Edit", !busy)
-                                            .on_click(cx.listener(move |this, _, window, cx| {
-                                                this.edit(Some(edit.clone()), window, cx)
-                                            })),
-                                    )
-                                    .child(
-                                        control(&format!("custom-delete-{i}"), "Delete", !busy)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                if !this.loading {
-                                                    this.deleting = Some(delete.clone());
-                                                    this.revision += 1;
-                                                    cx.notify();
-                                                }
-                                            })),
-                                    )
-                                }),
-                        )
-                }))
-            })
-            .when_some(self.deleting.clone(), |v, id| {
-                v.child(
+                                .child(
+                                    control("custom-close", "Close", true)
+                                        .on_click(cx.listener(|_, _, _, cx| cx.emit(Close))),
+                                ),
+                        ),
+                )
+                .child(
                     div()
                         .flex()
-                        .gap(px(8.))
-                        .child("Delete saved prompt?")
-                        .child(control("custom-delete-confirm", "Delete", !busy).on_click(
-                            cx.listener(move |this, _, _, cx| {
-                                this.load(
-                                    Some((
-                                        "DELETE".into(),
-                                        format!(
-                                            "/api/prompt-library/{}?expectedUpdatedAt={}",
-                                            escape(&id.id),
-                                            id.updated_at.unwrap()
-                                        ),
-                                        json!({}),
-                                    )),
-                                    cx,
-                                )
-                            }),
-                        ))
-                        .child(control("custom-delete-cancel", "Cancel", !busy).on_click(
-                            cx.listener(|this, _, _, cx| {
-                                if !this.loading {
-                                    this.deleting = None;
-                                    this.revision += 1;
-                                    cx.notify();
-                                }
-                            }),
-                        )),
+                        .flex_wrap()
+                        .gap(px(6.))
+                        .children(TABS.into_iter().map(|(id, label)| {
+                            let count = if id == "plugins" {
+                                self.plugins.read(cx).count()
+                            } else {
+                                self.inventory
+                                    .rows
+                                    .iter()
+                                    .filter(|(kind, _)| kind == id)
+                                    .count()
+                            };
+                            control(
+                                &format!("custom-tab-{id}"),
+                                format!("{label} ({count})"),
+                                !busy,
+                            )
+                            .bg(if self.tab == id {
+                                theme().selection
+                            } else {
+                                theme().surface_raised
+                            })
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    if !this.loading {
+                                        this.tab = id.into();
+                                        this.editor = None;
+                                        this.deleting = None;
+                                        this.error = None;
+                                        this.revision += 1;
+                                        cx.notify();
+                                    }
+                                },
+                            ))
+                        })),
                 )
-            })
-            .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
+                .when(self.tab != "plugins", |v| {
+                    v.child(
+                        div()
+                            .debug_selector(|| "custom-search".into())
+                            .flex()
+                            .w_full()
+                            .text_size(px(13.))
+                            .child(div().flex_1().min_w_0().child(self.query.clone())),
+                    )
+                })
+                .when(self.tab == "plugins", |v| v.child(self.plugins.clone()))
+                .when(busy, |v| {
+                    v.child(
+                        div()
+                            .debug_selector(|| "custom-loading".into())
+                            .child("Loading customizations…"),
+                    )
+                })
+                .when_some(self.error.clone(), |v, error| {
+                    v.child(
+                        div()
+                            .debug_selector(|| "custom-error".into())
+                            .text_color(theme().danger)
+                            .child(error),
+                    )
+                })
+                .when(self.tab == "prompts" && self.editor.is_none(), |v| {
+                    v.child(
+                        control("custom-new", "Save a prompt", !busy).on_click(
+                            cx.listener(|this, _, window, cx| this.edit(None, window, cx)),
+                        ),
+                    )
+                })
+                .when_some(self.editor.as_ref(), |v, editor| {
+                    v.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.))
+                            .child("Title")
+                            .child(field("custom-title", &editor.title, busy, cx))
+                            .child("Text")
+                            .child(field("custom-body", &editor.body, busy, cx))
+                            .child("Tags")
+                            .child(field("custom-tags", &editor.tags, busy, cx))
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap(px(8.))
+                                    .child(
+                                        control("custom-save", "Save", !busy)
+                                            .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
+                                    )
+                                    .child(control("custom-cancel", "Cancel", !busy).on_click(
+                                        cx.listener(|this, _, _, cx| {
+                                            if !this.loading {
+                                                this.editor = None;
+                                                this.error = None;
+                                                this.revision += 1;
+                                                cx.notify();
+                                            }
+                                        }),
+                                    )),
+                            ),
+                    )
+                })
+                .when(self.editor.is_none() && self.tab != "plugins", |v| {
+                    v.when(all.is_empty() && !busy && self.error.is_none(), |v| {
+                        v.child(
+                            div()
+                                .debug_selector(|| "custom-empty".into())
+                                .child("Nothing here yet"),
+                        )
+                    })
+                    .when(!all.is_empty() && rows.is_empty(), |v| {
+                        v.child(
+                            div()
+                                .debug_selector(|| "custom-no-matches".into())
+                                .child("No matches"),
+                        )
+                    })
+                    .when(row_count > 0, |v| {
+                        v.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .rounded(px(12.))
+                                .border_1()
+                                .border_color(theme().border)
+                                .bg(theme().surface)
+                                .overflow_hidden()
+                                .children(rows.into_iter().enumerate().map(|(i, row)| {
+                                    let copy = row.clone();
+                                    let edit = row.clone();
+                                    let delete = row.clone();
+                                    let key = format!("{}:{}", self.tab, row.title);
+                                    let open = self.expanded.contains(&key);
+                                    let preview = row
+                                        .body
+                                        .lines()
+                                        .map(str::trim)
+                                        .find(|line| !line.is_empty())
+                                        .unwrap_or("")
+                                        .chars()
+                                        .take(180)
+                                        .collect::<String>();
+                                    div()
+                                        .debug_selector(move || format!("custom-row-{i}"))
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(6.))
+                                        .px(px(14.))
+                                        .py(px(10.))
+                                        .when(i + 1 < row_count, |v| {
+                                            v.border_b_1().border_color(theme().border)
+                                        })
+                                        .hover(|v| v.bg(theme().hover))
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(12.))
+                                                .child(
+                                                    div()
+                                                        .id(SharedString::from(format!(
+                                                            "custom-open-{i}"
+                                                        )))
+                                                        .debug_selector(move || {
+                                                            format!("custom-open-{i}")
+                                                        })
+                                                        .flex_1()
+                                                        .min_w_0()
+                                                        .flex()
+                                                        .flex_col()
+                                                        .gap(px(3.))
+                                                        .cursor_pointer()
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                if !this.expanded.remove(&key) {
+                                                                    this.expanded
+                                                                        .insert(key.clone());
+                                                                }
+                                                                this.revision += 1;
+                                                                cx.notify();
+                                                            },
+                                                        ))
+                                                        .child(
+                                                            div()
+                                                                .text_size(px(13.5))
+                                                                .truncate()
+                                                                .child(row.title),
+                                                        )
+                                                        .when(!open, |v| {
+                                                            v.child(
+                                                                div()
+                                                                    .text_size(px(11.))
+                                                                    .text_color(theme().text_muted)
+                                                                    .truncate()
+                                                                    .child(preview),
+                                                            )
+                                                        }),
+                                                )
+                                                .child(
+                                                    control(
+                                                        &format!("custom-copy-{i}"),
+                                                        "Copy",
+                                                        !busy,
+                                                    )
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.copy(copy.clone(), cx)
+                                                    })),
+                                                )
+                                                .when(self.tab == "prompts", |v| {
+                                                    v.child(
+                                                        control(
+                                                            &format!("custom-edit-{i}"),
+                                                            "Edit",
+                                                            !busy,
+                                                        )
+                                                        .on_click(cx.listener(
+                                                            move |this, _, window, cx| {
+                                                                this.edit(
+                                                                    Some(edit.clone()),
+                                                                    window,
+                                                                    cx,
+                                                                )
+                                                            },
+                                                        )),
+                                                    )
+                                                    .child(
+                                                        control(
+                                                            &format!("custom-delete-{i}"),
+                                                            "Delete",
+                                                            !busy,
+                                                        )
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                if !this.loading {
+                                                                    this.deleting =
+                                                                        Some(delete.clone());
+                                                                    this.revision += 1;
+                                                                    cx.notify();
+                                                                }
+                                                            },
+                                                        )),
+                                                    )
+                                                }),
+                                        )
+                                        .when(open, |v| {
+                                            v.child(
+                                                div()
+                                                    .text_size(px(12.))
+                                                    .line_height(px(18.))
+                                                    .text_color(theme().text_secondary)
+                                                    .child(row.body),
+                                            )
+                                        })
+                                })),
+                        )
+                    })
+                })
+                .when_some(self.deleting.clone(), |v, id| {
+                    v.child(
+                        div()
+                            .flex()
+                            .gap(px(8.))
+                            .child("Delete saved prompt?")
+                            .child(control("custom-delete-confirm", "Delete", !busy).on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    this.load(
+                                        Some((
+                                            "DELETE".into(),
+                                            format!(
+                                                "/api/prompt-library/{}?expectedUpdatedAt={}",
+                                                escape(&id.id),
+                                                id.updated_at.unwrap()
+                                            ),
+                                            json!({}),
+                                        )),
+                                        cx,
+                                    )
+                                }),
+                            ))
+                            .child(control("custom-delete-cancel", "Cancel", !busy).on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    if !this.loading {
+                                        this.deleting = None;
+                                        this.revision += 1;
+                                        cx.notify();
+                                    }
+                                }),
+                            )),
+                    )
+                })
+                .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.))),
+            )
     }
 }

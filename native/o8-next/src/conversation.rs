@@ -7,6 +7,12 @@ mod command_client;
 mod composer_card;
 #[path = "composer/picker.rs"]
 mod composer_picker;
+#[path = "composer/screenshots.rs"]
+mod composer_screenshots;
+#[path = "composer/selector.rs"]
+mod composer_selector;
+#[path = "composer/dictation_wave.rs"]
+pub(super) mod dictation_wave;
 #[path = "composer/prompt_actions.rs"]
 mod prompt_actions;
 #[path = "composer/prompt_controls.rs"]
@@ -15,10 +21,18 @@ mod prompt_controls;
 mod prompt_rules;
 #[path = "composer/prompt_view.rs"]
 mod prompt_view;
+#[path = "composer/send_menu.rs"]
+mod send_menu;
 
 #[cfg(test)]
 #[path = "composer/card_tests.rs"]
 mod card_tests;
+#[cfg(test)]
+#[path = "composer/network_tests.rs"]
+mod network_tests;
+#[path = "composer/queue_tail.rs"]
+mod queue_rows;
+pub(super) use queue_rows::queue_tail;
 
 // The queue returns realpath(repoPath), while saved histories can retain a
 // symlink spelling (notably /var versus /private/var on macOS). Keep the frozen
@@ -42,8 +56,22 @@ fn receipt_matches(method: &str, body: &Value, response: &Value) -> bool {
         && item["status"] != "cancelled"
 }
 impl Surface {
+    fn retire_pending_send(&mut self, thread: &str, id: &Value) {
+        if self
+            .pending
+            .get(thread)
+            .is_some_and(|pending| pending["id"] == *id)
+        {
+            self.pending.remove(thread);
+        }
+    }
     pub(super) fn send(&mut self, promote: Option<String>, cx: &mut Context<Self>) {
-        if promote.is_none() {
+        if promote.is_none()
+            && self
+                .routing
+                .as_ref()
+                .is_none_or(|r| r["source"] != "bot-network")
+        {
             let editor = self.composer.clone();
             let input = editor.read(cx);
             let raw = input.text.trim().to_owned();
@@ -88,6 +116,9 @@ impl Surface {
     pub(crate) fn set_dictation(&mut self, dictation: DictationState, cx: &mut Context<Self>) {
         if self.dictation != dictation {
             self.dictation = dictation;
+            if dictation == DictationState::Off {
+                self.wave.borrow_mut().reset();
+            }
             cx.notify();
         }
     }
@@ -119,6 +150,13 @@ impl Surface {
     /// identity): who, which repository and thread, and how it runs. A change
     /// closes the voice session it pinned.
     pub(crate) fn voice_binding(&self, cx: &App) -> Option<VoiceTarget> {
+        if self
+            .routing
+            .as_ref()
+            .is_some_and(|r| r["source"] == "bot-network")
+        {
+            return None;
+        }
         let session = self
             .sessions
             .iter()
@@ -158,6 +196,7 @@ impl Surface {
                 &target.thread,
                 target.backend.as_deref(),
             )
+            .map(drop)
         })
     }
     /// Sends a Live delegation as a new message through this chat's queue,
@@ -213,11 +252,19 @@ impl Surface {
         }))
     }
     fn mutate_message(&mut self, promote: Option<String>, remove: bool, cx: &mut Context<Self>) {
+        if !remove && !self.network_can_reply() {
+            self.notice =
+                "This exchange is read only or closed. Open an operator conversation to reply."
+                    .into();
+            cx.notify();
+            return;
+        }
         if self.saving
             || !self.queue_ready
-            || self.composer.read(cx).composing()
-            || self.composer.read(cx).controls.busy
-            || self.composer.read(cx).controls.pending_images > 0
+            || (promote.is_none()
+                && (self.composer.read(cx).composing()
+                    || self.composer.read(cx).controls.busy
+                    || self.composer.read(cx).controls.pending_images > 0))
         {
             return;
         }
@@ -311,7 +358,9 @@ impl Surface {
                 } else {
                     format!("{}\n\n{contextual}", advice.prelude)
                 };
-                let wire = if let Some((_, wire)) =
+                let wire = if routing["source"] == "bot-network" {
+                    text.clone()
+                } else if let Some((_, wire)) =
                     advice.command_wire.as_ref().filter(|(raw, _)| raw == &text)
                 {
                     if explicit_fleet {
@@ -331,12 +380,15 @@ impl Surface {
                 let body = json!({"repoPath":repo,"threadId":session.id,"id":format!("next-{nonce:x}-{:x}", std::process::id()),
                     "intent":if !self.send_next && self.queue["canSteer"] == true { "steer-now" } else { "send-next" },
                     "payload":{"text":text,"wireMessage":wire,"images":images,"routing":routing}});
+                let network_send = routing["source"] == "bot-network";
                 let frozen_prelude = advice.prelude.clone();
-                self.composer.update(cx, |i, _| {
-                    i.controls.prompt.queued_prelude = body["id"]
-                        .as_str()
-                        .map(|id| (id.to_owned(), frozen_prelude));
-                });
+                if !network_send {
+                    self.composer.update(cx, |i, _| {
+                        i.controls.prompt.queued_prelude = body["id"]
+                            .as_str()
+                            .map(|id| (id.to_owned(), frozen_prelude));
+                    });
+                }
                 self.pending.insert(session.id.clone(), body.clone());
                 ("POST", body)
             }
@@ -368,11 +420,22 @@ impl Surface {
             .as_array()
             .cloned()
             .unwrap_or_default();
+        let network_send = body["payload"]["routing"]["source"] == "bot-network";
+        let request_identity = (session.id.clone(), body["id"].clone());
         let task = cx.background_executor().spawn(async move {
             let response = client.mutate_queue(method, &body).map_err(|error| {
+                let terminal = error.network_send.as_ref().is_some_and(|receipt| {
+                    receipt["id"] == body["id"]
+                        && receipt["threadId"] == session.id
+                        && matches!(
+                            receipt["status"].as_str(),
+                            Some("accepted" | "cancelled" | "rejected")
+                        )
+                });
                 (
                     error.message,
                     error.status.is_some_and(|code| (400..500).contains(&code)),
+                    terminal,
                 )
             })?;
             let matches = if method == "DELETE" {
@@ -385,15 +448,26 @@ impl Surface {
                     "Message receipt did not match. Draft retained; inspect the shared queue."
                         .into(),
                     false,
+                    false,
                 ));
             }
             let queue = client.queue(&session);
             let history = client.history(&session.id);
-            Ok::<_, (String, bool)>((method, session, queue, history))
+            Ok::<_, (String, bool, bool)>((method, session, queue, history))
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
+                if result.is_ok()
+                    || result
+                        .as_ref()
+                        .err()
+                        .is_some_and(|(_, rejected, terminal)| {
+                            *terminal || (method == "POST" && fresh && *rejected)
+                        })
+                {
+                    this.retire_pending_send(&request_identity.0, &request_identity.1);
+                }
                 if this.generation != generation {
                     return;
                 }
@@ -401,40 +475,44 @@ impl Surface {
                 match result {
                     Ok((method, session, queue, history)) => {
                         if method == "POST" {
-                            this.pending.remove(&session.id);
-                            this.composer.update(cx, |i, _| {
-                                if let Some(sent) =
-                                    sent_prelude.as_ref().filter(|sent| !sent.is_empty())
-                                {
-                                    if i.controls.prompt.prelude == *sent {
-                                        i.controls.prompt.prelude.clear();
-                                    } else if let Some(remaining) = i
-                                        .controls
-                                        .prompt
-                                        .prelude
-                                        .strip_prefix(&format!("{sent}\n\n"))
+                            if !network_send {
+                                this.composer.update(cx, |i, _| {
+                                    if let Some(sent) =
+                                        sent_prelude.as_ref().filter(|sent| !sent.is_empty())
                                     {
-                                        i.controls.prompt.prelude = remaining.to_owned();
+                                        if i.controls.prompt.prelude == *sent {
+                                            i.controls.prompt.prelude.clear();
+                                        } else if let Some(remaining) = i
+                                            .controls
+                                            .prompt
+                                            .prelude
+                                            .strip_prefix(&format!("{sent}\n\n"))
+                                        {
+                                            i.controls.prompt.prelude = remaining.to_owned();
+                                        }
+                                        if let Err(error) =
+                                            crate::composer::mode_store::save_prelude(
+                                                i.controls.prompt.store.as_deref(),
+                                                &i.controls.prompt.prelude,
+                                            )
+                                        {
+                                            i.controls.error = error;
+                                        }
                                     }
-                                    if let Err(error) = crate::composer::mode_store::save_prelude(
-                                        i.controls.prompt.store.as_deref(),
-                                        &i.controls.prompt.prelude,
-                                    ) {
-                                        i.controls.error = error;
-                                    }
-                                }
-                                i.controls.prompt.queued_prelude = None;
-                                i.controls.prompt.command_wire = None;
-                            });
-                            if this.composer.read(cx).text == draft {
-                                this.composer.update(cx, |i, cx| {
-                                    i.clear(cx);
-                                    i.controls
-                                        .images
-                                        .retain(|image| !sent_images.contains(image));
-                                    i.controls.files.retain(|file| !files.contains(file));
+                                    i.controls.prompt.queued_prelude = None;
+                                    i.controls.prompt.command_wire = None;
                                 });
                             }
+                            this.composer.update(cx, |i, cx| {
+                                if i.text == draft {
+                                    i.clear(cx);
+                                }
+                                i.controls
+                                    .images
+                                    .retain(|image| !sent_images.contains(image));
+                                i.controls.files.retain(|file| !files.contains(file));
+                                cx.notify();
+                            });
                         }
                         // The queue rows under the composer show delivery, as on
                         // the desktop; the transcript keeps no confirmation line.
@@ -454,12 +532,7 @@ impl Surface {
                             Err(error) => this.notice = error,
                         }
                     }
-                    Err((error, rejected)) => {
-                        if method == "POST" && fresh && rejected {
-                            if let Some(id) = &this.selected {
-                                this.pending.remove(id);
-                            }
-                        }
+                    Err((error, _, _)) => {
                         this.notice = error;
                     }
                 }
@@ -534,87 +607,73 @@ impl Surface {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let enabled = self.queue_ready && !self.saving;
-        let queue = self.queue["items"].as_array().cloned().unwrap_or_default();
-        let queue = queue
-            .into_iter()
-            .filter(|item| item["status"] != "applied" && item["status"] != "cancelled")
-            .collect::<Vec<_>>();
+        let rise = self.composer.read(cx).rise(window);
         div()
             .w_full()
             .max_w(px(crate::theme::GEOMETRY.composer_width))
             .mx_auto()
+            // A growing draft lifts the card over the transcript rather than
+            // shrinking it, so the transcript region is reused while typing.
+            .mt(px(-rise))
             .flex()
             .flex_col()
-            .gap(px(if queue.is_empty() { 0. } else { 8. }))
+            .children(self.lineage_strip(cx))
             .child(self.composer_card(window, cx))
-            .child(
-                div()
-                    .id("composer-queue")
-                    .min_w_0()
-                    .max_h(px(120.))
-                    .overflow_y_scroll()
-                    .children(queue.into_iter().map(|item| {
-                        let id = item["id"].as_str().unwrap_or("").to_owned();
-                        let remove_id = id.clone();
-                        let cancellable = enabled
-                            && (item["status"] == "queued"
-                                || item["status"] == "held"
-                                || (item["status"] == "dispatching"
-                                    && item["admittedAt"].is_null()));
-                        let steerable = enabled
-                            && item["status"] == "queued"
-                            && item["intent"] == "send-next"
-                            && item["admittedAt"].is_null()
-                            && item["payload"]["afterTaskId"].is_null()
-                            && self.queue["steerableIds"]
-                                .as_array()
-                                .is_some_and(|ids| ids.iter().any(|v| v == &id));
-                        div()
-                            .flex()
-                            .flex_col()
-                            .min_w_0()
-                            .text_size(px(11.))
-                            // Wrapped then clamped: a nowrap line would widen the column.
-                            .child(div().overflow_hidden().text_ellipsis().line_clamp(1).child(
-                                format!(
-                                    "{} · {}",
-                                    item["status"].as_str().unwrap_or("queued"),
-                                    item["payload"]["text"].as_str().unwrap_or("")
-                                ),
-                            ))
-                            .when(item["reason"].is_string(), |d| {
-                                d.child(item["reason"].as_str().unwrap_or("").to_owned())
-                            })
-                            .when(steerable, |d| {
-                                d.child(
-                                    div()
-                                        .id(gpui::ElementId::Name(format!("steer-{id}").into()))
-                                        .debug_selector(|| "steer-now".into())
-                                        .cursor_pointer()
-                                        .child("Steer now")
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.send(Some(id.clone()), cx)
-                                        })),
-                                )
-                            })
-                            .when(cancellable, |d| {
-                                d.child(
-                                    div()
-                                        .id(gpui::ElementId::Name(
-                                            format!("remove-{remove_id}").into(),
-                                        ))
-                                        .debug_selector(|| "remove-queued".into())
-                                        .cursor_pointer()
-                                        .child("Remove")
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.remove_queued(remove_id.clone(), cx)
-                                        })),
-                                )
-                            })
-                    })),
-            )
             .into_any_element()
+    }
+    /// Messages still waiting in this chat's queue, oldest first.
+    /// Sends still waiting, without the ones the transcript already shows
+    /// (ComposerQueuedMessages' pending filter): a message carrying the item's
+    /// id, or for an admitted send, the same text saved after it was queued.
+    pub(super) fn queued_items(&self) -> Vec<Value> {
+        let entries = self
+            .transcript
+            .as_ref()
+            .map(|t| t.shown_entries())
+            .unwrap_or_default();
+        let shown = |item: &Value| {
+            let id = item["id"].as_str().unwrap_or_default();
+            let ids = [
+                format!("composer-steer-{id}"),
+                format!("composer-queued-{id}"),
+                format!("review-user-assistant-queued-{id}"),
+            ];
+            let admitted = item["status"] == "dispatching" && !item["admittedAt"].is_null();
+            let created = item["createdAt"].as_f64().unwrap_or(f64::MAX);
+            entries.iter().any(|entry| {
+                ids.contains(&entry.id)
+                    || admitted
+                        && entry.role == "user"
+                        && item["payload"]["text"] == entry.text.as_str()
+                        && entry
+                            .extra
+                            .get("timestamp")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(0.)
+                            >= created
+            })
+        };
+        self.queue["items"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter(|item| item["status"] != "applied" && item["status"] != "cancelled")
+                    .filter_map(|item| match (shown(item), item["status"] == "held") {
+                        (false, _) => Some(item.clone()),
+                        // A held send already in the transcript still blocks
+                        // everything after it; keep its reason and Remove, as
+                        // classic's tag on that bubble does, without a second bubble.
+                        (true, true) => {
+                            let mut item = item.clone();
+                            item["captionOnly"] = Value::Bool(true);
+                            Some(item)
+                        }
+                        (true, false) => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 

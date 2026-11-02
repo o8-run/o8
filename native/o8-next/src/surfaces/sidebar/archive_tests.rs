@@ -18,8 +18,7 @@ fn archive_fixture(cx: &mut TestAppContext, restore: bool) {
     );
     wait_for(&shell, &mut visual, |s, _| s.connected);
     if restore {
-        click(&mut visual, "sidebar-archived");
-        draw(&mut visual);
+        open_archived(&shell, &mut visual);
     }
     let sidebar = shell.read_with(&visual, |s, _| {
         s.surfaces.sidebar.view.as_ref().unwrap().clone()
@@ -39,20 +38,11 @@ fn archive_fixture(cx: &mut TestAppContext, restore: bool) {
     let bounds = visual
         .debug_bounds(Box::leak(format!("thread-row-{index}").into_boxed_str()))
         .unwrap();
-    visual.simulate_mouse_move(bounds.center(), None, gpui::Modifiers::default());
+    // Archive lives in the row menu; the row's right edge shows its state.
+    visual.simulate_mouse_down(bounds.center(), gpui::MouseButton::Right, gpui::Modifiers::default());
+    visual.simulate_mouse_up(bounds.center(), gpui::MouseButton::Right, gpui::Modifiers::default());
     draw(&mut visual);
-    let action = visual
-        .debug_bounds(Box::leak(format!("thread-archive-{id}").into_boxed_str()))
-        .unwrap();
-    let rail = visual.debug_bounds("thread-sidebar").unwrap();
-    assert!(
-        action.right() <= rail.right(),
-        "row actions must stay inside the sidebar"
-    );
-    click(
-        &mut visual,
-        Box::leak(format!("thread-archive-{id}").into_boxed_str()),
-    );
+    click(&mut visual, "sidebar-row-archive");
     wait_for(&shell, &mut visual, |s, cx| {
         s.surfaces
             .sidebar
@@ -179,7 +169,9 @@ fn sidebar_archived_disclosure_keyboard_activation_and_navigation(cx: &mut TestA
     sidebar.read_with(&visual, |s, _| {
         assert_eq!(s.diagnostic()["choice"]["id"], last)
     });
-    press_keys(&mut visual, "tab enter");
+    press_keys(&mut visual, "tab");
+    draw(&mut visual);
+    press_keys(&mut visual, "enter");
     draw(&mut visual);
     assert!(
         visual.debug_bounds("sidebar-archived").is_some(),
@@ -239,7 +231,7 @@ fn sidebar_titles_ellipsize_with_visible_archive_and_restore_at_280(cx: &mut Tes
         ("thoughts-sidebar-1998", long),
     ] {
         if id.ends_with("1998") {
-            click(&mut visual, "sidebar-archived");
+            open_archived(&shell, &mut visual);
         }
         let index = sidebar.read_with(&visual, |s, _| {
             s.rows
@@ -260,7 +252,7 @@ fn sidebar_titles_ellipsize_with_visible_archive_and_restore_at_280(cx: &mut Tes
         let rail = visual.debug_bounds("thread-sidebar").unwrap();
         assert_eq!(rail.size.width, px(280.));
         let action = visual
-            .debug_bounds(Box::leak(format!("thread-archive-{id}").into_boxed_str()))
+            .debug_bounds(Box::leak(format!("thread-mark-slot-{id}").into_boxed_str()))
             .unwrap();
         sidebar.read_with(&visual, |s, _| {
             let layout = &s.title_layouts[id];
@@ -278,7 +270,26 @@ fn sidebar_titles_ellipsize_with_visible_archive_and_restore_at_280(cx: &mut Tes
                 "title must not overlap the action"
             );
             assert!(action.right() <= rail.right());
-            assert_eq!(action.size.width, px(38.));
+            assert_eq!(action.size.width, px(11.));
         });
     }
+}
+
+/// Archived is a group at the end of the list, so a long list scrolls to it first.
+fn open_archived(shell: &Entity<Shell>, visual: &mut VisualTestContext) {
+    let sidebar = shell.read_with(visual, |s, _| {
+        s.surfaces.sidebar.view.as_ref().unwrap().clone()
+    });
+    sidebar.update(visual, |s, cx| {
+        let index = s
+            .rows
+            .iter()
+            .position(|r| r.kind == "section" && r.title == "Archived")
+            .unwrap();
+        s.scroll.scroll_to_item_strict(index, ScrollStrategy::Top);
+        cx.notify();
+    });
+    draw(visual);
+    click(visual, "sidebar-archived");
+    draw(visual);
 }

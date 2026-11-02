@@ -33,8 +33,8 @@ afterAll(() => {
 });
 
 describe.sequential('workspace parking mode real Settings path', () => {
-  it('defaults to manual and persists pressure mode through POST, GET, and TOML', async () => {
-    expect((await (await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json()).values.workspaceParkingMode).toBe('manual');
+  it('defaults to on-settle parking and persists pressure mode through POST, GET, and TOML', async () => {
+    expect((await (await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json()).values.workspaceParkingMode).toBe('settled');
 
     const response = await POST(post({ workspaceParkingMode: 'pressure' }));
     const payload = await response.json();

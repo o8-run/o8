@@ -1,5 +1,4 @@
 //! Slash suggestions, intent chips and prompt insertion beside the native editor.
-use super::prompt_view::small;
 use super::*;
 use crate::composer::commands;
 use gpui::{AnyElement, KeyDownEvent};
@@ -30,11 +29,16 @@ impl Surface {
                 .update(cx, |i, _| i.controls.prompt.view = Some(view.clone()));
             view
         };
-        // Reserve one toolbar row so changing the draft never resizes the
-        // transcript. Only slash/filter/presence changes invalidate this scene.
+        // The row holds only a command result now; it takes no height until
+        // there is one. Only slash/filter/presence changes invalidate this scene.
+        let row = if self.composer.read(cx).controls.prompt.feedback.is_empty() {
+            0.
+        } else {
+            34.
+        };
         let mut style = gpui::StyleRefinement::default();
         style.size.width = Some(gpui::relative(1.).into());
-        style.size.height = Some(px(34.).into());
+        style.size.height = Some(px(row).into());
         style.flex_shrink = Some(0.);
         view.cached(style)
     }
@@ -50,46 +54,10 @@ impl Surface {
         }
         view.into_any_element()
     }
-    pub(super) fn mode_chip(
-        &self,
-        picked: &str,
-        enabled: bool,
-        cx: &mut Context<Self>,
-    ) -> gpui::Stateful<gpui::Div> {
-        self.track_prompt_anchor(
-            self.composer_button(
-                "composer-mode",
-                crate::composer::controls::mode_label(picked),
-                enabled,
-                cx,
-                |s, w, cx| s.open_composer_picker("mode", w, cx),
-            ),
-            "mode",
-        )
-        .when(picked != "solo", |v| {
-            v.bg(theme().selection).text_color(theme().accent)
-        })
-        .child(crate::icon::stroke(
-            "m6 9 6 6 6-6",
-            theme().text_secondary,
-            9.,
-            1.5,
-        ))
-    }
+    /// ModeChip: icon only, a checkout for Shared and a branch for Worktrees,
+    /// accent while open or in Worktrees.
     pub(super) fn composer_intent(&self, cx: &mut Context<Self>) -> AnyElement {
         let editor = self.composer.read(cx);
-        let has_text = !editor.text.trim().is_empty();
-        let repo = self.intent_repo(cx);
-        let label = repo
-            .as_deref()
-            .and_then(|p| std::path::Path::new(p).file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "choose repo".into());
-        let branch = if editor.controls.prompt.branch.is_empty() {
-            "main".to_owned()
-        } else {
-            editor.controls.prompt.branch.clone()
-        };
         let enabled = !self.saving && !editor.controls.busy;
         let feedback = editor.controls.prompt.feedback.clone();
         div()
@@ -100,37 +68,10 @@ impl Surface {
             .gap(px(6.))
             .px(px(12.))
             .py(px(4.))
-            .when(has_text, |v| {
-                v.child(small("Work on"))
-                    .child(
-                        self.prompt_trigger("composer-intent-repo", &label, "repo", enabled, cx)
-                            .max_w(px(160.))
-                            .truncate(),
-                    )
-                    .child(small("off"))
-                    .child(
-                        self.prompt_trigger(
-                            "composer-intent-branch",
-                            &branch,
-                            "branch",
-                            enabled,
-                            cx,
-                        )
-                        .max_w(px(160.))
-                        .truncate(),
-                    )
-            })
-            .child(self.prompt_trigger("composer-quick", "Commands", "quick", enabled, cx))
-            .child(self.prompt_trigger("composer-prompts", "Prompts", "prompts", enabled, cx))
-            .when(has_text, |v| {
-                v.child(self.prompt_trigger(
-                    "composer-save-prompt",
-                    "Save prompt",
-                    "save-prompt",
-                    enabled,
-                    cx,
-                ))
-            })
+            // Repository and base branch moved into the "+" drawer: classic
+            // retired the Work on row (20d627a8d) and it crowded the composer.
+            // Classic has no Commands or Prompts buttons: quick actions open
+            // with Cmd+Shift+K or "/", saved prompts from the "+" menu.
             .when(!feedback.is_empty(), |v| {
                 v.child(
                     self.prompt_trigger(
@@ -150,7 +91,7 @@ impl Surface {
             })
             .into_any_element()
     }
-    fn track_prompt_anchor(
+    pub(super) fn track_prompt_anchor(
         &self,
         button: gpui::Stateful<gpui::Div>,
         kind: &'static str,
@@ -225,9 +166,7 @@ impl Surface {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.composer.read(cx).focus.is_focused(window) {
-            return false;
-        }
+        // The composer has no Commands button, so the shortcut works while typing.
         if self.composer.read(cx).controls.open == Some("quick") {
             if let Some(query) = &self.composer.read(cx).controls.prompt.query {
                 query.read(cx).focus.focus(window);
@@ -295,7 +234,7 @@ impl Surface {
         let draft = editor.read(cx).text.clone();
         let mut fields = vec![];
         if open == "save-prompt" {
-            for text in [
+            for (index, text) in [
                 draft
                     .lines()
                     .find(|s| !s.trim().is_empty())
@@ -305,9 +244,13 @@ impl Surface {
                     .collect::<String>(),
                 String::new(),
                 draft,
-            ] {
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 fields.push(cx.new(|cx| {
                     let mut i = Composer::new(cx);
+                    i.newline_on_enter = index == 2;
                     i.set_text(&text, cx);
                     i
                 }));
@@ -561,11 +504,12 @@ impl Surface {
         if open == "mode" && matches!(key, "up" | "down") {
             let routing = self.composer_routing(cx).unwrap_or(Value::Null);
             // Arrows skip Shared where it is unavailable, as classic's cycle does.
-            let ids: &[&str] = if crate::composer::controls::shares_checkout(routing["backend"].as_str()) {
-                &["mode-fast", "mode-multitask"]
-            } else {
-                &["mode-multitask"]
-            };
+            let ids: &[&str] =
+                if crate::composer::controls::shares_checkout(routing["backend"].as_str()) {
+                    &["mode-fast", "mode-multitask"]
+                } else {
+                    &["mode-multitask"]
+                };
             let current = ids
                 .iter()
                 .position(|id| {
@@ -585,6 +529,28 @@ impl Surface {
             let next = (current + 1) % ids.len();
             if let Some(focus) = self.composer.read(cx).controls.focus.get(ids[next]) {
                 focus.focus(window);
+            }
+            cx.stop_propagation();
+            return true;
+        }
+        // Number keys pick a row, as in the Claude desktop permission menu
+        // (Q 2026-10-31); the rows show their numbers.
+        if matches!(open, "mode" | "access")
+            && !event.keystroke.modifiers.modified()
+            && let Some(index) = key.parse::<usize>().ok().and_then(|n| n.checked_sub(1))
+        {
+            let (field, values) = if open == "mode" {
+                ("pickedMode", ["fast", "multitask"])
+            } else {
+                ("permissionMode", ["full", "plan"])
+            };
+            if let Some(value) = values.get(index) {
+                let routing = self.composer_routing(cx).unwrap_or(Value::Null);
+                if *value != "fast"
+                    || crate::composer::controls::shares_checkout(routing["backend"].as_str())
+                {
+                    self.composer_choice(field, value, window, cx);
+                }
             }
             cx.stop_propagation();
             return true;

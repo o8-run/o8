@@ -327,6 +327,7 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
             .items_center()
             .gap(px(4.))
             .children(p.tabs.iter().map(|t| tool_tab(s, *t, cx)))
+            .children(contextual::issue_tabs(s, cx))
             .when(selected == Tool::Launcher, |v| {
                 v.child(
                     button(s, "panel-tab", "New tab", cx, |s, w, cx| {
@@ -436,17 +437,19 @@ pub(super) fn divider(s: &Shell, lower: Tool, cx: &mut Context<Shell>) -> AnyEle
         .border_color(theme().border)
         .bg(theme().background)
         .child(
-            button(
+            bare(
                 s,
                 "panel-split-resize",
                 "Drag to resize · double-click to reset",
                 cx,
                 |_, _, _| {},
             )
+            .relative()
             .w_full()
             .h(px(7.))
             .rounded_none()
             .cursor(gpui::CursorStyle::ResizeUpDown)
+            .child(crate::theme::split_line("panel-split-resize", false, -1., false))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|s, e: &gpui::MouseDownEvent, w, cx| {

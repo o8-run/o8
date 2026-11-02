@@ -1,6 +1,23 @@
 //! Narrow embedding API. The shell uses the production Surface and composer.
 use super::*;
 impl Surface {
+    pub(crate) fn shell_bind_thread(&mut self, id: String) {
+        self.sessions.retain(|session| session.id == id);
+        self.bound_session = Some(id);
+    }
+    /// Keep repeated Inbox opens useful after the operator edits or clears a draft.
+    pub(crate) fn prepend_inbox_draft(
+        &mut self,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.composer.read(cx).text.contains(text) {
+            self.shell_focus(true, window, cx);
+        } else {
+            self.prepend_draft(text, window, cx);
+        }
+    }
     /// Puts Symon's drafted message ahead of the draft, unsent, as the desktop's
     /// orchestrator_draft injection does, and focuses the composer.
     pub(crate) fn prepend_draft(

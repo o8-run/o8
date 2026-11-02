@@ -11,7 +11,6 @@ pub(super) struct Line {
     pub height: f32,
     pub runs: Vec<TextRun>,
     pub dotted: Vec<Range<usize>>,
-    pub note_color: Rgba,
 }
 pub(super) fn lines(
     source: &str,
@@ -58,9 +57,6 @@ pub(super) fn lines(
             let mut display = String::new();
             let mut map = vec![(0, 0)];
             for (at, ch) in raw.char_indices() {
-                if review.dots.contains(&(offset + at)) {
-                    display.push('●');
-                }
                 if at >= skip && !review.hidden.iter().any(|r| r.contains(&(offset + at))) {
                     if let Some(range) = review.arrows.iter().find(|r| r.start == offset + at) {
                         let _ = range;
@@ -219,7 +215,6 @@ pub(super) fn lines(
                 size: if in_code { 12. } else { size },
                 height: size.max(13.5) * 1.55,
                 dotted,
-                note_color: accent,
                 runs,
             };
             offset += raw.len() + 1;

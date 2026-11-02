@@ -12,6 +12,8 @@ use gpui::{
     WindowOptions, div, point, prelude::*, px, size,
 };
 use std::{collections::HashSet, time::Duration};
+#[path = "subagents/grid.rs"]
+mod subagent_binding;
 
 pub struct Grid {
     client: Client,
@@ -26,6 +28,13 @@ pub struct Grid {
     refreshing: bool,
     loading: HashSet<String>,
     focus_pending: bool,
+    subagents: std::collections::HashMap<
+        String,
+        (
+            gpui::Entity<crate::subagents::Inspector>,
+            gpui::Subscription,
+        ),
+    >,
 }
 impl Grid {
     pub(crate) fn shell_reading_focused(&self, window: &Window) -> bool {
@@ -62,6 +71,7 @@ impl Grid {
             refreshing: false,
             loading: HashSet::new(),
             focus_pending: true,
+            subagents: Default::default(),
         }
     }
     fn persist(&mut self) {
@@ -137,6 +147,7 @@ impl Grid {
                         }
                     }
                     this.load_images(cx);
+                    this.bind_subagents(cx);
                     cx.notify();
                 });
             })
@@ -161,6 +172,7 @@ impl Grid {
             }
         }
         if rows_changed {
+            self.bind_subagents(cx);
             self.load_images(cx);
         }
         if visible_changed {

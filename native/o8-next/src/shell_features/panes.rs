@@ -321,12 +321,14 @@ fn node(
 
 fn divider(id: &str, vertical: bool) -> impl IntoElement {
     let drag = Divider(id.to_owned());
+    let group = format!("pane-divider-{id}");
     div()
         .id(SharedString::from(format!("pane-divider-{id}")))
         .debug_selector({
             let id = id.to_owned();
             move || format!("pane-divider-{id}")
         })
+        .relative()
         .flex_shrink_0()
         .flex()
         .items_center()
@@ -339,6 +341,7 @@ fn divider(id: &str, vertical: bool) -> impl IntoElement {
                 .when(vertical, |d| d.w(px(1.)).h_full())
                 .when(!vertical, |d| d.h(px(1.)).w_full()),
         )
+        .child(crate::theme::split_line(group, vertical, 2.5, false))
         .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
 }
 

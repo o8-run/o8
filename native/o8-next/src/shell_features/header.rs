@@ -19,16 +19,25 @@ fn render(
     cx: &mut Context<Shell>,
 ) -> Option<AnyElement> {
     // The desktop header, measured from WorkspaceHeaderStrip, LeftHeaderStrip
-    // and PanelHeaderStrip. The sidebar toggle stays at x=74 (rail 60 + 14)
+    // and PanelHeaderStrip. The sidebar toggle stays at x=78 (rail 52 + 26)
     // whether the sidebar is open or not. With the sidebar open, search sits
     // at the sidebar's right edge and back/forward start the workspace header;
     // with it closed, toggle, search, back and forward share one row.
     super::right_panel::sync(s, window, cx);
+    // Settings is its own page with its own header, as in classic.
+    if s.surfaces.settings.view.is_some() {
+        return None;
+    }
     record_visit(s);
     super::header_tabs::settle(s, cx);
     let back = adjacent(s, -1);
     let forward = adjacent(s, 1);
     let hidden = s.surfaces.sidebar.hidden;
+    // Redraw each frame while the sidebar column opens or closes.
+    let (open, moving) = super::super::sidebar::travel(s);
+    if moving {
+        window.request_animation_frame();
+    }
     let panel = super::right_panel::width(s, window);
     let panel_open = super::right_panel::is_open(s);
     let shown = pill_list(s);
@@ -56,9 +65,9 @@ fn render(
         .gap(px(4.))
         // 4px workspace inset, plus the strip's 10px collapsed padding, or its
         // 8px padding after the 4px sidebar resize edge.
-        .pl(px(if hidden { 14. } else { 16. }))
+        .pl(px(if hidden && !moving { TOGGLE_INSET } else { 16. }))
         .pr(px(8.))
-        .when(hidden, |row| {
+        .when(hidden && !moving, |row| {
             row.child(sidebar_toggle(true, cx)).child(search_button(cx))
         })
         .child(history("header-back", BACK, "Back", back, cx))
@@ -71,7 +80,7 @@ fn render(
                 .items_center()
                 .gap(px(4.))
                 .mt(px(1.3))
-                .child(super::header_tools::play(s, window, cx))
+                .child(super::right_panel::subagent_button(s, cx))
                 .child(super::activity_dock::toggle_button(s, cx))
                 .when(!panel_open, |row| {
                     row.child(super::right_panel::toggle_button(s, false, cx))
@@ -90,6 +99,7 @@ fn render(
         });
     Some(
         div()
+            .relative()
             .flex()
             .items_center()
             .flex_shrink_0()
@@ -102,7 +112,7 @@ fn render(
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
-            .when(!hidden, |row| {
+            .when(!hidden && !moving, |row| {
                 row.child(
                     div()
                         .w(px(super::super::sidebar::width(s)))
@@ -111,12 +121,35 @@ fn render(
                         .flex()
                         .items_center()
                         .gap(px(4.))
-                        .pl(px(14.))
+                        .pl(px(TOGGLE_INSET))
                         .pr(px(8.))
                         .child(sidebar_toggle(false, cx))
                         .child(div().flex_1())
                         .child(search_button(cx)),
                 )
+            })
+            // In flight the column's slot travels with it, so the tabs move with
+            // the workspace, while the toggle holds its place and search rides
+            // the column's edge down to its spot beside the toggle. At either
+            // end every button sits where the resting header puts it.
+            .when(moving, |row| {
+                let edge = super::super::sidebar::width(s) * open;
+                let top = (crate::theme::GEOMETRY.header - 26.) / 2.;
+                row.child(div().w(px(edge.max(FOLDED))).h_full().flex_shrink_0())
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(TOGGLE_INSET))
+                            .top(px(top))
+                            .child(sidebar_toggle(hidden, cx)),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px((edge - 8. - SEARCH_W).max(TOGGLE_INSET + TOGGLE_W + 4.)))
+                            .top(px(top))
+                            .child(search_button(cx)),
+                    )
             })
             .when(!super::right_panel::maximized(s), |row| {
                 row.child(workspace)
@@ -124,11 +157,41 @@ fn render(
             .when_some(panel, |row, (full, shown)| {
                 row.child(super::right_panel::header(s, full, shown, cx))
             })
+            // The resize edges stay invisible below; these mark where they sit.
+            .when(!hidden && !moving, |row| {
+                row.child(edge_mark().left(px(
+                    super::super::sidebar::width(s) + super::super::sidebar::EDGE_GAP,
+                )))
+            })
+            .when_some(
+                panel.filter(|_| !super::right_panel::maximized(s)),
+                |row, (_, shown)| row.child(edge_mark().right(px(shown + 4.))),
+            )
             .into_any_element(),
     )
 }
 
+/// A quiet hairline in the header above a resize edge.
+fn edge_mark() -> gpui::Div {
+    div()
+        .absolute()
+        .top(px(8.))
+        .bottom(px(8.))
+        .w(px(1.))
+        .bg(theme().border)
+}
+
 /// SidebarTogglePill: 14px panel glyph, orange while the sidebar is pinned open.
+/// The toggle's and search's widths: 7px either side of a 14px and a 16px glyph.
+const TOGGLE_W: f32 = 28.;
+const SEARCH_W: f32 = 30.;
+/// The travelling slot's floor: the folded strip's 14px inset, toggle, 4px gap,
+/// search and 4px gap, less the strip's 16px padding in flight, so Back lands
+/// where the folded header puts it.
+/// Past the traffic lights, so the toggle never crowds them.
+const TOGGLE_INSET: f32 = 26.;
+const FOLDED: f32 = TOGGLE_INSET + TOGGLE_W + 4. + SEARCH_W + 4. - 16.;
+
 fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
     pill(
         "header-sidebar",
@@ -225,8 +288,8 @@ pub(super) fn icon_button(
     ))
 }
 
-pub(super) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
-    s.surfaces.sidebar.hidden = !s.surfaces.sidebar.hidden;
+pub(crate) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    super::super::sidebar::toggle(s, cx);
     s.restore_focus(window, cx);
     cx.notify();
 }

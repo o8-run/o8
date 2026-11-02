@@ -2,15 +2,31 @@ use super::prompt_acceptance_tests::*;
 use super::*;
 
 #[gpui::test]
+fn native_composer_uppercase_slash_runs_on_enter(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-input", cx);
+    cx.simulate_input("/PROMPTS");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    draw(cx);
+    surface.read_with(cx, |s, cx| {
+        assert_eq!(s.composer.read(cx).controls.open, Some("prompts"));
+        assert!(s.composer.read(cx).text.is_empty());
+        assert!(s.queue["items"].as_array().unwrap().is_empty());
+    });
+}
+
+#[gpui::test]
 fn native_composer_controls_orchestrate_routes_one_fleet_turn_without_changing_the_mode(
     cx: &mut TestAppContext,
 ) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    click("send-mode-steer", cx);
     focus(&surface, cx);
     cx.simulate_input("/orchestrate Coordinate this task");
-    cx.simulate_keystrokes("enter");
+    // The fixture's chat is mid-turn; ⌘↵ queues instead of steering.
+    cx.simulate_keystrokes("cmd-enter");
     wait(&surface, cx, |s, _| {
         !s.saving
             && s.queue["items"]
@@ -175,7 +191,8 @@ fn native_composer_controls_save_prompt_and_create_branch_persist_without_send(
     focus(&surface, cx);
     cx.simulate_input("A saved composer prompt");
     draw(cx);
-    click("composer-save-prompt", cx);
+    click("composer-attach", cx);
+    click("attach-save-prompt", cx);
     click("composer-prompt-submit", cx);
     wait(&surface, cx, |s, cx| {
         !s.composer.read(cx).controls.prompt.result.is_empty()
@@ -196,7 +213,8 @@ fn native_composer_controls_save_prompt_and_create_branch_persist_without_send(
             .any(|p| p["body"] == "A saved composer prompt" && p["scope"] == "repo")
     );
     click("composer-prompt-close", cx);
-    click("composer-intent-branch", cx);
+    click("composer-attach", cx);
+    click("attach-branch", cx);
     wait_selector(cx, "composer-branch-new");
     click("composer-branch-new", cx);
     click("composer-prompt-field-0", cx);

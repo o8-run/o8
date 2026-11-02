@@ -1,4 +1,4 @@
-//! The Inbox view: Active and Settled sections over the server's inbox
+//! The Inbox view: Active, Snoozed, Settled and Archived sections over the server's inbox
 //! settlement (docs/internals/inbox-settlement.md), with Settle and Un-settle
 //! on the row and on Mod+Shift+S, park-and-advance and an Undo toast.
 //!
@@ -18,11 +18,46 @@ use gpui::{AnyElement, div, px};
 /// The last Settle and its toast, which offers Undo until a newer Settle or
 /// its timeout.
 pub(super) struct Undo {
-    id: String,
+    ids: Vec<String>,
     toast: toasts::ToastId,
 }
 
-/// Active, then Settled newest first, then Archived. A child worker stays
+/// Threads the server just settled on its own (inbox/auto-settle.ts): seen
+/// active in the last listing, settled with a reason in this one. A first
+/// listing announces nothing, so a restart does not replay old settles.
+pub(super) fn newly_auto_settled(before: &[Session], after: &[Session]) -> Vec<(String, String)> {
+    after
+        .iter()
+        .filter(|s| s.settled() && s.auto_settled_reason.is_some())
+        .filter(|s| before.iter().any(|old| old.id == s.id && !old.settled()))
+        .map(|s| (s.id.clone(), s.title.clone()))
+        .collect()
+}
+
+/// "merged · 2h"; an idle settle reads "idle 3d".
+pub(super) fn note_with_age(reason: &str, age: &str) -> String {
+    if reason == "idle" {
+        format!("idle {age}")
+    } else {
+        format!("{} · {}", auto_note(reason), age)
+    }
+}
+
+/// An automatic settle was not the user's doing, so its Undo stays up
+/// longer than a manual Settle's notice.
+pub(super) const AUTO_SETTLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+
+/// The short note a Settled row shows in front of its age.
+pub(super) fn auto_note(reason: &str) -> &'static str {
+    match reason {
+        "pr-merged" | "released" => "merged",
+        "cleaned" => "cleaned",
+        "idle" => "idle",
+        _ => "auto",
+    }
+}
+
+/// Active, then Snoozed, Settled newest first, then Archived. A child worker stays
 /// out: its parent conversation is listed and carries its state.
 pub(super) fn rows(
     sessions: &[Session],
@@ -30,6 +65,7 @@ pub(super) fn rows(
     matches: &HashSet<String>,
     expanded: &HashSet<String>,
     branches: &HashSet<String>,
+    snoozes: &HashMap<String, u64>,
 ) -> Vec<Row> {
     let now = recents::now();
     let searching = !query.trim().is_empty();
@@ -39,6 +75,16 @@ pub(super) fn rows(
         .partition(|s| s.status != "archived");
     let (mut settled, active): (Vec<_>, Vec<_>) = live.into_iter().partition(|s| s.settled());
     settled.sort_by(|a, b| b.settled_at.cmp(&a.settled_at));
+    // A snooze hides an Active thread until its time; then it comes back on
+    // top, under the threads waiting on you, until it is opened.
+    let (mut snoozed, mut active): (Vec<_>, Vec<_>) = active
+        .into_iter()
+        .partition(|s| snoozes.get(&s.id).is_some_and(|until| *until > now));
+    snoozed.sort_by_key(|s| snoozes[&s.id]);
+    // A work outcome does not settle attention; merged threads stay Active
+    // until their persisted inbox state changes.
+    let woken = |s: &Session| snoozes.contains_key(&s.id);
+    active.sort_by_key(|s| (!needs_input(s), !woken(s)));
     // Active always heads the list; its row carries the view picker.
     let mut rows = vec![recents::header("section", "Active", "")];
     let open = searching || expanded.contains("Active");
@@ -47,12 +93,17 @@ pub(super) fn rows(
     } else {
         active.len().min(50)
     };
-    rows.extend(
-        active
-            .iter()
-            .take(count)
-            .map(|s| recents::thread_row(s, now, branches)),
-    );
+    rows.extend(active.iter().take(count).map(|s| {
+        let mut row = recents::thread_row(s, now, branches);
+        row.marker = if needs_input(s) {
+            "input"
+        } else if woken(s) {
+            "back"
+        } else {
+            ""
+        };
+        row
+    }));
     if count < active.len() {
         rows.push(recents::header(
             "more",
@@ -60,16 +111,43 @@ pub(super) fn rows(
             "Active",
         ));
     }
+    let open = searching || expanded.contains("Snoozed");
+    let at = rows.len();
+    recents::group_rows(&mut rows, "Snoozed", &snoozed, 10, open, now, branches);
+    // A snoozed row reads when it comes back in place of its age.
+    for row in &mut rows[at..] {
+        if let Some(until) = row.id.as_ref().and_then(|id| snoozes.get(id)) {
+            row.age = snooze::until_label(*until, now);
+        }
+    }
     let open = searching || expanded.contains("Settled");
+    let at = rows.len();
     recents::group_rows(&mut rows, "Settled", &settled, 10, open, now, branches);
+    // An automatic settle says why: "merged · 2h".
+    for row in &mut rows[at..] {
+        let reason = row.id.as_ref().and_then(|id| {
+            settled
+                .iter()
+                .find(|s| &s.id == id)
+                .and_then(|s| s.auto_settled_reason.as_deref())
+        });
+        if let Some(reason) = reason {
+            row.age = note_with_age(reason, &row.age);
+        }
+    }
     let open = searching || expanded.contains("Archived");
     recents::group_rows(&mut rows, "Archived", &archived, 12, open, now, branches);
     rows
 }
 
+/// A thread waiting on the user: a question or an approval.
+pub(super) fn needs_input(s: &Session) -> bool {
+    sidebar::rank(s) == 3 || s.status.trim().eq_ignore_ascii_case("approval")
+}
+
 impl ThreadList {
     /// Settle applies in the Inbox view on a host that projects settlement.
-    fn settleable(&self, id: &str) -> Option<&Session> {
+    pub(super) fn settleable(&self, id: &str) -> Option<&Session> {
         (self.view() == folders::View::Inbox)
             .then(|| {
                 self.sessions
@@ -102,6 +180,104 @@ impl ThreadList {
         };
         self.settle_id(id, cx);
         true
+    }
+    /// Mod+Z, right after a Settle, un-settles it as the toast's Undo does.
+    /// It applies only while the sidebar or nothing holds focus, so an
+    /// editor's own undo is untouched.
+    pub(crate) fn undo_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let stroke = &event.keystroke;
+        let secondary = if cfg!(target_os = "macos") {
+            stroke.modifiers.platform
+        } else {
+            stroke.modifiers.control
+        };
+        if !(secondary && !stroke.modifiers.shift && !stroke.modifiers.alt && stroke.key == "z")
+            || self.editing
+        {
+            return false;
+        }
+        // Anywhere in the list counts: its own focus, a row's, the archive's.
+        let sidebar = window.focused(cx).is_none()
+            || self.focus.contains_focused(window, cx)
+            || self.archived_focus.contains_focused(window, cx);
+        let Some(undo) = self.undo.take_if(|_| sidebar) else {
+            return false;
+        };
+        toasts::dismiss(undo.toast, cx);
+        self.undo_ids(undo.ids, cx);
+        true
+    }
+    /// Undo only un-settles still-settled threads. An old toast cannot settle
+    /// a thread restored by another client or a new run.
+    fn undo_ids(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {
+        let targets: Vec<_> = ids
+            .into_iter()
+            .filter_map(|id| {
+                self.settleable(&id)
+                    .filter(|s| s.settled())
+                    .map(|s| (id.clone(), s.repo_path.clone()))
+            })
+            .collect();
+        let client = self.client.clone();
+        let task = cx.background_executor().spawn(async move {
+            for (id, workspace) in targets {
+                if let Err(error) = client.inbox_action(workspace.as_deref(), &id, "unsettle") {
+                    return Err(error);
+                }
+            }
+            Ok(())
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                if let Err(error) = result {
+                    this.notice = error;
+                }
+                this.generation += 1;
+                this.load(cx);
+            });
+        })
+        .detach();
+    }
+    /// A toast for what the server settled on its own, with the same Undo
+    /// (and Mod+Z) as a manual Settle.
+    pub(super) fn announce_auto_settled(
+        &mut self,
+        auto: Vec<(String, String)>,
+        cx: &mut Context<Self>,
+    ) {
+        if auto.is_empty() || self.view() != folders::View::Inbox {
+            return;
+        }
+        if let Some(undo) = self.undo.take() {
+            toasts::dismiss(undo.toast, cx);
+        }
+        let message = match auto.as_slice() {
+            [(_, title)] => format!("Auto-settled “{}”", title),
+            _ => format!("Auto-settled {} finished threads", auto.len()),
+        };
+        let ids: Vec<String> = auto.into_iter().map(|(id, _)| id).collect();
+        let list = cx.entity().downgrade();
+        let targets = ids.clone();
+        let undo = toasts::Action::new("Undo", move |_, cx| {
+            let _ = list.update(cx, |this, cx| {
+                this.undo = None;
+                this.undo_ids(targets.clone(), cx);
+            });
+        });
+        let toast = toasts::show(
+            toasts::Kind::Info,
+            message,
+            vec![undo],
+            Some(AUTO_SETTLE_TIMEOUT),
+            cx,
+        );
+        self.undo = Some(Undo { ids, toast });
     }
     pub(super) fn settle_id(&mut self, id: String, cx: &mut Context<Self>) {
         if self.settling.is_some() {
@@ -141,6 +317,11 @@ impl ThreadList {
         if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
             session.settled_override = state["settledOverride"].as_str().map(str::to_owned);
             session.settled_at = state["settledAt"].as_str().map(str::to_owned);
+            session.auto_settled_reason = state["autoSettledReason"].as_str().map(str::to_owned);
+            // Settling bumps the subject's revision; a later Pin must quote it.
+            if let Some(revision) = state["inboxRevision"].as_u64() {
+                session.inbox_revision = Some(revision);
+            }
         }
         // A listing already in flight predates this answer; fence it, as
         // archive and rename do, so it cannot put the row back.
@@ -161,7 +342,7 @@ impl ThreadList {
             let undo = toasts::Action::new("Undo", move |_, cx| {
                 let _ = list.update(cx, |this, cx| {
                     this.undo = None;
-                    this.settle_id(target, cx);
+                    this.undo_ids(vec![target], cx);
                 });
             });
             let toast = toasts::show(
@@ -171,8 +352,14 @@ impl ThreadList {
                 Some(toasts::NOTICE_TIMEOUT),
                 cx,
             );
-            self.undo = Some(Undo { id, toast });
-        } else if self.undo.as_ref().is_some_and(|undo| undo.id == id)
+            self.undo = Some(Undo {
+                ids: vec![id],
+                toast,
+            });
+        } else if self
+            .undo
+            .as_ref()
+            .is_some_and(|undo| undo.ids.contains(&id))
             && let Some(undo) = self.undo.take()
         {
             toasts::dismiss(undo.toast, cx);
@@ -180,7 +367,7 @@ impl ThreadList {
         self.load(cx);
     }
     /// The Active thread now in the settled row's place, else the one above.
-    fn next_active(&self, index: Option<usize>) -> Option<String> {
+    pub(super) fn next_active(&self, index: Option<usize>) -> Option<String> {
         let index = index?;
         let end = self
             .rows
@@ -241,8 +428,10 @@ impl ThreadList {
                     11.,
                     2.6,
                 ))
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_click(cx.listener(move |this, _, window, cx| {
                     cx.stop_propagation();
+                    // Keeps Mod+Z with the list for the Undo that follows.
+                    this.focus.focus(window);
                     this.settle_id(id.clone(), cx);
                 }))
                 .into_any_element(),
@@ -252,5 +441,76 @@ impl ThreadList {
     #[cfg(test)]
     pub(crate) fn undo_toast(&self) -> Option<toasts::ToastId> {
         self.undo.as_ref().map(|undo| undo.toast)
+    }
+}
+
+#[cfg(test)]
+mod auto_settle_tests {
+    use super::*;
+
+    fn session(id: &str, settled: bool, reason: Option<&str>) -> Session {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "title": format!("Thread {id}"), "status": "idle",
+            "inboxSubject": { "kind": "conversation", "id": id },
+            "settledOverride": settled.then_some("settled"),
+            "settledAt": settled.then_some("2026-10-31T10:00:00.000Z"),
+            "autoSettledReason": reason,
+        }))
+        .expect("session fixture")
+    }
+
+    #[test]
+    fn only_a_transition_to_an_automatic_settle_is_announced() {
+        let before = [
+            session("a", false, None),
+            session("b", false, None),
+            session("c", true, Some("cleaned")),
+        ];
+        let after = [
+            session("a", true, Some("pr-merged")),
+            session("b", true, None),
+            session("c", true, Some("cleaned")),
+            session("d", true, Some("released")),
+        ];
+        assert_eq!(
+            newly_auto_settled(&before, &after),
+            vec![("a".to_owned(), "Thread a".to_owned())]
+        );
+        // The first listing after a launch replays nothing.
+        assert!(newly_auto_settled(&[], &after).is_empty());
+    }
+
+    #[test]
+    fn settled_rows_say_why_they_settled_on_their_own() {
+        let sessions = [
+            session("a", true, Some("pr-merged")),
+            session("b", true, None),
+            session("c", true, Some("cleaned")),
+        ];
+        let rows = rows(
+            &sessions,
+            "",
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashMap::new(),
+        );
+        let age = |id: &str| {
+            rows.iter()
+                .find(|r| r.id.as_deref() == Some(id))
+                .unwrap()
+                .age
+                .clone()
+        };
+        assert!(age("a").starts_with("merged · "), "{}", age("a"));
+        assert!(age("c").starts_with("cleaned · "), "{}", age("c"));
+        assert!(!age("b").contains('·'), "{}", age("b"));
+    }
+
+    #[test]
+    fn an_idle_settle_reads_idle_and_its_age() {
+        assert_eq!(note_with_age("idle", "4d"), "idle 4d");
+        assert_eq!(note_with_age("released", "2h"), "merged · 2h");
+        assert_eq!(note_with_age("cleaned", "1d"), "cleaned · 1d");
     }
 }

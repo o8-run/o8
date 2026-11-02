@@ -79,7 +79,7 @@ fn sidebar_recents_groups_times_more_and_keyboard(cx: &mut TestAppContext) {
             .count(),
         16
     );
-    click(&mut visual, "thread-search");
+    visual.simulate_keystrokes("ctrl-f");
     visual.simulate_keystrokes("escape end");
     settle(&shell, &mut visual);
     let sidebar = shell.read_with(&visual, |s, _| {
@@ -114,7 +114,7 @@ fn sidebar_recents_groups_times_more_and_keyboard(cx: &mut TestAppContext) {
     });
 }
 
-fn native_rows(shell: &Entity<Shell>, cx: &VisualTestContext) -> Value {
+pub(super) fn native_rows(shell: &Entity<Shell>, cx: &VisualTestContext) -> Value {
     shell.read_with(cx, |s, cx| {
         serde_json::to_value(&*s.surfaces.sidebar.view.as_ref().unwrap().read(cx).rows).unwrap()
     })

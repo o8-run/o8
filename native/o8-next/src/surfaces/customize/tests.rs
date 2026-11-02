@@ -46,12 +46,14 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
     custom_click(cx, "rail-more");
     cx.simulate_keystrokes("up enter");
     draw(cx);
-    assert!(shell.read_with(cx, |s, _| s.surfaces.projects.open && !s.surfaces.customize.open));
+    assert!(shell.read_with(cx, |s, _| s.surfaces.projects.open
+        && !s.surfaces.customize.open));
     // ArrowDown from Projects reaches Customize again.
     custom_click(cx, "rail-more");
     cx.simulate_keystrokes("down enter");
     draw(cx);
-    assert!(shell.read_with(cx, |s, _| s.surfaces.customize.open && !s.surfaces.projects.open));
+    assert!(shell.read_with(cx, |s, _| s.surfaces.customize.open
+        && !s.surfaces.projects.open));
     custom_click(cx, "shell-home");
     let start = Instant::now();
     custom_click(cx, "rail-more");
@@ -228,4 +230,98 @@ fn customize_auth_error_and_retry(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("custom-error").is_some());
     custom_click(cx, "custom-refresh");
     assert!(cx.debug_bounds("custom-error").is_some());
+}
+
+#[gpui::test]
+fn customize_plugins_review_link_run_remove(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--customize");
+    let (_shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("customize-plugins.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    custom_click(cx, "rail-more");
+    custom_click(cx, "rail-more-customize");
+    custom_click(cx, "custom-tab-plugins");
+    assert!(cx.debug_bounds("plugin-empty").is_some());
+    let repos: Value = fixture.client.get("/api/panel/repos", &[]).unwrap();
+    let repo = repos["repos"][0]["localPath"].as_str().unwrap().to_owned();
+    let folder = std::path::Path::new(&repo).join("fixture-plugin");
+    custom_click(cx, "plugin-directory");
+    cx.simulate_input(folder.to_str().unwrap());
+    custom_click(cx, "plugin-review-source");
+    assert!(cx.debug_bounds("plugin-review").is_some());
+    // The code you are about to trust is readable before it is linked.
+    custom_click(cx, "plugin-file-0");
+    assert!(cx.debug_bounds("plugin-file-content-0").is_some());
+    custom_click(cx, "plugin-link");
+    assert!(cx.debug_bounds("plugin-row-0").is_some());
+    assert!(cx.debug_bounds("plugin-review").is_none());
+    custom_click(cx, "plugin-run-0-0");
+    let inventory: Value = fixture.client.get("/api/customize/actions", &[]).unwrap();
+    assert_eq!(inventory["receipts"][0]["status"], "succeeded");
+    // Nothing removes on the first click.
+    custom_click(cx, "plugin-remove-0");
+    assert!(cx.debug_bounds("plugin-row-0").is_some());
+    custom_click(cx, "plugin-remove-confirm-0");
+    assert!(cx.debug_bounds("plugin-empty").is_some());
+}
+
+#[gpui::test]
+fn customize_closes_by_button_key_and_destination(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--customize");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("customize-close.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    let open_page = |cx: &mut VisualTestContext| {
+        custom_click(cx, "rail-more");
+        custom_click(cx, "rail-more-customize");
+        assert!(shell.read_with(cx, |s, _| s.surfaces.customize.open));
+    };
+    open_page(cx);
+    custom_click(cx, "custom-close");
+    assert!(!shell.read_with(cx, |s, _| s.surfaces.customize.open));
+    open_page(cx);
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    assert!(!shell.read_with(cx, |s, _| s.surfaces.customize.open));
+    open_page(cx);
+    custom_click(cx, "rail-scheduled");
+    assert!(
+        !shell.read_with(cx, |s, _| s.surfaces.customize.open),
+        "the page opens in front"
+    );
+}
+
+#[gpui::test]
+fn rail_plugins_opens_customize_on_its_tab(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--customize");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("customize-plugins.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    custom_click(cx, "rail-plugins");
+    assert!(shell.read_with(cx, |s, cx| s.customize_tab_open("plugins", cx)));
+    // Symon sits between home and the orchestrator, as in classic's rail.
+    let y = |cx: &mut VisualTestContext, id: &'static str| {
+        f32::from(cx.debug_bounds(id).expect(id).origin.y)
+    };
+    let (home, symon, run) = (
+        y(cx, "shell-home"),
+        y(cx, "rail-symon"),
+        y(cx, "rail-orchestrator"),
+    );
+    assert!(home < symon && symon < run, "{home} {symon} {run}");
 }

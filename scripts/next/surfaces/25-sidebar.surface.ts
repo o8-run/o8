@@ -1,6 +1,7 @@
 /** Sidebar-owned fixture records, production routes and live event peer. */
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { NextRequest } from 'next/server';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 
 export async function prepare({ dataDir }: SurfaceContext): Promise<SurfaceRoutes> {
@@ -12,9 +13,15 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
   const enabled = process.argv.includes('--sidebar');
   const auditKeyboard = process.argv.includes('--sidebar-keyboard-audit');
   const archives: Array<{ method: string; path: string; tabId?: string }> = [];
+  const workspaceRestores: Array<Record<string, unknown>> = [];
+  const parkingFixture = process.argv.includes('--sidebar-parked');
   // --sidebar-before-inbox serves the thread and runtime listings as a host
   // from before #5110 did: without inbox subjects or settlement fields.
   const beforeInbox = process.argv.includes('--sidebar-before-inbox');
+  // --sidebar-auto-settle lets a test settle a thread the way the server's
+  // sweep does (src/lib/inbox/settlement.ts), while the app is open.
+  const autoSettle = process.argv.includes('--sidebar-auto-settle');
+  const autoSettleActions: string[] = [];
   const { GET: historyList } = await import('../../../src/app/api/v2/chat-history/list/route');
   if (!enabled) return { routes: { 'GET /api/v2/chat-history/list': historyList } };
   const fixture = await import('../sidebar-fixture');
@@ -36,9 +43,64 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
       'POST /api/v2/chat-history': saveHistory, 'GET /api/v2/chat-history/list': historyList,
       'GET /api/runtime/archive': runtimeArchive.GET, 'POST /api/runtime/archive': runtimeArchive.POST,
       ...(auditKeyboard ? { 'GET /api/sidebar-fixture/archives': async () => Response.json({ archives }) } : {}),
+      ...(parkingFixture ? {
+        'GET /api/sidebar-fixture/parking-complete': async () => {
+          const snapshot = await (await import('./sidebar-markers')).completeSidebarParking();
+          const lane = snapshot.laneId ? (await import('../../../src/lib/lane/registry')).getLane(snapshot.laneId) : null;
+          if (!lane) throw new Error('Sidebar parking lane is missing.');
+          const now = new Date().toISOString();
+          socket?.completed({ mutationId: 'sidebar-parked', source: 'server', action: 'workspace.park', status: 'completed',
+            packetId: snapshot.packetId, laneId: lane.id, repoPath: lane.repoPath, createdAt: now, settledAt: now });
+          return Response.json({ snapshot });
+        },
+        'GET /api/sidebar-fixture/parking': async request => {
+          const { getWorkspaceSnapshot, listWorkspaceSnapshotTransitions } = await import('../../../src/lib/worktree/snapshot-state');
+          const { inboxPackets } = await import('../../../src/lib/inbox/subjects');
+          const { getLane } = await import('../../../src/lib/lane/registry');
+          const { completedParkedWorkspace } = await import('../../../src/lib/workspace/completed-packet');
+          const snapshot = getWorkspaceSnapshot('sidebar-parked-repo', 'sidebar-branch');
+          const packets = inboxPackets();
+          const packet = packets.find(candidate => candidate.id === 'sidebar-branch');
+          const lane = snapshot?.laneId ? getLane(snapshot.laneId) : null;
+          let listed: Record<string, unknown> | undefined;
+          if (process.argv.includes('--sidebar-parked-runtime')) {
+            const response = await inventory(new NextRequest(new URL('/api/runtime/inventory?fresh=1', request.url)));
+            listed = (await response.json()).agents.find((agent: Record<string, unknown>) => agent.sessionKey === lane?.sessionKey);
+          } else {
+            for (let offset = 0; offset <= 2000 && !listed; offset += 500) {
+              const response = await sessions(new NextRequest(new URL(`/api/mobile/orchestrator/threads?limit=500&offset=${offset}`, request.url)));
+              listed = (await response.json()).threads.find((thread: Record<string, unknown>) => thread.id === packet?.orchestratorThreadId);
+            }
+          }
+          return Response.json({ workspaceRestores, snapshot, packet, lane, listed,
+            completedOwner: Boolean(lane && snapshot && completedParkedWorkspace(lane, snapshot, packets)),
+            transitions: listWorkspaceSnapshotTransitions('sidebar-parked-repo', 'sidebar-branch') });
+        },
+        // The real service's destructive restore path is covered by its disposable
+        // workspace tests. This peer records the native command and holds it.
+        'POST /api/orchestrator/workspace': async request => {
+          workspaceRestores.push(await request.json() as Record<string, unknown>);
+          return Response.json({ ok: false, error: { code: 'fixture_restore_held', message: 'Fixture restore is held.' } }, { status: 409 });
+        },
+      } : {}),
       ...(beforeInbox ? { 'GET /api/runtime/inventory': inventory } : {}),
+      ...(autoSettle ? { 'GET /api/sidebar-fixture/auto-settle': async (request: import('next/server').NextRequest) => {
+        const tabId = request.nextUrl.searchParams.get('tabId');
+        const store = await import('../../../src/lib/inbox/store');
+        for (let offset = 0; ; offset += 500) {
+          const url = new URL(`/api/mobile/orchestrator/threads?limit=500&offset=${offset}`, request.url);
+          const page = (await (await sessions(new (await import('next/server')).NextRequest(url))).json()).threads as Array<{ id: string; inboxSubject: Parameters<typeof store.mutateInboxAutoSettle>[0] }>;
+          const thread = page.find(row => row.id === tabId);
+          if (thread) {
+            const settled = store.mutateInboxAutoSettle(thread.inboxSubject, 'pr-merged', new Date().toISOString(), () => {});
+            return Response.json({ settled });
+          }
+          if (page.length < 500) return Response.json({ settled: false }, { status: 404 });
+        }
+      }, 'GET /api/sidebar-fixture/auto-settle-actions': async () => Response.json(autoSettleActions) } : {}),
     },
     admit: ({ route, url, body, method }) => {
+      if (parkingFixture && url.pathname === '/api/orchestrator/workspace') return 200;
       if (route === patchHistory && body && Object.hasOwn(JSON.parse(body), 'inboxAction')) {
         return seeds.some(seed => seed.id === JSON.parse(body).tabId) ? 200 : 404;
       }
@@ -58,6 +120,10 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
           || route === saveHistory && /^thoughts-next-\d+$/.test(target.tabId) && realpathSync(target.repoPath) === realpathSync(repo)) ? 200 : 400;
     },
     run: async (route, request) => {
+      if (autoSettle && route === patchHistory) {
+        const body = await request.clone().json();
+        if (body.inboxAction) autoSettleActions.push(body.inboxAction);
+      }
       if (beforeInbox && (route === sessions || route === inventory)) {
         const key = route === sessions ? 'threads' : 'agents';
         const response = await route(request);

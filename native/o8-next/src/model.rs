@@ -46,6 +46,8 @@ pub enum Row {
     Message {
         id: String,
         role: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        author: Option<Value>,
         nodes: Vec<Node>,
     },
     Activity {
@@ -106,6 +108,30 @@ impl Row {
             | Self::PacketHeader { id, .. } => id,
         }
     }
+}
+
+/// A running turn's indicator stays at the bottom of its reply, however many
+/// messages have come back.
+pub fn keep_working_row(rows: &mut Vec<Row>, entries: &[Entry]) {
+    if let Some(Row::Activity { trace, .. }) = rows.last_mut() {
+        trace.live = true;
+        return;
+    }
+    for row in rows.iter_mut() {
+        if let Row::Activity { steps, trace, .. } = row {
+            trace.live = steps.iter().any(|s| s.status == "running");
+        }
+    }
+    let turn = entries.iter().rfind(|entry| entry.role == "user");
+    rows.push(Row::Activity {
+        id: format!("{}:working", turn.map_or("turn", |entry| &entry.id)),
+        steps: vec![],
+        trace: Trace {
+            started: turn.and_then(stamp),
+            live: true,
+            ..Trace::default()
+        },
+    });
 }
 
 /// The ordering/deduplication boundary in workerTranscriptBlocks. Tools preceding
@@ -240,6 +266,7 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
             }
             if entry_index == 0
                 && entry.role == "user"
+                && entry.extra.get("author").is_none_or(|a| a["kind"] != "bot")
                 && (crate::rich::packet_prompt(&entry.text)
                     || entry
                         .extra
@@ -274,6 +301,7 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
             rows.push(Row::Message {
                 id: entry.id.clone(),
                 role: entry.role.clone(),
+                author: entry.extra.get("author").cloned(),
                 nodes,
             });
         }

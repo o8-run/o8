@@ -10,6 +10,7 @@ use std::{
 
 #[derive(Clone)]
 pub enum ActivityEvent {
+    Commit(Row),
     Draft(String, String),
     Preferences(preferences::Saved),
     Worker(String),
@@ -20,6 +21,7 @@ pub enum ActivityEvent {
 }
 #[derive(Clone)]
 pub(super) enum Action {
+    BackToFeed,
     Packet(packet::Command),
     Proposals,
     ProposalDetail(String),
@@ -79,6 +81,10 @@ pub(super) struct Detail {
     pub updated: Option<Instant>,
 }
 pub struct ActivityPane {
+    pub(crate) background: bool,
+    pr_browser: Option<bool>,
+    pub(super) commit: Option<(String, gpui::Entity<crate::diff_ui::DiffSurface>)>,
+    pub(super) updates: updates::Updates,
     pub(super) packet: packet::State,
     pub(super) proposals: proposals::Proposals,
     pub(super) saved: preferences::Saved,
@@ -91,6 +97,7 @@ pub struct ActivityPane {
     pub(super) repos: Vec<Repo>,
     pub(super) rows: Vec<Row>,
     cache: HashMap<String, Streams>,
+    packet_fallback: String,
     pub(super) mission: Value,
     pub(super) loading: bool,
     pub(super) errors: Vec<String>,
@@ -130,6 +137,10 @@ impl ActivityPane {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut pane = Self {
+            background: false,
+            pr_browser: None,
+            commit: None,
+            updates: Default::default(),
             packet: packet::State::default(),
             proposals: Default::default(),
             saved: Default::default(),
@@ -142,6 +153,7 @@ impl ActivityPane {
             repos: vec![],
             rows: vec![],
             cache: HashMap::new(),
+            packet_fallback: crate::clock::now().to_string(),
             mission: Value::Null,
             loading: false,
             errors: vec![],
@@ -182,8 +194,19 @@ impl ActivityPane {
             && self.painted.get() == self.revision
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
-        if self.loaded_at.elapsed() >= Duration::from_secs(300) && !self.loading && !self.pending {
+        let interval = if self.background { 300 } else { 120 };
+        if self.loaded_at.elapsed() >= Duration::from_secs(interval)
+            && !self.loading
+            && !self.pending
+        {
             self.load(cx);
+        }
+        if !self.pending
+            && self
+                .updates
+                .aux_updated
+                .is_none_or(|at| at.elapsed() >= Duration::from_secs(300))
+        {
             self.load_dossiers(cx);
             self.load_proposals(cx);
         }
@@ -205,22 +228,44 @@ impl ActivityPane {
     }
     fn load(&mut self, cx: &mut Context<Self>) {
         if self.loading {
+            self.updates.queued = true;
             return;
         }
+        self.updates.queued = false;
+        let fresh = std::mem::take(&mut self.updates.fresh);
+        let manual = std::mem::take(&mut self.updates.manual);
         self.loading = true;
         let generation = self.generation;
         let client = self.client.clone();
         let scope = self.scope.clone();
         let workspace = self.workspace.clone();
         let cache = self.cache.clone();
+        let previous_repos = self.repos.clone();
+        let preference = self.pr_browser;
+        let options = feed::ReadOptions {
+            fresh,
+            manual,
+            mission: self.mission.clone(),
+            packet_fallback: self.packet_fallback.clone(),
+        };
         let task = cx.background_executor().spawn(async move {
+            let preference = preference.or_else(|| {
+                let value: Value = client
+                    .get("/api/panel/operator-defaults", &[("include", "values")])
+                    .ok()?;
+                match value["values"]["prLinkDestination"].as_str()? {
+                    "browser" => Some(true),
+                    "in-app" => Some(false),
+                    _ => None,
+                }
+            });
             let repos = client
                 .activity_request("GET", "/api/panel/repos", &[], None)
                 .and_then(|v| {
                     serde_json::from_value::<Vec<Repo>>(v["repos"].clone())
                         .map_err(|_| ReadError::invalid())
                 });
-            let registry = repos.clone().unwrap_or_default();
+            let registry = repos.clone().unwrap_or(previous_repos);
             let mut targets: Vec<_> = registry
                 .iter()
                 .filter(|r| scope == "*" || r.local_path == scope)
@@ -233,16 +278,16 @@ impl ActivityPane {
                     remote_url: None,
                 });
             }
-            let mut snapshot = feed::load(&client, &targets, cache);
+            let mut snapshot = feed::load(&client, &targets, cache, options);
             if let Err(error) = repos {
                 snapshot
                     .errors
                     .push(format!("Repository list unavailable: {}", error.message));
             }
-            (registry, snapshot)
+            (registry, snapshot, preference)
         });
         cx.spawn(async move |this, cx| {
-            let (repos, snapshot) = task.await;
+            let (repos, snapshot, preference) = task.await;
             let _ = this.update(cx, |this, cx| {
                 if generation != this.generation {
                     return;
@@ -250,6 +295,7 @@ impl ActivityPane {
                 this.loading = false;
                 this.loaded_at = Instant::now();
                 this.repos = repos;
+                this.pr_browser = preference;
                 this.rows = snapshot.rows;
                 this.errors = snapshot.errors;
                 this.cache = snapshot.cache;
@@ -271,6 +317,9 @@ impl ActivityPane {
                     }
                 }
                 this.changed(cx);
+                if this.updates.queued {
+                    this.load(cx);
+                }
             });
         })
         .detach();
@@ -288,7 +337,7 @@ impl ActivityPane {
                     || detail.error.is_none()
                         && detail
                             .updated
-                            .is_some_and(|t| t.elapsed() < Duration::from_secs(300)))
+                            .is_some_and(|t| t.elapsed() < Duration::from_secs(120)))
         {
             return;
         }
@@ -450,6 +499,7 @@ impl ActivityPane {
             _ => {}
         }
         match action {
+            Action::BackToFeed => self.commit = None,
             Action::Packet(command) => self.packet_act(command, cx),
             Action::Proposals => {self.proposals.open = !self.proposals.open; self.saved.proposals_open=Some(self.proposals.open); self.mark_proposals_seen(cx); self.remember_view(cx);},
             Action::ProposalDetail(id) => {if !self.proposals.expanded.remove(&id){self.proposals.expanded.insert(id);}},
@@ -465,7 +515,7 @@ impl ActivityPane {
                 if let Some(y)=self.restore_y {self.scroll.set_offset(gpui::point(gpui::px(0.),gpui::px(y)));} self.generation += 1; self.loading = false;
                 self.packet.reads.clear(); self.packet.editor = None; self.rows.clear(); self.errors.clear(); self.details.clear(); self.keyboard = None; self.load(cx);
             }
-            Action::Refresh => { self.packet.reads.clear(); self.load(cx); self.load_dossiers(cx); self.load_proposals(cx); },
+            Action::Refresh => { self.packet.reads.clear(); self.refresh_feed(true,true,cx); self.load_dossiers(cx); self.load_proposals(cx); },
             Action::Dossiers => self.decisions.open = !self.decisions.open,
             Action::DossierHistory(id) => self.decisions.expanded = if self.decisions.expanded.as_ref() == Some(&id) { None } else { Some(id) },
             Action::DossierDecision(id, action) => self.dossier_decision(id, action, cx),
@@ -477,7 +527,11 @@ impl ActivityPane {
             Action::RetryDetail(row) => self.detail(row,true,cx),
             Action::Link(url) => cx.open_url(&url),
             Action::Open(row) => {
-                if let Some(url) = row.url() {
+                if row.kind == "commit" {
+                    cx.emit(ActivityEvent::Commit(row));
+                } else if row.kind == "pr" && self.pr_browser == Some(true) {
+                    if let Some(url) = row.url() { cx.open_url(&url); }
+                } else if let Some(url) = row.url() {
                     cx.emit(ActivityEvent::Open(url));
                 }
             }
@@ -576,6 +630,7 @@ impl ActivityPane {
                     }
                 }
             }
+            "escape" if self.commit.is_some() => self.commit = None,
             "escape" if self.scope_menu => {
                 self.scope_menu = false;
                 self.keyboard = Some("activity-scope".into());
@@ -595,9 +650,13 @@ mod decisions;
 #[path = "view.rs"]
 mod view;
 
+#[path = "commit.rs"]
+mod commit;
 #[path = "packet.rs"]
 mod packet;
 #[path = "preferences.rs"]
 pub(super) mod preferences;
 #[path = "proposals.rs"]
 mod proposals;
+#[path = "updates.rs"]
+mod updates;

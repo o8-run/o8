@@ -5,16 +5,12 @@ fn native_composer_lead_picker_moves_a_thread_with_history_to_a_fresh_conversati
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     click("composer-model", cx);
-    // Runtimes are grouped as in the desktop picker: Claude above Codex.
-    let opus = cx
-        .debug_bounds("model-claude-opus-5-5")
-        .expect("Opus 5.5 row");
-    let astra = cx
-        .debug_bounds("model-gpt-6-astra")
-        .expect("GPT-6 Astra row");
-    assert!(opus.top() < astra.top());
-    // The fixture thread runs on another runtime and already has a reply, so
-    // the lead moves to a fresh conversation instead of rewriting this one.
+    // Houses sit on the rail as in the desktop picker: Claude above Codex.
+    let claude = cx.debug_bounds("lead-house-claude").expect("Claude house");
+    let codex = cx.debug_bounds("lead-house-codex").expect("Codex house");
+    assert!(claude.top() < codex.top());
+    click("lead-house-claude", cx);
+    assert!(cx.debug_bounds("model-gpt-6-astra").is_none());
     click("model-claude-opus-5-5", cx);
     let defaults: Value = fixture
         .client
@@ -83,6 +79,7 @@ fn native_composer_lead_picker_uses_saved_history_without_retained_rows(cx: &mut
     });
     click("composer-model", cx);
     assert!(surface.read_with(cx, |s, _| s.rows.is_empty()));
+    click("lead-house-claude", cx);
     click("model-claude-opus-5-5", cx);
     surface.read_with(cx, |s, cx| {
         assert!(s.composer.read(cx).controls.error.is_empty());
@@ -118,6 +115,7 @@ fn native_composer_lead_picker_switches_an_empty_thread_in_place(cx: &mut TestAp
         );
     });
     click("composer-model", cx);
+    click("lead-house-claude", cx);
     click("model-claude-opus-5-5", cx);
     surface.read_with(cx, |s, cx| {
         assert_eq!(s.selected.as_deref(), Some("thoughts-composer-first"));
@@ -155,6 +153,7 @@ fn native_composer_lead_picker_same_runtime_only_changes_the_model(cx: &mut Test
     let before = lead_history(&fixture);
     let (surface, cx) = open(cx, &fixture);
     click("composer-model", cx);
+    click("lead-house-claude", cx);
     click("model-claude-opus-5-5", cx);
     surface.read_with(cx, |s, cx| {
         assert_eq!(s.selected.as_deref(), Some("thoughts-composer-first"));
@@ -162,9 +161,60 @@ fn native_composer_lead_picker_same_runtime_only_changes_the_model(cx: &mut Test
         assert_eq!(routing["backend"], "claude");
         assert_eq!(routing["model"], "claude-opus-5-5");
     });
+    // Classic saves the model on the chat so it survives a reload; nothing
+    // else about the saved chat changes.
+    let mut after = lead_history(&fixture);
+    assert_eq!(after["model"], "claude-opus-5-5");
+    let mut expected = before;
+    for field in ["model", "savedAt"] {
+        after.as_object_mut().unwrap().remove(field);
+        expected.as_object_mut().unwrap().remove(field);
+    }
     assert_eq!(
-        lead_history(&fixture),
-        before,
-        "a model-only choice must not rewrite saved history"
+        after, expected,
+        "a model-only choice changes only the chat's model"
     );
+}
+
+#[gpui::test]
+fn native_composer_lead_picker_lists_and_binds_provider_instances(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let url = fixture
+        .client
+        .url("/api/runtime/provider-instances")
+        .unwrap();
+    let created: Value = fixture
+        .client
+        .request("POST", &url)
+        .send_json(json!({"action": "create", "instance": {"runtime": "codex", "name": "work"}}))
+        .unwrap()
+        .into_json()
+        .unwrap();
+    assert_eq!(created["instance"]["id"], "codex-work");
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-model", cx);
+    assert!(
+        cx.debug_bounds("lead-house-codex").is_some(),
+        "the default instance stays"
+    );
+    click("lead-house-codex@codex-work", cx);
+    click("model-gpt-6-astra", cx);
+    let selected = surface.read_with(cx, |s, cx| {
+        assert!(s.composer.read(cx).controls.error.is_empty());
+        s.selected.clone().unwrap()
+    });
+    assert!(selected.starts_with("thoughts-next-"), "{selected}");
+    let bound: Value = fixture
+        .client
+        .get(
+            "/api/runtime/provider-instances",
+            &[("thread", selected.as_str())],
+        )
+        .unwrap();
+    assert_eq!(bound["thread"]["instance"], "codex-work");
+    let history: Value = fixture
+        .client
+        .get("/api/v2/chat-history", &[("tabId", selected.as_str())])
+        .unwrap();
+    assert_eq!(history["backend"], "codex");
 }

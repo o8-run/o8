@@ -1,4 +1,5 @@
 import { basename } from 'node:path';
+import { applyNetworkProjectionHealth } from '@/lib/bots/network-health';
 import { orchestratorErrorText } from '@/lib/transcripts/orchestrator-error';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type {
@@ -69,6 +70,8 @@ export interface OrchestratorAssistantUpsertInput {
 }
 
 export type OrchestratorHistoryRecord = {
+  source?: 'bot-network';
+  network?: { question?: import('@/lib/bots/network-types').NetworkQuestionSummary };
   messages?: ChatHistoryMessage[];
   model?: string | null;
   savedAt?: string | null;
@@ -204,12 +207,13 @@ export function projectOrchestratorThread(
       : max
   ), 0);
 
-  return {
+  return applyNetworkProjectionHealth({
     id: tabId,
+    ...(record.source === 'bot-network' ? { source: record.source, ...(record.network?.question ? { networkQuestion: record.network.question } : {}) } : {}),
     title: trimTitle(orchestratorDisplayTitle(record.title, fallbackTitle), fallbackTitle),
     lastMessageAt: lastSpokeMs > 0 ? new Date(lastSpokeMs).toISOString() : (record.savedAt || modifiedAt),
-    runtime: inferRuntime(effectiveModel(tabId, record)),
-    status: record.orchestratorTerminalStatus === 'failed'
+    runtime: record.source === 'bot-network' ? 'unknown' : inferRuntime(effectiveModel(tabId, record)),
+    status: record.source === 'bot-network' ? (messages.length ? 'ready' : 'idle') : record.orchestratorTerminalStatus === 'failed'
       ? 'failed'
       : messages.length === 0
         ? 'idle'
@@ -227,8 +231,8 @@ export function projectOrchestratorThread(
     repoBranch: typeof record.repoBranch === 'string' ? record.repoBranch : null,
     githubOwner: githubIdentity.githubOwner,
     githubRepo: githubIdentity.githubRepo,
-    backend: effectiveBackend(record),
+    backend: record.source === 'bot-network' ? null : effectiveBackend(record),
     agent: normalizeAgent(record.agent),
     pinned: record.pinned === true,
-  };
+  });
 }

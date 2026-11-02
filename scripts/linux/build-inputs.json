@@ -1,0 +1,20 @@
+{
+  "node": {
+    "version": "22.23.3",
+    "file": "node-v22.23.3-linux-x64.tar.xz",
+    "url": "https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-x64.tar.xz",
+    "sha256": "df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de"
+  },
+  "appimagetool": {
+    "version": "1.9.1",
+    "file": "appimagetool-1.9.1-x86_64.AppImage",
+    "url": "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage",
+    "sha256": "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+  },
+  "runtime": {
+    "version": "fedfad51acc2860b2916a1eef32ba4a500ff31ef",
+    "file": "type2-runtime-fedfad51-x86_64",
+    "url": "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64",
+    "sha256": "617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46"
+  }
+}

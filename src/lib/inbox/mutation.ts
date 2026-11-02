@@ -9,9 +9,11 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { persistCanonicalChatHistoryRecord, readPersistedLlmChat, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
 import { matchesMutationWorkspace, mutationWorkspace } from '@/lib/repos/mutation-workspace';
-import { assertInboxCanSettle, InboxMutationError, runtimeInboxIdentity, observeAgentInboxRun } from './subjects';
+import { assertInboxCanSettle, inboxSettleInventoryKeys, InboxMutationError, runtimeInboxIdentity, observeAgentInboxRun } from './subjects';
 import { isInboxPreferenceAction, legacyInboxPin, validInboxOrderKey, type InboxPreferenceCommand } from './preferences';
-import { inboxProjection, inboxSubject, mutateInboxPreferences, mutateInboxSettlement } from './store';
+import { inboxProjection, inboxSubject, mutateInboxPreferences, mutateInboxSettlement, readInboxState } from './store';
+import { startSettledWorkspaceParking } from './workspace-parking';
+import type { InboxSubject } from './settlement-state';
 
 export async function patchInboxSettlement(request: NextRequest, body: Record<string, unknown>) {
   const action = body.inboxAction;
@@ -32,14 +34,15 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
   }
   try {
     const workspace = mutationWorkspace(request);
-    const inventory = await getRuntimeInventorySnapshot({ fresh: true });
     if (hasRuntime) {
+      const inventory = await getRuntimeInventorySnapshot({ fresh: true });
       const agent = inventory.agents.find(candidate => candidate.sessionKey === body.sessionKey);
       if (!agent) throw new InboxMutationError('Subject was not found.', 404);
       const identity = runtimeInboxIdentity(agent);
       if (!matchesMutationWorkspace(workspace, identity.inboxSubject.workspace)) throw new InboxMutationError('Subject was not found.', 404);
       if (identity.parentInboxSubject) throw new InboxMutationError('Worker is a child of a conversation. Organize its parent conversation.', 409);
       const activity = await observeAgentInboxRun(agent, identity.inboxSubject, true);
+      const beforeSettlement = readInboxState(identity.inboxSubject);
       if (preference) {
         mutateInboxPreferences(identity.inboxSubject, { action, orderKey: body.orderKey, enabled: body.enabled } as InboxPreferenceCommand, state => {
           assertPreferenceRevision(state, body);
@@ -55,14 +58,26 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
         }
         if (action === 'settle') assertInboxCanSettle(identity.inboxSubject, inventory.agents, activity);
       });
+      if (action === 'settle' && readInboxState(identity.inboxSubject).settledAt !== beforeSettlement.settledAt) {
+        startSettledWorkspaceParking(identity.inboxSubject);
+      }
       return NextResponse.json({ ok: true, ...inboxProjection(identity.inboxSubject) });
     }
     const tabId = body.tabId as string;
-    return withCanonicalChatHistoryLock(tabId, () => {
+    // Settle only needs live runtime status for sessions bound to this chat
+    // (worker lanes or bound runtime ids). A plain chat's own run state lives
+    // in this process (inbox state + turns), so skip the full scan for it.
+    const preflight = readPersistedLlmChat(tabId)?.history as { repoPath?: string; projectId?: string } | undefined;
+    const needsInventory = action === 'settle' && (!preflight
+      || inboxSettleInventoryKeys(inboxSubject('conversation', tabId, preflight.repoPath, preflight.projectId)).length > 0);
+    const inventory = needsInventory ? await getRuntimeInventorySnapshot({ fresh: true }) : { agents: [] };
+    let settledSubject: InboxSubject | undefined;
+    const response = await withCanonicalChatHistoryLock(tabId, () => {
       const saved = readPersistedLlmChat(tabId);
       const record = saved?.history as (NonNullable<typeof saved>['history'] & { projectId?: string; pinned?: boolean; archivedAt?: string | null }) | undefined;
       if (!record || !matchesMutationWorkspace(workspace, record.repoPath)) throw new InboxMutationError('History was not found.', 404);
       const subject = inboxSubject('conversation', tabId, record.repoPath, record.projectId);
+      const beforeSettlement = readInboxState(subject);
       if (preference) {
         mutateInboxPreferences(subject, { action, orderKey: body.orderKey, enabled: body.enabled } as InboxPreferenceCommand, state => {
           assertPreferenceRevision(state, body);
@@ -73,12 +88,19 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
         }, legacyInboxPin(record));
       } else mutateInboxSettlement(subject, action as 'settle' | 'unsettle', () => {
         if (action === 'settle') {
+          // A runtime session bound after the preflight was not scanned: refuse rather than guess.
+          if (!needsInventory && inboxSettleInventoryKeys(subject).length > 0) {
+            throw new InboxMutationError('Thread started a runtime session. Try settling again.', 409);
+          }
           assertInboxCanSettle(subject, inventory.agents);
           if (record.pinned) persistCanonicalChatHistoryRecord(tabId, { ...record, pinned: false });
         }
       }, record.pinned === true);
+      if (action === 'settle' && readInboxState(subject).settledAt !== beforeSettlement.settledAt) settledSubject = subject;
       return NextResponse.json({ ok: true, ...inboxProjection(subject, null, undefined, legacyInboxPin(record)) });
     });
+    if (settledSubject) startSettledWorkspaceParking(settledSubject);
+    return response;
   } catch (error) {
     if (error instanceof InboxMutationError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error('[inbox] Mutation failed', error);

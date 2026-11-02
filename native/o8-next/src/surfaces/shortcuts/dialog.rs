@@ -1,7 +1,9 @@
 use super::*;
 use crate::theme::current as theme;
 pub(super) const ROWS: &[(&str, &str, &str)] = &[
+    ("Navigation", "New chat", "⌘ N"),
     ("Navigation", "Command palette", "⌘ K"),
+    ("Navigation", "Show or hide the sidebar", "⌘ B"),
     ("Navigation", "Cycle tabs", "⌘ ⌥ ← / ⌘ ⌥ →"),
     ("Navigation", "Jump to tab 1–9", "⌘ 1–9"),
     ("Tabs", "Close active tab", "⌘ W"),

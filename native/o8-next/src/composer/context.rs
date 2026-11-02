@@ -182,10 +182,12 @@ pub fn estimate(
     now: f64,
 ) -> Option<Estimate> {
     let rows = resumes(rows);
+    // A turn that reported no usage (a failed resume, an interrupted turn)
+    // says nothing about the cache; estimate from the newest turn that did.
     let last = rows
         .iter()
         .rev()
-        .find(|r| r.session == session && r.runtime == runtime)?;
+        .find(|r| r.session == session && r.runtime == runtime && r.read.is_some())?;
     if !supported(runtime) || model.is_empty() || last.model != model {
         return None;
     }
@@ -221,14 +223,36 @@ pub fn estimate(
     })
 }
 
+/// Time left, short: minutes under an hour, then hours, then days. Classic
+/// printed minutes only, so a long estimate read "~5404m".
+fn short_left(ms: f64) -> String {
+    let minutes = (ms / 60_000.).ceil();
+    if minutes < 60. {
+        format!("~{minutes}m")
+    } else if minutes < 48. * 60. {
+        format!("~{}h", (minutes / 60.).round())
+    } else {
+        format!("~{}d", (minutes / 1440.).round())
+    }
+}
+fn long_left(ms: f64) -> String {
+    let minutes = (ms / 60_000.).ceil();
+    if minutes < 60. {
+        format!("{minutes} min")
+    } else if minutes < 48. * 60. {
+        format!("{} hours", (minutes / 60.).round())
+    } else {
+        format!("{} days", (minutes / 1440.).round())
+    }
+}
 pub fn label(runtime: &str, estimate: Option<&Estimate>, compact: bool) -> String {
     match (supported(runtime), estimate) {
         (false, _) => if compact { "n/a" } else { "Cache n/a" }.into(),
         (_, None) => if compact { "?" } else { "Cache ?" }.into(),
         (_, Some(e)) if e.remaining > 0. => format!(
-            "{}~{}m",
+            "{}{}",
             if compact { "" } else { "Warm " },
-            (e.remaining / 60_000.).ceil()
+            short_left(e.remaining)
         ),
         _ => if compact { "~cold" } else { "Cold · est." }.into(),
     }
@@ -239,8 +263,8 @@ pub fn explanation(runtime: &str, estimate: Option<&Estimate>) -> String {
     } else {
         match estimate {
             Some(e) if e.remaining > 0. => format!(
-                "Cache warm · about {} min left · estimate",
-                (e.remaining / 60_000.).ceil()
+                "Cache warm · about {} left · estimate",
+                long_left(e.remaining)
             ),
             Some(_) => "Cache likely cold · estimate".into(),
             None => "Cache unknown · estimate".into(),
@@ -406,7 +430,8 @@ pub struct MeterState {
     pub width: f32,
     pub anchor: Option<gpui::Bounds<gpui::Pixels>>,
     pub card_bounds: Option<gpui::Bounds<gpui::Pixels>>,
-    pub focus_events: Option<[gpui::Subscription; 2]>,
+    /// The help card: hovering, until a click puts it away.
+    pub help: bool,
 }
 pub fn telemetry(response: &Value) -> f64 {
     let t = &response["telemetry"];

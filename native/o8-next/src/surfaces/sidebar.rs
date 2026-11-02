@@ -7,7 +7,7 @@ mod thread_list;
 pub(crate) use thread_list::recents::calendar::clock as calendar_clock;
 /// Local day boundaries, for Activity's Today / Yesterday / "Oct 24" headings.
 pub(crate) use thread_list::recents::calendar::{
-    date as calendar_date, midnight as calendar_midnight,
+    date as calendar_date, midnight as calendar_midnight, moment as calendar_moment,
 };
 /// A repository's icon override or monogram, for the Projects page.
 pub(crate) use thread_list::repo_identity;
@@ -22,6 +22,8 @@ pub(super) struct Runtime {
     pub view: Option<Entity<ThreadList>>,
     /// The header's sidebar toggle (Cmd+B) hides the column.
     pub hidden: bool,
+    /// The column's open or close in flight; None at rest.
+    pub motion: Option<crate::motion::Transition>,
     /// The column's edge is being dragged; the width saves on release.
     pub resizing: bool,
     /// Where the press on the edge began and the width then (useColumnResize's
@@ -37,6 +39,41 @@ const MAX_WIDTH: f32 = 500.;
 /// The edge's grab target reaches this far either side of the boundary.
 const EDGE_SLOP: f32 = 8.;
 
+/// Open and close travel for the column (Q 2026-10-31). It grows out of the
+/// rail's o8 mark and folds back into it, as the phone's drawer leaves its chip.
+const TRAVEL_MS: u64 = 340;
+
+/// Starts the column toward shown or hidden; opening fades its rows in.
+pub(super) fn toggle(shell: &mut Shell, cx: &mut gpui::App) {
+    let sidebar = &mut shell.surfaces.sidebar;
+    sidebar.hidden = !sidebar.hidden;
+    sidebar
+        .motion
+        .get_or_insert(crate::motion::Transition::settled(TRAVEL_MS, sidebar.hidden))
+        .set(!sidebar.hidden);
+    if !sidebar.hidden
+        && let Some(view) = &sidebar.view
+    {
+        view.update(cx, |list, cx| list.stagger_in(cx));
+    }
+}
+
+/// How open the column is now (0 hidden, 1 shown) and whether it is moving.
+pub(super) fn travel(shell: &Shell) -> (f32, bool) {
+    let sidebar = &shell.surfaces.sidebar;
+    let smooth = |x: f32| x * x * (3. - 2. * x);
+    match sidebar.motion.map(|motion| (motion.position(), motion.is_open())) {
+        // Opening eases out with a soft start, so the card stays on the mark
+        // for its first frames; closing eases in and out, so the fold back
+        // into the mark reads as clearly as the way out.
+        Some(((x, true), opening)) => (
+            if opening { smooth(crate::motion::ease_out(x)) } else { smooth(x) },
+            true,
+        ),
+        _ => (if sidebar.hidden { 0. } else { 1. }, false),
+    }
+}
+
 /// The column's width: the dragged one, else the default.
 pub(super) fn width(shell: &Shell) -> f32 {
     shell
@@ -44,6 +81,11 @@ pub(super) fn width(shell: &Shell) -> f32 {
         .sidebar_width
         .filter(|width| width.is_finite())
         .map_or(WIDTH, |width| width.clamp(MIN_WIDTH, MAX_WIDTH))
+}
+
+/// The space left of the workspace once the sidebar has settled.
+pub(super) fn workspace_inset(shell: &Shell) -> f32 {
+    WORKSPACE_INSET + if shell.surfaces.sidebar.hidden { 0. } else { COLUMN_HANDLE }
 }
 
 /// A drag of the column's edge.
@@ -64,45 +106,38 @@ pub(super) fn resize(shell: &mut Shell, event: &gpui::DragMoveEvent<Resize>) {
     shell.surfaces.sidebar.resizing = true;
 }
 
-/// A wide grab target over the boundary with a quiet line that glows on hover.
+/// Classic's `workspaceInset` left of the workspace card, and the column handle
+/// (COLUMN_HANDLE_WIDTH) that sits before it while the sidebar is open.
+const WORKSPACE_INSET: f32 = 4.;
+const COLUMN_HANDLE: f32 = 4.;
+/// The handle sits mid-gap between the column and the workspace card.
+pub(super) const EDGE_GAP: f32 = COLUMN_HANDLE;
+/// A wide grab target over the boundary, from the window's top edge so the
+/// header's mark is part of it, with a line that lights when the cursor is near.
 fn edge(
     width: f32,
     resizing: bool,
-    glass: bool,
     press: std::rc::Rc<std::cell::Cell<Option<(f32, f32)>>>,
 ) -> impl IntoElement {
-    let accent = crate::theme::current().accent;
     div()
         .id("sidebar-resize")
         .debug_selector(|| "sidebar-resize".into())
-        .group("sidebar-resize")
         .absolute()
-        .top_0()
+        .top(px(-crate::theme::GEOMETRY.header))
         .bottom_0()
-        .left(px(width - EDGE_SLOP - 0.5))
+        .left(px(width - EDGE_SLOP - 0.5 + EDGE_GAP))
         .w(px(EDGE_SLOP * 2. + 1.))
         .cursor(gpui::CursorStyle::ResizeLeftRight)
         .on_mouse_down(gpui::MouseButton::Left, move |event, _, _| {
             press.set(Some((f32::from(event.position.x), width)));
         })
         .on_drag(Resize, |_, _, _, cx| cx.new(|_| Resize))
-        .child(
-            div()
-                .absolute()
-                .top(px(18.))
-                .bottom(px(if glass { 0. } else { 18. }))
-                .left(px(EDGE_SLOP))
-                .w(px(1.))
-                .bg(accent)
-                .shadow(vec![gpui::BoxShadow {
-                    color: accent.into(),
-                    offset: gpui::point(px(0.), px(0.)),
-                    blur_radius: px(8.),
-                    spread_radius: px(0.),
-                }])
-                .opacity(if resizing { 0.85 } else { 0. })
-                .group_hover("sidebar-resize", |style| style.opacity(0.85)),
-        )
+        .child(crate::theme::split_line(
+            "sidebar-resize",
+            true,
+            EDGE_SLOP,
+            resizing,
+        ))
 }
 pub(super) const REGISTRATION: Registration = Registration {
     initialize,
@@ -149,8 +184,11 @@ pub(super) const REGISTRATION: Registration = Registration {
             });
     },
     decorate: |shell, content| {
-        if shell.surfaces.sidebar.hidden {
+        let (open, moving) = travel(shell);
+        let inset = WORKSPACE_INSET + COLUMN_HANDLE * open;
+        if shell.surfaces.sidebar.hidden && !moving {
             return div()
+                .pl(px(inset))
                 .flex()
                 .flex_col()
                 .flex_1()
@@ -160,6 +198,13 @@ pub(super) const REGISTRATION: Registration = Registration {
                 .into_any_element();
         }
         let width = width(shell);
+        let list = gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone())
+            .cached(
+                gpui::StyleRefinement::default()
+                    .w(px(width))
+                    .h_full()
+                    .flex_shrink_0(),
+            );
         div()
             .relative()
             .flex()
@@ -168,27 +213,84 @@ pub(super) const REGISTRATION: Registration = Registration {
             // This row sits inside the panel and resize row; its automatic
             // minimum width must not widen the workspace past the window.
             .min_w_0()
+            .map(|row| {
+                if !moving {
+                    return row.child(list);
+                }
+                // In flight the workspace makes room while a card carries the
+                // full-width rows out of the rail's o8 mark: it starts as the
+                // mark's tile, lifts with a fill and shadow, and lands flush.
+                let mix = |from: f32, to: f32| from + (to - from) * open;
+                let mark_left = -(crate::shell::rail::WIDTH + crate::shell::rail::TARGET) / 2.;
+                let lift = (open / 0.12).min(1.) * ((1. - open) / 0.25).min(1.);
+                let tint = |color: gpui::Rgba| gpui::Rgba { a: color.a * lift, ..color };
+                let card = div()
+                    .absolute()
+                    .left(px(mix(mark_left, 0.)))
+                    .top(px(mix(crate::shell::rail::PAD, 0.)))
+                    .w(px(mix(crate::shell::rail::TARGET, width)))
+                    .h(gpui::relative(open))
+                    .min_h(px(crate::shell::rail::TARGET))
+                    .overflow_hidden()
+                    .rounded(px(mix(10., 0.)))
+                    .bg(tint(crate::theme::current().surface_raised))
+                    .border_1()
+                    .border_color(tint(crate::theme::current().border))
+                    .shadow(vec![gpui::BoxShadow {
+                        color: gpui::black().opacity(0.4 * lift),
+                        offset: gpui::point(px(0.), px(10.)),
+                        blur_radius: px(28.),
+                        spread_radius: px(0.),
+                    }])
+                    // The rows keep the row's height while the card is shorter.
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .w(px(width))
+                            .h(gpui::relative(1. / open.max(0.01)))
+                            .when(shell.surfaces.sidebar.hidden, |rows| {
+                                rows.opacity(((open - 0.5) / 0.5).clamp(0., 1.))
+                            })
+                            .child(list),
+                    )
+                    // The mark itself, fading as the card leaves it.
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px((crate::shell::rail::TARGET - 24.) / 2. - 1.))
+                            .top(px((crate::shell::rail::TARGET - 24.) / 2. - 1.))
+                            .opacity((1. - open / 0.3).max(0.))
+                            .child(crate::shell::rail::brand()),
+                    );
+                row.child(div().w(px(width * open)).h_full().flex_shrink_0())
+                    .child(gpui::deferred(card).with_priority(1))
+            })
             .child(
-                gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
-                    gpui::StyleRefinement::default()
-                        .w(px(width))
-                        .h_full()
-                        .flex_shrink_0(),
-                ),
+                div()
+                    .pl(px(inset))
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(content),
             )
-            .child(div().flex().flex_col().flex_1().min_w_0().child(content))
-            .child(edge(
-                width,
-                shell.surfaces.sidebar.resizing,
-                shell.system_glass,
-                shell.surfaces.sidebar.press.clone(),
-            ))
+            .when(!moving, |row| {
+                row.child(edge(
+                    width,
+                    shell.surfaces.sidebar.resizing,
+                    shell.surfaces.sidebar.press.clone(),
+                ))
+            })
             .into_any_element()
     },
     key_down: |shell, event, window, cx| {
         if shell.surfaces.sidebar.view.as_ref().is_some_and(|view| {
             view.update(cx, |sidebar, cx| {
-                sidebar.header_key(event, window, cx) || sidebar.settle_key(event, cx)
+                sidebar.header_key(event, window, cx)
+                    || sidebar.settle_key(event, cx)
+                    || sidebar.undo_key(event, window, cx)
             })
         }) {
             return true;
@@ -227,6 +329,13 @@ pub(super) const REGISTRATION: Registration = Registration {
                 .update(cx, |sidebar, _| sidebar.catalog_changed());
         }
     },
+    claim_link: |shell, url, window, cx| {
+        let Some(id) = crate::lineage::parse_link(url) else {
+            return false;
+        };
+        shell.open_thread_by_id(id.to_owned(), window, cx);
+        true
+    },
     ..Registration::new("", "", |shell, _, window, cx| {
         shell
             .surfaces
@@ -245,9 +354,16 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         shell.state.sidebar_view.clone(),
         shell.state.sidebar_closed_folders.clone(),
     );
+    let snoozes = shell.state.sidebar_snoozes.clone();
+    let (detailed, working) = (
+        shell.state.sidebar_detailed_rows,
+        shell.state.sidebar_working_section,
+    );
     sidebar.update(cx, |sidebar, _| {
         sidebar.restore_scopes(scopes);
         sidebar.restore_views(&views, &closed);
+        sidebar.restore_snoozes(&snoozes);
+        sidebar.restore_row_mode(detailed, working);
     });
     shell.subscriptions.push(
         cx.subscribe_in(&sidebar, window, |shell, _, event, window, cx| {
@@ -295,6 +411,15 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                 }
                 ThreadEvent::Folders(closed) => {
                     shell.state.sidebar_closed_folders = closed.iter().cloned().collect();
+                    shell.persist();
+                }
+                ThreadEvent::RowMode(detailed, working) => {
+                    shell.state.sidebar_detailed_rows = *detailed;
+                    shell.state.sidebar_working_section = *working;
+                    shell.persist();
+                }
+                ThreadEvent::Snoozes(snoozes) => {
+                    shell.state.sidebar_snoozes = snoozes.iter().cloned().collect();
                     shell.persist();
                 }
                 ThreadEvent::Error(error) => {
@@ -389,7 +514,22 @@ impl Shell {
         let list = self.surfaces.sidebar.view.clone()?;
         Some(list.update(cx, |list, cx| list.start_thread(repo, open, cx)))
     }
-    fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens a thread a lineage row, created-thread link or "started by"
+    /// marker named, or says so when this machine does not list it.
+    pub(crate) fn open_thread_by_id(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sessions.iter().any(|s| s.id == id) {
+            self.open_thread(id, window, cx);
+        } else {
+            toasts::show(
+                toasts::Kind::Info,
+                "That thread is not on this machine yet.",
+                vec![],
+                Some(toasts::NOTICE_TIMEOUT),
+                cx,
+            );
+        }
+    }
+    pub(super) fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(workspace) = self
             .sessions
             .iter()

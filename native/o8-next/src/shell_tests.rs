@@ -657,5 +657,38 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     assert!(offline.read_with(offline_cx, |s, _| !s.connected && s.notice == "Server down"));
 }
 
+#[gpui::test]
+fn each_clicked_issue_gets_its_own_panel_tab(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let state = State {
+        selected: fixture.folders.first().cloned(),
+        ..State::default()
+    };
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("issue-link.json"),
+        state,
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    for url in [
+        "https://github.com/o8-run/o8/issues/7",
+        "https://github.com/o8-run/o8/issues/8",
+        "https://github.com/o8-run/o8/issues/7",
+    ] {
+        shell.update_in(cx, |s, window, cx| s.open_transcript_link(url, window, cx));
+        cx.run_until_parked();
+    }
+    draw(cx);
+    assert!(cx.debug_bounds("panel-issue-tab-7").is_some());
+    assert!(cx.debug_bounds("panel-issue-tab-8").is_some());
+    assert!(cx.debug_bounds("issue-new").is_none(), "only the issue shows");
+    assert!(
+        shell.read_with(cx, |s, _| s.active().is_none_or(|tab| tab.label() != "Issues")),
+        "the issue stays out of the workspace"
+    );
+}
+
 #[path = "shell_look_tests.rs"]
 mod look;

@@ -687,3 +687,23 @@ fn spec_classic_heading_metrics_and_frame(cx: &mut TestAppContext) {
 fn spec_missing_document_and_load_failure(cx: &mut TestAppContext) {
     spec_tests::missing(cx);
 }
+
+#[gpui::test]
+fn privacy_eye_hides_contents_across_files(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    fs::write(PathBuf::from(&fixture.repo).join("one.md"), "# One\n\nFirst file\n").unwrap();
+    fs::write(PathBuf::from(&fixture.repo).join("two.md"), "# Two\n\nSecond file\n").unwrap();
+    let (panel, cx) = test_panel(&fixture, cx);
+    click(cx, "files-row-one.md");
+    wait(cx, "files-markdown-1");
+    click(cx, "files-privacy-toggle");
+    wait(cx, "files-hidden");
+    assert!(cx.debug_bounds("files-markdown-1").is_none());
+    click(cx, "files-row-two.md");
+    wait(cx, "files-hidden");
+    assert!(panel.read_with(cx, |p, _| p.contents_hidden));
+    assert!(cx.debug_bounds("files-markdown-1").is_none());
+    click(cx, "files-hidden");
+    wait(cx, "files-markdown-2");
+    assert!(cx.debug_bounds("files-hidden").is_none());
+}

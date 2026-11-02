@@ -18,6 +18,15 @@ struct Snapshot {
 }
 pub struct Submit(pub bool);
 impl EventEmitter<Submit> for Composer {}
+/// The chat composer's other sends: ⌘↵ queues for later, ⌥⌘↵ forks.
+#[derive(Clone)]
+pub enum SendAs {
+    Queue,
+    /// ⌘↵ on a complete slash command: run it as Enter would, queued.
+    QueueCommand(String, gpui::AnyWindowHandle),
+    Fork,
+}
+impl EventEmitter<SendAs> for Composer {}
 pub struct Composer {
     pub focus: FocusHandle,
     pub context: &'static str,
@@ -42,7 +51,11 @@ pub struct Composer {
     pub(crate) inline: bool,
     /// Textarea fields insert a newline on plain Enter; chat keeps Submit.
     pub(crate) newline_on_enter: bool,
+    /// The chat composer: ⌘↵ and ⌥⌘↵ emit [`SendAs`] instead of Submit.
+    pub(crate) send_intents: bool,
     pub(crate) controls: controls::State,
+    /// Paints `*` for every byte (offsets stay valid) and refuses copy/cut.
+    pub(crate) masked: bool,
 }
 impl Composer {
     /// Read-only input viewport for floating previews; layout and input stay here.
@@ -72,7 +85,9 @@ impl Composer {
             framed: true,
             inline: false,
             newline_on_enter: false,
+            send_intents: false,
             controls: controls::State::default(),
+            masked: false,
         }
     }
     pub(crate) fn select_all(&mut self, cx: &mut Context<Self>) {
@@ -88,6 +103,16 @@ impl Composer {
         self.composition = None;
         self.typing = None;
         self.changed(cx);
+    }
+    /// How far a long draft has grown the chat input past its 52px floor.
+    /// The card spends it upward over the transcript, as classic's floating
+    /// composer did, so the transcript keeps its size while you type.
+    pub(crate) fn rise(&self, window: &Window) -> f32 {
+        if self.framed || self.inline {
+            return 0.;
+        }
+        // The unframed input pads 11px above and 4px below its text.
+        (f32::from(self.height) + 15.).clamp(52., card_max(window)) - 52.
     }
     pub fn composing(&self) -> bool {
         self.marked.is_some()
@@ -227,6 +252,13 @@ impl Composer {
                 .unwrap_or(0)
     }
     fn index_at(&self, point: Point<Pixels>) -> usize {
+        if self
+            .layout
+            .first()
+            .is_some_and(|(_, _, origin)| point.y < origin.y)
+        {
+            return 0;
+        }
         for (offset, line, origin) in &self.layout {
             let height = px(crate::theme::TYPE.body_line)
                 * line.wrap_boundaries.len().saturating_add(1) as f32;
@@ -276,6 +308,13 @@ impl Composer {
             "enter" if self.newline_on_enter && !command => {
                 self.replace_text_in_range(None, "\n", window, cx)
             }
+            "enter" if self.send_intents && command && key.modifiers.alt => cx.emit(SendAs::Fork),
+            "enter" if self.send_intents && command && !key.modifiers.shift => {
+                match self.slash_to_run() {
+                    Some(text) => cx.emit(SendAs::QueueCommand(text, window.window_handle())),
+                    None => cx.emit(SendAs::Queue),
+                }
+            }
             "enter" if command && key.modifiers.shift => cx.emit(Submit(true)),
             "enter" if !key.modifiers.shift => cx.emit(Submit(false)),
             "enter" => self.replace_text_in_range(None, "\n", window, cx),
@@ -285,7 +324,7 @@ impl Composer {
                 self.changed(cx);
             }
             "c" | "x" if command => {
-                if self.selection.is_empty() {
+                if self.selection.is_empty() || self.masked {
                     cx.stop_propagation();
                     return;
                 }
@@ -563,6 +602,7 @@ impl Render for Composer {
         }
         let input = cx.entity();
         let height = self.height;
+        let card_max = card_max(window);
         div()
             .id("composer-input")
             .debug_selector(|| "composer-input".into())
@@ -570,7 +610,7 @@ impl Render for Composer {
             .key_context(self.context)
             .tab_stop(true)
             .cursor(CursorStyle::IBeam)
-            .max_h(px(if self.framed { 176. } else { 52. }))
+            .max_h(px(if self.framed { 176. } else { card_max }))
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .when(self.framed, |d| d.border_1())
@@ -647,7 +687,11 @@ impl Render for Composer {
                         let (text, marked, selection, cursor, focus, placeholder) = {
                             let i = input.read(cx);
                             (
-                                i.text.clone(),
+                                if i.masked {
+                                    "*".repeat(i.text.len())
+                                } else {
+                                    i.text.clone()
+                                },
                                 i.marked.clone(),
                                 i.selection.clone(),
                                 i.cursor(),
@@ -832,3 +876,11 @@ mod tests;
 #[cfg(test)]
 #[path = "composer/native_tests.rs"]
 mod native_tests;
+
+/// Classic's ComposerArea: max(52px, min(200px, 28vh)). A long draft grows the
+/// input to this, then scrolls; 52 is the floor, not the ceiling.
+fn card_max(window: &Window) -> f32 {
+    (f32::from(window.viewport_size().height) * 0.28)
+        .min(200.)
+        .max(52.)
+}

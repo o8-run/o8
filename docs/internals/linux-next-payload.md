@@ -76,9 +76,13 @@ result releases the launch lock and reports an error without starting a competin
 window. Each attempt directory holds a `pending` marker. The server claims the
 attempt by renaming it to `claimed` immediately before spawning; a timed-out launcher
 cancels by renaming it to `cancelled`. `rename` is atomic, so exactly one side wins:
-a cancelled attempt never spawns, and a claimed one is waited out for up to 20 more
-seconds, which the server's 15-second first-paint deadline bounds. A retry therefore
-cannot race a late restore. A failed `serve` command
+a cancelled attempt never spawns. Before claiming, the server records its PID, boot
+session and process start time. A claimed attempt gets 20 more seconds of launcher
+wait, then retains its record until the server publishes a result or that process
+is confirmed dead. Failed health probes cannot revoke a claim: the process may be
+paused before its first-paint timer starts. A later launch honors the retained claim
+and reports that the window is still opening, without starting a second window.
+Completed and dead-owner records are cleared on a later launch. A failed `serve` command
 permits reuse only for `serve_already_running` or `serve_desktop_owns_data_dir`, with
 a healthy status response. Other failures retain their output streams and exit code.
 

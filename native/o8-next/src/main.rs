@@ -17,6 +17,7 @@ mod files_panel;
 mod grid_sessions;
 mod icon;
 mod inbox;
+mod lineage;
 #[cfg(test)]
 mod input_reuse_tests;
 mod issues;
@@ -43,10 +44,13 @@ mod terminal;
 mod terminal_grid;
 mod terminal_transport;
 mod text;
+mod thread_messages;
 mod theme;
 #[cfg(test)]
 mod theme_tests;
 mod trace;
+mod subagents;
+mod transcript_actions;
 mod transport;
 mod ui;
 mod visualizations;

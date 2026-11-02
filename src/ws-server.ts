@@ -154,6 +154,7 @@ import {
 } from './lib/mobile/orchestrator-thread-history';
 import { OrchestratorThreadProjectError } from './lib/mobile/orchestrator-thread-project';
 import { persistOrchestratorThreadUserMessageFromWire } from './lib/ws-server/orchestrator-thread-send';
+import { disabledRuntimeRefusal } from './lib/providers/disabled-runtimes';
 import { resolveMobileTurnSelection } from './lib/ws-server/mobile-turn-selection';
 import {
   composerBackendSupportsImages,
@@ -5310,6 +5311,12 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
   }
   const requestedBackendId = resolveMsgBackendId(msg);
   const backendId = resolveOrchestratorExecutionBackendId(requestedBackendId, msg.orchestrationMode);
+  const disabledRefusal = disabledRuntimeRefusal({ backend: backendId, threadId });
+  if (disabledRefusal) {
+    send(client, { channel: 'orchestrator', event: 'error', data: { repoPath, threadId,
+      error: disabledRefusal, ...orchestratorCommandAckCorrelation(correlationId) } });
+    return;
+  }
   try {
     assertOrchestratorPermissionMode(backendId, msg.permissionMode);
   } catch (error) {
@@ -7718,7 +7725,7 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
-  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res)) return;
+  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT)) return;
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
   const allowedOrigins = new Set([
@@ -10007,6 +10014,8 @@ async function bootstrapWsServer() {
     stopHeadlessLoop = startHeadlessTickBridge(10_000);
     startWorktreeReaper();
     startLaneZombieReaper();
+    // Auto-settle merged or idle threads through the shared server guards.
+    void import('@/lib/inbox/settlement').then((m) => m.startInboxAutoSettle()).catch(() => {});
     // #6 persistent terminals — bounded GC for orphan dash tmux sessions, only
     // when persistence is on (off-path leaves no sessions to reap).
     if (dashPersistentTerminalsEnabled()) startDashSessionGc();

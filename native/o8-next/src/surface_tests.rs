@@ -122,6 +122,9 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
 #[path = "worker_tests.rs"]
 mod worker_tests;
 
+#[path = "prompt_action_tests.rs"]
+mod prompt_action_tests;
+
 #[gpui::test]
 fn session_chrome_uses_layout_instead_of_role_labels(cx: &mut TestAppContext) {
     let (_server, client) = fixture();
@@ -199,9 +202,8 @@ fn correction_composer_has_no_shortcut_or_mode_helper(cx: &mut TestAppContext) {
         );
     }
     assert!(
-        cx.debug_bounds("send-mode-steer").is_some()
-            || cx.debug_bounds("send-mode-queue").is_some(),
-        "mode selection remains available without helper text"
+        cx.debug_bounds("composer-microphone").is_some(),
+        "send and its menu remain available without helper text"
     );
 }
 
@@ -246,7 +248,8 @@ fn placement_empty_state_composer_and_right_panel(cx: &mut TestAppContext) {
             .expect("existing Brain uses the right slot");
         let card = cx.debug_bounds("composer-card").unwrap();
         assert!(right.left() >= card.right());
-        let send = cx.debug_bounds("send").unwrap();
+        // Empty composer: the round primary button is the mic.
+        let send = cx.debug_bounds("composer-microphone").unwrap();
         assert!(
             send.right() <= card.right(),
             "composer controls must fit beside the right panel"

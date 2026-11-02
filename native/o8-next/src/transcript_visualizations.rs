@@ -184,19 +184,20 @@ mod tests {
                 .unwrap();
         let (send, receive) = mpsc::channel();
         std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0; 8192];
-            let n = stream.read(&mut request).unwrap();
-            let body = body.to_string();
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            )
-            .unwrap();
-            send.send(String::from_utf8_lossy(&request[..n]).into_owned())
+            // A chat also reads its composer defaults when it opens.
+            for mut stream in listener.incoming().flatten() {
+                let mut request = [0; 8192];
+                let n = stream.read(&mut request).unwrap();
+                let body = body.to_string();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
                 .unwrap();
+                let _ = send.send(String::from_utf8_lossy(&request[..n]).into_owned());
+            }
         });
         (client, receive)
     }
@@ -270,7 +271,9 @@ mod tests {
             (s.rows[2].clone(), before, offset)
         });
         cx.run_until_parked();
-        assert!(request.recv().unwrap().contains("before=older-page"));
+        assert!(
+            std::iter::from_fn(|| request.recv().ok()).any(|path| path.contains("before=older-page"))
+        );
         view.update(cx, |s, cx| {
             assert!(!s.history_loading && s.history_error.is_none());
             assert!(s.rows.iter().all(|row| !row.borrow().row.id().starts_with("\0o8:leading-visualization:")));

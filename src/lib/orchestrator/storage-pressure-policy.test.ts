@@ -16,6 +16,15 @@ import {
 } from './storage-pressure-policy';
 import type { StorageVolumeObservation } from '@/lib/workspace/storage-admission';
 
+// This hermetic suite owns policy ordering. Resource integration exercises the real canonical owner guard.
+vi.mock('@/lib/workspace/completed-packet', () => ({
+  assertSettledCompletedWorkspace: (candidate: Lane) => {
+    if (candidate.status !== 'completed') throw new Error('Automatic parking requires completed ownership.');
+    return { subject: { kind: 'runtime', id: candidate.sessionKey, workspace: candidate.repoPath, projectId: null },
+      settledAt: '2026-01-01T00:00:00.000Z', releaseHead: null };
+  },
+}));
+
 function packet(id: string, launchAttempts = 0): OrchestratorPacket {
   return {
     id,
@@ -155,7 +164,7 @@ function lane(
     sessionKey: `session-${packetId}`,
     packetId,
     prNumber: null,
-    status: 'reviewing',
+    status: 'completed',
     ownership: 'managed',
     writerToken: null,
     lastHeartbeatAt: null,
@@ -174,7 +183,7 @@ describe('storage pressure admission policy', () => {
       baseCoordinator(async () => { throw held('target'); }),
       {
         mode: () => 'manual',
-        listLanes: () => [lane('review', '/repos/review', '2026-01-01T00:00:00.000Z')],
+        listLanes: () => [lane('review', '/repos/review', '2026-01-01T00:00:00.000Z', { status: 'reviewing' })],
         listRepos: async () => [repo('repo-review', '/repos/review')],
         measureAllocatedBytes: async () => 400,
         getSnapshot: () => null,
@@ -594,6 +603,34 @@ describe('storage pressure admission policy', () => {
       status: 'admitted_after_parking',
       candidates: [{ packetId: 'review', outcome: 'parked' }],
     });
+  });
+
+  it('never automatically parks a reviewing lane even with reserve pressure', async () => {
+    const park = vi.fn();
+    const coordinator = pressureCoordinator(baseCoordinator(async () => { throw held('target'); }), {
+      mode: () => 'pressure', listLanes: () => [lane('review', '/repos/review', '2026-01-01T00:00:00.000Z', { status: 'reviewing' })],
+      listRepos: async () => [repo('repo-review', '/repos/review')], measureAllocatedBytes: async () => 400,
+      getSnapshot: () => null, parkWorkspace: park,
+    });
+    await expect(coordinator.reserveForLaunch(packet('target'))).rejects.toMatchObject({ receipt: { pressure: { status: 'exhausted', candidates: [] } } });
+    expect(park).not.toHaveBeenCalled();
+  });
+
+  it('rechecks completed eligibility at the existing automatic park final boundary', async () => {
+    const candidate = lane('review', '/repos/review', '2026-01-01T00:00:00.000Z');
+    const park = vi.fn(async (input: import('@/lib/workspace/hibernator').ParkWorkspaceInput) => {
+      candidate.status = 'reviewing';
+      await input.assertPolicyCurrent!();
+      throw new Error('The changed lane must never reach deletion.');
+    });
+    const coordinator = pressureCoordinator(baseCoordinator(async () => { throw held('target'); }), {
+      mode: () => 'pressure', listLanes: () => [candidate], listRepos: async () => [repo('repo-review', '/repos/review')],
+      measureAllocatedBytes: async () => 400, getSnapshot: () => null, parkWorkspace: park,
+    });
+    await expect(coordinator.reserveForLaunch(packet('target'))).rejects.toMatchObject({
+      receipt: { pressure: { status: 'exhausted', candidates: [{ outcome: 'refused', reason: expect.stringContaining('completed ownership') }] } },
+    });
+    expect(park).toHaveBeenCalledTimes(1);
   });
 
   it('projects the global mode and durable repository opt-outs without inference', () => {

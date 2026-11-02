@@ -1,3 +1,4 @@
+import { createParkedWorkspaceContext, parkedWorkspaceProjection } from '@/lib/inbox/parked-workspaces';
 export const dynamic = 'force-dynamic';
 
 /**
@@ -98,6 +99,7 @@ export async function GET(request: NextRequest) {
     const files = readdirSync(HISTORY_DIR).filter(f => f.endsWith('.json'));
     const conversations: ChatHistoryEntry[] = [];
     const inbox = createInboxReadContext('conversation');
+    const parked = createParkedWorkspaceContext(undefined, inbox);
     // Empty files older than EMPTY_FILE_GC_MS get deleted at the end —
     // can't unlink mid-loop without surprising readdirSync.
     const filesToDelete: string[] = [];
@@ -222,6 +224,7 @@ export async function GET(request: NextRequest) {
           unsettledAt: settlement?.unsettledAt ?? undefined,
         };
         if (settlement || pinnedAt != null) appendInboxPreferences(row, settlement, pinnedAt);
+        Object.assign(row, parkedWorkspaceProjection(subject, parked));
         conversations.push(row);
       } catch { /* skip bad files */ }
     }

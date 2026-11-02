@@ -6,7 +6,8 @@ use gpui::Modifiers;
 fn click(cx: &mut VisualTestContext, selector: &str) {
     draw(cx);
     let selector: &'static str = Box::leak(selector.to_owned().into_boxed_str());
-    if selector.starts_with("key-")
+    if selector.starts_with("settings-nav-")
+        || selector.starts_with("key-")
         || selector.starts_with("setting-")
         || selector.starts_with("edit-")
         || selector.starts_with("settings-confirm-")
@@ -17,16 +18,23 @@ fn click(cx: &mut VisualTestContext, selector: &str) {
                 .debug_bounds(selector)
                 .unwrap_or_else(|| panic!("missing native control: {selector}"));
             let viewport = cx
-                .debug_bounds("settings-scroll")
+                .debug_bounds(if selector.starts_with("settings-nav-") {
+                    "settings-navigation"
+                } else {
+                    "settings-scroll"
+                })
                 .expect("settings scroll viewport");
-            if viewport.contains(&target.center()) {
+            if viewport.contains(&target.center())
+                && target.top() >= viewport.top()
+                && target.bottom() <= viewport.bottom()
+            {
                 break;
             }
             cx.simulate_event(gpui::ScrollWheelEvent {
                 position: viewport.center(),
                 delta: gpui::ScrollDelta::Pixels(gpui::point(
                     gpui::px(0.),
-                    gpui::px(if target.center().y > viewport.bottom() {
+                    gpui::px(if target.bottom() > viewport.bottom() {
                         -200.
                     } else {
                         200.
@@ -185,9 +193,26 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
     search(cx, "presentationQuietMode");
     click(cx, "setting-presentationQuietMode");
     settle(cx);
+    // An Off/On choice is a switch: one click flips the saved word.
+    search(cx, "notificationsReviewReady");
+    let review = values(&fixture)["notificationsReviewReady"].clone();
+    frames.push(timed_action(&shell, cx, "setting-notificationsReviewReady"));
+    assert_eq!(
+        error(&shell, cx),
+        None,
+        "native switch notificationsReviewReady"
+    );
+    assert_eq!(
+        values(&fixture)["notificationsReviewReady"],
+        if review == "on" {
+            json!("off")
+        } else {
+            json!("on")
+        },
+        "persisted notificationsReviewReady"
+    );
     // Selectors are the choices shown by desktop Settings, not arbitrary JSON writes.
     for (field, index, expected) in [
-        ("notificationsReviewReady", 0, json!("off")),
         ("overlapGate", 1, json!("strict")),
         ("requireApproval", 0, json!("always")),
         ("updateAutoApply", 0, json!("off")),
@@ -277,14 +302,7 @@ fn settings_fixture_validation_locks_loading_errors_and_empty(cx: &mut TestAppCo
     frame(&shell, cx);
     let notifications = values(&fixture)["notificationsReviewReady"].clone();
     search(cx, "notificationsReviewReady");
-    click(
-        cx,
-        if notifications == "on" {
-            "setting-notificationsReviewReady-0"
-        } else {
-            "setting-notificationsReviewReady-1"
-        },
-    );
+    click(cx, "setting-notificationsReviewReady");
     settle(cx);
     assert_eq!(
         values(&fixture)["notificationsReviewReady"],
@@ -604,3 +622,6 @@ fn settings_fixture_controls_and_toml_editor_fit_the_workspace(cx: &mut TestAppC
         "the TOML input must receive real pointer input inside the window"
     );
 }
+
+#[path = "settings_parity_tests.rs"]
+mod parity;

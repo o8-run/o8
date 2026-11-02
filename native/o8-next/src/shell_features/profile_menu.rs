@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 // The rail's profile button and its quick settings menu (SettingsQuickDrawer.tsx):
 // Account, Settings, Appearance and Get help, anchored beside the button.
 struct ProfileMenu;
@@ -35,6 +36,46 @@ struct Menu {
     open: bool,
     appearance: bool,
     help: bool,
+    /// Asked for once per connection; opening the menu asks again, which is
+    /// how a sign-in or sign-out reaches the rail.
+    photo_asked: bool,
+    photo: Option<Arc<gpui::Image>>,
+}
+
+/// The account photo, or None for anything that isn't a usable image.
+fn read_photo(client: &Client) -> Option<gpui::Image> {
+    const LIMIT: u64 = 2 * 1024 * 1024;
+    let url = client.url("/api/panel/account/avatar").ok()?;
+    let response = crate::client::get_with_retry(|| client.request("GET", &url).call()).ok()?;
+    if response.status() != 200 {
+        return None;
+    }
+    let format = gpui::ImageFormat::from_mime_type(
+        response.header("Content-Type")?.split(';').next()?.trim(),
+    )?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(
+        &mut std::io::Read::take(response.into_reader(), LIMIT),
+        &mut bytes,
+    )
+    .ok()?;
+    (!bytes.is_empty()).then(|| gpui::Image::from_bytes(format, bytes))
+}
+
+fn load_photo(s: &mut Shell, cx: &mut Context<Shell>) {
+    s.features.get::<Menu>().photo_asked = true;
+    let client = s.client.clone();
+    let task = cx
+        .background_executor()
+        .spawn(async move { read_photo(&client) });
+    cx.spawn(async move |this, cx| {
+        let photo = task.await;
+        let _ = this.update(cx, |this, cx| {
+            this.features.get::<Menu>().photo = photo.map(Arc::new);
+            cx.notify();
+        });
+    })
+    .detach();
 }
 
 fn close(s: &mut Shell, cx: &mut Context<Shell>) {
@@ -46,7 +87,11 @@ fn close(s: &mut Shell, cx: &mut Context<Shell>) {
 }
 
 fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::AnyElement {
+    if s.connected && !s.features.get::<Menu>().photo_asked {
+        load_photo(s, cx);
+    }
     let open = s.features.get::<Menu>().open;
+    let photo = s.features.get::<Menu>().photo.clone();
     let viewport = window.viewport_size();
     div()
         .relative()
@@ -70,22 +115,32 @@ fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::
                             .into()
                     })
                 })
-                .child(crate::icon::stroke(
-                    ACCOUNT,
-                    if open {
-                        theme().text
-                    } else {
-                        theme().text_secondary
-                    },
-                    19.,
-                    1.8,
-                ))
+                // Classic's rail: the account photo, or the account icon without one.
+                .child(match photo {
+                    Some(photo) => gpui::img(photo)
+                        .size(px(27.))
+                        .rounded_full()
+                        .object_fit(gpui::ObjectFit::Cover)
+                        .into_any_element(),
+                    None => crate::icon::stroke(
+                        ACCOUNT,
+                        if open {
+                            theme().text
+                        } else {
+                            theme().text_secondary
+                        },
+                        19.,
+                        1.8,
+                    )
+                    .into_any_element(),
+                })
                 .on_click(cx.listener(|this, _, window, cx| {
                     let menu = this.features.get::<Menu>();
                     if menu.open {
                         close(this, cx);
                     } else {
                         menu.open = true;
+                        load_photo(this, cx);
                         this.capture(window, cx);
                         cx.notify();
                     }

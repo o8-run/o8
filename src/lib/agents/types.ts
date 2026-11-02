@@ -49,3 +49,29 @@ export interface AgentMessage {
   deliveryNote: string | null;
   timestamp: string;
 }
+
+/** Storage identity and presentation; never substitutes for a bus principal. */
+export interface BotMember {
+  id: string;
+  house: string;
+  name: string;
+  iconKey: string | null;
+  homeThreadId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sourceIds: string[];
+  bindings: BotMemberBinding[];
+}
+
+/** An explicit snapshot of an existing local bus session's delivery context. */
+export interface BotMemberBinding {
+  id: string;
+  memberId: string;
+  agentId: string;
+  agentName: string;
+  repo: string;
+  runtime: string;
+  sessionKey: string;
+  createdAt: string;
+  live: boolean;
+}

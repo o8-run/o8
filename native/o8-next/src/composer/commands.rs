@@ -199,6 +199,21 @@ pub(crate) fn recognized(text: &str) -> bool {
         .any(|c| c.command == token || c.aliases.contains(&token.as_str()))
 }
 impl Composer {
+    /// The command text Enter would run now, as `apply_slash` decides it;
+    /// None when Enter would only complete the command or send plain text.
+    pub(super) fn slash_to_run(&self) -> Option<String> {
+        let commands = self.slash_suggestions();
+        let last = commands.len().checked_sub(1)?;
+        let command = commands.get(self.controls.slash.index.min(last))?;
+        let text = self.text.trim();
+        let token = text.split_whitespace().next().unwrap_or("");
+        let exact = token.eq_ignore_ascii_case(command.command)
+            || command
+                .aliases
+                .iter()
+                .any(|alias| token.eq_ignore_ascii_case(alias));
+        (exact && !(command.argument && text == token)).then(|| text.to_owned())
+    }
     pub(crate) fn slash_suggestions(&self) -> Vec<Command> {
         if !self.controls.slash.enabled
             || self.controls.slash.dismissed.as_ref() == Some(&self.text)
@@ -229,15 +244,24 @@ impl Composer {
     ) {
         let text = self.text.trim();
         let token = text.split_whitespace().next().unwrap_or("");
-        let exact = token == command.command || command.aliases.contains(&token);
+        let exact = token.eq_ignore_ascii_case(command.command)
+            || command
+                .aliases
+                .iter()
+                .any(|alias| token.eq_ignore_ascii_case(alias));
         if (click && command.argument)
-            || (!click && ((!exact && text == token) || (command.argument && text == token)))
+            || (!click && (!exact || (command.argument && text == token)))
         {
+            let args = &text[token.len()..];
             self.set_text(
                 &format!(
                     "{}{}",
                     command.command,
-                    if command.argument { " " } else { "" }
+                    if args.is_empty() && command.argument {
+                        " "
+                    } else {
+                        args
+                    }
                 ),
                 cx,
             );

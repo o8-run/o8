@@ -169,6 +169,7 @@ pub fn attach(rows: &mut Vec<Row>, buckets: &Buckets) {
             Row::Message {
                 id,
                 role: "assistant".into(),
+                author: None,
                 nodes: vec![Node {
                     kind: "visualization".into(),
                     runs: vec![],

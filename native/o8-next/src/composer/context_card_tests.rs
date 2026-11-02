@@ -14,7 +14,6 @@ fn native_context_meter_opens_340px_card_and_restores_keyboard_focus(cx: &mut Te
         s.composer.read(cx).controls.focus["composer-context"].focus(window)
     });
     draw(cx);
-    assert!(cx.debug_bounds("context-cache-help").is_some());
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     surface.read_with(cx, |s, cx| {
@@ -46,6 +45,36 @@ fn native_context_meter_opens_340px_card_and_restores_keyboard_focus(cx: &mut Te
 }
 
 #[gpui::test]
+fn native_context_help_follows_hover_and_a_click_puts_it_away(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    cx.simulate_resize(gpui::size(px(1200.), px(816.)));
+    draw(cx);
+    let ring = cx.debug_bounds("composer-context").unwrap().center();
+    let help = |surface: &gpui::Entity<Surface>, cx: &mut VisualTestContext| {
+        surface.read_with(cx, |s, cx| s.composer.read(cx).controls.context.help)
+    };
+    cx.simulate_mouse_move(ring, None, gpui::Modifiers::default());
+    draw(cx);
+    assert!(help(&surface, cx));
+    assert!(cx.debug_bounds("context-cache-help").is_some());
+    // Open and closed again under a still pointer: the card stays away and the
+    // ring gives its focus back.
+    click("composer-context", cx);
+    click("composer-context", cx);
+    draw(cx);
+    assert!(!help(&surface, cx));
+    surface.update_in(cx, |s, window, cx| {
+        assert!(!s.composer.read(cx).controls.focus["composer-context"].is_focused(window))
+    });
+    cx.simulate_mouse_move(gpui::point(px(4.), px(4.)), None, gpui::Modifiers::default());
+    draw(cx);
+    cx.simulate_mouse_move(ring, None, gpui::Modifiers::default());
+    draw(cx);
+    assert!(help(&surface, cx));
+}
+
+#[gpui::test]
 fn native_context_meter_uses_only_spare_width_and_preserves_draft_render_isolation(
     cx: &mut TestAppContext,
 ) {
@@ -60,7 +89,8 @@ fn native_context_meter_uses_only_spare_width_and_preserves_draft_render_isolati
         assert_eq!(meter.size.height, px(24.));
         assert!(meter.right() <= model.left());
         assert!(meter.left() >= card.left());
-        assert!(cx.debug_bounds("send").unwrap().right() <= card.right());
+        // Empty composer: the round primary button is the mic.
+        assert!(cx.debug_bounds("composer-microphone").unwrap().right() <= card.right());
         assert_eq!(cx.debug_path_count(), 0, "rings must use the icon atlas");
     }
     click("composer-input", cx);

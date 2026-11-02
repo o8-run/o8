@@ -6,7 +6,7 @@
  * Copyright (c) 2026 T3 Tools Inc.; MIT; see licenses/t3code-MIT.txt.
  * Adapted for o8: subject-scoped metadata, fractional keys and atomic revision guards.
  */
-import type { InboxSettlement } from './settlement';
+import type { InboxSettlement } from './settlement-state';
 
 export interface InboxPreferences {
   pinnedAt?: string | null;

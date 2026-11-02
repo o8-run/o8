@@ -8,9 +8,12 @@ use gpui::{AnyElement, Div, Image, ImageFormat, ObjectFit, Rgba, SharedString, S
 use serde_json::Value;
 use std::sync::{Arc, Mutex, Once, OnceLock};
 
-// NAVIGATION_RAIL_WIDTH and the 44px rail target in shell-geometry.ts.
-pub(super) const WIDTH: f32 = 60.;
-const TARGET: f32 = 44.;
+// The 44px rail target in shell-geometry.ts; the rail itself is narrower
+// than classic's 60 (Q 2026-10-31).
+pub(super) const WIDTH: f32 = 52.;
+pub(super) const TARGET: f32 = 44.;
+/// The rail's padding above its first target, the o8 mark.
+pub(super) const PAD: f32 = 8.;
 const ICON: f32 = 19.;
 
 #[derive(Clone, Copy)]
@@ -18,7 +21,9 @@ pub(super) enum Icon {
     Play,
     Gauge,
     Terminal,
+    Clock,
     PullRequest,
+    Puzzle,
 }
 
 impl Icon {
@@ -30,6 +35,10 @@ impl Icon {
             }
             Self::Gauge => "m12 14 4-4 M3.34 19a10 10 0 1 1 17.32 0",
             Self::Terminal => "m4 17 6-6-6-6 M12 19h8",
+            Self::Clock => "M12 6v6l4 2 M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20Z",
+            Self::Puzzle => {
+                "M8 3H5a2 2 0 0 0-2 2v3a3 3 0 1 1 0 6v3a2 2 0 0 0 2 2h3a3 3 0 1 1 6 0h3a2 2 0 0 0 2-2v-3a3 3 0 1 0 0-6V5a2 2 0 0 0-2-2h-3a3 3 0 1 0-6 0Z"
+            }
             Self::PullRequest => {
                 "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M13 6h3a2 2 0 0 1 2 2v7 M6 9v12"
             }
@@ -197,6 +206,12 @@ fn gauge(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
             target("rail-usage")
                 .relative()
                 .when(open, |view| view.bg(theme().hover))
+                .cursor_pointer()
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.features.get::<UsageCard>().open = false;
+                    this.close_rail_overlays(window, cx);
+                    this.execute(Command::Usage, window, cx);
+                }))
                 .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                     if *hovered {
                         let card = this.features.get::<UsageCard>();
@@ -307,23 +322,22 @@ fn reset_label(iso: &str) -> Option<String> {
     Some(format!("{day} {twelve}:{minute:02} {half}"))
 }
 
-/// The hover card: each connected runtime's windows, bars and resets
-/// (RuntimeUsageSummary, compact).
-fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
-    let snapshot = SNAPSHOT.lock().unwrap().clone();
+/// Each capacity's account heading, state line, window bars and resets
+/// (RuntimeUsageSummary). Shared by the rail card and Settings › Limits.
+pub(crate) fn usage_sections(snapshot: &Value) -> Vec<Div> {
     let muted = |text: SharedString, size: f32| {
         div()
             .text_size(px(size))
             .text_color(theme().text_muted)
             .child(text)
     };
+    let snapshot = Some(snapshot);
     let mut sections = vec![];
     let capacities = snapshot
-        .as_ref()
         .and_then(|snapshot| snapshot["capacities"].as_array().cloned())
         .unwrap_or_default();
     for capacity in &capacities {
-        let identity = snapshot.as_ref().and_then(|snapshot| {
+        let identity = snapshot.and_then(|snapshot| {
             snapshot["identities"].as_array().and_then(|all| {
                 all.iter()
                     .find(|identity| identity["id"] == capacity["identityId"])
@@ -402,6 +416,29 @@ fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
         }
         sections.push(section);
     }
+    sections
+}
+
+/// The last capacity snapshot the rail poll read, for a stale fallback.
+pub(crate) fn last_usage_snapshot() -> Option<Value> {
+    SNAPSHOT.lock().unwrap().clone()
+}
+
+/// The hover card: each connected runtime's windows, bars and resets
+/// (RuntimeUsageSummary, compact).
+fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
+    let snapshot = SNAPSHOT.lock().unwrap().clone();
+    let muted = |text: SharedString, size: f32| {
+        div()
+            .text_size(px(size))
+            .text_color(theme().text_muted)
+            .child(text)
+    };
+    let capacities = snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot["capacities"].as_array().cloned())
+        .unwrap_or_default();
+    let sections = snapshot.as_ref().map(usage_sections).unwrap_or_default();
     let body = div()
         .p(px(16.))
         .flex()
@@ -479,7 +516,7 @@ fn divider() -> Div {
         .bg(theme().border)
 }
 
-fn brand() -> impl IntoElement {
+pub(super) fn brand() -> impl IntoElement {
     static LOGO: OnceLock<Arc<Image>> = OnceLock::new();
     let logo = LOGO.get_or_init(|| {
         Arc::new(Image::from_bytes(
@@ -490,6 +527,43 @@ fn brand() -> impl IntoElement {
     img(logo.clone())
         .size(px(24.))
         .object_fit(ObjectFit::Contain)
+}
+
+/// SymonMark: classic's orb, rendered from SYMON_ORB_BACKGROUND because GPUI has
+/// no conic gradient. Its highlight follows `--t-text`, so each ink has a file.
+fn symon_mark(active: bool) -> impl IntoElement {
+    static DARK: OnceLock<Arc<Image>> = OnceLock::new();
+    static LIGHT: OnceLock<Arc<Image>> = OnceLock::new();
+    let load =
+        |bytes: &'static [u8]| Arc::new(Image::from_bytes(ImageFormat::Png, bytes.to_vec()));
+    let mark = if crate::theme::light() {
+        LIGHT.get_or_init(|| load(include_bytes!("symon_mark_light.png")))
+    } else {
+        DARK.get_or_init(|| load(include_bytes!("symon_mark_dark.png")))
+    };
+    let glow = gpui::BoxShadow {
+        color: crate::theme::symon_glow().into(),
+        offset: gpui::point(px(0.), px(0.)),
+        blur_radius: px(9.),
+        spread_radius: px(0.),
+    };
+    let mut shadows = vec![glow];
+    if active {
+        shadows.insert(
+            0,
+            gpui::BoxShadow {
+                color: theme().accent.into(),
+                offset: gpui::point(px(0.), px(0.)),
+                blur_radius: px(0.),
+                spread_radius: px(2.),
+            },
+        );
+    }
+    div()
+        .size(px(20.))
+        .rounded_full()
+        .shadow(shadows)
+        .child(img(mark.clone()).size(px(20.)).object_fit(ObjectFit::Contain))
 }
 
 impl Shell {
@@ -504,7 +578,13 @@ impl Shell {
         if self.surfaces.customize.open {
             self.close_customize(window, cx);
         }
-        if self.surfaces.setup.view.as_ref().is_some_and(|v| !v.read(cx).busy()) {
+        if self
+            .surfaces
+            .setup
+            .view
+            .as_ref()
+            .is_some_and(|v| !v.read(cx).busy())
+        {
             self.surfaces.setup.view = None;
             self.revision += 1;
         }
@@ -523,6 +603,11 @@ impl Shell {
             .flat_map(|r| (r.nav)(self, NavPosition::AfterWorkspaces, cx))
             .collect::<Vec<_>>();
         watch_usage(&self.client);
+        // The sidebar grows out of the home mark below; keep its frames coming
+        // when the mark, not the header, started it.
+        if super::sidebar::travel(self).1 {
+            window.request_animation_frame();
+        }
         let active = self.active();
         let tab = |id: &'static str,
                    icon: Icon,
@@ -531,12 +616,16 @@ impl Shell {
                    command: fn() -> Command| {
             button(id, icon, label, active.as_ref() == Some(&tab)).on_click(cx.listener(
                 move |this, _, window, cx| {
+                    // A destination opens in front, not behind Customize or Settings.
+                    this.close_rail_overlays(window, cx);
                     this.capture(window, cx);
                     this.execute(command(), window, cx);
                 },
             ))
         };
         let projects_open = self.surfaces.projects.open;
+        let voice = self.voice_live();
+        let plugins_open = self.customize_tab_open("plugins", cx);
         div()
             .id("shell-rail")
             .absolute()
@@ -548,13 +637,15 @@ impl Shell {
             .flex()
             .flex_col()
             .items_center()
-            .py(px(8.))
+            .py(px(PAD))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
             .child(
-                // Home returns to the workspace from Projects, Customize or Setup.
+                // Home returns to the workspace from Projects, Settings, Customize
+                // or Setup; on the workspace it opens or folds the sidebar, which
+                // grows out of this mark (Q 2026-10-31).
                 target(if projects_open {
                     "shell-workspace"
                 } else {
@@ -563,15 +654,31 @@ impl Shell {
                 .tooltip(|_, cx| cx.new(|_| Tip("o8 — Home".into())).into())
                 .child(brand())
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.close_rail_overlays(window, cx);
-                    this.restore_focus(window, cx);
-                    cx.notify();
+                    let overlay = this.surfaces.projects.open
+                        || this.surfaces.settings.view.is_some()
+                        || this.surfaces.customize.open
+                        || this.surfaces.setup.view.is_some();
+                    if overlay {
+                        this.close_rail_overlays(window, cx);
+                        this.restore_focus(window, cx);
+                        cx.notify();
+                    } else {
+                        features::toggle_sidebar(this, window, cx);
+                    }
                 })),
+            )
+            // Classic's toggle: the same one Caps Lock and voice-toggle drive.
+            .child(
+                target("rail-symon")
+                    .tooltip(|_, cx| cx.new(|_| Tip("Symon".into())).into())
+                    .child(symon_mark(voice))
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_voice(cx))),
             )
             // A click starts a chat on the lead; a drag drops one onto the workspace.
             .child(
                 button("rail-orchestrator", Icon::Play, "Run orchestrator", false)
                     .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_rail_overlays(window, cx);
                         this.capture(window, cx);
                         features::start_chat(this, window, cx);
                     }))
@@ -594,6 +701,21 @@ impl Shell {
             )
             // Grid stays in code but off the rail until it earns a place (Q, 10-30).
             .child(divider())
+            // AutomationsPage, as the desktop rail's Scheduled entry.
+            .child(tab(
+                "rail-scheduled",
+                Icon::Clock,
+                "Scheduled",
+                Tab::Scheduled,
+                || Command::Scheduled,
+            ))
+            .child(
+                button("rail-plugins", Icon::Puzzle, "Plugins", plugins_open).on_click(
+                    cx.listener(|this, _, window, cx| {
+                        this.show_customize_tab("plugins", window, cx);
+                    }),
+                ),
+            )
             // RailMoreMenu, then PRs last, as CompactNavigationRail orders them.
             .child(features::rail_more(self, cx))
             .children(top)

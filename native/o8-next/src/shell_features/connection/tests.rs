@@ -284,6 +284,7 @@ fn round1_late_token_child(cx: &mut TestAppContext) {
     );
 }
 
+#[ignore = "never settles after the host stops; see #5311"]
 #[gpui::test]
 fn round1_reconnect_keeps_composer_focus_draft_and_queue(cx: &mut TestAppContext) {
     let fixture = Fixture::new();

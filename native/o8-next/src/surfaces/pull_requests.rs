@@ -4,6 +4,8 @@ use super::*;
 mod comparison;
 #[path = "pull_requests/model.rs"]
 mod model;
+#[path = "pull_requests/readiness.rs"]
+pub(crate) mod readiness;
 #[path = "pull_requests/client.rs"]
 mod requests;
 pub(super) type Slice = EmptyState;

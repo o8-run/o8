@@ -2,6 +2,39 @@ use super::prompt_acceptance_tests::{focus, wait};
 use super::*;
 
 #[gpui::test]
+fn native_composer_saved_prompt_body_accepts_enter(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-input", cx);
+    cx.simulate_input("A multiline saved prompt");
+    click("composer-attach", cx);
+    click("attach-save-prompt", cx);
+    click("composer-prompt-field-2", cx);
+    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_input("First line");
+    cx.simulate_keystrokes("enter");
+    cx.simulate_input("Second line");
+    click("composer-prompt-submit", cx);
+    wait(&surface, cx, |s, cx| {
+        !s.composer.read(cx).controls.prompt.result.is_empty()
+    });
+    let repo = surface.read_with(cx, |s, cx| s.intent_repo(cx).unwrap());
+    let prompts: Value = fixture
+        .client
+        .get(
+            "/api/prompt-library",
+            &[("scope", "available"), ("repoPath", &repo)],
+        )
+        .unwrap();
+    assert!(
+        prompts["prompts"].as_array().unwrap().iter().any(|p| {
+            p["title"] == "A multiline saved prompt" && p["body"] == "First line\nSecond line"
+        }),
+        "Enter must persist a line break in the saved prompt body"
+    );
+}
+
+#[gpui::test]
 fn native_composer_retry_consumes_only_context_frozen_in_its_queue_item(app: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, visual) = open(app, &fixture);
@@ -14,10 +47,9 @@ fn native_composer_retry_consumes_only_context_frozen_in_its_queue_item(app: &mu
     let first = surface.read_with(visual, |s, cx| {
         s.composer.read(cx).controls.prompt.prelude.clone()
     });
-    click("send-mode-steer", visual);
     focus(&surface, visual);
     visual.simulate_input("Fixture lose response");
-    visual.simulate_keystrokes("enter");
+    visual.simulate_keystrokes("cmd-enter");
     wait(&surface, visual, |s, _| {
         !s.saving && s.pending.contains_key("thoughts-composer-first")
     });
@@ -92,10 +124,9 @@ fn native_composer_recall_survives_reopen_and_is_consumed_by_a_confirmed_send(
     reopened.read_with(visual, |s, cx| {
         assert_eq!(s.composer.read(cx).controls.prompt.prelude, saved)
     });
-    click("send-mode-steer", visual);
     focus(&reopened, visual);
     visual.simulate_input("Use recalled context");
-    visual.simulate_keystrokes("enter");
+    visual.simulate_keystrokes("cmd-enter");
     wait(&reopened, visual, |s, _| {
         !s.saving
             && s.queue["items"]
@@ -123,7 +154,8 @@ fn native_composer_mode_survives_reopen_through_the_picker(app: &mut TestAppCont
     ));
     app.update(|cx| cx.set_global(crate::composer::mode_store::TestRoot(root.clone())));
     let (surface, visual) = open(app, &fixture);
-    click("composer-mode", visual);
+    click("composer-attach", visual);
+    click("attach-mode", visual);
     click("mode-multitask", visual);
     let path = surface.read_with(visual, |s, cx| {
         s.composer.read(cx).controls.prompt.store.clone().unwrap()
@@ -135,10 +167,9 @@ fn native_composer_mode_survives_reopen_through_the_picker(app: &mut TestAppCont
     reopened.read_with(visual, |s, cx| {
         assert_eq!(s.composer_routing(cx).unwrap()["pickedMode"], "multitask")
     });
-    click("send-mode-steer", visual);
     reopened.update_in(visual, |s, w, cx| s.composer.read(cx).focus.focus(w));
     visual.simulate_input("Restored mode");
-    visual.simulate_keystrokes("enter");
+    visual.simulate_keystrokes("cmd-enter");
     visual.run_until_parked();
     reopened.read_with(visual, |s, _| {
         assert_eq!(

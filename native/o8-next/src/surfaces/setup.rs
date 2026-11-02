@@ -39,11 +39,17 @@ pub(super) const REGISTRATION: Registration = Registration {
         if position != NavPosition::BeforeWorkspaces {
             return vec![];
         }
-        if s.connected && !s.loading && !s.surfaces.setup.first_run_checked.replace(true) {
+        if s.connected
+            && !s.loading
+            && !s.surfaces.setup.first_run_checked.replace(true)
+            && !s.active().is_some_and(|tab| tab.registration().global)
+        {
             let shell = cx.weak_entity();
             cx.defer(move |cx| {
                 let _ = shell.update(cx, |s, cx| {
-                    if !s.sessions.iter().any(|session| session.repo_path.is_some()) {
+                    if !s.sessions.iter().any(|session| session.repo_path.is_some())
+                        && !s.active().is_some_and(|tab| tab.registration().global)
+                    {
                         s.open_setup(cx);
                     }
                 });

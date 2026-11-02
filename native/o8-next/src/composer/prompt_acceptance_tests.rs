@@ -30,6 +30,46 @@ pub(super) fn wait_selector(cx: &mut VisualTestContext, selector: &'static str) 
     panic!("Missing composer control {selector}");
 }
 #[gpui::test]
+fn native_composer_slash_click_keeps_typed_arguments(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-input", cx);
+    cx.simulate_input("/visualize compare these two plans");
+    click("slash-visualization", cx);
+    surface.update_in(cx, |s, window, cx| {
+        assert_eq!(
+            s.composer.read(cx).text,
+            "/visualization compare these two plans"
+        );
+        assert!(s.composer.read(cx).focus.is_focused(window));
+        assert!(s.queue["items"].as_array().unwrap().is_empty());
+    });
+}
+
+#[gpui::test]
+fn native_composer_up_reaches_start_of_first_line(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-input", cx);
+    cx.simulate_input("alpha beta\nsecond line");
+    draw(cx);
+    cx.simulate_keystrokes("ctrl-home right right right up");
+    surface.update_in(cx, |s, window, cx| {
+        s.composer.update(cx, |i, cx| {
+            assert_eq!(
+                gpui::EntityInputHandler::selected_text_range(i, false, window, cx)
+                    .unwrap()
+                    .range,
+                0..0,
+                "Up from the first visual line must reach the start of the draft"
+            );
+        });
+    });
+    cx.simulate_keystrokes("right right right shift-up ctrl-c");
+    assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), "alp");
+}
+
+#[gpui::test]
 fn native_composer_controls_slash_opens_arrows_and_enter_apply(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
@@ -85,13 +125,14 @@ fn native_composer_controls_slash_escape_waits_for_an_edit(cx: &mut TestAppConte
 fn native_composer_controls_mode_arrows_change_the_next_real_send(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    click("send-mode-steer", cx);
-    click("composer-mode", cx);
+    click("composer-attach", cx);
+    click("attach-mode", cx);
     cx.simulate_keystrokes("down enter");
     cx.run_until_parked();
     focus(&surface, cx);
     cx.simulate_input("Keyboard selected mode");
-    cx.simulate_keystrokes("enter");
+    // The fixture's chat is mid-turn; ⌘↵ queues instead of steering.
+    cx.simulate_keystrokes("cmd-enter");
     wait(&surface, cx, |s, _| {
         !s.saving && s.queue["items"].as_array().is_some_and(|i| !i.is_empty())
     });
@@ -114,15 +155,16 @@ fn native_composer_controls_intent_chips_apply_without_sending(cx: &mut TestAppC
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     focus(&surface, cx);
-    assert!(cx.debug_bounds("composer-intent-repo").is_none());
-    click("send-mode-steer", cx);
+    assert!(cx.debug_bounds("attach-repo").is_none());
     focus(&surface, cx);
     cx.simulate_input("Check this change");
     draw(cx);
-    click("composer-intent-repo", cx);
+    click("composer-attach", cx);
+    click("attach-repo", cx);
     wait_selector(cx, "composer-prompt-item-0");
     click("composer-prompt-item-0", cx);
-    click("composer-intent-branch", cx);
+    click("composer-attach", cx);
+    click("attach-branch", cx);
     wait_selector(cx, "composer-prompt-item-0");
     // Filter real branches through the real search editor, then choose it.
     click("composer-command-query", cx);
@@ -134,7 +176,7 @@ fn native_composer_controls_intent_chips_apply_without_sending(cx: &mut TestAppC
         assert!(s.queue["items"].as_array().unwrap().is_empty());
     });
     focus(&surface, cx);
-    cx.simulate_keystrokes("enter");
+    cx.simulate_keystrokes("cmd-enter");
     wait(&surface, cx, |s, _| {
         !s.saving && s.queue["items"].as_array().is_some_and(|i| !i.is_empty())
     });
@@ -153,7 +195,10 @@ fn native_composer_controls_intent_chips_apply_without_sending(cx: &mut TestAppC
 fn native_composer_controls_quick_action_and_prompt_insert_without_send(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    click("composer-quick", cx);
+    focus(&surface, cx);
+    cx.simulate_keystrokes("ctrl-shift-k");
+    cx.run_until_parked();
+    draw(cx);
     click("composer-command-query", cx);
     cx.simulate_input("decompose");
     cx.simulate_keystrokes("enter");
@@ -165,7 +210,8 @@ fn native_composer_controls_quick_action_and_prompt_insert_without_send(cx: &mut
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("Replace this");
     cx.simulate_keystrokes("ctrl-a");
-    click("composer-prompts", cx);
+    click("composer-attach", cx);
+    click("attach-browse-prompts", cx);
     wait_selector(cx, "composer-prompt-item-0");
     click("composer-prompt-item-0", cx);
     surface.read_with(cx, |s, cx| {

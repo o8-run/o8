@@ -7,7 +7,7 @@ pub(super) fn menu(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
     } else {
         p.selected
     };
-    let selected = if matches!(selected, Tool::Prs | Tool::Compare) {
+    let selected = if matches!(selected, Tool::Prs | Tool::Issues | Tool::Compare) {
         Tool::Activity
     } else {
         selected
@@ -98,7 +98,8 @@ pub(super) fn menu(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
                     |s, w, cx| {
                         show(s, Tool::Browser, w, cx);
                         let browser = key(s, Tool::Browser);
-                        if let Some(view) = s.features.get::<Panel>().browsers.get(&browser).cloned()
+                        if let Some(view) =
+                            s.features.get::<Panel>().browsers.get(&browser).cloned()
                         {
                             view.update(cx, |browser, cx| browser.new_page(w, cx));
                         }

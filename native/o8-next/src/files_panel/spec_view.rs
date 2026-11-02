@@ -90,7 +90,7 @@ impl Spec {
             self.workspace.clone()
         };
         div().debug_selector(||"spec-header".into()).h(px(58.)).flex_shrink_0().flex().items_center().gap(px(12.))
-            .pl(px(18.)).pr(px(8.)).border_b_1().border_color(theme().border)
+            .pl(px(18.)).pr(px(8.))
             .child(div().flex_1().min_w_0().flex().flex_col().gap(px(3.))
                 .child(div().flex().items_baseline().gap(px(10.)).min_w_0()
                     .child(div().text_size(px(13.5)).font_weight(FontWeight(350.)).line_height(px(16.875)).whitespace_nowrap().overflow_hidden().text_ellipsis().child("Workspace Notes"))
@@ -217,7 +217,13 @@ impl Spec {
                                     .m(px(7.))
                                     .pl(px(16.))
                                     .pr(px(8.))
-                                    .child(self.editor.clone()),
+                                    .relative()
+                                    .child(self.editor.clone())
+                                    .child(crate::theme::edge_fade(
+                                        true,
+                                        24.,
+                                        theme().surface,
+                                    )),
                             )
                         },
                     )

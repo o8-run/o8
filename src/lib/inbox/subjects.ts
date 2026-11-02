@@ -11,8 +11,7 @@ import type { Lane } from '@/lib/lane/types';
 import { getSqlite } from '@/lib/db';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { getRuntime } from '@/lib/runtimes';
-import type { AgentRuntime, RuntimeId } from '@/lib/runtimes/types';
+import type { RuntimeId } from '@/lib/runtimes/types';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { PROCESS_TIMEOUT_MS } from '@/lib/lane/orchestrator-session-core';
 import { listLanes } from '@/lib/lane/registry';
@@ -25,7 +24,8 @@ import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-pl
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 import { inboxListingProjection, inboxReadStatement, inboxSubject, observeInboxRuntimeRun, readInboxState, type InboxReadContext } from './store';
 import { legacyInboxPin } from './preferences';
-import { hasQueuedTurnStart, type InboxSubject } from './settlement';
+import { hasQueuedTurnStart, type InboxSubject } from './settlement-state';
+import { listNetworkSendIntents } from '@/lib/bots/network-store';
 
 export class InboxMutationError extends Error {
   constructor(message: string, public readonly status: number) { super(message); }
@@ -56,13 +56,18 @@ export function readInboxLanes(): Map<string, InboxLane> {
   if (!db.inTransaction) laneReads.set(db, { ...revision, lanes: newest });
   return newest;
 }
-export function runtimeInboxIdentity(agent: Pick<AgentSummary, 'sessionKey' | 'workspace'>, packets = inboxPackets(), lanes: Lane[] | Map<string, InboxLane> = listLanes(), context?: InboxReadContext) {
+export function runtimeInboxIdentity(agent: Pick<AgentSummary, 'sessionKey' | 'workspace'>, packets = inboxPackets(), lanes: Lane[] | Map<string, InboxLane> = listLanes(), context?: InboxReadContext, parentHistories?: Map<string, ReturnType<typeof readPersistedLlmChat>>) {
   const lane = lanes instanceof Map ? lanes.get(agent.sessionKey) : lanes.filter(candidate => candidate.sessionKey === agent.sessionKey).reverse()
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.updatedAt.localeCompare(a.updatedAt))[0];
   const workspace = agent.workspace.startsWith('~/') ? join(homedir(), agent.workspace.slice(2)) : agent.workspace;
   const packet = packets.find(candidate => lane ? candidate.id === lane.packetId : candidate.lane?.sessionKey === agent.sessionKey);
   const parentId = packet?.orchestratorThreadId || packet?.launchContext?.parentThreadId;
-  const parentHistory = parentId ? readPersistedLlmChat(parentId)?.history : null;
+  let savedParent = parentId ? parentHistories?.get(parentId) : undefined;
+  if (parentId && !parentHistories?.has(parentId)) {
+    savedParent = readPersistedLlmChat(parentId);
+    parentHistories?.set(parentId, savedParent);
+  }
+  const parentHistory = savedParent?.history ?? null;
   const parentInboxSubject = parentId
     ? inboxSubject('conversation', parentId, parentHistory?.repoPath ?? packet?.workspaceTargetPath ?? workspace,
       (parentHistory as { projectId?: string } | null)?.projectId ?? packet?.projectId, context?.workspaces)
@@ -106,13 +111,15 @@ export function observeAgentInboxRun(agent: AgentSummary, subject: InboxSubject,
   }
   const prior = readInboxState(subject, context);
   if (!forMutation && prior.settledOverride === null) return activity;
-  const runtime = getRuntime(agent.runtime as RuntimeId);
-  if (!runtime?.capabilities.readTranscript) return activity;
-  return observeAgentInboxTranscript(runtime, agent, subject, activity, context);
+  return observeAgentInboxTranscript(agent, subject, activity, context);
 }
 
-async function observeAgentInboxTranscript(runtime: AgentRuntime, agent: AgentSummary, subject: InboxSubject,
+async function observeAgentInboxTranscript(agent: AgentSummary, subject: InboxSubject,
   activity: RuntimeInboxActivity, context?: InboxReadContext): Promise<RuntimeInboxActivity> {
+  // Workspace guards also use subject identity; do not eagerly initialize owned runtimes through that path.
+  const { getRuntime } = await import('@/lib/runtimes');
+  const runtime = getRuntime(agent.runtime as RuntimeId);
+  if (!runtime?.capabilities.readTranscript) return activity;
   let transcript;
   try { transcript = await runtime.readTranscript(agent.sessionKey, undefined, 50); }
   catch { return activity; } // Missing evidence retains the explicit override.
@@ -129,9 +136,7 @@ async function observeAgentInboxTranscript(runtime: AgentRuntime, agent: AgentSu
   return activity;
 }
 
-export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary[], runtimeActivity?: RuntimeInboxActivity): void {
-  const packets = inboxPackets();
-  const lanes = listLanes();
+export function settleScope(subject: InboxSubject, packets = inboxPackets(), lanes = listLanes()) {
   const childPackets = subject.kind === 'conversation' ? packets.filter(packet =>
     (packet.orchestratorThreadId || packet.launchContext?.parentThreadId) === subject.id) : [];
   const childIds = new Set(childPackets.map(packet => packet.id));
@@ -148,6 +153,20 @@ export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary
   const history = subject.kind === 'conversation' ? readPersistedLlmChat(subject.id)?.history : null;
   const boundIds = (history as { orchestratorSessionIds?: Record<string, string> } | null)?.orchestratorSessionIds;
   for (const [runtime, id] of Object.entries(boundIds ?? {})) if (id) sessionKeys.add(`${runtime === 'claude' ? 'claude-code' : runtime}:${id}`);
+  return { packets, lanes, childPackets, childIds, relevantLanes, sessionKeys, history };
+}
+
+/**
+ * Runtime session keys whose live inventory status can block settling this
+ * subject. A plain conversation only has its in-process `llm-chat:` key, which
+ * the runtime inventory never lists, so settle can skip the inventory scan.
+ */
+export function inboxSettleInventoryKeys(subject: InboxSubject): string[] {
+  return [...settleScope(subject).sessionKeys].filter(key => !key.startsWith('llm-chat:'));
+}
+
+export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary[], runtimeActivity?: RuntimeInboxActivity): void {
+  const { lanes, childPackets, childIds, relevantLanes, sessionKeys, history } = settleScope(subject);
   const relevantAgents = agents.filter(agent => sessionKeys.has(agent.sessionKey));
   const approvals = listRecordedApprovals();
   if (approvals.some(approval => {
@@ -175,6 +194,9 @@ export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary
     throw new InboxMutationError('Thread is still running. Stop it before settling.', 409);
   }
   const messages = history?.messages ?? [];
+  if (subject.kind === 'conversation' && listNetworkSendIntents(subject.id).some(send => send.status === 'pending' && !send.messageId)) {
+    throw new InboxMutationError('Thread has an unconfirmed network send. Retry or remove it before settling.', 409);
+  }
   const latestUserMessageAt = runtimeActivity?.latestUserMessageAt ?? messages.filter(message => message.role === 'user').reduce<number | undefined>(
     (max, message) => Number.isFinite(message.timestamp) ? Math.max(max ?? -Infinity, message.timestamp) : max, undefined);
   const latestRunAt = runtimeActivity?.latestRunAt ?? messages.filter(message => message.role === 'assistant' && message.content?.trim()).reduce<number | undefined>(
@@ -183,7 +205,7 @@ export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary
   const latestKnownRunAt = Number.isFinite(recordedRunAt) ? Math.max(latestRunAt ?? -Infinity, recordedRunAt) : latestRunAt;
   const failed = runtimeActivity?.failed || (history as { orchestratorTerminalStatus?: string } | null)?.orchestratorTerminalStatus === 'failed';
   if ((subject.kind === 'conversation' && subject.workspace && listQueuedComposerSends({ repoPath: subject.workspace, threadId: subject.id }).length > 0)
-    || hasQueuedTurnStart({ latestUserMessageAt, latestRunAt: latestKnownRunAt, failed }, Date.now())) {
+    || (history?.source !== 'bot-network' && hasQueuedTurnStart({ latestUserMessageAt, latestRunAt: latestKnownRunAt, failed }, Date.now()))) {
     throw new InboxMutationError('Thread has a queued message. Send it or remove it before settling.', 409);
   }
   // Keep the synchronous guard in the mutation's SQLite transaction so a

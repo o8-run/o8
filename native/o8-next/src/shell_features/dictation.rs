@@ -294,8 +294,16 @@ pub(super) fn frame(s: &mut Shell, kind: &str, payload: &Value, cx: &mut Context
             }
         }
         _ => match payload["state"].as_str() {
-            Some("listening") if state == DictationState::Starting => {
-                show(s, DictationState::Listening, cx)
+            Some("listening") => {
+                if state == DictationState::Starting {
+                    show(s, DictationState::Listening, cx);
+                }
+                // The host relays the native recorder's level on listening frames.
+                if let Some(level) = payload["level"].as_f64()
+                    && let Some(view) = pinned(s)
+                {
+                    view.update(cx, |view, _| view.dictation_level(level as f32));
+                }
             }
             Some("idle") => {
                 let sent = s.features.get::<Mic>().sent;

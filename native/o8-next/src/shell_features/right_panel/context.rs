@@ -11,6 +11,10 @@ pub(super) struct Contexts {
     order: Vec<(String, u64)>,
     selected: Option<(String, u64)>,
     comparison: Option<gpui::AnyView>,
+    /// Issues opened from the chat, each with its own tab. An empty repository
+    /// means the workspace's, for a bare `#123`.
+    issues: Vec<((String, u64), Entity<crate::issues::Issues>)>,
+    issue: Option<(String, u64)>,
 }
 fn background<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
@@ -225,6 +229,106 @@ pub(super) fn tabs(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
                 )
         }))
         .into_any_element()
+}
+pub(super) fn open_issue(
+    s: &mut Shell,
+    repo: String,
+    number: u64,
+    w: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    let key = (repo, number);
+    if !s
+        .features
+        .get::<Panel>()
+        .contexts
+        .issues
+        .iter()
+        .any(|(k, _)| *k == key)
+    {
+        let client = s.client.clone();
+        let workspace = s.state.selected.clone();
+        let target = key.clone();
+        let view = cx.new(|cx| crate::issues::Issues::single(client, workspace, target, w, cx));
+        s.features
+            .get::<Panel>()
+            .contexts
+            .issues
+            .push((key.clone(), view));
+    }
+    s.features.get::<Panel>().contexts.issue = Some(key);
+    show(s, Tool::Issues, w, cx);
+}
+pub(super) fn issue(s: &Shell, _: &mut Context<Shell>) -> AnyElement {
+    let contexts = &s.features.read::<Panel>().unwrap().contexts;
+    contexts
+        .issues
+        .iter()
+        .find(|(key, _)| Some(key) == contexts.issue.as_ref())
+        .map(|(_, view)| view.clone().into_any_element())
+        .unwrap_or_else(|| div().into_any_element())
+}
+/// One tab per open issue, named for its number.
+pub(super) fn issue_tabs(s: &Shell, cx: &mut Context<Shell>) -> Vec<AnyElement> {
+    let p = s.features.read::<Panel>().unwrap();
+    p.contexts
+        .issues
+        .iter()
+        .map(|((repo, number), _)| {
+            let key = (repo.clone(), *number);
+            let (open, close) = (key.clone(), key.clone());
+            let number = *number;
+            div()
+                .debug_selector(move || format!("panel-issue-tab-{number}"))
+                .flex_shrink_0()
+                .h(px(28.))
+                .flex()
+                .items_center()
+                .rounded(px(7.))
+                .when(
+                    p.selected == Tool::Issues && p.contexts.issue.as_ref() == Some(&key),
+                    |v| v.bg(theme().selection),
+                )
+                .child(
+                    chrome::button(
+                        s,
+                        format!("panel-issue-{repo}-{number}"),
+                        format!("Issue #{number}"),
+                        cx,
+                        move |s, w, cx| open_issue(s, open.0.clone(), open.1, w, cx),
+                    )
+                    .h(px(28.))
+                    .px(px(8.))
+                    .child(format!("#{number}")),
+                )
+                .child(
+                    chrome::button(
+                        s,
+                        format!("panel-issue-close-{repo}-{number}"),
+                        "Close issue",
+                        cx,
+                        move |s, w, cx| {
+                            let state = &mut s.features.get::<Panel>().contexts;
+                            state.issues.retain(|(key, _)| *key != close);
+                            let next = state.issues.last().map(|(key, _)| key.clone());
+                            state.issue = next.clone();
+                            match next {
+                                Some((repo, n)) => open_issue(s, repo, n, w, cx),
+                                None => show(s, Tool::Activity, w, cx),
+                            }
+                        },
+                    )
+                    .size(px(24.))
+                    .child(crate::icon::stroke(
+                        "M6 6l12 12M18 6 6 18",
+                        theme().text_muted,
+                        10.,
+                        2.,
+                    )),
+                )
+                .into_any_element()
+        })
+        .collect()
 }
 pub(super) fn ensure_comparison(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
     let view = registered_view(s, &json!({"comparison": true}), w, cx);
