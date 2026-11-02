@@ -16,7 +16,7 @@ import { prepareOrchestratorProjectTurn, readPersistedOrchestratorProjectSelecti
 import { persistComposerImages, withAttachmentFilePaths } from '@/lib/mobile/orchestrator-image-media';
 import type { ComposerImageAttachment } from '@/lib/mobile/composer-image-validation';
 import { modelFacingComposerMessage } from '@/lib/orchestrator/composer-wire';
-import { createPersistPacer } from './orchestrator-assistant-text';
+import { createPersistPacer, createTrailingPersist } from './orchestrator-assistant-text';
 import type { OrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 
 export interface BoundChatContinuationHooks {
@@ -51,6 +51,7 @@ export async function runBoundChatContinuation(
   const startedAt = Date.now();
   let text = '';
   const persistDue = createPersistPacer();
+  const trailingPersist = createTrailingPersist();
   let completed = false;
   let turnError: string | null = null;
   let receipt: MobileTurnReceipt = { leadModel: expected.model, effort: thinkingEffort ?? 'adaptive',
@@ -66,6 +67,13 @@ export async function runBoundChatContinuation(
       ...((done.usage.cacheObserved === false) ? { cacheObserved: false } : {}),
       ...(done.usage.cacheRetentionMs ? { cacheRetentionMs: done.usage.cacheRetentionMs } : {}) } } : {}),
   });
+  const savePartial = () => {
+    try {
+      if (text) persist(null);
+    } catch (persistError) {
+      console.warn('[bound-chat-continuation] failed to save partial text', persistError);
+    }
+  };
   try {
     if (input.claim && !input.claim()) return;
     const session = backend.ensureSession(input.repoPath, undefined, expected.threadId);
@@ -101,6 +109,7 @@ export async function runBoundChatContinuation(
         case 'text':
           text += event.text;
           if (persistDue()) persist(null);
+          else trailingPersist.schedule(savePartial);
           hooks.publish(session.sessionName, 'output', { ...data, text: event.text, thinking: false }); break;
         case 'thinking': hooks.publish(session.sessionName, 'output', { ...data, text: event.text, thinking: true }); break;
         case 'tool_use': hooks.publish(session.sessionName, 'tool-use', { ...data, name: event.name, args: event.input, toolUseId: event.id }); break;
@@ -131,13 +140,9 @@ export async function runBoundChatContinuation(
     if (controller.signal.aborted) throw new Error('Parent continuation stopped.');
     if (!completed) throw new Error('Parent continuation ended without a completion receipt.');
   } catch (error) {
-    try {
-      if (text) persist(null);
-    } catch (persistError) {
-      console.warn('[bound-chat-continuation] failed to save partial text', persistError);
-    }
+    savePartial();
     hooks.publish(backend.peekSession(input.repoPath, undefined, expected.threadId)?.sessionName ?? '', controller.signal.aborted ? 'status' : 'error', controller.signal.aborted
       ? { ...data, status: 'stopped' } : { ...data, error: 'The continuation failed. Inspect the originating chat before retrying.' });
     throw error;
-  } finally { release(); }
+  } finally { trailingPersist.cancel(); release(); }
 }
