@@ -277,6 +277,7 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("storage", "Worktrees & storage"),
     ("keys", "API keys"),
     ("indexing", "Indexing"),
+    ("machines", "Machines"),
     ("connections", "Connections"),
     ("diagnostics", "Diagnostics"),
     ("limits", "Limits"),
