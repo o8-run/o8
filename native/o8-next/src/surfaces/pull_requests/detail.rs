@@ -480,6 +480,11 @@ impl PullRequests {
         let updated = crate::clock::timestamp(string(d, "updatedAt"));
         let note = |text: String| div().text_size(px(11.)).text_color(theme().text_muted).child(text);
         let mut watch = vec![];
+        // The list row carries the same fields the Merge readiness sort reads.
+        let row = self.rows.iter().find(|row| row["number"].as_u64() == Some(number));
+        if let Some(reasons) = row.and_then(crate::shell::pull_requests::readiness::reason_line) {
+            watch.push(note(reasons));
+        }
         if d["checksUnavailable"] == true || d["discussionIncomplete"] == true {
             watch.push(note(format!(
                 "{}{}",
