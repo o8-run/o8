@@ -10,6 +10,9 @@ fn now() -> f64 {
         .as_millis() as f64
 }
 
+/// The meter width that fits the Compact chip beside the ring.
+const COMPACT_MIN_WIDTH: f32 = 120.;
+
 impl Surface {
     pub(crate) fn sync_context_meter(&mut self, routing: &Value, cx: &mut Context<Self>) {
         let Some(thread) = self
@@ -211,6 +214,23 @@ impl Surface {
         // live in the popover it opens.
         let ring = rings(percent, reuse.as_ref().map(|r| r.percent), color, 19.);
         let button = button.w(px(24.)).justify_center().child(ring);
+        // A nearly full context offers the fix beside the ring, after T3 Code,
+        // only when the row has spare width for it.
+        let spare = self.composer.read(cx).controls.context.width >= COMPACT_MIN_WIDTH;
+        let compact = (percent >= 85. && spare).then(|| {
+            self.composer_button(
+                "composer-compact",
+                &format!("Compact {}", context::format_tokens(projection.active)),
+                true,
+                cx,
+                |s, w, cx| s.execute_composer_command("/compact".into(), w, cx),
+            )
+            .h(px(24.))
+            .px(px(8.))
+            .rounded_full()
+            .text_size(px(11.5))
+            .text_color(crate::theme::brand_orange())
+        });
         let owner = cx.entity().downgrade();
         let anchor_owner = owner.clone();
         let button = button.relative().child(
@@ -234,6 +254,8 @@ impl Surface {
             .flex()
             .justify_end()
             .items_center()
+            .gap(px(4.))
+            .children(compact)
             .child(button)
             .child(
                 canvas(
