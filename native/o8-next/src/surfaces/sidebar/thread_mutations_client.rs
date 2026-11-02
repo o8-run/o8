@@ -69,9 +69,10 @@ impl Client {
         if let Some(workspace) = self.workspace() {
             url.query_pairs_mut().append_pair("workspace", workspace);
         }
+        let regenerate = body["regenerateTitle"] == true;
         let request = self.request("PATCH", &url);
         let response = request.send_json(body).map_err(|error| match error {
-            ureq::Error::Status(code, _) => format!("Thread update rejected (HTTP {code})."),
+            ureq::Error::Status(code, _) => update_rejected(regenerate, code),
             _ => "Thread update is unconfirmed. Refresh before retrying.".into(),
         })?;
         let result: Value = Self::read(response)?;
@@ -181,12 +182,12 @@ impl Client {
                 .and_then(|body| body["error"].as_str().map(str::to_owned))
                 .unwrap_or_else(|| "This thread changed. Refresh and try again.".into()),
             ureq::Error::Status(404, _) => "This thread is no longer available.".into(),
-            ureq::Error::Status(code, _) => format!("Pin rejected (HTTP {code})."),
-            _ => "Pin is unconfirmed. Refresh before retrying.".into(),
+            ureq::Error::Status(code, _) => preference_failed(action, Some(code)),
+            _ => preference_failed(action, None),
         })?;
         let result: Value = Self::read(response)?;
         if result["ok"] != true {
-            return Err("Pin was not confirmed.".into());
+            return Err(preference_failed(action, None));
         }
         Ok(result)
     }
@@ -213,5 +214,43 @@ impl Client {
             );
         }
         Ok(())
+    }
+}
+
+/// A title regenerate that the server cannot do yet is a normal outcome, not a
+/// status code to show.
+fn update_rejected(regenerate: bool, code: u16) -> String {
+    if regenerate && code == 409 {
+        "Can't regenerate the title right now.".into()
+    } else {
+        format!("Thread update rejected (HTTP {code}).")
+    }
+}
+
+fn preference_failed(action: &str, code: Option<u16>) -> String {
+    match (action, code) {
+        ("auto-settle", _) => "Couldn't save auto-settle for this thread.".into(),
+        (_, Some(code)) => format!("Pin rejected (HTTP {code})."),
+        (_, None) => "Pin is unconfirmed. Refresh before retrying.".into(),
+    }
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::{preference_failed, update_rejected};
+
+    #[test]
+    fn a_title_conflict_reads_as_plain_copy_and_others_keep_their_status() {
+        assert_eq!(update_rejected(true, 409), "Can't regenerate the title right now.");
+        assert_eq!(update_rejected(true, 500), "Thread update rejected (HTTP 500).");
+        assert_eq!(update_rejected(false, 409), "Thread update rejected (HTTP 409).");
+    }
+
+    #[test]
+    fn auto_settle_failures_do_not_talk_about_pins() {
+        let copy = "Couldn't save auto-settle for this thread.";
+        assert_eq!(preference_failed("auto-settle", Some(500)), copy);
+        assert_eq!(preference_failed("auto-settle", None), copy);
+        assert_eq!(preference_failed("pin", Some(500)), "Pin rejected (HTTP 500).");
     }
 }
