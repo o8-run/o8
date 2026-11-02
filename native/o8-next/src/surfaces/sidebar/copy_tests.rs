@@ -39,6 +39,12 @@ fn copy_through_row_menu(cx: &mut TestAppContext, selector: &'static str) -> (St
         gpui::Modifiers::default(),
     );
     draw(&mut visual);
+    assert!(
+        visual.debug_bounds(selector).is_none(),
+        "the choices wait in the Copy submenu"
+    );
+    click(&mut visual, "sidebar-row-copy");
+    draw(&mut visual);
     click(&mut visual, selector);
     draw(&mut visual);
     let copied = visual
