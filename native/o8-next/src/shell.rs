@@ -106,10 +106,19 @@ impl Shell {
     fn new(
         client: Client,
         file: PathBuf,
-        state: State,
+        mut state: State,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // No tunnel is up yet at launch, so a far machine can't be the first
+        // thing this window shows.
+        if state
+            .selected
+            .as_deref()
+            .is_some_and(|workspace| session::machine_workspace(workspace).is_some())
+        {
+            state.selected = state.local_selected.clone();
+        }
         let focus = cx.focus_handle();
         focus.focus(window);
         let mut shell = Self {
@@ -144,6 +153,14 @@ impl Shell {
         shell
     }
     fn persist(&mut self) {
+        if let Some(local) = self
+            .state
+            .selected
+            .as_deref()
+            .filter(|workspace| session::machine_workspace(workspace).is_none())
+        {
+            self.state.local_selected = Some(local.to_owned());
+        }
         features::persist_window_state(self);
     }
     fn load(&mut self, cx: &mut Context<Self>) {
@@ -239,14 +256,24 @@ impl Shell {
     fn active(&self) -> Option<Tab> {
         self.current().and_then(|w| w.tabs.get(w.active)).cloned()
     }
+    /// The name of the machine holding this thread, while it can't be reached.
+    fn unreachable_machine(&self, id: &str) -> Option<String> {
+        let session = self.sessions.iter().find(|s| s.id == id)?;
+        let machine = session.machine.as_deref()?;
+        self.links.client(machine).is_none().then(|| {
+            let label = session.machine_label.as_deref().unwrap_or("That machine");
+            label.split(" · ").next().unwrap_or(label).to_owned()
+        })
+    }
+
     /// A panel's client. A far machine's panel never falls back to this
     /// computer's data: while it's offline the client can only fail, and the
     /// panel shows its normal error.
     pub(crate) fn panel_client(&self, workspace: &str) -> Client {
-        self.workspace_client(workspace).unwrap_or_else(|| {
-            Client::authenticated("http://127.0.0.1:1", None)
-                .expect("a fixed loopback origin is valid")
-        })
+        match session::machine_workspace(workspace) {
+            Some((machine, repo)) => self.links.client_or_offline(machine).in_workspace(repo),
+            None => self.client.in_workspace(workspace),
+        }
     }
 
     fn ensure(&mut self, window: &mut Window, cx: &mut Context<Self>) {

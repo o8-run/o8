@@ -96,7 +96,7 @@ impl ThreadList {
         let Some(session) = self.pinnable(&id) else { return };
         let pin = session.pinned_at.is_none();
         let (workspace, revision) = (session.repo_path.clone(), session.inbox_revision.unwrap_or(0));
-        let client = self.client.clone();
+        let client = self.client_for(&id);
         let target = id.clone();
         let task = cx.background_executor().spawn(async move {
             client.inbox_pin(workspace.as_deref(), &target, pin, revision)
@@ -314,7 +314,7 @@ impl ThreadList {
         self.generation += 1;
         self.rebuild();
         cx.notify();
-        let client = self.client.clone();
+        let client = self.client_for(moved);
         let id = moved.to_owned();
         let target = id.clone();
         let task = cx.background_executor().spawn(async move {

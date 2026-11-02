@@ -223,9 +223,9 @@ impl ThreadList {
                     .map(|s| (id.clone(), s.repo_path.clone()))
             })
             .collect();
-        let client = self.client.clone();
+        let targets = self.routed(targets);
         let task = cx.background_executor().spawn(async move {
-            for (id, workspace) in targets {
+            for (client, id, workspace) in targets {
                 if let Err(error) = client.inbox_action(workspace.as_deref(), &id, "unsettle") {
                     return Err(error);
                 }
@@ -294,7 +294,7 @@ impl ThreadList {
         let workspace = session.repo_path.clone();
         self.settling = Some(id.clone());
         self.notice.clear();
-        let client = self.client.clone();
+        let client = self.client_for(&id);
         let target = id.clone();
         let task = cx
             .background_executor()

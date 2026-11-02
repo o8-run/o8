@@ -239,7 +239,7 @@ fn detail(id: ToastId, cx: &mut App) {
     }
 }
 // Convenience for shell callers; surfaces can use show directly.
-pub(super) fn info(text: impl Into<SharedString>, cx: &mut App) -> ToastId {
+pub(crate) fn info(text: impl Into<SharedString>, cx: &mut App) -> ToastId {
     show(Kind::Info, text, vec![], Some(NOTICE_TIMEOUT), cx)
 }
 pub(super) fn error(text: impl Into<SharedString>, cx: &mut App) -> ToastId {

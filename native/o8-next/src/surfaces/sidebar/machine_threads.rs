@@ -3,7 +3,7 @@
 //! until every panel follows the thread's machine.
 use crate::client::{Client, Session};
 pub(crate) use crate::shell::settings::machine_links::Links;
-use crate::shell::settings::machine_links::Reach;
+use crate::shell::settings::machine_links::{Machine, Reach};
 use crate::shell::settings::machines::{SSH_MACHINES, machine_window::Route};
 use serde_json::Value;
 use std::time::Duration;
@@ -12,11 +12,8 @@ pub(crate) fn enabled() -> bool {
     !cfg!(test) && std::env::var("O8_NEXT_MACHINE_THREADS").is_ok_and(|value| value == "1")
 }
 
-/// How long a list may sit before it's read again. Far machines have no live
-/// feed here yet, so their rows and any tunnel that just came up wait on this.
-pub(super) fn reload_gap() -> Duration {
-    Duration::from_secs(if enabled() { 15 } else { 300 })
-}
+/// How often far machines are read; they have no live feed here yet.
+pub(super) const READ_GAP: Duration = Duration::from_secs(15);
 
 /// The saved machines worth a tunnel, with their labels.
 fn routes(saved: &Value) -> Vec<(Route, String)> {
@@ -32,29 +29,63 @@ fn routes(saved: &Value) -> Vec<(Route, String)> {
         .collect()
 }
 
-/// Every reachable machine's threads. A machine that can't answer adds nothing
-/// and never fails this computer's own list.
-pub(super) fn sessions(client: &Client, links: &Links) -> Vec<Session> {
-    if !enabled() {
-        return vec![];
-    }
+/// What one read of the saved machines found.
+#[derive(Default)]
+pub(super) struct Reading {
+    pub sessions: Vec<Session>,
+    /// Machines that gave no answer: their rows stay, marked when it's known
+    /// they're offline, because a dropped tunnel doesn't end their threads.
+    pub silent: Vec<(String, Option<String>)>,
+}
+
+/// Every saved machine's threads, read side by side so a slow tunnel only
+/// delays itself. Runs apart from this computer's own list.
+pub(super) fn read(client: &Client, links: &Links) -> Reading {
     if let Ok(saved) = client.get::<Value>(SSH_MACHINES, &[]) {
         links.sync(routes(&saved));
     }
-    let mut sessions = vec![];
-    for machine in links.machines() {
-        let Reach::Online(remote) = machine.reach else {
-            continue;
-        };
-        if let Ok((list, _)) = remote.sidebar_sessions_with_branches() {
-            sessions.extend(list.into_iter().map(|mut session| {
-                session.machine = Some(machine.id.clone());
-                session.machine_label = Some(machine.label.clone());
-                session
-            }));
+    let mut reading = Reading::default();
+    let answers: Vec<_> = std::thread::scope(|scope| {
+        let reads: Vec<_> = links
+            .machines()
+            .into_iter()
+            .map(|machine| scope.spawn(move || answer(machine)))
+            .collect();
+        reads
+            .into_iter()
+            .filter_map(|read| read.join().ok())
+            .collect()
+    });
+    for (machine, list) in answers {
+        match list {
+            Some(list) => reading.sessions.extend(list),
+            None => reading.silent.push(machine),
         }
     }
-    sessions
+    reading
+}
+
+fn answer(machine: Machine) -> ((String, Option<String>), Option<Vec<Session>>) {
+    let offline = format!("{} · offline", machine.label);
+    match machine.reach {
+        Reach::Online(remote) => {
+            let list = remote
+                .sidebar_sessions_with_branches()
+                .ok()
+                .map(|(list, _)| {
+                    list.into_iter()
+                        .map(|mut session| {
+                            session.machine = Some(machine.id.clone());
+                            session.machine_label = Some(machine.label.clone());
+                            session
+                        })
+                        .collect()
+                });
+            ((machine.id, None), list)
+        }
+        Reach::Connecting => ((machine.id, None), None),
+        Reach::Offline(_) => ((machine.id, Some(offline)), None),
+    }
 }
 
 #[cfg(test)]
