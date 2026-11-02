@@ -8,35 +8,6 @@ use url::{Host, Url};
 // including its response body, without extending mutation request deadlines.
 pub(crate) const LOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 
-/// A stopped host blocks every request, and GPUI's test executor runs them one
-/// after another, so a test that stops one shortens the budget while it lasts.
-#[cfg(test)]
-pub(crate) struct ShortLoadTimeout;
-#[cfg(test)]
-thread_local! {
-    static SHORT_LOAD_TIMEOUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-#[cfg(test)]
-impl ShortLoadTimeout {
-    pub(crate) fn start() -> Self {
-        SHORT_LOAD_TIMEOUT.set(true);
-        Self
-    }
-}
-#[cfg(test)]
-impl Drop for ShortLoadTimeout {
-    fn drop(&mut self) {
-        SHORT_LOAD_TIMEOUT.set(false);
-    }
-}
-pub(crate) fn load_timeout() -> Duration {
-    #[cfg(test)]
-    if SHORT_LOAD_TIMEOUT.get() {
-        return Duration::from_secs(2);
-    }
-    LOAD_REQUEST_TIMEOUT
-}
-
 fn timed_out(error: &(dyn std::error::Error + 'static)) -> bool {
     error
         .downcast_ref::<std::io::Error>()
@@ -193,7 +164,7 @@ impl Client {
         url.query_pairs_mut().extend_pairs(query.iter().copied());
         let response = get_with_retry(|| {
             self.request("GET", &url)
-                .timeout(load_timeout())
+                .timeout(LOAD_REQUEST_TIMEOUT)
                 .call()
         })
         .map_err(|error| {
