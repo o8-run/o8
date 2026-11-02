@@ -5,6 +5,9 @@ use crate::shell::toasts;
 use crate::theme::current as theme;
 use gpui::{AnyElement, MouseButton, div, px};
 
+/// Lucide external-link.
+const OPEN: &str = "M15 3h6v6 M10 14 21 3 M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6";
+
 /// Name, macOS bundle id, and the CLI used elsewhere.
 const EDITORS: [(&str, &str, &str); 2] = [
     ("VS Code", "com.microsoft.VSCode", "code"),
@@ -85,10 +88,12 @@ impl ThreadList {
                     .px(px(8.))
                     .flex()
                     .items_center()
+                    .gap(px(8.))
                     .rounded(px(7.))
                     .text_size(px(12.5))
                     .cursor_pointer()
                     .hover(|s| s.bg(theme().hover))
+                    .child(crate::icon::stroke(OPEN, theme().text_muted, 14., 1.7))
                     .child(format!("Open in {}", editor.0))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, _, cx| {
