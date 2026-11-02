@@ -127,7 +127,7 @@ impl ThreadList {
         self.rebuild();
         cx.notify();
     }
-    fn branch_of(&self, s: &Session) -> Option<String> {
+    pub(super) fn branch_of(&self, s: &Session) -> Option<String> {
         self.branch_names
             .get(&s.id)
             .filter(|b| !b.is_empty())
