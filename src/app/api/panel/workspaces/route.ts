@@ -1,9 +1,10 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execFileSync } from '@/lib/providers/child-process';
+import { execFile } from '@/lib/providers/child-process';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { fetchGitHubPullRequestSummaries, normalizeRepoSlug } from '@/lib/github-broker';
 import { listRepos } from '@/lib/repos/registry';
 import { getRepoReadiness } from '@/lib/repos/readiness';
@@ -145,24 +146,44 @@ function getAgentActiveRepo(sessionKey: string): { repo: string; path: string } 
   return map[sessionKey] || null;
 }
 
-function resolveGitBranch(repoPath: string) {
+const execFileAsync = promisify(execFile);
+const GIT_READ_TIMEOUT_MS = 3000;
+const branchReads = new Map<string, Promise<string>>();
+const worktreeReads = new Map<string, Promise<Set<string>>>();
+
+async function gitOutput(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['-C', cwd, ...args], {
+    windowsHide: true,
+    encoding: 'utf-8',
+    timeout: GIT_READ_TIMEOUT_MS,
+  });
+  return String(stdout);
+}
+
+/** One read per repo at a time: the route runs per agent and must not block the server. */
+function coalesced<T>(reads: Map<string, Promise<T>>, key: string, read: () => Promise<T>): Promise<T> {
+  const active = reads.get(key);
+  if (active) return active;
+  const pending = read().finally(() => reads.delete(key));
+  reads.set(key, pending);
+  return pending;
+}
+
+async function resolveGitBranch(repoPath: string): Promise<string> {
   const now = Date.now();
   const cached = branchCache.get(repoPath);
   if (cached && now - cached.ts < BRANCH_CACHE_TTL) return cached.branch;
 
-  try {
-    const resolved = resolveWorkspacePath(repoPath);
-    const branch = execFileSync('git', ['-C', resolved, 'branch', '--show-current'], {
-      windowsHide: true,
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim() || 'main';
-    branchCache.set(repoPath, { branch, ts: now });
-    return branch;
-  } catch {
-    return 'main';
-  }
+  return coalesced(branchReads, repoPath, async () => {
+    try {
+      const resolved = resolveWorkspacePath(repoPath);
+      const branch = (await gitOutput(resolved, ['branch', '--show-current'])).trim() || 'main';
+      branchCache.set(repoPath, { branch, ts: now });
+      return branch;
+    } catch {
+      return 'main';
+    }
+  });
 }
 
 // Cache of active git worktree branches per repo, used to filter ghost
@@ -172,20 +193,19 @@ function resolveGitBranch(repoPath: string) {
 const worktreeBranchCache = new Map<string, { branches: Set<string>; ts: number }>();
 const WORKTREE_BRANCH_CACHE_TTL = 10_000;
 
-function getActiveWorktreeBranches(repoPath: string): Set<string> {
+async function getActiveWorktreeBranches(repoPath: string): Promise<Set<string>> {
   const now = Date.now();
   const cached = worktreeBranchCache.get(repoPath);
   if (cached && now - cached.ts < WORKTREE_BRANCH_CACHE_TTL) return cached.branches;
 
+  return coalesced(worktreeReads, repoPath, () => readActiveWorktreeBranches(repoPath, now));
+}
+
+async function readActiveWorktreeBranches(repoPath: string, now: number): Promise<Set<string>> {
   const branches = new Set<string>();
   try {
     const resolved = resolveWorkspacePath(repoPath);
-    const output = execFileSync('git', ['-C', resolved, 'worktree', 'list', '--porcelain'], {
-      windowsHide: true,
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
+    const output = await gitOutput(resolved, ['worktree', 'list', '--porcelain']);
     // Parser: entries are separated by blank lines. Each entry has `worktree
     // <path>` and optionally `branch refs/heads/<name>`. Detached worktrees
     // have `detached` instead of `branch` — we skip those (no branch to
@@ -201,7 +221,7 @@ function getActiveWorktreeBranches(repoPath: string): Set<string> {
     // If git fails, fall back to permissive (empty set would drop every
     // non-main session including legitimate ones, so return the repo's
     // current branch to avoid false negatives).
-    branches.add(resolveGitBranch(repoPath));
+    branches.add(await resolveGitBranch(repoPath));
   }
 
   worktreeBranchCache.set(repoPath, { branches, ts: now });
@@ -286,7 +306,7 @@ async function collectWorkspaceLifecycle() {
     .filter((agent) => isVisibleWorkspaceAgent(agent));
 
   const repoSet = new Set<string>();
-  const preparedAgents = liveAgents.map((agent) => {
+  const preparedCandidates = await Promise.all(liveAgents.map(async (agent) => {
     const activeRepo = getAgentActiveRepo(agent.sessionKey);
     const workspacePath = activeRepo?.path
       ?? resolveWorkspacePath(agent.runtimeSurface?.cwd ?? agent.workspace);
@@ -299,7 +319,7 @@ async function collectWorkspaceLifecycle() {
       repoName = activeRepo.repo;
     }
     const branchName = activeRepo
-      ? resolveGitBranch(activeRepo.path)
+      ? await resolveGitBranch(activeRepo.path)
       : agent.runtimeSurface?.branch?.replace(/^surface\//, '') || agent.branch.replace(/^surface\//, '');
     return {
       agent,
@@ -309,8 +329,16 @@ async function collectWorkspaceLifecycle() {
       repoSlug,
       branchName,
     };
-  }).filter((prepared) => pathBelongsToRegisteredRepo(prepared.repoPath, registeredRepoPaths))
-    .filter((prepared) => !prepared.branchName.startsWith('worktree-you-are-the-orchestrator-'))
+  }));
+  const eligibleAgents = preparedCandidates
+    .filter((prepared) => pathBelongsToRegisteredRepo(prepared.repoPath, registeredRepoPaths))
+    .filter((prepared) => !prepared.branchName.startsWith('worktree-you-are-the-orchestrator-'));
+  const activeBranchesByRepo = new Map(await Promise.all(
+    [...new Set(eligibleAgents.map((prepared) => prepared.repoPath))].map(
+      async (repoPath) => [repoPath, await getActiveWorktreeBranches(repoPath)] as const,
+    ),
+  ));
+  const preparedAgents = eligibleAgents
     .filter((prepared) => {
       // Drop ghost workspace entries whose git worktree no longer exists.
       // Owned codex sessions survive lane archival and worktree removal
@@ -322,8 +350,7 @@ async function collectWorkspaceLifecycle() {
       // worktree has been removed and the session is a ghost.
       const branch = prepared.branchName;
       if (!branch || branch === 'main') return true;
-      const activeBranches = getActiveWorktreeBranches(prepared.repoPath);
-      return activeBranches.has(branch);
+      return activeBranchesByRepo.get(prepared.repoPath)?.has(branch) ?? false;
     });
 
   for (const prepared of preparedAgents) repoSet.add(prepared.repoName);

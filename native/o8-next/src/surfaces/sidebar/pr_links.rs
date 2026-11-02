@@ -115,7 +115,12 @@ impl ThreadList {
     pub(super) fn load_pr_links(&mut self, cx: &mut Context<Self>) {
         self.pr_loading = true;
         let client = self.client.clone();
-        let ids: Vec<String> = self.sessions.iter().map(|s| s.id.clone()).collect();
+        let ids: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|s| s.status != "archived")
+            .map(|s| s.id.clone())
+            .collect();
         let task = cx.background_executor().spawn(async move { fetch(&client, &ids) });
         cx.spawn(async move |this, cx| {
             let links = task.await;
