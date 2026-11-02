@@ -44,6 +44,13 @@ pub enum Event {
     /// The project menu's Switch workspace, with the focus to give back.
     WorkspacePicker(Option<gpui::FocusHandle>),
 }
+/// Lifecycle events arrive many times a second while agents run. Row changes
+/// apply in place from the stream; the full catalog read waits this long.
+const DIRTY_RELOAD_GAP: Duration = if cfg!(test) {
+    Duration::ZERO
+} else {
+    Duration::from_secs(3)
+};
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Row {
     pub kind: String,
@@ -156,6 +163,7 @@ pub struct ThreadList {
     generation: u64,
     last_load: Instant,
     last_inventory: Instant,
+    last_attempt: Instant,
     inventory_loading: bool,
     subscription: Subscription,
     subscriptions: Vec<gpui::Subscription>,
@@ -260,6 +268,7 @@ impl ThreadList {
             dirty: None,
             generation: 0,
             last_load: Instant::now(),
+            last_attempt: Instant::now(),
             last_inventory: Instant::now(),
             inventory_loading: false,
             subscriptions: vec![observe, submit],
@@ -438,6 +447,7 @@ impl ThreadList {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading = false;
+                this.last_attempt = Instant::now();
                 // Stream updates fence stale catalog snapshots, not transport
                 // failures. Suppressing an error leaves the shell waiting for
                 // recovery while the next full request deadline runs again.
@@ -656,6 +666,7 @@ impl ThreadList {
         if self
             .dirty
             .is_some_and(|time| time.elapsed() >= Duration::from_millis(300))
+            && self.last_attempt.elapsed() >= DIRTY_RELOAD_GAP
             || self.last_load.elapsed() >= Duration::from_secs(300)
         {
             self.load(cx);

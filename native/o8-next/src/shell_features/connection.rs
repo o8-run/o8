@@ -10,7 +10,12 @@ pub(super) struct Runtime {
     hidden: bool,
     restore: Option<(Option<String>, FocusHandle)>,
     status: Option<Entity<Status>>,
+    /// Seconds since a healthy window last reread the catalog.
+    idle_ticks: u32,
 }
+/// The sidebar follows the event stream, so a healthy window only needs a slow
+/// resilience read here. A disconnected one keeps retrying each second.
+const CONNECTED_LOAD_TICKS: u32 = if cfg!(test) { 1 } else { 30 };
 struct Connection;
 register_shell_feature!(Connection);
 impl ShellFeature for Connection {
@@ -252,7 +257,13 @@ impl ShellExtension for Connection {
     fn tick(&self, s: &mut Shell, refresh: bool, window: &mut Window, cx: &mut Context<Shell>) {
         self.prepare(s, window, cx);
         if refresh {
-            s.load(cx);
+            let connected = s.connected;
+            let runtime = s.features.get::<Runtime>();
+            runtime.idle_ticks += 1;
+            if !connected || runtime.idle_ticks >= CONNECTED_LOAD_TICKS {
+                runtime.idle_ticks = 0;
+                s.load(cx);
+            }
         }
     }
     fn frame(&self, s: &Shell) -> Option<Frame> {

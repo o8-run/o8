@@ -32,6 +32,8 @@ import { appendBroadcastEvent } from './post';
 import type { BroadcastEvent } from './types';
 
 const SPEAKER_TICK_MS = 1_000;
+/** With voice off, nothing speaks, so the cursor only needs to keep up. */
+const VOICE_OFF_TICK_EVERY = 15;
 const MAX_QUEUE_DEPTH = 3;
 const COMMENTARY_PAGE_LIMIT = 100;
 const MOMENT_COALESCE_MS = 1_000;
@@ -697,7 +699,12 @@ let speakerUnavailableWarningActive = false;
 export function startBroadcastSpeakerLoop(): () => void {
   if (speakerTimer) return () => undefined;
   loopSpeaker = new BroadcastSpeaker();
+  let voiceOffTicks = 0;
+  const voiceOff = () => {
+    try { return voiceSettings().broadcastVoice === 'off'; } catch { return false; }
+  };
   const tick = () => {
+    if (voiceOff() && voiceOffTicks++ % VOICE_OFF_TICK_EVERY !== 0) return;
     void loopSpeaker?.tick()
       .then((result) => {
         if (result?.status === 'processed') speakerUnavailableWarningActive = false;

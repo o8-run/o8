@@ -1,5 +1,8 @@
 //! Narrow embedding API. The shell uses the production Surface and composer.
 use super::*;
+const RECONCILE_LIVE_TICKS: u32 = if cfg!(test) { 1 } else { 3 };
+const RECONCILE_IDLE_TICKS: u32 = if cfg!(test) { 1 } else { 10 };
+
 impl Surface {
     pub(crate) fn shell_bind_thread(&mut self, id: String) {
         self.sessions.retain(|session| session.id == id);
@@ -129,9 +132,30 @@ impl Surface {
     }
     pub(crate) fn shell_tick(&mut self, refresh: bool, cx: &mut Context<Self>) {
         self.poll_stream(cx);
-        if refresh {
+        if refresh && self.reconcile_due() {
             self.reconcile(cx);
         }
+    }
+    /// The chat socket already pushes new history, so the full read is only a
+    /// safety net. It costs one 100-message page, so it must not run each second.
+    fn reconcile_due(&mut self) -> bool {
+        let live = self
+            .sessions
+            .iter()
+            .find(|s| Some(&s.id) == self.selected.as_ref())
+            .is_some_and(|s| s.status == "running");
+        self.reconcile_wait += 1;
+        let every = if live {
+            RECONCILE_LIVE_TICKS
+        } else {
+            RECONCILE_IDLE_TICKS
+        };
+        let due = self.reconcile_wait >= every || live != self.reconcile_live;
+        self.reconcile_live = live;
+        if due {
+            self.reconcile_wait = 0;
+        }
+        due
     }
     pub(crate) fn shell_refresh(&mut self, cx: &mut Context<Self>) {
         self.load_sessions(cx);
