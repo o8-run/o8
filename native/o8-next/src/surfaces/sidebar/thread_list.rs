@@ -113,6 +113,8 @@ pub struct ThreadList {
     /// Snoozed threads, by id, to the Unix second each comes back. An ended
     /// snooze stays until the thread is opened, so it can head the list.
     snoozes: HashMap<String, u64>,
+    picked: HashSet<String>,
+    pick_anchor: Option<String>,
     /// Linked pull requests by thread id (pr_links.rs).
     pr_links: HashMap<String, Vec<pr_links::PrLink>>,
     pr_links_at: Option<Instant>,
@@ -217,6 +219,8 @@ impl ThreadList {
             scope_menu: None,
             row_menu: None,
             snoozes: HashMap::new(),
+            picked: HashSet::new(),
+            pick_anchor: None,
             pr_links: HashMap::new(),
             pr_links_at: None,
             pr_loading: false,
@@ -1050,6 +1054,10 @@ mod inbox;
 mod auto_settle_toggle;
 #[path = "snooze.rs"]
 mod snooze;
+#[path = "bulk.rs"]
+mod bulk;
+#[path = "open_editor.rs"]
+mod open_editor;
 #[path = "pr_links.rs"]
 pub(crate) mod pr_links;
 #[path = "detailed.rs"]

@@ -168,6 +168,7 @@ impl Render for ThreadList {
                 },
             ),
             )
+            .children(self.bulk_bar(cx))
             .children(self.row_menu(cx))
             .children(self.pr_hover_list(cx))
     }
@@ -233,7 +234,10 @@ impl ThreadList {
                         .px(px(6.))
                         .rounded(px(8.))
                         .overflow_hidden()
-                        .bg(if selected || thread && row.id == this.choice {
+                        .bg(if selected
+                            || thread && row.id == this.choice
+                            || row.id.as_ref().is_some_and(|id| this.picked.contains(id))
+                        {
                             theme().selection
                         } else {
                             crate::theme::sidebar_fill()
@@ -426,8 +430,11 @@ impl ThreadList {
                             )
                         })
                         .when(thread, |view| {
-                            view.on_click(cx.listener(move |this, _, window, cx| {
+                            view.on_click(cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
                                 let id = row.id.clone().unwrap();
+                                if this.pick(&id, event.modifiers(), cx) {
+                                    return;
+                                }
                                 if this.rows.iter().any(|r| r.id.as_ref() == Some(&id))
                                 {
                                     this.focus.focus(window);
