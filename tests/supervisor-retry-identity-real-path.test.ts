@@ -52,7 +52,7 @@ function fixture(runtime: 'claude-code' | 'codex', config?: Record<string, strin
   const surface = `${runtime}-owned:failed-${id}`;
   const lane = createLane({ repoPath: repo, worktreePath: worktree, runtime, branch: `retry-${id}`, sessionKey: surface });
   updateLane(lane.id, { status: 'running' });
-  const sessionDir = path.join(dataDir, `owned-${runtime}`, `session-${id}`);
+  const sessionDir = path.join(dataDir, `owned-${runtime}`, `failed-${id}`);
   mkdirSync(sessionDir, { recursive: true });
   const session: OwnedSessionRecord = {
     surfaceId: surface, laneId: lane.id, sessionDir, cwd: worktree, repoPath: worktree,
@@ -192,7 +192,8 @@ describe('supervisor retry identity through persisted state and the launch route
     const transport = serveLaunchRoute();
     expect(await relaunchSupervisedAgent('read only', f.repo, 'retry', f.surface))
       .toEqual({ status: 'launched', surfaceId: `${runtime}-owned:retried` });
-    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    expect(h.launch).toHaveBeenCalledOnce();
+    expect(h.launch.mock.calls[0][0]).toEqual(expect.objectContaining({
       runtime, model: f.session.model, effort: 'high', workMode: 'read-only',
       automaticRecoverySurfaceId: f.surface, automaticRecoveryRunId: f.session.recentRuns[0].id,
       ...(carrier ? { claudeCodeModel: f.session.model, claudeCodeCarrier: carrier } : {}),
