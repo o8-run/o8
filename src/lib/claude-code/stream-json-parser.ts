@@ -199,6 +199,11 @@ export function createClaudeCodeStreamJsonParser(
     emittedDone: false,
   };
   const tracker = createToolTracker();
+  // Background agents answer through task_notification, and the model reads
+  // that answer in a request of its own. The turn stays open until it has.
+  const runningTasks = new Set<string>();
+  let unreadTaskAnswer = false;
+  let heldResult = false;
   const streamedTextIndices = new Set<number>();
   const streamedThinkingIndices = new Set<number>();
   let streamedTextWithoutIndex = false;
@@ -320,13 +325,19 @@ export function createClaudeCodeStreamJsonParser(
     if (state.emittedDone) return;
     const subtype = asString(event.subtype);
     const isResult = event.type === 'result';
+    if (isResult && event.is_error !== true && (runningTasks.size > 0 || unreadTaskAnswer)) {
+      heldResult = true;
+      return;
+    }
     const isError = event.is_error === true
       || (isResult && subtype !== undefined && subtype !== 'success');
     const explicitResult = asString(event.result);
     const errorText = isError && Array.isArray(event.errors)
       ? event.errors.filter((value): value is string => typeof value === 'string').join('\n')
       : '';
-    const resultText = explicitResult?.trim() ? explicitResult : errorText || state.fullResponse;
+    const resultText = heldResult
+      ? state.fullResponse
+      : explicitResult?.trim() ? explicitResult : errorText || state.fullResponse;
     const doneEvent: ClaudeCodeStreamJsonParserEvent = {
       type: 'done',
       text: resultText,
@@ -350,9 +361,27 @@ export function createClaudeCodeStreamJsonParser(
     const events: ClaudeCodeStreamJsonParserEvent[] = [];
     const type = asString(event.type);
 
+    // A subagent streams inside its parent. Its words and tools are its own;
+    // the parent receives them once, as the result of the call that started it.
+    if (asString(event.parent_tool_use_id)) return events;
+
     if (type === 'system') {
       const id = asString(event.session_id);
       if (id) state.sessionId = id;
+      const subtype = asString(event.subtype);
+      const toolUseId = asString(event.tool_use_id);
+      if (subtype === 'task_started' && toolUseId && event.is_backgrounded === true) {
+        runningTasks.add(toolUseId);
+      } else if (subtype === 'task_notification' && toolUseId && runningTasks.delete(toolUseId)) {
+        unreadTaskAnswer = true;
+        emitToolResult({
+          tool_use_id: toolUseId,
+          output: asString(event.summary) ?? '',
+          is_error: event.status !== 'completed',
+        }, events);
+      } else if (subtype === 'status' && event.status === 'requesting') {
+        unreadTaskAnswer = false;
+      }
       return events;
     }
 
@@ -471,7 +500,8 @@ export function createClaudeCodeStreamJsonParser(
       if (!Array.isArray(content)) return events;
       for (const rawBlock of content) {
         const block = asRecord(rawBlock);
-        if (block?.type === 'tool_result') {
+        // A background agent's call returns at launch; its answer is the result.
+        if (block?.type === 'tool_result' && !runningTasks.has(asString(block.tool_use_id) ?? '')) {
           emitToolResult(block, events);
         }
       }

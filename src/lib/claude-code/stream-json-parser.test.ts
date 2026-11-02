@@ -90,6 +90,83 @@ describe('stream-json parser assistant-replay dedup', () => {
   });
 });
 
+describe('stream-json parser subagents', () => {
+  it('keeps a subagent out of its parent reply and keeps its result on the parent call', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const inside = { parent_tool_use_id: 'agent-1' };
+    const events = parser.pushChunk(lines(
+      wrap({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Started it.' } }),
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'agent-1', name: 'Agent', input: { description: 'Sum' } }] } },
+      { ...wrap({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '391' } }), ...inside },
+      { type: 'assistant', ...inside, message: { content: [
+        { type: 'text', text: '391' },
+        { type: 'tool_use', id: 'inner', name: 'Bash', input: {} },
+      ] } },
+      { type: 'user', ...inside, message: { content: [{ type: 'tool_result', tool_use_id: 'inner', content: 'ok' }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'agent-1', content: '391' }] } },
+      { type: 'result', result: 'Done.' },
+    ));
+    const text = events.flatMap((e) => (e.type === 'delta' ? [e.text] : []));
+    expect(text).toEqual(['Started it.']);
+    const tools = events.flatMap((e) => (e.type === 'tool_call' ? [e.id] : []));
+    expect(tools).toEqual(['agent-1']);
+    const results = events.flatMap((e) => (e.type === 'tool_result' ? [e.id] : []));
+    expect(results).toEqual(['agent-1']);
+  });
+});
+
+describe('stream-json parser background agents', () => {
+  const started = { type: 'system', subtype: 'task_started', tool_use_id: 'agent-1', is_backgrounded: true };
+  const call = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'agent-1', name: 'Agent', input: { description: 'Sum' } }] } };
+  const launched = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'agent-1', content: 'Async agent launched successfully.' }] } };
+  const answered = { type: 'system', subtype: 'task_notification', tool_use_id: 'agent-1', status: 'completed', summary: '391' };
+  const requesting = { type: 'system', subtype: 'status', status: 'requesting' };
+  const say = (text: string) => wrap({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } });
+  const results = (events: ReturnType<ReturnType<typeof createClaudeCodeStreamJsonParser>['pushChunk']>) =>
+    events.flatMap((e) => (e.type === 'tool_result' ? [e] : []));
+
+  it('reports the answer, not the launch, and keeps the turn open until the model reads it', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const first = parser.pushChunk(lines(call, started, launched, say('Started.'), { type: 'result', result: 'Started.' }));
+    expect(results(first)).toEqual([]);
+    expect(first.some((e) => e.type === 'done')).toBe(false);
+
+    const second = parser.pushChunk(lines(answered, requesting, say('It is 391.'), { type: 'result', result: 'It is 391.' }));
+    expect(results(second)).toMatchObject([{ id: 'agent-1', name: 'Agent', output: '391' }]);
+    expect(second.find((e) => e.type === 'done')).toMatchObject({ text: 'Started.It is 391.' });
+  });
+
+  it('holds the turn when the answer lands before the first result', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const first = parser.pushChunk(lines(call, started, launched, answered, { type: 'result', result: 'Started.' }));
+    expect(first.some((e) => e.type === 'done')).toBe(false);
+    const second = parser.pushChunk(lines(requesting, { type: 'result', result: '391' }));
+    expect(second.some((e) => e.type === 'done')).toBe(true);
+  });
+
+  it('ends with one result when a later request already carried the answer', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const events = parser.pushChunk(lines(call, started, launched, answered, requesting, { type: 'result', result: '391' }));
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+  });
+
+  it('marks a failed agent and never holds a failed turn', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const failed = parser.pushChunk(lines(call, started, launched, { ...answered, status: 'failed', summary: 'boom' }));
+    expect(results(failed)).toMatchObject([{ id: 'agent-1', isError: true }]);
+    const running = createClaudeCodeStreamJsonParser();
+    const end = running.pushChunk(lines(call, started, launched, { type: 'result', subtype: 'error_during_execution', is_error: true }));
+    expect(end.some((e) => e.type === 'done')).toBe(true);
+  });
+
+  it('leaves a foreground agent alone', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const events = parser.pushChunk(lines(call, { ...started, is_backgrounded: false }, { ...launched }, { type: 'result', result: 'ok' }));
+    expect(results(events)).toHaveLength(1);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+  });
+});
+
 describe('stream-json parser usage truth', () => {
   it('preserves cache reads and writes on usage and terminal events', () => {
     const parser = createClaudeCodeStreamJsonParser();
