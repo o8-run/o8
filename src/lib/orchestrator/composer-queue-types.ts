@@ -17,6 +17,8 @@ export interface ComposerQueuePayload {
     backend: OrchestratorBackendId;
     /** Refuse route normalization or fallback for a bound voice request. */
     pinBackend?: true;
+    /** The operator chose another runtime for this chat, so its next turn carries the context. */
+    handoffMode?: 'handoff';
     model: string;
     effort: ThinkingEffort;
     serviceTier?: OrchestratorServiceTier;

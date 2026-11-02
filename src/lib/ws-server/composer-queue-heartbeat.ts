@@ -43,7 +43,9 @@ export function checkComposerQueueBinding(item: QueuedComposerSendRecord): void 
     messages?: Array<{ role: string; timestamp: number; receipt?: { permissionMode?: string } }> } | undefined;
   if (history?.archivedAt) throw new Error('This chat was archived.');
   if ((history?.projectId ?? undefined) !== item.payload.routing.projectId) throw new Error('The queued chat project changed.');
-  if (backendSwitchRequiresExplicitHandoff({ threadId: item.threadId, toBackend: originFor(item).backend })) {
+  // Only the built-in turn path seeds the new runtime; a bound lead would start cold.
+  const explicit = item.payload.routing.handoffMode === 'handoff' && !findLeadThreadBinding(item.threadId);
+  if (!explicit && backendSwitchRequiresExplicitHandoff({ threadId: item.threadId, toBackend: originFor(item).backend })) {
     throw new Error('The chat runtime changed. Choose an explicit handoff before sending this message.');
   }
   const latest = history?.messages?.filter(row => row.role === 'assistant').at(-1);
@@ -100,6 +102,7 @@ export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hook
   await runBoundChatContinuation({ repoPath, source: 'user', origin: originFor(item), message: item.payload.wireMessage,
     displayMessage: item.payload.text, images: item.payload.images, assistantMessageId: `assistant-queued-${item.id}`,
     serviceTier: item.payload.routing.serviceTier,
+    handoff: item.payload.routing.handoffMode === 'handoff',
     collideBaseBackend: originFor(item).backend === 'collide' ? item.payload.routing.backend : undefined,
     check: () => checkComposerQueueBinding(item), admit: () => admitComposerSend(item.id) }, hooks);
 }

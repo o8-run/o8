@@ -444,9 +444,9 @@ impl Surface {
         )
     }
 
-    /// A model on the thread's runtime switches in place. Another runtime cannot
-    /// take over a thread with history (the desktop hands off or starts fresh), so
-    /// it starts a fresh conversation there; an empty thread changes runtime.
+    /// A model on the thread's runtime switches in place. Another runtime keeps
+    /// the thread: the server opens its next turn with a handoff packet and shows
+    /// the marker. A provider instance binds a thread, so that still starts fresh.
     pub(super) fn choose_lead(
         &mut self,
         backend: &str,
@@ -477,7 +477,9 @@ impl Surface {
         };
         // Saved messages remain authoritative before their rows are retained.
         // Keep live rows as well: a new reply can precede the next session list.
-        let fresh = session.message_count > 0 || !self.rows.is_empty();
+        let history = session.message_count > 0 || !self.rows.is_empty();
+        let fresh = history && (instance.is_some() || !session.id.starts_with("thoughts-"));
+        let carried = history && !fresh;
         let id = if fresh {
             format!(
                 "thoughts-next-{}",
@@ -502,6 +504,7 @@ impl Surface {
             cx.notify();
         });
         let thread = id.clone();
+        let picked = (backend.clone(), model.clone());
         let task = cx.background_executor().spawn(async move {
             let defaults = client.url("/api/panel/operator-defaults").unwrap();
             client
@@ -509,12 +512,16 @@ impl Surface {
                 .send_json(json!({"orchestratorBackend": backend, "orchestratorModel": model}))
                 .map_err(|e| e.to_string())?;
             let history = client.url("/api/v2/chat-history").unwrap();
+            let mut record = json!({
+                "tabId": thread, "messages": [], "backend": backend, "model": model,
+                "repoPath": repo, "repoName": name,
+            });
+            if !carried {
+                record["title"] = json!("New conversation");
+            }
             client
                 .request("POST", &history)
-                .send_json(json!({
-                    "tabId": thread, "messages": [], "backend": backend, "model": model,
-                    "repoPath": repo, "repoName": name, "title": "New conversation",
-                }))
+                .send_json(record)
                 .map_err(|e| e.to_string())?;
             // Bind the thread to the instance; clearing a default pick is best effort.
             let bind = client.url("/api/runtime/provider-instances").unwrap();
@@ -535,6 +542,9 @@ impl Surface {
                     i.controls.model = None;
                     if let Err(error) = &result {
                         i.controls.error = format!("Could not switch the lead: {error}");
+                    } else if carried {
+                        i.controls.overrides["backend"] = json!(picked.0);
+                        i.controls.overrides["model"] = json!(picked.1);
                     }
                     cx.notify();
                 });

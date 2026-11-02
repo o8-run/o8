@@ -53,12 +53,14 @@ export function validateComposerQueuePayload(input: unknown): ComposerQueuePaylo
     || !/^[A-Za-z0-9_-]{1,160}$/.test(payload.afterTaskId) || routing.pinBackend !== true))
     || (routing.pinBackend !== undefined && routing.pinBackend !== true)
     || (routing.pinBackend && routing.collide)) throw new Error('A bound follow-up requires an exact task and runtime.');
+  if (routing.handoffMode !== undefined && routing.handoffMode !== 'handoff') throw new Error('Unknown handoff mode.');
   if (images.length && !composerBackendSupportsImages(routing.backend)) throw new Error('The selected runtime cannot receive these images.');
   return { text: payload.text, wireMessage: payload.wireMessage,
     ...(payload.afterTaskId ? { afterTaskId: payload.afterTaskId } : {}),
     images: images.map(image => ({ name: image.name ?? 'Image', dataUri: image.dataUri })),
     routing: { backend: routing.backend, model: routing.model, effort: routing.effort,
       ...(routing.pinBackend ? { pinBackend: true as const } : {}),
+      ...(routing.handoffMode ? { handoffMode: routing.handoffMode } : {}),
       permissionMode: routing.permissionMode, mode: routing.mode, pickedMode: routing.pickedMode,
       collide: routing.collide, ...(routing.serviceTier ? { serviceTier: routing.serviceTier } : {}), ...(routing.projectId ? { projectId: routing.projectId } : {}) } };
 }
