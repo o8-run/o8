@@ -1,8 +1,9 @@
 #[gpui::test]
-fn native_composer_lead_picker_moves_a_thread_with_history_to_a_fresh_conversation(
+fn native_composer_lead_picker_carries_a_thread_with_history_to_the_new_runtime(
     cx: &mut TestAppContext,
 ) {
     let fixture = Fixture::start(true);
+    let before = lead_history(&fixture);
     let (surface, cx) = open(cx, &fixture);
     click("composer-model", cx);
     // Houses sit on the rail as in the desktop picker: Claude above Codex.
@@ -22,21 +23,18 @@ fn native_composer_lead_picker_moves_a_thread_with_history_to_a_fresh_conversati
         assert!(s.composer.read(cx).controls.open.is_none());
         s.selected.clone().unwrap()
     });
-    assert!(selected.starts_with("thoughts-next-"), "{selected}");
+    assert_eq!(selected, "thoughts-composer-first");
     let history: Value = fixture
         .client
         .get("/api/v2/chat-history", &[("tabId", selected.as_str())])
         .unwrap();
     assert_eq!(history["backend"], "claude");
     assert_eq!(history["model"], "claude-opus-5-5");
-    let original: Value = fixture
-        .client
-        .get(
-            "/api/v2/chat-history",
-            &[("tabId", "thoughts-composer-first")],
-        )
-        .unwrap();
-    assert_ne!(original["backend"], "claude");
+    assert_eq!(history["messages"], before["messages"]);
+    assert_eq!(history["title"], before["title"]);
+    surface.read_with(cx, |s, cx| {
+        assert_eq!(s.composer_routing(cx).unwrap()["backend"], "claude");
+    });
 }
 
 fn lead_history(fixture: &Fixture) -> Value {
@@ -83,14 +81,15 @@ fn native_composer_lead_picker_uses_saved_history_without_retained_rows(cx: &mut
     click("model-claude-opus-5-5", cx);
     surface.read_with(cx, |s, cx| {
         assert!(s.composer.read(cx).controls.error.is_empty());
-        assert!(
-            s.selected.as_ref().unwrap().starts_with("thoughts-next-"),
-            "saved messages must start a fresh conversation even without retained rows"
+        assert_eq!(
+            s.selected.as_deref(),
+            Some("thoughts-composer-first"),
+            "saved messages must stay on their thread even without retained rows"
         );
     });
     let after = lead_history(&fixture);
     assert_eq!(after["messages"], original["messages"]);
-    assert_eq!(after["backend"], original["backend"]);
+    assert_eq!(after["backend"], "claude");
 }
 
 #[gpui::test]
