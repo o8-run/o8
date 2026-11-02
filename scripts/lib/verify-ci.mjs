@@ -286,7 +286,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   }
   const full = jobs['integration-weekly'];
   requireCondition(full.if === "(github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.schedule == '17 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.integration_base == '')"
-    && full.needs === 'test' && !full['continue-on-error'] && full['runs-on'] === 'ubuntu-latest'
+    && full.needs === 'test' && !full['continue-on-error'] && full['runs-on'] === 'ubuntu-24.04'
     && Number.isFinite(full['timeout-minutes']) && full['timeout-minutes'] > 0
     && isDeepStrictEqual(full.strategy, { 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6] } }),
   'main pushes must retain the complete integration matrix');
