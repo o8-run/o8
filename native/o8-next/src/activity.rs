@@ -750,7 +750,11 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
         delegate_prompt: delegate
             .then(|| args["prompt"].as_str().map(str::to_owned))
             .flatten(),
-        delegate_result: (delegate && !output.trim().is_empty()).then(|| output.to_owned()),
+        // A background agent's launch notice is not its answer.
+        delegate_result: (delegate
+            && !output.trim().is_empty()
+            && !output.starts_with("Async agent launched"))
+        .then(|| output.to_owned()),
         status,
         reason,
         group: 0,

@@ -280,11 +280,7 @@ pub(super) fn tabs(s: &Shell, cx: &mut Context<Shell>) -> Vec<AnyElement> {
                     .when(active, |b| b.text_color(theme().text))
                     .child(crate::icon::stroke(
                         crate::subagents::trace::MARK,
-                        if working {
-                            theme().accent
-                        } else {
-                            theme().text_muted
-                        },
+                        crate::subagents::trace::agent_color(&id),
                         13.,
                         1.6,
                     ))

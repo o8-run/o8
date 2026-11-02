@@ -123,27 +123,36 @@ pub(crate) fn items(steps: &[Step], trace: &Trace, agents: &[model::Agent]) -> V
     items
 }
 
-/// "started working", then in place "finished"; a mix says which is which.
-pub(crate) fn verb(items: &[&Item]) -> &'static str {
-    let working = items.iter().filter(|i| i.group == Group::Working).count();
-    if working == items.len() {
-        "started working"
-    } else if items.iter().all(|i| i.failed) {
+/// One color per agent, so its card, tab and header read as the same agent.
+pub(crate) fn agent_color(id: &str) -> gpui::Rgba {
+    const COLORS: [u32; 7] = [
+        0x3b82f6, 0xa855f7, 0x22c55e, 0xf59e0b, 0xec4899, 0x14b8a6, 0xf97316,
+    ];
+    let hash = id.bytes().fold(0u32, |hash, byte| {
+        hash.wrapping_mul(31).wrapping_add(u32::from(byte))
+    });
+    gpui::rgb(COLORS[hash as usize % COLORS.len()])
+}
+
+fn status(item: &Item) -> &'static str {
+    if item.failed {
         "failed"
-    } else if working > 0 {
-        "working"
-    } else if items.iter().all(|i| i.group == Group::Done) {
-        "finished"
     } else {
-        "need attention"
+        match item.group {
+            Group::Working => "working",
+            Group::Attention => "needs you",
+            Group::Done => "done",
+        }
     }
 }
 
-fn name(
+fn card(
     state: &RowState,
     item: &Item,
     inspector: Option<&Entity<Inspector>>,
     arrive: f32,
+    swap: f32,
+    beat: f32,
 ) -> AnyElement {
     let id = item.id.clone();
     let selector = format!("subagent-trace-{id}");
@@ -153,19 +162,42 @@ fn name(
     } else {
         shown
     };
-    let color = if item.failed {
-        theme().danger
+    let color = agent_color(&item.id);
+    let word = status(item);
+    let label: AnyElement = if word == "working" {
+        crate::trace::shimmer(word, theme().text_muted, theme().text, beat).into_any_element()
     } else {
-        theme().text_secondary
+        div().child(word).into_any_element()
     };
     let base = div()
         .id(SharedString::from(selector.clone()))
         .debug_selector(move || selector.clone())
+        .h(px(26.))
+        .px(px(9.))
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .rounded(px(8.))
+        .border_1()
+        .border_color(gpui::Rgba { a: 0.32, ..color })
+        .bg(gpui::Rgba { a: 0.1, ..color })
         .whitespace_nowrap()
         .opacity(arrive)
-        .text_color(color);
+        .child(crate::icon::stroke(MARK, color, 13., 2.))
+        .child(div().text_color(theme().text).child(shown))
+        .child(
+            div()
+                .text_size(px(11.))
+                .text_color(if item.failed {
+                    theme().danger
+                } else {
+                    theme().text_muted
+                })
+                .opacity(0.35 + 0.65 * swap)
+                .child(label),
+        );
     let Some(inspector) = inspector.cloned() else {
-        return base.child(shown).into_any_element();
+        return base.into_any_element();
     };
     let focus = state.subagent_focus.get(&item.id).cloned();
     let return_focus = focus.clone();
@@ -180,9 +212,8 @@ fn name(
     base.focusable()
         .when_some(focus, |v, focus| v.track_focus(&focus))
         .cursor_pointer()
-        .rounded(px(4.))
-        .hover(|v| v.text_color(theme().text))
-        .focus(|v| v.bg(theme().selection))
+        .hover(move |v| v.bg(gpui::Rgba { a: 0.2, ..color }))
+        .focus(|v| v.border_color(theme().accent))
         .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.clone().into())).into())
         .on_click(move |_, w, cx| {
             activate(w, cx);
@@ -201,12 +232,11 @@ fn name(
                 cx.stop_propagation();
             }
         })
-        .child(shown)
         .into_any_element()
 }
 
-/// "#  Quick calculation and Sentence edit started working". The bool asks for
-/// another frame while a name or the verb is still arriving.
+/// One card per agent, each opening its own tab. The bool asks for another
+/// frame while a card or its status is still arriving.
 pub(crate) fn element(
     row: &str,
     state: Rc<RefCell<RowState>>,
@@ -220,105 +250,35 @@ pub(crate) fn element(
         return None;
     }
     let inspector = state.subagents.clone();
-    let working = items.iter().any(|i| i.group == Group::Working);
     let settled = !trace.live;
-    let mut animating = false;
+    let mut animating = items.iter().any(|i| i.group == Group::Working);
     let mut line = div()
         .debug_selector(|| "trace-subagents".into())
-        .min_h(px(crate::trace::ROW))
         .py(px(4.))
         .flex()
         .flex_wrap()
         .items_center()
+        .gap(px(6.))
         .text_size(px(12.5))
         .line_height(px(18.));
-    let marks =
-        div()
-            .mr(px(7.))
-            .flex()
-            .items_center()
-            .gap(px(2.))
-            .children(items.iter().take(3).map(|item| {
-                crate::icon::stroke(
-                    MARK,
-                    if item.group == Group::Working {
-                        theme().accent
-                    } else {
-                        theme().text_muted
-                    },
-                    13.,
-                    2.,
-                )
-            }));
-    line = line.child(marks);
-    // Finished names read first, then the ones still going.
-    let sets: Vec<Vec<&Item>> = [
-        items.iter().filter(|i| i.group != Group::Working).collect(),
-        items.iter().filter(|i| i.group == Group::Working).collect(),
-    ]
-    .into_iter()
-    .filter(|set: &Vec<&Item>| !set.is_empty())
-    .collect();
-    let mut shown = 0;
-    for (set_index, set) in sets.iter().enumerate() {
-        if set_index > 0 {
-            line = line.child(
-                div()
-                    .whitespace_nowrap()
-                    .text_color(theme().text_muted)
-                    .child(",\u{a0}"),
-            );
-        }
-        let count = set.len();
-        for (position, item) in set.iter().enumerate() {
-            if shown == NAMES {
-                break;
-            }
-            shown += 1;
-            let arrived = crate::trace::seen(&format!("subagent:{row}:{}", item.id), settled);
-            let arrive = crate::trace::progress_after(
-                arrived,
-                crate::trace::STAGGER * position as u32,
-                crate::trace::APPEAR,
-            );
-            animating |= arrive < 1.;
-            line = line.child(name(&state, item, inspector.as_ref(), arrive));
-            let joiner = if position + 1 == count {
-                None
-            } else if position + 2 == count {
-                Some("\u{a0}and\u{a0}")
-            } else {
-                Some(",\u{a0}")
-            };
-            if let Some(joiner) = joiner.filter(|_| shown < NAMES) {
-                line = line.child(
-                    div()
-                        .whitespace_nowrap()
-                        .text_color(theme().text_muted)
-                        .opacity(arrive)
-                        .child(joiner),
-                );
-            }
-        }
-        let verb = verb(set);
+    // Finished agents read first, then the ones still going.
+    let ordered = items
+        .iter()
+        .filter(|i| i.group != Group::Working)
+        .chain(items.iter().filter(|i| i.group == Group::Working));
+    for (position, item) in ordered.take(NAMES).enumerate() {
+        let arrived = crate::trace::seen(&format!("subagent:{row}:{}", item.id), settled);
+        let arrive = crate::trace::progress_after(
+            arrived,
+            crate::trace::STAGGER * position as u32,
+            crate::trace::APPEAR,
+        );
         let swap = crate::trace::progress(
-            crate::trace::seen(&format!("subagent:{row}:{set_index}:{verb}"), settled),
+            crate::trace::seen(&format!("subagent:{row}:{}:{}", item.id, status(item)), settled),
             crate::trace::SWAP,
         );
-        animating |= swap < 1.;
-        let text = format!("\u{a0}{verb}");
-        let label: AnyElement = if verb == "started working" || verb == "working" {
-            crate::trace::shimmer(&text, theme().text_muted, theme().text, beat).into_any_element()
-        } else {
-            div().child(text).into_any_element()
-        };
-        line = line.child(
-            div()
-                .whitespace_nowrap()
-                .text_color(theme().text_muted)
-                .opacity(0.35 + 0.65 * swap)
-                .child(label),
-        );
+        animating |= arrive < 1. || swap < 1.;
+        line = line.child(card(&state, item, inspector.as_ref(), arrive, swap, beat));
     }
     if items.len() > NAMES {
         let inspector = inspector.clone();
@@ -326,7 +286,7 @@ pub(crate) fn element(
             div()
                 .id("subagent-trace-more")
                 .debug_selector(|| "subagent-trace-more".into())
-                .ml(px(6.))
+                .ml(px(2.))
                 .whitespace_nowrap()
                 .cursor_pointer()
                 .text_color(theme().text_muted)

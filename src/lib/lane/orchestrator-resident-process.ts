@@ -5,6 +5,7 @@ import { resolveProviderKey } from '@/lib/providers/key-store';
 import { spawn } from '@/lib/providers/child-process';
 import { closeSync } from 'node:fs';
 import { assertNoPrintFlag } from '@/lib/claude-code/assert-no-print-flag';
+import { recordSubagentEvent } from '@/lib/claude-code/subagent-transcript';
 import { processStreamEvent, parseOrchestratorTurnUsage, type OrchestratorEvent } from './orchestrator-stream-events';
 import { isFalseDispatchTurn } from './orchestrator-false-dispatch';
 import { detectPermissionRequest, missingClaudeResumeError } from './orchestrator-session-predicates';
@@ -205,6 +206,7 @@ export function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState,
     settleOrchestratorTurn(session, w, new Error(resumeError));
     return false;
   }
+  if (raw.parent_tool_use_id) recordSubagentEvent(raw);
   processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
   // The model is answering an agent, so the turn is unfinished again.
   if (raw.subtype === 'status' && raw.status === 'requesting') turn.heldResult = false;

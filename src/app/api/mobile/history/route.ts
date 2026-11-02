@@ -5,6 +5,7 @@ import { getOwnedGeminiRuntimeTail } from '@/lib/gemini/owned';
 import { getOwnedOpencodeRuntimeTail } from '@/lib/opencode/owned';
 import { getOwnedCursorRuntimeTail } from '@/lib/cursor/owned';
 import { getOwnedGrokRuntimeTail } from '@/lib/grok/owned';
+import { readSubagentTranscript, subagentSessionId } from '@/lib/claude-code/subagent-transcript';
 import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import {
   mergeDurableMobileTranscriptEntries,
@@ -279,6 +280,9 @@ async function readHistory(request: NextRequest, paged: boolean) {
 /** Opt-in cursor window over the same normalized payload the web store reads.
  * Existing non-paged callers keep their exact tail contract. */
 export async function GET(request: NextRequest) {
+  const sessionKey = request.nextUrl.searchParams.get('sessionKey');
+  const subagent = subagentSessionId(sessionKey);
+  if (subagent) return NextResponse.json({ sessionKey, transcript: readSubagentTranscript(subagent) });
   const paged = request.nextUrl.searchParams.get('page') === '1';
   const response = await readHistory(request, paged);
   if (!paged || !response.ok) return response;

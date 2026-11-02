@@ -35,6 +35,9 @@ pub(crate) struct Inspector {
     next: Option<Instant>,
     clock_second: u64,
     detail_pending: bool,
+    /// What a subagent's own chat last read as, and when; it has no session.
+    native_read: Option<(String, std::time::Instant)>,
+    native_entries: Vec<crate::model::Entry>,
     detail_error: Option<String>,
     detail: Option<crate::pane::Pane>,
     detail_key: Option<String>,
@@ -71,6 +74,8 @@ impl Inspector {
             next: None,
             clock_second: 0,
             detail_pending: false,
+            native_read: None,
+            native_entries: Vec::new(),
             detail_error: None,
             detail: None,
             detail_key: None,
@@ -202,6 +207,7 @@ impl Inspector {
                 .any(|a| a.group == model::Group::Working && a.started.is_some())
         {
             self.clock_second = now;
+            self.ensure_detail(cx);
             cx.notify();
         }
         if !self.pending && (refresh || self.next.is_none_or(|at| Instant::now() >= at)) {
@@ -312,7 +318,9 @@ impl Inspector {
         let id = agent.id.clone();
         let Some(key) = session else {
             if agent.native {
-                self.show_native(&agent.clone());
+                let agent = agent.clone();
+                self.show_native(&agent);
+                self.read_native(&agent, cx);
             }
             return;
         };
@@ -384,6 +392,59 @@ impl Inspector {
         });
         self.detail = Some(detail);
         self.detail_key = Some(key);
+        self.native_read = None;
+        self.native_entries.clear();
+    }
+    /// Replaces the prompt and answer with the agent's whole chat when the
+    /// server has one, and keeps it current while the agent works.
+    fn read_native(&mut self, agent: &Agent, cx: &mut Context<Self>) {
+        let working = agent.group == model::Group::Working;
+        let key = format!("native:{}:{}", agent.id, agent.status);
+        let due = self.native_read.as_ref().is_none_or(|(read, at)| {
+            *read != key || (working && at.elapsed() >= std::time::Duration::from_secs(2))
+        });
+        if !due {
+            return;
+        }
+        self.native_read = Some((key.clone(), std::time::Instant::now()));
+        let client = self.client.clone();
+        let target = format!("subagent:{}", agent.id);
+        let prompt = agent.prompt.clone();
+        let id = agent.id.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { client.history(&target) });
+        cx.spawn(async move |this, cx| {
+            let Ok(mut history) = task.await else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                if this.detail_key.as_ref() != Some(&key)
+                    || history.transcript.is_empty()
+                    || this.native_entries == history.transcript
+                {
+                    return;
+                }
+                this.native_entries.clone_from(&history.transcript);
+                if let Some(prompt) = prompt.filter(|_| history.transcript[0].role != "user") {
+                    history.transcript.insert(
+                        0,
+                        crate::model::Entry {
+                            id: format!("{id}:prompt"),
+                            role: "user".into(),
+                            text: prompt,
+                            tools: None,
+                            extra: Default::default(),
+                        },
+                    );
+                }
+                if let Some(detail) = &mut this.detail {
+                    detail.install_saved(history);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
     fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let return_focus = self
