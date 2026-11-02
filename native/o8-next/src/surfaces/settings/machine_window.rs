@@ -10,8 +10,10 @@ use std::time::{Duration, Instant};
 const DEFAULT_API_PORT: u16 = 47120;
 const DEFAULT_WS_PORT: u16 = 47125;
 /// Three lines: the token, then the ports an installed server chose.
-const REMOTE_COMMAND: &str =
-    "cat ~/.o8/ws-token; echo; cat ~/.o8/api-port 2>/dev/null; echo; cat ~/.o8/ws-port 2>/dev/null";
+// Only the token is required: a source checkout has no port files, and the
+// last missing one must not fail the whole read.
+const REMOTE_COMMAND: &str = "cat ~/.o8/ws-token || exit 1; echo; cat ~/.o8/api-port 2>/dev/null; \
+     echo; cat ~/.o8/ws-port 2>/dev/null; true";
 const TUNNEL_WAIT: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -50,7 +52,9 @@ impl Route {
         Some(Self {
             id: machine["id"].as_str()?.to_owned(),
             target: machine["target"].as_str()?.to_owned(),
-            port: machine["port"].as_u64().and_then(|port| port.try_into().ok())?,
+            port: machine["port"]
+                .as_u64()
+                .and_then(|port| port.try_into().ok())?,
             ssh_config: machine["sshConfig"].as_str().map(str::to_owned),
         })
     }
@@ -72,7 +76,11 @@ impl Route {
 
     fn remote_args(&self) -> Vec<String> {
         let mut args = self.base_args();
-        args.extend(["--".to_owned(), self.target.clone(), REMOTE_COMMAND.to_owned()]);
+        args.extend([
+            "--".to_owned(),
+            self.target.clone(),
+            REMOTE_COMMAND.to_owned(),
+        ]);
         args
     }
 
@@ -197,6 +205,25 @@ mod tests {
         assert!(args.contains(&"127.0.0.1:5001:127.0.0.1:47105".to_owned()));
         let read = route().remote_args();
         assert_eq!(&read[read.len() - 3..], ["--", "me@box", REMOTE_COMMAND]);
+    }
+
+    #[test]
+    fn the_remote_read_needs_the_token_and_not_the_port_files() {
+        let home = std::env::temp_dir().join(format!("o8-remote-read-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".o8")).unwrap();
+        let read = || {
+            Command::new("sh")
+                .args(["-c", REMOTE_COMMAND])
+                .env("HOME", &home)
+                .output()
+                .unwrap()
+        };
+        assert!(!read().status.success(), "no token, no server");
+        std::fs::write(home.join(".o8/ws-token"), "token\n").unwrap();
+        let reply = read();
+        std::fs::remove_dir_all(&home).unwrap();
+        assert!(reply.status.success());
+        assert!(Remote::parse(&String::from_utf8_lossy(&reply.stdout)).is_some());
     }
 
     #[test]
