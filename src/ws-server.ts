@@ -5843,9 +5843,9 @@ async function handleOrchestratorSendMsgOnce(
             break;
           }
 
-          case 'text':
+          case 'text': {
+            const text = isThreadBacked ? assistantText.append(event.text) : event.text;
             if (isThreadBacked) {
-              assistantText.append(event.text);
               // Throttled mid-stream persist so a wedged turn's reply survives a
               // reload instead of dropping to user-only on disk.
               if (Date.now() - lastIncrementalPersistAt > INCREMENTAL_PERSIST_MS) {
@@ -5856,9 +5856,10 @@ async function handleOrchestratorSendMsgOnce(
             wsMsg = JSON.stringify({
               channel: 'orchestrator',
               event: 'output',
-              data: { text: event.text, repoPath, threadId, thinking: false, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag, assistantMessageId },
+              data: { text, repoPath, threadId, thinking: false, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag, assistantMessageId },
             });
             break;
+          }
 
           case 'thinking':
             wsMsg = JSON.stringify({
@@ -5869,6 +5870,7 @@ async function handleOrchestratorSendMsgOnce(
             break;
 
           case 'tool_use':
+            assistantText.endBlock();
             wsMsg = JSON.stringify({
               channel: 'orchestrator',
               event: 'tool-use',
