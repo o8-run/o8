@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 pub(crate) use transport::{LOAD_REQUEST_TIMEOUT, get_with_retry, same_workspace, stale_notice, transient};
+pub(crate) use transport::Tunnel;
 pub use transport::{QueueError, Session};
 use url::Url;
 
@@ -45,6 +46,16 @@ impl Client {
     }
     pub(crate) fn with_wakeup(mut self, wake: async_channel::Sender<()>) -> Self {
         self.wake = Some(wake);
+        self
+    }
+    pub(crate) fn with_tunnel(self, tunnel: Option<Tunnel>) -> Self {
+        {
+            let mut transport = self
+                .transport
+                .write()
+                .unwrap_or_else(|error| error.into_inner());
+            *transport = transport.clone().with_tunnel(tunnel);
+        }
         self
     }
     pub(crate) fn wake(&self) {
