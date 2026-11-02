@@ -201,9 +201,11 @@ export function createClaudeCodeStreamJsonParser(
   const tracker = createToolTracker();
   // Background agents answer through task_notification, and the model reads
   // that answer in a request of its own. The turn stays open until it has.
+  // Background shells also report tasks, but a dev server never finishes.
   const runningTasks = new Set<string>();
   let unreadTaskAnswer = false;
-  let heldResult = false;
+  let sawBackgroundAgent = false;
+  let heldResult: Record<string, unknown> | null = null;
   const streamedTextIndices = new Set<number>();
   const streamedThinkingIndices = new Set<number>();
   let streamedTextWithoutIndex = false;
@@ -326,7 +328,8 @@ export function createClaudeCodeStreamJsonParser(
     const subtype = asString(event.subtype);
     const isResult = event.type === 'result';
     if (isResult && event.is_error !== true && (runningTasks.size > 0 || unreadTaskAnswer)) {
-      heldResult = true;
+      // Its usage is reported above, so the end of a held turn must not repeat it.
+      heldResult = { ...event, usage: undefined, total_cost_usd: undefined, cost_usd: undefined };
       return;
     }
     const isError = event.is_error === true
@@ -335,7 +338,7 @@ export function createClaudeCodeStreamJsonParser(
     const errorText = isError && Array.isArray(event.errors)
       ? event.errors.filter((value): value is string => typeof value === 'string').join('\n')
       : '';
-    const resultText = heldResult
+    const resultText = sawBackgroundAgent && !isError
       ? state.fullResponse
       : explicitResult?.trim() ? explicitResult : errorText || state.fullResponse;
     const doneEvent: ClaudeCodeStreamJsonParserEvent = {
@@ -370,14 +373,15 @@ export function createClaudeCodeStreamJsonParser(
       if (id) state.sessionId = id;
       const subtype = asString(event.subtype);
       const toolUseId = asString(event.tool_use_id);
-      if (subtype === 'task_started' && toolUseId && event.is_backgrounded === true) {
+      if (subtype === 'task_started' && toolUseId && event.is_backgrounded === true && event.task_type === 'local_agent') {
         runningTasks.add(toolUseId);
+        sawBackgroundAgent = true;
       } else if (subtype === 'task_notification' && toolUseId && runningTasks.delete(toolUseId)) {
         unreadTaskAnswer = true;
         emitToolResult({
           tool_use_id: toolUseId,
           output: asString(event.summary) ?? '',
-          is_error: event.status !== 'completed',
+          is_error: event.status !== 'completed' && event.status !== 'stopped',
         }, events);
       } else if (subtype === 'status' && event.status === 'requesting') {
         unreadTaskAnswer = false;
@@ -593,6 +597,12 @@ export function createClaudeCodeStreamJsonParser(
         const step = planStepFromLine(planLineBuffer);
         if (step) events.push({ type: 'plan_step', text: step, status: 'active' });
         planLineBuffer = '';
+      }
+      // The process or its caller gave up on a held turn, which had succeeded.
+      if (heldResult) {
+        runningTasks.clear();
+        unreadTaskAnswer = false;
+        emitDone(heldResult, events);
       }
       return events;
     },

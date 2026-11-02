@@ -499,6 +499,7 @@ export async function sendMessage(
   return new Promise<void>((resolvePromise, rejectPromise) => {
     const timeout = setTimeout(() => {
       console.warn(`[claude-code-interactive-session] Process timeout (${options.timeoutMs ?? PROCESS_TIMEOUT_MS}ms) — killing ${internal.tabId}`);
+      flushActiveTurn(internal);
       killClaudeCodeInteractiveSession(internal.tabId);
       settleTurn(internal, new Error('Claude Code interactive session timed out'));
     }, options.timeoutMs ?? PROCESS_TIMEOUT_MS);

@@ -419,6 +419,12 @@
       ]
     },
     {
+      "path": "src/lib/claude-code/one-shot-repl.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/claude-code/read-only-worker-launch.test.ts",
       "reasons": [
         "child-process",

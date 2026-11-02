@@ -116,7 +116,7 @@ describe('stream-json parser subagents', () => {
 });
 
 describe('stream-json parser background agents', () => {
-  const started = { type: 'system', subtype: 'task_started', tool_use_id: 'agent-1', is_backgrounded: true };
+  const started = { type: 'system', subtype: 'task_started', tool_use_id: 'agent-1', is_backgrounded: true, task_type: 'local_agent' };
   const call = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'agent-1', name: 'Agent', input: { description: 'Sum' } }] } };
   const launched = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'agent-1', content: 'Async agent launched successfully.' }] } };
   const answered = { type: 'system', subtype: 'task_notification', tool_use_id: 'agent-1', status: 'completed', summary: '391' };
@@ -157,6 +157,45 @@ describe('stream-json parser background agents', () => {
     const running = createClaudeCodeStreamJsonParser();
     const end = running.pushChunk(lines(call, started, launched, { type: 'result', subtype: 'error_during_execution', is_error: true }));
     expect(end.some((e) => e.type === 'done')).toBe(true);
+  });
+
+  it('reports the final text when both results arrive together at the end', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const events = parser.pushChunk(lines(
+      call, started, launched, say('Started.'), answered, requesting, say('It is 391.'),
+      { type: 'result', result: 'Started.' }, { type: 'result', result: 'It is 391.' },
+    ));
+    expect(events.filter((e) => e.type === 'done')).toMatchObject([{ text: 'Started.It is 391.' }]);
+  });
+
+  it('does not hold a turn for a background shell', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const shell = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'shell-1', name: 'Bash', input: { command: 'npm run dev', run_in_background: true } }] } };
+    const events = parser.pushChunk(lines(
+      shell,
+      { ...started, tool_use_id: 'shell-1', task_type: 'local_bash' },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'shell-1', content: 'Running in the background' }] } },
+      { type: 'result', result: 'Started the server.' },
+    ));
+    expect(results(events)).toMatchObject([{ id: 'shell-1' }]);
+    expect(events.find((e) => e.type === 'done')).toMatchObject({ text: 'Started the server.' });
+  });
+
+  it('ends a held turn with what it said when nothing more will arrive', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const held = parser.pushChunk(lines(call, started, launched, say('Started.'), { type: 'result', result: 'Started.', usage: { input_tokens: 5, output_tokens: 2 } }));
+    expect(held.filter((e) => e.type === 'usage')).toHaveLength(1);
+    const end = parser.flush();
+    expect(end.filter((e) => e.type === 'usage')).toEqual([]);
+    expect(end.filter((e) => e.type === 'done')).toMatchObject([{ text: 'Started.' }]);
+    expect(end.find((e) => e.type === 'done')).not.toHaveProperty('isError');
+  });
+
+  it('does not call an agent someone stopped a failure', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const events = parser.pushChunk(lines(call, started, launched, { ...answered, status: 'stopped', summary: 'Stopped' }));
+    expect(results(events)).toHaveLength(1);
+    expect(results(events)[0]).not.toHaveProperty('isError', true);
   });
 
   it('leaves a foreground agent alone', () => {

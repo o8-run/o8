@@ -317,6 +317,7 @@ function runTurn(
     };
 
     const timer = setTimeout(() => {
+      for (const evt of proc.flushParser()) handleEvent(evt);
       finish(new Error(`[qa][warm-repl] timed out after ${timeoutMs}ms (${warm ? 'warm' : 'cold'})`));
     }, timeoutMs);
 
