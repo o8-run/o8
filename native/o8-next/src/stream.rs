@@ -43,6 +43,8 @@ struct Reveal {
     id: String,
     shown: usize,
     next: Instant,
+    length: usize,
+    grew: Instant,
     steps: Vec<RevealStep>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -55,6 +57,8 @@ const REVEAL_TICK: Duration = Duration::from_millis(24);
 const REVEAL_SHARE: usize = 10;
 /// Words shown without a break wait no longer than this much text.
 const REVEAL_WORD: usize = 48;
+/// A last word with no space after it shows once the stream is this quiet.
+const REVEAL_QUIET: Duration = Duration::from_millis(400);
 pub(crate) const REVEAL_FADE: Duration = Duration::from_millis(280);
 pub(crate) const REVEAL_STAGGER: Duration = Duration::from_millis(70);
 
@@ -367,6 +371,8 @@ impl Transcript {
                             id,
                             shown: 0,
                             next: Instant::now(),
+                            length: 0,
+                            grew: Instant::now(),
                             steps: vec![],
                         });
                     }
@@ -520,6 +526,10 @@ impl Transcript {
             .map_or("", |entry| entry.text.as_str());
         // Saved text can replace the live reply and shift its offsets.
         reveal.shown = text.floor_char_boundary(reveal.shown);
+        if text.len() != reveal.length {
+            reveal.length = text.len();
+            reveal.grew = now;
+        }
         if reveal.shown >= text.len() {
             if self.live.is_none() && reveal.steps.is_empty() {
                 self.reveal = None;
@@ -540,7 +550,9 @@ impl Transcript {
         let streaming = self.live.is_some() && self.context_busy;
         let end = match end {
             Some(end) => end,
-            None if streaming && waiting < REVEAL_WORD => return false,
+            None if streaming && waiting < REVEAL_WORD && now - reveal.grew < REVEAL_QUIET => {
+                return false;
+            }
             None => text.len(),
         };
         let chars = text[reveal.shown..end].chars().count();
@@ -993,6 +1005,37 @@ mod tests {
         transcript.apply(&frame(6, "status", serde_json::json!({"status":"stopped"})));
         assert!(!live_last(&transcript), "the turn's end clears it");
     }
+    #[test]
+    fn a_held_turn_shows_its_last_word_once_the_stream_goes_quiet() {
+        let mut t = live("llm-chat:quiet");
+        t.paced = true;
+        t.apply(&frame(
+            "quiet",
+            1,
+            "status",
+            serde_json::json!({"status":"busy"}),
+        ));
+        t.apply(&frame(
+            "quiet",
+            2,
+            "output",
+            serde_json::json!({"text":"reports back."}),
+        ));
+        let mut step = |t: &mut Transcript| {
+            if let Some(reveal) = &mut t.reveal {
+                reveal.next = Instant::now();
+            }
+            t.pace();
+        };
+        for _ in 0..40 {
+            step(&mut t);
+        }
+        assert_eq!(t.reveal.as_ref().unwrap().shown, "reports ".len());
+        t.reveal.as_mut().unwrap().grew = Instant::now() - REVEAL_QUIET;
+        step(&mut t);
+        assert_eq!(t.reveal.as_ref().unwrap().shown, "reports back.".len());
+    }
+
     #[test]
     fn a_save_during_the_turn_keeps_the_live_reply_and_its_tools() {
         let mut t = live("llm-chat:lag");
