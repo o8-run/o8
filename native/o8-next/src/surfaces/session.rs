@@ -319,7 +319,21 @@ impl Client {
     pub fn history(&self, id: &str) -> Result<History, String> {
         self.history_page(id, None)
     }
+    /// The read behind opening a thread, recorded for Settings › Diagnostics.
+    pub fn history_for_switch(&self, id: &str) -> Result<History, String> {
+        let started = std::time::Instant::now();
+        let (history, bytes) = self.history_counted(id, None)?;
+        crate::switch_receipt::record(id, bytes, started.elapsed());
+        Ok(history)
+    }
     pub fn history_page(&self, id: &str, before: Option<&str>) -> Result<History, String> {
+        self.history_counted(id, before).map(|(history, _)| history)
+    }
+    fn history_counted(
+        &self,
+        id: &str,
+        before: Option<&str>,
+    ) -> Result<(History, usize), String> {
         let key = if id.contains(':') {
             id.to_owned()
         } else {
@@ -333,11 +347,12 @@ impl Client {
         if let Some(before) = before {
             query.push(("before", before));
         }
-        let history: History = self.get("/api/mobile/history", &query)?;
+        let (history, bytes): (History, usize) =
+            self.get_counted("/api/mobile/history", &query)?;
         if history.session_key != key {
             return Err("Server returned history for a different session".into());
         }
-        Ok(history)
+        Ok((history, bytes))
     }
 }
 

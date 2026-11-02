@@ -419,7 +419,7 @@ impl Surface {
             .filter(|_| !id.contains(':'));
         let task = cx.background_executor().spawn(async move {
             let session = session.ok_or("Selected session disappeared")?;
-            let mut history = client.history(&id)?;
+            let mut history = client.history_for_switch(&id)?;
             session.decorate(&mut history);
             if id.contains(':') {
                 return Ok((

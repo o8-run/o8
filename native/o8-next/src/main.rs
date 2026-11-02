@@ -40,6 +40,7 @@ mod shell;
 mod shell_state;
 mod sidebar;
 mod stream;
+mod switch_receipt;
 mod terminal;
 mod terminal_grid;
 mod terminal_transport;
