@@ -190,6 +190,8 @@ pub(crate) mod limits;
 pub(crate) mod machines;
 #[path = "settings/mcp.rs"]
 pub(crate) mod mcp;
+#[path = "settings/machine_links.rs"]
+pub(crate) mod machine_links;
 
 #[cfg(test)]
 #[path = "settings_shell_tests.rs"]
