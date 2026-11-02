@@ -15,7 +15,7 @@ const heldRoots = new AsyncLocalStorage<Map<string, { active: boolean; admitted:
 export class OwnedArtifactAdmissionError extends Error {
   readonly code = 'owned_artifact_admission_held';
   readonly sideEffect = 'none' as const;
-  constructor(public readonly reason: string) {
+  constructor(public readonly reason: string, public readonly retryable = false) {
     super(`Owned artifact admission held: ${reason}. Retained evidence was not removed; read, stop, archive and recovery remain available. Review retained artifacts before starting another run.`);
     this.name = 'OwnedArtifactAdmissionError';
   }
@@ -135,6 +135,7 @@ export async function withOwnedArtifactRootLock<T>(root: string, operation: () =
   catch { throw new OwnedArtifactAdmissionError('the runtime root could not be resolved'); }
   const existing = heldRoots.getStore()?.get(canonical);
   if (existing?.active) return operation();
+  let operationStarted = false;
   try {
     return await withPacketLifecycleSpawnLock(`owned-artifacts:${createHash('sha256').update(canonical).digest('hex')}`, async () => {
       try { await bindStore(canonical); }
@@ -147,13 +148,16 @@ export async function withOwnedArtifactRootLock<T>(root: string, operation: () =
         await bindStore(cliNamespace);
         const authority = { active: true, admitted: false };
         try {
+          operationStarted = true;
           return await heldRoots.run(new Map([...(heldRoots.getStore() ?? []), [canonical, authority]]), operation);
         } finally { authority.active = false; }
       });
     });
   } catch (error) {
     if (error instanceof WorkspaceLifecycleLeaseUnavailableError) {
-      throw new OwnedArtifactAdmissionError('another lifecycle operation owns this runtime root');
+      // Never replay a callback or a lost/unverified ownership receipt.
+      throw new OwnedArtifactAdmissionError('another lifecycle operation owns this runtime root',
+        !operationStarted && error.reason === 'contended');
     }
     throw error;
   }
