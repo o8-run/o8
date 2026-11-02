@@ -57,6 +57,24 @@ fn choose(cx: &mut VisualTestContext, path: &str) {
     menu_click(cx, "spec-target-open");
     wait(cx, "spec-editor");
 }
+/// The save leaves the input thread, so wait for the file to catch up.
+fn saved_state(f: &Fixture, ready: impl Fn(&Value) -> bool) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let saved = fs::read_to_string(f.root.join("shell.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or(Value::Null);
+        if ready(&saved) {
+            return saved;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "shell state never saved: {saved}"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
 #[gpui::test]
 fn spec_target_no_repo_typed_file_and_preferences_persist(cx: &mut TestAppContext) {
     let f = Fixture::new();
@@ -65,27 +83,22 @@ fn spec_target_no_repo_typed_file_and_preferences_persist(cx: &mut TestAppContex
     assert_eq!(content(&mut cx), "");
     choose(&mut cx, &format!("{}/o8.md", f.repo));
     until(&mut cx, |cx| content(cx) == "# Isolated notes\n");
-    // The save now leaves the input thread.
     cx.run_until_parked();
     draw(&mut cx);
-    let saved: Value =
-        serde_json::from_str(&fs::read_to_string(f.root.join("shell.json")).unwrap()).unwrap();
+    let saved = saved_state(&f, |saved| saved["notes"]["target_override"] == f.repo);
     assert_eq!(saved["notes"]["target_override"], f.repo);
-    assert!(
-        f.requests()
-            .iter()
-            .filter(|r| r.contains("/api/repo-spec?"))
-            .all(|r| r.contains("repoPath=%2F") && !r.contains("repoPath=&"))
-    );
+    assert!(f
+        .requests()
+        .iter()
+        .filter(|r| r.contains("/api/repo-spec?"))
+        .all(|r| r.contains("repoPath=%2F") && !r.contains("repoPath=&")));
     click(&mut cx, "spec-settings");
     click(&mut cx, "spec-color-2");
     cx.simulate_keystrokes("escape");
     draw(&mut cx);
-    // The save now leaves the input thread.
     cx.run_until_parked();
     draw(&mut cx);
-    let saved: Value =
-        serde_json::from_str(&fs::read_to_string(f.root.join("shell.json")).unwrap()).unwrap();
+    let saved = saved_state(&f, |saved| saved["notes"]["color"] == "#9ca3af");
     assert_eq!(saved["notes"]["color"], "#9ca3af");
     assert!(cx.simulate_close());
 }
@@ -107,11 +120,13 @@ fn spec_target_six_recents_file_folder_and_follow_active_repo(cx: &mut TestAppCo
         choose(&mut cx, dir.to_str().unwrap());
         until(&mut cx, |cx| content(cx) == format!("Recent {i}\n"));
     }
-    // The save now leaves the input thread.
     cx.run_until_parked();
     draw(&mut cx);
-    let saved: Value =
-        serde_json::from_str(&fs::read_to_string(f.root.join("shell.json")).unwrap()).unwrap();
+    let saved = saved_state(&f, |saved| {
+        saved["notes"]["recents"]
+            .as_array()
+            .is_some_and(|r| r.len() == 6)
+    });
     assert_eq!(saved["notes"]["recents"].as_array().unwrap().len(), 6);
     click(&mut cx, "spec-target");
     menu_click(&mut cx, "spec-follow-repo");
@@ -123,11 +138,10 @@ fn spec_target_six_recents_file_folder_and_follow_active_repo(cx: &mut TestAppCo
     menu_click(&mut cx, "spec-choose-folder");
     draw(&mut cx);
     assert!(f.requests().iter().any(|r| r == "POST /api/panel/file-io"));
-    assert!(
-        f.requests()
-            .iter()
-            .any(|r| r == "POST /api/panel/browse-folder")
-    );
+    assert!(f
+        .requests()
+        .iter()
+        .any(|r| r == "POST /api/panel/browse-folder"));
 }
 #[gpui::test]
 fn spec_saved_override_loads_before_active_repo_and_poll_stops_when_hidden(
@@ -142,12 +156,11 @@ fn spec_saved_override_loads_before_active_repo_and_poll_stops_when_hidden(
     let mut cx = shell(&f, state, cx);
     wait(&mut cx, "spec-editor");
     until(&mut cx, |cx| content(cx) == "Override notes\n");
-    assert!(
-        f.requests()
-            .iter()
-            .filter(|r| r.contains("/api/repo-spec?"))
-            .all(|r| r.contains("alternate"))
-    );
+    assert!(f
+        .requests()
+        .iter()
+        .filter(|r| r.contains("/api/repo-spec?"))
+        .all(|r| r.contains("alternate")));
     click(&mut cx, "header-right-panel");
     std::thread::sleep(Duration::from_millis(250));
     draw(&mut cx);
@@ -181,22 +194,22 @@ fn spec_settings_hue_neutrals_reset_and_keyboard_close(cx: &mut TestAppContext) 
     let bounds = cx.debug_bounds("spec-hue").unwrap();
     cx.simulate_click(bounds.center(), gpui::Modifiers::default());
     draw(&mut cx);
-    // The save now leaves the input thread.
     cx.run_until_parked();
     draw(&mut cx);
-    let saved: Value =
-        serde_json::from_str(&fs::read_to_string(f.root.join("shell.json")).unwrap()).unwrap();
+    let saved = saved_state(&f, |saved| {
+        saved["notes"]["color"]
+            .as_str()
+            .is_some_and(|c| c.starts_with("hsl(180,"))
+    });
     let hue = saved["notes"]["color"].as_str().unwrap();
     assert!(hue.starts_with("hsl(180,"));
     click(&mut cx, "spec-color-0");
     click(&mut cx, "spec-color-reset");
     cx.simulate_keystrokes("escape");
     draw(&mut cx);
-    // The save now leaves the input thread.
     cx.run_until_parked();
     draw(&mut cx);
-    let saved: Value =
-        serde_json::from_str(&fs::read_to_string(f.root.join("shell.json")).unwrap()).unwrap();
+    let saved = saved_state(&f, |saved| saved["notes"]["color"].is_null());
     assert!(saved["notes"]["color"].is_null());
     cx.simulate_keystrokes("enter");
     draw(&mut cx);
