@@ -1,3 +1,4 @@
+import { committedDiff } from '@/lib/worktree/committed-diff';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 /**
  * WorktreeManager — Orchestration Layer for Git Worktree Isolation
@@ -2773,12 +2774,7 @@ export class WorktreeManager {
 
         // Committed changes since base (if base provided)
         baseBranch
-          ? execFileAsync('git', ['diff', '--name-only', `${baseBranch}...HEAD`], {
-              windowsHide: true,
-              cwd: worktreePath,
-              timeout: 5000,
-            })
-              .then((r) => r.stdout)
+          ? committedDiff(worktreePath, baseBranch, '--name-only')
               .catch(() => '' /* base branch may not be reachable */)
           : Promise.resolve(''),
       ]);
