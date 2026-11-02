@@ -1,16 +1,10 @@
 import { codexModelDiscoveryHome } from './model-discovery-cache';
 import { resolveEffortPin, type ResolveEffortPinInput } from '@/lib/orchestrator/effort-pin';
 import { getRuntimeLaunchIdentitySync, type RuntimeLaunchIdentity } from '@/lib/runtime/identity-catalog';
-import { getDataDir } from '@/lib/data-dir-migration';
-import { readPacketSessionIdentitySync } from '@/lib/runtimes/shared/owned-session/packet-identity';
-import { join } from 'node:path';
 
 /** Carry this server-resolved identity from early admission into the owned store. */
 export function resolveCodexLaunchIdentity(packetId?: string): RuntimeLaunchIdentity {
-  const saved = packetId ? readPacketSessionIdentitySync(
-    process.env.CORTEX_IDE_OWNED_CODEX_ROOT || join(getDataDir(), 'owned-codex'), 'codex-owned:', packetId,
-  ) : null;
-  return saved ?? getRuntimeLaunchIdentitySync('codex', packetId) ?? {
+  return getRuntimeLaunchIdentitySync('codex', packetId) ?? {
     id: 'codex-local-default', label: 'Current local sign-in', configHomeRef: codexModelDiscoveryHome(),
   };
 }

@@ -3,7 +3,7 @@ import { resolveCapturedMissionProject } from '@/lib/orchestrator/mission-projec
 import 'server-only';
 
 import { resolveClaudeCodeWorkerSelection, selectedClaudeCodeWorkerModelSync } from '@/lib/claude-code/worker-profile';
-import { EffortPinRejectionError, isHonoredEffortPin, resolveAdapterEffort, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
+import { EffortPinRejectionError, isHonoredEffortPin, resolveAdapterEffort, resolveRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { listSessionRuleTexts } from '@/lib/db/session-rules-store';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -212,14 +212,14 @@ export async function launchPacketWithStorageAdmission(input: {
   // (recovery, a re-routed lane) would drop or coerce it, fail clearly BEFORE any
   // worktree/lane/provider work. Deliberate no-op pins (runtime without a
   // reasoning surface) keep their legacy behavior.
-  if (isHonoredEffortPin(packet.workerRouting)) {
-    const pin = resolveEffortPin({
-      requestedEffort: packet.workerRouting?.requestedEffort,
+  if (isHonoredEffortPin(packet.workerRouting) || workerRouting.selectedRuntime === 'muse' && workerRouting.requestedEffort) {
+    const pin = await resolveRuntimeEffortPin({
+      requestedEffort: workerRouting.selectedRuntime === 'muse' ? workerRouting.requestedEffort : packet.workerRouting?.requestedEffort,
       runtime: workerRouting.selectedRuntime,
       explicitModel: input.workerRouting.requestedModel,
       model: workerRouting.selectedModel,
       modelDisposition: workerRouting.modelDisposition,
-    });
+    }, { cwd: packet.workspaceTargetPath ?? undefined, packetId: packet.id });
     if (!pin.ok) {
       throw new EffortPinRejectionError(pin.code, `Refusing to launch packet ${packet.id}: ${pin.message}`);
     }

@@ -12,7 +12,7 @@ import {
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { resolveWorkerHuddle } from '@/lib/operator/worker-start-mode';
-import { resolveEffortAliases, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
+import { resolveEffortAliases, resolveRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   formatDispatchableRuntimeChoices,
@@ -140,13 +140,13 @@ export async function POST(request: NextRequest) {
   const actualLaunchedModel = workerRouting.selectedModel
     ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel
     ?? null;
-  const effortPin = resolveEffortPin({
+  const effortPin = await resolveRuntimeEffortPin({
     requestedEffort,
     runtime: workerRouting.selectedRuntime,
     explicitModel: typeof requestedModel === 'string' ? requestedModel.trim() || null : null,
     model: actualLaunchedModel,
     modelDisposition: workerRouting.modelDisposition,
-  });
+  }, { cwd: repoPath });
   if (!effortPin.ok) {
     return operatorError(effortPin.code, effortPin.message, 400);
   }

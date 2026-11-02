@@ -1,3 +1,5 @@
+import { getRuntimeLaunchIdentitySync } from './identity-catalog';
+import { assertLaunchEffortPin } from '@/lib/runtime/launch-effort';
 import type { RuntimeLaunchRequest } from './launch-request';
 export type { RuntimeLaunchRequest } from './launch-request';
 import { runtimeLaunchStep, withRuntimeLaunchDeadline } from './launch-deadline';
@@ -112,7 +114,7 @@ function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): v
   }
 }
 
-export async function launchRuntimeSurface(payload: RuntimeLaunchRequest, codexIdentity?: RuntimeLaunchIdentity): Promise<RuntimeLaunchResult> {
+export async function launchRuntimeSurface(payload: RuntimeLaunchRequest, resolvedIdentity?: RuntimeLaunchIdentity): Promise<RuntimeLaunchResult> {
   assertNotKnowledgeSource(payload.repoPath); assertNotKnowledgeSource(payload.cwd);
   if (payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId) {
     if (!payload.automaticRecoverySurfaceId?.startsWith(`${payload.runtime}-owned:`) || !payload.automaticRecoveryRunId) {
@@ -120,7 +122,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest, codexI
     }
     try {
       return await withOwnedAutomaticRecovery(payload.automaticRecoverySurfaceId, payload.automaticRecoveryRunId,
-        () => launchRuntimeSurfaceInner(payload, codexIdentity));
+        () => launchRuntimeSurfaceInner(payload, resolvedIdentity));
     } catch (error) {
       if (!(error instanceof AutomaticRecoveryRefusedError)) throw error;
       return { ok: false, runtime: payload.runtime, surfaceId: '', note: error.message,
@@ -128,9 +130,9 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest, codexI
         worktree: null, laneId: payload.existingLaneId ?? null };
     }
   }
-  return launchRuntimeSurfaceInner(payload, codexIdentity);
+  return launchRuntimeSurfaceInner(payload, resolvedIdentity);
 }
-async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest, codexIdentity?: RuntimeLaunchIdentity): Promise<RuntimeLaunchResult> {
+async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest, resolvedIdentity?: RuntimeLaunchIdentity): Promise<RuntimeLaunchResult> {
   const runtimeId = payload.runtime;
   const prompt = payload.prompt?.trim();
   const repoPath = payload.repoPath?.trim() || payload.cwd?.trim();
@@ -144,6 +146,10 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest, codexIde
   if (!repoPath) {
     throw new Error('repoPath or cwd is required');
   }
+
+  const launchIdentity = runtimeId === 'codex' ? resolvedIdentity ?? resolveCodexLaunchIdentity(payload.packetId)
+    : runtimeId === 'muse' ? resolvedIdentity ?? getRuntimeLaunchIdentitySync('muse', payload.packetId) ?? undefined : undefined;
+  await assertLaunchEffortPin(payload, repoPath, launchIdentity);
 
   const runtime = getRuntime(runtimeId);
   if (!runtime) {
@@ -172,7 +178,6 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest, codexIde
     };
   }
 
-  const launchIdentity = runtimeId === 'codex' ? codexIdentity ?? resolveCodexLaunchIdentity(payload.packetId) : undefined;
   assertSingleAttemptLaunch(payload, workModeResolution.workMode, launchIdentity?.configHomeRef);
   if (payload.controlledTask && (payload.executionPolicy !== 'single-attempt' || payload.isolate !== false
     || payload.skipSetup !== true || payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId)) {

@@ -1,3 +1,4 @@
+import { codexModelListFixtureScript } from './helpers/codex-model-list-fixture';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:http';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -30,19 +31,22 @@ writeFileSync(join(root, 'mode'), 'running');
 writeFileSync(bin, `#!/usr/bin/env node
 const fs = require('node:fs');
 if (process.argv.includes('--version')) { console.log('codex-cli 1.0.0'); process.exit(0); }
+const args = process.argv.slice(2);
+${codexModelListFixtureScript()}
 // A queued-lock fixture can hold provider output until both admissions settle.
-while (fs.existsSync(process.env.O8_TEST_PROVIDER_GATE)) {
+while (fs.existsSync(${JSON.stringify(providerGate)})) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
 }
-fs.appendFileSync(process.env.O8_TEST_PROVIDER_CAPTURE, JSON.stringify({pid: process.pid, argv: process.argv.slice(2)}) + '\\n');
+fs.appendFileSync(${JSON.stringify(join(root, 'starts.jsonl'))}, JSON.stringify({pid: process.pid, argv: process.argv.slice(2)}) + '\\n');
 console.log(JSON.stringify({type: 'thread.started', thread_id: 'synthetic-thread'}));
-const mode = fs.readFileSync(process.env.O8_TEST_PROVIDER_MODE, 'utf8');
+const mode = fs.readFileSync(${JSON.stringify(join(root, 'mode'))}, 'utf8');
 if (mode === 'failed') { console.log(JSON.stringify({type: 'turn.failed', error: {message: 'Synthetic failure'}})); process.exit(1); }
 if (mode === 'finished') {
  console.log(JSON.stringify({type: 'turn.completed', usage: {input_tokens: 0, output_tokens: 0}}));
  process.exit(0);
 }
 setInterval(() => {}, 1000);
+}
 `); chmodSync(bin, 0o755);
 const token = 'interrupted-recovery-operator-fixture'; writeFileSync(join(data, 'ws-token'), token);
 const route = await import('@/app/api/runtime/action/route');

@@ -1,3 +1,4 @@
+import { getRuntimeLaunchIdentitySync } from '@/lib/runtime/identity-catalog';
 import { NextRequest, NextResponse } from 'next/server';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
@@ -18,7 +19,7 @@ import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session
 import { isClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { normalizePacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
-import { EFFORT_CHOICE_LIST, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
+import { EFFORT_CHOICE_LIST, resolveRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { resolveCodexLaunchIdentity } from '@/lib/codex/launch-context';
@@ -97,24 +98,25 @@ export async function POST(request: NextRequest) {
   }
 
   const launchRequest = canonicalLaunchRequest(payload, runtimeName, clientMutationId);
-  const codexIdentity = runtimeName === 'codex' ? resolveCodexLaunchIdentity(launchRequest.packetId) : undefined;
+  const launchIdentity = runtimeName === 'codex' ? resolveCodexLaunchIdentity(launchRequest.packetId)
+    : runtimeName === 'muse' ? getRuntimeLaunchIdentitySync('muse', launchRequest.packetId) ?? undefined : undefined;
   // A concrete pin must survive the adapter's mapping. Validate before the
   // receipt binding so a rejected selection can be corrected with the same ID.
   if (launchRequest.effort && launchRequest.effort !== 'adaptive') {
-    const effortPin = resolveEffortPin({
+    const effortPin = await resolveRuntimeEffortPin({
       requestedEffort: launchRequest.effort,
       runtime: runtimeName,
       model: launchRequest.model
         ?? (runtimeName === 'codex' ? resolveDefaultDispatchModelSync() || null : null),
       codexHome: runtimeName === 'codex' && (launchRequest.effort === 'none' || launchRequest.effort === 'minimal')
-        ? codexIdentity?.configHomeRef
+        ? launchIdentity?.configHomeRef
         : undefined,
-    });
+    }, { cwd: launchRequest.cwd ?? launchRequest.repoPath, packetId: launchRequest.packetId, identity: launchIdentity, configHome: launchIdentity?.configHomeRef });
     if (!effortPin.ok) {
       return NextResponse.json({ error: effortPin.message, code: effortPin.code }, { status: 400 });
     }
   }
-  try { assertSingleAttemptLaunch({ ...launchRequest, executionCarrier: payload.executionCarrier }, launchRequest.workMode, codexIdentity?.configHomeRef); }
+  try { assertSingleAttemptLaunch({ ...launchRequest, executionCarrier: payload.executionCarrier }, launchRequest.workMode, launchIdentity?.configHomeRef); }
   catch { return NextResponse.json({ error: 'Single-attempt workers require exact native runtime, model, effort and read-only pins.' }, { status: 400 }); }
   const canonicalBody = JSON.stringify(launchRequest);
 
@@ -189,8 +191,8 @@ export async function POST(request: NextRequest) {
       },
       async () => {
         try {
-          return await (codexIdentity
-            ? launchRuntimeSurface(launchRequest, codexIdentity)
+          return await (launchIdentity
+            ? launchRuntimeSurface(launchRequest, launchIdentity)
             : launchRuntimeSurface(launchRequest));
         } catch (error) {
           if (error instanceof RuntimeLaunchPostEffectError) {

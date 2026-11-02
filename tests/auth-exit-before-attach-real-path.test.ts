@@ -1,3 +1,4 @@
+import { codexModelListFixtureScript } from './helpers/codex-model-list-fixture';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,6 +61,7 @@ writeFileSync(shimPath, `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('codex-cli 0.130.0'); process.exit(0); }
+${codexModelListFixtureScript()}
 const mode = fs.readFileSync(${JSON.stringify(shimModePath)}, 'utf8');
 if (args[0] === 'exec') {
   const path = ${JSON.stringify(execCountPath)};
@@ -80,6 +82,7 @@ if (args[0] === 'exec') {
   process.exit(1);
 }
 process.exit(64);
+}
 `);
 chmodSync(shimPath, 0o700);
 
