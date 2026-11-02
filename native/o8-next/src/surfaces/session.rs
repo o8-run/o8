@@ -79,6 +79,11 @@ const MACHINE_THREAD: &str = "machine~";
 pub(crate) fn machine_thread_id(machine: &str, id: &str) -> String {
     format!("{MACHINE_THREAD}{machine}|{id}")
 }
+/// A server's own thread can't use the sidebar's form, or it would read as a
+/// machine's thread.
+pub(crate) fn reserved_thread_id(id: &str) -> bool {
+    id.starts_with(MACHINE_THREAD)
+}
 /// The machine and its own thread id inside a sidebar id.
 pub(crate) fn machine_thread(id: &str) -> Option<(&str, &str)> {
     id.strip_prefix(MACHINE_THREAD)?.split_once('|')
