@@ -19,6 +19,24 @@ import {
   type OutputMode,
 } from '../output.js';
 
+const LISTED_OPERATOR_DEFAULTS = [
+  { key: 'composerEnterQueues', setting: 'chat.enter_queues' },
+  { key: 'textGenerationTitleModel', setting: 'text_generation.title_model' },
+] as const;
+
+/** Reports each listed default with where its value came from. */
+function operatorDefaultRows(data: unknown) {
+  const { values, sources } = (data ?? {}) as {
+    values?: Record<string, unknown>;
+    sources?: Record<string, unknown>;
+  };
+  return LISTED_OPERATOR_DEFAULTS.flatMap(({ key, setting }) => {
+    const value = values?.[key];
+    if (value === undefined) return [];
+    return [{ key, setting, value, source: String(sources?.[key] ?? 'default') }];
+  });
+}
+
 interface Lane {
   id: string;
   label: string;
@@ -165,6 +183,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
   const connectionResponse = await Promise.resolve(apiFetch(cfg, '/api/panel/operator-defaults', { timeoutMs: 15_000 }))
     .catch(() => null);
   const runtimeConnections = runtimeConnectionRows(connectionResponse?.data);
+  const operatorDefaults = operatorDefaultRows(connectionResponse?.data);
   const allLanes = allRes.data?.lanes ?? [];
   const terminalStorage = allRes.data?.terminalStorage ?? null;
   const approvals = approvalsRes.data?.approvals ?? [];
@@ -216,6 +235,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
   const payload = {
     schema: 'o8/cli/status/v1',
     runtimeConnections,
+    operatorDefaults,
     staleSessions: staleSessions.slice(0, LANE_CAP),
     staleSessionsTruncated: staleSessions.length > LANE_CAP,
     counts: {
@@ -262,6 +282,12 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       if (evidence) process.stdout.write(`    ${connectionDetail(evidence)} Checked ${evidence.checkedAt ? new Date(evidence.checkedAt).toISOString() : 'time not reported'}. Account identity not reported; external tools not inspected.\n`);
     }
     if (runtimeConnections.status === 'unavailable') process.stdout.write('  Connection evidence unavailable.\n');
+    if (operatorDefaults.length > 0) {
+      printHumanHeading('operator defaults');
+      for (const row of operatorDefaults) {
+        process.stdout.write(`  ${row.setting}: ${row.value === '' ? '(unset)' : String(row.value)} (${row.source})\n`);
+      }
+    }
     process.stdout.write(
         `  running ${color(String(running.length), 'green')}` +
         `   review ${color(String(awaitingReview.length), 'yellow')}` +
