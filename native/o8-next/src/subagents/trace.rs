@@ -125,13 +125,10 @@ pub(crate) fn items(steps: &[Step], trace: &Trace, agents: &[model::Agent]) -> V
 
 /// One color per agent, so its card, tab and header read as the same agent.
 pub(crate) fn agent_color(id: &str) -> gpui::Rgba {
-    const COLORS: [u32; 7] = [
-        0x3b82f6, 0xa855f7, 0x22c55e, 0xf59e0b, 0xec4899, 0x14b8a6, 0xf97316,
-    ];
     let hash = id.bytes().fold(0u32, |hash, byte| {
         hash.wrapping_mul(31).wrapping_add(u32::from(byte))
     });
-    gpui::rgb(COLORS[hash as usize % COLORS.len()])
+    crate::theme::agent_color(hash as usize)
 }
 
 fn status(item: &Item) -> &'static str {

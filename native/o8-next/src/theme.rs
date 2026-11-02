@@ -281,6 +281,14 @@ pub fn project_icon_color(name: &str, swatch: bool) -> Option<Rgba> {
     }))
 }
 /// The mark drawn on an accent fill, such as the trace's completed check.
+/// The color a subagent keeps across its card, tab and header.
+pub fn agent_color(index: usize) -> Rgba {
+    const COLORS: [u32; 7] = [
+        0x3b82f6, 0xa855f7, 0x22c55e, 0xf59e0b, 0xec4899, 0x14b8a6, 0xf97316,
+    ];
+    gpui::rgb(COLORS[index % COLORS.len()])
+}
+
 pub fn on_accent() -> Rgba {
     rgb(0xffffff)
 }
