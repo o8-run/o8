@@ -85,6 +85,12 @@ impl Inspector {
                 })
                 .cloned()
                 .collect::<Vec<_>>();
+            // Newest first, so the latest work is at the top of each group.
+            let mut agents = agents;
+            agents.sort_by(|a, b| {
+                let at = |agent: &Agent| agent.finished.or(agent.started).unwrap_or(0.);
+                at(b).total_cmp(&at(a))
+            });
             if agents.is_empty() {
                 continue;
             }
@@ -102,20 +108,28 @@ impl Inspector {
             );
             for agent in agents {
                 let id = agent.id.clone();
-                let time = timing(&agent);
+                let label = row_label(&agent);
+                let meta = [
+                    agent.runtime.clone(),
+                    agent.model.clone().unwrap_or_default(),
+                ]
+                .into_iter()
+                .filter(|v| !v.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
                 list = list.child(
                     self.button(
                         format!("subagent-row-{id}"),
-                        format!("Inspect {}", agent.title),
+                        format!("Open {}", agent.title),
                         cx,
                         move |s, w, cx| s.inspect(Some(id.clone()), w, cx),
                     )
                     .w_full()
                     .px(px(12.))
-                    .py(px(9.))
+                    .py(px(8.))
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(px(10.))
                     .child(
                         div()
                             .size(px(6.))
@@ -127,29 +141,32 @@ impl Inspector {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(div().text_size(px(13.5)).child(agent.title))
                             .child(
                                 div()
-                                    .mt(px(4.))
-                                    .text_size(px(9.5))
-                                    .font_weight(gpui::FontWeight(260.))
-                                    .text_color(theme().text_muted)
-                                    .child(
-                                        [agent.runtime, agent.model.unwrap_or_default()]
-                                            .into_iter()
-                                            .filter(|v| !v.is_empty())
-                                            .collect::<Vec<_>>()
-                                            .join(" · "),
-                                    ),
-                            ),
+                                    .text_size(px(13.))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .child(agent.title),
+                            )
+                            .when(!meta.is_empty(), |v| {
+                                v.child(
+                                    div()
+                                        .mt(px(3.))
+                                        .text_size(px(10.))
+                                        .font_weight(gpui::FontWeight(260.))
+                                        .text_color(theme().text_muted)
+                                        .child(meta),
+                                )
+                            }),
                     )
                     .child(
                         div()
                             .flex_shrink_0()
-                            .text_size(px(10.))
+                            .whitespace_nowrap()
+                            .text_size(px(11.))
                             .text_color(theme().text_muted)
-                            .child(agent.status)
-                            .when(!time.is_empty(), |v| v.child(div().mt(px(3.)).child(time))),
+                            .child(label),
                     ),
                 );
             }
@@ -489,6 +506,20 @@ fn color(group: Group) -> gpui::Rgba {
         Group::Working => theme().accent,
         Group::Attention => theme().warning,
         Group::Done => theme().text_muted,
+    }
+}
+/// The row's right side: "Working · 12s", "just now", or what needs attention.
+fn row_label(agent: &Agent) -> String {
+    match (agent.group, agent.started, agent.finished) {
+        (Group::Working, Some(start), _) => format!(
+            "{} · {}s",
+            agent.status,
+            ((crate::clock::now() as f64 * 1000. - start).max(0.) / 1000.) as u64
+        ),
+        (Group::Done, _, Some(end)) => {
+            crate::clock::age(Some((end / 1000.) as u64), crate::clock::now())
+        }
+        _ => agent.status.clone(),
     }
 }
 fn timing(agent: &Agent) -> String {
