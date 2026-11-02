@@ -2,6 +2,9 @@
 //! to the account, in one read-only list. It is the base for choosing where a
 //! thread runs. Registry membership never claims a machine is reachable; only
 //! Check reaches one.
+#[path = "machine_window.rs"]
+pub(crate) mod machine_window;
+
 use crate::client::Client;
 use crate::theme::current as theme;
 use gpui::{Context, IntoElement, Render, Window, div, prelude::*, px};
@@ -18,6 +21,7 @@ pub(crate) struct Machine {
     pub detail: String,
     pub ssh: bool,
     pub current: bool,
+    pub route: Option<machine_window::Route>,
 }
 
 /// One list from both sources. The current machine leads, and a linked machine
@@ -38,6 +42,7 @@ pub(crate) fn merged(ssh: &Value, connect: &Value) -> Vec<Machine> {
                 detail: format!("{platform} · o8 {version}"),
                 ssh: false,
                 current: Some(id) == current,
+                route: None,
             })
         })
         .collect();
@@ -50,6 +55,7 @@ pub(crate) fn merged(ssh: &Value, connect: &Value) -> Vec<Machine> {
                 detail: "Local".into(),
                 ssh: false,
                 current: true,
+                route: None,
             },
         );
     }
@@ -67,6 +73,7 @@ pub(crate) fn merged(ssh: &Value, connect: &Value) -> Vec<Machine> {
                     detail: format!("SSH · {}", machine["target"].as_str()?),
                     ssh: true,
                     current: false,
+                    route: machine_window::Route::parse(machine),
                 })
             }),
     );
@@ -151,6 +158,27 @@ impl Machines {
         cx.notify();
     }
 
+    /// Opens the machine in its own window. The far server's token stays in that
+    /// window's environment and is never written to disk.
+    fn open(&mut self, machine: Machine, cx: &mut Context<Self>) {
+        let Some(route) = machine.route else {
+            return;
+        };
+        let id = machine.id;
+        self.checks.insert(id.clone(), "Opening…".into());
+        let task = cx.background_executor().spawn(async move { route.open() });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                let status = result.map_or_else(|error| error, |()| "Opened in a new window.".into());
+                this.checks.insert(id, status);
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
     fn check(&mut self, id: String, cx: &mut Context<Self>) {
         self.checks.insert(id.clone(), "Checking…".into());
         let client = self.client.clone();
@@ -188,6 +216,7 @@ impl Render for Machines {
             .enumerate()
             .map(|(index, machine)| {
                 let id = machine.id.clone();
+                let opened = machine.clone();
                 let status = self.checks.get(&machine.id).cloned();
                 div()
                     .debug_selector(move || format!("settings-machine-{index}"))
@@ -214,6 +243,25 @@ impl Render for Machines {
                             .child(muted(crate::text::sanitize(&machine.detail)))
                             .children(status.map(muted)),
                     )
+                    .when(machine.route.is_some(), |row| {
+                        row.child(
+                            div()
+                                .id(("settings-machine-open", index))
+                                .debug_selector(move || format!("settings-machine-open-{index}"))
+                                .flex_none()
+                                .px(px(8.))
+                                .py(px(2.))
+                                .rounded(px(6.))
+                                .text_size(px(11.))
+                                .border_1()
+                                .border_color(theme().border)
+                                .cursor_pointer()
+                                .child("Open")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.open(opened.clone(), cx)
+                                })),
+                        )
+                    })
                     .when(machine.ssh, |row| {
                         row.child(
                             div()

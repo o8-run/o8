@@ -166,6 +166,7 @@ pub struct ThreadList {
     last_load: Instant,
     last_inventory: Instant,
     last_attempt: Instant,
+    catalog_loaded: bool,
     inventory_loading: bool,
     subscription: Subscription,
     subscriptions: Vec<gpui::Subscription>,
@@ -273,6 +274,7 @@ impl ThreadList {
             generation: 0,
             last_load: Instant::now(),
             last_attempt: Instant::now(),
+            catalog_loaded: false,
             last_inventory: Instant::now(),
             inventory_loading: false,
             subscriptions: vec![observe, submit],
@@ -455,7 +457,9 @@ impl ThreadList {
                 // Stream updates fence stale catalog snapshots, not transport
                 // failures. Suppressing an error leaves the shell waiting for
                 // recovery while the next full request deadline runs again.
-                if result.is_ok() && generation != this.generation {
+                // The first catalog has nothing newer to protect. Fencing it would
+                // keep a slow server on "Connecting" while its stream stays busy.
+                if result.is_ok() && generation != this.generation && this.catalog_loaded {
                     this.dirty = Some(Instant::now());
                     return;
                 }
@@ -463,6 +467,7 @@ impl ThreadList {
                 this.last_inventory = Instant::now();
                 match result {
                     Ok((mut sessions, ledger, header, branches)) => {
+                        this.catalog_loaded = true;
                         this.branch_ids = branches.keys().cloned().collect();
                         this.branch_names = branches;
                         if let Some(header) = header {
