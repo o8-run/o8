@@ -163,7 +163,7 @@ import {
   validateComposerImageAttachments,
   type ComposerImageAttachment,
 } from './lib/mobile/composer-image-validation';
-import { appendOperatorStopNote, createAssistantTextBuffer, createPersistPacer } from './lib/ws-server/orchestrator-assistant-text';
+import { appendOperatorStopNote, createAssistantTextBuffer, createPersistPacer, createTrailingPersist } from './lib/ws-server/orchestrator-assistant-text';
 import { prepareOrchestratorProjectTurn } from './lib/ws-server/orchestrator-project-context';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
@@ -5509,6 +5509,7 @@ async function handleOrchestratorSendMsgOnce(
   // back to just the user messages (operator-observed data loss). Throttled so
   // a fast token stream doesn't hammer the chat-history file + threads broadcast.
   const incrementalPersistDue = createPersistPacer();
+  const trailingPersist = createTrailingPersist();
 
   const persistAssistantText = (
     sessionId: string | null,
@@ -5858,6 +5859,8 @@ async function handleOrchestratorSendMsgOnce(
               // reload instead of dropping to user-only on disk.
               if (incrementalPersistDue()) {
                 persistAssistantText(null, turnBackend.id, undefined, effectiveTurnModel);
+              } else {
+                trailingPersist.schedule(() => persistAssistantText(null, turnBackend.id, undefined, effectiveTurnModel));
               }
             }
             wsMsg = JSON.stringify({
@@ -6341,6 +6344,7 @@ async function handleOrchestratorSendMsgOnce(
       throw new OrchestratorSendRejectedBeforeAcceptance(err);
     }
   } finally {
+    trailingPersist.cancel();
     undoneOrchestratorUserMessageIds.delete(userMessageId);
   }
 }

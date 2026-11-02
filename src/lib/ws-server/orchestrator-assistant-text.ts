@@ -55,6 +55,24 @@ export function createPersistPacer(now: () => number = Date.now): () => boolean 
   };
 }
 
+/** A burst can end inside the pace window, and a held turn then goes quiet with its end unsaved. */
+export function createTrailingPersist() {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return {
+    schedule(save: () => void) {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        save();
+      }, INCREMENTAL_PERSIST_MS);
+    },
+    cancel() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    },
+  };
+}
+
 export function createAssistantTextBuffer(): AssistantTextBuffer {
   let text = '';
   let persisted = '';
