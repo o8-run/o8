@@ -13,7 +13,7 @@ use std::{
     rc::Rc,
     time::{Duration, Instant},
 };
-mod address;
+pub(crate) mod address;
 mod agent;
 mod controls;
 mod favicon;

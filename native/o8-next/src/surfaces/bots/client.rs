@@ -74,7 +74,31 @@ impl Client {
     pub fn bots(&self) -> Result<Vec<BotEntry>, String> {
         self.get::<BotList>("/api/bots", &[]).map(|l| l.bots)
     }
+    /// Appends the operator's reply to the bot's mailbox.
+    pub(crate) fn bot_reply(&self, id: &str, text: &str) -> Result<(), String> {
+        let url = self
+            .url(&format!("/api/bots/{}/thread", encode(id)))
+            .map_err(|e| e.to_string())?;
+        let response = self
+            .request("POST", &url)
+            .send_json(serde_json::json!({ "text": text }))
+            .map_err(|e| match e {
+                ureq::Error::Status(code, _) => format!("Reply rejected (HTTP {code})."),
+                _ => "Reply is unconfirmed. Refresh before retrying.".into(),
+            })?;
+        Self::read::<serde_json::Value>(response).map(|_| ())
+    }
+    /// The operator MCP bridge endpoint (docs/user/operator-mcp-bridge.md).
+    /// Token-gated; the token is not part of the copied URL.
+    pub(crate) fn mcp_url(&self) -> Option<String> {
+        self.url("/api/mcp").ok().map(|u| mcp_url(u.as_str()))
+    }
     pub(crate) fn bot_thread(&self, id: &str) -> Result<BotThread, String> {
         self.get::<BotThread>(&format!("/api/bots/{}/thread", encode(id)), &[])
     }
+}
+
+/// Drops any query (a token) so a copied URL never carries a secret.
+pub(crate) fn mcp_url(raw: &str) -> String {
+    raw.split(['?', '#']).next().unwrap_or(raw).to_owned()
 }
