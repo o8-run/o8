@@ -18,7 +18,8 @@ export function readVoiceCaption(value: unknown): VoiceCaption | undefined {
     || typeof v.endMs !== 'number' || !Number.isFinite(v.endMs) || v.endMs < v.startMs) return undefined;
   return { sessionId: v.sessionId, direction: v.direction as VoiceCaption['direction'], revision: Number(v.revision),
     startMs: v.startMs, endMs: v.endMs,
-    ...(typeof v.delegatedUserMessageId === 'string' && v.delegatedUserMessageId.startsWith('orch-user-')
+    ...(typeof v.delegatedUserMessageId === 'string' && (v.delegatedUserMessageId.startsWith('orch-user-')
+      || /^(review-user-assistant-queued-|lead-user-)[A-Za-z0-9_-]+$/.test(v.delegatedUserMessageId))
       ? { delegatedUserMessageId: v.delegatedUserMessageId } : {}) };
 }
 

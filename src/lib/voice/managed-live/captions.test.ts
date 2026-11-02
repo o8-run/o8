@@ -48,4 +48,12 @@ describe('voice captions in the existing transcript', () => {
     expect(restored[0]).toMatchObject({ text: 'Check this', voice: { delegatedUserMessageId: 'orch-user-one' } });
     expect(dedupeDisplayMessages([...restored, ...stale])[0].text).toBe('Check this');
   });
+  it.each(['review-user-assistant-queued-next-nonce-123', 'lead-user-exact-root'])('persists the authoritative queued transcript link: %s', userId => {
+    const f = fixture(); f.delta('a', 'Queued request.'); f.captions.submitted(['a'], userId);
+    const restored = deserializeStoredTranscript(serializeTranscriptForStorage(f.entries()));
+    expect(restored[0].voice?.delegatedUserMessageId).toBe(userId);
+    const sent: MobileTranscriptEntry = { id: userId, role: 'user', text: 'Queued request.' };
+    expect(visibleVoiceTranscript([...restored, sent])).toEqual([sent]);
+    expect(visibleVoiceTranscript([...restored, { ...sent, id: 'other' }])).toHaveLength(2);
+  });
 });

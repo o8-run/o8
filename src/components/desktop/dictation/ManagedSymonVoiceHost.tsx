@@ -40,8 +40,10 @@ export function ManagedSymonVoiceHost() {
     const listener = () => { void managedChatVoiceTargets.request(target).then(accepted => {
       if (!accepted && alive) setDetail('Another chat owns voice or its closure is not confirmed.');
     }); };
+    const stop = () => { startup.current?.abort(); void session.current?.close(); };
+    window.addEventListener('o8:managed-symon-stop', stop);
     window.addEventListener('o8:managed-symon-toggle', listener);
-    return () => { alive = false; startup.current?.abort(); window.removeEventListener('o8:managed-symon-toggle', listener); void session.current?.close(); };
+    return () => { alive = false; window.removeEventListener('o8:managed-symon-stop', stop); startup.current?.abort(); window.removeEventListener('o8:managed-symon-toggle', listener); void session.current?.close(); };
   }, []);
   if (state === 'idle' && !confirmation) return null;
   return <><div role="status" style={{ position: 'fixed', bottom: 70, right: 24, zIndex: 1000,

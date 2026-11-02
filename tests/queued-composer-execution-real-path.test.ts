@@ -293,3 +293,64 @@ it.each(['held', 'applied'] as const)('keeps voice status truthful when an uncer
   } else expect(spoken).toContain('already accepted');
   expect(mocks.send).not.toHaveBeenCalled();
 });
+
+it.each(['completed', 'failed', 'needs_approval'] as const)('relays the exact queued lead terminal after settlement: %s', async outcome => {
+  execFileSync('git', ['init', '-q', repo]);
+  const leadRoute = await import('@/app/api/orchestrator/lead/route');
+  const leads = await import('@/lib/orchestrator/lead-lifecycle');
+  const { VoiceHostBroker } = await import('@/lib/ws-server/voice-host');
+  const report = (body: Record<string, unknown>) => leadRoute.POST(new NextRequest('http://localhost/api/orchestrator/lead', {
+    method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify(body),
+  }));
+  let release!: () => void;
+  let queued = false;
+  mocks.send.mockImplementation(async (_repo, _message, emit, options) => {
+    const lead = leads.findLeadThreadBinding(options.threadId!)!;
+    const turn = leads.getLeadStatus(lead.id).latestTurn!;
+    const isQueued = queued;
+    if (isQueued) await new Promise<void>(resolve => { release = resolve; });
+    if (isQueued && outcome === 'failed') emit({ type: 'error', error: 'Queued lead failed.' });
+    else {
+      expect((await report({ action: 'report', leadId: lead.id, turnId: turn.id,
+        repoPath: repo, threadId: lead.thread_id, kind: isQueued ? outcome : 'completed',
+        summary: isQueued ? 'Queued lead result.' : 'Initial lead result.', evidence: ['Fixture receipt'] })).status).toBe(200);
+      emit({ type: 'text', text: isQueued ? 'Exact queued lead result.' : 'Initial result must not be spoken.' });
+    }
+    emit({ type: 'done', sessionId: 'voice-lead-fixture', cost: null, terminalOutcome: 'completed' });
+  });
+  const response = await report({ action: 'start', repoPath: repo, backend: 'codex', model: 'gpt-6.1-sol', effort: 'high',
+    idempotencyKey: `voice-relay-lead-${outcome}`, brief: { objective: 'Verify queue terminal correlation', scope: ['Fixture'],
+      doneTests: ['Correlated terminal'], nonGoals: ['External calls'], budgets: ['No provider calls'], escalationCriteria: ['Unexpected routing'] } });
+  expect(response.status).toBe(202);
+  const initial = await response.json(); const leadId = initial.lead.id; const leadThread = initial.lead.threadId;
+  await vi.waitFor(() => expect(leads.getLeadStatus(leadId).latestTurn?.status).toBe('completed'));
+  const binding = { repoPath: repo, threadId: leadThread, binding: 'lead-chat', nonce: 'lead-nonce' };
+  const queueItemId = `next-lead-nonce-${outcome}`;
+  queued = true;
+  expect((await POST(new NextRequest('http://localhost/api/orchestrator/composer-queue', {
+    method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ ...binding, id: queueItemId, intent: 'send-next',
+      payload: { ...base, images: [], routing: { ...base.routing, model: 'gpt-6.1-sol', effort: 'high' } } }),
+  }))).status).toBe(200);
+  const frames: Record<string, unknown>[] = [];
+  const broker = new VoiceHostBroker(frame => frames.push(frame));
+  expect(broker.request({ action: 'ready', hostId: 'host' }).status).toBe(200);
+  expect(broker.request({ action: 'start', requestId: 'start', source: 'byok', ...binding }).status).toBe(202);
+  expect(broker.ui({ kind: 'voice-delegate', payload: { action: 'delegate', hostId: 'host', ...binding, delegationId: 'delegate', text: base.text } })?.status).toBe(200);
+  expect(broker.request({ action: 'accepted', ...binding, delegationId: 'delegate', queueItemId }).status).toBe(200);
+  createChatContinuationHeartbeat(hooks)();
+  await vi.waitFor(() => expect(queue.readComposerSend(queueItemId)?.status).toBe('applied'));
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+  broker.refreshQueuedTerminals();
+  expect(frames.filter(frame => (frame.payload as { action: string }).action === 'terminal')).toEqual([]);
+  expect(broker.request({ action: 'terminal', ...binding, delegationId: 'delegate' }).status).toBe(409);
+  release();
+  await vi.waitFor(() => expect(leads.getLeadStatus(leadId).latestTurn?.status).toBe(outcome));
+  // Stopping the lead later cannot rewrite an already settled exact turn.
+  expect((await report({ action: 'stop', leadId })).status).toBe(200);
+  broker.refreshQueuedTerminals();
+  expect(frames).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ action: 'terminal', delegationId: 'delegate',
+    transcriptUserMessageId: `lead-user-${leads.getLeadStatus(leadId).latestTurn!.rootTurnId}`,
+    voiceTerminal: { queueItemId, outcome: outcome === 'needs_approval' ? 'held' : outcome,
+      text: outcome === 'failed' ? 'Queued lead failed.' : 'Exact queued lead result.' },
+  }) }));
+});
