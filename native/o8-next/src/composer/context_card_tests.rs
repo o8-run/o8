@@ -75,6 +75,26 @@ fn native_context_help_follows_hover_and_a_click_puts_it_away(cx: &mut TestAppCo
 }
 
 #[gpui::test]
+fn native_compact_chip_shows_only_when_the_context_is_nearly_full(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    cx.simulate_resize(gpui::size(px(1200.), px(816.)));
+    draw(cx);
+    let selected = surface.read_with(cx, |s, _| s.selected.clone());
+    assert!(selected.is_some());
+    let wide = cx.debug_bounds("composer-context").is_some();
+    assert!(wide);
+    assert!(cx.debug_bounds("composer-compact").is_none());
+    surface.update(cx, |s, cx| {
+        s.composer.update(cx, |i, _| i.controls.context.reported = 950_000.);
+        cx.notify();
+    });
+    draw(cx);
+    draw(cx);
+    assert!(cx.debug_bounds("composer-compact").is_some());
+}
+
+#[gpui::test]
 fn native_context_meter_uses_only_spare_width_and_preserves_draft_render_isolation(
     cx: &mut TestAppContext,
 ) {
