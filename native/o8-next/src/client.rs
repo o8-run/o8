@@ -173,6 +173,14 @@ impl Client {
         path: &str,
         query: &[(&str, &str)],
     ) -> Result<T, String> {
+        self.get_counted(path, query).map(|(value, _)| value)
+    }
+    /// The parsed reply and the size of its body.
+    pub(crate) fn get_counted<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> Result<(T, usize), String> {
         let mut url = self.url(path).map_err(|_| "Invalid route")?;
         url.query_pairs_mut().extend_pairs(query.iter().copied());
         let response = get_with_retry(|| {
@@ -188,9 +196,14 @@ impl Client {
             };
             format!("{}: {message}", url.path())
         })?;
-        Self::read(response).map_err(|error| format!("{}: {error}", url.path()))
+        Self::read_counted(response).map_err(|error| format!("{}: {error}", url.path()))
     }
     pub(crate) fn read<T: DeserializeOwned>(response: ureq::Response) -> Result<T, String> {
+        Self::read_counted(response).map(|(value, _)| value)
+    }
+    fn read_counted<T: DeserializeOwned>(
+        response: ureq::Response,
+    ) -> Result<(T, usize), String> {
         let mut bytes = Vec::new();
         response
             .into_reader()
@@ -207,6 +220,7 @@ impl Client {
             return Err("History response exceeds 16 MiB".into());
         }
         serde_json::from_slice(&bytes)
+            .map(|value| (value, bytes.len()))
             .map_err(|_| "Server returned an invalid transcript response".into())
     }
     pub fn in_workspace(&self, workspace: &str) -> Self {

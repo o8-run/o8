@@ -100,6 +100,13 @@ impl Client {
         // Do not hold a refresh lock across network I/O.
         self.snapshot().get(path, query)
     }
+    pub(crate) fn get_counted<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> Result<(T, usize), String> {
+        self.snapshot().get_counted(path, query)
+    }
     pub(crate) fn read<T: DeserializeOwned>(response: ureq::Response) -> Result<T, String> {
         transport::Client::read(response)
     }
