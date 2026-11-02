@@ -65,6 +65,9 @@ fn spec_target_no_repo_typed_file_and_preferences_persist(cx: &mut TestAppContex
     assert_eq!(content(&mut cx), "");
     choose(&mut cx, &format!("{}/o8.md", f.repo));
     until(&mut cx, |cx| content(cx) == "# Isolated notes\n");
+    // The save now leaves the input thread.
+    cx.run_until_parked();
+    draw(&mut cx);
     let saved: Value =
         serde_json::from_str(&fs::read_to_string(f.root.join("shell.json")).unwrap()).unwrap();
     assert_eq!(saved["notes"]["target_override"], f.repo);
@@ -77,6 +80,9 @@ fn spec_target_no_repo_typed_file_and_preferences_persist(cx: &mut TestAppContex
     click(&mut cx, "spec-settings");
     click(&mut cx, "spec-color-2");
     cx.simulate_keystrokes("escape");
+    draw(&mut cx);
+    // The save now leaves the input thread.
+    cx.run_until_parked();
     draw(&mut cx);
     let saved: Value =
         serde_json::from_str(&fs::read_to_string(f.root.join("shell.json")).unwrap()).unwrap();
@@ -101,6 +107,9 @@ fn spec_target_six_recents_file_folder_and_follow_active_repo(cx: &mut TestAppCo
         choose(&mut cx, dir.to_str().unwrap());
         until(&mut cx, |cx| content(cx) == format!("Recent {i}\n"));
     }
+    // The save now leaves the input thread.
+    cx.run_until_parked();
+    draw(&mut cx);
     let saved: Value =
         serde_json::from_str(&fs::read_to_string(f.root.join("shell.json")).unwrap()).unwrap();
     assert_eq!(saved["notes"]["recents"].as_array().unwrap().len(), 6);
@@ -172,6 +181,9 @@ fn spec_settings_hue_neutrals_reset_and_keyboard_close(cx: &mut TestAppContext) 
     let bounds = cx.debug_bounds("spec-hue").unwrap();
     cx.simulate_click(bounds.center(), gpui::Modifiers::default());
     draw(&mut cx);
+    // The save now leaves the input thread.
+    cx.run_until_parked();
+    draw(&mut cx);
     let saved: Value =
         serde_json::from_str(&fs::read_to_string(f.root.join("shell.json")).unwrap()).unwrap();
     let hue = saved["notes"]["color"].as_str().unwrap();
@@ -179,6 +191,9 @@ fn spec_settings_hue_neutrals_reset_and_keyboard_close(cx: &mut TestAppContext) 
     click(&mut cx, "spec-color-0");
     click(&mut cx, "spec-color-reset");
     cx.simulate_keystrokes("escape");
+    draw(&mut cx);
+    // The save now leaves the input thread.
+    cx.run_until_parked();
     draw(&mut cx);
     let saved: Value =
         serde_json::from_str(&fs::read_to_string(f.root.join("shell.json")).unwrap()).unwrap();

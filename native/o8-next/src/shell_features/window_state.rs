@@ -146,7 +146,8 @@ pub(crate) fn settle_test_window(shell: &Entity<Shell>, cx: &mut gpui::VisualTes
     }
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while !shell.read_with(cx, |s, _| idle(s)) && std::time::Instant::now() < deadline {
-        cx.run_until_parked();
+        // The writer has its own thread; parking here would drain work other
+        // tests hold mid-flight.
         std::thread::sleep(Duration::from_millis(1));
     }
     assert!(
