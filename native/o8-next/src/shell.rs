@@ -256,12 +256,17 @@ impl Shell {
     fn active(&self) -> Option<Tab> {
         self.current().and_then(|w| w.tabs.get(w.active)).cloned()
     }
-    /// The name of the machine holding this thread, while it can't be reached.
+    /// The name of the machine holding a sidebar thread, while it can't be
+    /// reached.
     fn unreachable_machine(&self, id: &str) -> Option<String> {
-        let session = self.sessions.iter().find(|s| s.id == id)?;
-        let machine = session.machine.as_deref()?;
+        let (machine, _) = session::machine_thread(id)?;
         self.links.client(machine).is_none().then(|| {
-            let label = session.machine_label.as_deref().unwrap_or("That machine");
+            let label = self
+                .sessions
+                .iter()
+                .find(|s| s.list_id() == id)
+                .and_then(|s| s.machine_label.as_deref())
+                .unwrap_or("That machine");
             label.split(" · ").next().unwrap_or(label).to_owned()
         })
     }

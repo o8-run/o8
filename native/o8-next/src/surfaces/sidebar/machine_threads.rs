@@ -2,6 +2,7 @@
 //! listed beside this computer's. Off unless `O8_NEXT_MACHINE_THREADS` is set,
 //! until every panel follows the thread's machine.
 use crate::client::{Client, Session};
+use crate::shell::session::{machine_thread, machine_thread_id};
 pub(crate) use crate::shell::settings::machine_links::Links;
 use crate::shell::settings::machine_links::{Machine, Reach};
 use crate::shell::settings::machines::{SSH_MACHINES, machine_window::Route};
@@ -14,6 +15,23 @@ pub(crate) fn enabled() -> bool {
 
 /// How often far machines are read; they have no live feed here yet.
 pub(super) const READ_GAP: Duration = Duration::from_secs(15);
+
+/// Who owns a sidebar id. The id alone decides, and one nothing lists is
+/// refused rather than sent to this computer.
+#[derive(Debug, PartialEq)]
+pub(super) enum Owner<'a> {
+    Machine(&'a str, &'a str),
+    Here(&'a str),
+    Nobody(&'a str),
+}
+
+pub(super) fn owner(id: &str, listed: bool, strict: bool) -> Owner<'_> {
+    match machine_thread(id) {
+        Some((machine, id)) => Owner::Machine(machine, id),
+        None if listed || !strict => Owner::Here(id),
+        None => Owner::Nobody(id),
+    }
+}
 
 /// The saved machines worth a tunnel, with their labels.
 fn routes(saved: &Value) -> Vec<(Route, String)> {
@@ -75,6 +93,7 @@ fn answer(machine: Machine) -> ((String, Option<String>), Option<Vec<Session>>) 
                 .map(|(list, _)| {
                     list.into_iter()
                         .map(|mut session| {
+                            session.id = machine_thread_id(&machine.id, &session.id);
                             session.machine = Some(machine.id.clone());
                             session.machine_label = Some(machine.label.clone());
                             session
@@ -92,6 +111,32 @@ fn answer(machine: Machine) -> ((String, Option<String>), Option<Vec<Session>>) 
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_same_thread_id_on_two_computers_stays_two_threads() {
+        let far = machine_thread_id("box", "thoughts-1");
+        assert_eq!(owner(&far, true, true), Owner::Machine("box", "thoughts-1"));
+        assert_eq!(owner("thoughts-1", true, true), Owner::Here("thoughts-1"));
+        assert!(!far.contains(':'), "a colon marks a worker's id");
+    }
+
+    #[test]
+    fn the_shell_keeps_the_server_id_and_can_name_the_sidebar_row() {
+        let mut session: Session =
+            serde_json::from_value(json!({"id":"thoughts-1","title":"t","status":"idle"})).unwrap();
+        session.machine = Some("box".into());
+        let listed = machine_thread_id("box", "thoughts-1");
+        session.id = listed.clone();
+        let shell = crate::shell::session::with_server_ids(&[session]);
+        assert_eq!(shell[0].id, "thoughts-1");
+        assert_eq!(shell[0].list_id(), listed);
+    }
+
+    #[test]
+    fn an_id_nothing_lists_goes_nowhere_while_machines_are_on() {
+        assert_eq!(owner("gone", false, true), Owner::Nobody("gone"));
+        assert_eq!(owner("gone", false, false), Owner::Here("gone"));
+    }
 
     #[test]
     fn a_disabled_machine_gets_no_tunnel() {
