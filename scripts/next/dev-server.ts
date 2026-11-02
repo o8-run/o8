@@ -163,4 +163,6 @@ async function main() {
   } else setTimeout(close, 120_000).unref();
 
 }
-void main().catch(error => { console.error('[o8-next]', error); process.exitCode = 1; });
+// A listener opened before the failure would keep this process alive with the
+// receipt never written, leaving the native test blocked on stdout forever.
+void main().catch(error => { console.error('[o8-next]', error); process.exit(1); });
