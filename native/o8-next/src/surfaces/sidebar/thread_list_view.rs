@@ -168,7 +168,6 @@ impl Render for ThreadList {
                 },
             ),
             )
-            .children(self.bulk_bar(cx))
             .children(self.row_menu(cx))
             .children(self.pr_hover_list(cx))
     }

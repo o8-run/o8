@@ -1,11 +1,11 @@
 //! Range selection and bulk actions on thread rows, after T3 Code's inbox
-//! sidebar: Shift-click selects a range, Cmd/Ctrl-click toggles one row, and a
-//! bar under the list acts on all of them. Reimplemented; no code shared.
+//! sidebar: Shift-click selects a range, Cmd/Ctrl-click toggles one row, and
+//! right-clicking a picked row acts on all of them. Reimplemented; no code shared.
 use super::*;
 use super::inbox::Undo;
 use crate::shell::toasts;
 use crate::theme::current as theme;
-use gpui::{AnyElement, Modifiers, MouseButton, div, px};
+use gpui::{AnyElement, Corner, Modifiers, MouseButton, anchored, deferred, div, px};
 
 /// The ids from `anchor` to `target` in row order, both included.
 pub(super) fn range(ids: &[&str], anchor: &str, target: &str) -> Vec<String> {
@@ -243,77 +243,105 @@ impl ThreadList {
         })
         .detach();
     }
-    fn bulk_button(
-        selector: &'static str,
-        label: &'static str,
+    fn bulk_mark_unread(&mut self, cx: &mut Context<Self>) {
+        let ids = self.take_picked();
+        for session in &mut self.sessions {
+            if ids.contains(&session.id) && self.selected.as_ref() != Some(&session.id) {
+                session.unread = true;
+            }
+        }
+        self.rebuild();
+        cx.notify();
+    }
+    fn bulk_item(
+        selector: String,
+        label: String,
         cx: &mut Context<Self>,
         run: impl Fn(&mut Self, &mut Context<Self>) + 'static,
-    ) -> gpui::Stateful<gpui::Div> {
+    ) -> AnyElement {
         div()
-            .id(selector)
-            .debug_selector(move || selector.into())
-            .h(px(24.))
-            .px(px(7.))
+            .id(gpui::ElementId::Name(selector.clone().into()))
+            .debug_selector(move || selector.clone())
+            .h(px(28.))
+            .px(px(8.))
             .flex()
             .items_center()
-            .rounded(px(6.))
-            .text_size(px(12.))
+            .rounded(px(7.))
+            .text_size(px(12.5))
             .cursor_pointer()
             .hover(|s| s.bg(theme().hover))
             .child(label)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(move |this, _, _, cx| run(this, cx)))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.row_menu = None;
+                run(this, cx);
+            }))
+            .into_any_element()
     }
-    /// The action bar under the list while two or more rows are picked.
-    pub(super) fn bulk_bar(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The row menu for a right-click on a picked row: every action names how
+    /// many threads it touches, as T3 Code's does.
+    pub(super) fn bulk_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let position = self.row_menu.as_ref()?.position;
         let count = self.picked.len();
-        if count < 2 {
-            return None;
+        let mut items = vec![Self::bulk_item(
+            "sidebar-bulk-settle".into(),
+            format!("Settle ({count})"),
+            cx,
+            |this, cx| this.bulk_settle(cx),
+        )];
+        for (index, (label, until)) in snooze::presets(recents::now()).into_iter().enumerate() {
+            items.push(Self::bulk_item(
+                format!("sidebar-bulk-snooze-{index}"),
+                format!("Snooze ({count}) · {label}"),
+                cx,
+                move |this, cx| this.bulk_snooze(until, cx),
+            ));
         }
-        let now = recents::now();
-        let until = snooze::presets(now).first().map(|(_, until)| *until);
+        items.push(Self::bulk_item(
+            "sidebar-bulk-retitle".into(),
+            format!("Regenerate titles ({count})"),
+            cx,
+            |this, cx| this.bulk_retitle(cx),
+        ));
+        items.push(Self::bulk_item(
+            "sidebar-bulk-unread".into(),
+            format!("Mark unread ({count})"),
+            cx,
+            |this, cx| this.bulk_mark_unread(cx),
+        ));
+        items.push(Self::bulk_item(
+            "sidebar-bulk-archive".into(),
+            format!("Archive ({count})"),
+            cx,
+            |this, cx| this.bulk_archive(cx),
+        ));
         Some(
-            div()
-                .id("sidebar-bulk-bar")
-                .debug_selector(|| "sidebar-bulk-bar".into())
-                .flex_none()
-                .mx(px(6.))
-                .mb(px(6.))
-                .p(px(4.))
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap(px(2.))
-                .rounded(px(10.))
-                .bg(crate::theme::popover_background())
-                .border_1()
-                .border_color(theme().border)
-                .child(
-                    div()
-                        .px(px(7.))
-                        .text_size(px(12.))
-                        .text_color(theme().text_muted)
-                        .child(format!("{count} selected")),
-                )
-                .child(Self::bulk_button("sidebar-bulk-settle", "Settle", cx, |this, cx| {
-                    this.bulk_settle(cx)
-                }))
-                .children(until.map(|until| {
-                    Self::bulk_button("sidebar-bulk-snooze", "Snooze 1h", cx, move |this, cx| {
-                        this.bulk_snooze(until, cx)
-                    })
-                }))
-                .child(Self::bulk_button("sidebar-bulk-retitle", "Retitle", cx, |this, cx| {
-                    this.bulk_retitle(cx)
-                }))
-                .child(Self::bulk_button("sidebar-bulk-archive", "Archive", cx, |this, cx| {
-                    this.bulk_archive(cx)
-                }))
-                .child(Self::bulk_button("sidebar-bulk-clear", "Clear", cx, |this, cx| {
-                    this.picked.clear();
-                    cx.notify();
-                }))
-                .into_any_element(),
+            deferred(
+                anchored()
+                    .position(position)
+                    .anchor(Corner::TopLeft)
+                    .snap_to_window_with_margin(px(12.))
+                    .child(
+                        div()
+                            .id("sidebar-bulk-menu")
+                            .debug_selector(|| "sidebar-bulk-menu".into())
+                            .occlude()
+                            .min_w(px(180.))
+                            .rounded(px(12.))
+                            .p(px(5.))
+                            .bg(crate::theme::popover_background())
+                            .border_1()
+                            .border_color(theme().border)
+                            .shadow_lg()
+                            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                                this.row_menu = None;
+                                cx.notify();
+                            }))
+                            .children(items),
+                    ),
+            )
+            .with_priority(1)
+            .into_any_element(),
         )
     }
 }

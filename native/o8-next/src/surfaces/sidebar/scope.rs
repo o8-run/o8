@@ -478,6 +478,9 @@ impl ThreadList {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let id = self.row_menu.as_ref()?.id.clone();
+        if self.picked.len() > 1 && self.picked.contains(&id) {
+            return self.bulk_menu(cx);
+        }
         let snooze = self.snooze_items(&id, cx);
         let pin = self.pin_item(&id, cx);
         let auto_settle = self.auto_settle_item(&id, cx);
