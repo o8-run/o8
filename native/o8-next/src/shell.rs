@@ -359,14 +359,17 @@ impl Shell {
             cx.open_url(url);
         }
     }
-    /// Issues and pull requests open beside the chat; other web links leave o8.
+    /// Threads open in place, issues and pull requests open beside the chat, and
+    /// other web links leave o8.
     pub(super) fn open_transcript_link(
         &mut self,
         url: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(number) = url.strip_prefix('#').and_then(|n| n.parse().ok()) {
+        if let Some(id) = crate::lineage::parse_link(url) {
+            self.open_thread_by_id(id.to_owned(), window, cx);
+        } else if let Some(number) = url.strip_prefix('#').and_then(|n| n.parse().ok()) {
             self.open_issue_in_panel(None, number, window, cx);
         } else if let Some((repo, number)) = github_item(url, "issues") {
             self.open_issue_in_panel(Some(repo), number, window, cx);
