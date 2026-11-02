@@ -587,15 +587,7 @@ impl Surface {
         if visualizations_changed {
             cx.notify();
         }
-        let follow_tail = !self.rows.is_empty()
-            && self
-                .list
-                .bounds_for_item(self.rows.len() - 1)
-                .is_some_and(|bounds| {
-                    let viewport = self.list.viewport_bounds();
-                    bounds.bottom() <= viewport.bottom() + px(1.)
-                        && bounds.bottom() >= viewport.top()
-                });
+        let follow_tail = !self.rows.is_empty() && crate::retained::at_end(&self.list);
         let messages: Vec<_> = self
             .subscription
             .as_ref()
@@ -628,10 +620,7 @@ impl Surface {
                 crate::retained::mark_fading(&self.rows, transcript.fading());
             }
             if follow_tail && !self.rows.is_empty() {
-                self.list.scroll_to(ListOffset {
-                    item_ix: self.rows.len() - 1,
-                    offset_in_item: px(0.),
-                });
+                self.list.scroll_to_reveal_item(self.rows.len() - 1);
             }
             cx.notify();
         }

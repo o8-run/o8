@@ -2,7 +2,10 @@
 use crate::model::{Entry, History, Row, keep_working_row, render_tree_cached};
 use serde::Deserialize;
 use serde_json::Value;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, Instant},
+};
 
 static CONTEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -29,6 +32,85 @@ pub struct Transcript {
     live_backend: Option<String>,
     context_busy: bool,
     context_epoch: u64,
+    /// How much of the reply being written is on screen.
+    reveal: Option<Reveal>,
+    paced: bool,
+}
+
+/// The reply reaches the screen word by word at a pace that follows the stream,
+/// however the network bunches it; each step fades in, staggered across its words.
+struct Reveal {
+    id: String,
+    shown: usize,
+    next: Instant,
+    steps: Vec<RevealStep>,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RevealStep {
+    pub chars: usize,
+    pub at: Instant,
+}
+const REVEAL_TICK: Duration = Duration::from_millis(24);
+/// One tick shows this share of what is waiting, so the wait stays near 250ms.
+const REVEAL_SHARE: usize = 10;
+/// Words shown without a break wait no longer than this much text.
+const REVEAL_WORD: usize = 48;
+pub(crate) const REVEAL_FADE: Duration = Duration::from_millis(280);
+pub(crate) const REVEAL_STAGGER: Duration = Duration::from_millis(70);
+
+/// A live reply's tools sit where they ran: under the words before them, not
+/// above the whole reply. Each stretch of words becomes its own entry.
+fn split_at_tools(entries: Vec<Entry>) -> Vec<Entry> {
+    let at = |tool: &Value| tool["textAt"].as_u64().unwrap_or(0) as usize;
+    entries
+        .into_iter()
+        .flat_map(|entry| {
+            let tools = entry.tools.clone().unwrap_or_default();
+            let mut cuts: Vec<usize> = tools
+                .iter()
+                .map(|tool| at(tool).min(entry.text.len()))
+                .filter(|cut| *cut > 0)
+                .collect();
+            cuts.sort_unstable();
+            cuts.dedup();
+            if cuts.is_empty() {
+                return vec![entry];
+            }
+            cuts.insert(0, 0);
+            let last = cuts.len() - 1;
+            (0..cuts.len())
+                .map(|part| {
+                    let start = cuts[part];
+                    let end = cuts.get(part + 1).copied().unwrap_or(entry.text.len());
+                    let mut extra = entry.extra.clone();
+                    if part > 0 {
+                        extra.remove("thinking");
+                    }
+                    if part < last {
+                        extra.remove("thinkingActive");
+                        extra.remove("receipt");
+                    }
+                    Entry {
+                        id: if part == 0 {
+                            entry.id.clone()
+                        } else {
+                            format!("{}:part{part}", entry.id)
+                        },
+                        role: entry.role.clone(),
+                        text: entry.text[start..end].to_owned(),
+                        tools: Some(
+                            tools
+                                .iter()
+                                .filter(|t| at(t).min(entry.text.len()) == start)
+                                .cloned()
+                                .collect(),
+                        ),
+                        extra,
+                    }
+                })
+                .collect()
+        })
+        .collect()
 }
 impl Transcript {
     pub(crate) fn shown_entries(&self) -> &[Entry] {
@@ -121,6 +203,8 @@ impl Transcript {
             live_backend: None,
             context_busy: false,
             context_epoch: CONTEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
+            reveal: None,
+            paced: !cfg!(test),
         };
         this.merge(history.transcript, true);
         this
@@ -183,6 +267,18 @@ impl Transcript {
                 None => shown.push(live.clone()),
             }
         }
+        if let Some(reveal) = &self.reveal
+            && let Some(entry) = shown.iter_mut().rfind(|entry| entry.id == reveal.id)
+        {
+            let cut = entry.text.floor_char_boundary(reveal.shown);
+            entry.text.truncate(cut);
+            for tool in entry.tools.iter_mut().flatten() {
+                if tool["textAt"].as_u64().is_some_and(|at| at as usize > cut) {
+                    tool["textAt"] = cut.into();
+                }
+            }
+        }
+        let shown = split_at_tools(shown);
         let mut rows = render_tree_cached(&shown, &self.shown, &self.rows);
         if self.context_busy {
             keep_working_row(&mut rows, &shown);
@@ -260,6 +356,15 @@ impl Transcript {
                     live.extra
                         .insert("thinkingActive".into(), Value::Bool(false));
                     live.text.push_str(text);
+                    let id = live.id.clone();
+                    if self.paced && self.reveal.as_ref().is_none_or(|r| r.id != id) {
+                        self.reveal = Some(Reveal {
+                            id,
+                            shown: 0,
+                            next: Instant::now(),
+                            steps: vec![],
+                        });
+                    }
                 }
             }
             "tool-use" => {
@@ -271,6 +376,7 @@ impl Transcript {
                 };
                 live.extra
                     .insert("thinkingActive".into(), Value::Bool(false));
+                let text_at = live.text.len();
                 let tools = live.tools.get_or_insert_with(Vec::new);
                 match tools
                     .iter_mut()
@@ -295,7 +401,8 @@ impl Transcript {
                             crate::activity::note_batch(id, batch);
                         }
                         tools.push(serde_json::json!({
-                            "id":id,"name":name,"args":args,"status":"running","batch":batch
+                            "id":id,"name":name,"args":args,"status":"running","batch":batch,
+                            "textAt":text_at
                         }));
                     }
                 }
@@ -390,6 +497,55 @@ impl Transcript {
             }
         }
         Some(live)
+    }
+    /// Moves the reply on by one step when one is due; true when the rows changed.
+    pub fn pace(&mut self) -> bool {
+        let now = Instant::now();
+        let Some(reveal) = &mut self.reveal else {
+            return false;
+        };
+        reveal
+            .steps
+            .retain(|step| now - step.at < REVEAL_FADE + REVEAL_STAGGER);
+        let text = self
+            .live
+            .iter()
+            .chain(self.entries.iter().rev())
+            .find(|entry| entry.id == reveal.id)
+            .map_or("", |entry| entry.text.as_str());
+        if reveal.shown >= text.len() {
+            if self.live.is_none() && reveal.steps.is_empty() {
+                self.reveal = None;
+            }
+            return false;
+        }
+        if now < reveal.next {
+            return false;
+        }
+        reveal.next = now + REVEAL_TICK;
+        let waiting = text.len() - reveal.shown;
+        let target = text.ceil_char_boundary(reveal.shown + (waiting / REVEAL_SHARE).max(1));
+        // A step ends between words, so a word never wraps as it arrives.
+        let end = text[target..]
+            .find(char::is_whitespace)
+            .map(|at| target + at + 1)
+            .filter(|end| text.is_char_boundary(*end));
+        let streaming = self.live.is_some() && self.context_busy;
+        let end = match end {
+            Some(end) => end,
+            None if streaming && waiting < REVEAL_WORD => return false,
+            None => text.len(),
+        };
+        let chars = text[reveal.shown..end].chars().count();
+        reveal.steps.push(RevealStep { chars, at: now });
+        reveal.shown = end;
+        self.refresh()
+    }
+    /// The steps still fading in, oldest first.
+    pub(crate) fn fading(&self) -> Vec<RevealStep> {
+        self.reveal
+            .as_ref()
+            .map_or_else(Vec::new, |reveal| reveal.steps.clone())
     }
     /// The server confirmed a stop: the stream to this client never reports
     /// it, so the turn settles here, as the desktop stop pill does.
@@ -600,6 +756,135 @@ mod tests {
         ]))));
         assert_eq!(transcript.rows.len(), 1);
     }
+    fn live(key: &str) -> Transcript {
+        Transcript::new(
+            serde_json::from_value(serde_json::json!({"sessionKey":key,"transcript":[]})).unwrap(),
+        )
+    }
+    fn frame(thread: &str, seq: u64, event: &str, mut data: Value) -> Value {
+        data["threadId"] = thread.into();
+        data["assistantMessageId"] = "reply".into();
+        serde_json::json!({"channel":"orchestrator","event":event,"seq":seq,"data":data})
+    }
+
+    #[test]
+    fn a_tool_that_starts_after_words_stays_under_them() {
+        let mut t = live("llm-chat:order");
+        t.apply(&frame(
+            "order",
+            1,
+            "status",
+            serde_json::json!({"status":"busy"}),
+        ));
+        t.apply(&frame(
+            "order",
+            2,
+            "output",
+            serde_json::json!({"text":"First words"}),
+        ));
+        t.apply(&frame(
+            "order",
+            3,
+            "tool-use",
+            serde_json::json!({"toolUseId":"t","name":"Read","args":{"path":"a"}}),
+        ));
+        let kinds: Vec<&str> = t
+            .rows
+            .iter()
+            .map(|row| match row {
+                Row::Message { .. } => "words",
+                _ => "trace",
+            })
+            .collect();
+        assert_eq!(kinds, ["words", "trace"], "the words must not move down");
+        t.apply(&frame(
+            "order",
+            4,
+            "output",
+            serde_json::json!({"text":" then more"}),
+        ));
+        let shown: Vec<String> = t.shown.iter().map(|e| e.text.clone()).collect();
+        assert_eq!(shown, ["First words", " then more"]);
+        assert!(matches!(t.rows.last(), Some(Row::Activity { trace, .. }) if trace.live));
+    }
+
+    #[test]
+    fn a_burst_of_text_reaches_the_screen_in_steps_between_words() {
+        let mut t = live("llm-chat:pace");
+        t.paced = true;
+        let text = "word ".repeat(60);
+        t.apply(&frame(
+            "pace",
+            1,
+            "status",
+            serde_json::json!({"status":"busy"}),
+        ));
+        t.apply(&frame(
+            "pace",
+            2,
+            "output",
+            serde_json::json!({"text":text}),
+        ));
+        assert!(t.shown.iter().all(|e| e.text.len() < text.len()));
+        let mut steps = Vec::new();
+        for _ in 0..4000 {
+            if let Some(reveal) = &mut t.reveal {
+                reveal.next = Instant::now();
+            }
+            if t.pace() {
+                let on_screen = t.shown.last().unwrap().text.clone();
+                assert!(
+                    on_screen.ends_with(' '),
+                    "{on_screen:?} stops inside a word"
+                );
+                steps.push(on_screen.len());
+            }
+            if steps.last() == Some(&text.len()) {
+                break;
+            }
+        }
+        assert_eq!(steps.last(), Some(&text.len()));
+        assert!(
+            steps.len() >= 12,
+            "only {} steps: still a burst",
+            steps.len()
+        );
+        assert!(!t.fading().is_empty());
+    }
+
+    #[test]
+    fn subagents_report_at_the_bottom_of_the_running_reply() {
+        let mut t = live("llm-chat:helpers");
+        t.apply(&frame(
+            "helpers",
+            1,
+            "status",
+            serde_json::json!({"status":"busy"}),
+        ));
+        t.apply(&frame(
+            "helpers",
+            2,
+            "tool-use",
+            serde_json::json!({"toolUseId":"a","name":"Task","args":{"description":"Sort fruit","prompt":"Sort"}}),
+        ));
+        t.apply(&frame(
+            "helpers",
+            3,
+            "output",
+            serde_json::json!({"text":"Started it."}),
+        ));
+        let live: Vec<(usize, bool)> = t
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                Row::Activity { trace, .. } => Some((trace.helpers.len(), trace.helpers_below)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(live, [(0, true), (1, false)], "one line, on the last row");
+        assert!(matches!(t.rows.last(), Some(Row::Activity { trace, .. }) if trace.live));
+    }
+
     #[test]
     fn a_working_row_stays_under_every_message_of_the_turn() {
         let mut transcript = Transcript::new(

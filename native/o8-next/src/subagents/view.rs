@@ -69,7 +69,7 @@ impl Inspector {
             .pb(px(16.));
         let mut count = 0;
         for (group, slug, label) in [
-            (Group::Working, "working", "Working"),
+            (Group::Working, "working", "Active"),
             (Group::Attention, "attention", "Needs attention"),
             (Group::Done, "done", "Done"),
         ] {
@@ -95,9 +95,10 @@ impl Inspector {
                     .debug_selector(move || selector.clone())
                     .pt(px(16.))
                     .pb(px(6.))
-                    .text_size(px(10.))
+                    .text_size(px(11.))
+                    .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(theme().text_muted)
-                    .child(format!("{label} · {}", agents.len())),
+                    .child(format!("{label} ({})", agents.len())),
             );
             for agent in agents {
                 let id = agent.id.clone();
@@ -333,10 +334,10 @@ impl Inspector {
 impl Render for Inspector {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let title = if self.selected.is_some() {
-            self.button("subagents-back", "Back to all subagents", cx, |s, w, cx| {
+            self.button("subagents-back", "All subagents", cx, |s, w, cx| {
                 s.back(w, cx)
             })
-            .child("‹ Subagents")
+            .child(icon("m15 18-6-6 6-6"))
         } else {
             self.button("subagents-title", "Subagents", cx, |_, _, _| {})
                 .child("Subagents")
@@ -387,58 +388,63 @@ impl Render for Inspector {
                     .gap(px(4.))
                     .child(title)
                     .child(div().flex_1())
-                    .child(
-                        self.button("subagents-search", "Search subagents", cx, |s, w, cx| {
-                            s.search = !s.search;
-                            if s.search {
-                                s.back(w, cx);
-                                s.query.read(cx).focus.focus(w);
-                            } else {
-                                s.query.update(cx, |q, cx| q.set_text("", cx));
-                                s.focus.focus(w);
-                            }
-                            cx.notify();
-                        })
-                        .child("Search"),
-                    )
-                    .child(
-                        self.button("subagents-refresh", "Refresh subagents", cx, |s, _, cx| {
-                            s.refresh(cx)
-                        })
-                        .child(if self.pending {
-                            "Reading…"
-                        } else {
-                            "Refresh"
-                        }),
-                    )
+                    .when(self.selected.is_none(), |row| {
+                        row.child(
+                            self.button("subagents-search", "Search subagents", cx, |s, w, cx| {
+                                s.search = !s.search;
+                                if s.search {
+                                    s.back(w, cx);
+                                    s.query.read(cx).focus.focus(w);
+                                } else {
+                                    s.query.update(cx, |q, cx| q.set_text("", cx));
+                                    s.focus.focus(w);
+                                }
+                                cx.notify();
+                            })
+                            .child(icon("M21 21l-4.3-4.3M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z")),
+                        )
+                    })
+                    .when(self.selected.is_none(), |row| {
+                        row.child(
+                            self.button(
+                                "subagents-refresh",
+                                "Refresh subagents",
+                                cx,
+                                |s, _, cx| s.refresh(cx),
+                            )
+                            .child(icon("M21 12a9 9 0 1 1-2.6-6.4L21 8M21 3v5h-5")),
+                        )
+                    })
                     .child(
                         self.button("subagents-close", "Close subagents", cx, |s, w, cx| {
                             s.close(w, cx)
                         })
-                        .child("×"),
+                        .child(icon("M18 6 6 18M6 6l12 12")),
                     ),
             )
-            .child(
-                div()
-                    .debug_selector(|| "subagents-summary".into())
-                    .px(px(16.))
-                    .pb(px(10.))
-                    .text_size(px(10.))
-                    .text_color(theme().text_muted)
-                    .child(if self.loaded {
-                        format!(
-                            "{} · {}",
-                            if self.scope.parent.is_some() {
-                                "This conversation"
-                            } else {
-                                "This workspace"
-                            },
-                            self.summary()
-                        )
-                    } else {
-                        "Reading subagents…".into()
-                    }),
-            );
+            .when(self.selected.is_none(), |body| {
+                body.child(
+                    div()
+                        .debug_selector(|| "subagents-summary".into())
+                        .px(px(16.))
+                        .pb(px(10.))
+                        .text_size(px(10.))
+                        .text_color(theme().text_muted)
+                        .child(if self.loaded {
+                            format!(
+                                "{} · {}",
+                                if self.scope.parent.is_some() {
+                                    "This conversation"
+                                } else {
+                                    "This workspace"
+                                },
+                                self.summary()
+                            )
+                        } else {
+                            "Reading subagents…".into()
+                        }),
+                )
+            });
         if self.search {
             body = body.child(
                 div()
@@ -474,6 +480,9 @@ impl Render for Inspector {
         };
         body.child(content)
     }
+}
+fn icon(path: &'static str) -> AnyElement {
+    crate::icon::stroke(path, theme().text_muted, 14., 1.8).into_any_element()
 }
 fn color(group: Group) -> gpui::Rgba {
     match group {

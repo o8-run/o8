@@ -68,6 +68,13 @@ pub struct Trace {
     pub thinking: bool,
     /// A step runs, the model is reasoning, or the turn has no outcome yet.
     pub live: bool,
+    /// The turn this live row stands for, so its clock and header outlast the row.
+    pub turn: Option<String>,
+    pub turn_started: Option<f64>,
+    /// The running turn's subagents, shown at the bottom of its reply.
+    pub helpers: Vec<Step>,
+    /// A later row of the running turn shows this block's subagents.
+    pub helpers_below: bool,
 }
 
 impl Trace {
@@ -113,25 +120,48 @@ impl Row {
 /// A running turn's indicator stays at the bottom of its reply, however many
 /// messages have come back.
 pub fn keep_working_row(rows: &mut Vec<Row>, entries: &[Entry]) {
-    if let Some(Row::Activity { trace, .. }) = rows.last_mut() {
-        trace.live = true;
-        return;
+    let turn = entries.iter().rfind(|entry| entry.role == "user");
+    let turn_id = turn.map_or("turn", |entry| &entry.id).to_owned();
+    if !matches!(rows.last(), Some(Row::Activity { .. })) {
+        for row in rows.iter_mut() {
+            if let Row::Activity { steps, trace, .. } = row {
+                trace.live = steps.iter().any(|s| s.status == "running");
+            }
+        }
+        rows.push(Row::Activity {
+            id: format!("{turn_id}:working"),
+            steps: vec![],
+            trace: Trace {
+                started: turn.and_then(stamp),
+                ..Trace::default()
+            },
+        });
     }
-    for row in rows.iter_mut() {
-        if let Row::Activity { steps, trace, .. } = row {
-            trace.live = steps.iter().any(|s| s.status == "running");
+    let reply = rows
+        .iter()
+        .rposition(|row| matches!(row, Row::Message { role, .. } if role == "user"))
+        .map_or(0, |user| user + 1);
+    let helpers: Vec<Step> = rows[reply..]
+        .iter()
+        .flat_map(|row| match row {
+            Row::Activity { steps, .. } => steps.as_slice(),
+            _ => &[],
+        })
+        .filter(|step| step.delegate || !step.delegations.is_empty())
+        .cloned()
+        .collect();
+    for row in &mut rows[reply..] {
+        if let Row::Activity { trace, .. } = row {
+            trace.helpers_below = !helpers.is_empty();
         }
     }
-    let turn = entries.iter().rfind(|entry| entry.role == "user");
-    rows.push(Row::Activity {
-        id: format!("{}:working", turn.map_or("turn", |entry| &entry.id)),
-        steps: vec![],
-        trace: Trace {
-            started: turn.and_then(stamp),
-            live: true,
-            ..Trace::default()
-        },
-    });
+    if let Some(Row::Activity { trace, .. }) = rows.last_mut() {
+        trace.live = true;
+        trace.turn = Some(turn_id);
+        trace.turn_started = turn.and_then(stamp);
+        trace.helpers = helpers;
+        trace.helpers_below = false;
+    }
 }
 
 /// The ordering/deduplication boundary in workerTranscriptBlocks. Tools preceding

@@ -129,6 +129,12 @@ impl Pane {
         self.subscription = Some(transport::subscribe(client, key));
         self.notice.clear();
     }
+    /// A transcript with no live session behind it: a delegate call's own words.
+    pub(crate) fn install_saved(&mut self, history: History) {
+        self.transcript = Some(Transcript::new(history));
+        self.sync_rows();
+        self.notice.clear();
+    }
     pub(crate) fn prepend(&mut self, history: History) {
         let anchor = self.list.logical_scroll_top();
         let id = self
@@ -149,6 +155,9 @@ impl Pane {
             });
         }
     }
+    pub(crate) fn native_subagents(&self) -> Vec<crate::subagents::model::Agent> {
+        crate::subagents::trace::native_agents(&self.rows)
+    }
     pub(crate) fn attach_subagents(
         &mut self,
         view: gpui::Entity<crate::subagents::Inspector>,
@@ -158,7 +167,7 @@ impl Pane {
         let anchor = self.list.logical_scroll_top();
         for (index, row) in self.rows.iter().enumerate() {
             let mut row = row.borrow_mut();
-            if !matches!(&row.row,crate::model::Row::Activity{steps,..} if steps.iter().any(|s|!s.delegations.is_empty()))
+            if !crate::subagents::trace::delegates(&row.row)
             {
                 continue;
             }
@@ -224,14 +233,7 @@ impl Pane {
                 visualizations_changed = true;
             }
         }
-        let follow = self.rows.is_empty()
-            || self
-                .list
-                .bounds_for_item(self.rows.len() - 1)
-                .is_some_and(|b| {
-                    let viewport = self.list.viewport_bounds();
-                    b.bottom() <= viewport.bottom() + px(1.) && b.bottom() >= viewport.top()
-                });
+        let follow = self.rows.is_empty() || crate::retained::at_end(&self.list);
         let messages: Vec<_> = self
             .subscription
             .as_ref()
@@ -250,8 +252,14 @@ impl Pane {
                 }
             }
         }
+        if let Some(transcript) = &mut self.transcript {
+            changed |= transcript.pace();
+        }
         if changed {
             self.sync_rows();
+            if let Some(transcript) = &self.transcript {
+                crate::retained::mark_fading(&self.rows, transcript.fading());
+            }
             if follow {
                 self.navigate(true);
             }

@@ -21,15 +21,15 @@ use std::{
 };
 
 /// Measured from the reference at the transcript's 13px body size.
-const ROW: f32 = 30.;
-const RAIL_X: f32 = 9.;
+pub(crate) const ROW: f32 = 30.;
+pub(crate) const RAIL_X: f32 = 9.;
 const BRANCH_X: f32 = 24.;
-const TEXT_X: f32 = 38.;
+pub(crate) const TEXT_X: f32 = 38.;
 const CHIPS: f32 = 30.;
-const APPEAR: Duration = Duration::from_millis(260);
-const SWAP: Duration = Duration::from_millis(160);
+pub(crate) const APPEAR: Duration = Duration::from_millis(260);
+pub(crate) const SWAP: Duration = Duration::from_millis(160);
 const SLIDE: Duration = Duration::from_millis(300);
-const STAGGER: Duration = Duration::from_millis(70);
+pub(crate) const STAGGER: Duration = Duration::from_millis(70);
 const SHIMMER: f32 = 1.15;
 const SPIN: f32 = 0.9;
 const MAX_CHIPS: usize = 4;
@@ -42,7 +42,7 @@ const CHECK: &str = "m7.5 12.5 3 3 6-7";
 // About 200 degrees of a ring, turned while the step runs.
 const ARC: &str = "M12 3A9 9 0 1 1 8.92 20.46";
 const GLOBE: &str = "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z M3 12h18 M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z";
-const ATOM: &str = "M12 10.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8Z M12 7.5c4.7 0 8.5 2 8.5 4.5s-3.8 4.5-8.5 4.5-8.5-2-8.5-4.5 3.8-4.5 8.5-4.5Z M8.1 9.8c2.4-4.1 5.9-6.4 8.1-5.2 2.2 1.3 1.9 5.5-.4 9.6-2.4 4.1-5.9 6.4-8.1 5.2-2.2-1.3-1.9-5.5.4-9.6Z M15.9 9.8c2.4 4.1 2.6 8.3.4 9.6-2.2 1.2-5.7-1.1-8.1-5.2-2.3-4.1-2.6-8.3-.4-9.6 2.2-1.2 5.7 1.1 8.1 5.2Z";
+pub(crate) const ATOM: &str = "M12 10.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8Z M12 7.5c4.7 0 8.5 2 8.5 4.5s-3.8 4.5-8.5 4.5-8.5-2-8.5-4.5 3.8-4.5 8.5-4.5Z M8.1 9.8c2.4-4.1 5.9-6.4 8.1-5.2 2.2 1.3 1.9 5.5-.4 9.6-2.4 4.1-5.9 6.4-8.1 5.2-2.2-1.3-1.9-5.5.4-9.6Z M15.9 9.8c2.4 4.1 2.6 8.3.4 9.6-2.2 1.2-5.7-1.1-8.1-5.2-2.3-4.1-2.6-8.3-.4-9.6 2.2-1.2 5.7 1.1 8.1 5.2Z";
 
 thread_local! {
     /// When each trace and line was first drawn, so only new lines animate.
@@ -69,7 +69,7 @@ fn clock(id: &str, trace: &Trace, now: f64) -> Trace {
         if trace.live {
             let (start, end) = clocks
                 .entry(id.to_owned())
-                .or_insert((trace.started.unwrap_or(now), None));
+                .or_insert((trace.turn_started.or(trace.started).unwrap_or(now), None));
             *end = None;
             timed.started = Some(*start);
         } else if let Some((start, end)) = clocks.get_mut(id) {
@@ -83,7 +83,7 @@ fn clock(id: &str, trace: &Trace, now: f64) -> Trace {
 
 /// First sight of `key`; a key first drawn with an already-known trace animates,
 /// the rest of a freshly loaded trace starts settled.
-fn seen(key: &str, settled: bool) -> Instant {
+pub(crate) fn seen(key: &str, settled: bool) -> Instant {
     SEEN.with(|seen| {
         *seen.borrow_mut().entry(key.to_owned()).or_insert_with(|| {
             let now = Instant::now();
@@ -96,7 +96,7 @@ fn seen(key: &str, settled: bool) -> Instant {
     })
 }
 
-fn progress(since: Instant, length: Duration) -> f32 {
+pub(crate) fn progress(since: Instant, length: Duration) -> f32 {
     ease_out((since.elapsed().as_secs_f32() / length.as_secs_f32()).min(1.))
 }
 
@@ -107,7 +107,7 @@ fn smooth(t: f32) -> f32 {
 }
 
 /// Progress that waits `delay` before it starts, for staggered arrivals.
-fn progress_after(since: Instant, delay: Duration, length: Duration) -> f32 {
+pub(crate) fn progress_after(since: Instant, delay: Duration, length: Duration) -> f32 {
     let elapsed = since.elapsed().saturating_sub(delay);
     ease_out((elapsed.as_secs_f32() / length.as_secs_f32()).min(1.))
 }
@@ -896,7 +896,7 @@ fn now_ms() -> f64 {
 }
 
 /// A lighter band sweeps left to right across live text about once a second.
-fn shimmer(text: &str, base: Rgba, light: Rgba, clock: f32) -> StyledText {
+pub(crate) fn shimmer(text: &str, base: Rgba, light: Rgba, clock: f32) -> StyledText {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let length = chars.len() as f32;
     let band = 7.;
@@ -1158,12 +1158,16 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
     let settled = !known && !trace.live;
     seen(&format!("trace:{id}"), true);
     let now = now_ms();
-    let timed = clock(&id, &trace, now);
-    let lines = lines(&steps, &timed);
+    let timed = clock(trace.turn.as_deref().unwrap_or(&id), &trace, now);
+    // Subagents report on their own line under the reply, not as trace steps.
+    let timeline: Vec<Step> = steps.iter().filter(|s| !s.delegate).cloned().collect();
+    let lines = lines(&timeline, &timed);
     let expandable = !lines.is_empty();
     let mut animating = trace.live;
 
-    let header_open = progress(seen(&format!("trace:{id}:header"), settled), APPEAR);
+    // The running turn keeps one header and clock as its rows change under it.
+    let anchor = trace.turn.as_deref().unwrap_or(&id);
+    let header_open = progress(seen(&format!("trace:{anchor}:header"), settled), APPEAR);
     let (title, live_time) = title(&steps, &timed, now);
     let title_key = if trace.live { "live" } else { "done" };
     let title_since = seen(&format!("trace:{id}:title:{title_key}"), settled);
@@ -1364,7 +1368,8 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
         }
     }
 
-    let card = subagent_card(&id, &steps, &timed, now, index, list);
+    let helpers = crate::subagents::trace::element(&id, state.clone(), &steps, &timed, beat);
+    animating |= helpers.as_ref().is_some_and(|(_, moving)| *moving);
     let bubbles: Vec<AnyElement> = steps
         .iter()
         .flat_map(|step| step.messages.iter())
@@ -1395,9 +1400,8 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
                     .h(px(0.)),
                 )
                 .child(header)
-                .child(crate::subagents::trace::element(state.clone(), &steps))
                 .child(body)
-                .children(card)
+                .children(helpers.map(|(line, _)| line))
                 .children(bubbles)
                 .when(animating, |column| {
                     // Redraw while anything moves: the shimmer, arc, clock and fades.
@@ -1411,79 +1415,6 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
                 }),
         )
         .into_any_element()
-}
-
-/// "4 subagents · 4 working" under a trace that delegated, opening to the
-/// helpers it started; a row with a thread opens it.
-fn subagent_card(
-    id: &str,
-    steps: &[Step],
-    trace: &Trace,
-    now: f64,
-    index: usize,
-    list: &gpui::ListState,
-) -> Option<AnyElement> {
-    let mut children = crate::lineage::unlinked_children(steps);
-    if !trace.live {
-        // A saved call that never reported back is not still working.
-        children.iter_mut().for_each(|c| c.working = false);
-    }
-    let children = crate::lineage::with_live_status(children);
-    let (count, working) = crate::lineage::card_label(&children)?;
-    let key = format!("card:{id}");
-    let open = crate::lineage::is_open(&key);
-    let toggle_list = list.clone();
-    let toggle_key = key.clone();
-    let header = div()
-        .id(("trace-subagents", index))
-        .debug_selector(move || format!("trace-subagents-{index}"))
-        .h(px(ROW))
-        .px(px(8.))
-        .flex()
-        .items_center()
-        .gap(px(8.))
-        .cursor_pointer()
-        .on_click(move |_, window, cx| {
-            crate::lineage::toggle(&toggle_key);
-            toggle_list.splice(index..index + 1, 1);
-            window.refresh();
-            cx.stop_propagation();
-        })
-        .child(crate::icon::stroke(ATOM, theme().text_muted, 14., 1.6))
-        .child(div().text_color(theme().text).child(count))
-        .when_some(working, |row, working| {
-            row.child(div().text_color(theme().accent).child(working))
-        })
-        .child(div().flex_1())
-        .when_some(
-            trace
-                .started
-                .map(|start| seconds(trace.ended.filter(|_| !trace.live).unwrap_or(now) - start)),
-            |row, time| row.child(div().text_color(theme().text_muted).child(time)),
-        )
-        .child(crate::icon::stroke(
-            if open { CHEVRON_DOWN } else { CHEVRON_RIGHT },
-            theme().text_muted,
-            12.,
-            2.,
-        ));
-    Some(
-        div()
-            .mt(px(4.))
-            .rounded(px(10.))
-            .border_1()
-            .border_color(theme().border)
-            .flex()
-            .flex_col()
-            .child(header)
-            .when(open, |card| {
-                card.children(children.iter().enumerate().map(|(n, child)| {
-                    crate::lineage::child_row(child, now, format!("trace-subagent-{index}-{n}"))
-                }))
-                .pb(px(4.))
-            })
-            .into_any_element(),
-    )
 }
 
 #[cfg(test)]
@@ -1829,6 +1760,7 @@ mod tests {
             ended: Some(15_000.),
             thinking: true,
             live: true,
+            ..Trace::default()
         };
         assert_eq!(
             title(&steps, &trace, 5_200.),
@@ -1854,6 +1786,7 @@ mod tests {
             ended: Some(10_001.),
             thinking: false,
             live: true,
+            ..Trace::default()
         };
         assert_eq!(clock("watched", &live, 12_000.).started, Some(10_000.));
         let done = Trace {
