@@ -547,5 +547,8 @@ mod indexing;
 #[path = "settings_navigation.rs"]
 mod navigation;
 
+#[path = "settings_nav_groups.rs"]
+mod nav_groups;
+
 #[path = "settings_bots.rs"]
 mod bots;

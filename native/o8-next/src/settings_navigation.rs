@@ -8,7 +8,14 @@ pub(super) struct State {
     trail: Vec<&'static str>,
     at: usize,
     target: Option<&'static str>,
+    target_group: bool,
     pub(super) list_scroll: ScrollHandle,
+    pub(super) flyout: Option<&'static str>,
+    pub(super) flyout_wait: u64,
+    pub(super) flyout_keyboard: bool,
+    pub(super) flyout_focus: bool,
+    pub(super) over_tab: Option<&'static str>,
+    pub(super) over_flyout: bool,
 }
 impl Default for State {
     fn default() -> Self {
@@ -16,17 +23,22 @@ impl Default for State {
             trail: vec!["general"],
             at: 0,
             target: None,
+            target_group: false,
             list_scroll: ScrollHandle::new(),
+            flyout: None,
+            flyout_wait: 0,
+            flyout_keyboard: false,
+            flyout_focus: false,
+            over_tab: None,
+            over_flyout: false,
         }
     }
 }
 impl State {
     pub(super) fn remember(&mut self, section: &'static str) {
         self.target = None;
-        if let Some(index) = crate::settings_fields::SECTIONS
-            .iter()
-            .position(|(id, _)| *id == section)
-        {
+        self.target_group = false;
+        if let Some(index) = nav_groups::nav_index(section) {
             self.list_scroll.scroll_to_item(index);
         }
         if self.trail[self.at] != section {
@@ -34,6 +46,11 @@ impl State {
             self.trail.push(section);
             self.at += 1;
         }
+    }
+    /// The page scrolls to this field's group heading once it shows.
+    pub(super) fn aim_group(&mut self, field: &'static str) {
+        self.target = Some(field);
+        self.target_group = true;
     }
 }
 
@@ -62,13 +79,15 @@ impl Settings {
         self.search.read(cx).focus.focus(window);
     }
     pub(super) fn keep_navigation_focus_visible(&self, window: &Window) {
-        for (index, (id, _)) in crate::settings_fields::SECTIONS.iter().enumerate() {
+        for (id, _) in crate::settings_fields::SECTIONS {
             if self
                 .controls
                 .get(&format!("settings-nav-{id}"))
                 .is_some_and(|focus| focus.is_focused(window))
             {
-                self.navigation.list_scroll.scroll_to_item(index);
+                if let Some(index) = nav_groups::nav_index(id) {
+                    self.navigation.list_scroll.scroll_to_item(index);
+                }
                 break;
             }
         }
@@ -131,7 +150,11 @@ impl Settings {
     pub(super) fn reveal_search_target(&mut self, field: &Field, index: usize) {
         if !self.busy && self.navigation.target == Some(field.id) {
             // Direct list children scroll during layout, including in CPU GPUI tests.
-            self.scroll.scroll_to_item(index);
+            if std::mem::take(&mut self.navigation.target_group) {
+                self.scroll.scroll_to_top_of_item(index - 1);
+            } else {
+                self.scroll.scroll_to_item(index);
+            }
             self.navigation.target = None;
         }
     }

@@ -78,6 +78,8 @@ impl Settings {
             {
                 self.open_first_result(window, cx);
             }
+            "right" if self.open_focused_flyout(window, cx) => {}
+            "escape" if self.dismiss_flyout(window, cx) => {}
             "escape" if !self.busy => {
                 if self.editor.is_some() || self.confirm.is_some() {
                     self.cancel(window, cx);
