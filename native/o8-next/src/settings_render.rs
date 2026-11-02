@@ -114,6 +114,12 @@ impl Render for Settings {
             .filter(|_| self.section == "mcp" && query.len() < 2)
         {
             content = content.child(mcp);
+        } else if let Some(mobile) = self
+            .mobile
+            .clone()
+            .filter(|_| self.section == "mobile" && query.len() < 2)
+        {
+            content = content.child(mobile);
         } else if let Some(limits) = self
             .limits
             .clone()

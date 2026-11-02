@@ -74,7 +74,10 @@ fn symon(s: &mut Shell, data: &Value, window: &mut Window, cx: &mut Context<Shel
         }
         "set" => set(s, data["key"].as_str(), data["value"].as_str(), window, cx),
         "mobile_qr" => {
-            toasts::info("Mobile pairing is not in o8 next yet.", cx);
+            s.execute(Command::Settings, window, cx);
+            if let Some(view) = s.surfaces.settings.view.clone() {
+                view.update(cx, |settings, cx| settings.show_pairing(cx));
+            }
         }
         "automations" => {
             toasts::info("Automations are not in o8 next yet.", cx);
