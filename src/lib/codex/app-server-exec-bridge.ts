@@ -13,7 +13,7 @@ import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { spawn } from '@/lib/providers/child-process';
 import { readFileSync, rmSync } from 'node:fs';
 import type { CodexAppBridgeSpec } from './app-bridge-spec';
-import { createCollabTracker } from './app-bridge-collab';
+import { createSubagentTracker } from './app-bridge-subagents';
 import { appBridgeContext, retainedAppBridgeContextHashes } from './app-bridge-context';
 import { orchestratorErrorMessage } from '@/lib/transcripts/orchestrator-error';
 
@@ -22,7 +22,7 @@ class RpcRefusal extends Error {}
 interface Usage { input_tokens: number; cached_input_tokens: number; output_tokens: number }
 
 const STOP_GRACE_MS = 1_500;
-const collab = createCollabTracker();
+const subagents = createSubagentTracker();
 
 function out(line: Json): void {
   process.stdout.write(`${JSON.stringify(line)}\n`);
@@ -54,8 +54,8 @@ function emitItem(phase: 'started' | 'completed', item: Json): void {
   const id = text(item.id) || null;
   const type = text(item.type);
   if (type === 'userMessage' || type === 'hookPrompt') return;
-  if (type === 'collabAgentToolCall') {
-    collab.lines(phase, item).forEach(out);
+  if (type === 'subAgentActivity') {
+    subagents.activity(item).forEach(out);
     return;
   }
   if (phase === 'started') {
@@ -155,7 +155,12 @@ async function main(): Promise<void> {
       return;
     }
     const params = asObject(message.params) ?? {};
-    if (params.threadId !== undefined && params.threadId !== threadId) return;
+    if (params.threadId !== undefined && params.threadId !== threadId) {
+      // A child's words stay out of the parent; its last message is its answer.
+      const child = asObject(params.item);
+      if (method === 'item/completed' && child?.type === 'agentMessage') subagents.childMessage(text(params.threadId), text(child.text));
+      return;
+    }
     if (method === 'item/started' || method === 'item/completed') {
       const item = asObject(params.item);
       if (item) emitItem(method === 'item/started' ? 'started' : 'completed', item);
@@ -183,6 +188,7 @@ async function main(): Promise<void> {
     } else if (method === 'error') {
       if (params.willRetry !== true) out({ type: 'error', message: text(asObject(params.error)?.message) || 'Codex turn error' });
     } else if (method === 'turn/completed') {
+      subagents.finish().forEach(out);
       turnId = null;
       process.send?.({ type: 'codex.bridge.turn', threadId, turnId });
       const turn = asObject(params.turn) ?? {};
