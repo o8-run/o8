@@ -4,7 +4,7 @@
  * the 2s TTL shares one readdir instead of re-scanning per lookup.
  */
 import { execFileSync } from 'node:child_process';
-import { lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -115,6 +115,28 @@ describe('lookupOwnedActiveRun', () => {
     const after = lstatSync(fifo);
     expect(after.isFIFO()).toBe(true);
     expect([after.dev, after.ino, after.size]).toEqual([identity.dev, identity.ino, identity.size]);
+  });
+
+  it('finds a session whose metadata is rewritten during the fresh scan', async () => {
+    writeSession('busy', 'codex-owned:busy', { pid: 4242 });
+    const file = join(root, 'busy/session.json');
+    const record = JSON.stringify({ surfaceId: 'codex-owned:busy', activeRun: { pid: 4242 }, padding: 'x'.repeat(1 << 20) });
+    let writing = true;
+    const writer = (async () => {
+      for (let turn = 0; writing; turn += 1) {
+        writeFileSync(`${file}.${turn}.tmp`, record);
+        renameSync(`${file}.${turn}.tmp`, file);
+        await new Promise(resolve => setTimeout(resolve, 15));
+      }
+    })();
+    try {
+      for (let lookup = 0; lookup < 100; lookup += 1) {
+        expect(await lookupOwnedActiveRunFresh('codex-owned:busy')).toMatchObject({ pid: 4242 });
+      }
+    } finally {
+      writing = false;
+      await writer;
+    }
   });
 
   it('keeps malformed session metadata unknown while allowing a valid sibling lookup', async () => {
