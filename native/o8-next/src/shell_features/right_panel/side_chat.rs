@@ -26,8 +26,9 @@ pub(super) fn start(s: &mut Shell, cx: &mut Context<Shell>) -> Option<String> {
         .insert(workspace.clone(), id.clone());
     s.features.get::<Starts>().pending.insert(id.clone());
     s.persist();
-    let client = s.client.in_workspace(&workspace);
+    let client = s.panel_client(&workspace);
     let target = id.clone();
+    let workspace = crate::shell::session::workspace_path(&workspace).to_owned();
     let task = cx.background_executor().spawn(async move {
         let defaults: serde_json::Value =
             client.get("/api/panel/operator-defaults", &[("include", "values")])?;
@@ -109,7 +110,7 @@ pub(super) fn ensure(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
         }
         return;
     };
-    let client = s.client.in_workspace(&ws);
+    let client = s.panel_client(&ws);
     let view = cx.new(|cx| {
         let mut view = crate::ui::Surface::shell_new(client, vec![session], id.clone(), w, cx);
         view.shell_bind_thread(id);

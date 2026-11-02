@@ -11,16 +11,16 @@ mod layout;
 mod notes;
 #[path = "right_panel/resources.rs"]
 mod resources;
-#[path = "right_panel/subagents.rs"]
-mod subagents;
+#[cfg(test)]
+#[path = "right_panel/resources_tests.rs"]
+mod resources_tests;
 #[path = "right_panel/side_chat.rs"]
 mod side;
 #[cfg(test)]
 #[path = "right_panel/side_chat_tests.rs"]
 mod side_chat_tests;
-#[cfg(test)]
-#[path = "right_panel/resources_tests.rs"]
-mod resources_tests;
+#[path = "right_panel/subagents.rs"]
+mod subagents;
 #[cfg(test)]
 #[path = "right_panel/subagents_tests.rs"]
 mod subagents_tests;
@@ -150,14 +150,7 @@ impl Tool {
                 Tool::Spec,
             ],
         ),
-        (
-            "More",
-            &[
-                Tool::Threads,
-                Tool::Activity,
-                Tool::SideChat,
-            ],
-        ),
+        ("More", &[Tool::Threads, Tool::Activity, Tool::SideChat]),
         ("Diagnostics", &[Tool::Resources, Tool::Targeting]),
     ];
     fn tab(self) -> Option<Tab> {
@@ -605,13 +598,13 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         } else {
             crate::files_panel::Mode::Spec
         };
-        let client = s.client.in_workspace(&workspace);
+        let client = s.panel_client(&workspace);
         let view = files_view(s, client, workspace.clone(), mode, cx);
         s.features.get::<Panel>().files.insert(key.clone(), view);
     }
     if tool == Tool::Browser && !s.features.get::<Panel>().browsers.contains_key(&key) {
         let saved = s.state.browser_pages.get(&workspace).cloned();
-        let client = s.client.in_workspace(&workspace);
+        let client = s.panel_client(&workspace);
         let view = cx.new(|cx| {
             let mut view = crate::browser_panel::BrowserPanel::new(cx);
             view.configure(saved, client, cx);
@@ -762,7 +755,7 @@ pub(super) fn open_files(
 ) {
     if let Some(root) = root {
         let key = key(s, Tool::Files);
-        let client = s.client.in_workspace(&root);
+        let client = s.panel_client(&root);
         let view = files_view(s, client, root, crate::files_panel::Mode::Files, cx);
         s.features.get::<Panel>().files.insert(key, view);
     }
@@ -779,7 +772,12 @@ fn files_view(
 ) -> gpui::Entity<crate::files_panel::FilesPanel> {
     let pins = s.state.pins(&workspace);
     let view = cx.new(|cx| {
-        let mut view = crate::files_panel::FilesPanel::new(client, workspace.clone(), mode, cx);
+        let mut view = crate::files_panel::FilesPanel::new(
+            client,
+            crate::shell::session::workspace_path(&workspace).to_owned(),
+            mode,
+            cx,
+        );
         view.set_pins(&workspace, pins, cx);
         view.set_notes_preferences(s.state.notes.clone(), cx);
         view

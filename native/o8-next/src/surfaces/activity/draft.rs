@@ -46,8 +46,11 @@ pub(super) fn open(
             .unwrap_or_default()
             .as_nanos()
     );
-    let client = s.client.in_workspace(repo);
-    let (target, thread) = (repo.to_owned(), id.clone());
+    let client = s.panel_client(repo);
+    let (target, thread) = (
+        crate::shell::session::workspace_path(repo).to_owned(),
+        id.clone(),
+    );
     let task=cx.background_executor().spawn(async move {
         let url=client.url("/api/v2/chat-history").map_err(|e|e.to_string())?;
         client.request("POST",&url).send_json(serde_json::json!({"tabId":thread,"messages":[],"repoPath":target,"repoName":target.rsplit('/').next().unwrap_or(""),"title":"Review proposed directive"})).map_err(|_|"Could not prepare the directive review conversation.".to_owned())?;

@@ -216,9 +216,7 @@ impl Shell {
     fn workspace_sessions(&self) -> Vec<Session> {
         self.sessions
             .iter()
-            .filter(|s| {
-                Some(s.workspace().as_str()) == self.state.selected.as_deref()
-            })
+            .filter(|s| Some(s.workspace().as_str()) == self.state.selected.as_deref())
             .cloned()
             .collect()
     }
@@ -241,6 +239,16 @@ impl Shell {
     fn active(&self) -> Option<Tab> {
         self.current().and_then(|w| w.tabs.get(w.active)).cloned()
     }
+    /// A panel's client. A far machine's panel never falls back to this
+    /// computer's data: while it's offline the client can only fail, and the
+    /// panel shows its normal error.
+    pub(crate) fn panel_client(&self, workspace: &str) -> Client {
+        self.workspace_client(workspace).unwrap_or_else(|| {
+            Client::authenticated("http://127.0.0.1:1", None)
+                .expect("a fixed loopback origin is valid")
+        })
+    }
+
     fn ensure(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.connected {
             return;
