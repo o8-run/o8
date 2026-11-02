@@ -112,6 +112,12 @@ impl Render for Settings {
             .gap(px(16.));
         if let Some(editor) = self.editor.clone() {
             content = content.child(self.editor_view(editor, window, cx));
+        } else if let Some(machines) = self
+            .machines
+            .clone()
+            .filter(|_| self.section == "machines" && query.len() < 2)
+        {
+            content = content.child(machines);
         } else if let Some(limits) = self
             .limits
             .clone()

@@ -96,6 +96,7 @@ impl Settings {
             ("appearance", "Appearance", "appearance theme light dark solid all glass workspace"),
             ("keyboard", "Keyboard", "keyboard shortcuts help keybindings hotkeys"),
             ("about", "About", "about version platform mode updates github documentation releases credits"),
+            ("machines", "Machines", "machines computers ssh remote linked devices connect"),
             ("connections", "Connections", "connections adapter capabilities workers actions session transforms usage limits"),
             ("diagnostics", "Diagnostics", "diagnostics shipped feature audit flags maintenance transcript retention"),
             ("storage", "Worktrees & storage", "storage disk worktrees workspace usage free reserved parking categories allocated logical"),
