@@ -483,7 +483,8 @@ impl PullRequests {
         // The list row carries the same fields the Merge readiness sort reads.
         let row = self.rows.iter().find(|row| row["number"].as_u64() == Some(number));
         if let Some(reasons) = row.and_then(crate::shell::pull_requests::readiness::reason_line) {
-            watch.push(note(reasons));
+            // A whole-pixel line keeps the tab body on the pixel grid.
+            watch.push(note(reasons).line_height(px(16.)));
         }
         if d["checksUnavailable"] == true || d["discussionIncomplete"] == true {
             watch.push(note(format!(
