@@ -130,6 +130,7 @@ pub(crate) struct Settings {
     pub limits: Option<gpui::AnyView>,
     pub machines: Option<gpui::AnyView>,
     pub mcp: Option<gpui::AnyView>,
+    pub mobile: Option<Entity<crate::shell::settings::mobile::Mobile>>,
     section: &'static str,
     search: Entity<Composer>,
     editor: Option<Editor>,
@@ -177,6 +178,7 @@ impl Settings {
             providers: None,
             limits: None,
             mcp: None,
+            mobile: None,
             machines: None,
             section: "general",
             search,
@@ -323,6 +325,13 @@ impl Settings {
         })
         .detach();
         self.changed(cx);
+    }
+    /// Opens Mobile with a fresh pairing code, as the app's command asks.
+    pub(crate) fn show_pairing(&mut self, cx: &mut Context<Self>) {
+        self.select("mobile", cx);
+        if let Some(mobile) = &self.mobile {
+            mobile.update(cx, |mobile, cx| mobile.show_pairing(cx));
+        }
     }
     fn select(&mut self, section: &'static str, cx: &mut Context<Self>) {
         if self.busy {

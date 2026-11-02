@@ -278,6 +278,7 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("git", "Git & PRs"),
     ("indexing", "Indexing"),
     ("mcp", "MCP"),
+    ("mobile", "Mobile"),
     ("machines", "Machines"),
     ("connections", "Connections"),
     ("diagnostics", "Diagnostics"),

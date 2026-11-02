@@ -373,3 +373,12 @@ native-consumed server listings. No project settlement scripts are ported.
   `apps/web/src/components/ProjectFavicon.tsx` adapted in
   `native/o8-next/src/project_icon.rs`; the picker dialog adapted as an inline
   card in `native/o8-next/src/projects_icons.rs`.
+
+## Mobile pairing code
+
+- Package and version: `qrcode` 0.14.1
+- Copyright: Copyright (c) 2016 kennytm
+- License: MIT or Apache License 2.0; used under MIT
+- Upstream: <https://github.com/kennytm/qrcode-rust>
+- Use in o8: the pairing QR in o8 next's Settings
+- Unmodified license text: [qrcode](licenses/qrcode-MIT.txt)
