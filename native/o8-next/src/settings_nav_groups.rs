@@ -21,7 +21,7 @@ pub(super) const NAV: &[(&str, &[&str])] = &[
         &["dispatch", "models", "local-models", "providers", "keys"],
     ),
     ("Workspace", &["storage", "git", "indexing"]),
-    ("Connections", &["mcp", "machines", "connections"]),
+    ("Connections", &["mcp", "machines", "mobile", "connections"]),
     ("System", &["limits", "diagnostics", "about"]),
 ];
 
@@ -52,6 +52,7 @@ const PANEL_GROUPS: &[(&str, &[&str])] = &[
         &["Storage usage", "Fleet parking", "Storage categories"],
     ),
     ("indexing", &["Repositories"]),
+    ("mobile", &["Remote access", "Pairing", "Paired devices"]),
 ];
 
 /// The headings a tab's page shows, in page order.

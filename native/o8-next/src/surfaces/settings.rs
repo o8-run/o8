@@ -89,6 +89,8 @@ impl Shell {
         settings.update(cx, |s, _| s.machines = Some(machines.into()));
         let mcp = cx.new(|cx| mcp::Mcp::new(self.client.clone(), cx));
         settings.update(cx, |s, _| s.mcp = Some(mcp.into()));
+        let mobile = cx.new(|cx| mobile::Mobile::new(self.client.clone(), cx));
+        settings.update(cx, |s, _| s.mobile = Some(mobile));
         self.surfaces.settings.view = Some(settings);
         self.revision += 1;
         cx.notify();
@@ -190,6 +192,8 @@ pub(crate) mod limits;
 pub(crate) mod machines;
 #[path = "settings/mcp.rs"]
 pub(crate) mod mcp;
+#[path = "settings/mobile.rs"]
+pub(crate) mod mobile;
 #[path = "settings/machine_links.rs"]
 pub(crate) mod machine_links;
 

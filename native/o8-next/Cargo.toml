@@ -19,6 +19,7 @@ required-features = ["macos-diagnostics"]
 async-channel = "=2.5.0"
 alacritty_terminal = { version = "=0.26.0", default-features = false }
 base64 = "=0.22.1"
+qrcode = { version = "=0.14.1", default-features = false }
 getrandom = "=0.3.4"
 tungstenite = { version = "=0.28.0", default-features = false, features = ["handshake"] }
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit"] }

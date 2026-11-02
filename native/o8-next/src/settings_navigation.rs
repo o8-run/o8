@@ -116,6 +116,7 @@ impl Settings {
             ("keyboard", "Keyboard", "keyboard shortcuts help keybindings hotkeys"),
             ("about", "About", "about version platform mode updates github documentation releases credits"),
             ("mcp", "MCP", "mcp clients claude desktop code hermes openclaw servers tools"),
+            ("mobile", "Mobile", "mobile phone pair pairing qr code devices revoke relay connect remote"),
             ("machines", "Machines", "machines computers ssh remote linked devices connect"),
             ("connections", "Connections", "connections adapter capabilities workers actions session transforms usage limits"),
             ("diagnostics", "Diagnostics", "diagnostics shipped feature audit flags maintenance transcript retention"),
