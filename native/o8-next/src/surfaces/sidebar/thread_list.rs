@@ -96,6 +96,10 @@ fn workspace_parked(frame: &Value) -> bool {
 pub struct ThreadList {
     client: Client,
     pub(crate) links: machine_threads::Links,
+    machines_read_at: Option<Instant>,
+    machines_loading: bool,
+    /// The last ledger, so a machine read can refresh the shell without one.
+    ledger: Option<Ledger>,
     header: project_header::HeaderSnapshot,
     workspace: Option<String>,
     header_busy: bool,
@@ -226,6 +230,9 @@ impl ThreadList {
             subscription: transport::subscribe_global(client.clone()),
             client,
             links: Default::default(),
+            machines_read_at: None,
+            machines_loading: false,
+            ledger: None,
             header: project_header::HeaderSnapshot::default(),
             workspace: None,
             header_busy: false,
@@ -454,10 +461,8 @@ impl ThreadList {
         self.dirty = None;
         let generation = self.generation;
         let client = self.client.clone();
-        let links = self.links.clone();
         let task = cx.background_executor().spawn(async move {
-            let (mut sessions, branches) = client.sidebar_sessions_with_branches()?;
-            sessions.extend(machine_threads::sessions(&client, &links));
+            let (sessions, branches) = client.sidebar_sessions_with_branches()?;
             let header = match project_header::HeaderSnapshot::load(&client) {
                 Ok(header) => Some(header),
                 // Older session-only hosts do not provide project routes.
@@ -491,6 +496,9 @@ impl ThreadList {
                         if let Some(header) = header {
                             this.header = header;
                         }
+                        sessions.extend(
+                            this.sessions.iter().filter(|s| s.machine.is_some()).cloned(),
+                        );
                         let previous: HashMap<_, _> =
                             this.sessions.iter().map(|s| (s.id.as_str(), s)).collect();
                         for s in &mut sessions {
@@ -507,6 +515,7 @@ impl ThreadList {
                         }
                         this.rebuild();
                         this.notice.clear();
+                        this.ledger = ledger.clone();
                         cx.emit(Event::Refreshed(this.sessions.clone(), ledger));
                         if let Some(id) = this
                             .pending_open
@@ -532,7 +541,90 @@ impl ThreadList {
         .detach();
         cx.notify();
     }
+    /// Reads the other machines beside this computer's list, never inside it.
+    fn load_machines(&mut self, cx: &mut Context<Self>) {
+        self.machines_loading = true;
+        self.machines_read_at = Some(Instant::now());
+        let (client, links) = (self.client.clone(), self.links.clone());
+        let task = cx
+            .background_executor()
+            .spawn(async move { machine_threads::read(&client, &links) });
+        cx.spawn(async move |this, cx| {
+            let reading = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.machines_loading = false;
+                this.install_machines(reading, cx);
+            });
+        })
+        .detach();
+    }
+    fn install_machines(&mut self, reading: machine_threads::Reading, cx: &mut Context<Self>) {
+        let machine_threads::Reading {
+            mut sessions,
+            silent,
+        } = reading;
+        let previous: HashMap<_, _> = self.sessions.iter().map(|s| (s.id.as_str(), s)).collect();
+        for s in &mut sessions {
+            if let Some(old) = previous.get(s.id.as_str()) {
+                s.unread = self.selected.as_ref() != Some(&s.id)
+                    && (old.unread || s.last_message_at > old.last_message_at);
+            }
+        }
+        self.sessions.retain_mut(|s| {
+            let Some(machine) = s.machine.as_deref() else {
+                return true;
+            };
+            let Some((_, offline)) = silent.iter().find(|(id, _)| id == machine) else {
+                return false;
+            };
+            if offline.is_some() {
+                s.machine_label.clone_from(offline);
+            }
+            true
+        });
+        self.sessions.extend(sessions);
+        // These wait for this computer's list, which adopts them when it lands:
+        // the shell reads a refresh as the whole catalog.
+        if !self.catalog_loaded {
+            return;
+        }
+        self.rebuild();
+        cx.emit(Event::Refreshed(self.sessions.clone(), self.ledger.clone()));
+        if let Some(id) = self
+            .pending_open
+            .take_if(|id| self.sessions.iter().any(|s| &s.id == id))
+        {
+            cx.emit(Event::Selected(id));
+        }
+        cx.notify();
+    }
+    /// The client that owns a thread: its machine's, or this computer's.
+    pub(super) fn client_for(&self, id: &str) -> Client {
+        self.sessions
+            .iter()
+            .find(|s| s.id == id)
+            .and_then(|s| s.machine.as_deref())
+            .map_or_else(
+                || self.client.clone(),
+                |machine| self.links.client_or_offline(machine),
+            )
+    }
+    /// Pairs each target with the client that owns it.
+    pub(super) fn routed<T>(&self, targets: Vec<(String, T)>) -> Vec<(Client, String, T)> {
+        targets
+            .into_iter()
+            .map(|(id, target)| (self.client_for(&id), id, target))
+            .collect()
+    }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
+        if machine_threads::enabled()
+            && !self.machines_loading
+            && self
+                .machines_read_at
+                .is_none_or(|read| read.elapsed() >= machine_threads::READ_GAP)
+        {
+            self.load_machines(cx);
+        }
         if self.pr_links_due() {
             self.load_pr_links(cx);
         }
@@ -694,7 +786,7 @@ impl ThreadList {
             .dirty
             .is_some_and(|time| time.elapsed() >= Duration::from_millis(300))
             && self.last_attempt.elapsed() >= DIRTY_RELOAD_GAP
-            || self.last_load.elapsed() >= machine_threads::reload_gap()
+            || self.last_load.elapsed() >= Duration::from_secs(300)
         {
             self.load(cx);
         }
@@ -891,7 +983,7 @@ impl ThreadList {
         let editor_revision = self.editor.read(cx).revision;
         let draft_owner = self.rename.clone();
         let renaming = draft_owner.as_ref() == Some(&id) && patch["title"].is_string();
-        let client = self.client.clone();
+        let client = self.client_for(&id);
         let workspace = self
             .sessions
             .iter()
