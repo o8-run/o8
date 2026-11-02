@@ -144,6 +144,8 @@ vi.mock('@/lib/realtime/publisher', () => ({
 const root = realpathSync(mkdtempSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'declarative-dispatch-real-path-')));
 const dataDir = join(root, 'data');
 const ownedRoot = join(root, 'owned-qoder');
+// The launch only checks that the Pi write helper exists; the fake worker never uses it.
+process.env.O8_PI_WRITE_BIN = process.execPath;
 const capturePath = join(root, 'qoder-spawns.jsonl');
 const fakeQoderPath = join(root, 'qodercli');
 const bundledCliDir = join(root, 'bundled-cli');
