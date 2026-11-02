@@ -135,7 +135,7 @@ impl Inspector {
         self.detail = None;
         self.detail_key = None;
     }
-    /// Closes one subagent's tab; true when none are left.
+    /// Closes one subagent's tab; true when it was the last and was showing.
     pub(crate) fn close_tab(
         &mut self,
         id: &str,
@@ -145,7 +145,10 @@ impl Inspector {
         let at = self.tabs.iter().position(|tab| tab == id);
         self.tabs.retain(|tab| tab != id);
         self.parked.remove(id);
-        if self.selected.as_deref() == Some(id) {
+        let showing = self.selected.as_deref() == Some(id);
+        if showing {
+            self.detail = None;
+            self.detail_key = None;
             let next = at.and_then(|at| self.tabs.get(at.min(self.tabs.len().saturating_sub(1))));
             match next.cloned() {
                 Some(next) => self.inspect(Some(next), window, cx),
@@ -153,7 +156,7 @@ impl Inspector {
             }
         }
         cx.notify();
-        self.tabs.is_empty()
+        showing && self.tabs.is_empty()
     }
     pub(crate) fn close_all_tabs(&mut self) {
         self.tabs.clear();
@@ -256,19 +259,24 @@ impl Inspector {
                 });
                 this.agents
                     .sort_by(|a, b| a.title.cmp(&b.title).then_with(|| a.id.cmp(&b.id)));
+                // A tab opened by session id moves to the agent's own id.
+                let mut open = std::collections::HashSet::new();
+                let tabs = std::mem::take(&mut this.tabs);
+                this.tabs = tabs
+                    .into_iter()
+                    .map(|tab| {
+                        let agent = this.agents.iter().find(|a| a.session.as_ref() == Some(&tab));
+                        agent.map_or(tab, |agent| agent.id.clone())
+                    })
+                    .filter(|tab| open.insert(tab.clone()))
+                    .collect();
                 if let Some(id) = this.selected.clone() {
                     if let Some(agent) = this
                         .agents
                         .iter()
                         .find(|a| a.id == id || a.session.as_ref() == Some(&id))
                     {
-                        let found = agent.id.clone();
-                        this.tabs.iter_mut().for_each(|tab| {
-                            if *tab == id {
-                                *tab = found.clone();
-                            }
-                        });
-                        this.selected = Some(found);
+                        this.selected = Some(agent.id.clone());
                     }
                 }
                 let new = this

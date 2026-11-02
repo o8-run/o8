@@ -713,6 +713,7 @@ impl Surface {
                 item_ix: if end { self.rows.len() - 1 } else { 0 },
                 offset_in_item: px(0.),
             });
+            self.pinned = end;
             self.on_transcript_scroll(cx);
         }
         self.key_revision += 1;

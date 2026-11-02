@@ -513,6 +513,8 @@ impl Transcript {
             .chain(self.entries.iter().rev())
             .find(|entry| entry.id == reveal.id)
             .map_or("", |entry| entry.text.as_str());
+        // Saved text can replace the live reply and shift its offsets.
+        reveal.shown = text.floor_char_boundary(reveal.shown);
         if reveal.shown >= text.len() {
             if self.live.is_none() && reveal.steps.is_empty() {
                 self.reveal = None;
@@ -806,6 +808,37 @@ mod tests {
         let shown: Vec<String> = t.shown.iter().map(|e| e.text.clone()).collect();
         assert_eq!(shown, ["First words", " then more"]);
         assert!(matches!(t.rows.last(), Some(Row::Activity { trace, .. }) if trace.live));
+    }
+
+    #[test]
+    fn a_saved_reply_with_shifted_offsets_keeps_pacing() {
+        let mut t = live("llm-chat:shift");
+        t.paced = true;
+        let text = format!("\n\n{}", "\u{2014} word ".repeat(60));
+        t.apply(&frame("shift", 1, "status", serde_json::json!({"status":"busy"})));
+        t.apply(&frame("shift", 2, "output", serde_json::json!({"text":text})));
+        let mut step = |t: &mut Transcript| {
+            if let Some(reveal) = &mut t.reveal {
+                reveal.next = Instant::now();
+            }
+            t.pace();
+        };
+        for _ in 0..4 {
+            step(&mut t);
+        }
+        let id = t.reveal.as_ref().unwrap().id.clone();
+        t.entries.retain(|entry| entry.id != id);
+        t.entries.push(Entry {
+            id,
+            role: "assistant".into(),
+            text: text.trim_start().to_owned(),
+            tools: None,
+            extra: Default::default(),
+        });
+        t.live = None;
+        for _ in 0..400 {
+            step(&mut t);
+        }
     }
 
     #[test]
