@@ -33,6 +33,51 @@ fn native_composer_sent_images_clear_while_next_draft_changes(cx: &mut TestAppCo
     });
 }
 
+#[gpui::test]
+fn native_composer_stash_keeps_a_draft_with_its_attachments_and_restores_it(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    image_session(cx, &surface);
+    let image = json!({"name":"kept.png", "dataUri":"data:image/png;base64,a2VwdA=="});
+    let file = std::path::PathBuf::from("/tmp/clip.mov");
+    let composer = surface.read_with(cx, |s, _| s.composer.clone());
+    composer.update(cx, |i, cx| {
+        i.set_text("Keep this", cx);
+        i.controls.images.push(image.clone());
+        i.controls.files.push(file.clone());
+        i.toggle_stash(cx);
+    });
+    composer.read_with(cx, |i, _| {
+        assert_eq!(i.text, "");
+        assert!(i.controls.images.is_empty() && i.controls.files.is_empty());
+        assert_eq!(i.controls.stash.len(), 1);
+    });
+    composer.update(cx, |i, cx| i.toggle_stash(cx));
+    composer.read_with(cx, |i, _| {
+        assert_eq!(i.text, "Keep this");
+        assert_eq!(i.controls.images, vec![image.clone()]);
+        assert_eq!(i.controls.files, vec![file.clone()]);
+        assert!(i.controls.stash.is_empty());
+    });
+    // An attachment alone is a draft too, and an empty stash does nothing.
+    composer.update(cx, |i, cx| {
+        i.clear(cx);
+        i.controls.images.clear();
+        i.toggle_stash(cx);
+    });
+    composer.read_with(cx, |i, _| {
+        assert!(i.controls.files.is_empty() && i.controls.stash.len() == 1);
+    });
+    composer.update(cx, |i, cx| {
+        i.controls.stash.clear();
+        i.controls.files.clear();
+        i.toggle_stash(cx);
+    });
+    composer.read_with(cx, |i, _| assert!(i.controls.stash.is_empty() && i.text.is_empty()));
+}
+
 fn png() -> Vec<u8> {
     base64::engine::general_purpose::STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAFAAAAAwCAIAAAAJh2qgAAAAVklEQVR4nO3PAQ3AIADAMEAOnlCOmbv4k71VsM197viT9XXA2wzXGa4zXGe4znCd4TrDdYbrDNcZrjNcZ7jOcJ3hOsN1husM1xmuM1xnuM5wneE6w3UPI0QBwum7oOkAAAAASUVORK5CYII=").unwrap()
 }

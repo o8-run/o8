@@ -7,6 +7,14 @@ use std::collections::HashMap;
 #[path = "context.rs"]
 pub(crate) mod context;
 
+/// One draft set aside with Cmd-S (T3 Code's stash): text and attachments.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Stashed {
+    pub text: String,
+    pub images: Vec<Value>,
+    pub files: Vec<std::path::PathBuf>,
+}
+
 pub(crate) struct State {
     pub context: context::MeterState,
     pub slash: super::commands::Slash,
@@ -20,6 +28,8 @@ pub(crate) struct State {
     pub images: Vec<Value>,
     /// Non-image attachments (a video, a log, a PDF), sent to the agent as paths.
     pub files: Vec<std::path::PathBuf>,
+    /// Drafts set aside with Cmd-S, newest last. They live with this composer.
+    pub stash: Vec<Stashed>,
     pub previews: HashMap<String, std::sync::Arc<RenderImage>>,
     pub attachment_target: bool,
     pub images_enabled: bool,
@@ -55,6 +65,7 @@ impl Default for State {
             focus: HashMap::new(),
             images: vec![],
             files: vec![],
+            stash: vec![],
             previews: HashMap::new(),
             attachment_target: false,
             images_enabled: false,
