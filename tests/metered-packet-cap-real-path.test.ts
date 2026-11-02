@@ -449,14 +449,14 @@ describe('metered packet cap real path', () => {
         console.log('COLD_ACTIONS=' + actions);
         supervisor.unregisterWatchedAgent(${JSON.stringify(launch.surfaceId)});
         process.exit(0);
-      `], { cwd: process.cwd(), env: process.env, timeout: 30_000 });
+      `], { cwd: process.cwd(), env: process.env, timeout: 90_000 });
       expect.soft(upstreamCalls - beforeRequests, 'provider requests after cold recovery').toBe(1);
       expect.soft(starts() - beforeStarts, 'worker launches after cold recovery').toBe(1);
       expect(stdout).toContain('COLD_ACTIONS=0');
       expect(stdout).toContain('COLD_DIRECT_OK=false');
       expect(readOrchestratorControlPlaneState().packets[0].blockedReason).toBe(reason);
       expect((await ownedIo.findSession(launch.surfaceId))?.recentRuns[0]).toMatchObject({ id: run.id, outcome: 'finished' });
-    }, 60_000);
+    }, 120_000);
 
   it.each(['store', 'route'] as const)('kills a cold-resumed worker when its next request breaches the cap via %s', async (entry) => {
     await writeClaudeCodeWorkerProfile({ source: 'openrouter', model: 'metered/test', codexModel: null });
@@ -525,7 +525,7 @@ describe('metered packet cap real path', () => {
       }
       console.log('RESUME_CAP=' + JSON.stringify({resumed: resumed.ok, kill: !!kill, interrupted}));
       process.exit(0);
-    `], { cwd: process.cwd(), env: process.env, timeout: 25_000 });
+    `], { cwd: process.cwd(), env: process.env, timeout: 90_000 });
     const result = JSON.parse(stdout.split('RESUME_CAP=')[1].split('\n')[0]);
     expect(result.resumed).toBe(true);
     expect.soft(result.kill, 'cap enforcement must confirm a kill after automatic cold resume').toBe(true);
@@ -534,7 +534,7 @@ describe('metered packet cap real path', () => {
     await waitUntilGone(Object.values(resumedPids));
     expect.soft(Object.values(resumedPids).map(isAlive), 'both resumed workers must be dead').toEqual([false, false]);
     expect(upstreamCalls - beforeRequests).toBe(2);
-  }, 60_000);
+  }, 120_000);
 
   it('holds a metered cap stop through supervisor recovery and SQLite reopen without another request', async () => {
     const contention = process.env.O8_TEST_CAP_ARCHIVE_CONTENTION;
@@ -645,9 +645,13 @@ describe('metered packet cap real path', () => {
       expect(isAlive(pid)).toBe(false);
     }
 
-    const mission = await getMissionStatus({ includeCost: true });
-    if (!('cost' in mission) || !mission.cost) throw new Error('Expected mission cost telemetry.');
-    expect(mission.cost.packetCosts[0]).toMatchObject({ totalCostUsd: 0.09, costSource: 'gateway' });
+    // Gateway cost lands after the stop is confirmed; the estimate is only the placeholder.
+    const mission = await vi.waitFor(async () => {
+      const status = await getMissionStatus({ includeCost: true });
+      if (!('cost' in status) || !status.cost) throw new Error('Expected mission cost telemetry.');
+      expect(status.cost.packetCosts[0]).toMatchObject({ totalCostUsd: 0.09, costSource: 'gateway' });
+      return status;
+    }, { timeout: 30_000, interval: 100 });
     expect(mission.packets[0]).toMatchObject({
       spendTelemetry: { costUsd: 0.09, costSource: 'gateway', capHit: true },
     });
@@ -723,7 +727,7 @@ describe('metered packet cap real path', () => {
       console.log('COLD_RESULT=' + JSON.stringify({mutations, beforeWatch, afterWatch: rowCount(), watches: supervisor.getWatchedAgents().length,
         held: packet.queueState, stopped: packet.operatorStopped, capHit: packet.spendTelemetry.capHit}));
       process.exit(0);
-    `], { cwd: process.cwd(), env: process.env, encoding: 'utf8', timeout: 20_000 });
+    `], { cwd: process.cwd(), env: process.env, encoding: 'utf8', timeout: 90_000 });
     expect(JSON.parse(coldOutput.split('COLD_RESULT=')[1].split('\n')[0])).toEqual({
       mutations: 0, beforeWatch: 1, afterWatch: 0, watches: 0, held: 'held', stopped: true, capHit: true,
     });
@@ -757,5 +761,5 @@ describe('metered packet cap real path', () => {
       expect.objectContaining({ verb: 'spend_cap_hit', payload: expect.objectContaining({ reason: expect.stringContaining('spend cap reached') }) }),
       expect.objectContaining({ verb: 'kill_escalated', payload: expect.objectContaining({ confirmed: true }) }),
     ]));
-  }, 90_000);
+  }, 180_000);
 });

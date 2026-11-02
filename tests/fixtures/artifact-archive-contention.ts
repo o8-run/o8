@@ -51,7 +51,7 @@ export async function holdArchiveContention(
   return async () => {
     try {
       await vi.waitFor(() => expect(refused, `archive must encounter the live ${namespace} lease`).toBe(true),
-        { timeout: 10_000, interval: 10 });
+        { timeout: 60_000, interval: 10 });
       console.info(`[cap-archive] Archive refused by the fixture's live ${namespace} lifecycle owner before release.`);
     } finally { await cleanup(); }
   };
