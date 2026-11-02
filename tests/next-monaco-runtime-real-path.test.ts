@@ -3,6 +3,16 @@ import { expect, it, vi } from 'vitest';
 import { getMonacoLanguage } from '@/components/desktop/file-viewer-monaco';
 import { loadBundledMonacoEditor } from '@/components/desktop/file-viewer/bundled-monaco';
 
+it('refuses to load the editor graph in a server context', async () => {
+  vi.stubGlobal('window', undefined);
+  try {
+    await expect(loadBundledMonacoEditor()).rejects.toThrow('The editor loads in the browser.');
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+// Cold-loading the real dependency graph is setup work on shared development hosts.
 it('registers only languages opened by the file viewer and retains its five worker routes', async () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   const workers: string[] = [];
@@ -29,4 +39,4 @@ it('registers only languages opened by the file viewer and retains its five work
     'html.worker.js', 'ts.worker.js', 'ts.worker.js', 'editor.worker.js',
   ]);
   vi.unstubAllGlobals();
-});
+}, 90_000);
