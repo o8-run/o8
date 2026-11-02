@@ -10,6 +10,7 @@ const binary = process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/ta
 // Native paths that still need Next (#5243). Remove a path when it is registered.
 const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/connect',
+  '/api/mcp',
   '/api/panel/ssh-machines',
   '/api/runtime/acp-connection',
   '/api/runtime/acp-registry',
