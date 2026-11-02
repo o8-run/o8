@@ -35,6 +35,7 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/orchestrator/status',
   '/api/orchestrator/steer-packet',
   '/api/orchestrator/workspace',
+  '/api/panel/account/avatar',
   '/api/panel/branches',
   '/api/panel/browse-folder',
   '/api/panel/commits/[id]',
