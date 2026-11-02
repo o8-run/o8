@@ -492,3 +492,60 @@ fn each_opened_subagent_gets_a_tab_and_none_are_in_the_tools(cx: &mut TestAppCon
             .is_some()
     );
 }
+
+#[gpui::test]
+fn native_agents_out_of_title_order_settle_after_one_notify(cx: &mut TestAppContext) {
+    let agent = |id: &str, title: &str| crate::subagents::model::Agent {
+        shared: false,
+        native: true,
+        prompt: None,
+        run: id.into(),
+        id: id.into(),
+        title: title.into(),
+        runtime: String::new(),
+        model: None,
+        effort: None,
+        parent: None,
+        session: None,
+        group: crate::subagents::model::Group::Done,
+        status: "Done".into(),
+        progress: None,
+        result: None,
+        started: None,
+        finished: None,
+    };
+    // An inspector with no transcript behind it, so only this test feeds it.
+    let (f, _s, mut v) = setup(cx);
+    let client = f.client.clone();
+    let view = v.update(|_, cx| {
+        cx.new(|cx| {
+            crate::subagents::Inspector::new(
+                client,
+                crate::subagents::model::Scope {
+                    repo: "/nowhere".into(),
+                    parent: None,
+                },
+                cx,
+            )
+        })
+    });
+    v.run_until_parked();
+    let notified = std::rc::Rc::new(std::cell::Cell::new(0));
+    let count = notified.clone();
+    let _watch = v.update(|_, cx| cx.observe(&view, move |_, _| count.set(count.get() + 1)));
+    let agents = vec![agent("a", "Sort fruit"), agent("b", "Quick calculation")];
+    for _ in 0..3 {
+        let agents = agents.clone();
+        view.update(&mut v, |view, cx| view.set_native(agents, cx));
+        v.run_until_parked();
+    }
+    let titles: Vec<String> = view.read_with(&v, |view, _| {
+        view.agents
+            .iter()
+            .filter(|a| a.native)
+            .map(|a| a.title.clone())
+            .collect()
+    });
+    assert_eq!(titles, ["Quick calculation", "Sort fruit"]);
+    assert_eq!(notified.get(), 1, "the same agents must not notify again");
+}

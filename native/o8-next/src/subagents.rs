@@ -5,14 +5,14 @@ use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-#[path = "subagents/model.rs"]
-pub(crate) mod model;
-#[path = "subagents/view.rs"]
-mod view;
 #[path = "subagents/history.rs"]
 mod history;
+#[path = "subagents/model.rs"]
+pub(crate) mod model;
 #[path = "subagents/trace.rs"]
 pub(crate) mod trace;
+#[path = "subagents/view.rs"]
+mod view;
 use model::{Agent, Scope};
 
 pub(crate) struct Open(pub gpui::AnyWindowHandle);
@@ -136,7 +136,12 @@ impl Inspector {
         self.detail_key = None;
     }
     /// Closes one subagent's tab; true when none are left.
-    pub(crate) fn close_tab(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn close_tab(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let at = self.tabs.iter().position(|tab| tab == id);
         self.tabs.retain(|tab| tab != id);
         self.parked.remove(id);
@@ -166,10 +171,13 @@ impl Inspector {
             .flat_map(|a| [Some(a.id.clone()), a.session.clone()])
             .flatten()
             .collect();
-        let agents: Vec<Agent> = agents
+        let mut agents: Vec<Agent> = agents
             .into_iter()
             .filter(|a| !a.session.as_ref().is_some_and(|s| known.contains(s)))
             .collect();
+        // The kept list is sorted, so an unsorted one never matches and would
+        // notify the observer that called this, forever.
+        agents.sort_by(|a, b| a.title.cmp(&b.title).then_with(|| a.id.cmp(&b.id)));
         let current: Vec<&Agent> = self.agents.iter().filter(|a| a.native).collect();
         if current.len() == agents.len() && current.iter().zip(&agents).all(|(a, b)| *a == b) {
             return;

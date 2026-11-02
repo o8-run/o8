@@ -623,6 +623,17 @@ impl Surface {
             }
             if follow_tail && !self.rows.is_empty() {
                 self.list.scroll_to_reveal_item(self.rows.len() - 1);
+                // A turn started elsewhere follows like one sent from here.
+                if self.following.is_none()
+                    && self
+                        .transcript
+                        .as_ref()
+                        .is_some_and(|t| t.context_snapshot().1)
+                {
+                    self.following = self.rows.iter().rposition(
+                        |row| matches!(&row.borrow().row, Row::Message { role, .. } if role == "user"),
+                    );
+                }
             }
             cx.notify();
         }
