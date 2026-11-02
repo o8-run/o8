@@ -825,7 +825,11 @@ mod tests {
             extra: Default::default(),
         };
         let split = split_at_tools(vec![entry]);
-        let tools: usize = split.iter().filter_map(|e| e.tools.as_ref()).map(Vec::len).sum();
+        let tools: usize = split
+            .iter()
+            .filter_map(|e| e.tools.as_ref())
+            .map(Vec::len)
+            .sum();
         assert_eq!(tools, 2, "both tools survive the split");
     }
 
@@ -834,8 +838,18 @@ mod tests {
         let mut t = live("llm-chat:shift");
         t.paced = true;
         let text = format!("\n\n{}", "\u{2014} word ".repeat(60));
-        t.apply(&frame("shift", 1, "status", serde_json::json!({"status":"busy"})));
-        t.apply(&frame("shift", 2, "output", serde_json::json!({"text":text})));
+        t.apply(&frame(
+            "shift",
+            1,
+            "status",
+            serde_json::json!({"status":"busy"}),
+        ));
+        t.apply(&frame(
+            "shift",
+            2,
+            "output",
+            serde_json::json!({"text":text}),
+        ));
         let mut step = |t: &mut Transcript| {
             if let Some(reveal) = &mut t.reveal {
                 reveal.next = Instant::now();
