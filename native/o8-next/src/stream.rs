@@ -43,6 +43,8 @@ struct Reveal {
     id: String,
     shown: usize,
     next: Instant,
+    length: usize,
+    grew: Instant,
     steps: Vec<RevealStep>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -55,6 +57,8 @@ const REVEAL_TICK: Duration = Duration::from_millis(24);
 const REVEAL_SHARE: usize = 10;
 /// Words shown without a break wait no longer than this much text.
 const REVEAL_WORD: usize = 48;
+/// A last word with no space after it shows once the stream is this quiet.
+const REVEAL_QUIET: Duration = Duration::from_millis(400);
 pub(crate) const REVEAL_FADE: Duration = Duration::from_millis(280);
 pub(crate) const REVEAL_STAGGER: Duration = Duration::from_millis(70);
 
@@ -246,9 +250,12 @@ impl Transcript {
     fn render(&mut self, entries: &[Entry]) -> Vec<Row> {
         if let Some(live) = &self.live
             && entries.iter().any(|entry| {
+                let tools = |entry: &Entry| entry.tools.as_ref().map_or(0, Vec::len);
                 entry.id == live.id
-                    && (!entry.text.trim().is_empty()
-                        || entry.tools.as_ref().is_some_and(|tools| !tools.is_empty()))
+                    && (!entry.text.trim().is_empty() || tools(entry) > 0)
+                    // A save during the turn lags the stream it came from.
+                    && (!self.context_busy
+                        || entry.text.len() >= live.text.len() && tools(entry) >= tools(live))
             })
         {
             self.live = None;
@@ -364,6 +371,8 @@ impl Transcript {
                             id,
                             shown: 0,
                             next: Instant::now(),
+                            length: 0,
+                            grew: Instant::now(),
                             steps: vec![],
                         });
                     }
@@ -517,6 +526,10 @@ impl Transcript {
             .map_or("", |entry| entry.text.as_str());
         // Saved text can replace the live reply and shift its offsets.
         reveal.shown = text.floor_char_boundary(reveal.shown);
+        if text.len() != reveal.length {
+            reveal.length = text.len();
+            reveal.grew = now;
+        }
         if reveal.shown >= text.len() {
             if self.live.is_none() && reveal.steps.is_empty() {
                 self.reveal = None;
@@ -537,7 +550,9 @@ impl Transcript {
         let streaming = self.live.is_some() && self.context_busy;
         let end = match end {
             Some(end) => end,
-            None if streaming && waiting < REVEAL_WORD => return false,
+            None if streaming && waiting < REVEAL_WORD && now - reveal.grew < REVEAL_QUIET => {
+                return false;
+            }
             None => text.len(),
         };
         let chars = text[reveal.shown..end].chars().count();
@@ -990,6 +1005,72 @@ mod tests {
         transcript.apply(&frame(6, "status", serde_json::json!({"status":"stopped"})));
         assert!(!live_last(&transcript), "the turn's end clears it");
     }
+    #[test]
+    fn a_held_turn_shows_its_last_word_once_the_stream_goes_quiet() {
+        let mut t = live("llm-chat:quiet");
+        t.paced = true;
+        t.apply(&frame(
+            "quiet",
+            1,
+            "status",
+            serde_json::json!({"status":"busy"}),
+        ));
+        t.apply(&frame(
+            "quiet",
+            2,
+            "output",
+            serde_json::json!({"text":"reports back."}),
+        ));
+        let mut step = |t: &mut Transcript| {
+            if let Some(reveal) = &mut t.reveal {
+                reveal.next = Instant::now();
+                reveal.grew = Instant::now();
+            }
+            t.pace();
+        };
+        for _ in 0..40 {
+            step(&mut t);
+        }
+        assert_eq!(t.reveal.as_ref().unwrap().shown, "reports ".len());
+        let reveal = t.reveal.as_mut().unwrap();
+        reveal.next = Instant::now();
+        reveal.grew = Instant::now() - REVEAL_QUIET;
+        t.pace();
+        assert_eq!(t.reveal.as_ref().unwrap().shown, "reports back.".len());
+    }
+
+    #[test]
+    fn a_save_during_the_turn_keeps_the_live_reply_and_its_tools() {
+        let mut t = live("llm-chat:lag");
+        t.apply(&frame(
+            "lag",
+            1,
+            "status",
+            serde_json::json!({"status":"busy"}),
+        ));
+        t.apply(&frame(
+            "lag",
+            2,
+            "output",
+            serde_json::json!({"text":"The whole reply so far"}),
+        ));
+        let id = t.live.as_ref().unwrap().id.clone();
+        t.live.as_mut().unwrap().tools = Some(vec![serde_json::json!({"id":"t1"})]);
+        let saved = serde_json::from_value::<History>(serde_json::json!({
+            "sessionKey":"llm-chat:lag",
+            "transcript":[{"id":id,"role":"assistant","text":"The whole"}]
+        }))
+        .unwrap();
+        let checkpoint = t.checkpoint();
+        t.saved_tail(saved, checkpoint);
+        let live = t
+            .live
+            .as_ref()
+            .expect("the live reply survives a partial save");
+        assert_eq!(live.text, "The whole reply so far");
+        assert_eq!(live.tools.as_ref().map(Vec::len), Some(1));
+    }
+
     #[test]
     fn saved_tail_keeps_older_rows_and_yields_to_newer_websocket_history() {
         let history = |text: &str| {
