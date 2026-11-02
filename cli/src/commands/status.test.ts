@@ -9,6 +9,33 @@ afterEach(() => {
 });
 
 describe('o8 status', () => {
+  it('lists the enter-queues and title-model defaults with their source', async () => {
+    process.env.O8_API_PORT = '47120';
+    vi.stubGlobal('fetch', vi.fn(async (input: Request | URL) => {
+      const url = String(input);
+      if (url.includes('/api/lanes')) return Response.json({ lanes: [] });
+      if (url.includes('/api/panel/approvals')) return Response.json({ approvals: [] });
+      if (url.includes('/api/panel/operator-defaults')) {
+        return Response.json({
+          values: { composerEnterQueues: true, textGenerationTitleModel: '' },
+          sources: { composerEnterQueues: 'file', textGenerationTitleModel: 'default' },
+        });
+      }
+      return Response.json({});
+    }));
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      writes.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+
+    await expect(runStatus({ human: false, verbose: false })).resolves.toBe(0);
+    expect((JSON.parse(writes.join('')) as { operatorDefaults: unknown }).operatorDefaults).toEqual([
+      { key: 'composerEnterQueues', setting: 'chat.enter_queues', value: true, source: 'file' },
+      { key: 'textGenerationTitleModel', setting: 'text_generation.title_model', value: '', source: 'default' },
+    ]);
+  });
+
   it('keeps review and input-blocked lanes out of the running group', async () => {
     process.env.O8_API_PORT = '47120';
     const lanes = ['running', 'reviewing', 'awaiting_input'].map((status) => ({
