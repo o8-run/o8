@@ -261,7 +261,7 @@ jobs:
   # when no Sunday run passed, and closes the issue once one has.
   integration-weekly:
     name: Weekly Integration Tests (shard ${{ matrix.shard }}/6)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: test
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.schedule == '17 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.integration_base == '')
     timeout-minutes: 40
