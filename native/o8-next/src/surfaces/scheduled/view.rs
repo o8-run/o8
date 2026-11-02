@@ -323,11 +323,14 @@ impl Scheduled {
         };
         div()
             .flex()
+            .flex_wrap()
             .items_start()
             .justify_between()
             .gap(px(16.))
             .child(
                 div()
+                    .flex_1()
+                    .min_w(px(240.))
                     .flex()
                     .flex_col()
                     .gap(px(6.))
@@ -760,6 +763,7 @@ impl Scheduled {
             .debug_selector(move || row)
             .min_h(px(58.))
             .flex()
+            .flex_wrap()
             .items_center()
             .gap(px(14.))
             .px(px(14.))
@@ -769,7 +773,7 @@ impl Scheduled {
             .child(
                 div()
                     .flex_1()
-                    .min_w_0()
+                    .min_w(px(180.))
                     .flex()
                     .flex_col()
                     .gap(px(3.))
@@ -788,80 +792,88 @@ impl Scheduled {
                             .child(about),
                     ),
             )
+            // The details wrap under the name as one group when the page is narrow.
             .child(
                 div()
-                    .w(px(112.))
-                    .flex_shrink_0()
-                    .text_size(px(11.))
-                    .text_color(color)
-                    .truncate()
-                    .child(status),
-            )
-            .child(moment(
-                "Last run",
-                relative(job["lastRunAt"].as_f64(), "Not recorded"),
-            ))
-            .child(moment(
-                "Next run",
-                if enabled {
-                    relative(job["nextRunAt"].as_f64(), "On schedule")
-                } else {
-                    "Paused".into()
-                },
-            ))
-            .child(
-                div()
-                    .w(px(136.))
                     .flex_shrink_0()
                     .flex()
-                    .justify_end()
-                    .gap(px(6.))
-                    .when(read_only, |actions| {
-                        actions.child(
-                            div()
-                                .text_size(px(10.5))
-                                .text_color(theme().text_faint)
-                                .child("View only"),
-                        )
-                    })
-                    .when(can_run, |actions| {
-                        actions.child(
-                            action(
-                                format!("scheduled-run-{id}"),
-                                if busy == Some("run") {
-                                    "Starting…"
-                                } else {
-                                    "Run now"
-                                },
-                                false,
-                                busy.is_some(),
-                            )
-                            .on_click(cx.listener(
-                                move |this, _, _, cx| this.run_connected(run_id.clone(), cx),
-                            )),
-                        )
-                    })
-                    .when(!read_only, |actions| {
-                        actions.child(
-                            action(
-                                format!("scheduled-connected-{id}"),
-                                if busy == Some("toggle") {
-                                    "Updating…"
-                                } else if enabled {
-                                    "Pause"
-                                } else {
-                                    "Resume"
-                                },
-                                false,
-                                busy.is_some(),
-                            )
-                            .on_click(cx.listener(
-                                move |this, _, _, cx| {
-                                    this.toggle_connected(toggle_id.clone(), !enabled, cx)
-                                },
-                            )),
-                        )
-                    }),
+                    .items_center()
+                    .gap(px(14.))
+                    .child(
+                        div()
+                            .w(px(92.))
+                            .flex_shrink_0()
+                            .text_size(px(11.))
+                            .text_color(color)
+                            .truncate()
+                            .child(status),
+                    )
+                    .child(moment(
+                        "Last run",
+                        relative(job["lastRunAt"].as_f64(), "Not recorded"),
+                    ))
+                    .child(moment(
+                        "Next run",
+                        if enabled {
+                            relative(job["nextRunAt"].as_f64(), "On schedule")
+                        } else {
+                            "Paused".into()
+                        },
+                    ))
+                    .child(
+                        div()
+                            .min_w(px(96.))
+                            .flex_shrink_0()
+                            .flex()
+                            .justify_end()
+                            .gap(px(6.))
+                            .when(read_only, |actions| {
+                                actions.child(
+                                    div()
+                                        .text_size(px(10.5))
+                                        .text_color(theme().text_faint)
+                                        .child("View only"),
+                                )
+                            })
+                            .when(can_run, |actions| {
+                                actions.child(
+                                    action(
+                                        format!("scheduled-run-{id}"),
+                                        if busy == Some("run") {
+                                            "Starting…"
+                                        } else {
+                                            "Run now"
+                                        },
+                                        false,
+                                        busy.is_some(),
+                                    )
+                                    .on_click(cx.listener(
+                                        move |this, _, _, cx| this.run_connected(run_id.clone(), cx),
+                                    )),
+                                )
+                            })
+                            .when(!read_only, |actions| {
+                                actions.child(
+                                    action(
+                                        format!("scheduled-connected-{id}"),
+                                        if busy == Some("toggle") {
+                                            "Updating…"
+                                        } else if enabled {
+                                            "Pause"
+                                        } else {
+                                            "Resume"
+                                        },
+                                        false,
+                                        busy.is_some(),
+                                    )
+                                    .on_click(cx.listener(
+                                        move |this, _, _, cx| {
+                                            this.toggle_connected(toggle_id.clone(), !enabled, cx)
+                                        },
+                                    )),
+                                )
+                            }),
+                    )
             )
             .into_any_element()
     }

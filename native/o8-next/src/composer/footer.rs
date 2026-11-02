@@ -116,7 +116,7 @@ impl Surface {
             .px(px(8.))
             .pb(px(8.))
             .child(leading)
-            .child(self.context_meter(window, cx))
+            .child(self.context_meter(cx))
             .child(trailing)
             .into_any_element()
     }

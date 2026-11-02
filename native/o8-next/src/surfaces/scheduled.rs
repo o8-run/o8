@@ -2,6 +2,8 @@
 //! (manual or cron prompts) and the connected agents' own schedules.
 use super::*;
 
+#[path = "scheduled/cron.rs"]
+mod cron;
 #[path = "scheduled/editor.rs"]
 mod editor;
 #[path = "scheduled/view.rs"]

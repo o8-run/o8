@@ -103,6 +103,9 @@ fn show(s: &mut Shell, voice: VoiceState, cx: &mut Context<Shell>) {
 }
 
 impl Shell {
+    pub(crate) fn voice_live(&mut self) -> bool {
+        self.features.get::<Live>().on
+    }
     pub(crate) fn toggle_voice(&mut self, cx: &mut Context<Shell>) {
         let live = self.features.get::<Live>();
         if live.closing {

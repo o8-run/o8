@@ -85,7 +85,7 @@ impl Render for ThreadList {
             .min_h_0()
             .flex()
             .flex_col()
-            .bg(theme().surface)
+            .bg(crate::theme::sidebar_fill())
             .text_color(theme().text)
             .font_weight(gpui::FontWeight::LIGHT)
             .track_focus(&self.focus)
@@ -105,53 +105,6 @@ impl Render for ThreadList {
             .child(arriving(
                 div().child(self.project_header(window, cx)),
                 self.arrived(0),
-            ))
-            .child(arriving(
-                div()
-                    .mx(px(6.))
-                    .flex()
-                    .items_center()
-                    .gap(px(2.))
-                    .child(
-                        // A desktop-style nav row: search glyph and muted label, filled on hover.
-                        div()
-                            .id("thread-search")
-                            .debug_selector(|| "thread-search".into())
-                            .cursor_pointer()
-                            .flex_1()
-                            .min_w_0()
-                            .h(px(28.))
-                            .px(px(6.))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.))
-                            .rounded(px(8.))
-                            .hover(|style| style.bg(theme().hover))
-                            .text_size(px(12.5))
-                            .text_color(theme().text_secondary)
-                            .child(crate::icon::stroke(
-                                "M11 4a7 7 0 1 0 0 14 7 7 0 1 0 0-14Z M20 20l-3.5-3.5",
-                                theme().text_muted,
-                                15.,
-                                1.7,
-                            ))
-                            .child(if self.rename.is_some() {
-                                "Rename thread"
-                            } else {
-                                "Search"
-                            })
-                            .on_click(cx.listener(|this, _, window, cx| this.search(window, cx))),
-                    )
-                    .when(!self.scope_repos().is_empty(), |row| {
-                        row.child(
-                            div()
-                                .relative()
-                                .child(self.scope_trigger(cx))
-                                .children(self.scope_picker(cx)),
-                        )
-                        .child(self.new_thread_button(cx))
-                    }),
-                self.arrived(1),
             ))
             .when(self.editing || !self.query.is_empty(), |view| {
                 view.child(self.editor.clone())
@@ -184,7 +137,12 @@ impl Render for ThreadList {
                         view.update(cx, |this, cx| {
                             let keyboard = this.focus.is_focused(window);
                             this.materialized.set(this.materialized.get().max(i + 1));
-                            this.render_row(i, keyboard, cx).into_any_element()
+                            // gpui::list has no horizontal padding of its own.
+                            div()
+                                .w_full()
+                                .px(px(6.))
+                                .child(this.render_row(i, keyboard, cx))
+                                .into_any_element()
                         })
                     })
                     .flex_1()
@@ -205,18 +163,10 @@ impl Render for ThreadList {
                     .track_scroll(self.scroll.clone())
                     .flex_1()
                     .min_h_0()
+                    .px(px(6.))
                     .into_any_element()
                 },
             ),
-            )
-            .when(
-                self.query.is_empty()
-                    && (!self.archived_open
-                        || !self
-                            .rows
-                            .iter()
-                            .any(|r| r.kind == "section" && r.title == "Archived")),
-                |view| view.child(self.archived_control(cx)),
             )
             .children(self.row_menu(cx))
             .children(self.pr_hover_list(cx))
@@ -277,14 +227,16 @@ impl ThreadList {
                         .items_center()
                         // Headings keep the row height but sit low in it, so
                         // the air goes above them and they read as breaks.
-                        .when(row.kind == "section" && i > 0, |v| v.items_end().pb(px(3.)))
-                        .px(px(12.))
+                        .when(row.kind == "section" && i > 0, |v| v.items_end())
+                        // With the list's 6, a highlight has even margins on
+                        // both sides.
+                        .px(px(6.))
                         .rounded(px(8.))
                         .overflow_hidden()
                         .bg(if selected || thread && row.id == this.choice {
                             theme().selection
                         } else {
-                            theme().surface
+                            crate::theme::sidebar_fill()
                         })
                         .when(thread, |view| {
                             view.cursor_pointer().hover(|style| style.bg(theme().hover))
@@ -325,8 +277,19 @@ impl ThreadList {
                                         })
                                         .child(title),
                                 )
+                                // Classic has no Search row, so the list's own
+                                // controls sit on its first heading.
                                 .when(!thread && i == 0, |view| {
-                                    view.child(this.view_picker(cx))
+                                    view.when(!this.scope_repos().is_empty(), |view| {
+                                        view.child(
+                                            div()
+                                                .relative()
+                                                .child(this.scope_trigger(cx))
+                                                .children(this.scope_picker(cx)),
+                                        )
+                                        .child(this.new_thread_button(cx))
+                                    })
+                                    .child(this.view_picker(cx))
                                 })
                                 .when(thread, |view| {
                                     // A folder already names its threads' repository.
@@ -390,7 +353,12 @@ impl ThreadList {
                         .when(
                             row.kind == "section" && row.title == "Archived",
                             |view| {
-                                view.debug_selector(|| "sidebar-archived-header".into())
+                                let selector = if this.archived_open {
+                                    "sidebar-archived-header"
+                                } else {
+                                    "sidebar-archived"
+                                };
+                                view.debug_selector(move || selector.into())
                                     .track_focus(&this.archived_focus)
                                     .focus(|style| {
                                         style

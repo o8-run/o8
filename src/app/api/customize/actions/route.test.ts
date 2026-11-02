@@ -8,6 +8,11 @@ import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ root: '', auth: vi.fn(), resolveGate: null as Promise<void> | null, resolveEntered: null as (() => void) | null }));
+const principal = vi.hoisted(() => ({ role: 'operator' }));
+vi.mock('@/lib/auth/principal', async (original) => ({
+  ...(await original<typeof import('@/lib/auth/principal')>()),
+  resolveRequestPrincipalContext: () => ({ role: principal.role }),
+}));
 vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: state.auth }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => path.join(state.root, 'data'), migrateDataDirOnce: () => {} }));
 vi.mock('@/lib/repos/registry', () => ({ findRepoByLocalPath: async (localPath: string) => { state.resolveEntered?.(); if (state.resolveGate) await state.resolveGate; return localPath === path.join(state.root, 'repo') ? { localPath } : null; } }));
@@ -426,4 +431,13 @@ describe('action plugin API and subprocess', () => {
       expect((await (await actualAuthRoute.GET(operatorGet)).json()).receipts[0].status).toBe('succeeded');
     } finally { if (previous === undefined) delete process.env.WS_TOKEN; else process.env.WS_TOKEN = previous; }
   });
+});
+
+it('refuses action requests from a worker', async () => {
+  principal.role = 'worker';
+  try {
+    expect((await post({ action: 'invoke', id: 'a', actionId: 'b', revision: 'c' })).status).toBe(403);
+  } finally {
+    principal.role = 'operator';
+  }
 });

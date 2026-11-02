@@ -296,7 +296,10 @@ impl ThreadList {
             .collect::<Vec<_>>();
         let mut view = div()
             .debug_selector(|| "sidebar-project-header".into())
-            .py(px(3.))
+            // Classic's switcher sits 13px under the header strip (measured in
+            // the desktop DOM), level with the rail's home mark.
+            .pt(px(13.))
+            .pb(px(3.))
             .flex()
             .flex_col()
             .child(

@@ -320,6 +320,68 @@ pub fn right_panel_width(viewport: f32) -> f32 {
 // src/lib/theme/glass-material.ts: the only window-wide fill in All Glass.
 // Darker through the top third, still clear at the bottom.
 pub const GLASS_VEIL: [(f32, f32); 4] = [(0., 0.9), (0.3, 0.7), (0.65, 0.32), (1., 0.06)];
+/// `--t-glass-muted` in WORKSPACE_GLASS_OVERRIDES (src/lib/theme/context.tsx).
+pub fn glass_muted() -> Rgba {
+    translucent(0xffffff, 0.04)
+}
+/// The soft halo around the rail's Symon mark.
+pub fn symon_glow() -> Rgba {
+    gpui::rgba(0x88d1f173)
+}
+/// The sidebar's fill. In light it stays flush with the rail (Q 2026-11-01).
+pub fn sidebar_fill() -> Rgba {
+    if light() {
+        Rgba {
+            a: 0.,
+            ..current().surface
+        }
+    } else {
+        current().surface
+    }
+}
+/// How near the cursor comes before a split lights (Q 2026-11-01).
+const SPLIT_WAKE: f32 = 3.;
+/// Every resize split's line, so they all match: a faint light blue that wakes
+/// when the cursor is near. `center` is the line's offset in its parent.
+pub(crate) fn split_line(
+    group: impl Into<gpui::SharedString>,
+    vertical: bool,
+    center: f32,
+    lit: bool,
+) -> gpui::Div {
+    use gpui::prelude::*;
+    let group = group.into();
+    let glow = rgb(0x88d1f1);
+    let opacity = 0.4;
+    let span = gpui::px(SPLIT_WAKE * 2. + 1.);
+    let zone = gpui::div().group(group.clone()).absolute();
+    let line = gpui::div().absolute();
+    let (zone, line) = if vertical {
+        (
+            zone.top_0().bottom_0().left(gpui::px(center - SPLIT_WAKE)).w(span),
+            line.top_0().bottom_0().left(gpui::px(SPLIT_WAKE)).w(gpui::px(1.)),
+        )
+    } else {
+        (
+            zone.left_0().right_0().top(gpui::px(center - SPLIT_WAKE)).h(span),
+            line.left_0().right_0().top(gpui::px(SPLIT_WAKE)).h(gpui::px(1.)),
+        )
+    };
+    zone.child(
+        line.bg(glow)
+            .shadow(vec![gpui::BoxShadow {
+                color: Rgba { a: 0.2, ..glow }.into(),
+                offset: gpui::point(gpui::px(0.), gpui::px(0.)),
+                blur_radius: gpui::px(3.),
+                spread_radius: gpui::px(0.),
+            }])
+            .opacity(if lit { opacity } else { 0. })
+            .group_hover(group, move |style| style.opacity(opacity)),
+    )
+}
+pub fn light() -> bool {
+    matches!(selected(), Appearance::Light)
+}
 pub fn veil_color(alpha: f32) -> Rgba {
     translucent(0x0a0c12, alpha)
 }

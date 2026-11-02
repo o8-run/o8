@@ -169,11 +169,7 @@ impl Surface {
         )
     }
 
-    pub(crate) fn context_meter(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(crate) fn context_meter(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let (projection, reuse, runtime, estimate) = self.context_values(cx);
         let percent = projection.percent();
         let color = if percent >= 85. {
@@ -183,42 +179,14 @@ impl Surface {
         } else {
             theme().text_faint
         };
-        let help = format!(
-            "{} active context {}{} / 1M · {}%.{}{} {}",
-            if projection.reported {
-                "Runtime-reported"
-            } else {
-                "Estimated"
-            },
-            if projection.reported { "" } else { "~" },
-            context::format_tokens(projection.active),
-            percent,
-            reuse.as_ref().map_or(String::new(), |r| format!(
-                " Last prompt reused {}% cached input.",
-                r.percent
-            )),
-            if self.composer.read(cx).controls.context.growth > 0. {
-                format!(
-                    " Context grew by {} tokens since the previous runtime report.",
-                    context::format_tokens(self.composer.read(cx).controls.context.growth)
-                )
-            } else {
-                String::new()
-            },
-            context::explanation(&runtime, estimate.as_ref())
-        );
         let open = self.composer.read(cx).controls.open == Some("context");
-        let focused = self
-            .composer
-            .read(cx)
-            .controls
-            .focus
-            .get("composer-context")
-            .is_some_and(|focus| focus.is_focused(window));
         let button = self
             .composer_button("composer-context", "", true, cx, |s, w, cx| {
+                // Classic's handleToggle: a click puts the hover card away.
+                s.composer.update(cx, |i, _| i.controls.context.help = false);
                 if s.composer.read(cx).controls.open == Some("context") {
-                    s.dismiss_composer_picker(w, cx);
+                    // Back to the input, so the ring isn't left tinted as focused.
+                    s.close_composer_picker(w, cx);
                 } else {
                     s.composer.update(cx, |i, _| {
                         i.controls.open = Some("context");
@@ -233,25 +201,12 @@ impl Surface {
             .gap(px(4.))
             .line_height(gpui::relative(1.25))
             .when(open, |d| d.bg(theme().hover))
-            .when(!open && !focused, |d| {
-                d.tooltip(move |_, cx| cx.new(|_| ContextTip(help.clone())).into())
-            });
-        if self
-            .composer
-            .read(cx)
-            .controls
-            .context
-            .focus_events
-            .is_none()
-        {
-            let focus = self.composer.read(cx).controls.focus["composer-context"].clone();
-            let events = [
-                cx.on_focus(&focus, window, |_, _, cx| cx.notify()),
-                cx.on_blur(&focus, window, |_, _, cx| cx.notify()),
-            ];
-            self.composer
-                .update(cx, |i, _| i.controls.context.focus_events = Some(events));
-        }
+            .on_hover(cx.listener(|s, hovered: &bool, _, cx| {
+                let hovered = *hovered;
+                s.composer
+                    .update(cx, |i, _| i.controls.context.help = hovered);
+                cx.notify();
+            }));
         // Only the ring (Q 2026-10-31): the cache estimate and the breakdown
         // live in the popover it opens.
         let ring = rings(percent, reuse.as_ref().map(|r| r.percent), color, 19.);
@@ -455,19 +410,9 @@ impl Surface {
             .child(cache).into_any_element()
     }
 
-    pub(crate) fn context_focus_help(
-        &mut self,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        if !self
-            .composer
-            .read(cx)
-            .controls
-            .focus
-            .get("composer-context")
-            .is_some_and(|f| f.is_focused(window))
-        {
+    /// The one help card over the meter; hovering shows it, a click puts it away.
+    pub(crate) fn context_help(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.composer.read(cx).controls.context.help {
             return None;
         }
         let (_, _, runtime, estimate) = self.context_values(cx);

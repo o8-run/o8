@@ -7,6 +7,11 @@ import { invalidateCliCache } from '@/lib/runtimes/shared/cli-resolver';
 
 const auth = vi.hoisted(() => ({ denied: false }));
 const local = vi.hoisted(() => ({ jobs: [] as Array<Record<string, unknown>> }));
+const principal = vi.hoisted(() => ({ role: 'operator' }));
+vi.mock('@/lib/auth/principal', async (original) => ({
+  ...(await original<typeof import('@/lib/auth/principal')>()),
+  resolveRequestPrincipalContext: () => ({ role: principal.role }),
+}));
 vi.mock('@/lib/automations/local-schedules', () => ({ readLocalSchedules: async () => local.jobs }));
 vi.mock('@/lib/panel/auth', () => ({
   requirePanelAuth: () => auth.denied ? Response.json({ error: 'Unauthorized' }, { status: 401 }) : null,
@@ -107,4 +112,19 @@ it('rejects unauthenticated and unknown job mutations', async () => {
   expect((await PATCH(request('PATCH', { id: '82ac2f70-5549-4827-8974-adf5519decf5', enabled: false }))).status).toBe(401);
   auth.denied = false;
   expect((await PATCH(request('PATCH', { id: '00000000-0000-0000-0000-000000000000', enabled: false }))).status).toBe(404);
+});
+
+it('keeps launchd control with the operator', async () => {
+  const { POST } = await import('./route');
+  const id = 'launchd-0123456789abcdef';
+  principal.role = 'worker';
+  try {
+    const run = new NextRequest('http://localhost/api/automations/connected', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }),
+    });
+    expect((await POST(run)).status).toBe(403);
+    expect((await PATCH(request('PATCH', { id, enabled: false }))).status).toBe(403);
+  } finally {
+    principal.role = 'operator';
+  }
 });

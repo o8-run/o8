@@ -23,6 +23,7 @@ pub(super) enum Icon {
     Terminal,
     Clock,
     PullRequest,
+    Puzzle,
 }
 
 impl Icon {
@@ -35,6 +36,9 @@ impl Icon {
             Self::Gauge => "m12 14 4-4 M3.34 19a10 10 0 1 1 17.32 0",
             Self::Terminal => "m4 17 6-6-6-6 M12 19h8",
             Self::Clock => "M12 6v6l4 2 M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20Z",
+            Self::Puzzle => {
+                "M8 3H5a2 2 0 0 0-2 2v3a3 3 0 1 1 0 6v3a2 2 0 0 0 2 2h3a3 3 0 1 1 6 0h3a2 2 0 0 0 2-2v-3a3 3 0 1 0 0-6V5a2 2 0 0 0-2-2h-3a3 3 0 1 0-6 0Z"
+            }
             Self::PullRequest => {
                 "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M13 6h3a2 2 0 0 1 2 2v7 M6 9v12"
             }
@@ -525,6 +529,43 @@ pub(super) fn brand() -> impl IntoElement {
         .object_fit(ObjectFit::Contain)
 }
 
+/// SymonMark: classic's orb, rendered from SYMON_ORB_BACKGROUND because GPUI has
+/// no conic gradient. Its highlight follows `--t-text`, so each ink has a file.
+fn symon_mark(active: bool) -> impl IntoElement {
+    static DARK: OnceLock<Arc<Image>> = OnceLock::new();
+    static LIGHT: OnceLock<Arc<Image>> = OnceLock::new();
+    let load =
+        |bytes: &'static [u8]| Arc::new(Image::from_bytes(ImageFormat::Png, bytes.to_vec()));
+    let mark = if crate::theme::light() {
+        LIGHT.get_or_init(|| load(include_bytes!("symon_mark_light.png")))
+    } else {
+        DARK.get_or_init(|| load(include_bytes!("symon_mark_dark.png")))
+    };
+    let glow = gpui::BoxShadow {
+        color: crate::theme::symon_glow().into(),
+        offset: gpui::point(px(0.), px(0.)),
+        blur_radius: px(9.),
+        spread_radius: px(0.),
+    };
+    let mut shadows = vec![glow];
+    if active {
+        shadows.insert(
+            0,
+            gpui::BoxShadow {
+                color: theme().accent.into(),
+                offset: gpui::point(px(0.), px(0.)),
+                blur_radius: px(0.),
+                spread_radius: px(2.),
+            },
+        );
+    }
+    div()
+        .size(px(20.))
+        .rounded_full()
+        .shadow(shadows)
+        .child(img(mark.clone()).size(px(20.)).object_fit(ObjectFit::Contain))
+}
+
 impl Shell {
     /// Closes Projects, Settings, Customize and an idle Setup, the overlays the rail
     /// and its More menu open over the workspace.
@@ -583,6 +624,8 @@ impl Shell {
             ))
         };
         let projects_open = self.surfaces.projects.open;
+        let voice = self.voice_live();
+        let plugins_open = self.customize_tab_open("plugins", cx);
         div()
             .id("shell-rail")
             .absolute()
@@ -624,6 +667,13 @@ impl Shell {
                     }
                 })),
             )
+            // Classic's toggle: the same one Caps Lock and voice-toggle drive.
+            .child(
+                target("rail-symon")
+                    .tooltip(|_, cx| cx.new(|_| Tip("Symon".into())).into())
+                    .child(symon_mark(voice))
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_voice(cx))),
+            )
             // A click starts a chat on the lead; a drag drops one onto the workspace.
             .child(
                 button("rail-orchestrator", Icon::Play, "Run orchestrator", false)
@@ -649,6 +699,8 @@ impl Shell {
                     cx.new(|_| drag.clone())
                 }),
             )
+            // Grid stays in code but off the rail until it earns a place (Q, 10-30).
+            .child(divider())
             // AutomationsPage, as the desktop rail's Scheduled entry.
             .child(tab(
                 "rail-scheduled",
@@ -657,8 +709,13 @@ impl Shell {
                 Tab::Scheduled,
                 || Command::Scheduled,
             ))
-            // Grid stays in code but off the rail until it earns a place (Q, 10-30).
-            .child(divider())
+            .child(
+                button("rail-plugins", Icon::Puzzle, "Plugins", plugins_open).on_click(
+                    cx.listener(|this, _, window, cx| {
+                        this.show_customize_tab("plugins", window, cx);
+                    }),
+                ),
+            )
             // RailMoreMenu, then PRs last, as CompactNavigationRail orders them.
             .child(features::rail_more(self, cx))
             .children(top)

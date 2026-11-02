@@ -70,6 +70,30 @@ impl Shell {
         self.revision += 1;
         cx.notify();
     }
+    /// Opens the page on one tab; the rail's Plugins button lands on its tab.
+    pub(crate) fn show_customize_tab(
+        &mut self,
+        tab: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.surfaces.customize.open {
+            self.close_rail_overlays(window, cx);
+            self.execute(Command::Customize, window, cx);
+        }
+        if let Some(view) = self.surfaces.customize.view.clone() {
+            view.update(cx, |view, cx| view.select_tab(tab, cx));
+        }
+    }
+    pub(crate) fn customize_tab_open(&self, tab: &str, cx: &App) -> bool {
+        self.surfaces.customize.open
+            && self
+                .surfaces
+                .customize
+                .view
+                .as_ref()
+                .is_some_and(|view| view.read(cx).tab_is(tab))
+    }
     pub(crate) fn close_customize(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.surfaces.customize.open = false;
         self.restore_focus(window, cx);

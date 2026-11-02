@@ -728,7 +728,7 @@ impl Surface {
             card = card
                 .relative()
                 .child(self.composer_popover(open, busy, model, &routing, window, cx));
-        } else if let Some(help) = self.context_focus_help(window, cx) {
+        } else if let Some(help) = self.context_help(cx) {
             card = card.relative().child(help);
         }
         card.when(!error.is_empty(), |d| {

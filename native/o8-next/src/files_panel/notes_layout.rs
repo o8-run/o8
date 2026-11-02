@@ -26,12 +26,8 @@ impl RichLine {
             };
             let text = &row.display[at..at + run.len];
             for (local, word) in text.split_word_bound_indices() {
-                let font_size = if word == "●" { 9. } else { font_size };
                 let mut style = run.clone();
                 style.len = word.len();
-                if word == "●" {
-                    style.color = row.note_color.into();
-                }
                 let shaped = window.text_system().shape_line(
                     word.to_owned().into(),
                     px(font_size),

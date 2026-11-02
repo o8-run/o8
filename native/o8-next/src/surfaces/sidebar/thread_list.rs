@@ -309,7 +309,8 @@ impl ThreadList {
                 .iter()
                 .position(|r| r.kind == "section" && r.title == "Archived")
         {
-            rows.truncate(index);
+            // Collapsed, Archived is still a group: its heading stays in the list.
+            rows.truncate(index + 1);
         }
         self.rows = Rc::new(rows);
         // Remeasure detailed rows; keep the reader's place.

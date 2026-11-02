@@ -1,3 +1,4 @@
+import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -94,6 +95,11 @@ export async function GET(request: NextRequest) {
   }
 }
 
+/** launchd jobs belong to the person at the machine, not to a worker on it. */
+function operatorOnly() {
+  return NextResponse.json({ ok: false, error: 'operator_required' }, { status: 403 });
+}
+
 async function controlled(id: string, action: 'run' | 'pause' | 'resume') {
   try {
     const job = await controlLocalSchedule(id, action);
@@ -108,6 +114,7 @@ async function controlled(id: string, action: 'run' | 'pause' | 'resume') {
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
+  if (resolveRequestPrincipalContext(request).role !== 'operator') return operatorOnly();
   const body = await request.json().catch(() => null) as { id?: unknown } | null;
   if (!body || typeof body.id !== 'string' || !JOB_ID.test(body.id) || !body.id.startsWith('launchd-')) {
     return NextResponse.json({ ok: false, error: 'invalid job' }, { status: 400 });
@@ -122,7 +129,10 @@ export async function PATCH(request: NextRequest) {
   if (!body || typeof body.id !== 'string' || !JOB_ID.test(body.id) || typeof body.enabled !== 'boolean') {
     return NextResponse.json({ ok: false, error: 'invalid job update' }, { status: 400 });
   }
-  if (body.id.startsWith('launchd-')) return controlled(body.id, body.enabled ? 'resume' : 'pause');
+  if (body.id.startsWith('launchd-')) {
+    if (resolveRequestPrincipalContext(request).role !== 'operator') return operatorOnly();
+    return controlled(body.id, body.enabled ? 'resume' : 'pause');
+  }
   try {
     const binary = await openclawBinary();
     const before = await sourceJobs(binary);

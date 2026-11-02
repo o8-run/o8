@@ -79,7 +79,7 @@ fn sidebar_recents_groups_times_more_and_keyboard(cx: &mut TestAppContext) {
             .count(),
         16
     );
-    click(&mut visual, "thread-search");
+    visual.simulate_keystrokes("ctrl-f");
     visual.simulate_keystrokes("escape end");
     settle(&shell, &mut visual);
     let sidebar = shell.read_with(&visual, |s, _| {

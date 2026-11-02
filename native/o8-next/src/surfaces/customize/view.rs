@@ -315,6 +315,19 @@ fn field(id: &'static str, input: &Entity<Composer>, busy: bool, cx: &gpui::App)
         input.clone().into_any_element()
     })
 }
+impl Customize {
+    pub fn tab_is(&self, id: &str) -> bool {
+        self.tab == id
+    }
+    pub fn select_tab(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.tab = id.into();
+        self.editor = None;
+        self.deleting = None;
+        self.error = None;
+        self.revision += 1;
+        cx.notify();
+    }
+}
 impl Render for Customize {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let busy = self.loading;

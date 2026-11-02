@@ -18,8 +18,7 @@ fn archive_fixture(cx: &mut TestAppContext, restore: bool) {
     );
     wait_for(&shell, &mut visual, |s, _| s.connected);
     if restore {
-        click(&mut visual, "sidebar-archived");
-        draw(&mut visual);
+        open_archived(&shell, &mut visual);
     }
     let sidebar = shell.read_with(&visual, |s, _| {
         s.surfaces.sidebar.view.as_ref().unwrap().clone()
@@ -170,7 +169,9 @@ fn sidebar_archived_disclosure_keyboard_activation_and_navigation(cx: &mut TestA
     sidebar.read_with(&visual, |s, _| {
         assert_eq!(s.diagnostic()["choice"]["id"], last)
     });
-    press_keys(&mut visual, "tab enter");
+    press_keys(&mut visual, "tab");
+    draw(&mut visual);
+    press_keys(&mut visual, "enter");
     draw(&mut visual);
     assert!(
         visual.debug_bounds("sidebar-archived").is_some(),
@@ -230,7 +231,7 @@ fn sidebar_titles_ellipsize_with_visible_archive_and_restore_at_280(cx: &mut Tes
         ("thoughts-sidebar-1998", long),
     ] {
         if id.ends_with("1998") {
-            click(&mut visual, "sidebar-archived");
+            open_archived(&shell, &mut visual);
         }
         let index = sidebar.read_with(&visual, |s, _| {
             s.rows
@@ -272,4 +273,23 @@ fn sidebar_titles_ellipsize_with_visible_archive_and_restore_at_280(cx: &mut Tes
             assert_eq!(action.size.width, px(11.));
         });
     }
+}
+
+/// Archived is a group at the end of the list, so a long list scrolls to it first.
+fn open_archived(shell: &Entity<Shell>, visual: &mut VisualTestContext) {
+    let sidebar = shell.read_with(visual, |s, _| {
+        s.surfaces.sidebar.view.as_ref().unwrap().clone()
+    });
+    sidebar.update(visual, |s, cx| {
+        let index = s
+            .rows
+            .iter()
+            .position(|r| r.kind == "section" && r.title == "Archived")
+            .unwrap();
+        s.scroll.scroll_to_item_strict(index, ScrollStrategy::Top);
+        cx.notify();
+    });
+    draw(visual);
+    click(visual, "sidebar-archived");
+    draw(visual);
 }

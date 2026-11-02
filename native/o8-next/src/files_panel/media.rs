@@ -24,6 +24,40 @@ pub(super) fn is_image(path: &str) -> bool {
         "avif" | "bmp" | "gif" | "ico" | "jpg" | "jpeg" | "png" | "webp"
     )
 }
+pub(super) fn is_video(path: &str) -> bool {
+    matches!(extension(path).as_str(), "mp4" | "m4v" | "mov" | "webm")
+}
+/// A video's first frame, from the system's Quick Look thumbnailer: GPUI has no
+/// video decoder. Needs the repo on this machine; the caller shows a plain tile
+/// when this fails.
+pub(super) fn read_video_poster(workspace: &str, path: &str) -> Result<Image, String> {
+    const UNAVAILABLE: &str = "No preview for this video.";
+    let relative = std::path::Path::new(path);
+    if !relative
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err(UNAVAILABLE.into());
+    }
+    let source = std::path::Path::new(workspace).join(relative);
+    let name = source.file_name().ok_or(UNAVAILABLE)?.to_owned();
+    let folder = std::env::temp_dir().join(format!("o8-next-posters-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).map_err(|_| UNAVAILABLE)?;
+    std::process::Command::new("/usr/bin/qlmanage")
+        .args(["-t", "-s", "480", "-o"])
+        .arg(&folder)
+        .arg(&source)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|_| UNAVAILABLE)?;
+    let mut poster = name;
+    poster.push(".png");
+    let poster = folder.join(poster);
+    let bytes = std::fs::read(&poster).map_err(|_| UNAVAILABLE)?;
+    let _ = std::fs::remove_file(&poster);
+    Ok(Image::from_bytes(ImageFormat::Png, bytes))
+}
 pub(super) fn unsupported(path: &str) -> Option<&'static str> {
     match extension(path).as_str() {
         "pdf" => Some("PDF"),
@@ -52,7 +86,7 @@ fn read_asset(client: &Client, workspace: &str, path: &str, notes: bool) -> Resu
     url.query_pairs_mut()
         .append_pair("path", path)
         .append_pair("workspace", workspace);
-    let response = match client.request("GET", &url).call() {
+    let response = match crate::client::get_with_retry(|| client.request("GET", &url).call()) {
         Ok(response) => response,
         Err(ureq::Error::Status(400, response)) if notes => {
             let mut reason = String::new();
@@ -82,9 +116,7 @@ fn read_asset(client: &Client, workspace: &str, path: &str, notes: bool) -> Resu
                 .map_err(|_| "Unable to preview this image.")?;
             url.query_pairs_mut()
                 .append_pair("path", target.to_str().ok_or("Invalid image path")?);
-            client
-                .request("GET", &url)
-                .call()
+            crate::client::get_with_retry(|| client.request("GET", &url).call())
                 .map_err(|_| "Unable to preview this image.")?
         }
         Err(_) => return Err("Unable to preview this file.".into()),

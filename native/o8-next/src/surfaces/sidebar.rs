@@ -7,7 +7,7 @@ mod thread_list;
 pub(crate) use thread_list::recents::calendar::clock as calendar_clock;
 /// Local day boundaries, for Activity's Today / Yesterday / "Oct 24" headings.
 pub(crate) use thread_list::recents::calendar::{
-    date as calendar_date, midnight as calendar_midnight,
+    date as calendar_date, midnight as calendar_midnight, moment as calendar_moment,
 };
 /// A repository's icon override or monogram, for the Projects page.
 pub(crate) use thread_list::repo_identity;
@@ -83,6 +83,11 @@ pub(super) fn width(shell: &Shell) -> f32 {
         .map_or(WIDTH, |width| width.clamp(MIN_WIDTH, MAX_WIDTH))
 }
 
+/// The space left of the workspace once the sidebar has settled.
+pub(super) fn workspace_inset(shell: &Shell) -> f32 {
+    WORKSPACE_INSET + if shell.surfaces.sidebar.hidden { 0. } else { COLUMN_HANDLE }
+}
+
 /// A drag of the column's edge.
 pub(super) struct Resize;
 impl Render for Resize {
@@ -101,49 +106,38 @@ pub(super) fn resize(shell: &mut Shell, event: &gpui::DragMoveEvent<Resize>) {
     shell.surfaces.sidebar.resizing = true;
 }
 
-/// On glass the right panel's cards sit 12px inside its edge, so its handle
-/// has air on the panel side; the sidebar's sits as far outside its card,
-/// so the two handles mirror (Q 2026-11-01).
-pub(super) const GLASS_EDGE_GAP: f32 = 12.;
-/// A wide grab target over the boundary with a quiet line that glows on hover.
+/// Classic's `workspaceInset` left of the workspace card, and the column handle
+/// (COLUMN_HANDLE_WIDTH) that sits before it while the sidebar is open.
+const WORKSPACE_INSET: f32 = 4.;
+const COLUMN_HANDLE: f32 = 4.;
+/// The handle sits mid-gap between the column and the workspace card.
+pub(super) const EDGE_GAP: f32 = COLUMN_HANDLE;
+/// A wide grab target over the boundary, from the window's top edge so the
+/// header's mark is part of it, with a line that lights when the cursor is near.
 fn edge(
     width: f32,
     resizing: bool,
-    glass: bool,
     press: std::rc::Rc<std::cell::Cell<Option<(f32, f32)>>>,
 ) -> impl IntoElement {
-    let accent = crate::theme::current().accent;
     div()
         .id("sidebar-resize")
         .debug_selector(|| "sidebar-resize".into())
-        .group("sidebar-resize")
         .absolute()
-        .top_0()
+        .top(px(-crate::theme::GEOMETRY.header))
         .bottom_0()
-        .left(px(width - EDGE_SLOP - 0.5 + if glass { GLASS_EDGE_GAP } else { 0. }))
+        .left(px(width - EDGE_SLOP - 0.5 + EDGE_GAP))
         .w(px(EDGE_SLOP * 2. + 1.))
         .cursor(gpui::CursorStyle::ResizeLeftRight)
         .on_mouse_down(gpui::MouseButton::Left, move |event, _, _| {
             press.set(Some((f32::from(event.position.x), width)));
         })
         .on_drag(Resize, |_, _, _, cx| cx.new(|_| Resize))
-        .child(
-            div()
-                .absolute()
-                .top(px(18.))
-                .bottom(px(if glass { 0. } else { 18. }))
-                .left(px(EDGE_SLOP))
-                .w(px(1.))
-                .bg(accent)
-                .shadow(vec![gpui::BoxShadow {
-                    color: accent.into(),
-                    offset: gpui::point(px(0.), px(0.)),
-                    blur_radius: px(8.),
-                    spread_radius: px(0.),
-                }])
-                .opacity(if resizing { 0.85 } else { 0. })
-                .group_hover("sidebar-resize", |style| style.opacity(0.85)),
-        )
+        .child(crate::theme::split_line(
+            "sidebar-resize",
+            true,
+            EDGE_SLOP,
+            resizing,
+        ))
 }
 pub(super) const REGISTRATION: Registration = Registration {
     initialize,
@@ -191,8 +185,10 @@ pub(super) const REGISTRATION: Registration = Registration {
     },
     decorate: |shell, content| {
         let (open, moving) = travel(shell);
+        let inset = WORKSPACE_INSET + COLUMN_HANDLE * open;
         if shell.surfaces.sidebar.hidden && !moving {
             return div()
+                .pl(px(inset))
                 .flex()
                 .flex_col()
                 .flex_1()
@@ -271,12 +267,19 @@ pub(super) const REGISTRATION: Registration = Registration {
                 row.child(div().w(px(width * open)).h_full().flex_shrink_0())
                     .child(gpui::deferred(card).with_priority(1))
             })
-            .child(div().flex().flex_col().flex_1().min_w_0().child(content))
+            .child(
+                div()
+                    .pl(px(inset))
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(content),
+            )
             .when(!moving, |row| {
                 row.child(edge(
                     width,
                     shell.surfaces.sidebar.resizing,
-                    shell.system_glass,
                     shell.surfaces.sidebar.press.clone(),
                 ))
             })

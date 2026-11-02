@@ -1,22 +1,20 @@
 //! Row actions retain the row's identity, independent of the keyboard choice.
 use super::*;
-use crate::theme::current as theme;
-use gpui::{AnyElement, div, px};
 impl ThreadList {
     pub(super) fn toggle_archived(&mut self, cx: &mut Context<Self>) {
         self.archived_open = !self.archived_open;
         self.rebuild();
-        if self.archived_open
-            && let Some(index) = self
-                .rows
-                .iter()
-                .position(|r| r.kind == "section" && r.title == "Archived")
+        // Both ways: closing shortens the list under a heading that keeps focus.
+        if let Some(index) = self
+            .rows
+            .iter()
+            .position(|r| r.kind == "section" && r.title == "Archived")
         {
             self.scroll_row(index, ScrollStrategy::Top, true);
         }
         cx.notify();
     }
-    // Both render locations share one focus handle, so toggling never loses focus.
+    // The heading keeps one focus handle, so toggling never loses focus.
     pub(super) fn archived_key(
         &mut self,
         event: &KeyDownEvent,
@@ -85,25 +83,5 @@ impl ThreadList {
         cx.stop_propagation();
         cx.notify();
         true
-    }
-    pub(super) fn archived_control(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .id("sidebar-archived")
-            .debug_selector(|| "sidebar-archived".into())
-            .track_focus(&self.archived_focus)
-            .focus(|style| style.bg(theme().selection).text_color(theme().text))
-            .h(px(28.))
-            .px(px(12.))
-            .flex()
-            .items_center()
-            .text_size(px(12.))
-            .text_color(theme().text_faint)
-            .cursor_pointer()
-            .child("Archived")
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.archived_focus.focus(window);
-                this.toggle_archived(cx);
-            }))
-            .into_any_element()
     }
 }

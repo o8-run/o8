@@ -159,12 +159,9 @@ fn render(
             })
             // The resize edges stay invisible below; these mark where they sit.
             .when(!hidden && !moving, |row| {
-                let glass = if s.system_glass {
-                    super::super::sidebar::GLASS_EDGE_GAP
-                } else {
-                    0.
-                };
-                row.child(edge_mark().left(px(super::super::sidebar::width(s) + glass)))
+                row.child(edge_mark().left(px(
+                    super::super::sidebar::width(s) + super::super::sidebar::EDGE_GAP,
+                )))
             })
             .when_some(
                 panel.filter(|_| !super::right_panel::maximized(s)),
@@ -181,7 +178,7 @@ fn edge_mark() -> gpui::Div {
         .top(px(8.))
         .bottom(px(8.))
         .w(px(1.))
-        .bg(theme().text_faint)
+        .bg(theme().border)
 }
 
 /// SidebarTogglePill: 14px panel glyph, orange while the sidebar is pinned open.

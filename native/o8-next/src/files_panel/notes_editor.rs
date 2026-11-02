@@ -1,4 +1,4 @@
-//! Editable wrapped Markdown with a measured, shared-scroll annotation rail.
+//! Editable wrapped Markdown with measured note threads under their paragraphs.
 use super::*;
 impl Editor {
     pub(super) fn notes_view(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -15,7 +15,7 @@ impl Editor {
                 .collect(),
         ));
         let rail = self.note_rail(review.notes.clone(), cx);
-        let images = self.inline_images();
+        let images = self.inline_images(cx);
         self.base(cx)
             .flex_col()
             .relative()
@@ -43,6 +43,7 @@ impl Editor {
                     cx.stop_propagation();
                 }
             }))
+            .drag_over::<ExternalPaths>(|d, _, _, _| d.bg(theme().hover).rounded(px(14.)))
             .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 this.move_to(this.index_at(window.mouse_position()), false, cx);
                 for path in paths.paths() {
@@ -53,9 +54,12 @@ impl Editor {
             .when(self.assets.pending > 0, |d| {
                 d.child(
                     div()
+                        .absolute()
+                        .top(px(4.))
+                        .left(px(4.))
                         .text_size(px(9.5))
                         .text_color(theme().text_muted)
-                        .child("Uploading image…"),
+                        .child("Uploading…"),
                 )
             })
             .when_some(self.assets.error.as_ref(), |d, error| {
@@ -124,7 +128,6 @@ impl Editor {
                                                 let review = super::super::spec_rfm::parse(&text);
                                                 let refs = assets::references(&text);
                                                 let mut y = bounds.top();
-                                                let mut note_bottom = y;
                                                 let mut positions =
                                                     std::collections::HashMap::new();
                                                 let mut image_positions = vec![];
@@ -134,30 +137,6 @@ impl Editor {
                                                 #[cfg(test)]
                                                 let mut prose_lines = vec![];
                                                 for row in rows {
-                                                    let attached = review
-                                                        .notes
-                                                        .iter()
-                                                        .filter(|n| {
-                                                            n.offset >= row.start
-                                                                && n.offset <= row.start + row.len
-                                                        })
-                                                        .collect::<Vec<_>>();
-                                                    if !attached.is_empty() {
-                                                        y = y.max(note_bottom);
-                                                        let mut next = y;
-                                                        for note in attached {
-                                                            positions.insert(
-                                                                note.id.clone(),
-                                                                next - bounds.top(),
-                                                            );
-                                                            next += heights
-                                                                .get(&note.id)
-                                                                .copied()
-                                                                .unwrap_or(px(80.))
-                                                                + px(8.);
-                                                        }
-                                                        note_bottom = next;
-                                                    }
                                                     let mut shaped = rich_layout::RichLine::shape(
                                                         &row,
                                                         bounds.size.width.max(px(10.)),
@@ -247,6 +226,23 @@ impl Editor {
                                                         }
                                                     }
                                                     y += h;
+                                                    // A note reads as the reply to its paragraph.
+                                                    for note in review.notes.iter().filter(|n| {
+                                                        !n.resolved
+                                                            && n.offset >= row.start
+                                                            && n.offset <= row.start + row.len
+                                                    }) {
+                                                        y += px(2.);
+                                                        positions.insert(
+                                                            note.id.clone(),
+                                                            y - bounds.top(),
+                                                        );
+                                                        y += heights
+                                                            .get(&note.id)
+                                                            .copied()
+                                                            .unwrap_or(px(24.))
+                                                            + px(6.);
+                                                    }
                                                     layout.push(mapped);
                                                 }
                                                 #[cfg(test)]
@@ -262,8 +258,7 @@ impl Editor {
                                                     ),
                                                 );
                                                 input.update(cx, |i, cx| {
-                                                    let h = (y.max(note_bottom) - bounds.top())
-                                                        .max(px(20.925));
+                                                    let h = (y - bounds.top()).max(px(20.925));
                                                     if i.height != h
                                                         || i.rail.positions != positions
                                                         || i.assets.positions != image_positions
@@ -316,9 +311,9 @@ impl Editor {
                                         .h(height)
                                         .flex_shrink_0(),
                                     )
-                                    .child(rail),
                             )
-                            .child(images),
+                            .child(images)
+                            .child(rail),
                     ),
             )
             .into_any_element()

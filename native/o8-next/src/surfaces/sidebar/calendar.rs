@@ -66,6 +66,18 @@ pub(crate) fn clock(now: u64) -> Option<(i32, i32, i32)> {
 }
 
 /// Local month (0 is January) and day of the month for an epoch second.
+/// Month (1-12), day of month, weekday (0 is Sunday), hour and minute.
+pub(crate) fn moment(time: u64) -> Option<(u32, u32, u32, u32, u32)> {
+    let calendar = local(time)?;
+    let field = |value: c_int| u32::try_from(value).ok();
+    Some((
+        field(calendar.month + 1)?,
+        field(calendar.day)?,
+        field(calendar.weekday)?,
+        field(calendar.hour)?,
+        field(calendar.minute)?,
+    ))
+}
 pub(crate) fn date(time: u64) -> Option<(i32, i32)> {
     local(time).map(|calendar| (calendar.month, calendar.day))
 }

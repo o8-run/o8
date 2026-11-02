@@ -1,4 +1,4 @@
-//! Scoped image paste/drop, existing repo-spec asset writer and inline previews.
+//! Scoped image and video paste/drop, repo-spec asset writer and inline previews.
 use super::super::{io, media};
 use super::*;
 use crate::client::Client;
@@ -16,6 +16,7 @@ pub(in crate::files_panel) struct Assets {
     pub target: Option<(Client, String)>,
     pub generation: u64,
     pub previews: HashMap<String, Option<media::Preview>>,
+    pub retried: std::collections::HashSet<String>,
     pub positions: Vec<(String, Pixels, Pixels, Pixels)>,
     pub error: Option<String>,
     pub pending: usize,
@@ -101,6 +102,7 @@ impl Editor {
                 }
                 this.assets.pending = this.assets.pending.saturating_sub(1);
                 let replacement = match result {
+                    Ok((path, _)) if media::is_video(&path) => format!("![video]({path})"),
                     Ok((path, dimensions)) => match dimensions {
                         Some((w, h)) => format!("![image]({path} \"{w}x{h}\")"),
                         None => format!("![image]({path})"),
@@ -164,7 +166,11 @@ impl Editor {
                 (path, decoder)
             });
             let work = cx.background_executor().spawn(async move {
-                if let Some((path, decoder)) = svg {
+                if media::is_video(&requested) {
+                    media::read_video_poster(&repo, &requested)?
+                        .to_image_data(renderer)
+                        .map_err(|_| "No preview for this video.".into())
+                } else if let Some((path, decoder)) = svg {
                     let image = media::read_notes_image(&client, &repo, &requested)?;
                     let source =
                         std::str::from_utf8(&image.bytes).map_err(|_| "Invalid SVG image.")?;
@@ -179,7 +185,12 @@ impl Editor {
                 let result = work.await;
                 let _ = this.update(cx, |this, cx| {
                     if this.assets.generation == generation {
-                        this.assets.previews.insert(path, Some(result));
+                        // One more read before a failed preview stays on the page.
+                        if result.is_err() && this.assets.retried.insert(path.clone()) {
+                            this.assets.previews.remove(&path);
+                        } else {
+                            this.assets.previews.insert(path, Some(result));
+                        }
                         cx.notify();
                     }
                 });
@@ -187,23 +198,39 @@ impl Editor {
             .detach();
         }
     }
-    pub(super) fn inline_images(&self) -> AnyElement {
+    pub(super) fn inline_images(&self, cx: &mut Context<Self>) -> AnyElement {
+        let repo = self.assets.target.as_ref().map(|(_, repo)| repo.clone());
         div()
             .absolute()
             .left(px(4.))
-            .right(px(158.))
+            .right(px(8.))
             .top(px(22.))
             .children(
                 self.assets
                     .positions
                     .iter()
                     .map(|(path, top, width, height)| {
+                        let video = media::is_video(path);
+                        let file = repo
+                            .as_ref()
+                            .filter(|_| video)
+                            .map(|repo| std::path::Path::new(repo).join(path));
                         div()
+                            .id(ElementId::Name(format!("spec-media-{path}").into()))
                             .debug_selector(|| "spec-inline-image".into())
                             .absolute()
                             .top(*top)
                             .w(*width)
                             .h(*height)
+                            .when_some(file, |d, file| {
+                                d.cursor_pointer()
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .on_click(cx.listener(move |_, _, _, cx| {
+                                        cx.open_with_system(&file)
+                                    }))
+                            })
                             .overflow_hidden()
                             .rounded(px(10.))
                             .border_1()
@@ -228,6 +255,9 @@ impl Editor {
                                                 .object_fit(ObjectFit::Cover),
                                         )
                                         .into_any_element(),
+                                    Some(Err(_)) if video => {
+                                        div().size_full().bg(theme().hover).into_any_element()
+                                    }
                                     Some(Err(error)) => div()
                                         .text_size(px(10.5))
                                         .p(px(8.))
@@ -242,6 +272,22 @@ impl Editor {
                                         .into_any_element(),
                                 },
                             )
+                            .when(video, |d| {
+                                d.child(
+                                    div()
+                                        .absolute()
+                                        .inset_0()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(crate::icon::stroke(
+                                            "M8 5v14l11-7z",
+                                            gpui::white().into(),
+                                            26.,
+                                            1.6,
+                                        )),
+                                )
+                            })
                     }),
             )
             .into_any_element()
@@ -250,10 +296,9 @@ impl Editor {
 fn upload(client: &Client, repo: &str, input: Input) -> Result<String, String> {
     let (status, body) = match input {
         Input::Path(path) => {
-            if !media::is_image(path.to_str().unwrap_or(""))
-                && !media::is_svg(path.to_str().unwrap_or(""))
-            {
-                return Err("Choose an image file.".into());
+            let name = path.to_str().unwrap_or("");
+            if !media::is_image(name) && !media::is_svg(name) && !media::is_video(name) {
+                return Err("Choose an image or video file.".into());
             }
             let path = path.to_str().ok_or("Invalid image path")?;
             io::json_request(

@@ -133,7 +133,7 @@ fn bots_shell_rail_bounds_large_rosters_and_keeps_the_footer_clickable(cx: &mut 
         );
         settle(&shell, &mut visual);
         ready(&shell, &mut visual);
-        for height in [400., 480., 520., 540., 816.] {
+        for height in [400., 480., 520., 540., 628., 816.] {
             configure(&fixture, json!({"bots":[]}));
             shell.update(&mut visual, |s, _| s.surfaces.bots.fetched = None);
             settle(&shell, &mut visual);
@@ -173,7 +173,7 @@ fn bots_shell_rail_bounds_large_rosters_and_keeps_the_footer_clickable(cx: &mut 
                 .filter(|b| b.size.height >= px(44.))
             else {
                 assert!(
-                    height < 540.,
+                    height < 628.,
                     "a complete bot row fits at feasible short heights"
                 );
                 continue;

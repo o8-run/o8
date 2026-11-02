@@ -430,7 +430,8 @@ pub struct MeterState {
     pub width: f32,
     pub anchor: Option<gpui::Bounds<gpui::Pixels>>,
     pub card_bounds: Option<gpui::Bounds<gpui::Pixels>>,
-    pub focus_events: Option<[gpui::Subscription; 2]>,
+    /// The help card: hovering, until a click puts it away.
+    pub help: bool,
 }
 pub fn telemetry(response: &Value) -> f64 {
     let t = &response["telemetry"];

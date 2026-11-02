@@ -106,3 +106,26 @@ fn sidebar_project_header_switches_repos_and_projects(cx: &mut TestAppContext) {
     let ledger: Value = fixture.client.get("/api/panel/projects", &[]).unwrap();
     assert_eq!(ledger["activeProjectId"], second_id);
 }
+
+#[gpui::test]
+fn sidebar_project_row_sits_level_with_the_home_mark(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(true, "--shell --composer");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("project-level.json"),
+        State::default(),
+        cx,
+    );
+    wait_for(&shell, &mut visual, |s, _| s.connected);
+    let cx = &mut visual;
+    let home = cx.debug_bounds("shell-home").expect("home mark");
+    let header = cx
+        .debug_bounds("sidebar-project-header")
+        .expect("project header");
+    let home = f32::from(home.origin.y) + f32::from(home.size.height) / 2.;
+    // The 32px switcher sits 13px down the header.
+    let row = f32::from(header.origin.y) + 13. + 16.;
+    // Measured in the desktop DOM: Home 70, Switch project 69.
+    assert_eq!(home, 70.);
+    assert_eq!(row, 69.);
+}

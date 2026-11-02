@@ -300,3 +300,28 @@ fn customize_closes_by_button_key_and_destination(cx: &mut TestAppContext) {
         "the page opens in front"
     );
 }
+
+#[gpui::test]
+fn rail_plugins_opens_customize_on_its_tab(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--customize");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("customize-plugins.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    custom_click(cx, "rail-plugins");
+    assert!(shell.read_with(cx, |s, cx| s.customize_tab_open("plugins", cx)));
+    // Symon sits between home and the orchestrator, as in classic's rail.
+    let y = |cx: &mut VisualTestContext, id: &'static str| {
+        f32::from(cx.debug_bounds(id).expect(id).origin.y)
+    };
+    let (home, symon, run) = (
+        y(cx, "shell-home"),
+        y(cx, "rail-symon"),
+        y(cx, "rail-orchestrator"),
+    );
+    assert!(home < symon && symon < run, "{home} {symon} {run}");
+}

@@ -449,7 +449,11 @@ fn width_bounds(s: &Shell, viewport: f32) -> (f32, f32) {
     } else {
         super::super::sidebar::width(s)
     };
-    let available = viewport - super::super::rail::WIDTH - super::content::FRAME_SPACE - sidebar;
+    let available = viewport
+        - super::super::rail::WIDTH
+        - super::content::FRAME_SPACE
+        - super::super::sidebar::workspace_inset(s)
+        - sidebar;
     let max = MAX_WIDTH.min(
         (available - WORKSPACE_RESERVE - if s.system_glass { COLUMN_CHROME } else { 1. }).max(0.),
     );
@@ -462,6 +466,7 @@ fn full_width(s: &Shell, viewport: f32) -> f32 {
     let available = viewport
         - super::super::rail::WIDTH
         - super::content::FRAME_SPACE
+        - super::super::sidebar::workspace_inset(s)
         - if s.surfaces.sidebar.hidden {
             0.
         } else {
@@ -527,14 +532,12 @@ pub(super) fn edge(
         .get_or_insert_with(|| cx.focus_handle())
         .clone();
     let lit = s.features.get::<Panel>().resizing || focus.is_focused(window);
-    let accent = theme().accent;
     div()
         .id("panel-resize")
         .debug_selector(|| "panel-resize".into())
-        .group("panel-resize")
         .track_focus(&focus)
         .absolute()
-        .top_0()
+        .top(px(-crate::theme::GEOMETRY.header))
         .bottom_0()
         .right(px(shown - EDGE_SLOP - 0.5))
         .w(px(EDGE_SLOP * 2. + 1.))
@@ -547,23 +550,12 @@ pub(super) fn edge(
             }),
         )
         .on_drag(Resize, |_, _, _, cx| cx.new(|_| Resize))
-        .child(
-            div()
-                .absolute()
-                .top(px(if s.system_glass { 22. } else { 0. }))
-                .bottom(px(if s.system_glass { 22. } else { 0. }))
-                .left(px(EDGE_SLOP))
-                .w(px(1.))
-                .bg(accent)
-                .shadow(vec![gpui::BoxShadow {
-                    color: accent.into(),
-                    offset: gpui::point(px(0.), px(0.)),
-                    blur_radius: px(8.),
-                    spread_radius: px(0.),
-                }])
-                .opacity(if lit { 0.85 } else { 0. })
-                .group_hover("panel-resize", |style| style.opacity(0.85)),
-        )
+        .child(crate::theme::split_line(
+            "panel-resize",
+            true,
+            EDGE_SLOP,
+            lit,
+        ))
 }
 
 /// Opens the panel on one tool, creating that tool's view the first time.

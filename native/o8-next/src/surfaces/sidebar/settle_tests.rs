@@ -432,7 +432,7 @@ fn sidebar_inbox_vocabulary_keeps_merge_outcome_separate_from_attention(cx: &mut
         s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
     });
     // Searching opens every shelf and exposes this older row through the real editor.
-    click(&mut visual, "thread-search");
+    visual.simulate_keystrokes("ctrl-f");
     visual.simulate_input("Sidebar thread 19");
     wait_for(&shell, &mut visual, |s, cx| {
         s.surfaces.sidebar.view.as_ref().unwrap().read(cx).rows.iter()
@@ -693,7 +693,7 @@ fn parking_view(cx: &mut TestAppContext, flags: &str, section_name: &str) -> (Fi
     wait_for(&shell, &mut visual, |s, _| {
         s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
     });
-    click(&mut visual, "thread-search");
+    visual.simulate_keystrokes("ctrl-f");
     visual.simulate_input("Sidebar thread 19");
     wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, "thoughts-sidebar-0019", section_name));
     (fixture, shell, visual)
@@ -848,7 +848,7 @@ fn sidebar_parked_runtime_keeps_receipt_and_restore_after_inventory_refresh(cx: 
     click(&mut visual, "sidebar-view");
     click(&mut visual, "sidebar-view-detailed");
     wait_for(&shell, &mut visual, |s, _| s.state.sidebar_detailed_rows);
-    click(&mut visual, "thread-search");
+    visual.simulate_keystrokes("ctrl-f");
     visual.simulate_input("Grid runtime worker");
     wait_for(&shell, &mut visual, |s, cx| {
         let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);

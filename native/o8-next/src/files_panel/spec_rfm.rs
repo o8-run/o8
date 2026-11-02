@@ -17,7 +17,6 @@ pub(super) struct Note {
 #[derive(Default)]
 pub(super) struct Review {
     pub hidden: Vec<Range<usize>>,
-    pub dots: Vec<usize>,
     pub anchors: Vec<Range<usize>>,
     pub adds: Vec<Range<usize>>,
     pub deletes: Vec<Range<usize>>,
@@ -108,11 +107,6 @@ pub(super) fn parse(source: &str) -> Review {
         if m.end() > end + 3 {
             out.hidden.push(end + 3..m.end());
         }
-        // The canonical index ignores fenced and inline code, while buildAll's
-        // display projection intentionally follows classic's regex decoration.
-        if comment && !metadata.contains_key("re") {
-            out.dots.push(from);
-        }
         if in_code {
             continue;
         }
@@ -169,6 +163,18 @@ pub(super) fn parse(source: &str) -> Review {
             note.replies.push((author, text));
         }
     }
+    // A finished note leaves the page, so its phrase stops being marked.
+    let finished: Vec<usize> = out
+        .notes
+        .iter()
+        .filter(|note| note.resolved)
+        .map(|note| note.offset)
+        .collect();
+    out.anchors.retain(|anchor| {
+        !finished
+            .iter()
+            .any(|at| anchor.contains(at) || *at == anchor.end + 3 || at + 3 == anchor.start)
+    });
     out
 }
 

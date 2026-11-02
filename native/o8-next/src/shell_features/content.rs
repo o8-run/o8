@@ -10,11 +10,30 @@ impl ShellFeature for ContentSlot {
         }]
     }
 }
-/// Classic's SHELL_EDGE_INSET and frame corner radius (shell-geometry.ts).
+/// Classic's SHELL_EDGE_INSET (shell-geometry.ts).
 const EDGE_INSET: f32 = 4.;
-const FRAME_RADIUS: f32 = 14.;
+/// Classic's workspace card corner (WORKSPACE_RAIL_CORNER_RADIUS, branch-rail-geometry.ts).
+const CARD_RADIUS: f32 = 26.;
 /// Width the frame takes from the panel row: the inset and its two borders.
-pub(super) const FRAME_SPACE: f32 = EDGE_INSET + 2.;
+pub(super) const FRAME_SPACE: f32 = EDGE_INSET;
+/// Nothing frames the sidebar: it sits on the window and only the workspace is
+/// a card. All Glass fills it with OrchestratorTab's fog, `--t-glass-muted`
+/// fading to clear, with no border. Dark and light keep their colors, so a
+/// border in their usual ink is what shows the corners (Q 2026-11-01).
+fn workspace_card(element: gpui::Div) -> gpui::Div {
+    let card = element.rounded(px(CARD_RADIUS)).overflow_hidden();
+    if crate::theme::glass() {
+        let fog = crate::theme::glass_muted();
+        card.bg(gpui::linear_gradient(
+            180.,
+            gpui::linear_color_stop(fog, 0.),
+            gpui::linear_color_stop(gpui::Rgba { a: 0., ..fog }, 1.),
+        ))
+    } else {
+        card.border_1()
+            .border_color(crate::theme::current().border)
+    }
+}
 fn render(
     s: &mut Shell,
     frame: &Frame,
@@ -37,16 +56,7 @@ fn render(
                 .pr(px(EDGE_INSET))
                 .pb(px(EDGE_INSET))
                 .child(
-                    div()
-                        .flex()
-                        .flex_1()
-                        .min_h_0()
-                        .min_w_0()
-                        .rounded(px(FRAME_RADIUS))
-                        .overflow_hidden()
-                        .border_1()
-                        .border_color(crate::theme::current().border)
-                        .children(page),
+                    workspace_card(div().flex().flex_1().min_h_0().min_w_0()).children(page),
                 )
                 .into_any_element(),
         );
@@ -71,6 +81,9 @@ fn render(
         .children(super::activity_dock::element(s, window, cx))
         .into_any_element();
     let content = super::panes::element(s, content, cx);
+    let content = workspace_card(div().flex().flex_col().flex_1().min_h_0().min_w_0())
+        .child(content)
+        .into_any_element();
     // The right panel sits inside the sidebar decoration, beside the content.
     super::right_panel::settle_resize(s, cx);
     let content = match super::right_panel::element(s, window, cx) {
@@ -93,6 +106,8 @@ fn render(
                         .flex_col()
                         .flex_1()
                         .min_w_0()
+                        // Classic's `workspaceInset` beside the panel column.
+                        .mr(px(EDGE_INSET))
                         .overflow_hidden()
                         .child(content),
                 )
@@ -103,10 +118,7 @@ fn render(
                     .h_full()
                     .flex_shrink_0()
                     .overflow_hidden()
-                    .rounded_br(px(14.))
-                    .when(s.system_glass || super::right_panel::maximized(s), |v| {
-                        v.rounded_bl(px(14.))
-                    })
+                    .rounded(px(14.))
                     .child(panel)
                     .map(|v| super::rail_drag::panel_target(s, v, cx)),
             )
@@ -145,18 +157,7 @@ fn render(
                     cx.notify();
                 },
             ))
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .rounded(px(FRAME_RADIUS))
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(crate::theme::current().border)
-                    .child(content),
-            )
+            .child(div().flex().flex_1().min_h_0().min_w_0().child(content))
             .into_any_element(),
     )
 }
