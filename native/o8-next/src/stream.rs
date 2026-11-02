@@ -246,9 +246,12 @@ impl Transcript {
     fn render(&mut self, entries: &[Entry]) -> Vec<Row> {
         if let Some(live) = &self.live
             && entries.iter().any(|entry| {
+                let tools = |entry: &Entry| entry.tools.as_ref().map_or(0, Vec::len);
                 entry.id == live.id
-                    && (!entry.text.trim().is_empty()
-                        || entry.tools.as_ref().is_some_and(|tools| !tools.is_empty()))
+                    && (!entry.text.trim().is_empty() || tools(entry) > 0)
+                    // A save during the turn lags the stream it came from.
+                    && (!self.context_busy
+                        || entry.text.len() >= live.text.len() && tools(entry) >= tools(live))
             })
         {
             self.live = None;
@@ -990,6 +993,38 @@ mod tests {
         transcript.apply(&frame(6, "status", serde_json::json!({"status":"stopped"})));
         assert!(!live_last(&transcript), "the turn's end clears it");
     }
+    #[test]
+    fn a_save_during_the_turn_keeps_the_live_reply_and_its_tools() {
+        let mut t = live("llm-chat:lag");
+        t.apply(&frame(
+            "lag",
+            1,
+            "status",
+            serde_json::json!({"status":"busy"}),
+        ));
+        t.apply(&frame(
+            "lag",
+            2,
+            "output",
+            serde_json::json!({"text":"The whole reply so far"}),
+        ));
+        let id = t.live.as_ref().unwrap().id.clone();
+        t.live.as_mut().unwrap().tools = Some(vec![serde_json::json!({"id":"t1"})]);
+        let saved = serde_json::from_value::<History>(serde_json::json!({
+            "sessionKey":"llm-chat:lag",
+            "transcript":[{"id":id,"role":"assistant","text":"The whole"}]
+        }))
+        .unwrap();
+        let checkpoint = t.checkpoint();
+        t.saved_tail(saved, checkpoint);
+        let live = t
+            .live
+            .as_ref()
+            .expect("the live reply survives a partial save");
+        assert_eq!(live.text, "The whole reply so far");
+        assert_eq!(live.tools.as_ref().map(Vec::len), Some(1));
+    }
+
     #[test]
     fn saved_tail_keeps_older_rows_and_yields_to_newer_websocket_history() {
         let history = |text: &str| {
