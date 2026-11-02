@@ -10,10 +10,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(test)]
-#[path = "shell_state_barrier.rs"]
-pub(crate) mod barrier;
-
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Workspace {
     pub tabs: Vec<Tab>,
@@ -269,8 +265,6 @@ impl State {
         Ok(state)
     }
     pub fn save(&self, file: &Path) -> Result<(), String> {
-        #[cfg(test)]
-        barrier::before_save(file, self);
         // An unreadable source may contain valid state. Keep this session in
         // memory rather than replacing bytes we could not inspect.
         if self.retain_file {

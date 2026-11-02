@@ -141,7 +141,9 @@ impl Shell {
         shell
     }
     fn persist(&mut self) {
-        features::persist_window_state(self);
+        if let Err(error) = self.state.save(&self.file) {
+            self.notice = format!("{error}. View state remains in memory.");
+        }
     }
     fn load(&mut self, cx: &mut Context<Self>) {
         if registry::extensions().any(|extension| extension.load(self, cx)) {
