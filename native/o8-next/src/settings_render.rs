@@ -90,6 +90,11 @@ impl Render for Settings {
             .pr(px(16.));
         navigation = self.navigation_list(navigation, window, cx);
         let query = self.search.read(cx).text.trim().to_lowercase();
+        if !crate::shell::settings::mobile::page_shown(self.section, &query)
+            && let Some(mobile) = &self.mobile
+        {
+            mobile.update(cx, |mobile, cx| mobile.hide_pairing(cx));
+        }
         let mut content = div()
             .id("settings-content")
             .flex_1()

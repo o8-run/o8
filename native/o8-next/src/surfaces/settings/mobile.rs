@@ -49,6 +49,12 @@ struct Device {
     revoked: bool,
 }
 
+/// A code is up only while its page is: anywhere else it would keep minting
+/// single-use enroll codes, and be waiting on screen when the page came back.
+pub(crate) fn page_shown(section: &str, query: &str) -> bool {
+    section == "mobile" && query.len() < 2
+}
+
 /// The JSON the o8 app's scanner reads, built as classic builds it.
 fn payload(reply: &Value, hosts: &[String]) -> Value {
     let mut body = json!({
@@ -278,7 +284,10 @@ impl Mobile {
         cx.notify();
     }
 
-    fn hide_pairing(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn hide_pairing(&mut self, cx: &mut Context<Self>) {
+        if self.pairing == Pairing::Hidden {
+            return;
+        }
         self.pairing_turn += 1;
         self.pairing = Pairing::Hidden;
         cx.notify();
@@ -617,6 +626,30 @@ mod tests {
         let mut lost = reply();
         lost["host"] = Value::Null;
         assert_eq!(pairing_code(&lost), Err(NO_ADDRESS.into()));
+    }
+
+    #[test]
+    fn only_the_mobile_page_keeps_a_code_up() {
+        assert!(page_shown("mobile", ""));
+        assert!(!page_shown("general", ""));
+        assert!(!page_shown("mobile", "search"));
+    }
+
+    #[gpui::test]
+    fn hiding_ends_the_renewal_and_clears_the_code(cx: &mut gpui::TestAppContext) {
+        let client = Client::authenticated("http://127.0.0.1:1", None).unwrap();
+        let view = cx.new(|cx| Mobile::new(client, cx));
+        view.update(cx, |mobile, cx| {
+            mobile.pairing = Pairing::Ready(pairing_code(&reply()).unwrap());
+            let turn = mobile.pairing_turn;
+            mobile.hide_pairing(cx);
+            assert_eq!(mobile.pairing, Pairing::Hidden);
+            assert_eq!(
+                mobile.pairing_turn,
+                turn + 1,
+                "the renewal loop sees a new turn"
+            );
+        });
     }
 
     #[test]
