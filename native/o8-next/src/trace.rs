@@ -1257,7 +1257,7 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
             // The column narrows with the window; the last painted width says how far.
             let width = COLUMN
                 .with(Cell::get)
-                .unwrap_or(crate::theme::GEOMETRY.composer_width)
+                .unwrap_or_else(crate::theme::chat_width)
                 - TEXT_X;
             let (shown, more) = fit(&line.chips, line.more, width);
             let chips_row = chips_since.map(|since| {
@@ -1372,7 +1372,7 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
         .map(|(n, bubble)| crate::thread_messages::element(bubble, format!("trace-message-{index}-{n}")))
         .collect();
     // Reading column and insets match the transcript's message rows.
-    let column = crate::theme::GEOMETRY.composer_width + 48.;
+    let column = crate::retained::reading_column();
     div()
         .w_full()
         .flex()

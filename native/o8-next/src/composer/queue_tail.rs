@@ -28,7 +28,7 @@ pub(crate) fn queue_tail(
                 .id("composer-queue")
                 .debug_selector(|| "composer-queue".into())
                 .w_full()
-                .max_w(px(crate::retained::COLUMN))
+                .max_w(px(crate::retained::reading_column()))
                 .pl(px(18.))
                 .pr(px(23.))
                 .pb(px(12.))
