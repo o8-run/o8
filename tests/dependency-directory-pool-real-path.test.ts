@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { materializeDependencyInstall } from '@/lib/workspace/dependency-materializer';
-import { dependencyDirectoryPoolStatus, waitForDependencyDirectoryPool } from '@/lib/workspace/dependency-directory-pool';
+import { dependencyDirectoryPoolRoot, dependencyDirectoryPoolStatus, waitForDependencyDirectoryPool } from '@/lib/workspace/dependency-directory-pool';
 import * as storage from '@/lib/worktree/storage-telemetry';
 import * as leaf from '@/lib/worktree/materialization-leaf-io';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -13,7 +13,7 @@ const roots: string[] = [];
 afterEach(async () => {
   await waitForDependencyDirectoryPool();
   vi.restoreAllMocks();
-  rmSync(path.join(getDataDir(), 'dependency-directory-pool-v1'), { recursive: true, force: true });
+  rmSync(dependencyDirectoryPoolRoot(), { recursive: true, force: true });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -57,8 +57,16 @@ async function warm(source: string, root: string) {
 
 it.skipIf(process.platform !== 'darwin')('consumes distinct validated trees once and refills within the slot and byte bounds', async () => {
   const { source, workspace, root } = fixture();
+  const legacy = path.join(getDataDir(), 'dependency-directory-pool-v1');
+  mkdirSync(legacy, { mode: 0o700 });
+  roots.push(legacy);
+  writeFileSync(path.join(legacy, 'preserve.txt'), 'older pool owner');
+  const legacyInode = lstatSync(legacy).ino;
   await warm(source, root);
   expect(await dependencyDirectoryPoolStatus()).toMatchObject({ state: 'ready', readyTrees: 2 });
+  expect(lstatSync(path.join(getDataDir(), 'dependency-directory-pool-v1.noindex')).isDirectory()).toBe(true);
+  expect(lstatSync(legacy).ino).toBe(legacyInode);
+  expect(readFileSync(path.join(legacy, 'preserve.txt'), 'utf8')).toBe('older pool owner');
   const second = path.join(root, 'second');
   execFileSync('git', ['clone', '--local', '-q', source, second]);
   const clone = vi.spyOn(leaf, 'clonePinnedWorkspaceDirectory');
@@ -113,7 +121,7 @@ it.skipIf(process.platform !== 'darwin')('reuses ready trees across source-only 
 it.skipIf(process.platform !== 'darwin')('recovers a slot claimed by an exited consumer and refills it', async () => {
   const { source, workspace, root } = fixture();
   await warm(source, root);
-  const slot = path.join(getDataDir(), 'dependency-directory-pool-v1/slot-0');
+  const slot = path.join(dependencyDirectoryPoolRoot(), 'slot-0');
   execFileSync(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx', '--input-type=module', '-e', `
     const ownerModule = await import('./src/lib/workspace/dependency-pool-owner.ts');
     const identityModule = await import('./src/lib/worktree/materialization-identity.ts');
@@ -144,7 +152,7 @@ it.skipIf(process.platform !== 'darwin')('preserves an occupied destination duri
 
 it.skipIf(process.platform !== 'darwin')('holds an unreceipted slot and exposes reduced pool capacity without deleting it', async () => {
   const { source, root } = fixture();
-  const slot = path.join(getDataDir(), 'dependency-directory-pool-v1/slot-0');
+  const slot = path.join(dependencyDirectoryPoolRoot(), 'slot-0');
   mkdirSync(slot, { recursive: true, mode: 0o700 });
   writeFileSync(path.join(slot, 'preserve.txt'), 'unproved ownership');
   await warm(source, root);

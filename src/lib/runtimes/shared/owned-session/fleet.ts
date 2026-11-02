@@ -313,7 +313,11 @@ export function createFleetComputer({
     return !stopFailed;
   }
 
-  async function sweepOrphanedSessions(activeSurfaceIds: Set<string>, maxAgeMs: number): Promise<number> {
+  async function sweepOrphanedSessions(
+    activeSurfaceIds: Set<string>,
+    maxAgeMs: number,
+    chatOwnedSurfaceIds: ReadonlySet<string> = new Set(),
+  ): Promise<number> {
     let archived = 0;
     for (const sessionDir of await io.listSessionDirs()) {
       try {
@@ -329,6 +333,8 @@ export function createFleetComputer({
           if (activeSurfaceIds.has(current.surfaceId)) return false;
           if (Date.now() - sessionLastActivityMs(current) < maxAgeMs) return false;
           if (current.activeRun) {
+            // A chat's shared-checkout worker has no lane, but its live run belongs to that chat.
+            if (chatOwnedSurfaceIds.has(current.surfaceId)) return false;
             const stopped = await markActiveRunOrphaned(current, `No lane referenced this owned ${runtimeId} session within ${Math.round(maxAgeMs / 1000)}s of launch.`);
             // Archiving renames the directory out of the scanned root, so a
             // session archived while its worker is still alive can never be

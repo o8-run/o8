@@ -170,6 +170,31 @@ describe('workflow policy — every workflow is classified from the filesystem',
         for (const run of runs.slice(1)) expect(run).toMatch(/^node "\$POLICY_PATH" --base "\$BASE_REF" --head "\$HEAD_REF"/);
         return [];
       }
+      if (file.name === 'test-deletion-review.yml') {
+        // Base-owned for the same reason: a PR must not edit the policy that
+        // judges its own test removals. It only reads PR objects with `git show`.
+        expect(file.workflow.permissions).toEqual({ contents: 'read' });
+        expect(Object.keys(file.workflow.on as RecordValue).sort()).toEqual(['merge_group', 'pull_request_target']);
+        expect(jobsIn(file).map(([name]) => name)).toEqual(['test-deletions']);
+        const job = jobsIn(file)[0][1];
+        expect(job.permissions).toBeUndefined();
+        expect(job.environment).toBeUndefined();
+        expect(stringsIn(job.env).some(value => value.includes('secrets.'))).toBe(false);
+        const env = job.env as RecordValue;
+        expect(env.BASE_SHA).toBe('${{ github.event.pull_request.base.sha }}');
+        expect(env.HEAD_SHA).toBe('${{ github.event.pull_request.head.sha }}');
+        const steps = job.steps as RecordValue[];
+        const checkouts = steps.filter(step => String(step.uses).startsWith('actions/checkout@'));
+        expect(checkouts).toHaveLength(1);
+        expect(checkouts[0].with).toEqual({ ref: '${{ github.event.pull_request.base.sha }}', 'fetch-depth': 0, 'persist-credentials': false });
+        expect(steps.some(step => String(step.uses).startsWith('actions/cache@'))).toBe(false);
+        const runs = steps.filter(step => typeof step.run === 'string').map(step => String(step.run));
+        expect(runs).toHaveLength(3);
+        expect(runs.join('\n')).not.toMatch(/\$\{\{/);
+        expect(runs[1]).toContain('git show "$BASE_SHA:$CHECKER_PATH" > "$POLICY_PATH"');
+        expect(runs[2]).toBe('node "$POLICY_PATH" "$BASE_SHA" "$HEAD_SHA"');
+        return [];
+      }
       const checkoutViolations = usesReferences(file)
         .filter(({ uses }) => /^actions\/checkout(?:@|\/|$)/i.test(uses))
         .map(({ location, uses }) => `${location}: ${uses}`);

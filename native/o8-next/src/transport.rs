@@ -82,9 +82,76 @@ fn emit(
     client.wake();
     true
 }
+/// Sends the desktop stop pill's `orchestrator-interrupt` for one chat over a
+/// one-shot socket; session sockets stay read-only. The server answers only
+/// this socket, so it waits for the `interrupt-ack` and returns its state
+/// (`accepted`, `already-interrupted` or `not-running`).
+pub(crate) fn interrupt(
+    client: &Client,
+    repo: &str,
+    thread: &str,
+    backend: Option<&str>,
+) -> Result<String, String> {
+    let (url, address) = client.websocket()?;
+    let tcp = TcpStream::connect_timeout(&address, Duration::from_secs(2))
+        .map_err(|_| "Could not reach the chat server.".to_string())?;
+    tcp.set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|_| "Could not reach the chat server.".to_string())?;
+    tcp.set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|_| "Could not reach the chat server.".to_string())?;
+    let request = url
+        .as_str()
+        .into_client_request()
+        .map_err(|_| "Invalid chat socket.".to_string())?;
+    let (mut socket, _) = tungstenite::client::client(request, tcp)
+        .map_err(|_| "The chat server refused the socket.".to_string())?;
+    let mut frame = json!({"type":"orchestrator-interrupt","repoPath":repo,"threadId":thread});
+    if let Some(backend) = backend {
+        frame["backend"] = json!(backend);
+    }
+    socket
+        .send(Message::Text(frame.to_string().into()))
+        .map_err(|_| "The stop request was not sent.".to_string())?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(4);
+    let mut answer = Err("The chat server did not confirm the stop.".to_string());
+    while std::time::Instant::now() < deadline {
+        let message = match socket.read() {
+            Ok(message) => message,
+            Err(tungstenite::Error::Io(_)) => continue,
+            Err(_) => break,
+        };
+        let Message::Text(text) = message else {
+            continue;
+        };
+        let Ok(reply) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        if reply["channel"] != "orchestrator" || reply["data"]["threadId"] != thread {
+            continue;
+        }
+        match reply["event"].as_str() {
+            Some("interrupt-ack") => {
+                answer = Ok(reply["data"]["state"].as_str().unwrap_or("accepted").into());
+                break;
+            }
+            Some("error") => {
+                answer = Err(reply["data"]["error"]
+                    .as_str()
+                    .unwrap_or("The stop failed.")
+                    .into());
+                break;
+            }
+            _ => {}
+        }
+    }
+    let _ = socket.close(None);
+    let _ = socket.flush();
+    answer
+}
 fn run(
     client: &Client,
     stream: &str,
+    live: Option<&Value>,
     sender: &SyncSender<Incoming>,
     cancel: &Cancel,
     backoff: &mut u64,
@@ -120,6 +187,11 @@ fn run(
                 .into(),
         ))
         .map_err(|_| ())?;
+    if let Some(live) = live {
+        socket
+            .send(Message::Text(live.to_string().into()))
+            .map_err(|_| ())?;
+    }
     if !emit(sender, cancel, client, Incoming::Status("Live · read-only")) {
         return Ok(());
     }
@@ -156,19 +228,43 @@ fn run(
     Ok(())
 }
 pub fn subscribe(client: Client, key: String) -> Subscription {
-    subscribe_stream(client, format!("session:{key}"))
+    subscribe_stream(client, format!("session:{key}"), None)
+}
+/// A conversation's history plus its orchestrator stream, which carries the
+/// in-flight turn's thinking, tool calls and reply text as they happen.
+pub fn subscribe_live(
+    client: Client,
+    key: String,
+    repo: String,
+    backend: Option<String>,
+) -> Subscription {
+    let thread = key.strip_prefix("llm-chat:").unwrap_or(&key).to_owned();
+    // since 0 replays the turn in flight; Transcript drops replayed seqs.
+    let mut live =
+        json!({"type":"orchestrator-subscribe","repoPath":repo,"threadId":thread,"since":0});
+    if let Some(backend) = backend {
+        live["backend"] = Value::String(backend);
+    }
+    subscribe_stream(client, format!("session:{key}"), Some(live))
 }
 pub fn subscribe_global(client: Client) -> Subscription {
-    subscribe_stream(client, "global".into())
+    subscribe_stream(client, "global".into(), None)
 }
-fn subscribe_stream(client: Client, stream: String) -> Subscription {
+fn subscribe_stream(client: Client, stream: String, live: Option<Value>) -> Subscription {
     let (sender, receiver) = mpsc::sync_channel(64);
     let cancel = Arc::new(Cancel::default());
     let stopped = cancel.clone();
     thread::spawn(move || {
         let mut backoff = 1;
         while !stopped.is_stopped() {
-            let _ = run(&client, &stream, &sender, &stopped, &mut backoff);
+            let _ = run(
+                &client,
+                &stream,
+                live.as_ref(),
+                &sender,
+                &stopped,
+                &mut backoff,
+            );
             if stopped.is_stopped() {
                 break;
             }

@@ -137,7 +137,7 @@ describe('review completeness trace through lane prompt entry points', () => {
     );
     expect(h.reviewerPrompts[0]).toContain('or any COMPLETENESS site is uncovered');
     expect(h.reviewerPrompts[0]).toContain(
-      'list EVERY uncovered `SITE:` line in the request-changes findings',
+      'list every uncovered `SITE:` line in the request-changes findings',
     );
     expect(h.markReviewCompleted).toHaveBeenCalledOnce();
   });

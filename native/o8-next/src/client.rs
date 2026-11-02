@@ -6,13 +6,47 @@ use url::{Host, Url};
 
 // Cold route compilation can outlast window creation. Bound the entire GET,
 // including its response body, without extending mutation request deadlines.
-const LOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
+pub(crate) const LOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 
 fn timed_out(error: &(dyn std::error::Error + 'static)) -> bool {
     error
         .downcast_ref::<std::io::Error>()
         .is_some_and(|error| error.kind() == std::io::ErrorKind::TimedOut)
         || error.source().is_some_and(timed_out)
+}
+
+/// Backoff before the one retry of an idempotent GET.
+pub(crate) const GET_RETRY_BACKOFF: Duration = Duration::from_millis(250);
+
+/// Idempotent reads retry once after a refused or reset connection, so a briefly
+/// busy server does not surface as an error row. HTTP status answers are final,
+/// and a timeout has already spent the whole deadline, so neither is retried.
+pub(crate) fn get_with_retry(
+    mut call: impl FnMut() -> Result<ureq::Response, ureq::Error>,
+) -> Result<ureq::Response, ureq::Error> {
+    match call() {
+        Err(error @ ureq::Error::Transport(_)) if timed_out(&error) => Err(error),
+        Err(ureq::Error::Transport(_)) => {
+            std::thread::sleep(GET_RETRY_BACKOFF);
+            call()
+        }
+        other => other,
+    }
+}
+
+/// A read failed because the server was slow or busy, not because it refused
+/// the request or is gone. Surfaces keep their last good data.
+pub(crate) fn transient(error: &str) -> bool {
+    error.ends_with("Request timed out")
+        || ["502", "503", "504"]
+            .iter()
+            .any(|code| error.ends_with(&format!("Server returned HTTP {code}")))
+}
+
+/// The stale line shown over last good data (classic AgentPanel's stale strip).
+pub(crate) fn stale_notice(error: &str) -> String {
+    let reason = error.rsplit(": ").next().unwrap_or(error);
+    format!("Showing last loaded data · stale ({reason})")
 }
 
 pub(crate) fn same_workspace(a: &str, b: &str) -> bool {
@@ -128,8 +162,12 @@ impl Client {
     ) -> Result<T, String> {
         let mut url = self.url(path).map_err(|_| "Invalid route")?;
         url.query_pairs_mut().extend_pairs(query.iter().copied());
-        let request = self.request("GET", &url).timeout(LOAD_REQUEST_TIMEOUT);
-        let response = request.call().map_err(|error| {
+        let response = get_with_retry(|| {
+            self.request("GET", &url)
+                .timeout(LOAD_REQUEST_TIMEOUT)
+                .call()
+        })
+        .map_err(|error| {
             let message = match &error {
                 ureq::Error::Status(code, _) => format!("Server returned HTTP {code}"),
                 _ if timed_out(&error) => "Request timed out".into(),
@@ -185,6 +223,45 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transient_errors_are_stale_not_fatal() {
+        assert!(super::transient("/api/panel/repos: Request timed out"));
+        assert!(super::transient("/api/panel/repos: Server returned HTTP 503"));
+        assert!(!super::transient("/api/panel/repos: Server returned HTTP 401"));
+        assert_eq!(
+            super::stale_notice("/api/panel/repos: Request timed out"),
+            "Showing last loaded data · stale (Request timed out)"
+        );
+    }
+
+    #[test]
+    fn get_retries_once_after_a_dropped_connection_and_never_on_status() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            // First connection is dropped unanswered; the second gets JSON,
+            // the third a 503 that must not be retried.
+            let (first, _) = listener.accept().unwrap();
+            drop(first);
+            for body in ["HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}",
+                         "HTTP/1.1 503 Busy\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                stream.write_all(body.as_bytes()).unwrap();
+            }
+            listener.set_nonblocking(true).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            listener.accept().is_err()
+        });
+        let client = super::Client::new(&format!("http://127.0.0.1:{port}")).unwrap();
+        let ok: serde_json::Value = client.get("/api/panel/repos", &[]).unwrap();
+        assert_eq!(ok["ok"], true);
+        assert!(client.get::<serde_json::Value>("/api/panel/repos", &[]).unwrap_err().contains("HTTP 503"));
+        assert!(server.join().unwrap(), "a status answer was retried");
+    }
+
     use super::*;
     #[test]
     fn explicit_loopback_only() {

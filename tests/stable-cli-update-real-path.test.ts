@@ -25,8 +25,8 @@ vi.mock('@/lib/runtimes/shared/cli-resolver', () => ({ invalidateCliCache: vi.fn
     source: fixture.source, version: fixture.version }),
 }));
 vi.mock('node:child_process', () => ({ execFile: (command: string, args: string[], _options: unknown,
-  callback: (error: Error | null, result?: { stdout: string; stderr: string }) => void) => {
-  if (command === '/bin/ps') { callback(null, { stdout: fixture.externalBusy ? `claude ${fixture.selected}` : '', stderr: '' }); return; }
+  callback: (error: Error | null, stdout?: string, stderr?: string) => void) => {
+  if (command === '/bin/ps') { callback(null, fixture.externalBusy ? `claude ${fixture.selected}` : '', ''); return; }
   fixture.calls.push({ command, args });
   if (fixture.fail) { callback(new Error('fixture install failure')); return; }
   if (!fixture.wrongVersion) fixture.version = fixture.target;
@@ -50,7 +50,7 @@ vi.mock('node:child_process', () => ({ execFile: (command: string, args: string[
     rmSync(launcher); symlinkSync(target, launcher);
   }
   if (fixture.changedOwner) { rmSync(fixture.selected); writeFileSync(fixture.selected, 'unrecognized launcher'); }
-  callback(null, { stdout: '', stderr: '' });
+  callback(null, '', '');
 } }));
 const route = await import('@/app/api/setup/cli-updates/route');
 const request = (body: unknown = { runtime: 'claude-code' }, token = 'fixture-operator', stream = false) => route.POST(new Request('http://localhost/api/setup/cli-updates', {

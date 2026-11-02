@@ -115,7 +115,13 @@ pub fn apply_persisted_background_mode<R: Runtime>(app: &AppHandle<R>) {
     if on {
         log::info!("[background] booting in Accessory mode (Dock icon hidden) per saved pref");
     }
-    set_background_mode(app, on, false);
+    // In the packaged macOS app o8 next is the main window and its process
+    // owns the Dock icon. The saved pref is left as the user set it.
+    let next = crate::next_main::enabled();
+    if next {
+        log::info!("[background] booting in Accessory mode: o8 next is the main window");
+    }
+    set_background_mode(app, on || next, false);
 }
 
 // ── Autostart (launch at login — ON by default) ──

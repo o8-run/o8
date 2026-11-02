@@ -103,7 +103,8 @@ export function WorkerCorrections({ repoPath, threadId, draft, hasAttachments, o
   const sessions: SwarmSessionView[] = [...(workerContext?.sessions ?? [])];
   for (const worker of workers) {
     const saved = sessions.findIndex(item => item.sessionKey === worker.surfaceId);
-    const current = { sessionKey: worker.surfaceId, name: worker.taskName, runtime: worker.runtime, status: worker.running ? 'running' : 'idle' };
+    const current = { sessionKey: worker.surfaceId, name: worker.taskName, runtime: worker.runtime,
+      status: sessions[saved]?.status ?? (worker.running ? 'running' : 'idle') };
     if (saved < 0) sessions.push(current);
     else sessions[saved] = { ...sessions[saved], ...current };
   }
@@ -119,7 +120,9 @@ export function WorkerCorrections({ repoPath, threadId, draft, hasAttachments, o
       selection={{ available: workers.map(worker => worker.surfaceId), selected, disabled: busy || pendingRequest,
         onToggle: id => setSelected(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]) }} />
     {workers.length ? <span>{targets.length ? `Your composer message will go to ${targets.length === 1 ? targets[0].taskName : `${targets.length} selected workers`}.` : 'Select workers, then write your correction in the composer.'}</span>
-      : <span>No workers currently support corrections. Open a worker card to view its conversation.</span>}
+      : <span>{sessions.some(session => session.recovery?.actions.length)
+        ? 'Resume saved work, or retire the worker and keep its branch and edits.'
+        : 'No workers currently support corrections. Open a worker card to view its conversation.'}</span>}
     {pendingRequest ? <span>A saved correction needs a delivery receipt. Checking reuses that request and never resends an admitted correction.</span> : null}
     {hasAttachments ? <span>Worker corrections accept text. Send attachments through the worker’s regular composer.</span> : null}
     {draft.trim().length > 2000 ? <span>Keep the correction within 2,000 characters.</span> : null}

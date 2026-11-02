@@ -265,3 +265,69 @@ fn sidebar_header_matches_desktop_identity_count_and_add_at_1440(cx: &mut TestAp
         "o8 projects must use the same embedded identity asset as the desktop"
     );
 }
+
+#[gpui::test]
+fn sidebar_add_takes_a_dropped_folder_like_projects_switcher(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(true, "--shell --composer");
+    let id = project(&fixture, "Field Work", "field-work", &fixture.folders[..1]);
+    activate(&fixture, &id);
+    let dropped = std::path::Path::new(&fixture.folders[0])
+        .parent()
+        .unwrap()
+        .join("dropped-repo");
+    fs::create_dir(&dropped).unwrap();
+    assert!(
+        Process::new("git")
+            .args(["init", "--quiet"])
+            .arg(&dropped)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("header-drop.json"),
+        State::default(),
+        cx,
+    );
+    wait_for(&shell, &mut visual, |s, _| s.connected);
+    draw(&mut visual);
+    let position = visual.debug_bounds("sidebar-project-add").unwrap().center();
+    let drop = |visual: &mut VisualTestContext, paths: Vec<std::path::PathBuf>| {
+        visual.simulate_event(gpui::FileDropEvent::Entered {
+            position,
+            paths: gpui::ExternalPaths::new(paths),
+        });
+        draw(visual);
+        visual.simulate_event(gpui::FileDropEvent::Submit { position });
+        visual.run_until_parked();
+        draw(visual);
+    };
+    // Two items are not one repository: nothing registers.
+    drop(&mut visual, vec![dropped.clone(), dropped.join(".git")]);
+    let canonical = fs::canonicalize(&dropped).unwrap();
+    let registered = |fixture: &Fixture| {
+        let repos: Value = fixture.client.get("/api/panel/repos", &[]).unwrap();
+        repos["repos"].as_array().unwrap().iter().any(|r| {
+            fs::canonicalize(r["localPath"].as_str().unwrap())
+                .ok()
+                .as_ref()
+                == Some(&canonical)
+        })
+    };
+    assert!(!registered(&fixture), "a multi-item drop must not register");
+    drop(&mut visual, vec![dropped.clone()]);
+    wait_for(&shell, &mut visual, |_, _| registered(&fixture));
+    let projects: Value = fixture.client.get("/api/panel/projects", &[]).unwrap();
+    let joined = projects["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == id)
+        .map(|p| p.to_string())
+        .unwrap_or_default();
+    assert!(
+        joined.contains("dropped-repo"),
+        "the dropped folder joins the active project: {joined}"
+    );
+}

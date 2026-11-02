@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { githubInstallationFetch } from './auth';
+import { withGitHubAbort } from './abort';
 import type { PullRequestListPage, PullRequestListState, PullRequestListSort } from './pull-request-list.types';
 
 interface GitHubListPull {
@@ -25,12 +26,14 @@ interface PullStats {
   deletions: number;
   reviewRequests: { nodes: Array<{ requestedReviewer: { login?: string } | null } | null> } | null;
   commits: { nodes: Array<{ commit: { statusCheckRollup: { state: string } | null } }> };
+  reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
+  mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null;
 }
 
 const STATS_QUERY = `query PullRequestListStats($ids: [ID!]!) {
   nodes(ids: $ids) {
     ... on PullRequest {
-      number additions deletions
+      number additions deletions reviewDecision mergeable
       reviewRequests(first: 100) { nodes { requestedReviewer { ... on User { login } } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     }
@@ -52,7 +55,7 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
     }
     throw new Error('Pull requests could not be loaded from GitHub. Try again.');
   }
-  const pulls = await response.json() as GitHubListPull[];
+  const pulls = await withGitHubAbort(init.signal, () => response.json()) as GitHubListPull[];
   const stats = new Map<number, PullStats>();
   if (pulls.length > 0 && !anonymous) {
     try {
@@ -61,7 +64,7 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
         body: JSON.stringify({ query: STATS_QUERY, variables: { ids: pulls.map((pull) => pull.node_id) } }),
       });
       if (result.response.ok) {
-        const payload = await result.response.json() as { data?: { nodes?: Array<PullStats | null> } };
+        const payload = await withGitHubAbort(init.signal, () => result.response.json()) as { data?: { nodes?: Array<PullStats | null> } };
         for (const node of payload.data?.nodes ?? []) if (node) stats.set(node.number, node);
       }
     } catch { /* Keep the list usable when optional summary data is unavailable. */ }
@@ -83,6 +86,7 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
       headRepoFullName: pull.head.repo?.full_name ?? null,
       url: pull.html_url, labels: pull.labels.map((label) => label.name),
       createdAt: pull.created_at,
+      reviewDecision: summary?.reviewDecision ?? null, mergeable: summary?.mergeable ?? null,
     }; }),
   };
 }

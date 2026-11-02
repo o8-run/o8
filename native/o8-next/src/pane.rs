@@ -79,7 +79,9 @@ pub struct Pane {
     pub transcript: Option<Transcript>,
     pub rows: Rc<Vec<Rc<RefCell<RowState>>>>,
     pub list: ListState,
+    pub(crate) images: crate::ui::images::Cache,
     subscription: Option<Subscription>,
+    client: Option<Client>,
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     pub paints: Rc<Cell<usize>>,
@@ -96,8 +98,10 @@ impl Pane {
             notice: String::new(),
             transcript: None,
             rows: Rc::new(vec![]),
+            images: Default::default(),
             list: ListState::new(0, ListAlignment::Top, px(0.)),
             subscription: None,
+            client: None,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             paints: Rc::new(Cell::new(0)),
@@ -118,11 +122,57 @@ impl Pane {
         }
     }
     pub fn install(&mut self, history: History, client: Client) {
+        self.client = Some(client.clone());
         let key = history.session_key.clone();
         self.transcript = Some(Transcript::new(history));
         self.sync_rows();
         self.subscription = Some(transport::subscribe(client, key));
         self.notice.clear();
+    }
+    pub(crate) fn prepend(&mut self, history: History) {
+        let anchor = self.list.logical_scroll_top();
+        let id = self
+            .rows
+            .get(anchor.item_ix)
+            .map(|r| r.borrow().row.id().to_owned());
+        if let Some(transcript) = &mut self.transcript {
+            transcript.prepend(history);
+        }
+        self.sync_rows();
+        self.list = self.list.clone().measure_all();
+        if let Some(index) =
+            id.and_then(|id| self.rows.iter().position(|r| r.borrow().row.id() == id))
+        {
+            self.list.scroll_to(ListOffset {
+                item_ix: index,
+                offset_in_item: anchor.offset_in_item,
+            });
+        }
+    }
+    pub(crate) fn attach_subagents(
+        &mut self,
+        view: gpui::Entity<crate::subagents::Inspector>,
+        agents: Rc<Vec<crate::subagents::model::Agent>>,
+        cx: &gpui::App,
+    ) {
+        let anchor = self.list.logical_scroll_top();
+        for (index, row) in self.rows.iter().enumerate() {
+            let mut row = row.borrow_mut();
+            if !matches!(&row.row,crate::model::Row::Activity{steps,..} if steps.iter().any(|s|!s.delegations.is_empty()))
+            {
+                continue;
+            }
+            row.bind_subagent_focus(cx);
+            if row.subagents.as_ref() != Some(&view) || *row.subagent_agents != *agents {
+                row.subagents = Some(view.clone());
+                row.subagent_agents = agents.clone();
+                self.list.splice(index..index + 1, 1);
+            }
+        }
+        let after = self.list.logical_scroll_top();
+        if after.item_ix != anchor.item_ix || after.offset_in_item != anchor.offset_in_item {
+            self.list.scroll_to(anchor);
+        }
     }
     fn sync_rows(&mut self) {
         let rows = &self.transcript.as_ref().unwrap().rows;
@@ -144,7 +194,22 @@ impl Pane {
                 old.iter()
                     .find(|s| s.borrow().row == *row)
                     .cloned()
-                    .unwrap_or_else(|| Rc::new(RefCell::new(RowState::new(row.clone()))))
+                    .unwrap_or_else(|| {
+                        let mut state = RowState::new(row.clone());
+                        state.images = self.images.clone();
+                        if let Some(previous) = old
+                            .iter()
+                            .find(|previous| previous.borrow().row.id() == row.id())
+                        {
+                            let previous = previous.borrow();
+                            state.cards = previous.cards.clone();
+                            state.keep_disclosure(&previous);
+                        }
+                        if let Some(client) = &self.client {
+                            state.attach_visualizations(client);
+                        }
+                        Rc::new(RefCell::new(state))
+                    })
             })
             .collect();
         self.list
@@ -152,6 +217,13 @@ impl Pane {
         self.rows = Rc::new(states);
     }
     pub fn poll(&mut self) -> bool {
+        let mut visualizations_changed = false;
+        for (index, row) in self.rows.iter().enumerate() {
+            if row.borrow_mut().poll_visualizations() {
+                self.list.splice(index..index + 1, 1);
+                visualizations_changed = true;
+            }
+        }
         let follow = self.rows.is_empty()
             || self
                 .list
@@ -184,7 +256,7 @@ impl Pane {
                 self.navigate(true);
             }
         }
-        changed
+        changed || visualizations_changed
     }
     pub fn navigate(&mut self, end: bool) {
         if !self.rows.is_empty() {

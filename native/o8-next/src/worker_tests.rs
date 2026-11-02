@@ -80,8 +80,8 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
         s.queue_ready
     });
     assert!(
-        cx.debug_bounds("send-mode-steer").is_some(),
-        "render the default Steer chip"
+        surface.read_with(cx, |s, _| !s.send_next),
+        "Enter steers by default; ⌘↵ queues"
     );
     surface.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
     // GPUI installs the native input handler during paint after focus changes.
@@ -143,7 +143,7 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
     );
     cx.simulate_keystrokes("ctrl-shift-enter");
     draw(cx);
-    assert!(cx.debug_bounds("send-mode-queue").is_some());
+    assert!(surface.read_with(cx, |s, _| s.send_next));
     cx.simulate_input("Promoted instruction");
     cx.simulate_keystrokes("enter");
     wait(&mut server, &surface, cx, "queued promote receipt", |s| {

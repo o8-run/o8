@@ -53,6 +53,7 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
         "tsx",
         "scripts/next/dev-server.ts",
         "--composer",
+        "--owned-stdio",
     ]);
     if worker {
         command.arg("--worker");
@@ -91,6 +92,7 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
             Some(receipt)
         })
         .unwrap_or_else(|| panic!("fixture origin missing\n{}", server.diagnostics()));
+    std::thread::spawn(move || for _ in lines {});
     let origin = receipt["origin"].as_str().unwrap().to_owned();
     server.2 = receipt["runtimeLog"].as_str().map(std::path::PathBuf::from);
     let anonymous = Client::authenticated(&origin, None).unwrap();
@@ -119,6 +121,9 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
 
 #[path = "worker_tests.rs"]
 mod worker_tests;
+
+#[path = "prompt_action_tests.rs"]
+mod prompt_action_tests;
 
 #[gpui::test]
 fn session_chrome_uses_layout_instead_of_role_labels(cx: &mut TestAppContext) {
@@ -197,9 +202,8 @@ fn correction_composer_has_no_shortcut_or_mode_helper(cx: &mut TestAppContext) {
         );
     }
     assert!(
-        cx.debug_bounds("send-mode-steer").is_some()
-            || cx.debug_bounds("send-mode-queue").is_some(),
-        "mode selection remains available without helper text"
+        cx.debug_bounds("composer-microphone").is_some(),
+        "send and its menu remain available without helper text"
     );
 }
 
@@ -244,7 +248,8 @@ fn placement_empty_state_composer_and_right_panel(cx: &mut TestAppContext) {
             .expect("existing Brain uses the right slot");
         let card = cx.debug_bounds("composer-card").unwrap();
         assert!(right.left() >= card.right());
-        let send = cx.debug_bounds("send").unwrap();
+        // Empty composer: the round primary button is the mic.
+        let send = cx.debug_bounds("composer-microphone").unwrap();
         assert!(
             send.right() <= card.right(),
             "composer controls must fit beside the right panel"
@@ -423,8 +428,11 @@ fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let promoted = saved.queue(&second).unwrap()["items"][0].clone();
     assert_eq!(promoted["id"], queued["id"]);
-    assert_eq!(promoted["payload"], queued["payload"]);
+    for field in ["text", "routing", "images"] {
+        assert_eq!(promoted["payload"][field], queued["payload"][field]);
+    }
     assert_eq!(promoted["status"], "applied");
+    assert_eq!(promoted["payload"]["wireMessage"], "");
     let history = saved.history(&second.id).unwrap();
     assert_eq!(
         history.transcript.last().unwrap().text,
@@ -503,3 +511,58 @@ fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
 
 #[path = "brain_dock_tests.rs"]
 mod brain_dock_tests;
+
+#[gpui::test]
+fn settled_tool_runs_collapse_to_a_trace_header_and_expand_on_click(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-tools".into(), cx);
+    });
+    cx.run_until_parked();
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        })
+    };
+    draw(cx);
+    draw(cx);
+    let index = surface.read_with(cx, |s, _| {
+        s.rows
+            .iter()
+            .position(|row| matches!(row.borrow().row, Row::Activity { .. }))
+            .expect("activity row")
+    });
+    // Settled history starts as the trace's one header line; tools.history.json
+    // has three shell reads, then the cargo test that failed.
+    let header: &'static str = format!("trace-header-{index}").leak();
+    let first: &'static str = format!("trace-line-{index}-0").leak();
+    assert!(cx.debug_bounds(header).is_some(), "the trace header draws");
+    assert!(cx.debug_bounds(first).is_none(), "collapsed until opened");
+    let height = surface.read_with(cx, |s, _| {
+        s.list.bounds_for_item(index).unwrap().size.height
+    });
+    let toggle = cx.debug_bounds(header).unwrap().center();
+    cx.simulate_click(toggle, gpui::Modifiers::default());
+    draw(cx);
+    draw(cx);
+    assert!(
+        cx.debug_bounds(first).is_some(),
+        "the header opens the steps"
+    );
+    let expanded = surface.read_with(cx, |s, _| {
+        s.list.bounds_for_item(index).unwrap().size.height
+    });
+    assert!(expanded > height, "expansion must remeasure the row");
+    let steps = surface.read_with(cx, |s, _| match &s.rows[index].borrow().row {
+        Row::Activity { steps, .. } => steps.clone(),
+        _ => unreachable!(),
+    });
+    assert_eq!(
+        crate::activity::summary(&steps),
+        "Ran 4 commands · 1 failed"
+    );
+}

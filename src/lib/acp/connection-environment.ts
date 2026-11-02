@@ -1,7 +1,7 @@
 import 'server-only';
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { assertMasterKeyAvailableForMutation, decryptValueSync, encryptValueSync } from '@/lib/db/master-key';
@@ -43,6 +43,8 @@ function inventory(db: Database.Database, connectionId: string): AcpEnvironmentI
 }
 
 export function readAcpEnvironment(connectionId: string): AcpEnvironmentInventory {
+  // A read never creates the store.
+  if (!existsSync(join(getDataDir(), 'acp-environment.sqlite'))) return { connectionId, revision: 0, variables: [] };
   return withDatabase(db => inventory(db, connectionId));
 }
 
@@ -50,11 +52,15 @@ export function readAcpEnvironment(connectionId: string): AcpEnvironmentInventor
 // Provider credentials continue through the existing explicit sharing/billing path.
 const RESERVED = /^(?:O8_|NODE_|LD_|DYLD_|GIT_|SSH_|PYTHON|JAVA_|JDK_|BASH_|XDG_|OPENAI_|ANTHROPIC_|OPENROUTER_|CODEX_|CLAUDE_|GEMINI_|GOOGLE_|GROQ_|DEEPSEEK_|COPILOT_|GOOSE_|LLM_|ELECTRON_|NPM_|npm_)/i;
 const RESERVED_NAMES = new Set(['PATH', 'PATHEXT', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'SHELL', 'ENV', 'PWD', 'OLDPWD', 'IFS', 'TMPDIR', 'TMP', 'TEMP', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'SSL_CERT_FILE', 'SSL_CERT_DIR', '__PROTO__', 'CONSTRUCTOR', 'PROTOTYPE']);
-function parseVariables(input: unknown): AcpEnvironmentVariable[] {
+function parseVariables(input: unknown, options: AcpEnvironmentPolicy = {}): AcpEnvironmentVariable[] {
   if (!Array.isArray(input) || input.length > 32) throw new Error('Use at most 32 environment variables.');
   const names = new Set<string>();
   return input.map(item => {
     const v = item as AcpEnvironmentVariable | null;
+    // Provider instances may carry their own provider API keys, as secrets only.
+    const instanceCredential = options.allowProviderCredentials === true && typeof v?.name === 'string'
+      && v.name === v.name.toUpperCase() && providerCredentialName(v.name) && v.secret === true;
+    if (instanceCredential) return { name: v!.name, secret: true, ...(v!.value !== undefined ? { value: String(v!.value) } : {}) };
     if (!v || typeof v.name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(v.name)
       || RESERVED.test(v.name) || RESERVED_NAMES.has(v.name.toUpperCase()) || providerCredentialName(v.name.toUpperCase())) {
       throw new Error('Use a valid variable name outside process controls and provider credentials.');
@@ -74,8 +80,9 @@ function parseVariables(input: unknown): AcpEnvironmentVariable[] {
 }
 
 /** One SQLite transaction keeps encrypted credentials and ordinary config consistent. */
-export function saveAcpEnvironment(binding: AcpEnvironmentBinding, input: unknown, beforeCommit?: () => void): AcpEnvironmentInventory {
-  const variables = parseVariables(input);
+export interface AcpEnvironmentPolicy { allowProviderCredentials?: boolean }
+export function saveAcpEnvironment(binding: AcpEnvironmentBinding, input: unknown, beforeCommit?: () => void, policy: AcpEnvironmentPolicy = {}): AcpEnvironmentInventory {
+  const variables = parseVariables(input, policy);
   if (!Number.isSafeInteger(binding.revision) || binding.revision < 0) throw new Error('A current environment revision is required.');
   return withProviderStoreLock(() => withDatabase(db => db.transaction(() => {
     const current = inventory(db, binding.connectionId);
@@ -107,6 +114,16 @@ export function saveAcpEnvironment(binding: AcpEnvironmentBinding, input: unknow
 }
 
 /** Called only for the selected Local ACP launch; never exports into process.env. */
+/** Removes a connection's configuration row and every credential it owns. */
+export function deleteAcpEnvironment(connectionId: string, beforeCommit?: () => void): void {
+  if (!existsSync(join(getDataDir(), 'acp-environment.sqlite'))) { beforeCommit?.(); return; }
+  withProviderStoreLock(() => withDatabase(db => db.transaction(() => {
+    db.prepare('DELETE FROM credentials WHERE connection_id = ?').run(connectionId);
+    db.prepare('DELETE FROM configuration WHERE connection_id = ?').run(connectionId);
+    beforeCommit?.();
+  }).immediate()));
+}
+
 export function resolveAcpEnvironment(connectionId: string) {
   return withDatabase(db => db.transaction(() => {
     const current = inventory(db, connectionId);

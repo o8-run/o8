@@ -55,29 +55,28 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { summarize } from './lib/judgment-replay-metrics.mjs';
-import { labelCompaction, loadCompactionHistory } from './lib/judgment-replay-compaction.mjs';
-import { labelPushGate, loadPushGateHistory, PUSH_GATE_PROVISIONAL_BAND, PUSH_GATE_WINDOW_MS } from './lib/judgment-replay-push-gate.mjs';
-import { labelLoopChecks, loadLoopHistory } from './lib/judgment-replay-loop.mjs';
-import { labelWakeTriage, loadWakeTriageHistory, OUTCOME_TO_OPTION, WAKE_TRIAGE_OPTIONS, WAKE_TRIAGE_WINDOW } from './lib/judgment-replay-wake-triage.mjs';
-import { CATCH_UP_WINDOW_MS, labelCatchUp, loadCatchUpHistory } from './lib/judgment-replay-catch-up.mjs';
-import { CLAIM_PREDICTORS, labelClaimUnbacked, loadClaimUnbackedHistory } from './lib/judgment-replay-claim-unbacked.mjs';
-import { citationsByRule, DIRECTIVE_CITATION_REPLAY_THRESHOLD, labelDirectiveCitations } from './lib/judgment-replay-directive-citation.mjs';
+import { fmt } from './lib/judgment-replay-format.mjs';
+import { discoverReplayLabels } from './lib/judgment-replay-registry.mjs';
+
+// Preserve the existing report API; discovery does not use these compatibility exports.
+export { renderCompactionReport } from './judgment-labels/compaction.mjs';
+export { renderPushGateReport } from './judgment-labels/push-gate.mjs';
+export { renderLoopReport } from './judgment-labels/loop.mjs';
+export { renderWakeTriageReport } from './judgment-labels/wake-triage.mjs';
+export { renderClaimUnbackedReport } from './judgment-labels/claim-unbacked.mjs';
+export { renderDirectiveCitationReport } from './judgment-labels/directive-citation.mjs';
+export { renderCatchUpReport } from './judgment-labels/catch-up.mjs';
 
 const SURFACE = 'calibration-replay';
 const USD_PER_BILLION_INPUT_TOKENS = 42;
 const OPERATOR_ACTORS = new Set(['desktop', 'mobile']);
 const GATE_FAILURE_VERBS = ['typecheck_auto_retry', 'typecheck_escalation'];
-const LABELS = ['gateFailed', 'operatorRejected', 'mergedClean'];
-const COMPACTION_LABEL = 'compaction';
-const PUSH_GATE_LABEL = 'pushGate';
-const LOOP_LABEL = 'loop';
-const WAKE_TRIAGE_LABEL = 'wakeTriage';
-const CATCH_UP_LABEL = 'catchUp';
-const CLAIM_UNBACKED_LABEL = 'claimUnbacked';
-const DIRECTIVE_CITATION_LABEL = 'directiveCitation';
-/** Runs every recorded-answer label below in one pass; never the three labels above, which send calls. */
+const replayLabels = await discoverReplayLabels(new URL('./judgment-labels/', import.meta.url));
+const LABELS = replayLabels.filter(entry => entry.kind === 'approval').map(entry => entry.name);
+const RECORDED_LABELS = Object.fromEntries(replayLabels.filter(entry => entry.kind === 'recorded').map(entry => [entry.name, entry]));
+/** Runs every recorded-answer label in one pass; never the approval labels, which send calls. */
 const ALL_RECORDED_LABEL = 'all-recorded';
-const USAGE = 'usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label gateFailed|operatorRejected|mergedClean|compaction|pushGate|loop|wakeTriage|claimUnbacked|directiveCitation|catchUp|all-recorded]';
+const USAGE = `usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label ${[...replayLabels.map(entry => entry.name), ALL_RECORDED_LABEL].join('|')}]`;
 const TSX_MARKER = 'O8_JUDGMENT_REPLAY_TSX_LOADER';
 
 /**
@@ -253,7 +252,6 @@ export function collapseDiffs(approvals, labels, buildDiffState) {
   return { groups: [...groups.values()], withoutDiffText };
 }
 
-const fmt = (value, digits = 3) => (value === null || value === undefined ? 'n/a' : value.toFixed(digits));
 
 /**
  * A dedup group whose approvals span several packets is folded under its
@@ -282,159 +280,6 @@ function renderLabel(label, predictor, groups, lines) {
   lines.push(`  catch-every-positive threshold, leave-one-packet-out (${lopo.scoredFolds} of ${lopo.folds} packets scored): false alarms ${lopo.falseAlarms} of ${lopo.negativesEvaluated} negatives, missed ${lopo.misses} of ${lopo.positivesEvaluated} positives, ${lopo.rowsWithoutTrainingPositive} diffs had no positive outside their packet`);
   return { predictor, abstained, ...summary };
 }
-
-/** The compaction label report: recorded p(needed) against later-turn reuse, one fold per compaction. */
-export function renderCompactionReport({ rows, notes }) {
-  const lines = [];
-  lines.push(`archives read: ${notes.archivesRead}; with scorer and later turns: ${notes.scored}; without scorer: ${notes.withoutScorer}; without later turns: ${notes.withoutLaterTurns}`);
-  lines.push(`entries without any identifier (counted not needed): ${notes.entriesWithoutIdentifiers}`);
-  const summary = summarize(rows);
-  if (summary.positives === 0 || summary.negatives === 0) {
-    lines.push(`${COMPACTION_LABEL}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped (n=${summary.n} scored entries)`);
-    return { text: lines.join('\n'), result: { skipped: summary.positives === 0 ? 'no positives' : 'no negatives', n: summary.n } };
-  }
-  lines.push(`${COMPACTION_LABEL} by p(needed): n=${summary.n} scored entries (positives ${summary.positives}, negatives ${summary.negatives})`);
-  lines.push(`  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
-  lines.push('  reliability   bin        n  mean_p  observed');
-  for (const bin of summary.reliability) {
-    const range = `${bin.low.toFixed(1)}-${bin.high.toFixed(1)}`;
-    lines.push(`                ${range.padEnd(9)} ${String(bin.n).padStart(3)}  ${fmt(bin.meanPredicted, 2).padStart(6)}  ${fmt(bin.observedRate, 2).padStart(8)}`);
-  }
-  const lopo = summary.leaveOnePacketOut;
-  lines.push(`  keep-every-needed threshold, leave-one-compaction-out (${lopo.scoredFolds} of ${lopo.folds} compactions scored): kept but unneeded ${lopo.falseAlarms} of ${lopo.negativesEvaluated}, dropped but needed ${lopo.misses} of ${lopo.positivesEvaluated}`);
-  return { text: lines.join('\n'), result: summary };
-}
-
-/** The push gate label report: recorded p(attention now) against operator action within the window. */
-export function renderPushGateReport({ rows, notes }) {
-  const lines = [];
-  lines.push(`push_gate events read: ${notes.gatesRead}; without p: ${notes.withoutP}; window ${PUSH_GATE_WINDOW_MS / 60_000} min`);
-  const summary = summarize(rows);
-  const suppressed = rows.filter((row) => !row.operatorGated && row.p <= PUSH_GATE_PROVISIONAL_BAND);
-  const falseSuppressions = suppressed.filter((row) => row.y === 1).length;
-  if (summary.positives === 0 || summary.negatives === 0) {
-    lines.push(`${PUSH_GATE_LABEL}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped AUC (n=${summary.n} recorded pushes)`);
-  } else {
-    lines.push(`${PUSH_GATE_LABEL} by p(attention now): n=${summary.n} recorded pushes (positives ${summary.positives}, negatives ${summary.negatives})`);
-    lines.push(`  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
-  }
-  lines.push(`  PROVISIONAL band p <= ${PUSH_GATE_PROVISIONAL_BAND}, not operator-gated: would suppress ${suppressed.length} of ${summary.n}, false suppressions (operator acted) ${falseSuppressions}`);
-  return { text: lines.join('\n'), result: { ...summary, wouldSuppress: suppressed.length, falseSuppressions } };
-}
-
-/** The loop label report: recorded p(loop) against later intervention on the lane. */
-export function renderLoopReport({ rows, notes }) {
-  const lines = [`loop checks read: ${notes.checksRead}; unlabeled (no intervention and no merge): ${notes.unlabeled}`];
-  const summary = summarize(rows);
-  if (summary.positives === 0 || summary.negatives === 0) {
-    lines.push(`${LOOP_LABEL}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped (n=${summary.n} labeled checks)`);
-    return { text: lines.join('\n'), result: { skipped: summary.positives === 0 ? 'no positives' : 'no negatives', n: summary.n } };
-  }
-  lines.push(`${LOOP_LABEL} by p(loop): n=${summary.n} labeled checks (positives ${summary.positives}, negatives ${summary.negatives})`);
-  lines.push(`  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
-  return { text: lines.join('\n'), result: summary };
-}
-
-/** The wakeTriage label report: recorded option probabilities against the lane's next outcome, per option. */
-export function renderWakeTriageReport({ rows, notes }) {
-  const lines = [];
-  const outcomes = Object.entries(notes.outcomes).map(([outcome, n]) => `${outcome} ${n}`).join(', ');
-  lines.push(`wake triage events: ${notes.recorded} (unreadable ${notes.unreadable}, abstained ${notes.abstained}); outcomes within ${WAKE_TRIAGE_WINDOW} events: ${outcomes}`);
-  lines.push(`mapping: ${Object.entries(OUTCOME_TO_OPTION).map(([outcome, option]) => `${outcome} -> ${option}`).join(', ')}`);
-  const result = {};
-  for (const option of WAKE_TRIAGE_OPTIONS) {
-    const summary = summarize(rows.filter((row) => row.option === option));
-    if (summary.positives === 0 || summary.negatives === 0) {
-      lines.push(`${WAKE_TRIAGE_LABEL} ${option}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped (n=${summary.n})`);
-      result[option] = { skipped: summary.positives === 0 ? 'no positives' : 'no negatives', n: summary.n };
-      continue;
-    }
-    lines.push(`${WAKE_TRIAGE_LABEL} ${option}: n=${summary.n} (positives ${summary.positives}, negatives ${summary.negatives})  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
-    result[option] = summary;
-  }
-  return { text: lines.join('\n'), result };
-}
-
-/** The catchUp label report: recorded per-item attention scores against operator action after the briefing. */
-export function renderCatchUpReport({ rows, notes }) {
-  const lines = [`catch-up receipts: ${notes.receiptsRead} (failed ${notes.failed}, without selection ${notes.withoutSelection}); unlabeled items ${notes.unlabeledItems}; window ${CATCH_UP_WINDOW_MS / 60_000} min`];
-  const summary = summarize(rows);
-  if (summary.n === 0) {
-    lines.push(`${CATCH_UP_LABEL}: no rows`);
-    return { text: lines.join('\n'), result: { skipped: 'no rows', n: 0 } };
-  }
-  if (summary.positives === 0 || summary.negatives === 0) {
-    lines.push(`${CATCH_UP_LABEL}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped (n=${summary.n} scored items)`);
-    return { text: lines.join('\n'), result: { skipped: summary.positives === 0 ? 'no positives' : 'no negatives', n: summary.n } };
-  }
-  lines.push(`${CATCH_UP_LABEL} by p(attention): n=${summary.n} scored items (positives ${summary.positives}, negatives ${summary.negatives})  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
-  lines.push('  confound: the score also set the spoken order, so operator action is partly caused by it; read this AUC as an upper bound');
-  return { text: lines.join('\n'), result: summary };
-}
-
-/** The claimUnbacked label report: each recorded claim answer against a later rerun or rejection. */
-export function renderClaimUnbackedReport({ rows, notes }) {
-  const lines = [`report-claim receipts: ${notes.receiptsRead} (failed calls ${notes.failedCalls}, unlabeled ${notes.unlabeled}); labeled reports: rerun after ${notes.rerun}, rejected after ${notes.rejected}, merged without either ${notes.merged}`];
-  const result = {};
-  for (const predictor of CLAIM_PREDICTORS) {
-    const summary = summarize(rows.filter((row) => row.predictor === predictor));
-    if (summary.positives === 0 || summary.negatives === 0) {
-      lines.push(`${CLAIM_UNBACKED_LABEL} by ${predictor}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped (n=${summary.n} labeled reports)`);
-      result[predictor] = { skipped: summary.positives === 0 ? 'no positives' : 'no negatives', n: summary.n };
-      continue;
-    }
-    lines.push(`${CLAIM_UNBACKED_LABEL} by ${predictor}: n=${summary.n} labeled reports (positives ${summary.positives}, negatives ${summary.negatives})  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
-    result[predictor] = summary;
-  }
-  return { text: lines.join('\n'), result };
-}
-
-/** The directiveCitation label report: per-(file, rule) scores against the diff's outcome, with false citations per rule. */
-export function renderDirectiveCitationReport({ rows, notes }) {
-  const lines = [`directive_citations events: ${notes.eventsRead} (unlabeled ${notes.unlabeledEvents}, approval matched by diff fingerprint ${notes.matchedByFingerprint}); scores read: ${notes.scoresRead}`];
-  const summary = summarize(rows);
-  if (summary.positives === 0 || summary.negatives === 0) {
-    lines.push(`${DIRECTIVE_CITATION_LABEL}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped AUC (n=${summary.n} labeled scores)`);
-  } else {
-    lines.push(`${DIRECTIVE_CITATION_LABEL} by p(breaks rule): n=${summary.n} labeled scores (positives ${summary.positives}, negatives ${summary.negatives})`);
-    lines.push(`  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
-  }
-  // Printed even when the AUC is skipped: the per-rule positives below rest on the same labels.
-  lines.push('  caveat: the AUC, the Brier score and every per-rule positives count use labels assigned per diff, not per rule, so each rule\'s positives count is an UPPER bound and the AUC and Brier error has NO FIXED DIRECTION: neither is a clean measure of the rule-level score');
-  const byRule = citationsByRule(rows);
-  const falseCitations = byRule.reduce((sum, entry) => sum + entry.falseCitations, 0);
-  lines.push(`  false citations at p >= ${DIRECTIVE_CITATION_REPLAY_THRESHOLD}: ${falseCitations} of ${summary.negatives} y=0 scores`);
-  lines.push('  caveat: a rejection or rerun marks every rule scored on that diff y=1, including rules that were not the reason, so the two error counts are wrong in opposite directions:');
-  lines.push('    false citations are a LOWER bound and citation precision is OVERSTATED: a wrongly high score on a rejected diff counts as a cited positive and leaves the y=0 pool');
-  lines.push('    misses (positives minus cited positives) are an UPPER bound: rules that were not the reason count as violations the score missed');
-  for (const entry of byRule) {
-    lines.push(`  rule ${entry.rule}${entry.heldBack ? ' (held back)' : ''}: n=${entry.n}, positives ${entry.positives}, cited positives ${entry.cited}, false citations ${entry.falseCitations} of ${entry.n - entry.positives} y=0`);
-  }
-  return { text: lines.join('\n'), result: { ...summary, falseCitations, byRule } };
-}
-
-/**
- * Labels that score answers already recorded; none sends a call. Each loads
- * its history read-only, labels it, and renders its report.
- */
-const RECORDED_LABELS = {
-  [COMPACTION_LABEL]: {
-    source: ({ dataDir }) => dataDir,
-    load: ({ dataDir }) => loadCompactionHistory(dataDir),
-    label: (history) => labelCompaction(history.archives, history.threads),
-    render: renderCompactionReport,
-  },
-  [PUSH_GATE_LABEL]: { load: ({ dbPath }) => loadPushGateHistory(dbPath), label: labelPushGate, render: renderPushGateReport },
-  [LOOP_LABEL]: {
-    load: ({ dbPath }) => loadLoopHistory(dbPath),
-    label: (history) => labelLoopChecks(history.events, history.outcomes),
-    render: renderLoopReport,
-  },
-  [WAKE_TRIAGE_LABEL]: { load: ({ dbPath }) => loadWakeTriageHistory(dbPath), label: (events) => labelWakeTriage(events), render: renderWakeTriageReport },
-  [CLAIM_UNBACKED_LABEL]: { load: ({ dbPath }) => loadClaimUnbackedHistory(dbPath), label: labelClaimUnbacked, render: renderClaimUnbackedReport },
-  [DIRECTIVE_CITATION_LABEL]: { load: ({ dbPath }) => loadClaimUnbackedHistory(dbPath), label: labelDirectiveCitations, render: renderDirectiveCitationReport },
-  [CATCH_UP_LABEL]: { load: ({ dbPath }) => loadCatchUpHistory(dbPath), label: labelCatchUp, render: renderCatchUpReport },
-};
 
 /** Run one recorded label; `error` is set when its history could not be opened. */
 async function runRecordedLabel(name, paths) {

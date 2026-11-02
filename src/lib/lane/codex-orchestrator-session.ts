@@ -26,6 +26,7 @@ import { splitCodexOrchestratorPrompt, writeCodexAppBridgeSpec } from '@/lib/cod
 import { codexAppBridgeLaunch } from '@/lib/codex/app-bridge-launch';
 import { registerCodexAppBridgeSteer } from '@/lib/codex/app-bridge-steer';
 import { noteCodexAppTurnLine } from '@/lib/codex/app-thread-sync';
+import { orchestratorErrorText } from '@/lib/transcripts/orchestrator-error';
 export { ensureCodexHome, mergeCodexMcpConfig, prepareCodexHome, stripPluginSections } from './codex-orchestrator-config';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { resolveCodexAppThreadsSync } from '@/lib/operator/defaults';
@@ -43,6 +44,7 @@ import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
 import { serviceTierForTurn, type OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
 import { recoverRuntimeSessionMessage, SESSION_CONTEXT_UNAVAILABLE } from './runtime-session-recovery';
 import { readRuntimeSessionHandoff, persistRuntimeSessionHandoff, noteRuntimeSessionHandoff, clearRuntimeSessionHandoff, type RuntimeSessionHandoff } from './runtime-session-handoff';
+import { selectedOrchestratorModel } from './orchestrator-model-guard';
 import {
   ensureRegisteredSession,
   getRegisteredSession,
@@ -379,7 +381,7 @@ async function sendToCodexOrchestratorAttempt(
     });
     codexBin = resolved.path;
     reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort, model, {
-      explicitModel: options.model, installedCliVersion: resolved.version ?? null, codexHome: userCodexHome(),
+      explicitModel: selectedOrchestratorModel(options.model), installedCliVersion: resolved.version ?? null, codexHome: userCodexHome(),
     });
   } catch (err) {
     if (settleBeforeSpawnIfAborted()) return;
@@ -583,9 +585,13 @@ async function sendToCodexOrchestratorAttempt(
     let processTimeout: ReturnType<typeof setTimeout> | null = null;
     let firstEventTimeout: ReturnType<typeof setTimeout> | null = null;
     let sawFirstEvent = false;
+    let bridgeErrorMessage: string | undefined;
     const handleCodexLine = (line: string) => {
       if (codexApp) noteCodexAppTurnLine(line, { tabId: session.historyThreadId, repoPath: session.repoPath });
-      const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel, model, onActivity,
+      const parsed = handleCodexJsonLine(line, lineState, (event) => {
+        if (codexApp && event.type === 'error') bridgeErrorMessage = event.error;
+        onEvent(event);
+      }, { isLocalModel, model, onActivity,
         onInputAccepted: recovery ? () => noteRuntimeSessionHandoff(session.historyThreadId, recovery, lineState.threadId, true) : undefined });
       noteRuntimeSessionHandoff(session.historyThreadId, recovery, lineState.threadId);
       if (parsed) {
@@ -686,19 +692,22 @@ async function sendToCodexOrchestratorAttempt(
       if (lineBuffer.trim()) {
         handleCodexLine(lineBuffer);
       }
+      // The caught bridge path already selected Error.message without its stack.
+      if (codexApp && code !== 0) drainCrashOutput();
       const crashStderr = crashRecord && code !== 0
         ? readFileSync(crashRecord.stderrPath, 'utf8')
         : '';
       const diagnostic = (stderr || crashStderr).trim();
+      // The desktop tees stderr into logs/ws-server.log (and its .prev run).
+      // Keep the complete bridge stack there, outside the bounded app log/UI.
+      if (code !== 0 && diagnostic) console.error(`[codex-orchestrator-session] ${session.sessionName} exited (${code})\n${diagnostic}`);
       // Startup warnings can fill the display limit before the resume failure.
       // Keep that diagnostic visible to the one-time missing-thread recovery.
-      const resumeDiagnostic = diagnostic.split(/\r?\n/).find((line) => isMissingCodexRolloutResumeError(line)
-        || isCodexSolUnsupported(model, line));
-      // Node prints a bundle URL and potentially huge code frame before the error.
-      const errorDiagnostic = diagnostic.split(/\r?\n/).find((line) => /^\s*\w*Error(?: \[[^\]]+\])?:/.test(line));
       const error = code === 0
         ? undefined
-        : (resumeDiagnostic || errorDiagnostic?.trim() || diagnostic).slice(0, 500) || `codex exited with code ${code}`;
+        : (bridgeErrorMessage ?? orchestratorErrorText(diagnostic, `Error: Codex ${codexApp ? 'app bridge' : 'exec'} exited with code ${code}`,
+          line => isMissingCodexRolloutResumeError(line) || isCodexSolUnsupported(model, line))).slice(0, 500);
+      if (code !== 0) lineState.terminalOutcome = 'failed';
       settle(code === 0 ? 'ready' : 'dead', error, true);
     });
 

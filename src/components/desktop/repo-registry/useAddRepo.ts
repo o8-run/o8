@@ -46,6 +46,7 @@ export function useAddRepo(options: AddRepoOptions) {
   const opened = useRef(false);
   const generation = useRef(0);
   const mounted = useRef(true);
+  const selectedPath = useRef<string | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -57,37 +58,39 @@ export function useAddRepo(options: AddRepoOptions) {
   const close = useCallback(() => {
     if (pending.current) return;
     generation.current += 1;
+    selectedPath.current = null;
     setValue(''); setError(null); setRetryState(null); setProjectId(null); setBusy(false); setStage('');
     recovery.current = null;
     onClose();
   }, [onClose]);
 
-  const submit = useCallback(async (input: string) => {
-    const trimmed = input.trim();
-    if (!trimmed || pending.current) return;
+  const submit = useCallback(async (input: string, source: 'input' | 'path' = 'input') => {
+    const location = source === 'path' || selectedPath.current === input ? input : input.trim();
+    if (!location || pending.current) return;
+    if (source === 'path') selectedPath.current = input;
     pending.current = true;
-    setBusy(true); setError(null); setRetryState(null); setValue(trimmed);
-    const cloning = isRepoUrl(trimmed);
+    setBusy(true); setError(null); setRetryState(null); setValue(location);
+    const cloning = isRepoUrl(location);
     let cloningPending = cloning;
     const current = generation.current;
     const live = () => mounted.current && current === generation.current;
     try {
-      let attempt = recovery.current?.value === trimmed ? recovery.current : null;
+      let attempt = recovery.current?.value === location ? recovery.current : null;
       if (!attempt) {
         setStage(cloning ? 'Cloning repository…' : 'Opening folder…');
         let repo: RepoRegistryEntry;
         try {
-          repo = await register(trimmed, cloning);
+          repo = await register(location, cloning);
         } catch (cause) {
           // A lost response may follow a durable write. Reconcile before retrying.
           if (cloning || (cause instanceof RegistrationError && cause.status < 500)) throw cause;
           const data = await requestJson<{ repos: Array<RepoRegistryEntry & { exists?: boolean }> }>('/api/panel/repos').catch(() => ({ repos: [] }));
-          const saved = data.repos?.find(row => row.localPath === trimmed && row.exists !== false);
+          const saved = data.repos?.find(row => row.localPath === location && row.exists !== false);
           if (!saved) throw cause;
           repo = saved;
         }
         if (!live()) return;
-        attempt = { value: trimmed, repo, linked: false };
+        attempt = { value: location, repo, linked: false };
         recovery.current = attempt;
       }
       cloningPending = false;
@@ -139,7 +142,7 @@ export function useAddRepo(options: AddRepoOptions) {
     const current = generation.current;
     try {
       const path = await pickRepoFolder('Open repository', 'Enter a folder path or Git URL.', false);
-      if (path && mounted.current && current === generation.current) await submit(path);
+      if (path && mounted.current && current === generation.current) await submit(path, 'path');
     } catch {
       if (mounted.current && current === generation.current) setError('Could not open the folder picker. Paste a folder path or Git URL, then choose Open.');
     } finally { browsing.current = false; }
@@ -151,6 +154,7 @@ export function useAddRepo(options: AddRepoOptions) {
         generation.current += 1;
         pending.current = false;
         recovery.current = null;
+        selectedPath.current = null;
         setValue(''); setError(null); setRetryState(null); setBusy(false); setStage(''); setProjectId(null);
       }
       opened.current = false;
@@ -165,11 +169,12 @@ export function useAddRepo(options: AddRepoOptions) {
       const entries = Array.isArray(data.repos) ? data.repos : [];
       setRepos(entries); setRecents(recentRepoFolders(entries));
     }).catch(() => { /* Manual entry and saved recents remain available. */ });
-    if (initialPath) void submit(initialPath);
+    if (initialPath) void submit(initialPath, 'path');
     else if (initialMode !== 'scratch') void browse();
   }, [open, initialMode, initialPath, browse, submit]);
 
-  const changeValue = (next: string) => { setValue(next); setError(null); setRetryState(null); };
-  const registered = recovery.current?.value === value.trim();
-  return { value, changeValue, busy, error, setError, retryState, registered, stage, recents, repos, projectId: selectedProjectId, setProjectId, submit, browse, close };
+  const changeValue = (next: string) => { selectedPath.current = null; setValue(next); setError(null); setRetryState(null); };
+  const registrationValue = selectedPath.current === value ? value : value.trim();
+  const registered = recovery.current?.value === registrationValue;
+  return { value, registrationValue, changeValue, busy, error, setError, retryState, registered, stage, recents, repos, projectId: selectedProjectId, setProjectId, submit, browse, close };
 }

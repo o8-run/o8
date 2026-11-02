@@ -331,6 +331,11 @@ impl TestAppContext {
         self.test_window(window_handle).simulate_resize(size);
     }
 
+    /// Simulates the user moving the window to a new origin.
+    pub fn simulate_window_move(&self, window_handle: AnyWindowHandle, origin: Point<Pixels>) {
+        self.test_window(window_handle).simulate_move(origin);
+    }
+
     /// Causes the given sources to be returned if the application queries for screen
     /// capture sources.
     pub fn set_screen_capture_sources(&self, sources: Vec<TestScreenCaptureSource>) {
@@ -815,6 +820,11 @@ impl VisualTestContext {
         self.update(|window, _| window.rendered_frame.scene.paths.len())
     }
 
+    /// Effective opacity from the last paint, including the element's ancestors.
+    pub fn debug_opacity(&mut self, selector: &str) -> Option<f32> {
+        self.update(|window, _| window.rendered_frame.debug_opacities.get(selector).copied())
+    }
+
     /// Draw an element to the window. Useful for simulating events or actions
     pub fn draw<E>(
         &mut self,
@@ -849,6 +859,13 @@ impl VisualTestContext {
         self.background_executor.run_until_parked();
     }
 
+    /// Dispatch an input event without draining background work, so tests can
+    /// inspect the pending scene before a blocking request has completed.
+    pub fn simulate_event_without_wait<E: InputEvent>(&mut self, event: E) {
+        self.test_window(self.window)
+            .simulate_input(event.to_platform_input());
+    }
+
     /// Simulates the user blurring the window.
     pub fn deactivate_window(&mut self) {
         if Some(self.window) == self.test_platform.active_window() {
@@ -860,6 +877,22 @@ impl VisualTestContext {
     /// Simulates the user closing the window.
     /// Returns true if the window was closed.
     pub fn simulate_close(&mut self) -> bool {
+        if self.simulate_close_request() {
+            return true;
+        }
+        // Async close callbacks keep the window until their durable work completes.
+        // Drive that lifecycle in the test harness, outside the input callback.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while self.cx.windows().contains(&self.window) && std::time::Instant::now() < deadline {
+            self.cx.run_until_parked();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        !self.cx.windows().contains(&self.window)
+    }
+
+    /// Issue one native close request without waiting for asynchronous completion.
+    /// Returns the platform callback's immediate decision.
+    pub fn simulate_close_request(&mut self) -> bool {
         let handler = self
             .cx
             .update_window(self.window, |_, window, _| {
@@ -879,7 +912,7 @@ impl VisualTestContext {
                 .update_window(self.window, |_, window, _| {
                     window.platform_window.on_should_close(handler);
                 })
-                .unwrap();
+                .ok();
             should_close
         } else {
             false

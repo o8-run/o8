@@ -337,3 +337,26 @@ it('never overwrites an occupied private capture destination', async () => {
   expect(readFileSync(held, 'utf8')).toBe('foreign capture destination');
   expect(readFileSync(file, 'utf8')).toBe('owned bytes');
 });
+
+it('removes files outside the reservation through installed fs methods without recursing', async () => {
+  const root = await createRetainedGeneratedOutputFixture('o8-writer-outside-rm-');
+  const scope = path.join(root, 'output'); mkdirSync(scope);
+  const outside = path.join(root, 'outside'); mkdirSync(path.join(outside, 'nested'), { recursive: true });
+  writeFileSync(path.join(outside, 'nested', 'file'), 'outside bytes');
+  const single = path.join(root, 'single'); writeFileSync(single, 'single bytes');
+  const script = `
+    const fs = require('node:fs');
+    const stat = fs.lstatSync(${JSON.stringify(scope)});
+    const writer = require(${JSON.stringify(writerModule)}).createBuildOutputWriter(${JSON.stringify(scope)}, {device:stat.dev,inode:stat.ino});
+    // Install the session the same way a producer child does.
+    for (const [name, value] of Object.entries(writer.api)) if (typeof value === 'function') fs[name] = value;
+    try {
+      fs.rmSync(${JSON.stringify(single)}, { force: true });
+      fs.rmSync(${JSON.stringify(outside)}, { recursive: true, force: true });
+    } finally { writer.close(); }
+  `;
+  const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30_000 });
+  expect(result.status, result.stderr).toBe(0);
+  expect(existsSync(single)).toBe(false);
+  expect(existsSync(outside)).toBe(false);
+});

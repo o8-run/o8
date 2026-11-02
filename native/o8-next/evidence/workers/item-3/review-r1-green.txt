@@ -1,0 +1,16 @@
+running 13 tests
+test shell::workers::action_tests::workers_actions_are_reachable_by_tab_and_enter ... ok
+test shell::workers::action_tests::workers_adjust_lost_response_reuses_one_persisted_steer ... ok
+test shell::workers::action_tests::workers_adjust_waits_for_durable_storage_before_delivery ... ok
+test shell::workers::action_tests::workers_adjust_uses_desktop_steer_route_and_operator_provenance ... ok
+test shell::workers::action_tests::workers_keep_waiting_reads_current_lane_and_preserves_queue ... ok
+test shell::workers::action_tests::workers_inspect_conflict_opens_real_worktree_diff ... ok
+test shell::workers::card_tests::workers_card_activity_reads_real_events_and_keeps_position ... ok
+test shell::workers::card_tests::workers_escape_returns_focus_to_list ... ok
+test shell::workers::action_tests::workers_lost_steer_reopens_with_same_key_and_draft ... ok
+test shell::workers::card_tests::workers_enter_keeps_arrow_navigation_inside_card ... ok
+test shell::workers::tests::workers_live_route_retains_cards_selection_and_filter_scroll ... ok
+test shell::workers::tests::workers_real_shell_filters_route_membership ... ok
+test shell::workers::card_tests::workers_latest_progress_survives_more_than_500_events_and_refresh ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 223 filtered out; finished in 75.74s

@@ -1,0 +1,15 @@
+running 1 test
+test shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send ...
+thread 'shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send' (111915) panicked at src/surfaces/../issue_review_tests.rs:197:53:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 224 filtered out; finished in 11.57s
+
+error: test failed, to rerun pass `--bin o8-next`

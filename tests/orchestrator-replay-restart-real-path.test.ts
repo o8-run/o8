@@ -11,6 +11,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { NextRequest } from 'next/server';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -27,6 +28,8 @@ for (const [key, value] of Object.entries({
   CORTEX_IDE_DB_PATH: join(dataDir, 'cortex-ide.db'),
 })) vi.stubEnv(key, value);
 
+const { PATCH, POST } = await import('@/app/api/v2/chat-history/route');
+const { GET: listThreads } = await import('@/app/api/mobile/orchestrator/threads/route');
 const { buildOrchestratorSendPayload } = await import('@/components/desktop/thoughts/use-orchestrator-stream/send-payload');
 const { skipDuplicateBySeq } = await import('@/lib/orchestrator/replay-cursor');
 
@@ -119,7 +122,7 @@ beforeAll(async () => {
 if (process.argv.includes('--version')) { console.log('codex-cli 0.130.0'); process.exit(0); }
 const emit = (value) => console.log(JSON.stringify(value));
 const prompt = process.argv.join('\\n');
-const text = prompt.includes('second turn') ? 'Second reply after restart.' : 'First reply.';
+const text = prompt.includes('second turn') ? 'Second reply after restart.' : prompt.includes('inbox initial empty turn') ? '' : 'First reply.';
 emit({ type: 'thread.started', thread_id: 'scripted-codex-replay' });
 if (prompt.includes('stream-heavy replay fixture')) {
   const { existsSync } = await import('node:fs');
@@ -214,6 +217,43 @@ describe('orchestrator replay cursor across a ws-server restart (#3665)', () => 
       await waitFor(() => first.events.some((event) => event.event === 'status' && event.data?.status === 'ready' && !event.data?.snapshot), 'heavy turn completion');
     }
   }, 60_000);
+
+  it('clears an explicit active override only on a real WS turn and refuses settle while it runs (#5090)', async () => {
+    const threadId = `thoughts-inbox-ws-${Date.now()}`;
+    const first = await connect(threadId, 0);
+    await runTurn(first.socket, first.events, threadId, 'inbox-first', 'inbox initial empty turn');
+    const mutate = (inboxAction: string) => PATCH(new NextRequest('http://localhost/api/v2/chat-history', {
+      method: 'PATCH', body: JSON.stringify({ tabId: threadId, inboxAction }),
+    }));
+    const projected = async () => {
+      const response = await listThreads(new NextRequest('http://localhost/api/mobile/orchestrator/threads?limit=500'));
+      return (await response.json()).threads.find((thread: { id: string }) => thread.id === threadId);
+    };
+    expect((await mutate('settle')).status).toBe(200);
+    expect((await projected()).settledOverride).toBe('settled');
+    expect((await mutate('unsettle')).status).toBe(200);
+    const active = await projected();
+    expect(active.settledOverride).toBe('active');
+    // Saving an unchanged transcript is metadata activity, never a run.
+    expect((await POST(new NextRequest('http://localhost/api/v2/chat-history', {
+      method: 'POST', body: JSON.stringify({ tabId: threadId, messages: [] }),
+    }))).status).toBe(200);
+    expect((await projected()).settledOverride).toBe('active');
+    rmSync(join(root, 'release-stream'), { force: true });
+    const start = first.events.length;
+    first.socket.send(buildOrchestratorSendPayload({ repoPath, threadId, clientMessageId: 'inbox-running',
+      wireMessage: 'stream-heavy replay fixture', displayMessage: 'stream-heavy replay fixture',
+      permissionMode: 'plan', orchestrationMode: 'fleet', pickedMode: 'multitask', model: 'gpt-6.1-sol', backend: 'codex' }));
+    try {
+      await waitFor(() => first.events.slice(start).some(event => String(event.data?.text).includes('chunk-11:')), 'inbox live stream');
+      expect(await projected()).toMatchObject({ settledOverride: null, settledAt: null, unsettledAt: active.unsettledAt });
+      expect((await mutate('settle')).status).toBe(409);
+    } finally {
+      writeFileSync(join(root, 'release-stream'), 'release');
+      await waitFor(() => first.events.slice(start).some(event => event.event === 'status' && event.data?.status === 'ready' && !event.data?.snapshot), 'inbox turn completion');
+    }
+    expect((await mutate('settle')).status).toBe(200);
+  }, 180_000);
 
   it('delivers the next turn to a view that kept its cursor through the restart', async () => {
     const threadId = `thoughts-replay-restart-${Date.now()}`;

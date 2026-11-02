@@ -161,7 +161,10 @@ fn run_case(mode: &str) {
         "the child must execute its assertion"
     );
     assert_eq!(
-        output.lines().filter(|line| line.ends_with("o8-next-ready")).count(),
+        output
+            .lines()
+            .filter(|line| line.ends_with("o8-next-ready"))
+            .count(),
         1,
         "only the first paint signals readiness, including after Retry"
     );

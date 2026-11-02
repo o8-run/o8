@@ -6,6 +6,15 @@ interface OwnedTranscriptTail {
   groups: OwnedTailGroup[];
 }
 
+function activityTimestamp(value?: string): Date | undefined {
+  return value && Number.isFinite(Date.parse(value)) ? new Date(value) : undefined;
+}
+
+/** Keep display fallback timestamps separate from authentic activity evidence. */
+export function runtimeTranscriptTime(value?: string, displayTimestamp?: Date): Pick<RuntimeTranscriptEntry, 'timestamp' | 'activityAt'> {
+  return { timestamp: displayTimestamp ?? (value ? new Date(value) : new Date()), activityAt: activityTimestamp(value) };
+}
+
 function transcriptTimestamp(value?: string, fallback?: string): Date {
   const direct = value ? new Date(value) : null;
   if (direct && !Number.isNaN(direct.getTime())) return direct;
@@ -27,6 +36,7 @@ function runtimeEntry(
     text: entry.text,
     ...(entry.tokens ? { tokens: entry.tokens, model: entry.model } : {}),
     timestamp: transcriptTimestamp(entry.timestamp, fallbackTimestamp),
+    activityAt: activityTimestamp(entry.timestamp ?? fallbackTimestamp),
     toolName: entry.kind === 'tool' ? entry.label : undefined,
     thinking: entry.thinking,
     thinkingActive: entry.thinkingActive,
@@ -96,6 +106,7 @@ export function ownedTailToRuntimeTranscript(
         role: 'assistant',
         text: '',
         timestamp: transcriptTimestamp(entry.timestamp, fallbackTimestamp),
+        activityAt: activityTimestamp(entry.timestamp ?? fallbackTimestamp),
         toolCalls: [{ ...entry.toolCall }],
       };
       append(toolEntry);
@@ -114,6 +125,7 @@ export function ownedTailToRuntimeTranscript(
         role: 'user',
         text: prompt,
         timestamp: transcriptTimestamp(group.startedAt),
+        activityAt: activityTimestamp(group.startedAt),
       });
     }
     for (const entry of group.entries) {

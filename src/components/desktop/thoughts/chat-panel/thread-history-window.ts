@@ -26,22 +26,26 @@ export function prependBoundedThreadHistoryEntries(
   return { entries, hasCapacity: entries.length < MAX_THREAD_HISTORY_WINDOW_ENTRIES };
 }
 
-export async function fetchOlderThreadPage(
+export async function fetchThreadHistoryPage(
   tabId: string,
-  before: string,
-): Promise<ThreadHistoryPage<ThoughtsHistoryMessage> | null> {
+  before?: string,
+): Promise<Response | null> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 6000);
   try {
-    const params = new URLSearchParams({ tabId, limit: '60', before });
-    const response = await fetch(`/api/v2/chat-history?${params.toString()}`, { signal: controller.signal });
-    if (!response.ok) return null;
-    return await response.json() as ThreadHistoryPage<ThoughtsHistoryMessage>;
+    const params = new URLSearchParams({ tabId, limit: '60', ...(before ? { before } : {}) });
+    return await fetch(`/api/v2/chat-history?${params.toString()}`, { signal: controller.signal });
   } catch {
     return null;
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+export async function fetchOlderThreadPage(tabId: string, before: string): Promise<ThreadHistoryPage<ThoughtsHistoryMessage> | null> {
+  const response = await fetchThreadHistoryPage(tabId, before);
+  if (!response?.ok) return null;
+  return await response.json().catch(() => null) as ThreadHistoryPage<ThoughtsHistoryMessage> | null;
 }
 
 export function useBoundedThreadHistoryWindow() {

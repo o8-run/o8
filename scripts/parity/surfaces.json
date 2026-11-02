@@ -238,6 +238,37 @@
       ]
     },
     {
+      "id": "scheduled",
+      "flags": [
+        "--scheduled"
+      ],
+      "nativeCommand": "Open scheduled automations",
+      "webRoute": "/dashboard",
+      "webEvent": "o8:open-automations",
+      "nativeSelectors": [
+        "scheduled-page"
+      ]
+    },
+    {
+      "id": "usage",
+      "flags": [
+        "--usage"
+      ],
+      "nativeCommand": "Open usage",
+      "webRoute": "/dashboard",
+      "nativeSelectors": [
+        "usage-page"
+      ]
+    },
+    {
+      "id": "bots",
+      "flags": [
+        "--bots"
+      ],
+      "webRoute": "/dashboard",
+      "nativeSelectors": []
+    },
+    {
       "id": "setup",
       "flags": [
         "--onboarding"

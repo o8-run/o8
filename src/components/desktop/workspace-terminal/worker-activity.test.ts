@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { humanizeActivity, workerTranscriptBlocks } from './worker-activity';
 import { codexParseRunLog } from '@/lib/codex/owned-log';
+import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import { normalizeCodexEvents } from '@/lib/orchestrator/transcript-normalizer';
 import { mapPacketTranscriptEntries } from './use-packet-transcript-poll';
 import type { OwnedRunRecord } from '@/lib/runtimes/shared/owned-session/types';
@@ -38,18 +39,30 @@ describe('activity humanizer', () => {
 });
 
 describe('command identity through log and packet entry points', () => {
-  it('merges item start/completion into one owned row with status and output', () => {
+  it('folds separate start/completion events into one settled runtime row', () => {
     const raw = [log('item.started', 'a'), log('item.completed', 'a', { exit_code: 1, aggregated_output: 'Permission denied' })].join('\n');
     const entries = codexParseRunLog(raw, run).entries.filter(entry => entry.kind === 'tool' || entry.kind === 'tool-output');
-    expect(entries).toHaveLength(1);
-    expect(entries[0].toolCall).toMatchObject({ id: 'run:a', status: 'error', result: 'Permission denied' });
+    expect(entries.map(entry => entry.id)).toEqual(['run:tool:a', 'run:tool-output:a']);
+    for (const entry of entries) {
+      expect(entry.toolCall).toMatchObject({ id: 'run:a', status: 'error', result: 'Permission denied' });
+    }
+    const transcript = ownedTailToRuntimeTranscript({ entries, groups: [] });
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]).toMatchObject({
+      id: 'run:tool:a', role: 'assistant',
+      toolCalls: [{ id: 'run:a', status: 'error', result: 'Permission denied' }],
+    });
   });
   it('retains a stable owned identity while running', () => {
     const start = codexParseRunLog(log('item.started', 'a'), run).entries.find(entry => entry.kind === 'tool')!;
-    const done = codexParseRunLog([log('item.started', 'a'), log('item.completed', 'a', { exit_code: 0 })].join('\n'), run).entries.find(entry => entry.kind === 'tool')!;
+    const parsed = codexParseRunLog([log('item.started', 'a'), log('item.completed', 'a', { exit_code: 0 })].join('\n'), run);
+    const done = parsed.entries.find(entry => entry.kind === 'tool')!;
     expect(start.id).toBe(done.id);
     expect(start.toolCall?.status).toBe('running');
     expect(done.toolCall?.status).toBe('done');
+    const transcript = ownedTailToRuntimeTranscript({ entries: parsed.entries, groups: [] }).filter(entry => entry.toolCalls?.length);
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]).toMatchObject({ id: start.id, toolCalls: [{ id: 'run:a', status: 'done' }] });
   });
   it('pairs concurrent identical tools by item id across intervening prose', () => {
     const raw = [log('item.started', 'a'), log('item.started', 'b'), JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Checking both.' } }), log('item.completed', 'a', { exit_code: 1, aggregated_output: 'denied' }), log('item.completed', 'b', { exit_code: 0 })].join('\n');

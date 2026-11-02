@@ -5,6 +5,9 @@ use serde_json::{Value, json};
 
 use crate::ui::Surface;
 #[cfg(test)]
+#[path = "../composer/image_loaded_shell_tests.rs"]
+mod image_loaded_shell_tests;
+#[cfg(test)]
 #[path = "../composer/loaded_shell_tests.rs"]
 mod loaded_shell_tests;
 pub(super) type Runtime = ();
@@ -100,10 +103,22 @@ impl Shell {
     }
 }
 
+/// Actual current-generation parking receipts. Signed deltas preserve net space loss too.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ParkedWorkspace {
+    pub packet_id: String,
+    pub repository_uuid: String,
+    #[serde(default)]
+    pub reclaimed_available_bytes: Option<i64>,
+}
+
 // Request adapters compile with this surface through its existing shell entry.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
+    #[serde(default)]
+    pub parked_workspaces: Vec<ParkedWorkspace>,
     pub id: String,
     pub title: String,
     #[serde(default)]
@@ -129,8 +144,46 @@ pub struct Session {
     pub tmux_session: Option<String>,
     #[serde(default)]
     pub packet_state: bool,
+    /// Inbox settlement (docs/internals/inbox-settlement.md); older hosts
+    /// omit these and the sidebar stays as it was.
+    #[serde(default)]
+    pub inbox_subject: Option<Value>,
+    /// Set on a child worker, which its parent conversation already lists.
+    #[serde(default)]
+    pub parent_inbox_subject: Option<Value>,
+    #[serde(default)]
+    pub settled_override: Option<String>,
+    #[serde(default)]
+    pub settled_at: Option<String>,
+    /// Why the server settled it on its own ("pr-merged", "released",
+    /// "cleaned"), while that automatic settle is the current one.
+    #[serde(default)]
+    pub auto_settled_reason: Option<String>,
+    /// This thread opted out of auto-settle (inboxAction `auto-settle`).
+    #[serde(default)]
+    pub auto_settle_disabled_at: Option<String>,
+    /// `owner/repo` from the repo's git remote, else its folder; older hosts omit it.
+    #[serde(default)]
+    pub repo_slug: Option<String>,
+    /// The worktree's current branch; older hosts omit it.
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// When the current run started; null when idle or on older hosts.
+    #[serde(default)]
+    pub run_started_at: Option<String>,
+    /// Inbox pin (#5141), its order key and the preference revision a
+    /// pin/unpin must quote; older hosts omit them.
+    #[serde(default)]
+    pub pinned_at: Option<String>,
+    #[serde(default)]
+    pub pin_order_key: Option<String>,
+    #[serde(default)]
+    pub inbox_revision: Option<u64>,
 }
 impl Session {
+    pub fn settled(&self) -> bool {
+        self.settled_override.as_deref() == Some("settled")
+    }
     pub fn key(&self) -> String {
         if self.id.contains(':') {
             self.id.clone()
@@ -150,6 +203,7 @@ impl Session {
 pub struct QueueError {
     pub message: String,
     pub status: Option<u16>,
+    pub network_send: Option<Value>,
 }
 
 impl Client {
@@ -161,6 +215,14 @@ impl Client {
             "/api/v2/chat-history",
             &[("tabId", &session.id), ("limit", "100")],
         )?;
+        if record["source"] == "bot-network" {
+            if record["repoPath"].as_str() != session.repo_path.as_deref() {
+                return Err(
+                    "The network conversation repository changed. Refresh before sending.".into(),
+                );
+            }
+            return Ok(json!({"source":"bot-network", "network":record["network"]}));
+        }
         if record["repoPath"].as_str() != session.repo_path.as_deref()
             || record["backend"].as_str() != session.backend.as_deref()
         {
@@ -185,7 +247,7 @@ impl Client {
         let defaults: Value = self
             .get("/api/panel/operator-defaults", &[("include", "values")])
             .unwrap_or(Value::Null);
-        let mut routing = json!({"backend":backend,"model":model,"effort":"medium","permissionMode":permission,"mode":"single","pickedMode":"solo","collide":false});
+        let mut routing = json!({"backend":backend,"model":model,"effort":"medium","permissionMode":permission,"mode":"fleet","pickedMode":"fast","collide":false});
         if let Some(effort) = receipt
             .and_then(|r| r["effort"].as_str())
             .or(defaults["values"]["thinkingEffort"].as_str())
@@ -221,18 +283,37 @@ impl Client {
         let url = self.url("/api/orchestrator/composer-queue").unwrap();
         let request = self.request(method, &url);
         let response = request.send_json(body.clone()).map_err(|e| match e {
-            ureq::Error::Status(code, _) => QueueError {
-                message: format!("Queue rejected the request (HTTP {code}). Draft retained."),
-                status: Some(code),
-            },
+            ureq::Error::Status(code, response) => {
+                let record: Value = Self::read(response).unwrap_or(Value::Null);
+                let network_send = record.get("networkSend").cloned();
+                let message = match network_send.as_ref().and_then(|r| r["status"].as_str()) {
+                    Some("accepted") => {
+                        "The bus accepted this message. Refresh its transcript; draft retained."
+                            .to_owned()
+                    }
+                    Some("cancelled") => "This send was removed. Draft retained.".to_owned(),
+                    Some("rejected") => format!(
+                        "{} Draft retained.",
+                        record["error"].as_str().unwrap_or("This send was refused.")
+                    ),
+                    _ => format!("Queue rejected the request (HTTP {code}). Draft retained."),
+                };
+                QueueError {
+                    message,
+                    status: Some(code),
+                    network_send,
+                }
+            }
             _ => QueueError {
                 message: "Delivery is unconfirmed. Retry checks the same message identity.".into(),
                 status: None,
+                network_send: None,
             },
         })?;
         Self::read(response).map_err(|message| QueueError {
             message,
             status: None,
+            network_send: None,
         })
     }
     pub fn history(&self, id: &str) -> Result<History, String> {

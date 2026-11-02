@@ -25,3 +25,17 @@ Up and Down continue peer selection when Activity has card focus. Escape returns
 ## Card review round 2
 
 Primary mouse presses select and focus a card during capture, before Activity or another child control handles the event. Child controls retain their own subsequent focus handling. Up and Down derive their starting position from the focused card, falling back to list selection when the list has focus. The GPUI regression selects A, clicks B Activity, presses Enter then Down, and verifies C is selected and focused, including that the Activity click selected B first. The item-2 review-r2 tails record the failure on the prior head and the passing test after the fix.
+
+## Conflict and adjust actions
+
+Inspect conflict opens the existing native diff viewer inside the task using the desktop's `/api/worktrees/diff` route. The target is the selected task's lane worktree, falling back to its lane repository or packet workspace in the same order as the desktop. The native client does not invent a conflicting-owner path when the server supplies none; this opens the task's complete workspace diff.
+
+Keep waiting reads `/api/lanes/:id?events=0` to check the current lane and leaves the durable queue unchanged. It does not resume or redispatch the worker. The inline editor is the existing native composer. Send calls `/api/orchestrator/steer-packet` with the exact packet ID, message, operator source and a stable idempotency key. A lost response retains the frozen request and draft; Retry reuses it. Confirmed delivery clears only an unchanged draft, so edits made during a request survive.
+
+Tab and Shift+Tab traverse enabled actions and the editor; Enter or Space activates an action. Controls are disabled during a request. Each action has a GPUI test that asserts the actual server call. The lost-response fixture runs the production route and persisted idempotency service twice while replacing only the external runtime discovery/resume leaf: it records two identical HTTP bodies and one delivery.
+
+The item-3 screenshots show the native actions and draft beside the current desktop worker components in All Glass. macOS material, exact type shaping and shared shell chrome still require the visual parity work in #4711.
+
+## Action review round 1
+
+Unconfirmed requests and composer drafts are saved per workspace and packet in a surface-owned `workers.json` sibling of the shell state. The owner-only file is atomically replaced and synced before Send can call the server. Closing Workers or opening a fresh shell restores the frozen request, including its original idempotency key. A confirmed response removes that pending entry and clears only an unchanged draft; drafts on other cards remain. Unavailable local storage prevents delivery until saving succeeds. The GPUI regression drops a successful real-route response, destroys the original Workers view, opens a fresh shell, and verifies identical request bodies with one runtime delivery after retry.

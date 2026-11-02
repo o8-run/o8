@@ -57,7 +57,10 @@ fn saved_history_surface_with_only_o8d(cx: &mut TestAppContext) {
     let line = BufReader::new(child.stdout.take().unwrap())
         .lines()
         .next()
-        .unwrap()
+        .expect(
+            "o8d exited before listening: build it with --features experimental-http \
+             and set O8D_HTTP_TEST_BINARY to that binary",
+        )
         .unwrap();
     let origin = format!(
         "http://{}",

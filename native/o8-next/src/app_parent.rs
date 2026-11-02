@@ -1,17 +1,71 @@
 //! The installed app owns the native window through a stdin pipe. Its EOF is
 //! reliable on orderly shutdown and forced server death on both macOS and Linux.
-use std::io::Read;
+use serde_json::{Value, json};
+use std::{
+    collections::VecDeque,
+    io::{BufRead, Write},
+    sync::Mutex,
+};
+
+static REQUESTS: Mutex<VecDeque<Value>> = Mutex::new(VecDeque::new());
+
+pub(crate) fn take_browser_request() -> Option<Value> {
+    REQUESTS.lock().unwrap().pop_front()
+}
+pub(crate) fn browser_result(id: &str, result: Value) {
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(
+        out,
+        "o8-next-browser-result:{}",
+        json!({"id":id,"result":result})
+    );
+    let _ = out.flush();
+}
 
 pub fn watch() {
     if std::env::var("O8_NEXT_PARENT_PIPE").as_deref() != Ok("1") {
         return;
     }
     std::thread::spawn(|| {
-        let mut byte = [0_u8; 1];
+        let input = std::io::stdin();
+        let mut input = input.lock();
         loop {
-            match std::io::stdin().read(&mut byte) {
-                Ok(0) | Err(_) => std::process::exit(0),
-                Ok(_) => {}
+            // Parent-owned, newline-delimited controls. Bound even a malformed
+            // frame; EOF retains the existing server-death lifecycle behavior.
+            let mut line = Vec::new();
+            loop {
+                let available = match input.fill_buf() {
+                    Ok([]) | Err(_) => std::process::exit(0),
+                    Ok(bytes) => bytes,
+                };
+                let end = available.iter().position(|b| *b == b'\n');
+                let count = end.map_or(available.len(), |at| at + 1);
+                if line.len() + count > 1024 * 1024 {
+                    std::process::exit(0);
+                }
+                line.extend_from_slice(&available[..count]);
+                input.consume(count);
+                if end.is_some() {
+                    break;
+                }
+            }
+            let Ok(frame) = serde_json::from_slice::<Value>(&line) else {
+                continue;
+            };
+            if frame["type"] != "browser-agent" {
+                continue;
+            }
+            let Some(id) = frame["id"].as_str().filter(|id| id.len() <= 128) else {
+                continue;
+            };
+            let mut requests = REQUESTS.lock().unwrap();
+            if requests.len() >= 32 {
+                browser_result(
+                    id,
+                    json!({"ok":false,"error":"Browser action queue is full","actionDispatched":false}),
+                );
+            } else {
+                requests.push_back(frame);
             }
         }
     });

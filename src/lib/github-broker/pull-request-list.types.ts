@@ -19,6 +19,9 @@ export interface PullRequestListItem {
   createdAt: string;
   url: string;
   labels: string[];
+  /** Merge-readiness inputs; null when GitHub did not report them. */
+  reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
+  mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null;
 }
 
 export interface PullRequestListPage {

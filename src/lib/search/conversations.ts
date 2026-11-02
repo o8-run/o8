@@ -1,5 +1,5 @@
 import { getDb, getSqlite } from '@/lib/db';
-import { matchedTextSnippet, toFts5Query } from '@/lib/search/fts';
+import { approximateSearchResult, boundedTypoSelect, matchedTextSnippet, toFts5Query, toTypoFts5Query } from '@/lib/search/fts';
 import type { SearchResult } from '@/lib/search/types';
 
 interface ChatMessage {
@@ -138,6 +138,7 @@ export async function searchConversations(query: string, browse = false): Promis
   if (!getDb()) return [];
   const sqlite = getSqlite();
   let rows: ChatSearchRow[];
+  let recovered: ChatSearchRow[] = [];
   if (browse) {
     rows = sqlite.prepare(`
       SELECT tab_id, messages_json, title, repo_name, repo_path, repo_branch,
@@ -150,7 +151,7 @@ export async function searchConversations(query: string, browse = false): Promis
   } else {
     const ftsQuery = toFts5Query(query);
     if (!ftsQuery) return [];
-    rows = sqlite.prepare(`
+    const select = `
       SELECT ch.tab_id, ch.messages_json, ch.title, ch.repo_name, ch.repo_path,
         ch.repo_branch, ch.remote_url, ch.modified_at,
         snippet(chat_history_fts, 4, char(1), char(2), ' … ', 24) AS snippet,
@@ -158,11 +159,24 @@ export async function searchConversations(query: string, browse = false): Promis
       FROM chat_history_fts
       JOIN chat_history ch ON ch.tab_id = chat_history_fts.tab_id
       WHERE chat_history_fts MATCH ?
-      ORDER BY rank, datetime(ch.modified_at) DESC
+    `;
+    const run = (match: string, recovery = false) => sqlite.prepare(`
+      ${recovery ? boundedTypoSelect(select) : select}
+      ORDER BY rank, datetime(modified_at) DESC
       LIMIT 8
-    `).all(ftsQuery) as ChatSearchRow[];
+    `).all(match) as ChatSearchRow[];
+    rows = run(ftsQuery);
+    const recoveryQuery = toTypoFts5Query(sqlite, 'chat_history_fts', query, rows.length);
+    if (recoveryQuery) recovered = run(recoveryQuery, true);
   }
-  return rows
+  const strictResults = rows
     .map((row) => resultFromRow(row, query, browse))
     .filter((result): result is SearchResult => result !== null);
+  const seen = new Set(strictResults.map(result => result.id));
+  return [...strictResults, ...recovered.flatMap(row => {
+    const result = resultFromRow(row, query, false);
+    if (!result || seen.has(result.id)) return [];
+    seen.add(result.id);
+    return [approximateSearchResult(result)];
+  })].slice(0, 8);
 }

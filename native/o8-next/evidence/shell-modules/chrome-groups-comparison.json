@@ -1,0 +1,30 @@
+{
+  "main_commit": "39618b7d0981e503223eb8688575ed831ed22149",
+  "main": [
+    314,
+    0,
+    8
+  ],
+  "head": [
+    316,
+    0,
+    8
+  ],
+  "main_cases": 322,
+  "head_cases": 324,
+  "missing_or_changed": [],
+  "added_or_changed": [
+    {
+      "name": "shell::feature_tests::registered_chrome_slot_state_change_repaints_cached_scene",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::feature_tests::registered_shell_feature_reaches_render_keys_commands_tick_and_observer",
+      "status": "ok",
+      "count": 1
+    }
+  ],
+  "head_only_failures": [],
+  "ignored_same": true
+}

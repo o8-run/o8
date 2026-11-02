@@ -3,7 +3,12 @@ set -euo pipefail
 
 packages=(libfontconfig1-dev libfreetype-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libvulkan-dev)
 if [[ "${O8_NATIVE_HEADLESS_TESTS:-false}" != true ]]; then
-  packages+=(mesa-vulkan-drivers xvfb xauth x11-xserver-utils imagemagick fonts-dejavu-core xdotool tesseract-ocr)
+  packages+=(mesa-vulkan-drivers xvfb xauth openbox x11-xserver-utils imagemagick fonts-dejavu-core xdotool tesseract-ocr)
+fi
+# The production-binary terminal test owns a private Xvfb/software Vulkan display.
+# Keep the ordinary headless prerequisite contract unchanged unless opted in.
+if [[ "${O8_NATIVE_REAL_WINDOW_TESTS:-false}" == true ]]; then
+  packages+=(mesa-vulkan-drivers xvfb xauth openbox xdotool fonts-dejavu-core)
 fi
 missing=()
 for package in "${packages[@]}"; do

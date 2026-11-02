@@ -12,6 +12,8 @@ use gpui::{
     WindowOptions, div, point, prelude::*, px, size,
 };
 use std::{collections::HashSet, time::Duration};
+#[path = "subagents/grid.rs"]
+mod subagent_binding;
 
 pub struct Grid {
     client: Client,
@@ -26,6 +28,13 @@ pub struct Grid {
     refreshing: bool,
     loading: HashSet<String>,
     focus_pending: bool,
+    subagents: std::collections::HashMap<
+        String,
+        (
+            gpui::Entity<crate::subagents::Inspector>,
+            gpui::Subscription,
+        ),
+    >,
 }
 impl Grid {
     pub(crate) fn shell_reading_focused(&self, window: &Window) -> bool {
@@ -62,6 +71,7 @@ impl Grid {
             refreshing: false,
             loading: HashSet::new(),
             focus_pending: true,
+            subagents: Default::default(),
         }
     }
     fn persist(&mut self) {
@@ -136,6 +146,8 @@ impl Grid {
                             Err(error) => pane.notice = format!("{error}. Refresh to retry."),
                         }
                     }
+                    this.load_images(cx);
+                    this.bind_subagents(cx);
                     cx.notify();
                 });
             })
@@ -144,9 +156,12 @@ impl Grid {
     }
     pub fn poll(&mut self, cx: &mut Context<Self>) {
         let mut visible_changed = false;
+        let mut rows_changed = false;
         for (index, pane) in self.panes.iter_mut().enumerate() {
             let visible = index < self.layout.size && (!self.zoom || index == self.layout.focus);
-            if pane.poll() && visible && self.layout.views[index] == View::Transcript {
+            let changed = pane.poll();
+            rows_changed |= changed;
+            if changed && visible && self.layout.views[index] == View::Transcript {
                 visible_changed = true;
             }
             if let Some(terminal) = &pane.terminal {
@@ -156,8 +171,36 @@ impl Grid {
                     && painting;
             }
         }
+        if rows_changed {
+            self.bind_subagents(cx);
+            self.load_images(cx);
+        }
         if visible_changed {
             cx.notify();
+        }
+    }
+    fn load_images(&mut self, cx: &mut Context<Self>) {
+        for pane in &self.panes {
+            crate::ui::images::load(
+                self.client.clone(),
+                &pane.rows,
+                &pane.list,
+                &pane.images,
+                cx,
+                |grid, cache, changed, cx| {
+                    let mut updated = false;
+                    for pane in &grid.panes {
+                        if std::rc::Rc::ptr_eq(cache, &pane.images) {
+                            updated |=
+                                crate::ui::images::invalidate(&pane.rows, &pane.list, changed);
+                        }
+                    }
+                    if updated {
+                        cx.notify();
+                    }
+                },
+                Self::load_images,
+            );
         }
     }
     fn focus(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -377,6 +420,7 @@ fn this_session<'a>(sessions: &'a [Session], key: &str) -> Option<&'a Session> {
 impl Render for Grid {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.attach_terminals(cx);
+        self.load_images(cx);
         if self.focus_pending {
             self.focus_pending = false;
             self.focus_slot(window, cx);

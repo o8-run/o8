@@ -1,0 +1,20 @@
+<section style="height:240px"><button id="control">Explore</button></section>
+<script>
+addEventListener('o8:visualization-state', async event => {
+  const state = event.detail;
+  if (state?.saved) {
+    document.querySelector('#control').textContent = state.saved;
+    window.__o8Visualization.post('state', { restored: document.querySelector('#control').textContent,
+      theme: document.documentElement.dataset.theme });
+  }
+  if (!state?.probeOrigin) return;
+  const proof = { network: false, popup: false, bridge: false, parent: false, rtc: false, referrer: document.referrer };
+  try { await fetch(state.probeOrigin + '/sandbox-fetch'); } catch { proof.network = true; }
+  try { proof.popup = window.open(state.probeOrigin + '/sandbox-popup') === null; } catch { proof.popup = true; }
+  try { window.webkit.messageHandlers.anyOtherHandler.postMessage('probe'); } catch { proof.bridge = true; }
+  try { void parent.document.body.innerHTML; } catch { proof.parent = true; }
+  proof.rtc = typeof RTCPeerConnection === 'undefined';
+  try { location.href = state.probeOrigin + '/sandbox-navigation'; } catch {}
+  setTimeout(() => window.__o8Visualization.post('state', { proof }), 150);
+});
+</script>

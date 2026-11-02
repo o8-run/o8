@@ -186,6 +186,8 @@ export interface RuntimeTranscriptEntry {
   role: TranscriptRole;
   text: string;
   timestamp: Date;
+  /** Authentic run activity; absent when timestamp is a display fallback. */
+  activityAt?: Date;
   type?: 'message' | 'compaction';
   /** Tool name if role=tool */
   toolName?: string;

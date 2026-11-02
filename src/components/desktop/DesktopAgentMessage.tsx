@@ -489,8 +489,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   // the turn is still streaming AND no answer text or tool call has landed yet.
   // The first token or first tool ends reasoning → it collapses to the
   // "Thought for Ns" line.
-  const thinkingLive = (isStreaming && !hasText && !hasToolCalls)
-    || (entry.thinkingActive === true && !hasText && !hasToolCalls);
+  const thinkingLive = isStreaming && entry.thinkingActive === true && !hasText && !hasToolCalls;
 
   return (
     <div ref={rootRef} style={{
@@ -498,12 +497,13 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       flexDirection: 'column',
       alignItems: 'flex-start',
       gap: 8,
-      animation: isLast ? 'llmFadeIn 180ms ease-out' : undefined,
+      // Activity updates have a stable position and never replay an entrance.
+      animation: isLast && !hasToolCalls && !hasThinkingSignal ? 'llmFadeIn 180ms ease-out' : undefined,
       opacity: evictedOpacity,
       transition: 'opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)',
     }}>
       {evictedEyebrow}
-      {hasThinkingSignal ? (
+      {hasThinkingSignal && clusterToolCalls.length === 0 ? (
         <ThoughtBlock
           thinking={sanitizedThinking}
           live={thinkingLive}
@@ -558,7 +558,9 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       {hasMedia ? <MediaGrid media={entry.media ?? []} tint="assistant" /> : null}
       {fileEdits.length > 0 ? <FileEditRowStack edits={fileEdits} repoPath={repoPath} extras={rollupExtras} /> : null}
       {clusterToolCalls.length > 0 ? (
-        <ToolCallChipCluster toolCalls={clusterToolCalls} suppressSettledRollup={fileEdits.length > 0} />
+        <ToolCallChipCluster toolCalls={clusterToolCalls} suppressSettledRollup={fileEdits.length > 0} waiting={isStreaming}>
+          {hasThinkingSignal ? <ThoughtBlock thinking={sanitizedThinking} live={false} durationMs={entry.thinkingDurationMs} /> : null}
+        </ToolCallChipCluster>
       ) : null}
       {brainFeedCalls.map((toolCall, index) => (
         <BrainFeedCard key={toolCall.id ?? `brain-feed-${index}`} toolCall={toolCall} />

@@ -23,6 +23,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import {
   isTauri,
   browserViewOpen,
+  browserViewViewportSize,
   browserViewSetRect,
   browserViewHide,
   browserViewShow,
@@ -31,6 +32,7 @@ import {
   type BrowserViewRect,
 } from '@/lib/tauri/bridge';
 import { NATIVE_BROWSER_AGENT_SOURCE } from '@/lib/browser/native-agent-source';
+import { readAppliedUiZoom } from '@/lib/appearance/ui-zoom';
 import { cropRegionBase64, type CropRect } from '@/lib/browser/region-crop';
 
 interface NativeBrowserSurfaceProps {
@@ -38,21 +40,40 @@ interface NativeBrowserSurfaceProps {
   url: string;
   /** Agent-driving glow (framed around the surface while a verb lands). */
   agentGlow?: boolean;
+  /** PiP uses the same page viewport as its iframe preview. */
+  viewportWidth?: number;
 }
 
 function rectKey(r: BrowserViewRect): string {
-  return `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.w)},${Math.round(r.h)}`;
+  return `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.w)},${Math.round(r.h)},${r.pageZoom ?? 1}`;
 }
 
 let lastShownNativeBrowserUrl = '';
+let activeNativeBrowserSurface: symbol | null = null;
+let nativeBrowserWork = Promise.resolve();
 
-export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfaceProps) {
+// All mounted placeholders share one native window. Serialize the seam and
+// discard work from a surface that lost ownership while IPC was in flight.
+function enqueueNativeBrowserWork(owner: symbol | null, work: () => Promise<void>) {
+  nativeBrowserWork = nativeBrowserWork.then(async () => {
+    if (activeNativeBrowserSurface === owner) await work();
+  }).catch((error) => { console.warn('[native-browser] sync failed:', error); });
+}
+
+export function NativeBrowserSurface({ url, agentGlow, viewportWidth }: NativeBrowserSurfaceProps) {
   const ref = useRef<HTMLDivElement>(null);
   const lastRect = useRef<string>('');
+  const followPosition = useRef<() => void>(() => {});
+  const opening = useRef(false);
+  const calibration = useRef(0);
   /** Whether the placeholder is currently on screen (driven by the observer). */
   const visibleRef = useRef<boolean>(false);
-  /** The URL currently shown by the native window (so we navigate on change). */
-  const shownUrl = useRef<string>(lastShownNativeBrowserUrl);
+  const owner = useRef(Symbol('native-browser-surface'));
+  const hideOwned = useCallback(() => {
+    if (activeNativeBrowserSurface !== owner.current) return;
+    activeNativeBrowserSurface = null;
+    enqueueNativeBrowserWork(null, browserViewHide);
+  }, []);
   /** Page-zoom factor: visual-viewport px ÷ layout (CSS) px. 1 at 100%. */
   const zoomRef = useRef<number>(1);
   /** Occlusion state (Stage 5): the native window composites ABOVE o8's web
@@ -70,24 +91,12 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
   const imgRef = useRef<HTMLImageElement>(null);
   const snapshotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /** Measure the o8 webview's page zoom (Cmd +/-). getBoundingClientRect returns
-   *  CSS px in the (possibly zoomed) LAYOUT viewport, but the native child window
-   *  lives in the VISUAL viewport (window.innerWidth/innerHeight). Their ratio is
-   *  the zoom factor — at 90% zoom, a 100vh element measures ~898 while
-   *  innerHeight is 808, so coords must be scaled by 808/898 before they reach
-   *  Rust or the native window lands too far right/down. Cached + remeasured on
-   *  resize (zoom changes fire resize) so syncRect's hot path stays cheap. */
-  const measureZoom = useCallback(() => {
-    try {
-      const probe = document.createElement('div');
-      probe.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:100vh;pointer-events:none;visibility:hidden';
-      document.body.appendChild(probe);
-      const vh = probe.getBoundingClientRect().height;
-      probe.remove();
-      zoomRef.current = vh > 1 ? window.innerHeight / vh : 1;
-    } catch {
-      zoomRef.current = 1;
-    }
+  /** DOMRects already include CSS UI zoom. Only WK page zoom needs conversion:
+   * native viewport points / CSS viewport px. A 100vh probe inherits html.zoom
+   * and undoes the UI zoom, shifting and enlarging the child a second time. */
+  const measureZoom = useCallback(async () => {
+    const viewport = await browserViewViewportSize();
+    return viewport.w / window.innerWidth;
   }, []);
 
   const computeRect = useCallback((): BrowserViewRect | null => {
@@ -101,32 +110,54 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     // clamp it paints PAST o8's window edges. We also stop the bottom at the
     // FOOTER (DesktopStatusBar) top so the native window never covers the status
     // bar (operator video, 2026-06-25).
-    let footerTop = window.innerHeight;
+    const nativeViewportWidth = window.innerWidth * z;
+    const viewportHeight = window.innerHeight * z;
+    let footerTop = viewportHeight;
     const footer = document.querySelector('[data-mcp-scope="desktop-status-bar"]');
     if (footer) {
       const ft = footer.getBoundingClientRect().top * z;
-      if (ft > 0 && ft <= window.innerHeight) footerTop = ft;
+      if (ft > 0 && ft <= viewportHeight) footerTop = ft;
     }
-    const left = Math.max(0, r.left * z);
-    const top = Math.max(0, r.top * z);
-    const right = Math.min(window.innerWidth, r.right * z);
-    const bottom = Math.min(window.innerHeight, footerTop, r.bottom * z);
+    let left = Math.max(0, r.left * z);
+    let top = Math.max(0, r.top * z);
+    let right = Math.min(nativeViewportWidth, r.right * z);
+    let bottom = Math.min(viewportHeight, footerTop, r.bottom * z);
+    // A separate OS window cannot inherit CSS clipping or hidden ancestors.
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) <= 0.02) return null;
+      if (node === el) continue;
+      const clip = node.getBoundingClientRect();
+      if (/(hidden|clip|scroll|auto)/.test(style.overflowX || style.overflow)) {
+        left = Math.max(left, clip.left * z); right = Math.min(right, clip.right * z);
+      }
+      if (/(hidden|clip|scroll|auto)/.test(style.overflowY || style.overflow)) {
+        top = Math.max(top, clip.top * z); bottom = Math.min(bottom, clip.bottom * z);
+      }
+    }
+    // Tauri's macOS window sizing rounds fractional points outward. Inset to
+    // whole points so a zoomed/animated host never spills over its toolbar/card.
+    left = Math.ceil(left); top = Math.ceil(top);
+    right = Math.floor(right); bottom = Math.floor(bottom);
     const w = right - left;
     const h = bottom - top;
     if (w < 1 || h < 1) return null;
-    return { x: left, y: top, w, h };
-  }, []);
+    const pageZoom = viewportWidth ? w / viewportWidth : readAppliedUiZoom() * z;
+    return { x: left, y: top, w, h, ...(pageZoom === 1 ? {} : { pageZoom }) };
+  }, [viewportWidth]);
 
   /** Push the current rect to the native window, deduped. */
   const syncRect = useCallback(() => {
-    if (!visibleRef.current || occludedRef.current) return;
+    if (!visibleRef.current || occludedRef.current || activeNativeBrowserSurface !== owner.current) return;
     const rect = computeRect();
-    if (!rect) return;
+    if (!rect) { hideOwned(); return; }
     const key = rectKey(rect);
     if (key === lastRect.current) return;
     lastRect.current = key;
-    void browserViewSetRect(rect);
-  }, [computeRect]);
+    enqueueNativeBrowserWork(owner.current, async () => {
+      if (visibleRef.current && !occludedRef.current && key === lastRect.current) await browserViewSetRect(rect);
+    });
+  }, [computeRect, hideOwned]);
 
   /** Capture a fresh snapshot for the occlusion swap, debounced — only while the
    *  window is visible + NOT occluded (else screencapture grabs the overlay or a
@@ -139,6 +170,24 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
       void browserViewCapture().then((png) => { if (png) snapshotRef.current = png; });
     }, 900);
   }, []);
+
+  const showOrOpen = useCallback((rect: BrowserViewRect) => {
+    activeNativeBrowserSurface = owner.current;
+    lastRect.current = rectKey(rect);
+    enqueueNativeBrowserWork(owner.current, async () => {
+      if (!visibleRef.current || occludedRef.current) return;
+      const current = computeRect();
+      if (!current) return;
+      if (lastShownNativeBrowserUrl === url) {
+        await browserViewSetRect(current);
+        if (!occludedRef.current && visibleRef.current) await browserViewShow();
+      } else {
+        await browserViewOpen(url, current, NATIVE_BROWSER_AGENT_SOURCE);
+        lastShownNativeBrowserUrl = url;
+      }
+    });
+    scheduleSnapshot();
+  }, [computeRect, scheduleSnapshot, url]);
 
   /** Enter/leave the occluded state: hide the native window + paint the snapshot
    *  so the o8 overlay underneath shows without a blank gap; restore on leave. */
@@ -155,18 +204,20 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
           img.style.display = 'none';
         }
       }
-      void browserViewHide();
+      enqueueNativeBrowserWork(owner.current, browserViewHide);
     } else {
-      void browserViewShow();
-      // The layout may have shifted while hidden — force a reposition.
+      if (!visibleRef.current || activeNativeBrowserSurface !== owner.current) return;
+      // Reposition before show, or open if this owner first appeared covered.
+      const rect = computeRect();
+      if (!rect) return;
       lastRect.current = '';
-      syncRect();
+      showOrOpen(rect);
       // Hold the snapshot a beat so the native window paints before we drop it
       // (no one-frame gap during the show), then refresh it for next time.
       if (img) setTimeout(() => { img.style.display = 'none'; }, 220);
       scheduleSnapshot();
     }
-  }, [syncRect, scheduleSnapshot]);
+  }, [computeRect, showOrOpen, scheduleSnapshot]);
 
   /** Detect an o8 overlay painting over the browser rect: sample the rect's
    *  center + corners with elementsFromPoint (CSS/layout coords). A hit only
@@ -269,7 +320,7 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
       const ys = [r.top + inset, r.top + r.height / 2, r.bottom - inset];
       for (const px of xs) {
         for (const py of ys) {
-          const top = document.elementsFromPoint(px, py)[0];
+          const top = document.elementsFromPoint?.(px, py)[0];
           if (top && top !== el && !el.contains(top) && !top.contains(el) && paintsVisibly(top)) {
             occluded = true;
             break;
@@ -281,51 +332,25 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     setOccluded(occluded);
   }, [setOccluded]);
 
-  const showOrOpen = useCallback((rect: BrowserViewRect) => {
-    lastRect.current = rectKey(rect);
-    lastShownNativeBrowserUrl = url;
-    if (shownUrl.current === url) {
-      void browserViewSetRect(rect);
-      void browserViewShow();
-    } else {
-      shownUrl.current = url;
-      void browserViewOpen(url, rect, NATIVE_BROWSER_AGENT_SOURCE);
+  const openHere = useCallback(async () => {
+    if (!visibleRef.current || !url || opening.current) return;
+    opening.current = true;
+    const request = ++calibration.current;
+    try {
+      const zoom = await measureZoom();
+      if (!visibleRef.current || request !== calibration.current) return;
+      zoomRef.current = zoom;
+      occludedRef.current = false;
+      if (imgRef.current) imgRef.current.style.display = 'none';
+      const rect = computeRect();
+      if (!rect) return;
+      activeNativeBrowserSurface = owner.current;
+      checkOcclusion();
+      if (!occludedRef.current) showOrOpen(rect);
+    } finally {
+      if (request === calibration.current) opening.current = false;
     }
-    scheduleSnapshot();
-  }, [scheduleSnapshot, url]);
-
-  /** Open/navigate the native window over the placeholder (only when visible). */
-  const openHere = useCallback(() => {
-    if (!visibleRef.current || !url) return;
-    occludedRef.current = false;
-    if (imgRef.current) imgRef.current.style.display = 'none';
-    measureZoom();
-    const rect = computeRect();
-    if (!rect) {
-      // Layout not settled yet — retry next frame.
-      requestAnimationFrame(() => {
-        if (!visibleRef.current || !url) return;
-        const retry = computeRect();
-        if (!retry) return;
-        showOrOpen(retry);
-      });
-      return;
-    }
-    showOrOpen(rect);
-    // Self-correct a stale open rect. The panel/window layout may not be settled
-    // when the tab first opens — especially right after the operator moves the
-    // o8 window between displays (mixed scale factors) — so re-measure the zoom +
-    // reposition a couple of beats later. syncRect dedupes, so a no-op when the
-    // first rect was already correct.
-    [160, 500].forEach((delay) => {
-      setTimeout(() => {
-        if (visibleRef.current && !occludedRef.current) {
-          measureZoom();
-          syncRect();
-        }
-      }, delay);
-    });
-  }, [url, computeRect, measureZoom, showOrOpen, syncRect]);
+  }, [url, computeRect, measureZoom, showOrOpen, checkOcclusion]);
 
   // Visibility: open when the placeholder appears on screen, hide when it leaves
   // (tab switched away → display:none → not intersecting). The native window is a
@@ -342,26 +367,33 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
         if (nowVisible === visibleRef.current) return;
         visibleRef.current = nowVisible;
         if (nowVisible) {
-          openHere();
+          followPosition.current();
+          void openHere();
         } else {
           // Tab switched away — drop occlusion state so a stale snapshot/hidden
           // flag never carries into the next show.
+          calibration.current += 1;
+          opening.current = false;
           occludedRef.current = false;
           if (imgRef.current) imgRef.current.style.display = 'none';
-          void browserViewHide();
+          hideOwned();
         }
       },
       { threshold: 0 },
     );
     io.observe(el);
-    return () => io.disconnect();
-  }, [openHere]);
+    return () => {
+      calibration.current += 1;
+      opening.current = false;
+      io.disconnect();
+    };
+  }, [openHere, hideOwned]);
 
   // Navigate when the URL changes while visible (tab switch / URL bar).
   useEffect(() => {
     if (!isTauri()) return;
-    if (!visibleRef.current || !url || url === shownUrl.current) return;
-    openHere();
+    if (!visibleRef.current || !url || url === lastShownNativeBrowserUrl) return;
+    void openHere();
   }, [url, openHere]);
 
   // Reposition on container/window resize + scroll. Live drag-resize jank +
@@ -380,23 +412,55 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     // A window resize is also where page-zoom changes surface — remeasure the
     // zoom before repositioning. Scroll and panel-divider drags (ResizeObserver)
     // don't change zoom, so they skip it.
-    const onResize = () => { measureZoom(); syncRect(); };
+    let resizeMeasurement = 0;
+    const onResize = () => {
+      const request = ++resizeMeasurement;
+      void measureZoom().then((zoom) => {
+        if (request !== resizeMeasurement) return;
+        zoomRef.current = zoom;
+        syncRect();
+      });
+    };
     const onScroll = () => syncRect();
     window.addEventListener('resize', onResize);
     window.addEventListener('scroll', onScroll, true);
     // The o8 UI-zoom (lib/appearance/ui-zoom.ts) sets html.style.zoom, which does
     // NOT fire a window resize — observe the <html> style so the native window
     // tracks a live zoom change instead of drifting until the next reopen.
-    const htmlObserver = new MutationObserver(() => { measureZoom(); syncRect(); });
+    const htmlObserver = new MutationObserver(() => syncRect());
     htmlObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    // Ancestor motion (panel transitions, PiP transforms) can change position
+    // without resizing the host. Follow rendered geometry, deduped at the seam.
+    let frame = 0;
+    let dpr = window.devicePixelRatio;
+    let geometry = '';
+    const follow = () => {
+      frame = 0;
+      if (!visibleRef.current) return;
+      if (dpr !== window.devicePixelRatio) { dpr = window.devicePixelRatio; onResize(); }
+      const rect = computeRect();
+      if (!rect) hideOwned();
+      // IO can stay intersecting through opacity/clip transitions. Recover
+      // when rendered geometry becomes valid without stealing a newer owner.
+      else if (activeNativeBrowserSurface === null) void openHere();
+      else if (activeNativeBrowserSurface === owner.current && rectKey(rect) !== geometry) {
+        geometry = rectKey(rect); checkOcclusion(); syncRect();
+      }
+      frame = requestAnimationFrame(follow);
+    };
+    followPosition.current = () => { if (!frame) frame = requestAnimationFrame(follow); };
+    if (visibleRef.current) followPosition.current();
     return () => {
+      resizeMeasurement += 1;
+      followPosition.current = () => {};
+      cancelAnimationFrame(frame);
       ro.disconnect();
       pipPositionObserver?.disconnect();
       htmlObserver.disconnect();
       window.removeEventListener('resize', onResize);
       window.removeEventListener('scroll', onScroll, true);
     };
-  }, [syncRect, measureZoom]);
+  }, [syncRect, measureZoom, computeRect, checkOcclusion, hideOwned, openHere]);
 
   // Occlusion detection (Stage 5). o8 overlays (⌘K/⌘⇧K palettes, modals, the
   // dictation pill, settings) portal into <body>, so a body childList mutation
@@ -411,7 +475,7 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
       raf = requestAnimationFrame(() => { raf = 0; checkOcclusion(); });
     };
     const mo = new MutationObserver(schedule);
-    mo.observe(document.body, { childList: true });
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
     const poll = setInterval(schedule, 500);
     return () => {
       mo.disconnect();
@@ -602,9 +666,11 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
   // Browser tab closing entirely is what triggers browser_view_close upstream).
   useEffect(() => {
     return () => {
-      if (isTauri()) void browserViewHide();
+      visibleRef.current = false;
+      if (snapshotTimer.current) clearTimeout(snapshotTimer.current);
+      if (isTauri()) hideOwned();
     };
-  }, []);
+  }, [hideOwned]);
 
   return (
     <div

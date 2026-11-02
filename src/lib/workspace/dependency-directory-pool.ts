@@ -29,7 +29,11 @@ interface ReadyTree {
 }
 const refills = new Map<string, Promise<void>>();
 const status = new Map<string, { state: string; reason: string | null }>();
-const poolRoot = () => path.join(getDataDir(), 'dependency-directory-pool-v1');
+// Use the directory-name exclusion before clone population. Do not adopt or
+// rename an older pool: another app process may still hold one of its slots.
+export const dependencyDirectoryPoolRoot = () => path.join(getDataDir(),
+  process.platform === 'darwin' ? 'dependency-directory-pool-v1.noindex' : 'dependency-directory-pool-v1');
+const poolRoot = dependencyDirectoryPoolRoot;
 
 /** Match #4377's dependency inputs, retaining the tree fence for unbounded lifecycle. */
 export function dependencyDirectoryPoolKey(recipe: DependencyInstallRecipe, source: WorktreeMaterializationIdentity, graphDigest: string): string {

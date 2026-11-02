@@ -23,7 +23,7 @@ async function freePort(): Promise<number> {
 
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
 export async function startParityReference(options: {
-  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string;
+  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number;
 } = {}) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-ws-parity-')));
   const token = 'ws-parity-fixture-credential';
@@ -69,6 +69,7 @@ export async function startParityReference(options: {
   const apiUrl = `http://127.0.0.1:${address.port}`;
   const port = await freePort();
   const child = execFile(process.execPath, [
+    ...(options.preload ? ['--require', options.preload] : []),
     ...(options.stallFixture ? ['--import=./tests/fixtures/ws-stall-preload.mjs'] : []),
     ...(options.nativeHttp ? ['--require=./scripts/next/brain-runtime.cjs'] : []),
     ...(options.entry ? [options.entry] : ['--import=./scripts/register-server-only-stub.mjs',
@@ -79,6 +80,7 @@ export async function startParityReference(options: {
       CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'),
       CORTEX_IDE_REVIEW_REPO_ROOT: directory, WS_TOKEN: token,
       O8_API_PORT: String(address.port), O8_WS_PORT: String(port),
+      CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${port}`,
       O8_WS_O8D: (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
       O8_NEXT_O8D: options.nativeHttp ? '1' : '0',
       O8D_BINARY: options.binary ?? process.env.O8D_TEST_BINARY,
@@ -99,7 +101,7 @@ export async function startParityReference(options: {
   child.stdout?.resume();
   child.stderr?.resume();
   try {
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + (options.startupTimeoutMs ?? 30_000);
     while (Date.now() < deadline) {
       if (child.exitCode !== null) throw new Error('reference WS process exited');
       try {

@@ -20,7 +20,7 @@ function InstructionRow({ directive: d, expandedRow, onToggleRow, onOpenFile }: 
     <Row
       title={d.title}
       subtitle={`${d.repoName ? `${d.repoName} · ` : ''}${d.body.replace(/\s+/g, ' ').slice(0, 160)}`}
-      pill={indexed ? 'Indexed reference' : d.scope === 'project' ? 'Project rule' : d.repoName ? 'Repository rule' : 'Shared rule'}
+      pill={indexed ? undefined : d.scope === 'project' ? 'Project rule' : d.repoName ? 'Repository rule' : 'Shared rule'}
       expanded={expandedRow === d.id}
       onClick={() => onToggleRow(expandedRow === d.id ? null : d.id)}
     >
@@ -51,37 +51,29 @@ function IndexedDocumentation({ directives, ...rowProps }: InstructionRowsProps)
 
   return (
     <section aria-label="Indexed documentation">
-      <SectionHeader label="Indexed documentation" count={directives.length} />
-      <p style={{ marginTop: 0, marginBottom: 12, fontSize: 13, lineHeight: 1.6, color: 'var(--t-text-muted)' }}>
-        Document sections indexed for retrieval. Browse by source or search their contents above.
-      </p>
-      <label style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--t-text-muted)', marginBottom: 12 }}>
-        Source
-        <select aria-label="Documentation source" value={selectedSource} onChange={(event) => { setSource(event.target.value); changePage(0); }} style={{
-          maxWidth: '100%', minWidth: 0, minHeight: 42, border: '1px solid var(--t-divider)', borderRadius: 12,
+      <SectionHeader label="Indexed docs" count={directives.length} />
+      <select aria-label="Documentation source" value={selectedSource} onChange={(event) => { setSource(event.target.value); changePage(0); }} style={{
+          display: 'block', marginBottom: 12, maxWidth: '100%', minWidth: 0, minHeight: 42, border: '1px solid var(--t-divider)', borderRadius: 12,
           background: 'var(--t-input-bg)', color: 'var(--t-text)', font: 'inherit',
           paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12,
         }}>
           <option value="">All sources</option>
           {sources.map((value) => <option key={value} value={value}>{value}</option>)}
         </select>
-      </label>
       {selected.slice(start, start + REFERENCE_PAGE_SIZE).map((directive) => (
         <InstructionRow key={directive.id} directive={directive} {...rowProps} />
       ))}
-      <nav aria-label="Documentation pages" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginTop: 12 }}>
+      {lastPage > 0 ? <nav aria-label="Documentation pages" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginTop: 12 }}>
         <RamsButton variant="ghost" disabled={currentPage === 0} onClick={() => changePage(currentPage - 1)}>Previous sections</RamsButton>
         <span role="status" style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Sections {start + 1} to {Math.min(start + REFERENCE_PAGE_SIZE, selected.length)} of {selected.length}</span>
         <RamsButton variant="ghost" disabled={currentPage === lastPage} onClick={() => changePage(currentPage + 1)}>Next sections</RamsButton>
-      </nav>
+      </nav> : null}
     </section>
   );
 }
 
 export function InstructionsTab({ directives, query, correctionRepoPaths, projectId, ...rowProps }: InstructionRowsProps & { query: string; correctionRepoPaths?: string[]; projectId?: string }) {
   const q = query.toLowerCase();
-  const references = directives.filter(isIndexedDocumentation);
-  const authored = directives.filter((d) => !isIndexedDocumentation(d));
   const visible = directives.filter((d) => !q || [d.title, d.body, d.repoName, d.file,
     isIndexedDocumentation(d) ? indexedDocumentationSource(d) : null,
   ].some((field) => field?.toLowerCase().includes(q)));
@@ -91,14 +83,11 @@ export function InstructionsTab({ directives, query, correctionRepoPaths, projec
   const repoScoped = visibleAuthored.filter((d) => d.repoName);
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      <p style={{ marginTop: 0, marginBottom: 12, fontSize: 13, lineHeight: 1.6, color: 'var(--t-text-muted)' }}>
-        {authored.length} authored {authored.length === 1 ? 'instruction' : 'instructions'} · {references.length} indexed {references.length === 1 ? 'section' : 'sections'}
-      </p>
       {visible.length === 0 ? <EmptyState
         title={query && directives.length > 0 ? 'No matching instructions' : 'No additional rules'}
         body={query && directives.length > 0
           ? `No instructions match “${query}”. Change or clear the search to see your rules.`
-          : 'Rules appear here with their source and scope. Shared project instructions are managed separately in the project view.'}
+          : undefined}
       /> : null}
       {[{ label: 'Shared rules', entries: shared }, { label: 'Repository rules', entries: repoScoped }].map(({ label, entries }) => entries.length ? (
         <div key={label}>

@@ -5,11 +5,13 @@ import type { SetupRuntime } from '@/lib/setup/runtime-recommendation';
 
 interface InventoryState {
   inventory: SetupRuntime[] | null;
+  /** Settings › Providers `disabledRuntimes`: hidden from new-session pickers. */
+  disabled: string[];
   loading: boolean;
   error: string | null;
   expires: number;
 }
-const EMPTY: InventoryState = { inventory: null, loading: false, error: null, expires: 0 };
+const EMPTY: InventoryState = { inventory: null, disabled: [], loading: false, error: null, expires: 0 };
 let snapshot = EMPTY;
 let pending: Promise<void> | null = null;
 const listeners = new Set<() => void>();
@@ -27,9 +29,10 @@ async function loadInventory(refresh = false): Promise<void> {
   const request = fetch(`/api/panel/operator-defaults${refresh ? '?refresh=runtime' : ''}`, { cache: 'no-store' })
     .then(async (response) => {
       if (!response.ok) throw new Error('Could not check installed tools. Retry the scan.');
-      const payload = await response.json() as { dispatchableRuntimes?: SetupRuntime[] };
+      const payload = await response.json() as { dispatchableRuntimes?: SetupRuntime[]; values?: { disabledRuntimes?: unknown } };
       if (!Array.isArray(payload.dispatchableRuntimes)) throw new Error('Runtime inventory is unavailable.');
-      publish({ inventory: payload.dispatchableRuntimes, expires: Date.now() + 60_000, loading: false, error: null });
+      const disabled = Array.isArray(payload.values?.disabledRuntimes) ? payload.values.disabledRuntimes.filter((id): id is string => typeof id === 'string') : [];
+      publish({ inventory: payload.dispatchableRuntimes, disabled, expires: Date.now() + 60_000, loading: false, error: null });
     }).catch((cause: unknown) => {
       publish({ ...EMPTY, error: cause instanceof Error ? cause.message : 'Runtime scan failed.' });
     });

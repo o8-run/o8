@@ -21,8 +21,6 @@ beforeAll(async () => {
       function Surface() {
         const [busy, setBusy] = useState(false);
         window.setBusy = setBusy;
-        const [liveCompaction, setLiveCompaction] = useState(false);
-        window.setLiveCompaction = setLiveCompaction;
         const item = { id: 'follow-up', sequence: 1, repoPath: '/fixture', threadId: 'thoughts-fixture', intent: 'send-next', status: 'queued',
           reason: null, createdAt: 1, updatedAt: 1, admittedAt: null, payload: { text: 'Keep this follow-up queued.', wireMessage: 'Keep this follow-up queued.',
           images: [], routing: { backend: 'codex', permissionMode: 'plan', mode: 'single', pickedMode: 'solo', collide: false } } };
@@ -30,7 +28,7 @@ beforeAll(async () => {
           padding: 24, color: 'var(--t-text)', background: 'var(--t-bg)', fontFamily: 'var(--font-sans-system)' } },
           createElement('section', { style: { display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, width: '100%', maxWidth: 760,
             marginLeft: 'auto', marginRight: 'auto', background: 'var(--t-chat-surface-bg)' } },
-            createElement(ChatMessageList, { displayMessages: restored, displayWaiting: busy, liveCompaction, isOrchestratorMode: true,
+            createElement(ChatMessageList, { displayMessages: restored, displayWaiting: busy, isOrchestratorMode: true,
               activeTargetLabel: 'Lead', activeTargetColor: 'var(--t-accent)', thoughtsMutedGlass: 'var(--t-hover)',
               thoughtsElevatedBorder: 'var(--t-divider-subtle)', thoughtsElevatedShadow: 'none', emptyStateFallback: null,
               composerQueue: { items: [item], canSteer: false, onSteer() {}, onCancel() {} }, logLabel: 'Fixture conversation' })));
@@ -77,7 +75,8 @@ it.each([
       await page.evaluate(() => (window as unknown as { setBusy: (busy: boolean) => void }).setBusy(true));
       if (proofDir) { fs.mkdirSync(proofDir, { recursive: true }); await page.screenshot({ path: path.join(proofDir, `${palette}-${surface}-${width}-before-assert.png`) }); }
       await expect.poll(() => page.getByText('Compaction in progress', { exact: true }).count()).toBe(0);
-      await expect.poll(() => page.getByText('Planning next moves', { exact: true }).count()).toBe(1);
+      await expect.poll(() => page.getByText('Planning next moves', { exact: true }).count()).toBe(0);
+      await expect.poll(() => page.getByText(/^(Waiting for response|Working · phase unknown)$/).count()).toBe(1);
       if (proofDir) { fs.mkdirSync(proofDir, { recursive: true }); await page.screenshot({ path: path.join(proofDir, `${palette}-${surface}-${width}.png`) }); }
       expect(await page.getByText('Messages sent now will be queued', { exact: false }).count()).toBe(0);
       expect(await queue.textContent()).toContain('Keep this follow-up queued.');
@@ -89,19 +88,6 @@ it.each([
       expect(busyFrame!.y).toBeCloseTo(idleFrame!.y, 0);
       expect(busyFrame!.height).toBeCloseTo(idleFrame!.height, 0);
       expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(busyFrame!.y + busyFrame!.height);
-      await page.evaluate(() => (window as unknown as { setLiveCompaction: (value: boolean) => void }).setLiveCompaction(true));
-      const warning = page.getByText('Compaction in progress', { exact: true });
-      await expect.poll(() => warning.count()).toBe(1);
-      expect(await page.getByText('Messages sent now will be queued', { exact: false }).count()).toBe(1);
-      expect(await page.getByText('Planning next moves', { exact: true }).count()).toBe(0);
-      await warning.scrollIntoViewIfNeeded();
-      const warningBounds = await warning.boundingBox();
-      expect(warningBounds!.x).toBeGreaterThanOrEqual(0);
-      expect(warningBounds!.x + warningBounds!.width).toBeLessThanOrEqual(width);
-      if (proofDir) await page.screenshot({ path: path.join(proofDir, `${palette}-${surface}-${width}-live.png`) });
-      await page.evaluate(() => (window as unknown as { setLiveCompaction: (value: boolean) => void }).setLiveCompaction(false));
-      await expect.poll(() => warning.count()).toBe(0);
-      expect(await page.getByText('Messages sent now will be queued', { exact: false }).count()).toBe(0);
       await divider.getByRole('button').click();
       expect(await divider.textContent()).toContain('The route inspection is complete.');
       await divider.getByRole('button').click();

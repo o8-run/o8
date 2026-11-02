@@ -31,12 +31,12 @@ vi.mock('@/lib/runtimes/shared/cli-resolver', () => ({
     return { path: fixture.selected, version: fixture.calls.length > 0 && fixture.postProbes <= fixture.missingProbes ? undefined : fixture.version, source: fixture.source };
   },
 }));
-vi.mock('node:child_process', () => ({ execFile: (command: string, args: string[], _options: unknown, callback: (error: Error | null, result?: { stdout: string; stderr: string }) => void) => {
-  if (command === '/bin/ps') { callback(null, { stdout: fixture.externalBusy ? 'codex codex exec' : '', stderr: '' }); return; }
+vi.mock('node:child_process', () => ({ execFile: (command: string, args: string[], _options: unknown, callback: (error: Error | null, stdout?: string, stderr?: string) => void) => {
+  if (command === '/bin/ps') { callback(null, fixture.externalBusy ? 'codex codex exec' : '', ''); return; }
   fixture.commands.push(command);
   fixture.calls.push(args);
   if (fixture.fail) callback(new Error('install failed'));
-  else { if (fixture.changedRealpath) { const other = join(fixture.prefix, 'bin/other-codex'); writeFileSync(other, 'fixture'); rmSync(fixture.selected); symlinkSync(other, fixture.selected); } if (fixture.changedPath) fixture.selected = join(fixture.prefix, 'bin/other-codex'); if (!fixture.wrongVersion) fixture.version = '0.159.3'; callback(null, { stdout: '', stderr: '' }); }
+  else { if (fixture.changedRealpath) { const other = join(fixture.prefix, 'bin/other-codex'); writeFileSync(other, 'fixture'); rmSync(fixture.selected); symlinkSync(other, fixture.selected); } if (fixture.changedPath) fixture.selected = join(fixture.prefix, 'bin/other-codex'); if (!fixture.wrongVersion) fixture.version = '0.159.3'; callback(null, '', ''); }
 } }));
 const route = await import('@/app/api/setup/cli-updates/route');
 const post = (body: unknown = {}, token = 'operator-test-token') => {

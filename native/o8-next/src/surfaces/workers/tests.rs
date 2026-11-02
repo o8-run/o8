@@ -86,6 +86,12 @@ fn workers_live_route_retains_cards_selection_and_filter_scroll(cx: &mut TestApp
         }
         std::thread::sleep(Duration::from_millis(25));
     }
+    // A tick after five seconds first starts the periodic catalog scan. Drive
+    // the following production tick too, so the event subscription starts
+    // after that scan has completed, as it does in the running shell.
+    view.update(&mut visual, |v, cx| v.tick(false, cx));
+    visual.run_until_parked();
+    draw(&mut visual);
     assert_eq!(
         card.read_with(&visual, |c, _| c.task.filter),
         2,

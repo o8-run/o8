@@ -66,6 +66,9 @@ interface CacheReservation {
 const MANAGERS = ['npm', 'pnpm', 'yarn', 'bun'];
 const RECORD = '.o8-cache.json';
 const ACTIVE = '.o8-active-';
+// Confine exclusion to the managed namespace, including injected cache roots.
+// Existing unsuffixed caches and their active installer leases stay untouched.
+const MANAGED_DIRECTORY = process.platform === 'darwin' ? 'managed-v1.noindex' : 'managed-v1';
 
 async function ensurePrivateDirectory(directoryPath: string, parentPath?: string): Promise<void> {
   try {
@@ -164,7 +167,7 @@ export async function acquireDependencyCache(
     throw new Error('Dependency recipe cache authority is invalid.');
   }
   await ensurePrivateDirectory(cacheRoot);
-  const managed = path.join(await realpath(cacheRoot), 'managed-v1');
+  const managed = path.join(await realpath(cacheRoot), MANAGED_DIRECTORY);
   await ensurePrivateDirectory(managed, cacheRoot);
   const managerRoot = path.join(managed, recipe.packageManager);
   const root = path.join(managerRoot, recipe.key);
@@ -221,7 +224,7 @@ export async function pruneDependencyCaches(
 ): Promise<DependencyCacheRetentionReceipt> {
   validPolicy(policy);
   await ensurePrivateDirectory(cacheRoot);
-  const managed = path.join(await realpath(cacheRoot), 'managed-v1');
+  const managed = path.join(await realpath(cacheRoot), MANAGED_DIRECTORY);
   await ensurePrivateDirectory(managed, cacheRoot);
   return withPacketLifecycleMutationLock(cacheLock(managed), () => pruneLocked(cacheRoot, managed, policy));
 }

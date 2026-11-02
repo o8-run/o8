@@ -160,8 +160,8 @@ export async function ownedClaudeCodeSessionState(surfaceId: string) {
   return claudeCodeOwnedStore.sessionState(surfaceId);
 }
 
-export async function sweepOrphanedClaudeCodeSessions(activeSurfaceIds: Set<string>, maxAgeMs: number) {
-  return claudeCodeOwnedStore.sweepOrphanedSessions(activeSurfaceIds, maxAgeMs);
+export async function sweepOrphanedClaudeCodeSessions(activeSurfaceIds: Set<string>, maxAgeMs: number, chatOwnedSurfaceIds?: ReadonlySet<string>) {
+  return claudeCodeOwnedStore.sweepOrphanedSessions(activeSurfaceIds, maxAgeMs, chatOwnedSurfaceIds);
 }
 
 export async function getOwnedClaudeCodeTelemetrySources(surfaceId: string) {

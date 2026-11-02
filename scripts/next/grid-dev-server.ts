@@ -85,7 +85,10 @@ async function main() {
     writeFileSync(join(dataDir, 'ws-port'), String(peer?.port ?? address.port));
     process.stdout.write(`${JSON.stringify({ origin: `http://127.0.0.1:${address.port}`, workspace: repo })}\n`);
   });
+  let closing = false;
   async function close() {
+    if (closing) return;
+    closing = true;
     await closeTerminal();
     closeSockets(); server.closeAllConnections(); server.close();
     realtime.closeAllConnections(); realtime.close();
@@ -93,6 +96,9 @@ async function main() {
     rmSync(root, { recursive: true, force: true }); process.exit(0);
   }
   process.once('SIGTERM', close); process.once('SIGINT', close);
-  setTimeout(close, 120_000).unref();
+  if (process.argv.includes('--owned-stdio')) {
+    process.stdin.once('end', () => { void close(); });
+    process.stdin.resume();
+  } else setTimeout(close, 120_000).unref();
 }
 void main().catch(() => { console.error('[o8-next-grid] Fixture startup failed'); process.exitCode = 1; });

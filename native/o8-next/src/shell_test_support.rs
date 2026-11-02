@@ -25,6 +25,12 @@ impl Fixture {
         Self::start_mode(false, if settings { "--settings" } else { "" })
     }
     pub(super) fn start_mode(projects: bool, option: &str) -> Self {
+        Self::start_port(projects, option, 0)
+    }
+    pub(super) fn on_port(port: u16) -> Self {
+        Self::start_port(false, "", port)
+    }
+    fn start_port(projects: bool, option: &str, port: u16) -> Self {
         let root = std::env::temp_dir().join(format!(
             "o8-shell-{}-{}",
             std::process::id(),
@@ -64,9 +70,14 @@ impl Fixture {
         command.arg("--owned-stdio");
         let mut server = command
             .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .env("O8_NEXT_FIXTURE_PORT", port.to_string())
             .env(
                 "O8_NEXT_BRAIN_REQUEST_LOG",
                 root.join("brain-requests.json"),
+            )
+            .env(
+                "O8_NEXT_BRAIN_RESPONSE_GATE",
+                root.join("brain-response-hold"),
             )
             .env("O8_NEXT_API_TOKEN", "fixture-shell-bearer")
             .stdin(Stdio::piped())
@@ -109,9 +120,11 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let _ = Process::new("kill")
-            .args(["-TERM", &self.server.id().to_string()])
-            .status();
+        if self.server.try_wait().ok().flatten().is_none() {
+            let _ = Process::new("kill")
+                .args(["-TERM", &self.server.id().to_string()])
+                .status();
+        }
         let _ = self.server.wait();
         if let Ok(directory) = std::env::var("O8_NEXT_SETTINGS_DIAGNOSTICS") {
             let _ = fs::copy(
@@ -140,6 +153,9 @@ pub(super) fn draw(cx: &mut VisualTestContext) {
         window.refresh();
         window.draw(cx).clear();
     });
+    if let Some(shell) = cx.update(|window, _| window.root::<Shell>().flatten()) {
+        features::settle_test_window(&shell, cx);
+    }
 }
 pub(super) fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     for _ in 0..20 {
@@ -153,5 +169,51 @@ pub(super) fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
             return;
         }
     }
-    panic!("selected fixture history must reach CPU scene paint through the existing surface");
+    panic!(
+        "selected fixture history must reach CPU scene paint through the existing surface: {:?}",
+        shell.read_with(cx, |s, _| (
+            s.connected,
+            s.loading,
+            s.state.selected.clone(),
+            s.active(),
+            s.notice.clone()
+        ))
+    );
+}
+
+/// Opens the workspace picker the way a person does: the sidebar project menu,
+/// then Switch workspace.
+pub(super) fn open_workspace_picker(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
+    for selector in ["sidebar-project-switcher", "sidebar-workspace-picker"] {
+        draw(cx);
+        let bounds = cx
+            .debug_bounds(selector)
+            .expect("sidebar workspace navigation");
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    }
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.palette && s.workspace_picker));
+}
+
+/// Inbox is a right panel tool: the panel's front view, beside the main surface.
+pub(super) fn inbox_panel(
+    shell: &Entity<Shell>,
+    cx: &VisualTestContext,
+) -> Entity<crate::inbox::Inbox> {
+    shell.read_with(cx, |s, _| {
+        let key = s.panel_front_key().expect("Inbox panel must be open");
+        assert!(
+            key.ends_with("|Inbox"),
+            "Inbox must be the front panel tool: {key}"
+        );
+        assert_ne!(
+            s.active(),
+            Some(Tab::Inbox),
+            "Inbox belongs beside the main surface"
+        );
+        match s.content.get(&key) {
+            Some(Content::Inbox(view)) => view.clone(),
+            _ => panic!("the front tool must own the real Inbox view"),
+        }
+    })
 }

@@ -1,4 +1,6 @@
 import { resolveBackendTurnModel } from '@/lib/orchestrator/turn-model-selection';
+import { getRuntimeCapability, isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import { validateRuntimeModelSelection } from '@/lib/runtimes/shared/model-compatibility';
 import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { formatModelLabel } from '@/lib/format';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
@@ -42,7 +44,13 @@ export async function resolveFreshComposerTurnOptions(input: {
   const backend = input.backendSourceRef.current === 'default'
     ? resolveActiveComposerBackend(defaults)
     : input.backend;
-  const model = resolveBackendTurnModel(effectiveBackend(backend), readStoredOrchestratorModel(input.repoPath) ?? defaults.orchestratorModel)!;
+  const storedModel = readStoredOrchestratorModel(input.repoPath);
+  const runtime = backend === 'claude' ? 'claude-code' : backend;
+  const inheritedModel = storedModel === null && isOrchestratorRuntime(runtime)
+    && validateRuntimeModelSelection(runtime, defaults.orchestratorModel, 'Default') !== null
+    ? getRuntimeCapability(runtime).defaultModel ?? ''
+    : storedModel ?? defaults.orchestratorModel;
+  const model = resolveBackendTurnModel(effectiveBackend(backend), inheritedModel)!;
   input.setOperatorDefaults(defaults);
   input.setModel(model);
   if (input.backendSourceRef.current === 'default') input.setBackend(backend);

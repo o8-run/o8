@@ -1,10 +1,12 @@
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
+import { renameSync } from 'node:fs';
 import type { ChildProcess } from '@/lib/providers/child-process';
-import { access, constants } from 'node:fs/promises';
+import { access, constants, rename, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { getApiBase } from '@/lib/panel/api-port';
+import { bindNextBrowserPipe } from './browser-pipe';
 
 const UNAVAILABLE = 'o8 next is unavailable. Reinstall the app and try again.';
 // Only spawn-to-first-paint is parent-owned; server loads stay in the window.
@@ -40,6 +42,8 @@ function waitForStartup(child: ChildProcess): Promise<void> {
   });
 }
 type WindowState = { child?: ChildProcess; error: string | null; queue: Promise<unknown>; cleanup?: boolean };
+/** Set by the packaged macOS shell: o8 next is the main window, not a Settings switch. */
+const isMainWindow = () => process.env.O8_NEXT_MAIN_WINDOW === '1';
 const runtime = globalThis as typeof globalThis & { __o8NativeWindow?: WindowState };
 const state = runtime.__o8NativeWindow ??= { error: null, queue: Promise.resolve() };
 
@@ -57,7 +61,7 @@ async function stop(): Promise<void> {
   if (state.child === child) state.child = undefined;
 }
 
-async function start(): Promise<void> {
+async function start(startupResult?: string): Promise<void> {
   if (state.child) return;
   const binary = process.env.O8_NEXT_BIN;
   if (process.env.O8_PACKAGED_APP !== '1' || !binary || !isAbsolute(binary)) throw new Error(UNAVAILABLE);
@@ -72,12 +76,23 @@ async function start(): Promise<void> {
     const { spawn } = await import('@/lib/providers/child-process');
     const { childEnvironment } = await import('@/lib/providers/spawn-environment');
     const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+    // Linux launch ownership: claim the launcher's attempt by renaming its
+    // marker after all async work, immediately before spawning. A timed-out
+    // launcher cancels with the same rename, so exactly one side wins.
+    if (startupResult) {
+      try {
+        const { writeLinuxWindowOwner } = await import('./linux-window-startup');
+        writeLinuxWindowOwner(dirname(startupResult));
+        renameSync(join(dirname(startupResult), 'pending'), join(dirname(startupResult), 'claimed'));
+      } catch { return; }
+    }
     const child = spawn(binary, ['--enable-next', '--app-shell', '--server', getApiBase(),
       '--shell-state', join(directory, 'next-shell.json')], {
       cwd: directory, shell: false, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true,
       env: childEnvironment({ inherit: false, inject: false, env: { ...display, O8_NEXT_API_TOKEN: getOrCreateWsToken(), O8_NEXT_PARENT_PIPE: '1' } }),
     });
     state.child = child;
+    bindNextBrowserPipe(child);
     // Errors have fixed public messages; never forward child output or spawn diagnostics.
     child.on('error', () => {});
     child.once('exit', () => { if (state.child === child) state.child = undefined; });
@@ -99,9 +114,9 @@ async function start(): Promise<void> {
   }
 }
 
-async function apply(enabled: boolean): Promise<void> {
+async function apply(enabled: boolean, startupResult?: string): Promise<void> {
   try {
-    if (enabled) await start(); else await stop();
+    if (enabled) await start(startupResult); else await stop();
     state.error = null;
   } catch (error) {
     state.error = error instanceof NextWindowStartupError ? error.message : UNAVAILABLE;
@@ -117,7 +132,8 @@ function serialized<T>(work: () => Promise<T>): Promise<T> {
 
 export function changeNextWindowPreference<T>(enabled: boolean | undefined, save: () => Promise<T>): Promise<T> {
   return serialized(async () => {
-    if (enabled === undefined) return save();
+    // The main window stays open; turning the old switch off only saves it.
+    if (enabled === undefined || (enabled === false && isMainWindow())) return save();
     const wasOpen = Boolean(state.child);
     await apply(enabled);
     try { return await save(); } catch (error) {
@@ -133,8 +149,18 @@ export function setNextWindowEnabled(enabled: boolean): Promise<void> {
 
 /** Called only by packaged server startup; false never reads the bearer or binary. */
 export async function restoreNextWindow(): Promise<void> {
+  const result = process.platform === 'linux' && isMainWindow() ? process.env.O8_NEXT_STARTUP_RESULT : undefined;
   await serialized(async () => {
-    const { values } = await getOperatorDefaults();
-    if (values.experimentalNext) await apply(true);
+    if (isMainWindow() || (await getOperatorDefaults()).values.experimentalNext) {
+      await apply(true, result && isAbsolute(result) ? result : undefined);
+    }
   }).catch(() => {});
+  // A Linux launcher must wait for this actual attempt, including a delayed
+  // startup hook and the child's full first-paint timeout. Failure is published
+  // only after start() has reaped the child, so a CLI fallback cannot race it.
+  if (result && isAbsolute(result)) {
+    const status = state.child?.exitCode === null && state.child.signalCode === null && !state.error ? 'ready' : 'failed';
+    await writeFile(`${result}.tmp`, JSON.stringify({ status }), { mode: 0o600 })
+      .then(() => rename(`${result}.tmp`, result)).catch(() => {});
+  }
 }

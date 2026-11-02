@@ -4,6 +4,7 @@ import { readActiveSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout
 import { findOwnedLaunchByMutationId, readOwnedSessionDisplay } from '@/lib/runtimes/shared/owned-session-index';
 import { readSharedTeamsForThread } from '@/lib/orchestrator/shared-team-history';
 import { listSharedWorkerReturns } from '@/lib/orchestrator/shared-worker-returns';
+import { readWorkerRecovery } from '@/lib/agent-control/worker-recovery';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,7 @@ export async function GET(request: NextRequest) {
           returnStatus: returns.get(member.surfaceId!)?.status ?? null,
           returnReason: returns.get(member.surfaceId!)?.reason ?? null,
           model: session?.model ?? member.workerRouting?.selectedModel ?? null, effort: member.workerRouting?.selectedEffort ?? null,
+          recovery: await readWorkerRecovery(member.surfaceId!),
           status: session?.status ?? 'unknown' };
       }));
       return NextResponse.json({ threadId, workers }, { headers: { 'Cache-Control': 'no-store' } });

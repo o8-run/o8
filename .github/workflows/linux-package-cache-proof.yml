@@ -1,0 +1,54 @@
+name: Linux package cache proof
+
+on:
+  pull_request:
+    paths:
+      - .github/actions/linux-package-prerequisites/**
+      - .github/workflows/linux-package-cache-proof.yml
+      - scripts/ci/linux-package-prerequisites.*
+      - scripts/ci/prove-linux-package-cache.sh
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/linux-package-prerequisites/**
+      - .github/workflows/linux-package-cache-proof.yml
+      - scripts/ci/linux-package-prerequisites.*
+      - scripts/ci/prove-linux-package-cache.sh
+
+permissions:
+  contents: read
+
+# Fresh containers on one hosted runner avoid image-rollout differences between
+# VMs. PRs transfer payloads locally and never save the main-only shared cache.
+jobs:
+  proof:
+    name: Linux package cache miss and hit
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Prepare identical fresh images
+        run: docker pull ubuntu@sha256:24737cef17f4e22b1977df7d9a05e77c4e28b7da5b8911f8d8ccda136bf3573c
+      - name: Install Linux Rust prerequisites (miss)
+        id: miss
+        run: bash scripts/ci/prove-linux-package-cache.sh
+      - name: Require a measured cache miss
+        env:
+          SOURCE: ${{ steps.miss.outputs.source }}
+          ELAPSED_MS: ${{ steps.miss.outputs.elapsedMs }}
+        run: |
+          test "$SOURCE" = download
+          echo "Cache miss: $ELAPSED_MS ms" >> "$GITHUB_STEP_SUMMARY"
+      - name: Install Linux Rust prerequisites (hit, signed index refreshed)
+        id: hit
+        run: bash scripts/ci/prove-linux-package-cache.sh
+      - name: Require authenticated payload reuse
+        env:
+          SOURCE: ${{ steps.hit.outputs.source }}
+          ELAPSED_MS: ${{ steps.hit.outputs.elapsedMs }}
+        run: |
+          test "$SOURCE" = cache
+          echo "Cache hit: $ELAPSED_MS ms" >> "$GITHUB_STEP_SUMMARY"

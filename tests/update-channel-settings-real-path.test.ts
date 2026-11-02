@@ -10,6 +10,7 @@ const edge = vi.hoisted(() => ({
   nextOutcome: 'after-install',
   holdNextRead: false,
   releaseRead: null as null | (() => void),
+  writes: [] as string[],
 }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: async (command: string, args?: { channel: string }) => {
   if (command === 'read_update_channel') return edge.preference.channel;
@@ -22,6 +23,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: async (command: string, args?: 
     return value;
   }
   if (command === 'set_update_channel') {
+    edge.writes.push(args!.channel);
     if (edge.failSave) throw new Error('Fixture preference save failed');
     edge.preference = { channel: args!.channel, outcome: edge.nextOutcome, revision: edge.preference.revision + 1 };
     return { ...edge.preference };
@@ -34,6 +36,7 @@ afterEach(() => {
   edge.preference = { channel: 'beta', outcome: 'applied', revision: 1 };
   edge.failSave = false; edge.checks = 0; edge.nextOutcome = 'after-install';
   edge.holdNextRead = false; edge.releaseRead?.(); edge.releaseRead = null;
+  edge.writes = [];
 });
 
 async function mount() {
@@ -48,6 +51,32 @@ async function mount() {
 async function save(select: HTMLSelectElement, channel: string) {
   await act(async () => { select.value = channel; select.dispatchEvent(new Event('change', { bubbles: true })); });
 }
+
+it.each(['stable', 'beta'])('shows an unenrolled Preview build and preserves an explicit %s selection after reopening', async channel => {
+  edge.preference = { channel: 'preview', outcome: 'applied', revision: 0 };
+  edge.nextOutcome = 'applied';
+  const view = await mount();
+  try {
+    expect(view.host.textContent).toContain('Preview build');
+    expect(view.host.textContent).not.toContain('Beta is now active');
+    expect(view.select.value).toBe('preview');
+    expect(view.select.selectedOptions[0].textContent).toBe('Preview');
+    expect([...view.select.options].map(option => option.value)).toEqual(['preview', 'stable', 'beta']);
+    expect(edge.writes).toEqual([]);
+    expect(edge.checks).toBe(0);
+    await save(view.select, channel);
+    expect(edge.writes).toEqual([channel]);
+    expect(view.select.value).toBe(channel);
+    expect(view.host.textContent).toContain(`${channel === 'stable' ? 'Stable' : 'Beta'} is now active.`);
+  } finally { await view.dispose(); }
+  const reopened = await mount();
+  try {
+    expect(reopened.select.value).toBe(channel);
+    expect([...reopened.select.options].map(option => option.value)).toEqual(['stable', 'beta']);
+    expect(reopened.host.textContent).not.toContain('Preview build');
+    expect(edge.writes).toEqual([channel]);
+  } finally { await reopened.dispose(); }
+});
 
 it('settings says Stable is saved for after this installation and confirms when it applies', async () => {
   const view = await mount();

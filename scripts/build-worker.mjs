@@ -16,6 +16,7 @@ await esbuild.build({
   outfile: outFile,
   bundle: true,
   platform: 'node',
+  alias: { 'server-only': path.join(repoRoot, 'scripts/server-only-stub.js') },
   target: 'node22',
   format: 'esm',
   sourcemap: false,

@@ -1,6 +1,41 @@
 //! Narrow embedding API. The shell uses the production Surface and composer.
 use super::*;
 impl Surface {
+    pub(crate) fn shell_bind_thread(&mut self, id: String) {
+        self.sessions.retain(|session| session.id == id);
+        self.bound_session = Some(id);
+    }
+    /// Keep repeated Inbox opens useful after the operator edits or clears a draft.
+    pub(crate) fn prepend_inbox_draft(
+        &mut self,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.composer.read(cx).text.contains(text) {
+            self.shell_focus(true, window, cx);
+        } else {
+            self.prepend_draft(text, window, cx);
+        }
+    }
+    /// Puts Symon's drafted message ahead of the draft, unsent, as the desktop's
+    /// orchestrator_draft injection does, and focuses the composer.
+    pub(crate) fn prepend_draft(
+        &mut self,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self.composer.read(cx).text.trim().to_string();
+        let next = if current.is_empty() {
+            text.to_string()
+        } else {
+            format!("{text}\n\n{current}")
+        };
+        self.composer
+            .update(cx, |composer, cx| composer.set_text(&next, cx));
+        self.composer.read(cx).focus.focus(window);
+    }
     #[cfg(test)]
     pub(crate) fn shell_loaded_probe(&mut self, load_older: bool, cx: &mut Context<Self>) -> Value {
         if load_older {
@@ -144,6 +179,28 @@ impl Surface {
             self.selected.clone(),
             self.composer.read(cx).focus.is_focused(window),
         )
+    }
+    /// The conversation's tool steps, oldest first, and whether a turn is
+    /// streaming, for the Activity Dock.
+    pub(crate) fn shell_steps(&self) -> (Vec<crate::activity::Step>, bool) {
+        let mut live = false;
+        let steps = self
+            .rows
+            .iter()
+            .flat_map(|row| match &row.borrow().row {
+                Row::Activity { steps, trace, .. } => {
+                    live |= trace.live;
+                    steps.clone()
+                }
+                _ => vec![],
+            })
+            .collect();
+        (steps, live)
+    }
+    /// The conversation this view shows, which Up and Down in its transcript
+    /// can move off the tab's own thread.
+    pub(crate) fn shown_thread(&self) -> Option<String> {
+        self.selected.clone()
     }
     #[cfg(test)]
     pub(crate) fn shell_selected(&self) -> String {

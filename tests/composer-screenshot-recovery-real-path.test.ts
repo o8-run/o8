@@ -1,3 +1,4 @@
+// @o8-test-browser
 import fs from 'node:fs';
 import path from 'node:path';
 import esbuild from 'esbuild';
@@ -19,6 +20,8 @@ const { ensureV71ComposerQueueSchema } = await import('@/lib/db/v71-composer-que
 const queue = await import('@/lib/orchestrator/composer-queue');
 const api = await import('@/app/api/orchestrator/composer-queue/route');
 const proofDir = process.env.O8_SCREENSHOT_QUEUE_PROOF_DIR;
+// Screenshot persistence and browser recovery need the verified 10 s deadline under load.
+const screenshotPollTimeout = 10_000;
 const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5S8AAAAASUVORK5CYII=', 'base64');
 const imageUri = (large: boolean) => `data:image/png;base64,${(large ? Buffer.concat([pixel, Buffer.alloc(3_136_623 - pixel.length)]) : pixel).toString('base64')}`;
 let browser: Browser; let bundle: string;
@@ -106,8 +109,8 @@ it.each([false, true])('queues a supported screenshot and reuses its original re
   try {
     await connect(page, posts, true); await mount(page, imageUri(large));
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => posts.length).toBe(1);
-    await expect.poll(() => page.getByRole('alert').count()).toBe(1);
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(1);
+    await expect.poll(() => page.getByRole('alert').count(), { timeout: screenshotPollTimeout }).toBe(1);
     expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
     expect(await page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
     if (proofDir) { fs.mkdirSync(proofDir, { recursive: true }); await page.screenshot({ path: path.join(proofDir, `uncertain-${large ? 'large' : 'small'}.png`) }); }
@@ -120,8 +123,8 @@ it.each([false, true])('queues a supported screenshot and reuses its original re
     expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
     await mount(page, imageUri(large), 'http://localhost/screenshot?model=changed-model&idle');
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => posts.length).toBe(2);
-    await expect.poll(() => page.getByRole('textbox').inputValue()).toBe('');
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(2);
+    await expect.poll(() => page.getByRole('textbox').inputValue(), { timeout: screenshotPollTimeout }).toBe('');
     expect(posts[1]).toEqual(posts[0]);
     expect(posts[1].payload.routing.model).toBe('original-model');
     expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
@@ -138,7 +141,7 @@ it.each([
     await connect(page, posts); await mount(page, imageUri(true));
     await page.evaluate(name => { IDBObjectStore.prototype.put = () => { throw new DOMException('Fixture storage failure', name); }; }, name);
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => page.getByRole('alert').textContent()).toContain(advice);
+    await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain(advice);
     expect(await page.getByRole('alert').textContent()).toContain('Message was not queued');
     expect(posts).toEqual([]);
     expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
@@ -161,7 +164,7 @@ it('holds the draft and does not post when a successful attachment request abort
       };
     });
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Message was not queued');
+    await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('Message was not queued');
     expect(posts).toEqual([]);
     expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
     expect(await page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
@@ -181,7 +184,7 @@ it('does not post or leave an attachment behind when the small manifest hits quo
       };
     });
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Browser storage is full');
+    await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('Browser storage is full');
     expect(posts).toEqual([]);
     expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
     expect(await page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
@@ -198,8 +201,8 @@ it('retains an uncertain identity and refuses another POST when its saved attach
   const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
   try {
     await connect(page, posts, true); await mount(page, imageUri(true));
-    await page.getByRole('textbox').press('Enter'); await expect.poll(() => posts.length).toBe(1);
-    await expect.poll(() => page.getByRole('alert').count()).toBe(1);
+    await page.getByRole('textbox').press('Enter'); await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(1);
+    await expect.poll(() => page.getByRole('alert').count(), { timeout: screenshotPollTimeout }).toBe(1);
     await page.evaluate(() => new Promise<void>((resolve, reject) => {
       const opening = indexedDB.open('o8.composer-queue-attachments.v1');
       opening.onsuccess = () => { const db = opening.result; const tx = db.transaction('attempts', 'readwrite'); tx.objectStore('attempts').clear();
@@ -207,7 +210,7 @@ it('retains an uncertain identity and refuses another POST when its saved attach
       opening.onerror = () => reject(opening.error);
     }));
     await mount(page, imageUri(true)); await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Saved messages could not be checked');
+    await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('Saved messages could not be checked');
     expect(posts).toHaveLength(1);
     expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
     expect(await page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
@@ -233,11 +236,11 @@ it('keeps a late attachment save scoped to its original thread and preserves the
       };
     });
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => page.evaluate(() => typeof (window as unknown as { releaseAttachment?: unknown }).releaseAttachment)).toBe('function');
+    await expect.poll(() => page.evaluate(() => typeof (window as unknown as { releaseAttachment?: unknown }).releaseAttachment), { timeout: screenshotPollTimeout }).toBe('function');
     await page.evaluate(() => (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void }).changeDraft('thoughts-other', 'Different chat draft.', ''));
-    await expect.poll(() => page.getByRole('textbox').inputValue()).toBe('Different chat draft.');
+    await expect.poll(() => page.getByRole('textbox').inputValue(), { timeout: screenshotPollTimeout }).toBe('Different chat draft.');
     await page.evaluate(() => (window as unknown as { releaseAttachment: () => void }).releaseAttachment());
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('o8:composer-queue-recovery:')).length)).toBe(1);
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('o8:composer-queue-recovery:')).length), { timeout: screenshotPollTimeout }).toBe(1);
     expect(posts).toEqual([]);
     expect(await page.getByRole('textbox').inputValue()).toBe('Different chat draft.');
     expect(await page.getByRole('alert').count()).toBe(0);
@@ -251,7 +254,7 @@ it('reports the application message limit without quota advice or a queue POST',
     await connect(page, posts); await mount(page, '');
     await page.evaluate(() => (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void }).changeDraft('thoughts-screenshot', 'x'.repeat(2_000_100), ''));
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => page.getByRole('alert').textContent()).toContain('This message is too large');
+    await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('This message is too large');
     expect(await page.getByRole('alert').textContent()).toContain('Shorten it and retry');
     expect(await page.getByRole('alert').textContent()).not.toContain('storage is full');
     expect(posts).toEqual([]);
@@ -268,22 +271,22 @@ it.each([['Queue the screenshot.', 'screenshot.png'], ['', 'screenshot.png'], ['
     await mount(page, '', 'http://localhost/screenshot', true, imageName);
     await page.evaluate(({ image, text }) => (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void }).changeDraft('thoughts-screenshot', text, image), { image: imageUri(true), text });
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => page.getByRole('alert').count()).toBe(1);
+    await expect.poll(() => page.getByRole('alert').count(), { timeout: screenshotPollTimeout }).toBe(1);
     expect(attemptedIds).toHaveLength(1);
     expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(0);
     await mount(page, '', 'http://localhost/screenshot', true);
     expect(await page.getByRole('textbox').inputValue()).toBe(text);
-    await expect.poll(() => page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
+    await expect.poll(() => page.getByText('screenshot.png', { exact: true }).count(), { timeout: screenshotPollTimeout }).toBeGreaterThan(0);
     expect(await page.locator('img[alt]').evaluateAll(images => images.map(image => image.getAttribute('alt')))).toContain(imageName);
     if (proofDir) { fs.mkdirSync(proofDir, { recursive: true }); await page.screenshot({ path: path.join(proofDir, `restored-production-${text ? 'text' : 'image-only'}.png`) }); }
     await page.unroute('**/api/orchestrator/composer-queue');
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => posts.length).toBe(1);
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(1);
     expect(posts[0].id).toBe(attemptedIds[0]);
     expect((posts[0].payload.images[0] as { name?: string }).name).toBe('screenshot.png');
     expect(posts[0].payload.images[0].dataUri).toBe(imageUri(true));
     expect(imageUri(true).length).toBe(4_182_186);
-    await expect.poll(() => page.getByRole('textbox').inputValue()).toBe('');
+    await expect.poll(() => page.getByRole('textbox').inputValue(), { timeout: screenshotPollTimeout }).toBe('');
     await page.getByRole('textbox').press('Enter');
     expect(posts).toHaveLength(1);
     expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
@@ -305,7 +308,7 @@ it('review: a native localStorage quota failure gives storage advice, without mo
     });
     expect(quota.name).toBe('QuotaExceededError');
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Browser storage is full');
+    await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('Browser storage is full');
     expect(posts).toEqual([]);
     expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
     expect(await page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
@@ -323,7 +326,7 @@ async function failLargeDraft(page: Page, posts: Parameters<typeof connect>[1]) 
   await page.evaluate(image => (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void })
     .changeDraft('thoughts-screenshot', 'Queue the screenshot.', image), imageUri(true));
   await page.getByRole('textbox').press('Enter');
-  await expect.poll(() => page.getByRole('alert').count()).toBe(1);
+  await expect.poll(() => page.getByRole('alert').count(), { timeout: screenshotPollTimeout }).toBe(1);
   expect(id).not.toBe(''); return id;
 }
 
@@ -349,10 +352,10 @@ it('retries a saved screenshot without rewriting attachments when new storage wr
     const id = await failLargeDraft(page, posts); await page.unroute('**/api/orchestrator/composer-queue');
     await page.evaluate(() => { IDBObjectStore.prototype.put = () => { throw new DOMException('Fixture quota', 'QuotaExceededError'); }; });
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => posts.length).toBe(1);
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(1);
     expect(posts[0].id).toBe(id);
     expect(posts[0].payload.images[0].dataUri).toBe(imageUri(true));
-    await expect.poll(() => page.getByRole('textbox').inputValue()).toBe('');
+    await expect.poll(() => page.getByRole('textbox').inputValue(), { timeout: screenshotPollTimeout }).toBe('');
     expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
   } finally { await page.close(); }
 });
@@ -371,7 +374,7 @@ it('blocks a text-only send when the saved draft image copy is missing', async (
     }));
     await mount(page, '', 'http://localhost/screenshot', true);
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Saved draft attachments could not be restored');
+    await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('Saved draft attachments could not be restored');
     expect(posts).toEqual([]);
     expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(0);
   } finally { await page.close(); }
@@ -387,7 +390,7 @@ it('refuses a draft move during restoration and retains text edited while the im
     expect(await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.startsWith('o8:composer-draft:')))).toEqual(before);
     await page.getByRole('textbox').fill('Edited while restoring.');
     await page.evaluate(() => (window as unknown as { releaseDraftReads: () => void }).releaseDraftReads());
-    await expect.poll(() => page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
+    await expect.poll(() => page.getByText('screenshot.png', { exact: true }).count(), { timeout: screenshotPollTimeout }).toBeGreaterThan(0);
     expect(await page.getByRole('textbox').inputValue()).toBe('Edited while restoring.');
     expect(posts).toEqual([]);
   } finally { await page.close(); }
@@ -406,7 +409,7 @@ it('does not resurrect an image explicitly removed during restoration', async ()
       opening.onsuccess = () => { const db = opening.result; const request = db.transaction('attempts').objectStore('attempts').count();
         request.onsuccess = () => { db.close(); resolve(request.result); }; request.onerror = () => reject(request.error); };
       opening.onerror = () => reject(opening.error);
-    }))).toBe(1); // The uncertain queue attempt remains; its draft copy retired.
+    })), { timeout: screenshotPollTimeout }).toBe(1); // The uncertain queue attempt remains; its draft copy retired.
     expect(await page.getByText('screenshot.png', { exact: true }).count()).toBe(0);
     await mount(page, '', 'http://localhost/screenshot', true);
     expect(await page.getByRole('textbox').inputValue()).toBe('Keep only this text.');
@@ -425,7 +428,7 @@ it('does not replace another window’s saved draft before its storage event arr
       localStorage.setItem(key, raw); return { key, raw };
     });
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Saved draft attachments could not be restored');
+    await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('Saved draft attachments could not be restored');
     expect(await page.evaluate(key => localStorage.getItem(key), other.key)).toBe(other.raw);
     expect(posts).toEqual([]);
   } finally { await page.close(); }
@@ -446,8 +449,8 @@ it('retains image and identity when clearing fails after acceptance and queue re
       };
     });
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => posts.length).toBe(1);
-    await expect.poll(() => page.getByRole('alert').textContent()).toContain('draft could not be cleared');
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(1);
+    await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('draft could not be cleared');
     expect(posts[0].id).toBe(id);
     // Another owner may confirm this same send and retire its queue recovery.
     await page.evaluate(() => new Promise<void>((resolve, reject) => {
@@ -459,11 +462,11 @@ it('retains image and identity when clearing fails after acceptance and queue re
       opening.onerror = () => reject(opening.error);
     }));
     await mount(page, '', 'http://localhost/screenshot?model=changed-model&idle', true);
-    await expect.poll(() => page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
+    await expect.poll(() => page.getByText('screenshot.png', { exact: true }).count(), { timeout: screenshotPollTimeout }).toBeGreaterThan(0);
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => posts.length).toBe(2);
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(2);
     expect(posts[1]).toEqual(posts[0]);
-    await expect.poll(() => page.getByRole('textbox').inputValue()).toBe('');
+    await expect.poll(() => page.getByRole('textbox').inputValue(), { timeout: screenshotPollTimeout }).toBe('');
     expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
     expect(posts[1].payload.images[0].dataUri).toBe(imageUri(true));
   } finally { await page.close(); }

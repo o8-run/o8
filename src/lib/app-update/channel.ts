@@ -2,7 +2,7 @@
 import { invalidateUpdateChecks } from './check-order';
 export type UpdateChannel = 'stable' | 'beta';
 export interface UpdateChannelStatus {
-  channel: UpdateChannel;
+  channel: UpdateChannel | 'preview';
   outcome: 'applied' | 'after-install' | 'waiting-for-save';
   revision: number;
 }

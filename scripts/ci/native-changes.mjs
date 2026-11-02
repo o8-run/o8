@@ -61,7 +61,9 @@ function isNative(changedPaths) {
     || /(^|\/)rust-toolchain(\.toml)?$/.test(file)
     || /(^|\/)(tauri\.[^/]*\.conf\.json5?|tauri\.conf\.json5?|Tauri\.toml)$/.test(file)
     || /^(src-tauri|crates|tauri-plugin-mcp|tests\/fixtures\/update-ping-native)\//.test(file)
-    || ['.github/workflows/ci.yml', 'scripts/ci/native-changes.mjs', 'scripts/test-update-ping-native.mjs'].includes(file));
+    || /^\.github\/actions\/linux-package-prerequisites\//.test(file)
+    || ['.github/workflows/ci.yml', 'scripts/ci/native-changes.mjs', 'scripts/test-update-ping-native.mjs',
+      'scripts/ci/linux-package-prerequisites.mjs', 'scripts/ci/linux-package-prerequisites.json'].includes(file));
 }
 
 let changed = true;

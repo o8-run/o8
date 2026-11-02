@@ -2,6 +2,7 @@
 use std::{
     io::{Read, Write},
     net::TcpListener,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -12,7 +13,42 @@ use tauri::Manager;
 
 #[test]
 fn stalled_artifact_unwinds_ownership_and_scheduler_serves_a_freshness_request() {
-    let _serial = super::scheduler_tests::SCHEDULER_ENV.lock().unwrap();
+    check_stalled_artifact_receipts(receipt_paths);
+}
+
+#[test]
+fn stalled_artifact_receipt_check_ignores_in_flight_tmp() {
+    check_stalled_artifact_receipts(|directory| {
+        // TaskOwner can leave an incomplete temporary receipt while persisting.
+        std::fs::write(directory.join("in-flight.tmp"), b"{").unwrap();
+        receipt_paths(directory)
+    });
+}
+
+#[test]
+fn stalled_artifact_receipt_check_tolerates_a_vanishing_entry() {
+    check_stalled_artifact_receipts(|directory| {
+        let vanishing = directory.join("vanishing.json");
+        std::fs::write(&vanishing, b"{}").unwrap();
+        let paths = receipt_paths(directory);
+        assert!(paths.contains(&vanishing));
+        // Force disappearance after listing, before the receipt check reads it.
+        std::fs::remove_file(vanishing).unwrap();
+        paths
+    });
+}
+
+fn receipt_paths(directory: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect()
+}
+
+fn check_stalled_artifact_receipts(list_receipts: impl FnOnce(&Path) -> Vec<PathBuf>) {
+    let _serial = super::scheduler_tests::SCHEDULER_ENV
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -123,10 +159,14 @@ fn stalled_artifact_unwinds_ownership_and_scheduler_serves_a_freshness_request()
     // Inspect before aborting: abort itself must not be what releases ownership.
     let data = state.lock().unwrap().clone();
     let receipts: Vec<serde_json::Value> =
-        std::fs::read_dir(directory.path().join("native-update-tasks"))
-            .unwrap()
-            .map(|entry| {
-                serde_json::from_slice(&std::fs::read(entry.unwrap().path()).unwrap()).unwrap()
+        list_receipts(&directory.path().join("native-update-tasks"))
+            .into_iter()
+            // TaskOwner publishes receipts by renaming .tmp files to .json.
+            .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+            .filter_map(|path| match std::fs::read(&path) {
+                Ok(bytes) => Some(serde_json::from_slice(&bytes).unwrap()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => panic!("cannot read committed receipt {}: {error}", path.display()),
             })
             .collect();
     task.abort();

@@ -1,8 +1,11 @@
+import { recordInboxConversationEvent } from '@/lib/inbox/store';
+import { VoiceHostBroker, handleVoiceHostHttp } from '@/lib/ws-server/voice-host';
 import { startProductSession, endProductSession } from '@/lib/analytics/session';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
 import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
+import { orchestratorErrorMessage, orchestratorErrorText } from '@/lib/transcripts/orchestrator-error';
 /**
  * Unified WebSocket server for o8 mobile.
  *
@@ -152,6 +155,7 @@ import {
 } from './lib/mobile/orchestrator-thread-history';
 import { OrchestratorThreadProjectError } from './lib/mobile/orchestrator-thread-project';
 import { persistOrchestratorThreadUserMessageFromWire } from './lib/ws-server/orchestrator-thread-send';
+import { disabledRuntimeRefusal } from './lib/providers/disabled-runtimes';
 import { resolveMobileTurnSelection } from './lib/ws-server/mobile-turn-selection';
 import {
   composerBackendSupportsImages,
@@ -168,6 +172,7 @@ import { isOrchestratorServiceTier, serviceTierForTurn } from './lib/orchestrato
 import { normalizeObservedOrchestratorTurnModel, normalizeOrchestratorTurnModel } from './lib/orchestrator/turn-model-selection';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
+import { terminalReceipt } from './lib/mobile/turn-receipt';
 import { resolveOrchestratorExecutionMode } from './lib/lane/orchestrator-backends/orchestration-mode';
 import {
   backendSwitchRequiresExplicitHandoff,
@@ -1166,6 +1171,7 @@ function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): vo
   try {
     const parsed = JSON.parse(rawMsg);
     if (parsed && parsed.channel === 'orchestrator') {
+      recordInboxConversationEvent(parsed);
       // Single chokepoint for the plan cache — every emitter site (main turn,
       // rebound rehydrate, supervisor auto-queue) funnels through here.
       if (parsed.event === 'plan-update' && parsed.data) {
@@ -1175,6 +1181,10 @@ function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): vo
         || (parsed.event === 'status' && (parsed.data?.status === 'ready' || parsed.data?.status === 'dead'))
       ) {
         latestOrchestratorPlanBySession.delete(sessionName);
+        const threadId = parsed.data?.threadId;
+        if (typeof threadId === 'string' && threadId.startsWith('thoughts-')) {
+          scheduleRealtimeSessionHistoryRefresh(`llm-chat:${threadId}`, true, undefined, { urgent: true });
+        }
       }
       outMsg = orchestratorReplay.record(sessionName, parsed);
     }
@@ -1322,6 +1332,12 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
       break;
     case 'error':
       persistAssistantText(null);
+      try {
+        const failedThread = markMobileOrchestratorThreadFailed({ tabId: threadId, repoPath, assistantMessageId, error: event.error, backend });
+        if (failedThread) broadcast({ channel: 'orchestrator-threads', event: 'upsert', data: { thread: failedThread } });
+      } catch (error) {
+        console.warn('[orchestrator-rehydrate] failed to mark thread failed', error);
+      }
       wsMsg = JSON.stringify({
         channel: 'orchestrator',
         event: 'error',
@@ -2335,6 +2351,13 @@ function recordTerminalBenchDrop(preStringified: string) {
   }
 }
 
+const voiceHostBroker = new VoiceHostBroker(frame => broadcast(frame));
+// Settlement may follow the last stream event, or happen in another HTTP worker.
+const voiceQueueTimer = setInterval(() => {
+  try { voiceHostBroker.refreshQueuedTerminals(); } catch (error) { console.warn('[voice-host] Queue receipt read failed:', error); }
+}, 250);
+voiceQueueTimer.unref();
+
 function broadcast(msg: Record<string, unknown>, filter?: (c: ClientState) => boolean) {
   const json = JSON.stringify(msg);
   for (const client of clients.values()) {
@@ -2517,6 +2540,8 @@ const sessionHistoryReadsInFlight = new Map<string, {
   promise: Promise<SessionTranscriptRead>;
 }>();
 const lastRealtimeHistoryId = new Map<string, string>();
+const sessionHistoryPublications = new Map<string, Promise<void>>();
+const freshSessionHistoryRequested = new Set<string>();
 let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopHeadlessLoop: (() => void) | null = null;
@@ -3393,10 +3418,32 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
 
 async function publishSessionHistoryRealtimeSnapshot(sessionKey: string, fresh = false) {
   if (!sessionKey || !hasRealtimeSessionSubscriber(sessionKey)) return;
+  if (fresh) freshSessionHistoryRequested.add(sessionKey);
+  const active = sessionHistoryPublications.get(sessionKey);
+  if (active) return active;
+  const nextFresh = freshSessionHistoryRequested.delete(sessionKey);
+  const job = readAndPublishSessionHistory(sessionKey, nextFresh).finally(() => {
+    sessionHistoryPublications.delete(sessionKey);
+    const backoff = sessionHistoryBridgeBackoffs.get(sessionKey);
+    if (freshSessionHistoryRequested.has(sessionKey) && (!backoff || canAttemptRealtimeBridge(backoff))) {
+      scheduleRealtimeSessionHistoryRefresh(sessionKey, true, undefined, { urgent: true });
+    }
+  });
+  sessionHistoryPublications.set(sessionKey, job);
+  return job;
+}
+
+async function readAndPublishSessionHistory(sessionKey: string, fresh: boolean) {
   const backoff = sessionHistoryBridgeBackoffs.get(sessionKey) ?? createRealtimeBridgeBackoffState();
   sessionHistoryBridgeBackoffs.set(sessionKey, backoff);
-  if (!canAttemptRealtimeBridge(backoff) || sessionHistoryReadsInFlight.has(sessionKey)) return;
+  if (!canAttemptRealtimeBridge(backoff)) {
+    if (fresh) freshSessionHistoryRequested.add(sessionKey);
+    return;
+  }
   try {
+    // A bootstrap may already hold a read captured before completion. A fresh
+    // publication must read again after that response, even with the same cursor.
+    if (fresh) await sessionHistoryReadsInFlight.get(sessionKey)?.promise.catch(() => undefined);
     const sinceId = fresh ? undefined : lastRealtimeHistoryId.get(sessionKey);
     const transcript = await getSessionTranscriptSingleFlight(sessionKey, 200, sinceId);
     const entries = transcript.entries;
@@ -3428,6 +3475,7 @@ async function publishSessionHistoryRealtimeSnapshot(sessionKey: string, fresh =
       ),
     ]);
   } catch (error) {
+    if (fresh) freshSessionHistoryRequested.add(sessionKey);
     const failure = recordRealtimeBridgeFailure(backoff, Date.now(), {
       threshold: 1,
       initialDelayMs: REALTIME_SESSION_HISTORY_POLL_MS,
@@ -3482,7 +3530,8 @@ function scheduleRealtimeSessionHistoryRefresh(
   delayMs?: number,
   options: { urgent?: boolean } = {},
 ) {
-  const resolvedDelay = delayMs ?? (options.urgent ? URGENT_HISTORY_REFRESH_MS : 350);
+  if (fresh) freshSessionHistoryRequested.add(sessionKey);
+  const resolvedDelay = delayMs ?? (options.urgent || freshSessionHistoryRequested.has(sessionKey) ? URGENT_HISTORY_REFRESH_MS : 350);
   const existing = sessionHistoryTimers.get(sessionKey);
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {
@@ -5270,6 +5319,12 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
   }
   const requestedBackendId = resolveMsgBackendId(msg);
   const backendId = resolveOrchestratorExecutionBackendId(requestedBackendId, msg.orchestrationMode);
+  const disabledRefusal = disabledRuntimeRefusal({ backend: backendId, threadId });
+  if (disabledRefusal) {
+    send(client, { channel: 'orchestrator', event: 'error', data: { repoPath, threadId,
+      error: disabledRefusal, ...orchestratorCommandAckCorrelation(correlationId) } });
+    return;
+  }
   try {
     assertOrchestratorPermissionMode(backendId, msg.permissionMode);
   } catch (error) {
@@ -5745,8 +5800,8 @@ async function handleOrchestratorSendMsgOnce(
         if (threadId && event.sessionId && (turnBackend.id === 'claude' || turnBackend.id === 'codex')) {
           writeOrchestratorBackendSessionId(threadId, turnBackend.id, event.sessionId);
         }
-        if (activeAssistantReceipt) activeAssistantReceipt = { ...activeAssistantReceipt, terminal: { userMessageId,
-          outcome: turnController?.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed' } };
+        if (activeAssistantReceipt) activeAssistantReceipt = { ...activeAssistantReceipt, terminal: terminalReceipt(userMessageId,
+          turnController?.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed') };
         persistAssistantText(event.sessionId ?? null, turnBackend.id, event, effectiveTurnModel);
         if (sessionName) {
           broadcastToOrchestratorSession(sessionName, JSON.stringify({
@@ -5978,18 +6033,21 @@ async function handleOrchestratorSendMsgOnce(
             emitDone(event);
             break;
 
-          case 'error':
+          case 'error': {
             if (suppressQuotaError && isRuntimeQuotaLimitError(event)) {
               quotaFallbackError = event.error;
               break;
             }
+            const error = orchestratorErrorMessage(event.error);
+            if (error !== event.error) console.error('[ws-server][orchestrator] turn failed:', event.error);
             sawTerminal = true;
             persistAssistantText(null, turnBackend.id, undefined, effectiveTurnModel);
             try {
               const failedThread = markMobileOrchestratorThreadFailed({
                 tabId: threadId,
+                assistantMessageId,
                 repoPath,
-                error: event.error,
+                error,
                 backend: turnBackend.id,
                 agent: turnAgentTag,
               });
@@ -6006,9 +6064,10 @@ async function handleOrchestratorSendMsgOnce(
             wsMsg = JSON.stringify({
               channel: 'orchestrator',
               event: 'error',
-              data: { error: event.error, repoPath, threadId, backend: turnBackend.id, agent: turnAgentTag },
+              data: { error, repoPath, threadId, backend: turnBackend.id, agent: turnAgentTag },
             });
             break;
+          }
         }
 
         if (wsMsg && sessionName) broadcastToOrchestratorSession(sessionName, wsMsg);
@@ -6197,6 +6256,10 @@ async function handleOrchestratorSendMsgOnce(
     void drainOrchestratorAutoQueue();
   } catch (err) {
     const projectError = err instanceof OrchestratorThreadProjectError ? err : null;
+    console.error('[ws-server][orchestrator] send failed:', err);
+    const error = err instanceof Error
+      ? orchestratorErrorText(err.message, 'Failed to send message').replace(/\s+/g, ' ')
+      : 'Failed to send message';
     const turnWasUndone = undoneOrchestratorUserMessageIds.has(userMessageId);
     activeOrchestratorRoutes.release(activeRouteHandle);
     if (turnController) {
@@ -6213,8 +6276,9 @@ async function handleOrchestratorSendMsgOnce(
       try {
         const failedThread = markMobileOrchestratorThreadFailed({
           tabId: threadId,
+          assistantMessageId,
           repoPath,
-          error: err instanceof Error ? err.message : 'Failed to send message',
+          error,
           backend: activeBackend.id,
           agent: activeAgentTag,
         });
@@ -6246,7 +6310,7 @@ async function handleOrchestratorSendMsgOnce(
       channel: 'orchestrator' as const,
       event: 'error' as const,
       data: {
-        error: err instanceof Error ? err.message : 'Failed to send message',
+        error,
         voiceTerminal: { userMessageId, outcome: commandAccepted ? 'unconfirmed' : 'failed', text: commandAccepted ? '' : 'The backend did not accept this request.' },
         ...(projectError?.toPayload() ?? {}),
         repoPath,
@@ -6578,7 +6642,11 @@ function subscribedRealtimeSessionKeys(): string[] {
     ...sessionKeys,
     ...sessionHistoryTimers.keys(),
     ...sessionHistoryReadsInFlight.keys(),
+    ...sessionHistoryPublications.keys(),
   ]);
+  for (const sessionKey of freshSessionHistoryRequested) {
+    if (!retainedSessionKeys.has(sessionKey)) freshSessionHistoryRequested.delete(sessionKey);
+  }
   for (const sessionKey of sessionHistoryBridgeBackoffs.keys()) {
     if (!retainedSessionKeys.has(sessionKey)) sessionHistoryBridgeBackoffs.delete(sessionKey);
   }
@@ -7016,6 +7084,7 @@ function materializePendingDashSession(
     sessionName,
     kind: 'dash-shell',
     transient: pending.directPty,
+    cwd,
     ptyProcess,
     clientIds: new Set([client.id]),
     clientViews: new Map(),
@@ -7664,7 +7733,7 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
-  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res)) return;
+  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT)) return;
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
   const allowedOrigins = new Set([
@@ -8734,6 +8803,12 @@ const httpServer = createServer(async (req, res) => {
         }));
       }
     });
+    return;
+  }
+
+  if (req.url === '/internal/next/voice-host') {
+    if (!isAuthorizedInternalRequest(req)) { res.writeHead(401).end('unauthorized'); return; }
+    await handleVoiceHostHttp(req, res, voiceHostBroker);
     return;
   }
 
@@ -9953,6 +10028,8 @@ async function bootstrapWsServer() {
     stopHeadlessLoop = startHeadlessTickBridge(10_000);
     startWorktreeReaper();
     startLaneZombieReaper();
+    // Auto-settle merged or idle threads through the shared server guards.
+    void import('@/lib/inbox/settlement').then((m) => m.startInboxAutoSettle()).catch(() => {});
     // #6 persistent terminals — bounded GC for orphan dash tmux sessions, only
     // when persistence is on (off-path leaves no sessions to reap).
     if (dashPersistentTerminalsEnabled()) startDashSessionGc();
@@ -10046,6 +10123,7 @@ async function shutdown(signal: string, exitCode = 0) {
   if (browserDiscoveryTimer) clearInterval(browserDiscoveryTimer);
   if (attachedBrowserRefreshTimer) clearInterval(attachedBrowserRefreshTimer);
 
+  clearInterval(voiceQueueTimer);
   // Destroy all terminal PTY handles (tmux sessions persist independently)
   for (const [, att] of terminalAttachments) {
     if (att.batchTimer) clearTimeout(att.batchTimer);

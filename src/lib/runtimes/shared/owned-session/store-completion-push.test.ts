@@ -16,7 +16,7 @@
 import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -81,7 +81,16 @@ describe('#1523 — clean child exit pushes completion to the supervisor', () =>
   let server: http.Server | null = null;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(path.join(process.cwd(), '.tmp-owned-push-'));
+    // Scratch lives under a dedicated hidden dir in the home tree — a
+    // validateWorkspace-allowed root — never the repo (process.cwd()): a
+    // hard-killed/detached runner can skip afterEach, and a leaked dir in the
+    // working tree pollutes the Files panel and can retain owned-session data
+    // (#1588, #5097). A home subdir (not os.homedir() root) contains any such
+    // leak in one place, and avoids priming the memoized getDataDir() cache
+    // before these tests override O8_DATA_DIR.
+    const scratchBase = path.join(os.homedir(), '.o8-owned-session-test-scratch');
+    mkdirSync(scratchBase, { recursive: true });
+    tempRoot = mkdtempSync(path.join(scratchBase, 'push-'));
     repoPath = path.join(tempRoot, 'repo');
     execFileSync('git', ['init', '-q', repoPath]);
     priorEnv = {

@@ -2,6 +2,7 @@ import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { dedupeDisplayMessages } from './dedupe-display-messages';
 import { visibleVoiceTranscript } from '@/lib/transcripts/voice-captions';
 import { mergeCompactionMarkers, withoutCompactionReplay } from '@/lib/transcripts/compaction';
+import { mergeTranscriptSources } from '@/lib/transcripts/merge-ordered';
 
 export function resolveVisibleChatMessages(sources: Parameters<typeof resolveDisplayMessages>[0] & {
   isOrchestratorMode: boolean;
@@ -27,11 +28,9 @@ export function resolveVisibleChatMessages(sources: Parameters<typeof resolveDis
  * showed a single dispatch card in whitespace, which reads as a lost session
  * exactly when the history matters most (#1839).
  *
- * They are concatenated oldest-to-newest instead, and {@link dedupeDisplayMessages}
- * collapses the overlap — which is what its own contract describes: the
- * transcript is *composed from* loaded history and the live stream, and the
- * same logical message may appear in both with the same id or across the
- * optimistic/echo boundary with differing ids.
+ * Shared identities place unseen runs at their original boundaries. Concatenating
+ * and deduplicating by first occurrence could append an older live block below
+ * a fetched tail page. The final dedupe also handles optimistic user echoes.
  */
 export function resolveDisplayMessages(sources: {
   historyEntries: MobileTranscriptEntry[];
@@ -39,7 +38,7 @@ export function resolveDisplayMessages(sources: {
   streamMessages: MobileTranscriptEntry[];
 }): MobileTranscriptEntry[] {
   const { historyEntries, chatMessages, streamMessages } = sources;
-  const restored = historyEntries.length ? [...historyEntries, ...chatMessages] : chatMessages;
+  const restored = mergeTranscriptSources(historyEntries, chatMessages);
   const base = restored.length ? mergeCompactionMarkers(restored, streamMessages) : restored;
-  return withoutCompactionReplay(dedupeDisplayMessages(streamMessages.length ? [...base, ...streamMessages] : base));
+  return withoutCompactionReplay(dedupeDisplayMessages(mergeTranscriptSources(base, streamMessages)));
 }

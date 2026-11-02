@@ -16,6 +16,7 @@ import type {
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
 import { consumePendingTurnWorkers } from '@/lib/mobile/turn-receipt';
+import { redactToolCallForRest } from '@/lib/threads/redaction';
 
 const HISTORY_DIR = join(getDataDir(), 'chat-history');
 const heldHistoryLocks = new Set<string>();
@@ -28,6 +29,9 @@ export interface PersistedLlmChatMessage {
 
   id: string;
   role: MobileTranscriptEntry['role'];
+  author?: MobileTranscriptEntry['author'];
+  network?: MobileTranscriptEntry['network'];
+  runtime?: string;
   content: string;
   type?: MobileTranscriptEntry['type'];
   media?: MobileTranscriptMedia[];
@@ -38,6 +42,7 @@ export interface PersistedLlmChatMessage {
   costUsd?: number;
   inferenceRoute?: { provider: 'chatgpt-plan'; billing: 'subscription'; allowanceUse: 'unknown'; meter: 'provider-tokens' };
   timestamp: number;
+  persistedVersion?: number;
   timestampLabel?: string;
   toolCalls?: MobileTranscriptToolCall[];
   sources?: MobileTranscriptSource[];
@@ -55,6 +60,8 @@ export interface PersistedLlmChatMessage {
 }
 
 export interface PersistedLlmChatHistory {
+  source?: 'bot-network';
+  network?: { conversationId: string | null; memberIds: string[]; canReply: boolean; closed?: boolean; question?: import('@/lib/bots/network-types').NetworkQuestionSummary };
   messages: PersistedLlmChatMessage[];
   model?: string;
   savedAt?: string;
@@ -87,12 +94,12 @@ export type CanonicalChatHistoryRecord = SearchableChatHistoryRecord & {
 };
 
 /** Serialize chat-history read/modify/write cycles across the WS and API processes. */
-export function withCanonicalChatHistoryLock<T>(tabId: string, task: () => T): T {
+export function withCanonicalChatHistoryLock<T>(tabId: string, task: () => T, options: { timeoutMs?: number } = {}): T {
   ensureDir();
   const lockPath = `${getCanonicalChatHistoryPath(tabId)}.lock`;
   if (heldHistoryLocks.has(lockPath)) return task();
 
-  const deadline = Date.now() + HISTORY_LOCK_TIMEOUT_MS;
+  const deadline = Date.now() + (options.timeoutMs ?? HISTORY_LOCK_TIMEOUT_MS);
   while (true) {
     try {
       writeFileSync(lockPath, `${process.pid}\n`, { flag: 'wx', mode: 0o600 });
@@ -232,9 +239,11 @@ export function writePersistedLlmChat(
   // desktop ws-server upserting a reply), can never drop a stored turn. This is
   // the second write path alongside the /api/v2/chat-history route. Pass
   // replace:true only for an intentional truncation (none today).
+    const incomingMessages = history.messages.map(message => message.toolCalls
+      ? { ...message, toolCalls: message.toolCalls.map(redactToolCallForRest) } : message);
     const mergedMessages = opts?.replace === true
-      ? history.messages
-      : mergeChatMessages(existingMessages, history.messages);
+      ? incomingMessages
+      : mergeChatMessages(existingMessages, incomingMessages);
 
     const selectedPendingTurnWorkers = Object.prototype.hasOwnProperty.call(history, 'pendingTurnWorkers')
       ? history.pendingTurnWorkers
@@ -289,7 +298,11 @@ export function mapLlmHistoryToMobileTranscript(
   return filtered.map((message) => ({
     id: message.id,
     role: message.role,
+    author: message.author,
+    network: message.network,
+    runtime: message.runtime,
     text: message.content,
+    persistedVersion: message.persistedVersion,
     type: message.type ?? (message.compaction || message.isCompaction ? 'compaction' : 'message'),
     media: message.media,
     timestamp: message.timestamp,

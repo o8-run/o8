@@ -13,6 +13,7 @@ import { safeErrorText } from '@/lib/mcp/api-error';
 
 // MUST run before shared imports: re-exec onto Node 22 before native addon loads.
 import './operator-node22-reexec';
+import './stdio-console';
 
 // MUST run before handler imports that may initialize persistent stores.
 import './orphan-exit-bootstrap';
@@ -364,7 +365,16 @@ const flagValue = (name: string): string | undefined => {
 };
 const transport = flagValue('--transport') ?? process.env.O8_MCP_TRANSPORT ?? 'stdio';
 
-if (transport === 'http') {
+if (process.env.O8_OPERATOR_MCP_PROFILE === 'network') {
+  if (transport !== 'stdio') {
+    console.error('[o8-network] The local network profile supports stdio only.');
+    process.exit(2);
+  }
+  void import('./network-mcp-stdio').then(module => module.startNetworkMcpStdio()).catch(error => {
+    console.error(`[o8-network] Cannot start: ${safeErrorText(error)}`);
+    process.exit(2);
+  });
+} else if (transport === 'http') {
   const port = Number(flagValue('--port')) || Number(process.env.O8_MCP_PORT) || 18795;
   startHttp(port);
 } else {

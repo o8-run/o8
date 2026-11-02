@@ -5,6 +5,7 @@ edition = "2024"
 license = "Apache-2.0"
 publish = false
 default-run = "o8-next"
+build = "src/shell_feature_build.rs"
 
 [features]
 macos-diagnostics = ["gpui/frame-diagnostics"]
@@ -18,6 +19,7 @@ required-features = ["macos-diagnostics"]
 async-channel = "=2.5.0"
 alacritty_terminal = { version = "=0.26.0", default-features = false }
 base64 = "=0.22.1"
+getrandom = "=0.3.4"
 tungstenite = { version = "=0.28.0", default-features = false, features = ["handshake"] }
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit"] }
 regex = "=1.13.1"
@@ -33,6 +35,9 @@ tree-sitter-json = "=0.24.8"
 tree-sitter-md = "=0.5.3"
 
 # Shell work: the release app needs the real Linux renderer, not the test platform.
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.183"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "x11"] }
 
@@ -42,9 +47,20 @@ gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "=0.26.0"
 objc = "=0.2.7"
+block = "=0.1.6"
 raw-window-handle = "=0.6.2"
 
 [workspace]
+
+# Keep interactive debug painting and terminal parsing responsive while retaining
+# the debug assertions and overflow checks used by the native regression suite.
+[profile.dev]
+opt-level = 1
+debug-assertions = true
+overflow-checks = true
+
+[profile.dev.package."*"]
+opt-level = 2
 
 [[example]]
 name = "window-occlusion"
@@ -54,3 +70,8 @@ path = "test-support/window_occlusion.rs"
 [patch.crates-io]
 gpui = { path = "vendor/gpui" }
 taffy = { path = "vendor/taffy" }
+
+[[bin]]
+name = "o8-next-visualization-check"
+path = "diagnostics/visualization_check.rs"
+test = false

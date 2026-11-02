@@ -18,9 +18,28 @@ pub(in crate::shell) trait Port: 'static {
         cx: &mut Context<Self::View>,
     ) -> Self::View;
     fn tick(_view: &Entity<Self::View>, _cx: &mut Context<Shell>) {}
+    /// The target a surface opens by itself when nothing is selected (the
+    /// workspace's own shell). `None` keeps the picker.
+    fn own(_client: &Client, _workspace: &str) -> Option<Result<String, String>> {
+        None
+    }
     #[cfg(test)]
     fn ready(view: &Entity<Self::View>, cx: &App) -> bool;
 }
+
+enum OwnTarget {
+    Unrequested,
+    Pending,
+    Unavailable,
+    Ready(String),
+    Failed(String),
+}
+
+// Creation and inventory are independent jobs. A labelled creation task also
+// lets GPUI tests hold it while exercising real inventory and input callbacks.
+static OWN_REQUEST: std::sync::LazyLock<gpui::TaskLabel> =
+    std::sync::LazyLock::new(gpui::TaskLabel::new);
+
 pub(in crate::shell) struct Picker<P: Port> {
     client: Client,
     workspace: String,
@@ -34,6 +53,15 @@ pub(in crate::shell) struct Picker<P: Port> {
     loading: bool,
     failed: bool,
     requested: Option<String>,
+    own: OwnTarget,
+    /// Initial restoration and explicit creation retries may adopt. Listing or
+    /// manually selecting a target cancels that intent, without losing the reply.
+    open_own: bool,
+    /// Inventory generations never invalidate an in-flight creation result.
+    generation: u64,
+    /// A split pane's own target: opened even before the inventory lists it,
+    /// and never swapped for the surface's own target.
+    pinned: bool,
 }
 impl<P: Port> Picker<P> {
     pub fn new(
@@ -55,14 +83,70 @@ impl<P: Port> Picker<P> {
             loading: false,
             failed: false,
             requested: selected,
+            own: OwnTarget::Unrequested,
+            open_own: true,
+            generation: 0,
+            pinned: false,
+        };
+        view.load(cx);
+        view
+    }
+    /// Opens `id` and only `id`: a split pane's own terminal.
+    pub fn pinned(client: Client, workspace: String, id: String, cx: &mut Context<Self>) -> Self {
+        let mut view = Self {
+            client,
+            workspace,
+            selected: Some(id.clone()),
+            child: None,
+            choices: vec![Choice {
+                id: id.clone(),
+                label: id.clone(),
+            }],
+            focus: cx.focus_handle(),
+            child_focus: None,
+            query: String::new(),
+            choice: 0,
+            loading: false,
+            failed: false,
+            requested: Some(id),
+            own: OwnTarget::Unavailable,
+            open_own: true,
+            generation: 0,
+            pinned: true,
         };
         view.load(cx);
         view
     }
     fn load(&mut self, cx: &mut Context<Self>) {
-        if self.loading {
-            return;
+        if matches!(self.own, OwnTarget::Unrequested | OwnTarget::Failed(_)) {
+            self.own = OwnTarget::Pending;
+            self.open_own = true;
+            let client = self.client.clone();
+            let workspace = self.workspace.clone();
+            let task = cx
+                .background_executor()
+                .spawn_labeled(*OWN_REQUEST, async move { P::own(&client, &workspace) });
+            cx.spawn(async move |this, cx| {
+                let result = task.await;
+                let _ = this.update(cx, |s, cx| {
+                    // One creation at a time: refreshes coalesce while pending.
+                    // Even a later list request must retain this result/error.
+                    s.own = match result {
+                        Some(Ok(id)) => OwnTarget::Ready(id),
+                        Some(Err(error)) => OwnTarget::Failed(error),
+                        None => OwnTarget::Unavailable,
+                    };
+                    s.merge_own();
+                    cx.notify();
+                });
+            })
+            .detach();
         }
+        self.load_choices(cx);
+    }
+    fn load_choices(&mut self, cx: &mut Context<Self>) {
+        self.generation += 1;
+        let generation = self.generation;
         self.loading = true;
         self.failed = false;
         let client = self.client.clone();
@@ -73,12 +157,23 @@ impl<P: Port> Picker<P> {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |s, cx| {
+                if generation != s.generation {
+                    return;
+                }
                 s.loading = false;
                 match result {
-                    Ok(mut choices) => {
-                        choices.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.id.cmp(&b.id)));
-                        choices.dedup_by(|a, b| a.id == b.id);
+                    Ok(choices) => {
                         s.choices = choices;
+                        if s.pinned
+                            && let Some(id) = s.selected.clone()
+                            && !s.choices.iter().any(|choice| choice.id == id)
+                        {
+                            s.choices.push(Choice {
+                                id: id.clone(),
+                                label: id,
+                            });
+                        }
+                        s.merge_own();
                     }
                     Err(_) => s.failed = true,
                 }
@@ -87,6 +182,28 @@ impl<P: Port> Picker<P> {
         })
         .detach();
         cx.notify();
+    }
+    fn is_loading(&self) -> bool {
+        self.loading || (self.open_own && matches!(self.own, OwnTarget::Pending))
+    }
+    fn own_error(&self) -> Option<&str> {
+        match &self.own {
+            OwnTarget::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+    fn merge_own(&mut self) {
+        if let OwnTarget::Ready(id) = &self.own
+            && !self.choices.iter().any(|choice| &choice.id == id)
+        {
+            self.choices.push(Choice {
+                id: id.clone(),
+                label: id.clone(),
+            });
+        }
+        self.choices
+            .sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.id.cmp(&b.id)));
+        self.choices.dedup_by(|a, b| a.id == b.id);
     }
     fn filtered(&self) -> Vec<usize> {
         let query = self.query.to_lowercase();
@@ -104,6 +221,8 @@ impl<P: Port> Picker<P> {
             self.selected = None;
             return;
         }
+        self.open_own = false;
+        self.requested = None;
         let client = self.client.clone();
         self.child = Some(cx.new(|cx| P::create(client, id.clone(), window, cx)));
         self.child_focus = window.focused(cx);
@@ -115,13 +234,14 @@ impl<P: Port> Picker<P> {
         let modifiers = event.keystroke.modifiers;
         if (modifiers.control || modifiers.platform) && modifiers.alt && key == "o" {
             self.child = None;
+            self.open_own = false;
             self.requested = None;
             self.child_focus = None;
             self.selected = None;
             self.query.clear();
             self.choice = 0;
             self.focus.focus(window);
-            self.load(cx);
+            self.load_choices(cx);
         } else if self.child.is_some() {
             return;
         } else if key == "f5" {
@@ -140,7 +260,7 @@ impl<P: Port> Picker<P> {
                     self.query.clear();
                     self.choice = 0;
                 }
-                "enter" if !self.loading && !self.failed => {
+                "enter" if !self.is_loading() && !self.failed => {
                     if let Some(&index) = self.filtered().get(self.choice) {
                         self.attach(self.choices[index].id.clone(), window, cx);
                     }
@@ -161,11 +281,17 @@ impl<P: Port> Picker<P> {
 }
 impl<P: Port> Render for Picker<P> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if !self.loading
-            && !self.failed
-            && let Some(id) = self.requested.take()
-        {
-            self.attach(id, window, cx);
+        let loading = self.is_loading();
+        if !loading && !self.failed && self.open_own {
+            self.open_own = false;
+            let own = match &self.own {
+                OwnTarget::Ready(id) => Some(Ok(id.clone())),
+                _ => None,
+            };
+            adopt(&mut self.choices, &mut self.requested, own);
+            if let Some(id) = self.requested.take() {
+                self.attach(id, window, cx);
+            }
         }
         let choices = self.filtered();
         div()
@@ -193,12 +319,29 @@ impl<P: Port> Render for Picker<P> {
                         } else {
                             self.query.clone()
                         })
-                        .when(self.loading, |view| view.child("Loading…"))
+                        .when(loading, |view| view.child("Loading…"))
+                        .when_some(self.own_error().map(str::to_owned), |view, error| {
+                            view.child(
+                                div()
+                                    .debug_selector(|| "target-own-error".into())
+                                    .child(format!("Could not start one: {error}"))
+                                    .child(
+                                        div()
+                                            .id("target-own-retry")
+                                            .debug_selector(|| "target-own-retry".into())
+                                            .cursor_pointer()
+                                            .p(px(8.))
+                                            .child("Retry (F5)")
+                                            .on_click(cx.listener(|s, _, _, cx| s.load(cx))),
+                                    ),
+                            )
+                        })
                         .when(self.failed, |view| {
                             view.child(
                                 div().child("Targets unavailable").child(
                                     div()
                                         .id("target-retry")
+                                        .debug_selector(|| "target-retry".into())
                                         .cursor_pointer()
                                         .p(px(8.))
                                         .child("Retry")
@@ -206,10 +349,9 @@ impl<P: Port> Render for Picker<P> {
                                 ),
                             )
                         })
-                        .when(
-                            !self.loading && !self.failed && choices.is_empty(),
-                            |view| view.child(P::EMPTY),
-                        )
+                        .when(!loading && !self.failed && choices.is_empty(), |view| {
+                            view.child(P::EMPTY)
+                        })
                         .children(choices.into_iter().enumerate().map(|(row, index)| {
                             let id = self.choices[index].id.clone();
                             div()
@@ -247,176 +389,34 @@ impl<P: Port> ShellView for Picker<P> {
     #[cfg(test)]
     fn ready(view: &Entity<Self>, cx: &App) -> bool {
         let view = view.read(cx);
-        !view.loading && view.child.as_ref().is_none_or(|child| P::ready(child, cx))
+        !view.is_loading() && view.child.as_ref().is_none_or(|child| P::ready(child, cx))
+    }
+}
+
+/// Adds the surface's own target to the listed choices and opens the saved
+/// choice while it is still listed, else the own target.
+fn adopt(
+    choices: &mut Vec<Choice>,
+    requested: &mut Option<String>,
+    own: Option<Result<String, String>>,
+) {
+    let Some(Ok(id)) = own else {
+        return;
+    };
+    if !choices.iter().any(|choice| choice.id == id) {
+        choices.push(Choice {
+            id: id.clone(),
+            label: id.clone(),
+        });
+    }
+    if !requested
+        .as_ref()
+        .is_some_and(|saved| choices.iter().any(|choice| &choice.id == saved))
+    {
+        *requested = Some(id);
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::shell::palette::tests::{run, settled};
-    use crate::shell::test_support::*;
-
-    #[gpui::test]
-    fn target_click_keeps_identity_when_inventory_reorders(cx: &mut TestAppContext) {
-        let fixture = Fixture::start_mode(false, "--review");
-        for redraw in [false, true] {
-            let (shell, mut visual) = open(
-                fixture.client.clone(),
-                fixture.root.join(format!("row-race-{redraw}.json")),
-                State::default(),
-                cx,
-            );
-            let cx = &mut visual;
-            ready(&shell, cx);
-            run(cx, "d i f f");
-            settled(&shell, cx);
-            let view = shell.read_with(cx, |s, _| match &s.content[&s.key(&Tab::Diff)] {
-                Content::Diff(v) => v.clone(),
-                _ => panic!("diff"),
-            });
-            let expected = view.read_with(cx, |v, _| v.choices[0].id.clone());
-            let bounds = cx.debug_bounds("target-0").unwrap();
-            cx.simulate_mouse_down(
-                bounds.center(),
-                gpui::MouseButton::Left,
-                gpui::Modifiers::default(),
-            );
-            view.update(cx, |v, _| v.choices.reverse());
-            if redraw {
-                draw(cx);
-            }
-            cx.simulate_mouse_up(
-                bounds.center(),
-                gpui::MouseButton::Left,
-                gpui::Modifiers::default(),
-            );
-            settled(&shell, cx);
-            let selected = view.read_with(cx, |v, _| v.selected.clone());
-            assert!(
-                selected == Some(expected) || (redraw && selected.is_none()),
-                "a repainted row must cancel the click or retain its original target"
-            );
-        }
-    }
-
-    #[gpui::test]
-    fn target_reopen_cancels_pending_restore(cx: &mut TestAppContext) {
-        let fixture = Fixture::start_mode(false, "--review");
-        let (shell, mut visual) = open(
-            fixture.client.clone(),
-            fixture.root.join("restore-race.json"),
-            State::default(),
-            cx,
-        );
-        let cx = &mut visual;
-        ready(&shell, cx);
-        shell.update_in(cx, |s, window, cx| {
-            s.state
-                .workspaces
-                .get_mut(s.state.selected.as_deref().unwrap())
-                .unwrap()
-                .surfaces
-                .diff
-                .diff_packet = Some("next-review-approve".into());
-            s.execute(Command::Diff, window, cx);
-            let view = match &s.content[&s.key(&Tab::Diff)] {
-                Content::Diff(v) => v.clone(),
-                _ => panic!("diff"),
-            };
-            // Dispatch the production key listener before the background response
-            // can update the view; the shell and HTTP entry point are unchanged.
-            view.update(cx, |view, cx| {
-                view.key(
-                    &KeyDownEvent {
-                        keystroke: gpui::Keystroke::parse("ctrl-alt-o").unwrap(),
-                        is_held: false,
-                    },
-                    window,
-                    cx,
-                )
-            });
-        });
-        settled(&shell, cx);
-        assert!(
-            shell.read_with(cx, |s, cx| match &s.content[&s.key(&Tab::Diff)] {
-                Content::Diff(v) => v.read(cx).selected.is_none() && v.read(cx).child.is_none(),
-                _ => false,
-            })
-        );
-    }
-
-    #[gpui::test]
-    fn target_choices_compare_canonical_workspace_paths(cx: &mut TestAppContext) {
-        let fixture = Fixture::start_mode(false, "--review --terminal");
-        let (shell, mut visual) = open(
-            fixture.client.clone(),
-            fixture.root.join("alias.json"),
-            State::default(),
-            cx,
-        );
-        let cx = &mut visual;
-        ready(&shell, cx);
-        let alias = shell.read_with(cx, |s, _| {
-            format!("{}/.", s.state.selected.as_deref().unwrap())
-        });
-        shell.update_in(cx, |s, window, cx| {
-            s.workspaces.push(alias.clone());
-            s.switch(alias, window, cx);
-        });
-        run(cx, "d i f f");
-        settled(&shell, cx);
-        assert_eq!(
-            shell.read_with(cx, |s, cx| match &s.content[&s.key(&Tab::Diff)] {
-                Content::Diff(v) => v.read(cx).choices.len(),
-                _ => 0,
-            }),
-            2
-        );
-        run(cx, "t e r m i n a l");
-        settled(&shell, cx);
-        assert_eq!(
-            shell.read_with(cx, |s, cx| match &s.content[&s.key(&Tab::Terminal)] {
-                Content::Terminal(v) => v.read(cx).choices.len(),
-                _ => 0,
-            }),
-            1
-        );
-    }
-
-    #[gpui::test]
-    fn target_load_finishing_after_workspace_switch_keeps_composer_focus(cx: &mut TestAppContext) {
-        let fixture = Fixture::start_mode(false, "--review");
-        let (shell, mut visual) = open(
-            fixture.client.clone(),
-            fixture.root.join("load-race.json"),
-            State::default(),
-            cx,
-        );
-        let cx = &mut visual;
-        ready(&shell, cx);
-        let other = shell.read_with(cx, |s, _| {
-            s.workspaces
-                .iter()
-                .find(|w| Some(*w) != s.state.selected.as_ref())
-                .unwrap()
-                .clone()
-        });
-        shell.update_in(cx, |s, window, cx| {
-            s.execute(Command::Diff, window, cx);
-            s.switch(other.clone(), window, cx);
-            let session = s.workspace_sessions()[0].id.clone();
-            s.execute(Command::Message(session), window, cx);
-        });
-        settled(&shell, cx);
-        assert_eq!(
-            shell.read_with(cx, |s, _| s.state.selected.clone()),
-            Some(other)
-        );
-        let view = shell.read_with(cx, |s, _| match &s.content[&s.key(&s.active().unwrap())] {
-            Content::Session(view) => view.clone(),
-            _ => panic!("session"),
-        });
-        cx.update(|window, cx| assert!(view.read(cx).shell_selection(window, cx).1));
-    }
-}
+#[path = "palette_target_tests.rs"]
+mod tests;

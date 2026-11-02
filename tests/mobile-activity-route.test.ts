@@ -4,9 +4,10 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 const execFile = vi.fn((...args: unknown[]) => {
   const callback = args[args.length - 1] as (
     error: Error | null,
-    result: { stdout: string; stderr: string },
+    stdout: string,
+    stderr: string,
   ) => void;
-  callback(null, { stdout: '', stderr: '' });
+  callback(null, '', '');
 });
 const listRepos = vi.fn<() => Promise<Array<{
   id: string;
@@ -33,9 +34,10 @@ describe('mobile activity route', () => {
     execFile.mockImplementation((...args: unknown[]) => {
       const callback = args[args.length - 1] as (
         error: Error | null,
-        result: { stdout: string; stderr: string },
+        stdout: string,
+        stderr: string,
       ) => void;
-      callback(null, { stdout: '', stderr: '' });
+      callback(null, '', '');
     });
     listRepos.mockReset();
     listRepos.mockResolvedValue([]);
@@ -70,19 +72,17 @@ describe('mobile activity route', () => {
       const gitArgs = args[1] as string[];
       const callback = args[args.length - 1] as (
         error: Error | null,
-        result: { stdout: string; stderr: string },
+        stdout: string,
+        stderr: string,
       ) => void;
       if (gitArgs.includes('log')) {
-        callback(null, {
-          stdout: [
-            `${recordSeparator}${featureSha}${fieldSeparator}refs/heads/feature/offline-work${fieldSeparator}parent-a${fieldSeparator}Sydney${fieldSeparator}Build outside o8${fieldSeparator}2026-07-30T18:30:00.000Z${statSeparator}\n${featureStats.join('\n')}\n`,
-            `${recordSeparator}${remoteSha}${fieldSeparator}refs/remotes/origin/review${fieldSeparator}parent-b parent-c${fieldSeparator}Marquise${fieldSeparator}Merge reviewed work${fieldSeparator}2026-07-30T18:00:00.000Z${statSeparator}\n0\t0\tREADME.md`,
-          ].join(''),
-          stderr: '',
-        });
+        callback(null, [
+          `${recordSeparator}${featureSha}${fieldSeparator}refs/heads/feature/offline-work${fieldSeparator}parent-a${fieldSeparator}Sydney${fieldSeparator}Build outside o8${fieldSeparator}2026-07-30T18:30:00.000Z${statSeparator}\n${featureStats.join('\n')}\n`,
+          `${recordSeparator}${remoteSha}${fieldSeparator}refs/remotes/origin/review${fieldSeparator}parent-b parent-c${fieldSeparator}Marquise${fieldSeparator}Merge reviewed work${fieldSeparator}2026-07-30T18:00:00.000Z${statSeparator}\n0\t0\tREADME.md`,
+        ].join(''), '');
         return;
       }
-      callback(null, { stdout: '', stderr: '' });
+      callback(null, '', '');
     });
 
     const response = await GET(new Request('http://localhost:3001/api/mobile/activity'));
@@ -207,7 +207,8 @@ describe('mobile activity route', () => {
       const gitArgs = args[1] as string[];
       const callback = args[args.length - 1] as (
         error: Error | null,
-        result: { stdout: string; stderr: string },
+        stdout: string,
+        stderr: string,
       ) => void;
       const repoPath = gitArgs[1] ?? '';
       const index = Number.parseInt(repoPath.slice(repoPath.lastIndexOf('-') + 1), 10);
@@ -216,14 +217,12 @@ describe('mobile activity route', () => {
       setTimeout(() => {
         activeGitCalls -= 1;
         if (index === 2) {
-          callback(new Error('repo unavailable'), { stdout: '', stderr: '' });
+          callback(new Error('repo unavailable'), '', '');
           return;
         }
         const sha = String(index).repeat(40);
-        callback(null, {
-          stdout: `${recordSeparator}${sha}${fieldSeparator}refs/heads/main${fieldSeparator}parent${fieldSeparator}Author ${index}${fieldSeparator}Commit ${index}${fieldSeparator}2026-07-30T18:0${index}:00.000Z${statSeparator}\n1\t0\tfile-${index}.ts`,
-          stderr: '',
-        });
+        callback(null, `${recordSeparator}${sha}${fieldSeparator}refs/heads/main${fieldSeparator}parent${fieldSeparator}Author ${index}${fieldSeparator}Commit ${index}${fieldSeparator}2026-07-30T18:0${index}:00.000Z${statSeparator}\n1\t0\tfile-${index}.ts`,
+          '');
       }, 5);
     });
 

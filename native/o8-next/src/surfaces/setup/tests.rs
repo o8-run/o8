@@ -18,6 +18,49 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
 }
 
 #[gpui::test]
+fn setup_deferred_first_run_does_not_cover_later_global_navigation(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(true, "--shell --bots --inbox-empty");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("global-first-run.json"),
+        State::default(),
+        cx,
+    );
+    for _ in 0..6 {
+        visual.run_until_parked();
+        draw(&mut visual);
+    }
+    assert!(
+        shell.read_with(&visual, |s, _| s.surfaces.setup.view.is_some()),
+        "first-run Setup still opens when there is no active global surface"
+    );
+    shell.update_in(&mut visual, |s, window, cx| {
+        assert!(s.connected && !s.loading);
+        assert!(s.active().is_none());
+        s.surfaces.setup.view = None;
+        s.surfaces.setup.first_run_checked.set(false);
+        (setup::REGISTRATION.nav)(s, NavPosition::BeforeWorkspaces, cx);
+        assert!(
+            s.surfaces.setup.first_run_checked.get(),
+            "queue the real first-run callback before navigating"
+        );
+        s.execute(Command::Bot("grok:agent-1".into()), window, cx);
+    });
+    visual.run_until_parked();
+    draw(&mut visual);
+    ready(&shell, &mut visual);
+    assert_eq!(
+        shell.read_with(&visual, |s, _| s.active()),
+        Some(Tab::Bot("grok:agent-1".into()))
+    );
+    assert!(
+        shell.read_with(&visual, |s, _| s.surfaces.setup.view.is_none()),
+        "a queued first-run callback cannot cover a later global rail click"
+    );
+    assert!(visual.debug_bounds("bot-thread").is_some());
+}
+
+#[gpui::test]
 fn onboarding_registered_workspace_without_sessions_still_starts_setup(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--onboarding --transcript");
     let projects: Value = fixture.client.get("/api/panel/projects", &[]).unwrap();
@@ -156,10 +199,11 @@ fn onboarding_project_tools_privacy_and_workspace(cx: &mut TestAppContext) {
         "the opened workspace must persist a send through the production queue"
     );
     let start = Instant::now();
-    click(cx, "setup-open");
+    click(cx, "rail-more");
+    click(cx, "rail-more-setup");
     let interaction = start.elapsed().as_secs_f64() * 1000.;
     assert!(cx.debug_bounds("setup-projects").is_some());
-    click(cx, "setup-close");
+    click(cx, "shell-home");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
     println!(
         "O8_NEXT_ONBOARDING_EVIDENCE {}",
@@ -294,7 +338,8 @@ fn onboarding_operator_auth_error_retry(cx: &mut TestAppContext) {
     let cx = &mut visual;
     cx.run_until_parked();
     draw(cx);
-    click(cx, "setup-open");
+    click(cx, "rail-more");
+    click(cx, "rail-more-setup");
     assert!(cx.debug_bounds("setup-error").is_some());
     click(cx, "setup-refresh");
     assert!(cx.debug_bounds("setup-error").is_some());

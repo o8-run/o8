@@ -94,11 +94,19 @@ fn sidebar_selection_leaves_projects_and_settings(cx: &mut TestAppContext) {
             .clone()
             .unwrap()
     });
-    for (button, panel) in [
-        ("shell-settings", "settings-page"),
-        ("shell-projects", "project-new"),
-    ] {
-        click(cx, button);
+    // Settings lives in the rail's profile menu and takes over the window.
+    click(cx, "shell-profile");
+    click(cx, "profile-settings");
+    settle(&shell, cx);
+    assert!(cx.debug_bounds("settings-page").is_some());
+    assert!(cx.debug_bounds("thread-row-2").is_none());
+    click(cx, "settings-close");
+    settle(&shell, cx);
+    assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()));
+    for (buttons, panel) in [(&["rail-more", "rail-more-projects"][..], "project-new")] {
+        for button in buttons.iter().copied() {
+            click(cx, button);
+        }
         settle(&shell, cx);
         assert!(cx.debug_bounds(panel).is_some());
         click(cx, "thread-row-2");
@@ -215,11 +223,6 @@ fn settle(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
 }
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
-    if selector == "thread-archive" || selector == "thread-rename" {
-        let sidebar = cx.debug_bounds("thread-list").unwrap();
-        cx.simulate_mouse_move(sidebar.center(), None, gpui::Modifiers::default());
-        draw(cx);
-    }
     let bounds = cx
         .debug_bounds(selector)
         .unwrap_or_else(|| panic!("missing {selector}"));
@@ -574,10 +577,10 @@ fn sidebar_worker_archive_real_path(cx: &mut TestAppContext) {
     click(cx, "thread-row-2");
     ready(&shell, cx);
     // Opening the worker focuses its content. Focus the sidebar through its
-    // real shortcut before clicking the footer control hidden outside it.
+    // real shortcut; Delete archives the chosen row.
     cx.simulate_keystrokes("f8");
     settle(&shell, cx);
-    click(cx, "thread-archive");
+    cx.simulate_keystrokes("delete");
     wait_for(&shell, cx, |s, cx| {
         !s.surfaces
             .sidebar
@@ -718,5 +721,27 @@ mod project_keyboard_tests;
 #[path = "project_round2_tests.rs"]
 mod project_round2_tests;
 
+#[path = "scope_tests.rs"]
+mod scope_tests;
+#[path = "folder_tests.rs"]
+mod folder_tests;
+#[path = "settle_tests.rs"]
+mod settle_tests;
+#[path = "pr_links_tests.rs"]
+mod pr_links_tests;
+#[path = "detailed_tests.rs"]
+mod detailed_tests;
+
+#[path = "icon_tests.rs"]
+mod icon_tests;
+
 #[path = "recents_tests.rs"]
 mod recents_tests;
+
+#[path = "archive_tests.rs"]
+mod archive_tests;
+
+#[path = "pin_reorder_tests.rs"]
+mod pin_reorder_tests;
+#[path = "copy_tests.rs"]
+mod copy_tests;

@@ -38,7 +38,7 @@ impl HasWindowHandle for TestWindow {
     fn window_handle(
         &self,
     ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
-        unimplemented!("Test Windows are not backed by a real platform window")
+        Err(raw_window_handle::HandleError::NotSupported)
     }
 }
 
@@ -46,7 +46,7 @@ impl HasDisplayHandle for TestWindow {
     fn display_handle(
         &self,
     ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
-        unimplemented!("Test Windows are not backed by a real platform window")
+        Err(raw_window_handle::HandleError::NotSupported)
     }
 }
 
@@ -87,6 +87,17 @@ impl TestWindow {
         drop(lock);
         callback(size, scale_factor);
         self.0.lock().resize_callback = Some(callback);
+    }
+
+    pub fn simulate_move(&mut self, origin: Point<Pixels>) {
+        let mut lock = self.0.lock();
+        let Some(mut callback) = lock.moved_callback.take() else {
+            return;
+        };
+        lock.bounds.origin = origin;
+        drop(lock);
+        callback();
+        self.0.lock().moved_callback = Some(callback);
     }
 
     pub(crate) fn simulate_active_status_change(&self, active: bool) {

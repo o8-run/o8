@@ -16,9 +16,9 @@ export async function pickRepoFolder(title: string, promptMessage: string, promp
       if (typeof data.path === 'string') folderPath = data.path;
     } catch (error) {
       if (!promptFallback) throw error;
-      folderPath = await requestPrompt({ title, message: promptMessage, placeholder: '/path/to/folder' });
+      const typedPath = await requestPrompt({ title, message: promptMessage, placeholder: '/path/to/folder' });
+      folderPath = typedPath?.trim() || null;
     }
   }
-  const trimmedPath = folderPath?.trim() ?? '';
-  return trimmedPath || null;
+  return folderPath || null;
 }

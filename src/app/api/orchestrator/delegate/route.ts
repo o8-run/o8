@@ -28,7 +28,7 @@ import { launchSharedCheckoutWorker } from '@/lib/orchestrator/shared-checkout-l
 import { findSharedCheckoutMemberByMutation, readSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
 import { DelegationSelectionError, resolveDelegationSelection } from '@/lib/orchestrator/delegation-selection';
 import { resolveEffortAliases } from '@/lib/orchestrator/effort-pin';
-import { getWorkerCatalog } from '@/lib/orchestrator/worker-catalog';
+import { getWorkerCatalog, WorkerCatalogReadError, WorkerCatalogSelectionError } from '@/lib/orchestrator/worker-catalog';
 import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { authorizeFastDelegation } from '@/lib/orchestrator/fast-delegation-auth';
@@ -568,6 +568,12 @@ export async function GET(request: NextRequest) {
   try {
     return NextResponse.json(await getWorkerCatalog(request.nextUrl.searchParams.get('repoPath') || process.cwd(), runtime && isOrchestratorRuntime(runtime) ? runtime : undefined), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Worker catalog unavailable.' }, { status: 400 });
+    const status = error instanceof WorkerCatalogSelectionError ? 400 : 503;
+    return NextResponse.json({ ok: false,
+      error: error instanceof Error ? error.message : 'Worker catalog unavailable.',
+      call: 'GET /api/orchestrator/delegate',
+      step: error instanceof WorkerCatalogReadError ? error.call : 'getWorkerCatalog',
+      status, retryable: status === 503,
+    }, { status, headers: { 'Cache-Control': 'no-store' } });
   }
 }

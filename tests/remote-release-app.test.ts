@@ -76,7 +76,7 @@ function fixture() {
   execFileSync('git', ['init', '-q', root]);
   execFileSync('git', ['add', '.'], { cwd: root });
   execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], { cwd: root });
-  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write']) {
+  for (const name of ['o8', 'o8-next', 'speech_recognizer', 'speech-local', 'o8-pi-write']) {
     const path = join(appPath, 'Contents/MacOS', name);
     writeFileSync(path, universalBinary());
     chmodSync(path, 0o755);

@@ -17,6 +17,8 @@ import { useBufferedOrchestratorSend } from '@/components/desktop/thoughts/chat-
 import { useDefaultComposerSendBuffer } from '@/components/desktop/thoughts/chat-panel/useDefaultComposerSendBuffer';
 import { ChatMessageList } from '@/components/desktop/thoughts/chat-panel/ChatMessageList';
 import { useOrchestratorMobile } from '@/components/mobile/hooks/useOrchestratorMobile';
+import { TranscriptBubble } from '@/components/mobile/orchestrator/parts';
+import * as realtimePublisher from '@/lib/realtime/publisher';
 import type { MobileOrchestratorThread } from '@/lib/mobile/types';
 
 const connection = vi.hoisted(() => ({ socket: null as WebSocket | null }));
@@ -39,7 +41,7 @@ const { ensureV71ComposerQueueSchema } = await import('@/lib/db/v71-composer-que
 ensureV71ComposerQueueSchema(getSqlite());
 const registry = await import('@/lib/lane/orchestrator-backends/registry');
 const { runBoundChatContinuation } = await import('@/lib/ws-server/bound-chat-continuation');
-const { runQueuedComposerSteer } = await import('@/lib/ws-server/composer-queue-heartbeat');
+const { runQueuedComposerSteer, publishComposerQueueChange } = await import('@/lib/ws-server/composer-queue-heartbeat');
 const queue = await import('@/lib/orchestrator/composer-queue');
 const { POST, GET } = await import('@/app/api/orchestrator/composer-queue/route');
 const host = document.createElement('div'); document.body.append(host);
@@ -183,4 +185,94 @@ it.each([
       expect(persisted.some(entry => entry.id.includes(':before:'))).toBe(false);
     } finally { await act(async () => phoneRoot.unmount()); phoneHost.remove(); vi.stubGlobal('WebSocket', oldSocket); }
   } finally { finish(); await run.catch(() => {}); }
+});
+
+
+it.each([{ backendId: 'pi', withTool: false }, { backendId: 'codex', withTool: false }, { backendId: 'codex', withTool: true }] as const)(
+  'shows an acknowledged desktop steer in an already-open $backendId phone thread (tool: $withTool)', async ({ backendId, withTool }) => {
+  const threadId = `thoughts-open-phone-steer-${backendId}-${withTool}`;
+  mkdirSync(join(fixture, 'chat-history'), { recursive: true });
+  writeFileSync(join(fixture, 'chat-history', `${threadId}.json`), JSON.stringify({ repoPath: repo, backend: backendId, messages: [] }));
+  let emit!: (event: OrchestratorEvent) => void;
+  let finish!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  class PhoneSocket {
+    static OPEN = 1;
+    static instances: PhoneSocket[] = [];
+    readyState = 1;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    global = false;
+    constructor() { PhoneSocket.instances.push(this); queueMicrotask(() => { this.onopen?.(); this.receive({ channel: 'system', event: 'connected' }); }); }
+    send(raw: string) {
+      const message = JSON.parse(raw);
+      if (message.type === 'realtime-subscribe') this.global = message.subscriptions.some((entry: { stream: string }) => entry.stream === 'global');
+    }
+    close() {}
+    receive(message: unknown) { this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent); }
+  }
+  const oldSocket = globalThis.WebSocket;
+  vi.stubGlobal('WebSocket', PhoneSocket);
+  let sequence = 0;
+  vi.spyOn(realtimePublisher, 'publishRealtimeMutation').mockImplementation(async ({ mutation }) => {
+    for (const phone of PhoneSocket.instances) if (phone.global) phone.receive({ channel: 'realtime', event: 'batch', data: {
+      stream: 'global', delivery: 'live', events: [{ protocol: 1, seq: ++sequence, stream: 'global', channel: 'mutation',
+        event: 'mutation.settled', ts: new Date().toISOString(), data: { mutation } }],
+    } });
+    return true;
+  });
+  const backend = { id: backendId, label: 'Fixture runtime', ensureSession: () => ({ sessionName: 'fixture-session' }), peekSession: () => null,
+    liveSteer: async (_repo: string, _text: string, options: Parameters<NonNullable<OrchestratorBackend['liveSteer']>>[2]) => {
+      options.beforeAdmit(); emit({ type: 'text', text: 'After steer. ' }); return { accepted: true };
+    },
+    sendTurn: async (_repo: string, _text: string, callback: (event: OrchestratorEvent) => void) => {
+      emit = callback; callback({ type: 'text', text: 'Before steer. ' }); await gate;
+    },
+  } as unknown as OrchestratorBackend;
+  vi.spyOn(registry, 'getOrchestratorBackend').mockReturnValue(backend);
+  connection.socket = { readyState: WebSocket.OPEN, send: vi.fn(), close: vi.fn() } as unknown as WebSocket;
+  await act(async () => root.render(createElement(Harness, { messages: [], threadId, backend: backendId, busy: true })));
+  await act(async () => connection.socket!.onopen?.(new Event('open')));
+  const run = runBoundChatContinuation({ repoPath: repo, origin: { threadId, turnId: 'assistant-open-phone', backend: backendId,
+    model: backendId, effort: 'low', permissionMode: 'full', mode: 'fleet', pickedMode: 'multitask' },
+    message: 'Start the task', assistantMessageId: 'assistant-open-phone', check: () => {} },
+  { registerAbort: () => () => {}, publish: (_session, event, data) => {
+    const message = { channel: 'orchestrator', event, data };
+    connection.socket!.onmessage?.({ data: JSON.stringify(message) } as MessageEvent);
+    for (const phone of PhoneSocket.instances) phone.receive(message);
+  } });
+  await vi.waitFor(() => expect(emit).toBeTypeOf('function'));
+  const phoneHost = document.createElement('div'); document.body.append(phoneHost); const phoneRoot = createRoot(phoneHost);
+  const thread: MobileOrchestratorThread = { id: threadId, title: 'Open phone fixture', repoPath: repo, repoName: 'Fixture', repoBranch: 'main', githubOwner: null,
+    githubRepo: null, runtime: backendId === 'pi' ? 'claude-code' : 'codex', status: 'ready', lastMessageAt: new Date().toISOString(), messageCount: 0, projectId: null, backend: backendId, agent: null };
+  let phone!: ReturnType<typeof useOrchestratorMobile>;
+  function Phone() {
+    const result = useOrchestratorMobile({ activeThread: thread });
+    useEffect(() => { phone = result; }, [result]);
+    return createElement('div', null, ...result.transcript.map(entry => createElement('section', { key: entry.id, 'data-phone-row': entry.id }, createElement(TranscriptBubble, { entry }))));
+  }
+  const rows = () => phone.transcript.filter(entry => entry.role === 'user' || entry.role === 'assistant')
+    .map(entry => entry.text.replace(/\s+/g, ' ').trim());
+  try {
+    await act(async () => phoneRoot.render(createElement(Phone)));
+    await vi.waitFor(() => expect(phone.transcriptLoading).toBe(false));
+    await act(async () => { if (withTool) emit({ type: 'tool_use', name: 'boundary_probe', id: 'phone-probe', input: {} }); emit({ type: 'text', text: 'More before. ' }); await new Promise(resolve => setTimeout(resolve, 80)); });
+    await typeAndSubmit('Live correction');
+    const item = queue.listQueuedComposerSends({ repoPath: repo, threadId }).find(entry => entry.payload.text === 'Live correction')!;
+    await act(async () => { await runQueuedComposerSteer(queue.claimComposerSteer(item.id)!); publishComposerQueueChange(threadId); });
+    const before = withTool ? ['Before steer.', 'More before.'] : ['Before steer. More before.'];
+    await vi.waitFor(() => expect(rows()).toEqual(['Start the task', ...before, 'Live correction', 'After steer.']));
+    expect([...phoneHost.querySelectorAll('[data-phone-row]')].map(row => row.textContent)).toEqual([
+      expect.stringContaining('Start the task'), ...(withTool ? [expect.stringContaining('Before steer.'), expect.stringContaining('boundary_probe'), expect.stringContaining('More before.')] : [expect.stringContaining('Before steer. More before.')]), expect.stringContaining('Live correction'), expect.stringContaining('After steer.'),
+    ]);
+    await act(async () => { publishComposerQueueChange(threadId); publishComposerQueueChange(threadId); emit({ type: 'text', text: 'Still after. ' }); await new Promise(resolve => setTimeout(resolve, 80)); });
+    expect(rows()).toEqual(['Start the task', ...before, 'Live correction', 'After steer. Still after.']);
+    expect(phone.transcript.filter(entry => entry.id === `composer-steer-${item.id}`)).toHaveLength(1);
+    expect(PhoneSocket.instances).toHaveLength(1);
+    expect(phone.connectionState).toBe('connected');
+    await act(async () => { emit({ type: 'done', sessionId: 'fixture-session', cost: null }); finish(); await run; });
+    expect(rows()).toEqual(['Start the task', ...before, 'Live correction', 'After steer. Still after.']);
+  } finally {
+    finish(); await run.catch(() => {}); await act(async () => phoneRoot.unmount()); phoneHost.remove(); vi.stubGlobal('WebSocket', oldSocket);
+  }
 });

@@ -12,6 +12,14 @@ fn shortcuts_draw(cx: &mut VisualTestContext) {
     draw(cx);
 }
 
+/// The reference opens from the rail's profile menu, under Get help
+/// (SettingsQuickDrawer), as in the desktop rail.
+fn shortcuts_open(cx: &mut VisualTestContext) {
+    shortcuts_click(cx, "shell-profile");
+    shortcuts_click(cx, "profile-help");
+    shortcuts_click(cx, "profile-shortcuts");
+}
+
 fn shortcuts_click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
     let bounds = cx.debug_bounds(selector).expect("painted shortcut control");
@@ -58,7 +66,7 @@ fn shortcuts_overlay_bindings_dismissal_and_typing(cx: &mut TestAppContext) {
         cx.update(|window, cx| window.focused(cx)),
         "dismiss restores the original focus"
     );
-    shortcuts_click(cx, "shortcuts-open");
+    shortcuts_open(cx);
     cx.simulate_keystrokes("enter");
     shortcuts_draw(cx);
     assert_eq!(

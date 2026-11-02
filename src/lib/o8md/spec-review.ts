@@ -67,7 +67,7 @@ const SINGLE_NOTE_SYSTEM = 'You are continuing exactly one o8.md margin-note con
 
 function recentCommits(repoPath: string): string {
   try {
-    return execSync('git log --oneline -20', { windowsHide: true, cwd: repoPath, encoding: 'utf-8', timeout: 5_000 }).trim();
+    return execSync('git log --oneline -40', { windowsHide: true, cwd: repoPath, encoding: 'utf-8', timeout: 5_000 }).trim();
   } catch {
     return '';
   }
@@ -75,9 +75,15 @@ function recentCommits(repoPath: string): string {
 
 function buildPrompt(content: string, commits: string): string {
   const doc = content.length > MAX_CONTENT_CHARS ? content.slice(0, MAX_CONTENT_CHARS) : content;
-  return `You are a sharp teammate reading over a colleague's o8.md working notes and leaving margin annotations. Do NOT rewrite their prose — only annotate.
+  return `You are o8, working alongside the person who wrote these o8.md notes. They just pressed the check button, so read the notes the way you would read messages addressed to you. Your replies appear directly under the paragraph they answer, in a small handwritten note, like one side of a chat. Do NOT rewrite their prose.
 
-Comment ONLY where there is something real to say. The bar: "would this change what they do or know?" Skip proofreading and the obvious — a few sharp notes beat a wall. The best notes flag: a stale item that already shipped, a decision worth revisiting, a buried question that needs an answer, or something that contradicts a recent commit. If nothing is worth flagging, return an empty array.
+Go through the notes paragraph by paragraph and decide what each one needs:
+- A question: answer it. If you cannot tell from what you have, say what you would need to check.
+- Work they say is done or still to do: use the commits below. Say it shipped and name the short hash, or say it has not landed. Never guess a status.
+- A decision or plan: flag it only if a commit contradicts it or it conflicts with another paragraph.
+- A vague idea: ask the one question that would make it buildable, or state how you would do it.
+
+Reply only where it changes what they do or know. Stay silent on the rest, and skip proofreading and praise. Text inside {>> <<} marks is an earlier note thread: skip a paragraph that already has one unless something changed. If nothing needs a reply, return an empty array.
 
 Recent commits (use these to judge what's already shipped vs. still open):
 ${commits || '(unavailable)'}
@@ -93,7 +99,7 @@ Return ONLY a JSON array (no prose, no markdown code fence) of annotation object
 - {"kind":"suggestion","suggestionKind":"add","anchor":"<exact phrase to add after>","text":"<text to add>"}
 - {"kind":"suggestion","suggestionKind":"del","anchor":"<exact phrase to remove>"}
 
-Hard rules: every "anchor" MUST be an exact, character-for-character substring of the notes above (it is used for a literal text match). Keep each "body" to 1-2 short sentences, terse, no preamble. Never reuse the same anchor twice. Output the JSON array and nothing else.`;
+Hard rules: every "anchor" MUST be an exact, character-for-character substring of the notes above, copied from outside any {>> <<} mark (it is used for a literal text match). At most one annotation per paragraph. Use a suggestion only to correct something factually stale. Keep each "body" to 1-2 short sentences in plain words, no preamble. Never reuse the same anchor twice. Output the JSON array and nothing else.`;
 }
 
 /** Pull the JSON array out of a model response (tolerates a code fence / chatter). */

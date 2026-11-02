@@ -24,7 +24,7 @@ const ERROR_FLASH_MS = 2500;
  * (`'__TAURI_INTERNALS__' in window` + dynamic `import('@tauri-apps/api/*')`).
  */
 
-async function sttInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+export async function sttInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<T>(cmd, args);
 }
@@ -33,7 +33,7 @@ export function isNativeDictationAvailable(): boolean {
   return isTauri();
 }
 
-interface SttEventPayload {
+export interface SttEventPayload {
   type:
     | 'ready'
     | 'system-start'

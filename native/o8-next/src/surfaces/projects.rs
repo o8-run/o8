@@ -48,38 +48,6 @@ pub(super) const REGISTRATION: Registration = Registration {
                 .map(|p| p.repo_paths.clone());
         }
     },
-    nav: |s, position, cx| {
-        if position != NavPosition::BeforeWorkspaces {
-            return vec![];
-        }
-        let mut nav = vec![
-            div()
-                .id("shell-projects")
-                .debug_selector(|| "shell-projects".into())
-                .cursor_pointer()
-                .p(px(6.))
-                .child("Projects")
-                .on_click(cx.listener(|this, _, window, cx| this.open_projects(window, cx)))
-                .into_any_element(),
-        ];
-        if s.surfaces.projects.open {
-            nav.push(
-                div()
-                    .id("shell-workspace")
-                    .debug_selector(|| "shell-workspace".into())
-                    .cursor_pointer()
-                    .p(px(6.))
-                    .child("Back to workspace")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.surfaces.projects.open = false;
-                        this.restore_focus(window, cx);
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-            );
-        }
-        nav
-    },
     ..Registration::new("", "Open projects and repositories", |s, _, window, cx| {
         s.open_projects(window, cx);
         None

@@ -1819,6 +1819,14 @@ impl Interactivity {
                 }
 
                 window.with_element_opacity(style.opacity, |window| {
+                    #[cfg(any(feature = "test-support", test))]
+                    if let Some(selector) = &self.debug_selector {
+                        let opacity = window.element_opacity();
+                        window
+                            .next_frame
+                            .debug_opacities
+                            .insert(selector.clone(), opacity);
+                    }
                     style.paint(bounds, window, cx, |window: &mut Window, cx: &mut App| {
                         window.with_text_style(style.text_style().cloned(), |window| {
                             window.with_content_mask(

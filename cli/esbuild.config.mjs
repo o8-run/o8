@@ -21,6 +21,17 @@ mkdirSync(dirname(outFile), { recursive: true });
 const rootPkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
 const cliVersion = rootPkg.version ?? '0.0.0-dev';
 
+const sqliteRuntime = join(__dirname, 'src', 'sqlite-runtime.ts');
+const sqlitePlugin = {
+  name: 'cli-sqlite-runtime',
+  setup(build) {
+    build.onResolve({ filter: /^better-sqlite3$/ }, ({ importer }) => {
+      // The runtime keeps a bundled fallback for dependency-free CLI commands.
+      if (importer !== sqliteRuntime) return { path: sqliteRuntime };
+    });
+  },
+};
+
 // esbuild rewrites CJS `require()` calls into a `__require` shim that checks
 // `typeof require !== "undefined"`. With pure ESM output, that local `require`
 // from createRequire doesn't reach the shim's scope, so any bundled CJS
@@ -44,6 +55,7 @@ await esbuild.build({
   target: 'node22',
   banner: { js: ESM_BANNER },
   define: { __O8_CLI_VERSION__: JSON.stringify(cliVersion) },
+  plugins: [sqlitePlugin],
   outfile: outFile,
 });
 

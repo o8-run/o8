@@ -5,6 +5,7 @@
  * Messages survive page refresh and app restart.
  */
 
+import { removeTranscriptReadingPositions } from '@/components/desktop/thoughts/chat-panel/transcript-reading-position';
 import type { LLMMessage } from '@/components/desktop/LLMChat';
 
 const API_PATH = '/api/v2/chat-history';
@@ -70,6 +71,10 @@ export async function loadChatHistory(tabId: string): Promise<{
 /** Delete history for a tab */
 export async function deleteChatHistory(tabId: string): Promise<void> {
   try {
-    await fetch(`${API_PATH}?tabId=${encodeURIComponent(tabId)}`, { method: 'DELETE' });
+    const response = await fetch(`${API_PATH}?tabId=${encodeURIComponent(tabId)}`, { method: 'DELETE' });
+    if (response.ok && typeof window !== 'undefined') {
+      removeTranscriptReadingPositions(tabId);
+      window.dispatchEvent(new CustomEvent('o8:chat-history-deleted', { detail: { tabId } }));
+    }
   } catch { /* ignore */ }
 }

@@ -35,8 +35,10 @@ fn fixture_with_tail_gate(gate: Option<std::path::PathBuf>) -> (Fixture, Client,
             "tsx",
             "scripts/next/dev-server.ts",
             "--terminal",
+            "--owned-stdio",
         ])
         .env("O8_NEXT_API_TOKEN", "fixture-next-terminal-operator")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     if let Some(gate) = &gate {
@@ -50,6 +52,7 @@ fn fixture_with_tail_gate(gate: Option<std::path::PathBuf>) -> (Fixture, Client,
             value["terminalSession"].is_string().then_some(value)
         })
         .expect("fixture metadata");
+    std::thread::spawn(move || for _ in lines {});
     let client = Client::authenticated(
         metadata["origin"].as_str().unwrap(),
         Some("fixture-next-terminal-operator".into()),
@@ -234,7 +237,7 @@ fn production_pty_to_gpui_terminal(cx: &mut TestAppContext) {
     }));
     // Resize the actual GPUI viewport. Its canvas computes the grid and sends
     // terminal-resize; the fixture reads the resulting kernel winsize.
-    for (width, height, expected) in [(768., 584., Size(92, 29)), (793., 607., Size(95, 30))] {
+    for (width, height, expected) in [(768., 584., Size(92, 31)), (793., 607., Size(95, 32))] {
         cx.simulate_resize(size(px(width), px(height)));
         draw(&pane, cx);
         draw(&pane, cx);
@@ -242,13 +245,14 @@ fn production_pty_to_gpui_terminal(cx: &mut TestAppContext) {
             (pane.painted_bounds.get(), pane.grid.lock().unwrap().size())
         });
         // Desktop CSS: 12px panel padding on every side, plus xterm's 2px
-        // top/left content padding. The native status strip occupies 26px.
+        // top/left content padding. A connected terminal shows no status
+        // strip, as in classic.
         assert_eq!(
             bounds.origin,
-            point(px(14.), px(40.)),
+            point(px(14.), px(14.)),
             "terminal content must be inset"
         );
-        assert_eq!(bounds.size, size(px(width - 26.), px(height - 52.)));
+        assert_eq!(bounds.size, size(px(width - 26.), px(height - 26.)));
         assert_eq!(dimensions, expected);
         assert_eq!(
             dimensions,

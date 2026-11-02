@@ -65,6 +65,8 @@ const PI_WRITE_ARTIFACTS = [
   'src-tauri/helpers/o8-pi-write-aarch64-apple-darwin',
   'src-tauri/helpers/o8-pi-write-universal-apple-darwin',
   'src-tauri/helpers/o8-pi-write-x86_64-apple-darwin',
+  'src-tauri/helpers/o8-pi-write-x86_64-unknown-linux-gnu',
+  'src-tauri/helpers/o8-pi-write-aarch64-unknown-linux-gnu',
 ];
 
 function sha256File(path) {

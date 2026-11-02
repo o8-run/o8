@@ -1,0 +1,15 @@
+running 1 test
+test shell::feature_tests::registered_shell_feature_reaches_render_keys_commands_tick_and_observer ...
+thread 'shell::feature_tests::registered_shell_feature_reaches_render_keys_commands_tick_and_observer' (15345) panicked at src/shell_feature_tests.rs:15:5:
+registered render slot must paint through the real shell
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::feature_tests::registered_shell_feature_reaches_render_keys_commands_tick_and_observer
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 190 filtered out; finished in 10.66s
+
+error: test failed, to rerun pass `--bin o8-next`

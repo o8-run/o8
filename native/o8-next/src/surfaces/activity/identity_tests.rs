@@ -1,5 +1,5 @@
 //! Repository identity matrix through real Git/registry routes and headless GPUI.
-use super::tests::{activity_click, activity_open, activity_view};
+use super::tests::{activity_click, activity_open, activity_scope, activity_view};
 use super::*;
 use crate::shell::test_support::*;
 
@@ -25,7 +25,7 @@ fn check_identity_matrix(cx: &mut TestAppContext, option: &str, count: usize) {
         option.contains("worktrees") || option.contains("same-repo")
     );
     let (shell, mut visual, _) = activity_open(&fixture, cx);
-    activity_click(&mut visual, "activity-scope-all");
+    activity_scope(&mut visual, "activity-scope-all");
     activity_click(&mut visual, "activity-filter-commit");
     let view = activity_view(&shell, &mut visual);
     let rows = view.read_with(&visual, |view, _| {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MODEL_IDS } from '@/lib/models';
-import { recommendRuntimeSetup, visibleRuntimeInventory } from './runtime-recommendation';
+import { enabledRuntimeInventory, recommendRuntimeSetup, visibleRuntimeInventory } from './runtime-recommendation';
 import { resolveBackendTurnModel } from '@/lib/orchestrator/turn-model-selection';
 
 const inventory = [
@@ -115,5 +115,12 @@ describe('detected runtime recommendation', () => {
   it('shows installed tools needing login, hides missing tools, and preserves a selected missing tool', () => {
     expect(visibleRuntimeInventory(inventory).map((item) => item.id)).toEqual(['codex', 'claude-code', 'gemini']);
     expect(visibleRuntimeInventory(inventory, ['opencode']).map((item) => item.id)).toContain('opencode');
+  });
+});
+
+describe('enabledRuntimeInventory', () => {
+  it('hides runtimes turned off in Settings › Providers', () => {
+    expect(enabledRuntimeInventory(inventory, ['claude-code']).map(item => item.id)).toEqual(['codex', 'gemini', 'opencode']);
+    expect(enabledRuntimeInventory(inventory).length).toBe(4);
   });
 });

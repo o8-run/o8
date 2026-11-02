@@ -57,7 +57,7 @@ beforeAll(async () => {
     format: 'esm',
     target: 'node22',
     outfile: cli,
-    banner: { js: 'import { createRequire } from "node:module"; globalThis.require = createRequire(import.meta.url);' },
+    banner: { js: 'import { createRequire as __o8_createRequire } from "node:module"; globalThis.require = __o8_createRequire(import.meta.url);' },
     define: { __O8_CLI_VERSION__: '"test"' },
   });
 });

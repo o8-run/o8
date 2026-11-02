@@ -1,17 +1,17 @@
 import 'server-only';
 
-export type WorkspaceParkingMode = 'manual' | 'pressure';
+export type WorkspaceParkingMode = 'manual' | 'pressure' | 'settled';
 
 export interface WorkspaceParkingDefaults {
   workspaceParkingMode: WorkspaceParkingMode;
 }
 
 export const WORKSPACE_PARKING_FALLBACK: WorkspaceParkingDefaults = {
-  workspaceParkingMode: 'manual',
+  workspaceParkingMode: 'settled',
 };
 
 export function isWorkspaceParkingMode(value: unknown): value is WorkspaceParkingMode {
-  return value === 'manual' || value === 'pressure';
+  return value === 'manual' || value === 'pressure' || value === 'settled';
 }
 
 function envWorkspaceParkingMode(): WorkspaceParkingMode | null {
@@ -49,7 +49,7 @@ export function applyWorkspaceParkingUpdate(
 ): void {
   if (update.workspaceParkingMode === undefined) return;
   if (!isWorkspaceParkingMode(update.workspaceParkingMode)) {
-    throw new Error('workspaceParkingMode must be "manual" or "pressure".');
+    throw new Error('workspaceParkingMode must be "manual", "pressure" or "settled".');
   }
   stored.workspaceParkingMode = update.workspaceParkingMode;
 }

@@ -44,18 +44,8 @@ async function buildFixture() {
   // Evaluate the shipped configuration with its real directory and callbacks;
   // JSON serialization would silently drop splitChunks predicates.
   writeFileSync(join(root, 'next.config.js'), `
-    const fs = require('node:fs');
-    const Module = require('node:module');
-    const ts = require('typescript');
-    const file = ${JSON.stringify(resolve('next.config.ts'))};
-    const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2017, esModuleInterop: true }
-    }).outputText;
-    const configModule = new Module(file);
-    configModule.filename = file;
-    configModule.paths = Module._nodeModulePaths(${JSON.stringify(workspace)});
-    configModule._compile(compiled, file);
-    const shipped = configModule.exports.default;
+    const { require: requireTypeScript } = require('tsx/cjs/api');
+    const shipped = requireTypeScript(${JSON.stringify(resolve('next.config.ts'))}, __filename).default;
     module.exports = { ...shipped,
       outputFileTracingRoot: ${JSON.stringify(workspace)},
       typescript: { ignoreBuildErrors: true },

@@ -121,6 +121,22 @@ describe('GET /api/panel/repos readiness scope', () => {
     gitSpawns.calls = [];
   });
 
+  it('does not resolve icons on the restore-only path', async () => {
+    const icons = await import('@/lib/repos/project-icon-settings');
+    const projection = vi.spyOn(icons, 'projectIconProjection');
+    try {
+      const query = new URLSearchParams({ restoreValidationOnly: '1', restorePath: existingPath });
+      const { response, data } = await getRepos(`?${query}`);
+      expect(response.status).toBe(200);
+      expect(data.repos).toBeUndefined();
+      expect(data.validatedRestorePaths).toEqual([{ requestedPath: existingPath, canonicalPath: existingPath }]);
+      expect(projection).not.toHaveBeenCalled();
+      expect(gitSpawns.calls).toEqual([]);
+    } finally {
+      projection.mockRestore();
+    }
+  });
+
   it('keeps fleet discovery cheap and leaves uncached readiness unprobed', async () => {
     const { response, data } = await getRepos();
 

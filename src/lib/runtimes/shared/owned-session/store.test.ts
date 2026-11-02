@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -12,11 +12,17 @@ const spawnMock = vi.hoisted(() => vi.fn());
 const spawnBridgeMock = vi.hoisted(() => vi.fn());
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn());
 
+// CLI integrity is covered separately; these store fixtures use fake provider children.
+vi.mock('./worker-o8-cli', async (load) => ({
+  ...await load<typeof import('./worker-o8-cli')>(), prepareWorkerO8Cli: async () => null,
+}));
+
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
     ...actual,
-    spawn: spawnMock,
+    spawn: (...args: Parameters<typeof actual.spawn>) => ['/bin/ps', '/usr/sbin/sysctl', 'powershell.exe'].includes(args[0])
+      ? actual.spawn(...args) : spawnMock(...args),
   };
 });
 
@@ -49,7 +55,14 @@ describe('createOwnedSessionStore launch readiness gate', () => {
   let priorNodeEnv: string | undefined;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(path.join(process.cwd(), '.tmp-owned-store-'));
+    // Scratch lives under a dedicated hidden dir in the home tree — a
+    // validateWorkspace-allowed root — never the repo (process.cwd()): a
+    // hard-killed/detached runner can skip afterEach, and a leaked dir in the
+    // working tree pollutes the Files panel and can retain owned-session data
+    // (#1588, #5097). A home subdir contains any such leak in one place.
+    const scratchBase = path.join(os.homedir(), '.o8-owned-session-test-scratch');
+    mkdirSync(scratchBase, { recursive: true });
+    tempRoot = mkdtempSync(path.join(scratchBase, 'store-'));
     repoPath = path.join(tempRoot, 'repo');
     execFileSync('git', ['init', '-q', repoPath]);
     priorRoot = process.env.O8_TEST_OWNED_ROOT;
@@ -384,7 +397,7 @@ describe('createOwnedSessionStore launch readiness gate', () => {
       expectedVersion: 1,
     })).resolves.toMatchObject({ status: 'idempotent' });
   });
-  it.each(['resume', 'forget during preparation'] as const)('fences forgotten worker memory at %s through the owned store', async kind => {
+  it.each(['resume', 'missing thread', 'non-resumable adapter', 'forget during continuation', 'forget during preparation'] as const)('fences forgotten worker memory at %s through the owned store', async kind => {
     const { createOwnedSessionStore } = await import('./store');
     const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
     const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
@@ -399,7 +412,14 @@ describe('createOwnedSessionStore launch readiness gate', () => {
       status: 'running', queueState: 'held', releaseState: 'pending', dependencyPacketIds: [], dependencyLabels: [],
     }] });
     ensureDispatchBackendReadyMock.mockResolvedValue(readyResult());
-    const store = createOwnedSessionStore(testAdapter(), {
+    const adapter = testAdapter();
+    if (kind === 'non-resumable adapter') adapter.resumeArgs = () => null;
+    if (kind === 'forget during continuation') adapter.resumeArgs = () => {
+      // Forget while the fallback awaits transcript I/O, after its first revision check.
+      queueMicrotask(() => db.transaction(() => advanceMemoryRevision(db))());
+      return null;
+    };
+    const store = createOwnedSessionStore(adapter, {
       workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }),
     });
     const children: import('node:child_process').ChildProcess[] = [];
@@ -407,7 +427,8 @@ describe('createOwnedSessionStore launch readiness gate', () => {
     try {
       const launched = await store.launch({ cwd: repoPath, prompt: 'forgotten assembled context canary', packetId });
       const session = readSingleSession(process.env.O8_TEST_OWNED_ROOT!);
-      session.threadId = 'old-provider-thread';
+      session.threadId = kind === 'missing thread' ? undefined : 'old-provider-thread';
+      session.latestSummary = 'forgotten assembled context canary';
       session.recentRuns[0] = { ...session.recentRuns[0], outcome: 'finished', pid: 0, finishedAt: new Date().toISOString() };
       session.activeRun = undefined;
       writeFileSync(path.join(session.sessionDir, 'session.json'), JSON.stringify(session));
@@ -420,16 +441,17 @@ describe('createOwnedSessionStore launch readiness gate', () => {
         await expect(store.resume(launched.surfaceId, 'fresh operator instruction')).rejects.toThrow(/memory changed/i);
         expect(spawnMock).not.toHaveBeenCalled();
       } else {
-        db.transaction(() => advanceMemoryRevision(db))();
-        const expectedRevision = readMemoryRevision();
+        if (kind !== 'forget during continuation') db.transaction(() => advanceMemoryRevision(db))();
         spawnMock.mockImplementationOnce((_command, _args, options) => {
           const prepared = readSingleSession(process.env.O8_TEST_OWNED_ROOT!);
           expect(prepared.threadId).toBeUndefined();
-          expect(prepared.promptMemoryRevision).toBe(expectedRevision);
+          expect(prepared.promptMemoryRevision).toBe(readMemoryRevision());
           expect(prepared.initialPrompt).toContain('Current retained worker task');
           expect(prepared.activeRun?.mode).toBe('launch');
           expect(prepared.activeRun?.prompt).toContain('fresh operator instruction');
           expect(prepared.activeRun?.prompt).not.toContain('forgotten assembled context canary');
+          expect(prepared.initialPrompt).not.toContain('forgotten assembled context canary');
+          expect(_args.join(' ')).not.toContain('forgotten assembled context canary');
           const child = actual.spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], options);
           children.push(child);
           return child;

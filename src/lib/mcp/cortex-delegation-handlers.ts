@@ -1,4 +1,5 @@
 import { apiError, safeErrorText } from '@/lib/mcp/api-error';
+import { sharedCheckoutControlFailure } from '@/lib/mcp/shared-checkout-control-error';
 import { DEFAULT_WS_PORT } from '@/lib/panel/api-port';
 import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
 import { finishSharedCheckoutTeam, inspectSharedCheckoutTeam, reconcileSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
@@ -110,13 +111,36 @@ export function createCortexDelegationHandlers(config: {
   const handleWorkerCatalog = async (args: Record<string, unknown>): Promise<ToolResult> => {
     const params = new URLSearchParams({ repoPath: config.repoPath });
     if (typeof args.runtime === 'string' && args.runtime) params.set('runtime', args.runtime);
-    try {
-      const response = await fetch(`${config.apiBase}/api/orchestrator/delegate?${params}`, {
-        headers: { Authorization: `Bearer ${config.wsToken}` }, signal: AbortSignal.timeout(45_000),
-      });
-      const payload = await response.json();
-      return response.ok ? jsonResult(payload) : textResult(safeErrorText(payload), true);
-    } catch (error) { return textResult(`Worker catalog unavailable: ${safeErrorText(error)}`, true); }
+    const call = 'GET /api/orchestrator/delegate';
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      let status: number | null = null;
+      let failure: string;
+      try {
+        const response = await fetch(`${config.apiBase}/api/orchestrator/delegate?${params}`, {
+          headers: { Authorization: `Bearer ${config.wsToken}` }, signal: AbortSignal.timeout(45_000),
+        });
+        status = response.status;
+        if (status >= 400 && status < 500) {
+          // A rejected request is final even when its body is not JSON.
+          const body = await response.text().catch(() => '');
+          let payload;
+          try { payload = JSON.parse(body); }
+          catch { payload = { error: body }; }
+          const step = typeof payload?.step === 'string' ? `; step ${payload.step}` : '';
+          return textResult(`${call} failed (HTTP ${status}${step}): ${safeErrorText(payload)}`, true);
+        }
+        const payload = await response.json();
+        if (response.ok) return jsonResult(payload);
+        const step = typeof payload?.step === 'string' ? `; step ${payload.step}` : '';
+        failure = `${call} failed (HTTP ${status}${step}): ${safeErrorText(payload)}`;
+        if (status < 500) return textResult(failure, true);
+      } catch (error) {
+        failure = `${call} failed (${status === null ? 'network; no HTTP response' : `HTTP ${status}`}): ${safeErrorText(error)}`;
+      }
+      if (attempt === 3) return textResult(`${failure} Stopped after 3 attempts. Retry the catalog read when the service recovers; no worker was started.`, true);
+      await new Promise(resolve => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+    }
+    return textResult(`${call} unavailable. Retry the catalog read; no worker was started.`, true);
   };
 
   const handleSharedTeamStatus = async (): Promise<ToolResult> => {
@@ -145,7 +169,7 @@ export function createCortexDelegationHandlers(config: {
 
   const handleFinishSharedTeam = async (args: Record<string, unknown>): Promise<ToolResult> => {
     if (!config.repoPath || !config.parentThreadId) {
-      return textResult('This tool requires a persisted o8 orchestrator chat.', true);
+      return textResult('cortex_finish_shared_team failed: Open the saved orchestrator chat, then retry.', true);
     }
     try {
       const reviewSummary = typeof args.reviewSummary === 'string' ? args.reviewSummary.trim() : '';
@@ -159,25 +183,25 @@ export function createCortexDelegationHandlers(config: {
       return jsonResult({ ok: true, teamId: result.team.id, reviewedHead: result.reviewedHead,
         committedPaths: result.committedPaths, note: 'Shared team review was archived and checkout ownership was released.' });
     } catch (error) {
-      return textResult(`Shared team finish refused: ${safeErrorText(error)}`, true);
+      return textResult(sharedCheckoutControlFailure('cortex_finish_shared_team', error), true);
     }
   };
 
   const handleReconcileSharedTeam = async (args: Record<string, unknown>): Promise<ToolResult> => {
     if (!config.repoPath || !config.parentThreadId) {
-      return textResult('This tool requires a persisted o8 orchestrator chat.', true);
+      return textResult('cortex_reconcile_shared_team failed: Open the saved orchestrator chat, then retry.', true);
     }
     if (typeof args.reviewId !== 'string' || typeof args.reviewedHead !== 'string'
       || typeof args.reviewSummary !== 'string' || !Array.isArray(args.acknowledgedPaths)
       || !args.acknowledgedPaths.every((path) => typeof path === 'string')) {
-      return textResult('Provide the exact status review ID, HEAD, paths, and an explicit review summary.', true);
+      return textResult('cortex_reconcile_shared_team failed: Provide the exact status review ID, HEAD, paths and an explicit review summary. Run cortex_shared_team_status and review the current diff before retrying.', true);
     }
     try {
       const receipt = await reconcileSharedCheckoutTeam({ repoPath: config.repoPath, parentThreadId: config.parentThreadId,
         reviewId: args.reviewId, reviewedHead: args.reviewedHead, acknowledgedPaths: args.acknowledgedPaths,
         reviewSummary: args.reviewSummary });
       return jsonResult({ ok: true, receipt, note: 'Reviewed checkout state recorded. Source is unchanged; Finish must still verify settled workers and this exact state.' });
-    } catch (error) { return textResult(`Shared team reconciliation refused: ${safeErrorText(error)}`, true); }
+    } catch (error) { return textResult(sharedCheckoutControlFailure('cortex_reconcile_shared_team', error), true); }
   };
 
   async function handleCorrectWorkers(args: Record<string, unknown>): Promise<ToolResult> {

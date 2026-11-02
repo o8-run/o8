@@ -1,3 +1,4 @@
+import * as conversationDefaults from './conversation-defaults';
 import { reconcileKnowledgeSources } from '@/lib/cortex/knowledge/reconcile';
 import { parseKnowledgeSources, type KnowledgeSourceDefaults } from './knowledge-source-defaults';
 import { parseOperatorDefaultsToml } from '@/lib/settings/toml';
@@ -132,7 +133,7 @@ export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, CodexAppThreadsDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults {
+export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, CodexAppThreadsDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults, conversationDefaults.ConversationDefaults {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -140,7 +141,6 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   supervisorAutoEscalate: boolean;
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
-  autoTitleInferenceEnabled: boolean; // Optional background inference; code fallback remains available.
   /** Opt-in: replay the repo's test command against a rebased branch in the
    *  merge gate (in addition to typecheck). Default off — tests can be slow. */
   mergeTestReplayEnabled: boolean;
@@ -161,6 +161,8 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   workerExecutionCarrier: ExecutionCarrierId | null;
   workerStartMode: WorkerStartMode;
   workerRuntimes: OrchestratorRuntime[];
+  /** Runtimes the operator turned off in Settings › Providers. Empty means all are on. */
+  disabledRuntimes: OrchestratorRuntime[];
   /** Default Codex worker effort. 'adaptive' preserves runtime default behavior. */
   codexWorkerEffort: ThinkingEffort;
   /** Default Claude Code worker effort. 'adaptive' preserves runtime default behavior. */
@@ -188,6 +190,9 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   /** Chat model on the local endpoint for Brain compose/classify + dictation polish.
    *  Empty = cloud/managed path. Env: `O8_LOCAL_CHAT_MODEL`. */
   localChatModel: string;
+  /** [text_generation] title_model: OpenRouter model tried first for thread titles.
+   *  Empty = the free title chain only. */
+  textGenerationTitleModel: string;
   experimentalOpencode: boolean;
   experimentalGemini: boolean;
   /**
@@ -343,7 +348,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // Operator-pinned subscription model; not a per-token API charge.
   thinkingEffort: 'max',
   promptCachingEnabled: true,
-  autoTitleInferenceEnabled: true,
+  ...conversationDefaults.FALLBACK,
   mergeTestReplayEnabled: false,
   requireApproval: 'high-risk',
   orchestratorModel: MODEL_IDS.orchestratorDefault,
@@ -354,6 +359,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   workerExecutionCarrier: null,
   workerStartMode: 'autonomous',
   workerRuntimes: ['codex'],
+  disabledRuntimes: [],
   codexWorkerEffort: 'adaptive',
   claudeWorkerEffort: 'adaptive',
   ...BRAIN_DEFAULTS,
@@ -361,6 +367,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   localInferenceBaseUrl: '',
   localEmbedModel: '',
   localChatModel: '',
+  textGenerationTitleModel: '',
   experimentalOpencode: false,
   experimentalGemini: false,
   experimentalChat: false,
@@ -447,7 +454,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.promptCachingEnabled === 'boolean') {
     result.promptCachingEnabled = stored.promptCachingEnabled;
   }
-  if (typeof stored.autoTitleInferenceEnabled === 'boolean') result.autoTitleInferenceEnabled = stored.autoTitleInferenceEnabled;
+  Object.assign(result, conversationDefaults.fromFile(stored));
   if (typeof stored.mergeTestReplayEnabled === 'boolean') {
     result.mergeTestReplayEnabled = stored.mergeTestReplayEnabled;
   }
@@ -470,6 +477,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
     const workerRuntimes = [...new Set(stored.workerRuntimes.filter(isDispatchRuntime))];
     if (workerRuntimes.length > 0) result.workerRuntimes = workerRuntimes;
   }
+  if (Array.isArray(stored.disabledRuntimes)) {
+    result.disabledRuntimes = [...new Set(stored.disabledRuntimes.filter(isDispatchRuntime))];
+  }
   if (stored.codexWorkerEffort && isThinkingEffort(stored.codexWorkerEffort)) {
     result.codexWorkerEffort = stored.codexWorkerEffort;
   }
@@ -489,6 +499,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.localChatModel === 'string') {
     result.localChatModel = stored.localChatModel.trim();
+  }
+  if (typeof stored.textGenerationTitleModel === 'string') {
+    result.textGenerationTitleModel = stored.textGenerationTitleModel.trim();
   }
   if (typeof stored.experimentalOpencode === 'boolean') {
     result.experimentalOpencode = stored.experimentalOpencode;
@@ -659,7 +672,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     thinkingEffort: envThink ?? fileValues.thinkingEffort ?? OPERATOR_DEFAULTS_FALLBACK.thinkingEffort,
     promptCachingEnabled:
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
-    autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled ?? OPERATOR_DEFAULTS_FALLBACK.autoTitleInferenceEnabled,
+    ...conversationDefaults.resolve(fileValues),
     mergeTestReplayEnabled:
       fileValues.mergeTestReplayEnabled ?? OPERATOR_DEFAULTS_FALLBACK.mergeTestReplayEnabled,
     requireApproval: fileValues.requireApproval ?? OPERATOR_DEFAULTS_FALLBACK.requireApproval,
@@ -672,6 +685,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     workerExecutionCarrier: fileValues.workerExecutionCarrier !== undefined ? fileValues.workerExecutionCarrier : OPERATOR_DEFAULTS_FALLBACK.workerExecutionCarrier,
     workerStartMode: fileValues.workerStartMode ?? OPERATOR_DEFAULTS_FALLBACK.workerStartMode,
     workerRuntimes: fileValues.workerRuntimes ?? OPERATOR_DEFAULTS_FALLBACK.workerRuntimes,
+    disabledRuntimes: fileValues.disabledRuntimes ?? OPERATOR_DEFAULTS_FALLBACK.disabledRuntimes,
     codexWorkerEffort:
       envCodexEffort ?? fileValues.codexWorkerEffort ?? OPERATOR_DEFAULTS_FALLBACK.codexWorkerEffort,
     claudeWorkerEffort:
@@ -683,6 +697,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     localInferenceBaseUrl: envLocalBaseUrl ?? fileValues.localInferenceBaseUrl ?? OPERATOR_DEFAULTS_FALLBACK.localInferenceBaseUrl,
     localEmbedModel: envLocalEmbed ?? fileValues.localEmbedModel ?? OPERATOR_DEFAULTS_FALLBACK.localEmbedModel,
     localChatModel: envLocalChat ?? fileValues.localChatModel ?? OPERATOR_DEFAULTS_FALLBACK.localChatModel,
+    textGenerationTitleModel: fileValues.textGenerationTitleModel ?? OPERATOR_DEFAULTS_FALLBACK.textGenerationTitleModel,
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
@@ -739,7 +754,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     thinkingEffort: envThink !== null ? 'env' : fileValues.thinkingEffort !== undefined ? 'file' : 'default',
     promptCachingEnabled:
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
-    autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled !== undefined ? 'file' : 'default',
+    ...conversationDefaults.sources(fileValues),
     mergeTestReplayEnabled: fileValues.mergeTestReplayEnabled !== undefined ? 'file' : 'default',
     requireApproval: fileValues.requireApproval !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
@@ -750,6 +765,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     workerExecutionCarrier: fileValues.workerExecutionCarrier !== undefined ? 'file' : 'default',
     workerStartMode: fileValues.workerStartMode !== undefined ? 'file' : 'default',
     workerRuntimes: fileValues.workerRuntimes !== undefined ? 'file' : 'default',
+    disabledRuntimes: fileValues.disabledRuntimes !== undefined ? 'file' : 'default',
     codexWorkerEffort:
       envCodexEffort !== null ? 'env' : fileValues.codexWorkerEffort !== undefined ? 'file' : 'default',
     claudeWorkerEffort:
@@ -761,6 +777,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     localInferenceBaseUrl: envLocalBaseUrl !== null ? 'env' : fileValues.localInferenceBaseUrl !== undefined ? 'file' : 'default',
     localEmbedModel: envLocalEmbed !== null ? 'env' : fileValues.localEmbedModel !== undefined ? 'file' : 'default',
     localChatModel: envLocalChat !== null ? 'env' : fileValues.localChatModel !== undefined ? 'file' : 'default',
+    textGenerationTitleModel: fileValues.textGenerationTitleModel !== undefined ? 'file' : 'default',
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
@@ -873,7 +890,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
   if (update.promptCachingEnabled !== undefined) {
     stored.promptCachingEnabled = Boolean(update.promptCachingEnabled);
   }
-  if (update.autoTitleInferenceEnabled !== undefined) stored.autoTitleInferenceEnabled = Boolean(update.autoTitleInferenceEnabled);
+  Object.assign(stored, conversationDefaults.forUpdate(update));
   if (update.mergeTestReplayEnabled !== undefined) {
     stored.mergeTestReplayEnabled = Boolean(update.mergeTestReplayEnabled);
   }
@@ -914,6 +931,12 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
     }
     stored.workerRuntimes = [...new Set(update.workerRuntimes)];
   }
+  if (update.disabledRuntimes !== undefined) {
+    if (!Array.isArray(update.disabledRuntimes) || !update.disabledRuntimes.every(isDispatchRuntime)) {
+      throw new Error('disabledRuntimes must contain only dispatchable runtimes.');
+    }
+    stored.disabledRuntimes = [...new Set(update.disabledRuntimes)];
+  }
   if (update.codexWorkerEffort !== undefined) {
     if (!isThinkingEffort(update.codexWorkerEffort)) {
       throw new Error('codexWorkerEffort must be a valid ThinkingEffort value.');
@@ -946,6 +969,12 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
       throw new Error('localChatModel must be a string.');
     }
     stored.localChatModel = update.localChatModel.trim();
+  }
+  if (update.textGenerationTitleModel !== undefined) {
+    if (typeof update.textGenerationTitleModel !== 'string') {
+      throw new Error('textGenerationTitleModel must be a string.');
+    }
+    stored.textGenerationTitleModel = update.textGenerationTitleModel.trim();
   }
   if (update.experimentalOpencode !== undefined) {
     stored.experimentalOpencode = Boolean(update.experimentalOpencode);

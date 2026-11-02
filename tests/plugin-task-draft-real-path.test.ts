@@ -278,7 +278,8 @@ describe('plugin task drafts through the actual authenticated route and persiste
     dirs.push(childDir);
     const child = join(childDir, 'store-child.cjs');
     buildSync({ entryPoints: ['tests/fixtures/plugin-task-draft-store-child.fixture.ts'], outfile: child,
-      platform: 'node', format: 'cjs', bundle: true, logLevel: 'silent' });
+      platform: 'node', format: 'cjs', bundle: true, logLevel: 'silent',
+      alias: { 'server-only': join(process.cwd(), 'scripts/server-only-stub.js') } });
     const env = { ...process.env, CORTEX_IDE_DATA_DIR: getDataDir() };
     const cold = await execAsync(process.execPath, [child, 'read', key], { env, timeout: 5000 });
     expect(JSON.parse(cold.stdout).taskId).toBe(simultaneous[0].result.taskId);

@@ -37,6 +37,7 @@ impl Fixture {
                 "--import",
                 "tsx",
                 "scripts/next/grid-dev-server.ts",
+                "--owned-stdio",
             ])
             .args(if terminals {
                 vec!["--terminals"]
@@ -44,18 +45,20 @@ impl Fixture {
                 vec![]
             })
             .env("O8_NEXT_API_TOKEN", "fixture-grid-bearer")
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        let origin = BufReader::new(server.stdout.take().unwrap())
-            .lines()
+        let mut output = BufReader::new(server.stdout.take().unwrap()).lines();
+        let origin = output
             .find_map(|line| {
                 serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
                     .as_str()
                     .map(str::to_owned)
             })
             .expect("fixture origin");
+        std::thread::spawn(move || for _ in output {});
         let client = Client::authenticated(&origin, Some("fixture-grid-bearer".into())).unwrap();
         let workspace = client
             .sessions()

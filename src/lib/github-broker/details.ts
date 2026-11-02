@@ -14,6 +14,70 @@ async function parseGithubJson<T>(response: Response) {
   return JSON.parse(text) as T;
 }
 
+const ISSUE_DISCUSSION_PAGE = 100;
+
+// The issue still opens when its comments or references cannot be read.
+async function readIssueDiscussion(repoFullName: string, issueNumber: number, commentCount: number) {
+  const read = async <T>(path: string) => {
+    const { response } = await githubInstallationFetch(repoFullName, path);
+    return parseGithubJson<T>(response);
+  };
+  const base = `/repos/${repoFullName}/issues/${issueNumber}`;
+  const [comments, timeline] = await Promise.allSettled([
+    read<Array<{
+      id: number;
+      body?: string | null;
+      user?: { login?: string | null } | null;
+      created_at?: string;
+      html_url?: string;
+    }>>(`${base}/comments?per_page=${ISSUE_DISCUSSION_PAGE}`),
+    read<Array<{
+      event?: string;
+      source?: { issue?: {
+        number: number;
+        title?: string;
+        state?: string;
+        html_url?: string;
+        repository?: { full_name?: string };
+        pull_request?: { merged_at?: string | null };
+      } };
+    }>>(`${base}/timeline?per_page=${ISSUE_DISCUSSION_PAGE}`),
+  ]);
+  const linked = new Map<string, {
+    kind: 'pull' | 'issue';
+    number: number;
+    title: string;
+    state: string;
+    url: string;
+    repo: string;
+  }>();
+  const events = timeline.status === 'fulfilled' && Array.isArray(timeline.value) ? timeline.value : null;
+  const replies = comments.status === 'fulfilled' && Array.isArray(comments.value) ? comments.value : null;
+  for (const event of events ?? []) {
+    const source = event.event === 'cross-referenced' ? event.source?.issue : undefined;
+    if (!source?.html_url) continue;
+    linked.set(source.html_url, {
+      kind: source.pull_request ? 'pull' : 'issue',
+      number: source.number,
+      title: source.title ?? '',
+      state: source.pull_request?.merged_at ? 'merged' : source.state ?? 'open',
+      url: source.html_url,
+      repo: source.repository?.full_name ?? repoFullName,
+    });
+  }
+  return {
+    discussion: (replies ?? []).map((comment) => ({
+      id: comment.id,
+      author: comment.user?.login ?? 'unknown',
+      body: comment.body ?? '',
+      createdAt: comment.created_at ?? '',
+      url: comment.html_url ?? '',
+    })),
+    linked: [...linked.values()],
+    discussionIncomplete: !replies || !events || commentCount > ISSUE_DISCUSSION_PAGE,
+  };
+}
+
 export async function fetchGitHubIssueDetail(repoFullName: string, issueNumber: number) {
   const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/issues/${issueNumber}`);
   const issue = await parseGithubJson<{
@@ -44,6 +108,7 @@ export async function fetchGitHubIssueDetail(repoFullName: string, issueNumber: 
     createdAt: issue.created_at ?? '',
     comments: issue.comments ?? 0,
     url: issue.html_url ?? '',
+    ...await readIssueDiscussion(repoFullName, issueNumber, issue.comments ?? 0),
   };
 }
 

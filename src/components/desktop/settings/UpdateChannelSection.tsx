@@ -1,12 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getUpdateChannelStatus, recheckUpdateChannel, setUpdateChannel, type UpdateChannel, type UpdateChannelStatus } from '@/lib/app-update/channel';
+import { getUpdateChannelStatus, recheckUpdateChannel, setUpdateChannel, type UpdateChannelStatus } from '@/lib/app-update/channel';
 import { SettingsSelect } from './shared';
 import { SettingsGroup, SettingsRow } from './grouped';
 
 export function UpdateChannelSection() {
-  const [channel, setChannel] = useState<UpdateChannel>('stable');
+  const [channel, setChannel] = useState<UpdateChannelStatus['channel']>('stable');
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +53,9 @@ export function UpdateChannelSection() {
       <SettingsGroup header="Updates" footnote="Beta receives new releases first. Returning to Stable keeps your installed version until a newer stable release is available.">
         <SettingsRow
           label="Update channel"
-          subtitle={error ?? (status?.outcome === 'waiting-for-save'
+          subtitle={error ?? (channel === 'preview'
+            ? 'Preview build. Choose Stable or Beta for future updates.'
+            : status?.outcome === 'waiting-for-save'
             ? `${channel === 'stable' ? 'Stable' : 'Beta'} saved. Applying the channel change will retry automatically.`
             : status?.outcome === 'after-install'
             ? `${channel === 'stable' ? 'Stable' : 'Beta'} saved. It will take effect when this installation finishes.`
@@ -62,7 +64,8 @@ export function UpdateChannelSection() {
             <label>
               <span style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' }}>Update channel</span>
               <SettingsSelect value={channel} onChange={next => { void save(next); }} disabled={!ready || busy} width={120}
-                options={[{ value: 'stable', label: 'Stable' }, { value: 'beta', label: 'Beta' }]} />
+                options={[...(channel === 'preview' ? [{ value: 'preview', label: 'Preview' }] : []),
+                  { value: 'stable', label: 'Stable' }, { value: 'beta', label: 'Beta' }]} />
             </label>
           )}
         />

@@ -1,3 +1,4 @@
+import { createParkedWorkspaceContext, parkedWorkspaceProjection } from '@/lib/inbox/parked-workspaces';
 export const dynamic = 'force-dynamic';
 
 /**
@@ -15,6 +16,8 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { orchestratorDisplayTitle, stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { deleteCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
+import { legacyInboxPin } from '@/lib/inbox/preferences';
+import { appendInboxPreferences, createInboxReadContext, inboxListingState, type InboxListingProjection, inboxSubject } from '@/lib/inbox/store';
 import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
@@ -25,7 +28,7 @@ const EMPTY_FILE_GC_MS = 60 * 60 * 1000; // 1 hour
 
 const HISTORY_DIR = join(getDataDir(), 'chat-history');
 
-interface ChatHistoryEntry {
+interface ChatHistoryEntry extends InboxListingProjection {
   tabId: string;
   title: string;
   preview: string;
@@ -95,6 +98,8 @@ export async function GET(request: NextRequest) {
   try {
     const files = readdirSync(HISTORY_DIR).filter(f => f.endsWith('.json'));
     const conversations: ChatHistoryEntry[] = [];
+    const inbox = createInboxReadContext('conversation');
+    const parked = createParkedWorkspaceContext(undefined, inbox);
     // Empty files older than EMPTY_FILE_GC_MS get deleted at the end —
     // can't unlink mid-loop without surprising readdirSync.
     const filesToDelete: string[] = [];
@@ -143,7 +148,10 @@ export async function GET(request: NextRequest) {
         // orchestrator/chat tab, even before the operator types. Those
         // threads are noise in the left rail until they have content.
         // Pinned / starred empties stay visible (operator explicitly cared).
-        const explicitlyKept = data.pinned === true
+        const subject = inboxSubject('conversation', tabId, data.repoPath, data.projectId, inbox.workspaces);
+        const settlement = inboxListingState(subject, inbox);
+        const pinnedAt = settlement?.pinnedAt === undefined ? legacyInboxPin(data) : settlement.pinnedAt;
+        const explicitlyKept = pinnedAt != null
           || data.starred === true
           || (includeOrchestrator && data.orchestratorVisible === true);
         if (isEmpty && !explicitlyKept) {
@@ -188,8 +196,8 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        conversations.push({
-          tabId: basename(file, '.json'),
+        const row: ChatHistoryEntry = {
+          tabId,
           title,
           preview,
           empty: isEmpty,
@@ -198,7 +206,7 @@ export async function GET(request: NextRequest) {
           savedAt: data.savedAt || stat.mtime.toISOString(),
           modifiedAt: lastSpokeMs > 0 ? new Date(lastSpokeMs).toISOString() : stat.mtime.toISOString(),
           starred: data.starred || false,
-          pinned: data.pinned === true,
+          pinned: pinnedAt != null,
           planText: typeof data.planText === 'string' && data.planText.trim() ? data.planText : null,
           firstUserMessage: firstUserMsg ? firstUserMsg.content.slice(0, 500) : null,
           projectId: typeof data.projectId === 'string' && data.projectId.trim() ? data.projectId.trim() : null,
@@ -209,7 +217,15 @@ export async function GET(request: NextRequest) {
           backend: isOrchestratorBackendId(data.backend) ? data.backend : null,
           agent: typeof data.agent === 'string' && data.agent.trim() ? data.agent.trim() : null,
           archivedAt,
-        });
+          inboxSubject: subject,
+          parentInboxSubject: undefined,
+          settledOverride: settlement?.settledOverride ?? undefined,
+          settledAt: settlement?.settledAt ?? undefined,
+          unsettledAt: settlement?.unsettledAt ?? undefined,
+        };
+        if (settlement || pinnedAt != null) appendInboxPreferences(row, settlement, pinnedAt);
+        Object.assign(row, parkedWorkspaceProjection(subject, parked));
+        conversations.push(row);
       } catch { /* skip bad files */ }
     }
 

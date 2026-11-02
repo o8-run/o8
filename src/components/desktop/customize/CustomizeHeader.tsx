@@ -40,16 +40,6 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
   const label = tabs.find((item) => item.id === tab)?.label ?? 'customizations';
   const repoName = scope === 'personal' || !project ? 'Personal' : repos.find((repo) => repo.localPath === scope)?.name ?? project.name;
   const filtersRepositories = ['rules', 'skills', 'prompts', 'agents', 'hooks'].includes(tab);
-  const explanations: Record<CustomizeTab, string> = {
-    rules: 'The Instructions count shows authored guidance. Indexed documentation is listed separately as reference material, with its source.',
-    skills: 'Reusable instructions for your agents. Browse skills by project or personal library.',
-    prompts: 'Saved text you choose to insert into a task. Choose Personal or a repository when saving a prompt.',
-    commands: 'Built-in shortcuts for the orchestrator. Type / in the composer to use them in your current task.',
-    connections: 'Manage connected services once in Settings. Access during a task depends on the agent and its permissions.',
-    agents: 'Agent definitions found in personal and repository folders. These entries currently come from Claude Code configuration.',
-    hooks: 'Configured commands that run on agent events. These entries currently come from Claude Code configuration.',
-    plugins: 'Features that add new capabilities and interfaces to o8.',
-  };
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <WorkspacePageHeader
@@ -74,17 +64,13 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginBottom: 24 }}>
           <input aria-label={`Search ${label}`} placeholder={`Search ${label} for ${repoName}…`} value={query} onChange={(event) => onQuery(event.target.value)}
             style={{ ...fieldStyle, flex: '1 1 200px', fontSize: 13 }} />
-          {filtersRepositories ? <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--t-text-muted)', maxWidth: '100%' }}>
-            Show
-            <select aria-label="Customization view" value={scope} onChange={(event) => onScope(event.target.value)} style={{ ...fieldStyle, maxWidth: 240 }}>
+          {filtersRepositories ? <select aria-label="Customization view" value={scope} onChange={(event) => onScope(event.target.value)} style={{ ...fieldStyle, maxWidth: 260 }}>
               <option value="all">{project ? 'All project repositories + personal' : 'Personal'}</option>
               {project ? <option value="personal">Personal only</option> : null}
               {repos.map((repo) => <option key={repo.localPath} value={repo.localPath}>{repo.name} + personal</option>)}
-            </select>
-          </label> : <span style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Shared across projects</span>}
+            </select> : <span style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Shared across projects</span>}
         </div>
       ) : null}
-      {tab !== 'plugins' ? <p style={{ marginTop: 0, marginBottom: 0, color: 'var(--t-text-muted)', fontSize: 13, lineHeight: 1.6 }}>{explanations[tab]}{filtersRepositories && project ? ' This view filters the list; it does not change your task’s repository.' : ''}</p> : null}
     </div>
   );
 }

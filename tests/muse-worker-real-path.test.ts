@@ -96,7 +96,8 @@ describe.sequential('native worker dispatch through the managed entry point', ()
     const { museOwnedAdapter } = await import('@/lib/muse/owned');
     const cold = createOwnedSessionStore(museOwnedAdapter);
     expect((await cold.resume(launched.surfaceId, 'second')).ok).toBe(true);
-    const resumed = await answer(launched.surfaceId, 'second');
+    const resumed = await answer(launched.surfaceId, 'second\n\n'
+      + 'The o8 command on PATH is verified for this run. Use o8 packet commands directly; do not construct source-loader wrappers.');
     expect(resumed).toMatchObject({ config: configA, data: dataA });
     expect(resumed.args).toEqual(expect.arrayContaining(['--session-id', 'native-fixture-session']));
     process.env.XDG_CONFIG_HOME = configA; process.env.XDG_DATA_HOME = dataA;

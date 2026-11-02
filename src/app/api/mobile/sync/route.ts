@@ -105,7 +105,9 @@ async function resolveHistory(
             timestamp: parseMobileTranscriptTimestamp(entry.timestamp),
             timestampLabel: entry.timestampLabel,
           });
-        } else if (entry.kind === 'tool') {
+        } else if (entry.kind === 'tool' || (entry.kind === 'tool-output'
+          && entry.toolCall?.name === 'exec_command'
+          && typeof entry.toolCall.args?.command === 'string')) {
           entries.push({ id: entry.id, role: 'system', text: entry.text || `Tool: ${entry.label || 'Command'}`, timestampLabel: entry.timestampLabel });
           const timestamp = parseMobileTranscriptTimestamp(entry.timestamp);
           if (timestamp !== undefined) entries[entries.length - 1]!.timestamp = timestamp;

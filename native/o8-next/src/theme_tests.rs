@@ -17,6 +17,14 @@ fn string_value(node: tree_sitter::Node) -> bool {
     node.named_children(&mut node.walk()).any(string_value)
 }
 
+/// Where the parser first failed, so a refusal names the line to fix.
+fn first_error(node: tree_sitter::Node) -> Option<tree_sitter::Point> {
+    if node.is_error() || node.is_missing() {
+        return Some(node.start_position());
+    }
+    node.children(&mut node.walk()).find_map(first_error)
+}
+
 fn font_literal(node: tree_sitter::Node, source: &[u8]) -> bool {
     if node.kind() == "call_expression" {
         let function = node
@@ -80,7 +88,14 @@ fn sources(directory: &Path, violations: &mut Vec<String>) {
                 .set_language(&tree_sitter_rust::LANGUAGE.into())
                 .unwrap();
             let tree = parser.parse(&source, None).unwrap();
-            assert!(!tree.root_node().has_error(), "valid Rust source");
+            if let Some(at) = first_error(tree.root_node()) {
+                panic!(
+                    "valid Rust source: {}:{}:{}",
+                    path.display(),
+                    at.row + 1,
+                    at.column + 1
+                );
+            }
             if font_literal(tree.root_node(), source.as_bytes()) {
                 violations.push(format!(
                     "{}: font family literal",
@@ -242,14 +257,26 @@ fn glass_tokens_match_the_desktop_overrides_and_window_veil() {
         .unwrap();
     let pattern = Regex::new(r"(rgba\([^)]+\)) (\d+)%").unwrap();
     let stops: Vec<_> = pattern.captures_iter(veil).collect();
-    assert_eq!(stops.len(), crate::theme::GLASS_VEIL.len());
-    for (capture, (offset, alpha)) in stops.iter().zip(crate::theme::GLASS_VEIL) {
-        assert_eq!(capture[2].parse::<f32>().unwrap() / 100., offset);
+    // The native veil is deliberately darker at the top than classic's three
+    // stops: four stops since 78fb95459, kept by Q on 2026-10-29. It keeps
+    // classic's tint and its transparent foot.
+    assert_eq!(
+        crate::theme::GLASS_VEIL,
+        [(0., 0.9), (0.3, 0.7), (0.65, 0.32), (1., 0.06)]
+    );
+    let tint = |color: gpui::Rgba| (color.r, color.g, color.b);
+    for capture in &stops {
         assert_eq!(
-            css_color(&format!("color:{};", &capture[1]), "color"),
-            crate::theme::veil_color(alpha)
+            tint(css_color(&format!("color:{};", &capture[1]), "color")),
+            tint(crate::theme::veil_color(1.))
         );
     }
+    let foot = stops.last().unwrap();
+    assert_eq!(foot[2].parse::<f32>().unwrap() / 100., 1.);
+    assert_eq!(
+        css_color(&format!("color:{};", &foot[1]), "color"),
+        crate::theme::veil_color(crate::theme::GLASS_VEIL[3].1)
+    );
 }
 
 #[test]
@@ -284,7 +311,10 @@ fn every_theme_token_resolves_for_both_appearances_and_matches_desktop_css() {
             terminal_ansi,
             font_ui,
             font_mono,
+            font_annotation,
         } = Theme::for_appearance(appearance);
+        // Review notes use the desktop's self-hosted handwriting face.
+        assert!(css.contains(&format!("font-family: '{font_annotation}';")));
         let (selector, hover_selector) = match appearance {
             Appearance::Dark => (
                 ":root.dark-mode, .dark-mode {",

@@ -21,7 +21,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorLaneBinding, OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const h = vi.hoisted(() => ({
@@ -97,6 +97,10 @@ process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const repoDirs: string[] = [];
+const heldDrains: Promise<void>[] = [];
+// Drains took up to 5.2 s under load: allow 10 s per wait and 60 s for seven contention drains.
+const reviewWaitTimeout = 10_000;
+const contentionTestTimeout = 60_000;
 
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { drainReviewQueue, startReviewQueueDrain, triggerAutoReview } = await import('@/lib/lane/auto-review');
@@ -223,9 +227,13 @@ function releaseHeldTurns(): void {
   while (h.heldTurns.length > 0) h.heldTurns.pop()!();
 }
 
-afterAll(async () => {
+afterEach(async () => {
+  h.holdNextTurn = false;
   releaseHeldTurns();
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await Promise.all(heldDrains.splice(0));
+});
+
+afterAll(() => {
   closeDb();
   rmSync(dataDir, { recursive: true, force: true });
   for (const repoDir of repoDirs) rmSync(repoDir, { recursive: true, force: true });
@@ -256,10 +264,11 @@ describe('steer during an in-progress review, followed by a successor commit (#1
     // Real drain claim; the reviewer turn is held open, so the claim never settles.
     h.holdNextTurn = true;
     const hungDrain = drainReviewQueue();
+    heldDrains.push(hungDrain);
     await vi.waitFor(() => {
       expect(queueRows(lane.id)[0]!.status).toBe('in_progress');
       expect(h.heldTurns).toHaveLength(1);
-    });
+    }, { timeout: reviewWaitTimeout });
     expect(queueRows(lane.id)[0]!.claimed_at).toBeTruthy();
 
     // The steer lands its successor commit while that attempt is still claimed.
@@ -326,10 +335,11 @@ describe('steer during an in-progress review, followed by a successor commit (#1
 
     h.holdNextTurn = true;
     const hungDrain = drainReviewQueue();
+    heldDrains.push(hungDrain);
     await vi.waitFor(() => {
       expect(queueRows(lane.id).find((row) => row.id === queued.reviewId)?.status).toBe('in_progress');
       expect(h.heldTurns).toHaveLength(1);
-    });
+    }, { timeout: reviewWaitTimeout });
     const oldClaimOwner = queueRows(lane.id).find((row) => row.id === queued.reviewId)?.claim_owner;
     expect(oldClaimOwner).toBeTruthy();
 
@@ -434,7 +444,7 @@ describe('steer during an in-progress review, followed by a successor commit (#1
     expect(eventsWithVerb(lane.id, 'review_deferred')).toHaveLength(6);
     await drainReviewQueue();
     expect(queueRows(lane.id).find((row) => row.id === queued.reviewId)?.status).toBe('completed');
-  });
+  }, contentionTestTimeout);
 
   it('repairs a legacy failed-busy row after its stale alarm escalated to a human', async () => {
     const branch = 'inline/legacy-busy-restart';
@@ -508,7 +518,7 @@ describe('steer during an in-progress review, followed by a successor commit (#1
           releaseRepaired: true,
         });
         expect(queueRows(lane.id).find((row) => row.id === 'review-legacy-busy')?.status).toBe('pending');
-      });
+      }, { timeout: reviewWaitTimeout });
     } finally {
       stopDrain();
       h.busyTurnsRemaining = 0;

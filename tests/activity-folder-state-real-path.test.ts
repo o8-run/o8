@@ -3,8 +3,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
-import { act, createElement } from 'react';
+import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -40,12 +41,14 @@ function entry(localPath: string, remoteUrl: string | null = null): RepoRegistry
 }
 const repos = [entry(plain), entry(empty), entry(local), entry(join(fixtures, 'other'), 'https://github.com/example/other.git')];
 let host: HTMLDivElement; let root: Root;
+let client: QueryClient;
 let requests: string[];
 let failLocal = false;
 let remoteHistory = false;
 let malformedRemote = false;
 
 beforeEach(() => {
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   window.localStorage.clear(); requests = []; failLocal = false; remoteHistory = false; malformedRemote = false;
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
@@ -61,7 +64,7 @@ beforeEach(() => {
   }));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); client.clear(); host.remove(); vi.unstubAllGlobals(); });
 afterAll(() => rmSync(fixtures, { recursive: true, force: true }));
 
 async function settle() {
@@ -70,8 +73,11 @@ async function settle() {
   }
 }
 async function show(repoPath: string) {
-  await act(async () => root.render(createElement(O8ActivityPane, { repoPath, registeredRepos: repos })));
+  await act(async () => root.render(pane({ repoPath, registeredRepos: repos })));
   await settle();
+}
+function pane(props: ComponentProps<typeof O8ActivityPane>) {
+  return createElement(QueryClientProvider, { client }, createElement(O8ActivityPane, props));
 }
 const click = async (label: string) => {
   const button = [...host.querySelectorAll('button')].find((b) => b.textContent?.trim().replace(/\s*\d+$/, "") === label);
@@ -121,7 +127,7 @@ describe('Activity selected-folder real path', () => {
   it('keeps local errors and Retry visible beside valid remote history', async () => {
     remoteHistory = true;
     const selected = entry(plain, 'https://github.com/example/selected.git');
-    await act(async () => root.render(createElement(O8ActivityPane, { repoPath: plain, registeredRepos: [selected] })));
+    await act(async () => root.render(pane({ repoPath: plain, registeredRepos: [selected] })));
     await settle();
     expect(host.textContent).toContain('Remote history remains available');
     expect(host.textContent).toContain('This folder is not a Git repository');
@@ -130,7 +136,7 @@ describe('Activity selected-folder real path', () => {
 
   it('keeps healthy local history when one All-repos remote returns malformed data', async () => {
     malformedRemote = true;
-    await act(async () => root.render(createElement(O8ActivityPane, { allRepos: true, registeredRepos: repos })));
+    await act(async () => root.render(pane({ allRepos: true, registeredRepos: repos })));
     await settle();
     expect(host.textContent).toContain('Local activity survives navigation');
     expect(host.textContent).toContain('Some folders could not be read');

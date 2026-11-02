@@ -355,7 +355,8 @@ export function HistoryChatRow({
             color: recede && !active && !hovered ? 'var(--t-text-muted)' : 'var(--t-text)' }}>
             {item.title}
           </span>
-          {inlineRepo ? <span style={{ flexShrink: 1, minWidth: 0, maxWidth: SIDEBAR_REPO_MAX_WIDTH, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          {/* The title gives way first; the repo tag keeps its width up to its own cap. */}
+          {inlineRepo ? <span data-chat-row-repo style={{ flexShrink: 0, maxWidth: SIDEBAR_REPO_MAX_WIDTH, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             fontSize: 11.5, fontWeight: 260, color: 'var(--t-text-faint)' }}>{inlineRepo}</span> : null}
         </span>
         {preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: roomy ? 'var(--o8-navigation-preview-gap, 6px)' : 4, fontSize: 11.5, lineHeight: roomy ? 1.45 : 1.4, color: 'var(--t-text-muted)' }}>{preview}</span> : null}

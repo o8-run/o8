@@ -2,8 +2,9 @@
 //! views consume semantic tokens and never choose their own palette or fonts.
 use gpui::{Rgba, rgb};
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Appearance {
     Dark,
     Light,
@@ -36,32 +37,351 @@ pub struct Theme {
     pub terminal_ansi: [u32; 16],
     pub font_ui: &'static str,
     pub font_mono: &'static str,
+    /// The handwriting of review notes, as in classic's notes rail.
+    pub font_annotation: &'static str,
 }
 
 // This is the only appearance selection. A future system-appearance hook can
 // replace it without changing any view's choice of semantic tokens.
-static SELECTED: LazyLock<Appearance> =
-    LazyLock::new(|| match std::env::var("O8_NEXT_APPEARANCE").as_deref() {
-        Ok("glass") => Appearance::Glass,
-        Ok("plain") => Appearance::Dark,
-        _ if cfg!(target_os = "macos") && std::env::args().any(|arg| arg == "--app-shell") => {
+// An explicit launch setting wins over the choice saved from the profile menu.
+static LAUNCH: LazyLock<Appearance> = LazyLock::new(|| {
+    match std::env::var("O8_NEXT_APPEARANCE")
+        .ok()
+        .or_else(saved_appearance)
+        .as_deref()
+        .and_then(named)
+    {
+        Some(appearance) => appearance,
+        None if cfg!(target_os = "macos") && std::env::args().any(|arg| arg == "--app-shell") => {
             Appearance::Glass
         }
-        _ => Appearance::Dark,
-    });
-static CURRENT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(*SELECTED));
+        None => Appearance::Dark,
+    }
+});
+fn named(mode: &str) -> Option<Appearance> {
+    match mode {
+        "light" => Some(Appearance::Light),
+        "glass" => Some(Appearance::Glass),
+        "plain" | "dark" => Some(Appearance::Dark),
+        _ => None,
+    }
+}
+/// The profile menu's choice while the app runs; unset until it switches.
+static CHOSEN: AtomicU8 = AtomicU8::new(u8::MAX);
+fn selected() -> Appearance {
+    match CHOSEN.load(Ordering::Relaxed) {
+        0 => Appearance::Dark,
+        1 => Appearance::Light,
+        2 => Appearance::Glass,
+        _ => *LAUNCH,
+    }
+}
+fn appearance_id(appearance: Appearance) -> u8 {
+    match appearance {
+        Appearance::Dark => 0,
+        Appearance::Light => 1,
+        Appearance::Glass => 2,
+    }
+}
+/// Switches the running appearance and saves it for the next launch. True
+/// when it changed; the caller then refreshes the window and its material.
+pub fn set_appearance(mode: &str) -> bool {
+    let Some(next) = named(mode) else {
+        return false;
+    };
+    save_appearance(mode);
+    if next == selected() {
+        return false;
+    }
+    CHOSEN.store(appearance_id(next), Ordering::Relaxed);
+    true
+}
+/// Changes with the appearance, for caches that keep painted colors.
+pub fn generation() -> u8 {
+    appearance_id(selected())
+}
+fn saved_path() -> Option<std::path::PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
+    std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".o8/next-appearance"))
+}
+fn saved_appearance() -> Option<String> {
+    Some(
+        std::fs::read_to_string(saved_path()?)
+            .ok()?
+            .trim()
+            .to_string(),
+    )
+}
+/// Saves the profile menu's appearance choice for the next launch.
+fn save_appearance(mode: &str) {
+    if let Some(path) = saved_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, mode);
+    }
+}
+/// The running appearance as the menu names it: "light", "dark" or "glass".
+pub fn appearance_name() -> &'static str {
+    match selected() {
+        Appearance::Light => "light",
+        Appearance::Glass => "glass",
+        Appearance::Dark => "dark",
+    }
+}
+static DARK: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Dark));
+static LIGHT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Light));
+static GLASS: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Glass));
 pub fn current() -> &'static Theme {
-    &CURRENT
+    match selected() {
+        Appearance::Dark => &DARK,
+        Appearance::Light => &LIGHT,
+        Appearance::Glass => &GLASS,
+    }
 }
 pub fn glass() -> bool {
-    matches!(*SELECTED, Appearance::Glass)
+    matches!(selected(), Appearance::Glass)
+}
+/// Classic AgentStatusDot colours with no semantic token: the grey of a
+/// thread waiting on review and the amber of a rejected one.
+pub(crate) fn review_mark() -> Rgba {
+    rgb(0x94a3b8)
+}
+pub(crate) fn rejected_mark() -> Rgba {
+    rgb(0xf97316)
+}
+/// Classic's `.scroll-fade-y` mask (globals.css): content fades into `color`
+/// at a scroll edge. GPUI has no masks, so this strip paints over the content;
+/// it has no hitbox, so clicks and scrolling reach what is under it.
+pub(crate) fn edge_fade(bottom: bool, height: f32, color: Rgba) -> gpui::Div {
+    use gpui::prelude::*;
+    let clear = Rgba { a: 0., ..color };
+    // Glass has no solid color to fade into and GPUI cannot mask, so the
+    // strip would only paint a dark band; glass goes without (Q 2026-11-01).
+    let color = if glass() { clear } else { color };
+    gpui::div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .h(gpui::px(height))
+        .when(bottom, |strip| strip.bottom_0())
+        .when(!bottom, |strip| strip.top_0())
+        .bg(gpui::linear_gradient(
+            if bottom { 180. } else { 0. },
+            gpui::linear_color_stop(clear, 0.),
+            gpui::linear_color_stop(color, 1.),
+        ))
 }
 pub fn plain_background() -> Rgba {
-    Theme::for_appearance(Appearance::Dark).background
+    Theme::for_appearance(if matches!(selected(), Appearance::Light) {
+        Appearance::Light
+    } else {
+        Appearance::Dark
+    })
+    .background
+}
+/// Floating cards (the desktop overlay material). Opaque, because the native
+/// shell has no backdrop blur to frost a translucent card over glass.
+pub fn popover_background() -> Rgba {
+    match selected() {
+        Appearance::Light => rgb(0xffffff),
+        Appearance::Glass => rgb(0x3e3f47),
+        _ => rgb(0x2c2c2e),
+    }
+}
+// --t-brand-orange in src/lib/theme/registry.ts.
+pub fn brand_orange() -> Rgba {
+    rgb(0xff5a1f)
+}
+/// A hue at the saturation and lightness of the Files accent setting,
+/// hsl(h, 80%, 55%); `turn` runs from 0 to 1 around the wheel.
+pub fn accent_hue(turn: f32) -> gpui::Hsla {
+    gpui::hsla(turn, 0.8, 0.55, 1.)
+}
+/// A project icon color by its stored name, T3's palette: the ink on the
+/// surface (-600 in light, -400 otherwise), or the picker's swatch (-500).
+pub fn project_icon_color(name: &str, swatch: bool) -> Option<Rgba> {
+    let (light, middle, dark) = match name {
+        "gray" => (0x4b5563, 0x6b7280, 0x9ca3af),
+        "red" => (0xdc2626, 0xef4444, 0xf87171),
+        "orange" => (0xea580c, 0xf97316, 0xfb923c),
+        "amber" => (0xd97706, 0xf59e0b, 0xfbbf24),
+        "yellow" => (0xca8a04, 0xeab308, 0xfacc15),
+        "lime" => (0x65a30d, 0x84cc16, 0xa3e635),
+        "green" => (0x16a34a, 0x22c55e, 0x4ade80),
+        "emerald" => (0x059669, 0x10b981, 0x34d399),
+        "teal" => (0x0d9488, 0x14b8a6, 0x2dd4bf),
+        "cyan" => (0x0891b2, 0x06b6d4, 0x22d3ee),
+        "sky" => (0x0284c7, 0x0ea5e9, 0x38bdf8),
+        "blue" => (0x2563eb, 0x3b82f6, 0x60a5fa),
+        "indigo" => (0x4f46e5, 0x6366f1, 0x818cf8),
+        "violet" => (0x7c3aed, 0x8b5cf6, 0xa78bfa),
+        "purple" => (0x9333ea, 0xa855f7, 0xc084fc),
+        "fuchsia" => (0xc026d3, 0xd946ef, 0xe879f9),
+        "pink" => (0xdb2777, 0xec4899, 0xf472b6),
+        "rose" => (0xe11d48, 0xf43f5e, 0xfb7185),
+        _ => return None,
+    };
+    Some(rgb(if swatch {
+        middle
+    } else if matches!(selected(), Appearance::Light) {
+        light
+    } else {
+        dark
+    }))
+}
+/// The mark drawn on an accent fill, such as the trace's completed check.
+pub fn on_accent() -> Rgba {
+    rgb(0xffffff)
+}
+/// Language colors for the file-type marks on the thinking trace's chips. The
+/// neutral mark covers prose, data files and web pages.
+pub struct FileMarks {
+    pub typescript: u32,
+    pub javascript: u32,
+    pub rust: u32,
+    pub python: u32,
+    pub go: u32,
+    pub css: u32,
+    pub swift: u32,
+    pub neutral: u32,
+}
+pub const FILE_MARKS: FileMarks = FileMarks {
+    typescript: 0x4f9fbf,
+    javascript: 0xc9a43a,
+    rust: 0xd0875a,
+    python: 0x4b8bbe,
+    go: 0x4fa8c8,
+    css: 0x6c8fd6,
+    swift: 0xe0794c,
+    neutral: 0x8a8f98,
+};
+/// Floating menus and tooltips stay opaque: glass surfaces are translucent and
+/// would show the content underneath.
+pub fn menu_fill() -> Rgba {
+    if glass() {
+        Theme::for_appearance(Appearance::Dark).surface_raised
+    } else {
+        current().surface_raised
+    }
+}
+/// No fill: a row or line with nothing behind it.
+pub const CLEAR: Rgba = Rgba {
+    r: 0.,
+    g: 0.,
+    b: 0.,
+    a: 0.,
+};
+
+/// Activity's fixed tints, the same on every appearance: classic
+/// ACTIVITY_COLORS (o8-activity-helpers.tsx) and orchestratorStatusTone
+/// (src/lib/orchestrator/display.ts).
+pub mod activity {
+    pub const ACCENT: u32 = 0x8d9fbd;
+    pub const SUCCESS: u32 = 0x70b57f;
+    pub const DANGER: u32 = 0xc97878;
+    pub const MERGE: u32 = 0xaaa0c7;
+    pub const ATTENTION: u32 = 0xcf9d60;
+    pub const ADD: u32 = 0x91c99d;
+    pub const DELETE: u32 = 0xd99a9a;
+
+    /// A packet status's label, text color, and dot wash with its alpha.
+    pub fn packet_tone(status: &str) -> (&'static str, u32, u32, f32) {
+        match status {
+            "queued" => ("Queued", 0x1d4ed8, 0x2563eb, 0.1),
+            "launching" => ("Launching", 0x2563eb, 0x2563eb, 0.12),
+            "running" => ("Running", 0x16a34a, 0x16a34a, 0.12),
+            "awaiting_review" => ("Reviewing", 0xb45309, 0xf59e0b, 0.12),
+            "blocked" => ("Blocked", 0xdc2626, 0xef4444, 0.1),
+            "recovering" => ("Recovering", 0x7c3aed, 0x7c3aed, 0.12),
+            "failed" => ("Failed", 0x991b1b, 0x991b1b, 0.12),
+            "released" => ("Completed", 0x0f766e, 0x14b8a6, 0.12),
+            "archived" => ("Archived", 0x6b7280, 0x6b7280, 0.12),
+            _ => ("Waiting", 0x64748b, 0x94a3b8, 0.12),
+        }
+    }
+}
+/// The rail Update control's ready fill, RailUpdateControl's #3b82f6.
+pub fn update_ready() -> Rgba {
+    rgb(0x3b82f6)
+}
+/// A merged pull request's status, GitHub's merged purple.
+pub fn pull_merged() -> Rgba {
+    rgb(0x8957e5)
+}
+
+/// The right panel column: 30% of the window, at most GEOMETRY.right_width.
+pub fn right_panel_width(viewport: f32) -> f32 {
+    (viewport * 0.30).min(GEOMETRY.right_width)
 }
 
 // src/lib/theme/glass-material.ts: the only window-wide fill in All Glass.
-pub const GLASS_VEIL: [(f32, f32); 3] = [(0., 0.78), (0.55, 0.44), (1., 0.06)];
+// Darker through the top third, still clear at the bottom.
+pub const GLASS_VEIL: [(f32, f32); 4] = [(0., 0.9), (0.3, 0.7), (0.65, 0.32), (1., 0.06)];
+/// `--t-glass-muted` in WORKSPACE_GLASS_OVERRIDES (src/lib/theme/context.tsx).
+pub fn glass_muted() -> Rgba {
+    translucent(0xffffff, 0.04)
+}
+/// The soft halo around the rail's Symon mark.
+pub fn symon_glow() -> Rgba {
+    gpui::rgba(0x88d1f173)
+}
+/// The sidebar's fill. In light it stays flush with the rail (Q 2026-11-01).
+pub fn sidebar_fill() -> Rgba {
+    if light() {
+        Rgba {
+            a: 0.,
+            ..current().surface
+        }
+    } else {
+        current().surface
+    }
+}
+/// How near the cursor comes before a split lights (Q 2026-11-01).
+const SPLIT_WAKE: f32 = 3.;
+/// Every resize split's line, so they all match: a faint light blue that wakes
+/// when the cursor is near. `center` is the line's offset in its parent.
+pub(crate) fn split_line(
+    group: impl Into<gpui::SharedString>,
+    vertical: bool,
+    center: f32,
+    lit: bool,
+) -> gpui::Div {
+    use gpui::prelude::*;
+    let group = group.into();
+    let glow = rgb(0x88d1f1);
+    let opacity = 0.4;
+    let span = gpui::px(SPLIT_WAKE * 2. + 1.);
+    let zone = gpui::div().group(group.clone()).absolute();
+    let line = gpui::div().absolute();
+    let (zone, line) = if vertical {
+        (
+            zone.top_0().bottom_0().left(gpui::px(center - SPLIT_WAKE)).w(span),
+            line.top_0().bottom_0().left(gpui::px(SPLIT_WAKE)).w(gpui::px(1.)),
+        )
+    } else {
+        (
+            zone.left_0().right_0().top(gpui::px(center - SPLIT_WAKE)).h(span),
+            line.left_0().right_0().top(gpui::px(SPLIT_WAKE)).h(gpui::px(1.)),
+        )
+    };
+    zone.child(
+        line.bg(glow)
+            .shadow(vec![gpui::BoxShadow {
+                color: Rgba { a: 0.2, ..glow }.into(),
+                offset: gpui::point(gpui::px(0.), gpui::px(0.)),
+                blur_radius: gpui::px(3.),
+                spread_radius: gpui::px(0.),
+            }])
+            .opacity(if lit { opacity } else { 0. })
+            .group_hover(group, move |style| style.opacity(opacity)),
+    )
+}
+pub fn light() -> bool {
+    matches!(selected(), Appearance::Light)
+}
 pub fn veil_color(alpha: f32) -> Rgba {
     translucent(0x0a0c12, alpha)
 }
@@ -132,6 +452,8 @@ const UI_FONT: &str = if cfg!(target_os = "macos") {
 } else {
     "system-ui"
 };
+// Self-hosted from public/fonts by files_panel/spec.rs.
+const ANNOTATION_FONT: &str = "Caveat";
 const MONO_FONT: &str = if cfg!(target_os = "macos") {
     "Menlo"
 } else if cfg!(target_os = "windows") {
@@ -204,6 +526,7 @@ impl Theme {
                 terminal_ansi: TERMINAL_ANSI,
                 font_ui: UI_FONT,
                 font_mono: MONO_FONT,
+                font_annotation: ANNOTATION_FONT,
             },
             Appearance::Light => Self {
                 background: rgb(0xf5f7fb),
@@ -231,7 +554,30 @@ impl Theme {
                 terminal_ansi: TERMINAL_ANSI,
                 font_ui: UI_FONT,
                 font_mono: MONO_FONT,
+                font_annotation: ANNOTATION_FONT,
             },
         }
     }
+}
+
+pub fn visualization() -> serde_json::Value {
+    let theme = current();
+    let css = |color: Rgba| {
+        format!(
+            "rgba({},{},{},{})",
+            color.r * 255.,
+            color.g * 255.,
+            color.b * 255.,
+            color.a
+        )
+    };
+    serde_json::json!({"colorScheme": if matches!(selected(), Appearance::Light) { "light" } else { "dark" }, "variables": {
+        "--background":"transparent", "--foreground":css(theme.text), "--muted":css(theme.hover),
+        "--muted-foreground":css(theme.text_muted), "--card":css(theme.surface), "--card-foreground":css(theme.text),
+        "--popover":css(theme.surface_raised), "--border":css(theme.border), "--accent":css(theme.accent),
+        "--accent-foreground":"#172238", "--primary":css(theme.accent), "--primary-foreground":"#172238",
+        "--chart-1":css(theme.text), "--chart-2":"#dd835b", "--chart-3":"#70b5c4",
+        "--chart-4":"#a599d8", "--chart-5":"#69bea6", "--chart-6":"#d8b16d",
+        "--font-sans":"-apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", "--font-mono":"ui-monospace, SFMono-Regular, Consolas, monospace",
+    }})
 }

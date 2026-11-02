@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync, execFileSync } from '@/lib/providers/child-process';
+import { execFileSync } from '@/lib/providers/child-process';
 import os from 'node:os';
 import path from 'node:path';
 import { fetchGitHubPullRequestSummaries, normalizeRepoSlug } from '@/lib/github-broker';
@@ -18,13 +18,12 @@ import {
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 import { selectWorkspaceReadinessRepos } from './readiness-scope';
+import { readLocalDiffStats, type DiffStats } from './diff-stats';
 
 const prCache = new Map<string, { prs: PRData[]; ts: number }>();
 const PR_CACHE_TTL_MS = 60_000;
 const branchCache = new Map<string, { branch: string; ts: number }>();
 const BRANCH_CACHE_TTL = 10_000;
-const diffCache = new Map<string, { data: { additions: number; deletions: number; changedFiles: number } | null; ts: number }>();
-const DIFF_CACHE_TTL = 30_000;
 interface PRData {
   number: number;
   title: string;
@@ -209,37 +208,15 @@ function getActiveWorktreeBranches(repoPath: string): Set<string> {
   return branches;
 }
 
-function getLocalDiffStats(workspace: string) {
+function getLocalDiffStats(workspace: string): Promise<DiffStats | null> {
+  const isDefault = workspace === 'unknown';
   try {
-    const isDefault = workspace === 'unknown';
     const cwd = isDefault
       ? (process.env.CORTEX_IDE_WORKSPACE_ROOT || process.cwd())
       : resolveWorkspacePath(workspace);
-    const cached = diffCache.get(cwd);
-    if (cached && Date.now() - cached.ts < DIFF_CACHE_TTL) return cached.data;
-
-    const cmd = isDefault
-      ? 'git diff --shortstat 2>/dev/null'
-      : 'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null';
-    const diffStat = execSync(cmd, { windowsHide: true, cwd, encoding: 'utf-8', timeout: 5000 }).trim();
-
-    let additions = 0;
-    let deletions = 0;
-    let changedFiles = 0;
-    for (const line of diffStat.split('\n').filter(Boolean)) {
-      const filesMatch = line.match(/(\d+) files? changed/);
-      const addMatch = line.match(/(\d+) insertions?\(\+\)/);
-      const delMatch = line.match(/(\d+) deletions?\(-\)/);
-      if (filesMatch) changedFiles += parseInt(filesMatch[1], 10);
-      if (addMatch) additions += parseInt(addMatch[1], 10);
-      if (delMatch) deletions += parseInt(delMatch[1], 10);
-    }
-
-    const result = additions === 0 && deletions === 0 ? null : { additions, deletions, changedFiles };
-    diffCache.set(cwd, { data: result, ts: Date.now() });
-    return result;
+    return readLocalDiffStats(cwd, isDefault);
   } catch {
-    return null;
+    return Promise.resolve(null);
   }
 }
 
@@ -392,15 +369,21 @@ async function collectWorkspaceLifecycle() {
     }
   }
 
+  // Read every workspace's local diff concurrently, off the event loop.
+  const localDiffs = await Promise.all(preparedAgents.map(({ repoName, branchName, workspacePath }) => (
+    repoName && repoName !== 'workspace' && !prsByBranch.get(`${repoName}:${branchName}`)
+      ? getLocalDiffStats(workspacePath)
+      : Promise.resolve(null)
+  )));
   const workspaces: WorkspaceEntry[] = [];
   const liveLifecycleInputs: LiveWorkspaceLifecycleInput[] = [];
 
-  for (const prepared of preparedAgents) {
+  for (const [preparedIndex, prepared] of preparedAgents.entries()) {
     const { agent, repoName, repoPath, workspacePath, repoSlug, branchName } = prepared;
     if (!repoName) continue;
     const pr = prsByBranch.get(`${repoName}:${branchName}`) || null;
     const status = deriveWorkspaceStatus({ runtimeStatus: agent.status, pr });
-    const localDiff = (!pr && repoName !== 'workspace') ? getLocalDiffStats(workspacePath) : null;
+    const localDiff = localDiffs[preparedIndex];
     const ghRepo = repoSlugByName.get(repoName) ?? fallbackSlugMap[repoName] ?? '';
     const workflowStage = deriveWorkflowStage({
       runtimeStatus: agent.status,

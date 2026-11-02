@@ -1,0 +1,13 @@
+test shell::workers::review_tests::workers_edits_during_delivery_survive_ack ... FAILED
+test shell::workers::review_tests::workers_keep_waiting_retains_fetched_lane_state ... FAILED
+test shell::workers::review_tests::workers_workspace_isolation_preserves_peer_draft_during_lane_refresh ... FAILED
+assertion `left == right` failed: acknowledgement must preserve the operator's exact edit during delivery
+  left: ""
+ right: "Keep this adjustment "
+assertion `left == right` failed
+  left: String("awaiting_orchestrator")
+ right: String("reviewing")
+assertion `left == right` failed: refreshing A must retain A's fetched state while B's same-ID card stays isolated
+  left: String("awaiting_orchestrator")
+ right: "reviewing"
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 317 filtered out; finished in 9.94s

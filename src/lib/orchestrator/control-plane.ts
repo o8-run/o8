@@ -375,6 +375,9 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
         packetId: lane.packetId!,
         status: currentAuthExit ? 'awaiting_input' : runtimeExited ? 'failed' : lane.status,
         sessionKey: lane.sessionKey,
+        repoPath: lane.repoPath,
+        worktreePath: lane.worktreePath,
+        ownership: lane.ownership,
         lastEventLabel: currentAuthExit
           ? CODEX_AUTH_RECOVERY_LANE_LABEL
           : runtimeExited ? 'runtime_process_exit' : lane.lastEventLabel,

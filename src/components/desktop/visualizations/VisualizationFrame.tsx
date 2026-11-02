@@ -23,7 +23,7 @@ function VisualizationDocumentFrame({ version, expanded }: { version: ReturnType
   const nonce = `${identity}:${reference.id}`;
   const { paletteId, workspaceGlass, surface } = useTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const themeRef = useRef<VisualizationTheme | null>(null);
   const [doc, setDoc] = useState<VisualizationDocument | undefined>(() => cachedVisualization(reference.id));
   const [error, setError] = useState<string | null>(null);
@@ -65,20 +65,18 @@ function VisualizationDocumentFrame({ version, expanded }: { version: ReturnType
 
   useEffect(() => {
     let stopped = false;
-    const load = () => void loadVisualization(reference.id).then(document => {
+    // Every saved card enters the bounded queue, even outside the viewport.
+    void loadVisualization(reference.id, () => {
+      const card = cardRef.current;
+      if (!card?.isConnected) return Infinity;
+      const rect = card.getBoundingClientRect();
+      return Math.hypot(Math.max(0, -rect.bottom, rect.top - window.innerHeight),
+        Math.max(0, -rect.right, rect.left - window.innerWidth));
+    }).then(document => {
       if (!stopped) { setDoc(document); setError(null); }
-    }).catch(reason => { if (!stopped) setError(reason instanceof Error ? reason.message : 'This visualization could not be loaded.'); });
-    const node = containerRef.current;
-    if (expanded || !node || typeof IntersectionObserver === 'undefined') load();
-    else {
-      const observer = new IntersectionObserver(entries => {
-        if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); load(); }
-      }, { rootMargin: '400px' });
-      observer.observe(node);
-      return () => { stopped = true; observer.disconnect(); };
-    }
+    }).catch(reason => { if (!stopped) setError(reason instanceof Error ? reason.message : 'This visualization is unavailable.'); });
     return () => { stopped = true; };
-  }, [reference.id, expanded, attempt]);
+  }, [reference.id, attempt]);
 
   useEffect(() => {
     const receive = (event: MessageEvent) => {
@@ -103,7 +101,7 @@ function VisualizationDocumentFrame({ version, expanded }: { version: ReturnType
 
   useEffect(() => {
     if (!doc || ready) return;
-    const timer = window.setTimeout(() => setError('The visualization did not finish loading. Try again.'), 12_000);
+    const timer = window.setTimeout(() => setError('The visualization did not finish loading. Retry it or rebuild it from this chat.'), 15_000);
     return () => window.clearTimeout(timer);
   }, [doc, ready, attempt]);
 
@@ -112,12 +110,13 @@ function VisualizationDocumentFrame({ version, expanded }: { version: ReturnType
     color: 'var(--t-text-primary)', font: '12px var(--font-sans-system)', paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 8, cursor: 'pointer',
     backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' };
 
-  return <div ref={containerRef} data-o8-visualization={reference.id} style={{ position: 'relative', width: '100%', minWidth: 0, minHeight: error ? 96 : height }}
+  return <div ref={cardRef} data-o8-visualization={reference.id} style={{ position: 'relative', width: '100%', minWidth: 0, minHeight: error ? 96 : height }}
     onMouseEnter={() => setControls(true)} onMouseLeave={() => setControls(false)} onFocusCapture={() => setControls(true)}
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setControls(false); }}>
     {error ? <div role="status" style={{ paddingTop: 16, paddingBottom: 16, color: 'var(--t-text-muted)', fontSize: 13 }}>
       <div>{error}</div>
-      <div style={{ marginTop: 10 }}><RamsButton variant="ghost" onClick={() => { setError(null); setReady(false); setDoc(undefined); setAttempt(value => value + 1); }}>Retry visualization</RamsButton></div>
+      <div style={{ marginTop: 10 }}><RamsButton variant="ghost" onClick={() => { setError(null); setReady(false); setDoc(undefined); setSrcdoc(''); setAttempt(value => value + 1); }}>Retry visualization</RamsButton>
+        <RamsButton variant="ghost" onClick={() => setQuestion(`Rebuild the saved visualization “${reference.title}” from this chat. Its source (${reference.id}) is unavailable or could not load. Use the original data and requirements in the conversation, and ask me for anything missing.`)}>Rebuild visualization</RamsButton></div>
     </div> : <>
       {srcdoc ? <iframe key={`${reference.id}:${attempt}`} ref={frameRef} title={reference.title} sandbox="allow-scripts" referrerPolicy="no-referrer"
         srcDoc={srcdoc} style={{ display: 'block', border: 0, width: '100%', height, background: 'transparent', opacity: ready ? 1 : 0 }} /> : null}
@@ -137,7 +136,7 @@ function VisualizationDocumentFrame({ version, expanded }: { version: ReturnType
           Open in workspace
         </button> : null}
       </div> : null}
-      {question ? <VisualizationQuestion title={reference.title} question={question} onClose={() => setQuestion(null)} /> : null}
     </>}
+    {question ? <VisualizationQuestion title={reference.title} question={question} onClose={() => setQuestion(null)} /> : null}
   </div>;
 }

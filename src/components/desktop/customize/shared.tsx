@@ -180,7 +180,7 @@ export function Row({ title, titleMono = false, subtitle, pill, dot, expanded, o
 
 export function EmptyState({ title, body, actionLabel, onAction }: {
   title: string;
-  body: string;
+  body?: string;
   actionLabel?: string;
   onAction?: () => void;
 }) {
@@ -204,7 +204,7 @@ export function EmptyState({ title, body, actionLabel, onAction }: {
       textAlign: 'center',
     }}>
       <span style={{ fontSize: 13.5, fontWeight: 400, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>{title}</span>
-      <span style={{ fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-muted)', maxWidth: 420, lineHeight: 1.5 }}>{body}</span>
+      {body ? <span style={{ fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-muted)', maxWidth: 420, lineHeight: 1.5 }}>{body}</span> : null}
       {actionLabel && onAction ? (
         <button
           type="button"

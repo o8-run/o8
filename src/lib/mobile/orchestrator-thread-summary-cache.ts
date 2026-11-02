@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { applyNetworkProjectionHealth } from '@/lib/bots/network-health';
 import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 import type { MobileOrchestratorThread } from '@/lib/mobile/types';
@@ -50,7 +51,7 @@ class ThreadSummaryCache {
       };
       // Git metadata can change independently of the history stat. Preserve the
       // previous per-list projection behavior, and return a fresh object.
-      return thread ? { ...thread, ...resolveRepoGithubIdentity(thread.repoPath, remoteUrl) } : null;
+      return thread ? applyNetworkProjectionHealth({ ...thread, ...resolveRepoGithubIdentity(thread.repoPath, remoteUrl) }) : null;
     }
     this.delete(stat.filePath);
     const record = JSON.parse(readFileSync(stat.filePath, 'utf8')) as OrchestratorHistoryRecord;

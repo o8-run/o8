@@ -56,7 +56,7 @@ let configDir = '';
 const headers = { authorization: 'Bearer fixture-next-settings-operator', 'Content-Type': 'application/json' };
 beforeAll(async () => {
   host = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
-    'scripts/next/dev-server.ts', '--settings', '--shell'], {
+    'scripts/next/dev-server.ts', '--settings', '--bot-settings', '--shell'], {
     env: { ...process.env, O8_NEXT_API_TOKEN: 'fixture-next-settings-operator' }, stdio: ['ignore', 'pipe', 'ignore'],
   });
   const lines = createInterface({ input: host.stdout! });
@@ -185,3 +185,38 @@ it('serializes competing native field saves at their original revision instead o
   expect(missingRevision.status).toBe(400);
   expect((await (await call('/api/panel/operator-defaults?include=native')).json()).values.branchPrefix).toBe(winner);
 });
+
+it('lists candidates in native Settings but exposes only explicit rail choices across a fresh process', async () => {
+  const before = await (await call('/api/panel/operator-defaults?include=native')).json();
+  expect(before.bots).toContainEqual({ id: 'grok:agent-1', name: 'Fixture bot', house: 'grok', selectionIds: ['grok:agent-1'] });
+  expect(before.values.botRailEnabledIds).toEqual([]);
+  expect((await (await call('/api/bots')).json()).bots).toEqual([]);
+  const saved = await call('/api/panel/operator-defaults?include=native', 'POST', {
+    botRailEnabledIds: ['grok:agent-1', 'grok:agent-1'], settingsTomlRevision: before.settingsToml.revision,
+  });
+  expect(saved.status).toBe(200);
+  expect((await (await call('/api/bots')).json()).bots.map((b: { id: string }) => b.id)).toEqual(['grok:agent-1']);
+  const stale = await call('/api/panel/operator-defaults?include=native', 'POST', {
+    botRailEnabledIds: [], settingsTomlRevision: before.settingsToml.revision,
+  });
+  expect(stale.status).toBe(409);
+  const restarted = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx', '-e',
+    "const {getOperatorDefaults}=require('./src/lib/operator/defaults'); getOperatorDefaults().then(d=>console.log(JSON.stringify(d.values.botRailEnabledIds)));"], {
+    env: { ...process.env, O8_DATA_DIR: configDir, CORTEX_IDE_DATA_DIR: configDir }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let out = ''; let err = '';
+  restarted.stdout!.on('data', chunk => { out += chunk; });
+  restarted.stderr!.on('data', chunk => { err += chunk; });
+  expect((await once(restarted, 'close'))[0], err).toBe(0);
+  expect(JSON.parse(out.trim())).toEqual(['grok:agent-1']);
+  const current = await (await call('/api/panel/operator-defaults?include=native')).json();
+  expect(current.values.botRailEnabledIds).toEqual(['grok:agent-1']);
+  const invalid = await call('/api/panel/operator-defaults?include=native', 'POST', {
+    botRailEnabledIds: ['grok:agent-1', 7], settingsTomlRevision: current.settingsToml.revision,
+  });
+  expect(invalid.status).toBe(400);
+  expect((await call('/api/panel/operator-defaults?include=native', 'POST', {
+    botRailEnabledIds: [], settingsTomlRevision: current.settingsToml.revision,
+  })).status).toBe(200);
+  expect((await (await call('/api/bots')).json()).bots).toEqual([]);
+}, 30_000);

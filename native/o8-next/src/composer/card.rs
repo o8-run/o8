@@ -2,159 +2,330 @@ use super::*;
 use crate::composer::controls::mode_label;
 use gpui::{AnyElement, Div, KeyDownEvent, SharedString, Stateful};
 
-impl Surface {
-    pub(crate) fn composer_footer(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let routing = self.composer_routing(cx).unwrap_or(Value::Null);
-        let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("solo"));
-        let access = if routing["permissionMode"] == "plan" {
-            "Plan only"
-        } else {
-            "Full access"
-        };
-        let enabled = self.queue_ready && !self.saving && !self.composer.read(cx).controls.busy;
-        let leading = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(6.))
-            .child(
-                self.composer_button("composer-mode", mode, enabled, cx, |s, w, cx| {
-                    s.open_composer_picker("mode", w, cx)
-                }),
-            )
-            .child(
-                self.composer_button("composer-access", access, enabled, cx, |s, w, cx| {
-                    s.open_composer_picker("access", w, cx)
-                }),
-            )
-            .child(self.composer_button(
-                "composer-attach",
-                "+",
-                enabled
-                    && matches!(
-                        routing["backend"].as_str(),
-                        Some("codex" | "claude" | "fable" | "collide")
-                    ),
-                cx,
-                |s, _, cx| s.attach_composer_image(cx),
-            ))
-            .when(self.queue["canSteer"] == true, |d| {
-                d.child(self.composer_button(
-                    "send-mode",
-                    if self.send_next { "Queue" } else { "Steer" },
-                    enabled,
-                    cx,
-                    |s, _, cx| {
-                        s.send_next = !s.send_next;
-                        cx.notify();
-                    },
-                ))
-            });
-        let trailing = div()
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .child(
-                self.composer_button(
-                    "composer-model",
-                    routing["model"].as_str().unwrap_or("Model"),
-                    enabled,
-                    cx,
-                    |s, w, cx| s.open_composer_picker("model", w, cx),
+#[path = "context_view.rs"]
+mod context_view;
+#[path = "footer.rs"]
+mod footer;
+
+/// The mic and primary button in their own cached view: the draft turning
+/// empty or non-empty redraws only this, never the session (typing budget).
+struct PrimaryView {
+    owner: gpui::WeakEntity<Surface>,
+    _subscription: gpui::Subscription,
+}
+impl gpui::Render for PrimaryView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.owner
+            .update(cx, |s, cx| s.primary_cluster(window, cx))
+            .unwrap()
+    }
+}
+
+/// The dictation mic drawn with quads at `scale`: a stroked path would
+/// activate viewport-sized GPU/MSAA targets, and this fits the quad pass.
+fn mic_glyph(color: gpui::Rgba, scale: f32) -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            // Scale about the 14x20 box's center.
+            let (ox, oy) = (7. * (1. - scale), 10. * (1. - scale));
+            let rect = |x: f32, y: f32, w: f32, h: f32| {
+                Bounds::new(
+                    bounds.origin + point(px(ox + x * scale), px(oy + y * scale)),
+                    size(px(w * scale), px(h * scale)),
                 )
-                .max_w(px(140.))
-                .truncate(),
-            )
-            .child(self.composer_button(
-                "composer-effort",
-                routing["effort"].as_str().unwrap_or("Effort"),
-                enabled,
-                cx,
-                |s, w, cx| s.open_composer_picker("effort", w, cx),
-            ))
-            .child(
-                self.composer_button("composer-microphone", "", false, cx, |_, _, _| {})
-                    .w(px(26.))
-                    .child(
-                        canvas(
-                            |_, _, _| (),
-                            |bounds, _, window, _| {
-                                // A stroked path activates viewport-sized GPU/MSAA
-                                // targets. This small icon fits the existing quad pass.
-                                let rect = |x, y, w, h| {
-                                    Bounds::new(
-                                        bounds.origin + point(px(x), px(y)),
-                                        size(px(w), px(h)),
-                                    )
-                                };
-                                let color = theme().text_secondary;
-                                let stroke = px(1.3);
-                                window.paint_quad(
-                                    gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
-                                        .corner_radii(px(3.))
-                                        .border_widths(stroke),
-                                );
-                                window.paint_quad(
-                                    gpui::outline(rect(1., 7., 12., 8.), color, Default::default())
-                                        .corner_radii(gpui::Corners {
-                                            top_left: px(0.),
-                                            top_right: px(0.),
-                                            bottom_right: px(6.),
-                                            bottom_left: px(6.),
-                                        })
-                                        .border_widths(gpui::Edges {
-                                            top: px(0.),
-                                            right: stroke,
-                                            bottom: stroke,
-                                            left: stroke,
-                                        }),
-                                );
-                                window.paint_quad(gpui::fill(rect(6.35, 14., 1.3, 4.), color));
-                                window.paint_quad(gpui::fill(rect(4., 17.35, 6., 1.3), color));
-                            },
-                        )
-                        .w(px(14.))
-                        .h(px(20.)),
-                    ),
-            )
-            .child(
-                self.composer_button(
-                    "send",
-                    if self.saving { "…" } else { "↑" },
-                    enabled,
-                    cx,
-                    |s, window, cx| {
-                        s.send(None, cx);
-                        s.composer.read(cx).focus.focus(window);
-                    },
-                )
-                .bg(theme().accent)
-                .text_color(theme().background),
+            };
+            let stroke = px(1.3 * scale);
+            window.paint_quad(
+                gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
+                    .corner_radii(px(3. * scale))
+                    .border_widths(stroke),
             );
+            window.paint_quad(
+                gpui::outline(rect(1., 7., 12., 8.), color, Default::default())
+                    .corner_radii(gpui::Corners {
+                        top_left: px(0.),
+                        top_right: px(0.),
+                        bottom_right: px(6. * scale),
+                        bottom_left: px(6. * scale),
+                    })
+                    .border_widths(gpui::Edges {
+                        top: px(0.),
+                        right: stroke,
+                        bottom: stroke,
+                        left: stroke,
+                    }),
+            );
+            window.paint_quad(gpui::fill(rect(6.35, 14., 1.3, 4.), color));
+            window.paint_quad(gpui::fill(rect(4., 17.35, 6., 1.3), color));
+        },
+    )
+    .w(px(14.))
+    .h(px(20.))
+}
+
+impl Surface {
+    fn primary_view(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let view = if let Some(view) = &self.composer.read(cx).controls.send_view {
+            view.clone()
+        } else {
+            let owner = cx.entity();
+            let view: gpui::AnyView = cx
+                .new(|cx| PrimaryView {
+                    owner: owner.downgrade(),
+                    _subscription: cx.observe(&owner, |_, _, cx| cx.notify()),
+                })
+                .into();
+            self.composer
+                .update(cx, |i, _| i.controls.send_view = Some(view.clone()));
+            view
+        };
+        let mut style = gpui::StyleRefinement::default();
+        style.size.width = Some(px(self.primary_width()).into());
+        style.size.height = Some(px(28.).into());
+        style.flex_shrink = Some(0.);
+        view.cached(style).into_any_element()
+    }
+
+    /// Q 2026-10-31: an empty composer offers voice first. The round primary
+    /// button is the dictation mic and morphs into Send once there is a
+    /// draft. v1; the motion will be refined.
+    fn primary_cluster(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let enabled = self.queue_ready
+            && self.network_can_reply()
+            && !self.saving
+            && !self.composer.read(cx).controls.busy
+            && self.composer.read(cx).controls.pending_images == 0;
+        let drafted = {
+            let input = self.composer.read(cx);
+            !input.text.trim().is_empty()
+                || !input.controls.images.is_empty()
+                || !input.controls.files.is_empty()
+        };
+        // Dictation fills the draft as it listens; the button stays the mic
+        // (stop) until it finishes, then turns into Send.
+        let drafted = drafted && self.dictation == super::DictationState::Off;
+        let (morph, moving) = self.composer.update(cx, |i, _| {
+            i.controls.send_morph.set(drafted);
+            i.controls.send_morph.value()
+        });
+        if moving {
+            window.request_animation_frame();
+        }
+        // One voice entry point: with a draft, Ctrl+Z hold still dictates
+        // into it; a mockup pass will revisit mic and Live side by side.
         div()
+            .h(px(28.))
             .flex()
-            .flex_wrap()
-            .items_center()
-            .justify_end()
-            .gap(px(6.))
-            .min_h(px(36.))
-            .pt(px(4.))
-            .px(px(8.))
-            .pb(px(8.))
-            .child(leading)
-            .child(div().flex_1().min_w(px(0.)))
-            .child(trailing)
+            .gap(px(PRIMARY_GAP))
+            .when(self.dictating(), |d| d.child(self.dictation_wave()))
+            .when(self.turn_running(), |d| d.child(self.stop_button(cx)))
+            .child(self.primary_button(morph, enabled, cx))
             .into_any_element()
     }
 
-    pub(super) fn composer_routing(&self, cx: &App) -> Option<Value> {
+    /// The primary slot: the round button, and Stop beside it while a turn runs.
+    fn primary_width(&self) -> f32 {
+        let mut width = 28.;
+        if self.turn_running() {
+            width += 28. + PRIMARY_GAP;
+        }
+        if self.dictating() {
+            width += super::dictation_wave::WIDTH + 12. + PRIMARY_GAP;
+        }
+        width
+    }
+
+    /// Dictation is asking for or holding the microphone.
+    fn dictating(&self) -> bool {
+        matches!(
+            self.dictation,
+            super::DictationState::Starting | super::DictationState::Listening
+        )
+    }
+
+    /// The round primary button. `morph` runs 0 (empty: voice) to 1 (draft:
+    /// send); the mic shrinks and fades as the arrow grows in, and the press
+    /// follows whichever side of the midpoint the button is on. Empty, it is
+    /// the only voice control (Q 2026-10-31): tap dictates and polishes, a
+    /// hold starts GPT Live, and while Live runs it shows the waveform and a
+    /// tap ends it. Caps Lock still toggles Live.
+    fn primary_button(&self, morph: f32, enabled: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+        use super::DictationState::*;
+        use super::VoiceState;
+        let sending = morph >= 0.5;
+        let state = self.dictation;
+        let live = !sending && matches!(self.voice, VoiceState::Connecting | VoiceState::Live);
+        let (id, tip, enabled) = if sending {
+            ("send", "Send · hold for Queue and Fork", enabled)
+        } else if live || self.voice == VoiceState::Closing {
+            (
+                "composer-microphone",
+                match self.voice {
+                    VoiceState::Connecting => "Connecting GPT Live… click to stop",
+                    VoiceState::Closing => "Closing voice…",
+                    _ => {
+                        "GPT Live · voice usage is billed to your OpenAI key. Click or Caps Lock to stop."
+                    }
+                },
+                self.voice != VoiceState::Closing,
+            )
+        } else {
+            (
+                "composer-microphone",
+                match state {
+                    Off => "Click to dictate · hold for GPT Live (Caps Lock)",
+                    Starting => "Waiting for the microphone… click to cancel",
+                    Listening => "Click to finish dictation",
+                    Finishing => "Polishing…",
+                },
+                match state {
+                    Off => enabled,
+                    Finishing => false,
+                    _ => true,
+                },
+            )
+        };
+        let white = crate::theme::on_accent();
+        let recording = !sending && matches!(state, Starting | Listening);
+        // Empty, a hold starts Live; with a draft, it opens the send menu.
+        let holdable = (sending || !live && state == Off) && enabled;
+        let button = self
+            .composer_button(id, "", enabled, cx, move |s, window, cx| {
+                // A hold that already started Live consumes its release.
+                if std::mem::take(&mut s.voice_hold.1) {
+                    return;
+                }
+                s.voice_hold.0 += 1;
+                if sending {
+                    s.send(None, cx);
+                    s.composer.read(cx).focus.focus(window);
+                } else if live {
+                    window.dispatch_action(Box::new(super::ToggleVoice), cx);
+                } else {
+                    window.dispatch_action(Box::new(super::ToggleDictation), cx);
+                }
+            })
+            .relative()
+            .w(px(28.))
+            .h(px(28.))
+            .px(px(0.))
+            .rounded_full()
+            .justify_center()
+            .group("composer-primary")
+            .when(holdable, |b| {
+                b.on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(move |s, _, window, cx| {
+                        s.voice_hold = (s.voice_hold.0 + 1, false);
+                        let press = s.voice_hold.0;
+                        cx.spawn_in(window, async move |this, cx| {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(VOICE_HOLD_MS))
+                                .await;
+                            let _ = this.update_in(cx, |s, window, cx| {
+                                if s.voice_hold == (press, false) {
+                                    s.voice_hold.1 = true;
+                                    if sending {
+                                        s.open_composer_picker("send", window, cx);
+                                    } else {
+                                        window.dispatch_action(Box::new(super::ToggleVoice), cx);
+                                    }
+                                }
+                            });
+                        })
+                        .detach();
+                    }),
+                )
+                // A release off the button cancels a pending hold.
+                .on_mouse_up_out(
+                    gpui::MouseButton::Left,
+                    cx.listener(|s, _, _, _| {
+                        if !s.voice_hold.1 {
+                            s.voice_hold.0 += 1;
+                        }
+                    }),
+                )
+            })
+            .when(sending && enabled, |b| {
+                b.on_mouse_down(
+                    gpui::MouseButton::Right,
+                    cx.listener(|s, _, window, cx| s.open_composer_picker("send", window, cx)),
+                )
+            })
+            .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into());
+        let layer = || {
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+        };
+        // The fill sits over the shared button's hover background, so a hover
+        // dims the accent instead of replacing it.
+        let button = button.child(
+            layer()
+                .rounded_full()
+                .bg(if recording {
+                    theme().danger
+                } else {
+                    theme().accent
+                })
+                .group_hover("composer-primary", |d| d.opacity(0.86)),
+        );
+        if self.saving && sending {
+            return button.child(layer().text_color(white).child("…"));
+        }
+        if live || (!sending && self.voice == VoiceState::Closing) {
+            return button.child(layer().child(crate::icon::stroke(WAVEFORM, white, 15., 1.9)));
+        }
+        let mic = if recording {
+            layer()
+                .child(div().size(px(9.)).rounded(px(2.)).bg(white))
+                .into_any_element()
+        } else {
+            layer()
+                .opacity((1. - morph) * if state == Finishing { 0.6 } else { 1. })
+                .child(mic_glyph(white, 1. - 0.45 * morph))
+                .into_any_element()
+        };
+        let grow = 0.6 + 0.4 * morph;
+        button
+            .child(mic)
+            .child(layer().opacity(morph).child(crate::icon::stroke(
+                "M12 19V5M5 12l7-7 7 7",
+                white,
+                15. * grow,
+                2.,
+            )))
+    }
+
+    pub(in crate::ui) fn composer_routing(&self, cx: &App) -> Option<Value> {
         let mut routing = self.routing.clone()?;
+        if routing["source"] == "bot-network" {
+            return Some(routing);
+        }
         for (key, value) in self.composer.read(cx).controls.overrides.as_object()? {
             routing[key] = value.clone();
         }
+        let picked = crate::composer::controls::visible_mode(
+            routing["pickedMode"].as_str(),
+            routing["backend"].as_str(),
+        );
+        routing["pickedMode"] = json!(picked);
+        routing["mode"] = json!("fleet");
+        if let Some(tier) = super::composer_selector::service_tier(
+            self.selected.as_deref(),
+            routing["backend"].as_str().unwrap_or(""),
+            routing["model"].as_str().unwrap_or(""),
+            cx,
+        ) {
+            routing["serviceTier"] = json!(tier);
+        }
         Some(routing)
     }
-    fn composer_button(
+    pub(super) fn composer_button(
         &self,
         id: &str,
         label: &str,
@@ -216,7 +387,7 @@ impl Surface {
                 }
             }))
     }
-    fn close_composer_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_composer_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.composer.update(cx, |i, cx| {
             i.controls.open = None;
             i.controls.model = None;
@@ -239,7 +410,7 @@ impl Surface {
             focus.focus(window);
         }
     }
-    fn open_composer_picker(
+    pub(super) fn open_composer_picker(
         &mut self,
         picker: &'static str,
         window: &mut Window,
@@ -248,26 +419,32 @@ impl Surface {
         if self.composer.read(cx).controls.busy {
             return;
         }
-        let model = self.composer_routing(cx).unwrap_or(Value::Null)["model"]
-            .as_str()
-            .unwrap_or("")
-            .to_owned();
         self.composer.update(cx, |i, cx| {
+            // A second press on the same chip closes its menu, as on the desktop.
+            if i.controls.open == Some(picker) {
+                i.controls.open = None;
+                i.controls.model = None;
+                cx.notify();
+                return;
+            }
             i.controls.open = Some(picker);
+            i.controls.prompt.opened = Some(cx.background_executor().now());
             i.controls.error.clear();
             if picker == "model" {
                 i.controls.model = Some(cx.new(|cx| {
-                    let mut input = Composer::new(cx);
-                    input.set_text(&model, cx);
+                    let input = Composer::new(cx);
                     input.focus.focus(window);
                     input
                 }));
             }
             cx.notify();
         });
+        if self.composer.read(cx).controls.open == Some(picker) {
+            self.prepare_selector(picker, cx);
+        }
         cx.notify();
     }
-    fn composer_choice(
+    pub(super) fn composer_choice(
         &mut self,
         field: &'static str,
         value: &str,
@@ -285,6 +462,16 @@ impl Surface {
                         json!(if value == "solo" { "single" } else { "fleet" });
                 }
             });
+            if field == "pickedMode" {
+                let error = crate::composer::mode_store::save(
+                    self.composer.read(cx).controls.prompt.store.as_deref(),
+                    value,
+                )
+                .err();
+                if let Some(error) = error {
+                    self.composer.update(cx, |i, _| i.controls.error = error);
+                }
+            }
             self.close_composer_picker(window, cx);
             return;
         }
@@ -302,6 +489,16 @@ impl Surface {
             cx.notify();
         });
         let requested = value.clone();
+        // Classic saves a model choice on the thread too, so it survives a reload.
+        // The chat's own repository scopes the write, as for every other
+        // chat-history mutation; the server refuses an unscoped one.
+        let thread = (field == "model")
+            .then(|| {
+                let id = self.selected.clone()?;
+                let repo = self.sessions.iter().find(|s| s.id == id)?.repo_path.clone();
+                Some((id, repo))
+            })
+            .flatten();
         let task = cx.background_executor().spawn(async move {
             let url = client.url("/api/panel/operator-defaults").unwrap();
             let mutation = client
@@ -312,6 +509,19 @@ impl Surface {
             let confirmed: Value =
                 client.get("/api/panel/operator-defaults", &[("include", "values")])?;
             if confirmed["values"][setting] == requested {
+                if let Some((thread, repo)) = thread {
+                    let history = client.url("/api/v2/chat-history").unwrap();
+                    let mut body = json!({"tabId": thread, "messages": [], "model": requested});
+                    if let Some(repo) = repo {
+                        body["repoPath"] = json!(repo);
+                    }
+                    client
+                        .request("POST", &history)
+                        .send_json(body)
+                        .map_err(|_| {
+                            "Model saved as the default, but not on this chat.".to_owned()
+                        })?;
+                }
                 Ok(())
             } else if mutation.is_err() {
                 Err("Settings update failed. Previous selection retained.".into())
@@ -355,41 +565,21 @@ impl Surface {
         })
         .detach();
     }
-    fn attach_composer_image(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn attach_composer_image(&mut self, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Attach images".into()),
+            prompt: Some("Attach images or files".into()),
         });
         let editor = self.composer.clone();
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else { return; };
-            let task = cx.background_executor().spawn(async move {
-                use base64::Engine;
-                paths.into_iter().map(|path| {
-                    let mime = match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
-                        "png" => "image/png", "jpg" | "jpeg" => "image/jpeg", "webp" => "image/webp", "gif" => "image/gif",
-                        _ => return Err("Choose a PNG, JPEG, WebP or GIF image."),
-                    };
-                    if fs::metadata(&path).map_err(|_| "Could not read image.")?.len() > 512 * 1024 { return Err("Image exceeds 512 KiB."); }
-                    let bytes = fs::read(&path).map_err(|_| "Could not read image.")?;
-                    Ok(json!({"name":path.file_name().and_then(|s| s.to_str()).unwrap_or("image"), "dataUri":format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))}))
-                }).collect::<Result<Vec<_>, _>>()
-            });
-            let result = task.await;
-            let _ = this.update(cx, |_, cx| {
-                editor.update(cx, |i, cx| {
-                    match result {
-                        Ok(images) if i.controls.images.len() + images.len() <= 8 => i.controls.images.extend(images),
-                        Ok(_) => i.controls.error = "Attach at most 8 images.".into(),
-                        Err(error) => i.controls.error = error.into(),
-                    }
-                    cx.notify();
-                });
-                cx.notify();
-            });
-        }).detach();
+        cx.spawn(async move |_, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            let _ = editor.update(cx, |i, cx| i.attach_paths(paths, cx));
+        })
+        .detach();
     }
     pub(super) fn composer_card(
         &mut self,
@@ -397,9 +587,32 @@ impl Surface {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
-        let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("solo"));
-        let (open, busy, error, model, images) = self.composer.update(cx, |i, cx| {
-            let placeholder = format!("Message {mode}…");
+        let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("fast"));
+        self.sync_context_meter(&routing, cx);
+        let (running, forkable) = (self.turn_running(), self.can_fork());
+        let (open, busy, error, model) = self.composer.update(cx, |i, cx| {
+            i.controls.attachment_target = true;
+            i.controls.images_enabled = self.queue_ready
+                && matches!(
+                    routing["backend"].as_str(),
+                    Some("codex" | "claude" | "fable" | "collide")
+                );
+            // The placeholder teaches the keys (Q 2026-10-31): steer or
+            // queue while a turn runs, send or fork after one, else the mode.
+            let placeholder = if running {
+                if self.send_next || self.queue["canSteer"] != true {
+                    "↵ to queue for later · Esc to stop"
+                } else {
+                    "↵ to steer now, ⌘↵ to queue for later"
+                }
+            } else if forkable {
+                "↵ to send, ⌥⌘↵ to fork into a new thread"
+            } else if mode == "Worktrees" {
+                "Ask anything · workers use isolated worktrees"
+            } else {
+                "Ask anything · workers share this checkout"
+            }
+            .to_owned();
             if i.placeholder != placeholder || i.framed {
                 i.placeholder = placeholder;
                 i.framed = false;
@@ -410,7 +623,6 @@ impl Surface {
                 i.controls.busy,
                 i.controls.error.clone(),
                 i.controls.model.clone(),
-                i.controls.images.clone(),
             )
         });
         let footer = self.regions.measured_view(
@@ -423,17 +635,41 @@ impl Surface {
         let mut card = div()
             .id("composer-card")
             .debug_selector(|| "composer-card".into())
+            .relative()
+            .flex()
+            .flex_col()
             .border_1()
             .border_color(theme().border)
             .rounded(px(crate::theme::GEOMETRY.composer_radius))
             .bg(theme().surface_raised)
             .capture_key_down(cx.listener(|s, event: &KeyDownEvent, window, cx| {
+                if s.prompt_picker_key(event, window, cx) {
+                    return;
+                }
                 match event.keystroke.key.as_str() {
                     "tab" => {
                         if s.composer.read(cx).focus.is_focused(window)
                             && !event.keystroke.modifiers.shift
                         {
-                            s.focus.focus(window);
+                            let input = s.composer.read(cx);
+                            if let Some(focus) = input
+                                .controls
+                                .focus
+                                .get("composer-image-remove-0")
+                                .filter(|_| !input.controls.images.is_empty())
+                                .or_else(|| {
+                                    input
+                                        .controls
+                                        .focus
+                                        .get("composer-file-remove-0")
+                                        .filter(|_| !input.controls.files.is_empty())
+                                })
+                                .or_else(|| input.controls.focus.get("composer-attach"))
+                            {
+                                focus.focus(window);
+                            } else {
+                                s.focus.focus(window);
+                            }
                         } else if event.keystroke.modifiers.shift {
                             window.focus_prev();
                         } else {
@@ -445,83 +681,55 @@ impl Surface {
                         s.dismiss_composer_picker(window, cx);
                         cx.stop_propagation();
                     }
+                    // Esc on an empty composer stops the running turn.
+                    "escape"
+                        if s.turn_running()
+                            && s.dictation == super::DictationState::Off
+                            && s.voice == super::VoiceState::Off
+                            && s.composer.read(cx).focus.is_focused(window)
+                            && s.composer.read(cx).text.trim().is_empty() =>
+                    {
+                        s.stop_turn(cx);
+                        cx.stop_propagation();
+                    }
                     _ => {}
                 }
             }))
-            .child(self.composer.clone())
-            .children(images.iter().map(|image| {
-                div()
-                    .text_size(px(11.))
-                    .px(px(14.))
-                    .child(image["name"].as_str().unwrap_or("image").to_owned())
+            .on_drop(cx.listener(|s, paths: &gpui::ExternalPaths, _, cx| {
+                s.composer
+                    .update(cx, |i, cx| i.attach_paths(paths.paths().to_vec(), cx));
             }))
-            .child(footer);
+            .child(self.composer.clone())
+            .child(self.composer_control_view(cx))
+            .child(self.composer.update(cx, |i, cx| i.image_chips(cx)))
+            .child(footer)
+            .child(
+                div()
+                    .absolute()
+                    .right(px(8.))
+                    .bottom(px(8.))
+                    .child(self.primary_view(cx)),
+            );
+        let owner = cx.entity().downgrade();
+        card = card.child(
+            canvas(
+                |_, _, _| (),
+                move |bounds, _, _, cx| {
+                    let _ = owner.update(cx, |s, cx| {
+                        s.composer
+                            .update(cx, |i, _| i.controls.context.card_bounds = Some(bounds));
+                    });
+                },
+            )
+            .absolute()
+            .inset_0(),
+        );
         if let Some(open) = open {
-            let mut picker = div()
-                .id("composer-picker")
-                .p(px(8.))
-                .flex()
-                .flex_wrap()
-                .gap(px(6.));
-            let choices: &[(&str, &str)] = match open {
-                "mode" => &[
-                    ("solo", "Solo"),
-                    ("fast", "Shared"),
-                    ("multitask", "Worktrees"),
-                ],
-                "access" => &[("plan", "Plan only"), ("full", "Full access")],
-                "effort" => &[
-                    ("low", "Low"),
-                    ("medium", "Medium"),
-                    ("high", "High"),
-                    ("xhigh", "Extra high"),
-                    ("max", "Max"),
-                ],
-                _ => &[],
-            };
-            for &(value, label) in choices {
-                let field = match open {
-                    "mode" => "pickedMode",
-                    "access" => "permissionMode",
-                    _ => "effort",
-                };
-                picker = picker.child(self.composer_button(
-                    &format!("{open}-{value}"),
-                    label,
-                    !busy,
-                    cx,
-                    move |s, w, cx| s.composer_choice(field, value, w, cx),
-                ));
-            }
-            if let Some(model) = model {
-                let input = model.clone();
-                picker = picker
-                    .child(
-                        div()
-                            .id("composer-model-input")
-                            .debug_selector(|| "composer-model-input".into())
-                            .w_full()
-                            .child(model),
-                    )
-                    .child(self.composer_button(
-                        "composer-model-save",
-                        if busy { "Saving…" } else { "Save" },
-                        !busy,
-                        cx,
-                        move |s, w, cx| {
-                            let model = input.read(cx).text.trim().to_owned();
-                            s.composer_choice("model", &model, w, cx);
-                        },
-                    ));
-            }
-            picker = picker.child(self.composer_button(
-                "composer-picker-close",
-                "Close",
-                !busy,
-                cx,
-                |s, w, cx| s.dismiss_composer_picker(w, cx),
-            ));
-            card = card.child(picker);
+            card = card
+                .relative()
+                .child(self.composer_popover(open, busy, model, &routing, window, cx));
+        } else if let Some(help) = self.context_help(cx) {
+            card = card.relative().child(help);
         }
         card.when(!error.is_empty(), |d| {
             d.child(
@@ -534,3 +742,12 @@ impl Surface {
         .into_any_element()
     }
 }
+
+/// Lucide audio-lines, as the desktop Live button draws it.
+/// Lucide "paperclip" (ISC).
+const PAPERCLIP: &str = "m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48";
+/// How long a press on the empty primary button waits before it starts Live.
+const VOICE_HOLD_MS: u64 = 350;
+/// The space between Stop and the primary button.
+const PRIMARY_GAP: f32 = 6.;
+const WAVEFORM: &str = "M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4";

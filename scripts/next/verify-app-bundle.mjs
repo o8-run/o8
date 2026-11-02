@@ -5,9 +5,11 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readMachOArchitectures } from '../lib/macos-release-artifacts.mjs';
 import { verifyNextBuildIdentity } from './build-identity.mjs';
+import { assertNextRuntimeFilesPresent } from '../lib/tauri-export-safety.mjs';
 
 /** Release-only gate, after signing. The app's existing notary flow covers its sealed sidecars. */
 export function verifyNextAppSidecar(app) {
+  assertNextRuntimeFilesPresent(join(app, 'Contents/Resources/server'));
   const binary = join(app, 'Contents/MacOS/o8-next');
   if (!existsSync(binary)) throw new Error('o8 next sidecar is missing from the app bundle');
   const metadata = lstatSync(binary);

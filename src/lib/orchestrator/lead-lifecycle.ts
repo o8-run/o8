@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { assertLlmThread } from '@/lib/bots/network-kind';
 import { realpathSync } from 'node:fs';
 
 import { getSqlite } from '@/lib/db';
@@ -537,6 +538,7 @@ export async function sendLeadThreadMessage(input: {
   beforeAdmit?: () => void;
 }) {
   const threadId = cleanLeadString(input.threadId, 'threadId', 256);
+  assertLlmThread(threadId);
   const lead = getSqlite().prepare(
     'SELECT * FROM orchestrator_leads WHERE thread_id = ?',
   ).get(threadId) as LeadRow | undefined;

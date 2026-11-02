@@ -30,6 +30,13 @@ export function attachReplaySocket(server: Server, token: string, requests: stri
       const message = JSON.parse(bytes.toString()) as { type: string; subscriptions?: Array<{ stream: string; since?: number }> };
       requests.push(`WS ${message.type}`);
       if (message.type === 'ping') { ws.send(JSON.stringify({ channel: 'pong', event: 'pong', data: {} })); return; }
+      // The stop pill's one-shot socket waits for this ack, as ws-server sends it.
+      if (message.type === 'orchestrator-interrupt') {
+        const { threadId, repoPath } = message as { threadId?: string; repoPath?: string };
+        ws.send(JSON.stringify({ channel: 'orchestrator', event: 'interrupt-ack',
+          data: { threadId, repoPath, state: 'accepted', interrupted: true, duplicate: false } }));
+        return;
+      }
       if (subscribed || message.type !== 'realtime-subscribe') { ws.close(1008); return; }
       const subscriptions = message.subscriptions;
       if (subscriptions?.length !== 1 || subscriptions[0].stream !== `session:${replay.initial.sessionKey}` || subscriptions[0].since !== undefined) {

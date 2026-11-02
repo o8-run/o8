@@ -1,5 +1,8 @@
 # Activity
 
+Current right-panel parity is tracked in [Right-panel ports](right-panel-ports.md).
+The extraction receipts below describe earlier revisions.
+
 The opt-in shell registers Activity through `src/surfaces/activity.rs` and one
 entry in the shell inventory. Its `activity/` directory owns the feed, GPUI view,
 transport and tests. The stateless workspace slice preserves the existing

@@ -1,0 +1,13 @@
+thread 'shell::workers::action_tests::workers_actions_are_reachable_by_tab_and_enter' (93362) panicked at src/surfaces/workers/action_tests.rs:126:5:
+assertion failed: visual.debug_bounds("diff-file-0").is_some()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test shell::workers::action_tests::workers_actions_are_reachable_by_tab_and_enter ... FAILED
+
+failures:
+
+failures:
+    shell::workers::action_tests::workers_actions_are_reachable_by_tab_and_enter
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 173 filtered out; finished in 8.85s
+
+error: test failed, to rerun pass `--bin o8-next`

@@ -1,0 +1,7 @@
+running 1 test
+test shell::pull_requests::registration_tests::pull_requests_single_registration_owns_the_request_adapter ... registered real entry point: PR preview and POST compile
+removed single registration: real application still compiles
+removed single registration: pr_preview and pr_post are both unavailable (E0599)
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 225 filtered out; finished in 7.76s
