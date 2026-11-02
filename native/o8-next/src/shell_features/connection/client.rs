@@ -52,11 +52,13 @@ impl Client {
     }
     pub(crate) fn refresh_bearer(&self, token: Option<String>) -> Result<(), String> {
         let origin = self.url("/").map_err(|_| "Invalid server URL")?;
-        let replacement = transport::Client::authenticated(origin.as_str(), token);
+        let tunnel = self.snapshot().tunnel();
+        let replacement = transport::Client::authenticated(origin.as_str(), token)
+            .map(|client| client.with_tunnel(tunnel.clone()));
         let (replacement, result) = match replacement {
             Ok(client) => (client, Ok(())),
             Err(error) => (
-                transport::Client::authenticated(origin.as_str(), None)?,
+                transport::Client::authenticated(origin.as_str(), None)?.with_tunnel(tunnel),
                 Err(error),
             ),
         };
