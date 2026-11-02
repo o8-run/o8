@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
+import { MAX_CHANGED_PATH_PROBES, worktreeActivityMtimeMs } from './activity';
 
 const execFileAsync = promisify(execFile);
 const cleanupPaths: string[] = [];
@@ -47,6 +48,25 @@ afterEach(async () => {
     await rm(cleanupPath, { recursive: true, force: true });
   }
   delete process.env.CORTEX_IDE_DATA_DIR;
+});
+
+describe('worktree activity probe bound', () => {
+  it('stats the leading changed paths and stops at the cap', async () => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'o8-activity-cap-')));
+    const paths = Array.from({ length: MAX_CHANGED_PATH_PROBES + 1 }, (_, index) => `file-${index}.txt`);
+    await Promise.all(paths.map((name) => writeFile(path.join(root, name), 'x')));
+    const past = new Date('2020-01-01T00:00:00Z');
+    await Promise.all(paths.map((name) => utimes(path.join(root, name), past, past)));
+    await utimes(root, past, past);
+    const newest = new Date('2030-01-01T00:00:00Z');
+
+    await utimes(path.join(root, paths.at(-1)!), newest, newest);
+    await expect(worktreeActivityMtimeMs({ worktreePath: root, changedPaths: paths })).resolves.toBe(past.getTime());
+
+    await utimes(path.join(root, paths[0]!), newest, newest);
+    await expect(worktreeActivityMtimeMs({ worktreePath: root, changedPaths: paths })).resolves.toBe(newest.getTime());
+    await rm(root, { recursive: true, force: true });
+  });
 });
 
 describe('WorktreeManager retention activity truth (#1586)', () => {
