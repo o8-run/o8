@@ -1,6 +1,6 @@
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
-export type VoiceTerminals = Record<string, { outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed'; text: string }>;
+export type VoiceTerminals = Record<string, { outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed' | 'held'; text: string; transcriptUserMessageId?: string }>;
 
 /** Restored receipts survive voice close/reload; late uncertainty cannot erase confirmed evidence. */
 export function voiceTerminalContext(messages: MobileTranscriptEntry[], live: VoiceTerminals): VoiceTerminals {

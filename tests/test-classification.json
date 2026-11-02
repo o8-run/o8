@@ -2092,6 +2092,13 @@
       ]
     },
     {
+      "path": "tests/child-creation-guard-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ci-gates-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4680,6 +4687,12 @@
       ]
     },
     {
+      "path": "tests/next-dictation-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-diff-review-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4886,6 +4899,13 @@
       "reasons": [
         "child-process",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/next-voice-host-real-path.test.ts",
+      "reasons": [
+        "network-listener",
         "real-path"
       ]
     },

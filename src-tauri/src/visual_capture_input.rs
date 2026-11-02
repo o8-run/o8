@@ -44,7 +44,7 @@ fn main_webview_rect(app: &tauri::AppHandle, screen: [f64; 4]) -> Option<[f64; 4
     if front.processIdentifier() != std::process::id() as i32 {
         return None;
     }
-    let window = app.get_webview_window("main")?;
+    let window = crate::voice_host::classic_window(&app)?;
     if !window.is_focused().ok()? {
         return None;
     }

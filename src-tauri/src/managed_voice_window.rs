@@ -57,6 +57,8 @@ pub fn managed_voice_presentation_epoch<R: tauri::Runtime>(
 
 /// FlagsChanged is emitted on both Caps Lock toggles. Duplicate edges do not retoggle.
 pub fn caps_lock_changed(app: &tauri::AppHandle, keycode: i64, flags: u64) {
+    // Under o8 next the hidden voice host holds the `main` label and relays
+    // the tap to the native window through the voice broker.
     if caps_lock_edge(&CAPS_STATE, keycode, flags) {
         let _ = app.emit_to("main", "o8:managed-chat-voice-toggle", ());
     }
@@ -208,9 +210,8 @@ fn position<R: tauri::Runtime>(
     use objc2_app_kit::{NSColor, NSScreen, NSWindow, NSWindowCollectionBehavior};
     use objc2_foundation::{NSPoint, NSRect, NSSize};
     let mtm = MainThreadMarker::new().ok_or("Voice geometry requires the main thread.")?;
-    let main = app
-        .get_webview_window("main")
-        .ok_or("The owning chat window is unavailable.")?;
+    let main =
+        crate::voice_host::classic_window(&app).ok_or("The owning chat window is unavailable.")?;
     // Both pointers are owned by live Tauri windows and accessed only on the main thread.
     unsafe {
         let main = &*(main.ns_window().map_err(|error| error.to_string())? as *mut NSWindow);
@@ -247,8 +248,7 @@ fn position<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     window: &tauri::WebviewWindow<R>,
 ) -> Result<(), String> {
-    let monitor = app
-        .get_webview_window("main")
+    let monitor = crate::voice_host::classic_window(&app)
         .and_then(|main| main.current_monitor().ok().flatten())
         .ok_or("No display for the chat window.")?;
     let height = (220.0 * monitor.scale_factor()).min(f64::from(monitor.size().height)) as u32;
