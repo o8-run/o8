@@ -113,6 +113,7 @@ impl Client {
                 "enabled":true,"title":packet["title"],"branch":packet["branchTarget"],"runtime":packet["runtime"],"status":packet["status"],"repo":packet["workspaceTargetPath"].as_str().and_then(|path| path.rsplit('/').find(|part| !part.is_empty())),"launchContext":packet["launchContext"]
             }));
             sessions.push(Session {
+                machine: None,
                 parked_workspaces: serde_json::from_value(agent["parkedWorkspaces"].clone()).unwrap_or_default(),
                 repo_slug: None,
                 pinned_at: agent["pinnedAt"].as_str().map(str::to_owned),
