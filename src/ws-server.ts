@@ -155,6 +155,7 @@ import {
 } from './lib/mobile/orchestrator-thread-history';
 import { OrchestratorThreadProjectError } from './lib/mobile/orchestrator-thread-project';
 import { persistOrchestratorThreadUserMessageFromWire } from './lib/ws-server/orchestrator-thread-send';
+import { withAttachmentFilePaths } from './lib/mobile/orchestrator-image-media';
 import { disabledRuntimeRefusal } from './lib/providers/disabled-runtimes';
 import { resolveMobileTurnSelection } from './lib/ws-server/mobile-turn-selection';
 import {
@@ -5639,7 +5640,7 @@ async function handleOrchestratorSendMsgOnce(
     const mobileMessage = msg.surface === 'mobile' && isComposerWireMode(msg.pickedMode)
       ? composeComposerWireMessage(message, msg.pickedMode).wireMessage
       : message;
-    const operatorMessage = modelFacingComposerMessage(mobileMessage, executionMode);
+    const operatorMessage = withAttachmentFilePaths(modelFacingComposerMessage(mobileMessage, executionMode), attachments);
     const turnBody = backendSwitchHandoff
       ? `${backendSwitchHandoff.prelude}\n\n${operatorMessage}`
       : operatorMessage;
