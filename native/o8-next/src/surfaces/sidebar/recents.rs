@@ -104,12 +104,13 @@ pub(super) fn header(kind: &str, title: &str, status: &str) -> Row {
         attention: false,
         marker: "",
         folder: None,
+        machine: None,
     }
 }
 pub(super) fn thread_row(s: &Session, now: u64, branches: &HashSet<String>) -> Row {
     Row {
         kind: "thread".into(),
-        workspace: s.repo_path.clone().unwrap_or_else(|| "Unassigned".into()),
+        workspace: s.workspace(),
         id: Some(s.id.clone()),
         title: s.title.clone(),
         status: s.status.clone(),
@@ -124,6 +125,7 @@ pub(super) fn thread_row(s: &Session, now: u64, branches: &HashSet<String>) -> R
         attention: sidebar::rank(s) > 0 || s.unread,
         marker: "",
         folder: None,
+        machine: s.away().map(str::to_owned),
     }
 }
 /// A titled group of threads, at most `cap` until disclosed or searched.

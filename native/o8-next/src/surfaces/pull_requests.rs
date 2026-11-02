@@ -107,9 +107,14 @@ fn hosted_view(
     window: &mut Window,
     cx: &mut Context<Shell>,
 ) -> Entity<View> {
-    let client = shell.client.in_workspace(workspace);
+    let client = shell.panel_client(workspace);
     let view = cx.new(|cx| {
-        let mut view = View::new(client, workspace.to_owned(), window, cx);
+        let mut view = View::new(
+            client,
+            crate::shell::session::workspace_path(workspace).to_owned(),
+            window,
+            cx,
+        );
         view.hosted = true;
         view
     });

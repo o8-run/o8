@@ -84,6 +84,8 @@ pub struct Shell {
     state: State,
     sessions: Vec<Session>,
     workspaces: Vec<String>,
+    /// Tunnels to saved machines, shared with the sidebar.
+    links: crate::shell::settings::machine_links::Links,
     content: HashMap<String, Content>,
     focus: FocusHandle,
     palette: bool,
@@ -120,6 +122,7 @@ impl Shell {
             state,
             sessions: vec![],
             workspaces: vec![],
+            links: Default::default(),
             content: HashMap::new(),
             focus,
             palette: false,
@@ -213,12 +216,17 @@ impl Shell {
     fn workspace_sessions(&self) -> Vec<Session> {
         self.sessions
             .iter()
-            .filter(|s| {
-                Some(s.repo_path.as_deref().unwrap_or("Unassigned"))
-                    == self.state.selected.as_deref()
-            })
+            .filter(|s| Some(s.workspace().as_str()) == self.state.selected.as_deref())
             .cloned()
             .collect()
+    }
+    /// The client a workspace's surfaces use. A machine's workspace has none
+    /// while its tunnel is down.
+    fn workspace_client(&self, workspace: &str) -> Option<Client> {
+        match session::machine_workspace(workspace) {
+            Some((machine, repo)) => Some(self.links.client(machine)?.in_workspace(repo)),
+            None => Some(self.client.in_workspace(workspace)),
+        }
     }
     fn current(&self) -> Option<&Workspace> {
         self.state
@@ -231,6 +239,16 @@ impl Shell {
     fn active(&self) -> Option<Tab> {
         self.current().and_then(|w| w.tabs.get(w.active)).cloned()
     }
+    /// A panel's client. A far machine's panel never falls back to this
+    /// computer's data: while it's offline the client can only fail, and the
+    /// panel shows its normal error.
+    pub(crate) fn panel_client(&self, workspace: &str) -> Client {
+        self.workspace_client(workspace).unwrap_or_else(|| {
+            Client::authenticated("http://127.0.0.1:1", None)
+                .expect("a fixed loopback origin is valid")
+        })
+    }
+
     fn ensure(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.connected {
             return;

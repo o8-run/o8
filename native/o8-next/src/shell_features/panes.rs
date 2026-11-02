@@ -101,10 +101,16 @@ fn ensure(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
             Leaf::Terminal {
                 session: Some(session),
             } => {
-                let client = s.client.in_workspace(&ws);
+                let client = s.panel_client(&ws);
                 let (ws, session) = (ws.clone(), session.clone());
-                let view =
-                    cx.new(|cx| super::super::terminal::View::pinned(client, ws, session, cx));
+                let view = cx.new(|cx| {
+                    super::super::terminal::View::pinned(
+                        client,
+                        crate::shell::session::workspace_path(&ws).to_owned(),
+                        session,
+                        cx,
+                    )
+                });
                 s.content.insert(key, Content::Terminal(view));
             }
             Leaf::Terminal { session: None } => start_terminal(s, id.to_owned(), cx),
@@ -119,11 +125,11 @@ fn start_terminal(s: &mut Shell, leaf: String, cx: &mut Context<Shell>) {
         return;
     }
     let ws = workspace(s);
-    let client = s.client.in_workspace(&ws);
+    let client = s.panel_client(&ws);
     let owner = format!("o8-next:{ws}:pane:{leaf}");
-    let task = cx
-        .background_executor()
-        .spawn(async move { client.create_terminal(&ws, &owner) });
+    let task = cx.background_executor().spawn(async move {
+        client.create_terminal(crate::shell::session::workspace_path(&ws), &owner)
+    });
     cx.spawn(async move |this, cx| {
         let result = task.await;
         let _ = this.update(cx, |s, cx| {
@@ -161,7 +167,9 @@ fn split(s: &mut Shell, target: &str, zone: Zone, pane: super::RailPane, cx: &mu
                 return;
             }
             let open = tree(s).leaves().into_iter().find_map(|(leaf, content)| {
-                let Leaf::Chat { session } = content else { return None };
+                let Leaf::Chat { session } = content else {
+                    return None;
+                };
                 // A pane's view may have moved off its own thread.
                 let shown = match s.content.get(&key(s, leaf)) {
                     Some(Content::Session(view)) => view.read(cx).shown_thread(),
@@ -513,7 +521,9 @@ fn link_in_composer(
     let Some(Content::Session(view)) = s.content.get(&s.key(&tab)) else {
         return false;
     };
-    view.update(cx, |view, cx| view.take_thread_drop(id, title, position, cx))
+    view.update(cx, |view, cx| {
+        view.take_thread_drop(id, title, position, cx)
+    })
 }
 
 /// The conversation the main pane shows.

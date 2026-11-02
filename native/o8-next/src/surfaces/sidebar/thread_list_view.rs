@@ -223,6 +223,9 @@ impl ThreadList {
                         } else {
                             28.
                         }))
+                        .when_some(row.id.clone().filter(|_| thread), |view, id| {
+                            this.with_thread_hover(view, id, cx)
+                        })
                         .flex()
                         .items_center()
                         // Headings keep the row height but sit low in it, so
@@ -296,7 +299,10 @@ impl ThreadList {
                                 })
                                 .when(thread, |view| {
                                     // A folder already names its threads' repository.
-                                    view.when(!by_repo, |view| {
+                                    view.when(row.machine.is_some(), |view| {
+                                        view.child(thread_hover::machine_mark())
+                                    })
+                                    .when(!by_repo, |view| {
                                         view.child(
                                             div()
                                                 .max_w(px(65.))

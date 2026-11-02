@@ -5,9 +5,15 @@ pub(super) type View = crate::brain::Brain;
 pub(super) const REGISTRATION: Registration = Registration {
     command: Some((0, || Command::Brain)),
     create: |shell, _, workspace, window, cx| {
-        let client = shell.client.in_workspace(&workspace);
+        let client = shell.panel_client(&workspace);
         Some(Content::Brain(cx.new(|cx| {
-            crate::brain::Brain::new(client, workspace, None, window, cx)
+            crate::brain::Brain::new(
+                client,
+                crate::shell::session::workspace_path(&workspace).to_owned(),
+                None,
+                window,
+                cx,
+            )
         })))
     },
     ..Registration::new("Brain", "Open Brain", |shell, _, window, cx| {

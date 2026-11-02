@@ -15,11 +15,11 @@ fn create(
     window: &mut Window,
     cx: &mut Context<Shell>,
 ) -> Option<Content> {
-    let client = shell.client.in_workspace(&workspace);
+    let client = shell.panel_client(&workspace);
 
     let options = pane_layout::Options {
         size: 4,
-        workspace,
+        workspace: crate::shell::session::workspace_path(&workspace).to_owned(),
         file: shell.file.with_extension("grid.json"),
     };
     if let Err(error) = options.load() {

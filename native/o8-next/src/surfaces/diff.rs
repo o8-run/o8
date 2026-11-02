@@ -18,10 +18,15 @@ pub(super) const REGISTRATION: Registration = Registration {
             .diff
             .diff_packet
             .clone();
-        let client = shell.client.in_workspace(&workspace);
-        Some(Content::Diff(
-            cx.new(|cx| View::new(client, workspace, selected, cx)),
-        ))
+        let client = shell.panel_client(&workspace);
+        Some(Content::Diff(cx.new(|cx| {
+            View::new(
+                client,
+                crate::shell::session::workspace_path(&workspace).to_owned(),
+                selected,
+                cx,
+            )
+        })))
     },
     capture: |shell, _, cx| {
         if let Some(Tab::Diff) = shell.active()

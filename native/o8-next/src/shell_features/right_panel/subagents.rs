@@ -96,12 +96,12 @@ pub(super) fn current(s: &mut Shell, cx: &mut Context<Shell>) -> Option<Entity<I
     if let Some(view) = s.features.get::<Inspectors>().workspace.get(&repo) {
         return Some(view.clone());
     }
-    let client = s.client.in_workspace(&repo);
+    let client = s.panel_client(&repo);
     let view = cx.new(|cx| {
         Inspector::new(
             client,
             Scope {
-                repo: repo.clone(),
+                repo: crate::shell::session::workspace_path(&repo).to_owned(),
                 parent: None,
             },
             cx,

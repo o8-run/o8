@@ -1,9 +1,10 @@
-//! Opens a saved SSH machine in its own window, so threads run on that machine.
-//! One SSH tunnel carries the far server's two ports; this binary then attaches
-//! to the local end. The tunnel lives exactly as long as the window.
+//! Reaches a saved SSH machine: one SSH tunnel carries the far server's two
+//! ports, and a `Link` owns that tunnel. Open attaches a window to the local end,
+//! and the tunnel lives exactly as long as the window.
+use crate::client::{Client, Tunnel};
 use serde_json::Value;
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// A source checkout writes no port files and always uses these two.
@@ -44,6 +45,39 @@ impl Remote {
         let api = port(DEFAULT_API_PORT);
         let ws = port(DEFAULT_WS_PORT);
         Some(Self { token, api, ws })
+    }
+}
+
+/// A live tunnel to one machine. Dropping it closes the tunnel.
+pub(crate) struct Link {
+    api: u16,
+    ws: u16,
+    remote: Remote,
+    tunnel: Child,
+}
+
+impl Link {
+    /// A client for the far server, through this tunnel.
+    pub(crate) fn client(&self) -> Result<Client, String> {
+        Ok(Client::authenticated(
+            &format!("http://127.0.0.1:{}", self.api),
+            Some(self.remote.token.clone()),
+        )?
+        .with_tunnel(Some(Tunnel {
+            host: format!("127.0.0.1:{}", self.remote.api),
+            ws_port: Some(self.ws),
+        })))
+    }
+    /// False once ssh has exited, which is how a dropped machine shows up.
+    pub(crate) fn alive(&mut self) -> bool {
+        matches!(self.tunnel.try_wait(), Ok(None))
+    }
+}
+
+impl Drop for Link {
+    fn drop(&mut self) {
+        let _ = self.tunnel.kill();
+        let _ = self.tunnel.wait();
     }
 }
 
@@ -89,6 +123,12 @@ impl Route {
         let mut args = self.base_args();
         args.extend([
             "-N".to_owned(),
+            // A shared SSH connection would take these forwards and let this
+            // process exit, so they'd outlive the tunnel that asked for them.
+            "-o".to_owned(),
+            "ControlMaster=no".to_owned(),
+            "-o".to_owned(),
+            "ControlPath=none".to_owned(),
             "-o".to_owned(),
             "ExitOnForwardFailure=yes".to_owned(),
             "-o".to_owned(),
@@ -103,7 +143,8 @@ impl Route {
         args
     }
 
-    pub(crate) fn open(self) -> Result<(), String> {
+    /// Reads the far server's token and ports, then opens the tunnel.
+    pub(crate) fn connect(&self) -> Result<Link, String> {
         let reply = Command::new("ssh")
             .args(self.remote_args())
             .stdin(Stdio::null())
@@ -129,6 +170,16 @@ impl Route {
             let _ = tunnel.wait();
             return Err("The tunnel to this machine did not open.".into());
         }
+        Ok(Link {
+            api,
+            ws,
+            remote,
+            tunnel,
+        })
+    }
+
+    pub(crate) fn open(self) -> Result<(), String> {
+        let link = self.connect()?;
         let home = std::env::var("HOME").map_err(|_| "HOME is not set.".to_owned())?;
         let binary = std::env::current_exe().map_err(|_| "Could not find this app.".to_owned())?;
         let window = Command::new(binary)
@@ -136,13 +187,16 @@ impl Route {
                 "--enable-next",
                 "--app-shell",
                 "--server",
-                &format!("http://127.0.0.1:{api}"),
+                &format!("http://127.0.0.1:{}", link.api),
                 "--shell-state",
                 &format!("{home}/.o8/next-shell-{}.json", self.id),
             ])
-            .env("O8_NEXT_API_TOKEN", &remote.token)
-            .env("O8_NEXT_TUNNEL_HOST", format!("127.0.0.1:{}", remote.api))
-            .env("O8_NEXT_WS_PORT", ws.to_string())
+            .env("O8_NEXT_API_TOKEN", &link.remote.token)
+            .env(
+                "O8_NEXT_TUNNEL_HOST",
+                format!("127.0.0.1:{}", link.remote.api),
+            )
+            .env("O8_NEXT_WS_PORT", link.ws.to_string())
             .env_remove("O8_NEXT_CLERK_SESSION_TOKEN")
             .env_remove("O8_NEXT_TOKEN_FILE")
             .env_remove("O8_NEXT_TOKEN_FILES")
@@ -152,18 +206,10 @@ impl Route {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn();
-        let mut window = match window {
-            Ok(window) => window,
-            Err(_) => {
-                let _ = tunnel.kill();
-                let _ = tunnel.wait();
-                return Err("Could not open a window for this machine.".into());
-            }
-        };
+        let mut window = window.map_err(|_| "Could not open a window for this machine.")?;
         std::thread::spawn(move || {
             let _ = window.wait();
-            let _ = tunnel.kill();
-            let _ = tunnel.wait();
+            drop(link);
         });
         Ok(())
     }
@@ -200,6 +246,7 @@ mod tests {
     fn the_target_always_follows_the_end_of_options() {
         let remote = Remote::parse("t\n47100\n47105\n").unwrap();
         let args = route().tunnel_args(5000, 5001, &remote);
+        assert!(args.contains(&"ControlPath=none".to_owned()));
         assert_eq!(&args[args.len() - 2..], ["--", "me@box"]);
         assert!(args.contains(&"127.0.0.1:5000:127.0.0.1:47100".to_owned()));
         assert!(args.contains(&"127.0.0.1:5001:127.0.0.1:47105".to_owned()));

@@ -67,6 +67,17 @@ pub struct Row {
     pub marker: &'static str,
     /// Set on a By repo folder row.
     pub folder: Option<folders::Folder>,
+    /// The other computer this thread lives on.
+    pub machine: Option<String>,
+}
+impl Row {
+    /// A place name, with the machine in front when it isn't this computer.
+    fn on_machine(&self, place: String) -> String {
+        match &self.machine {
+            Some(machine) => format!("{machine} · {place}"),
+            None => place,
+        }
+    }
 }
 fn label(path: &str) -> String {
     path.rsplit('/')
@@ -84,6 +95,7 @@ fn workspace_parked(frame: &Value) -> bool {
 
 pub struct ThreadList {
     client: Client,
+    pub(crate) links: machine_threads::Links,
     header: project_header::HeaderSnapshot,
     workspace: Option<String>,
     header_busy: bool,
@@ -120,6 +132,8 @@ pub struct ThreadList {
     pr_links_at: Option<Instant>,
     pr_loading: bool,
     pr_hover: Option<pr_links::PrHover>,
+    /// The thread whose facts card is opening or open (thread_hover.rs).
+    thread_hover: Option<thread_hover::ThreadHover>,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
@@ -211,6 +225,7 @@ impl ThreadList {
         Self {
             subscription: transport::subscribe_global(client.clone()),
             client,
+            links: Default::default(),
             header: project_header::HeaderSnapshot::default(),
             workspace: None,
             header_busy: false,
@@ -226,6 +241,7 @@ impl ThreadList {
             pr_links_at: None,
             pr_loading: false,
             pr_hover: None,
+            thread_hover: None,
             views: HashMap::new(),
             view_menu: false,
             new_menu: false,
@@ -438,8 +454,10 @@ impl ThreadList {
         self.dirty = None;
         let generation = self.generation;
         let client = self.client.clone();
+        let links = self.links.clone();
         let task = cx.background_executor().spawn(async move {
-            let (sessions, branches) = client.sidebar_sessions_with_branches()?;
+            let (mut sessions, branches) = client.sidebar_sessions_with_branches()?;
+            sessions.extend(machine_threads::sessions(&client, &links));
             let header = match project_header::HeaderSnapshot::load(&client) {
                 Ok(header) => Some(header),
                 // Older session-only hosts do not provide project routes.
@@ -676,7 +694,7 @@ impl ThreadList {
             .dirty
             .is_some_and(|time| time.elapsed() >= Duration::from_millis(300))
             && self.last_attempt.elapsed() >= DIRTY_RELOAD_GAP
-            || self.last_load.elapsed() >= Duration::from_secs(300)
+            || self.last_load.elapsed() >= machine_threads::reload_gap()
         {
             self.load(cx);
         }
@@ -1044,6 +1062,9 @@ mod races;
 mod project_header;
 pub(crate) use project_header::repo_identity;
 
+#[path = "machine_threads.rs"]
+pub(crate) mod machine_threads;
+
 #[path = "recents.rs"]
 pub(crate) mod recents;
 
@@ -1065,6 +1086,8 @@ mod bulk;
 mod open_editor;
 #[path = "pr_links.rs"]
 pub(crate) mod pr_links;
+#[path = "thread_hover.rs"]
+mod thread_hover;
 #[path = "detailed.rs"]
 pub(crate) mod detailed;
 #[path = "pins.rs"]

@@ -123,7 +123,9 @@ impl ThreadList {
         self.sessions
             .iter()
             .filter(|s| {
-                keys.is_empty() || s.repo_path.as_ref().is_some_and(|path| keys.contains(path))
+                keys.is_empty()
+                    || s.machine.is_some()
+                    || s.repo_path.as_ref().is_some_and(|path| keys.contains(path))
             })
             .cloned()
             .collect()
