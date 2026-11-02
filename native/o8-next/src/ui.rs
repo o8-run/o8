@@ -156,6 +156,7 @@ pub(crate) struct Surface {
     key_revision: u64,
     painted: Rc<Cell<u64>>,
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
+    composer_card: Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>>,
     voice: VoiceState,
     dictation: DictationState,
     /// The primary button's press count and whether that press's hold
@@ -233,6 +234,7 @@ impl Surface {
             key_revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
+            composer_card: Default::default(),
             voice: VoiceState::Off,
             dictation: DictationState::Off,
             voice_hold: (0, false),
