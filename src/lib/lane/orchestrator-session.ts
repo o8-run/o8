@@ -684,6 +684,11 @@ export async function sendToOrchestrator(
       // never settles on a `result`.
       const timeout = setTimeout(() => {
         console.warn(`[orchestrator-session] Process timeout (${PROCESS_TIMEOUT_MS}ms) — killing ${session.sessionName}`);
+        if (w.activeTurn?.heldResult) {
+          settleOrchestratorTurn(session, w, null, true, 'completed');
+          killOrchestratorProc(session, w);
+          return;
+        }
         const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
         onEvent({
           type: 'error',
