@@ -33,6 +33,11 @@ pub(crate) struct Links {
     stops: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
+/// A client whose every request fails.
+pub(crate) fn dead_client() -> Client {
+    Client::authenticated("http://127.0.0.1:1", None).expect("a fixed loopback origin is valid")
+}
+
 /// The wait before the next attempt, doubling up to a minute.
 fn next_retry(wait: Duration) -> Duration {
     (wait * 2).min(LAST_RETRY)
@@ -59,10 +64,7 @@ impl Links {
     /// A client that speaks for this machine, and only for it: while it's
     /// offline every request fails, so nothing falls back to this computer.
     pub(crate) fn client_or_offline(&self, id: &str) -> Client {
-        self.client(id).unwrap_or_else(|| {
-            Client::authenticated("http://127.0.0.1:1", None)
-                .expect("a fixed loopback origin is valid")
-        })
+        self.client(id).unwrap_or_else(dead_client)
     }
 
     /// Follows the saved list: new machines start, removed ones close.

@@ -598,22 +598,28 @@ impl ThreadList {
         }
         cx.notify();
     }
-    /// The client that owns a thread: its machine's, or this computer's.
-    pub(super) fn client_for(&self, id: &str) -> Client {
-        self.sessions
-            .iter()
-            .find(|s| s.id == id)
-            .and_then(|s| s.machine.as_deref())
-            .map_or_else(
-                || self.client.clone(),
-                |machine| self.links.client_or_offline(machine),
-            )
+    /// The client that owns a sidebar id, and that server's id for the thread.
+    pub(super) fn owner(&self, id: &str) -> (Client, String) {
+        let listed = self.sessions.iter().any(|s| s.id == id);
+        match machine_threads::owner(id, listed, machine_threads::enabled()) {
+            machine_threads::Owner::Machine(machine, id) => {
+                (self.links.client_or_offline(machine), id.to_owned())
+            }
+            machine_threads::Owner::Here(id) => (self.client.clone(), id.to_owned()),
+            machine_threads::Owner::Nobody(id) => (
+                crate::shell::settings::machine_links::dead_client(),
+                id.to_owned(),
+            ),
+        }
     }
-    /// Pairs each target with the client that owns it.
+    /// Pairs each target with the client that owns it, under that server's id.
     pub(super) fn routed<T>(&self, targets: Vec<(String, T)>) -> Vec<(Client, String, T)> {
         targets
             .into_iter()
-            .map(|(id, target)| (self.client_for(&id), id, target))
+            .map(|(id, target)| {
+                let (client, id) = self.owner(&id);
+                (client, id, target)
+            })
             .collect()
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
@@ -983,7 +989,7 @@ impl ThreadList {
         let editor_revision = self.editor.read(cx).revision;
         let draft_owner = self.rename.clone();
         let renaming = draft_owner.as_ref() == Some(&id) && patch["title"].is_string();
-        let client = self.client_for(&id);
+        let (client, thread) = self.owner(&id);
         let workspace = self
             .sessions
             .iter()
@@ -998,7 +1004,7 @@ impl ThreadList {
         });
         let task = cx
             .background_executor()
-            .spawn(async move { client.mutate_sidebar(workspace.as_deref(), &id, patch) });
+            .spawn(async move { client.mutate_sidebar(workspace.as_deref(), &thread, patch) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {

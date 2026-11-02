@@ -73,6 +73,30 @@ impl Session {
         }
     }
 }
+/// Ids repeat across computers when a data folder was cloned, so a far thread's
+/// sidebar id carries its machine. No `:`, which marks a worker's id.
+const MACHINE_THREAD: &str = "machine~";
+pub(crate) fn machine_thread_id(machine: &str, id: &str) -> String {
+    format!("{MACHINE_THREAD}{machine}|{id}")
+}
+/// The machine and its own thread id inside a sidebar id.
+pub(crate) fn machine_thread(id: &str) -> Option<(&str, &str)> {
+    id.strip_prefix(MACHINE_THREAD)?.split_once('|')
+}
+/// The sidebar's sessions as the shell keeps them: under each server's own id,
+/// and told apart by workspace.
+pub(crate) fn with_server_ids(sessions: &[Session]) -> Vec<Session> {
+    sessions
+        .iter()
+        .cloned()
+        .map(|mut session| {
+            if let Some((_, id)) = machine_thread(&session.id) {
+                session.id = id.to_owned();
+            }
+            session
+        })
+        .collect()
+}
 const MACHINE_WORKSPACE: &str = "machine:";
 /// The machine and repository inside a machine workspace's key.
 pub(crate) fn machine_workspace(workspace: &str) -> Option<(&str, &str)> {
@@ -206,6 +230,12 @@ pub struct Session {
     pub inbox_revision: Option<u64>,
 }
 impl Session {
+    /// This thread's id in the sidebar, given the shell's copy of it.
+    pub(crate) fn list_id(&self) -> String {
+        self.machine
+            .as_deref()
+            .map_or_else(|| self.id.clone(), |machine| machine_thread_id(machine, &self.id))
+    }
     /// Where this thread runs when that isn't this computer.
     pub(crate) fn away(&self) -> Option<&str> {
         self.machine_label

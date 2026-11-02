@@ -169,6 +169,13 @@ pub(super) const REGISTRATION: Registration = Registration {
                 _ => None,
             });
         let workspace = shell.state.selected.clone();
+        // A far workspace's thread goes by its own server's id in its surface.
+        let selected = selected.map(|id| {
+            match workspace.as_deref().and_then(session::machine_workspace) {
+                Some((machine, _)) => session::machine_thread_id(machine, &id),
+                None => id,
+            }
+        });
         shell
             .surfaces
             .sidebar
@@ -374,11 +381,11 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         cx.subscribe_in(&sidebar, window, |shell, _, event, window, cx| {
             match event {
                 ThreadEvent::Loaded(sessions) => {
-                    shell.install_sessions(sessions.clone(), false, cx)
+                    shell.install_sessions(session::with_server_ids(sessions), false, cx)
                 }
                 ThreadEvent::Refreshed(sessions, ledger) => {
                     shell.surfaces.sidebar.workspace_ledger = ledger.clone();
-                    shell.install_sessions(sessions.clone(), true, cx);
+                    shell.install_sessions(session::with_server_ids(sessions), true, cx);
                 }
                 ThreadEvent::Workspace(path, ledger) => {
                     shell
@@ -545,14 +552,22 @@ impl Shell {
         }
     }
     pub(super) fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(workspace) = self
+        // A sidebar id names one computer's thread; a link from inside a far
+        // thread names a thread in that thread's own workspace.
+        let selected = self.state.selected.clone();
+        let Some(session) = self
             .sessions
             .iter()
-            .find(|s| s.id == id)
-            .map(Session::workspace)
+            .find(|s| s.list_id() == id)
+            .or_else(|| {
+                self.sessions
+                    .iter()
+                    .find(|s| s.id == id && Some(s.workspace()) == selected)
+            })
         else {
             return;
         };
+        let (workspace, id) = (session.workspace(), session.id.clone());
         self.surfaces.projects.open = false;
         self.surfaces.settings.view = None;
         self.surfaces.settings.subscription = None;
