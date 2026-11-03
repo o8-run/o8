@@ -17,6 +17,7 @@ thread_local! {
         RefCell::default();
 }
 
+const WATCH_LIMIT: usize = 256;
 pub(crate) const MARK: &str = "M4 9h16M4 15h16M10 3 8 21M16 3l-2 18";
 const NAME: usize = 32;
 const NAMES: usize = 4;
@@ -355,6 +356,11 @@ fn watch(key: &str, mut item: Item, live: bool, now: f64) -> Item {
     WATCHED.with(|watched| {
         let mut watched = watched.borrow_mut();
         let clock = if item.group == Group::Working && live {
+            // Finished clocks only matter while their row is on screen; keep
+            // the map small for a long-lived window.
+            if watched.len() >= WATCH_LIMIT && !watched.contains_key(key) {
+                watched.retain(|_, (_, end)| end.is_none());
+            }
             let clock = watched.entry(key.to_owned()).or_insert((now, None));
             clock.1 = None;
             Some(*clock)
@@ -483,6 +489,21 @@ mod roster_tests {
         assert_eq!(later.finished, Some(9_000.), "the stop time holds");
         let loaded = watch("row:old", fresh(Group::Done), false, 5_000.);
         assert_eq!(elapsed(&loaded, 5_000.), None);
+    }
+
+    #[test]
+    fn finished_clocks_are_dropped_once_the_map_is_full() {
+        let fresh = |group| Item {
+            started: None,
+            ..item("x", group)
+        };
+        for n in 0..WATCH_LIMIT {
+            watch(&format!("full:{n}"), fresh(Group::Working), true, 1.);
+            watch(&format!("full:{n}"), fresh(Group::Done), false, 2.);
+        }
+        watch("full:new", fresh(Group::Working), true, 3.);
+        let size = WATCHED.with(|w| w.borrow().len());
+        assert!(size < WATCH_LIMIT, "{size} clocks kept");
     }
 
     #[test]
