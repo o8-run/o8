@@ -669,7 +669,18 @@ describe('principal-authz — worker credentials are bound to their persisted pa
     const packetB = `pkt-authz-owner-b-${Date.now()}`;
     // The worker card reads the lane diff through hardened lane Git, which needs a real repository.
     const repoPath = join(dataDir, 'packet-owner-repo');
+    // #5449: the merge route reads the lane diff through hardened lane Git, which runs
+    // `git rev-parse HEAD`. A bare `git init` leaves HEAD unborn, so the route 500s
+    // before it can reach the ownership decision this test asserts. Give the repo a
+    // real initial commit (matching the merge-preview fixture above) so HEAD resolves
+    // and the authz checks below actually run.
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repoPath, stdio: 'pipe' });
     execFileSync('git', ['init', '-q', '-b', 'main', repoPath], { stdio: 'pipe' });
+    git('config', 'user.email', 'test@o8.dev');
+    git('config', 'user.name', 'o8 test');
+    writeFileSync(join(repoPath, 'README.md'), 'base\n');
+    git('add', 'README.md');
+    git('commit', '-q', '-m', 'base');
     for (const [label, packetId] of [['A', packetA], ['B', packetB]]) {
       createLane({ label: `packet ownership ${label}`, repoPath, branch: `agent/${packetId}`, baseBranch: 'main', runtime: 'codex', packetId });
     }
