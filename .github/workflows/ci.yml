@@ -541,13 +541,12 @@ jobs:
     name: o8 next Native Tests (Linux)
     if: github.event.schedule != '41 13 * * 1'
     runs-on: ubuntu-24.04
-    # A cold build plus a regular shard takes about 14 to 17 minutes, so 20
-    # left no room for the timed terminal probes.
+    # Keep cold-build headroom; warm runs distribute tests over eight shards.
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       CARGO_HOME: ${{ github.workspace }}/.o8-next-cargo
       CARGO_TARGET_DIR: ${{ github.workspace }}/native/o8-next/target
@@ -555,7 +554,7 @@ jobs:
       CARGO_INCREMENTAL: '0'
       O8_NATIVE_REAL_WINDOW_TESTS: 'true'
       O8D_HTTP_TEST_BINARY: ${{ github.workspace }}/native/o8-next/target/debug/o8d
-      O8_NATIVE_TEST_SHARD: ${{ matrix.shard }}/4
+      O8_NATIVE_TEST_SHARD: ${{ matrix.shard }}/8
     steps:
       - uses: actions/checkout@v4
         with:
