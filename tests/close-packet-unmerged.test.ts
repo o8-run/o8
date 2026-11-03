@@ -694,7 +694,7 @@ process.exit(run.status ?? 1);
     expect(getLane(lane.id)?.status).toBe('archived');
     const calls = fixture.readLog();
     const releaseIndex = calls.findIndex((call) => call.startsWith('opencode api delete /api/debug/location?'));
-    const removalProbeIndex = calls.findIndex((call) => call === 'lsof -nP -Fpcftn');
+    const removalProbeIndex = calls.findIndex((call) => call === 'lsof -nP -FpcLftn');
     expect(releaseIndex).toBeGreaterThanOrEqual(0);
     expect(removalProbeIndex).toBeGreaterThan(releaseIndex);
     expect(calls.filter((call) => call.startsWith('opencode api delete /api/debug/location?'))).toHaveLength(1);
@@ -778,7 +778,7 @@ process.exit(run.status ?? 1);
     const calls = fixture.readLog();
     expect(calls.filter((call) => call.startsWith('opencode api delete /api/debug/location?'))).toHaveLength(2);
     // Admission refuses before rename; cwd and descriptors share one snapshot.
-    expect(calls.filter((call) => call === 'lsof -nP -Fpcftn')).toHaveLength(1);
+    expect(calls.filter((call) => call === 'lsof -nP -FpcLftn')).toHaveLength(1);
     expect(getLaneEvents(lane.id).find((event) => event.payload.phase === 'retirement_process_refused')).toMatchObject({
       payload: { state: 'live', failed: expect.arrayContaining([['filesystem_users', 'live', 'owned_process_live']]) },
     });

@@ -7,6 +7,7 @@ import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-li
 import {
   parseProcessCwdSnapshot,
   processCwdRowsInside,
+  processCwdSnapshotFromRows,
   readProcessCwdSnapshot,
   type ProcessCwdSnapshot,
 } from '@/lib/runtime/process-cwd-snapshot';
@@ -79,9 +80,9 @@ async function machineCwdSnapshot(
   // Close owns explicit refreshes at admission, rename, paused purge and final
   // removal. Projections within one such boundary share its native evidence.
   if (!options.run) return readProcessCwdSnapshot({ forceRefresh: !hasCloseProcessObservation() });
-  const receipt = await run('lsof', ['-nP', '-d', 'cwd', '-F', 'pcn'], 3_000);
+  const receipt = await run('lsof', ['-nP', '-d', 'cwd', '-F', 'pcLftn'], 3_000);
   if (receipt.code === 0) {
-    return { status: 'ready', rows: parseProcessCwdSnapshot(receipt.stdout), capturedAt: Date.now() };
+    return processCwdSnapshotFromRows(parseProcessCwdSnapshot(receipt.stdout), Date.now());
   }
   if (receipt.code === 1 && !receipt.stdout.trim() && !receipt.stderr.trim()) {
     return { status: 'ready', rows: [], capturedAt: Date.now() };

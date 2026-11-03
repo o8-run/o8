@@ -5,7 +5,7 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 
-const probeArgs = ['-nP', '-d', 'cwd', '-F', 'pcn'];
+const probeArgs = ['-nP', '-d', 'cwd', '-F', 'pcLftn'];
 const outputLimit = 64 * 1024;
 
 function errorFields(error) {

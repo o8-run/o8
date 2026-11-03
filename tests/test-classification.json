@@ -950,6 +950,13 @@
       ]
     },
     {
+      "path": "src/lib/runtime/worker-dumpability.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/claude-code-status.test.ts",
       "reasons": [
         "terminal-tool"

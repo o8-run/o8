@@ -19,6 +19,7 @@
  * would rather leak a stale directory than abort a live worker's turn.
  */
 import path from 'node:path';
+import { unreadableCwdReason } from '@/lib/runtime/process-open-files-snapshot';
 import {
   readProcessCwdSnapshot,
   processCwdRowsInside,
@@ -56,8 +57,10 @@ export async function probeLiveProcessInside(
   const snapshot = options.snapshot
     ?? await (options.readSnapshot?.() ?? readProcessCwdSnapshot());
   if (snapshot.status !== 'ready') {
-    return { status: 'inconclusive', reason: `machine cwd snapshot unavailable: ${snapshot.reason}` };
+    return { status: 'inconclusive', reason: snapshot.reason };
   }
+  const reason = unreadableCwdReason(snapshot.rows);
+  if (reason) return { status: 'inconclusive', reason };
   const pids = processCwdRowsInside(snapshot, target)
     .map((row) => String(row.pid));
   return pids.length > 0 ? { status: 'live', pids } : { status: 'clear' };

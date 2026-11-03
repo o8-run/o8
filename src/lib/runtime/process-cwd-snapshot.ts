@@ -3,7 +3,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { closeObservedHelperSettled, hasCloseProcessObservation, observeCloseProcess, refreshCloseProcessObservation } from './close-process-observation';
-import { readCloseOpenFileRows } from './process-open-files-snapshot';
+import { isUnreadableCwdName, readCloseOpenFileRows, unreadableCwdReason } from './process-open-files-snapshot';
 
 const execFileAsync = promisify(execFile);
 const ACTIVE_SNAPSHOT_TTL_MS = 15_000;
@@ -13,6 +13,9 @@ export interface ProcessCwdRow {
   pid: number;
   cwd: string;
   commandName?: string;
+  owner?: string;
+  /** No path is known for this row; cwd is empty, never the diagnostic text. */
+  unreadable?: true;
 }
 
 export type ProcessCwdSnapshot =
@@ -71,12 +74,14 @@ function outputText(value: string | Buffer): string {
 export function parseProcessCwdSnapshot(raw: string): ProcessCwdRow[] {
   const rows: ProcessCwdRow[] = [];
   let current: Partial<ProcessCwdRow> = {};
+  let fileType = '';
 
   const flush = () => {
-    if (typeof current.pid === 'number' && current.cwd) {
+    if (typeof current.pid === 'number' && (current.cwd || current.unreadable)) {
       rows.push(current as ProcessCwdRow);
     }
     current = {};
+    fileType = '';
   };
 
   for (const line of raw.split('\n')) {
@@ -89,12 +94,30 @@ export function parseProcessCwdSnapshot(raw: string): ProcessCwdRow[] {
       if (Number.isFinite(pid)) current.pid = pid;
     } else if (tag === 'c') {
       current.commandName = value;
+    } else if (tag === 'L') {
+      if (!current.pid || current.owner !== undefined || current.cwd !== undefined || !value) throw new Error('lsof returned malformed owner coverage');
+      current.owner = value;
+    } else if (tag === 't') {
+      fileType = value;
     } else if (tag === 'n') {
-      current.cwd = value;
+      if (isUnreadableCwdName(value, fileType)) {
+        current.cwd = '';
+        current.unreadable = true;
+      } else {
+        current.cwd = value;
+      }
     }
   }
   flush();
   return rows;
+}
+
+/** Unknown ownership cannot establish that an unreadable process is out of scope. */
+export function processCwdSnapshotFromRows(rows: ProcessCwdRow[], capturedAt: number): ProcessCwdSnapshot {
+  const reason = unreadableCwdReason(rows);
+  return reason
+    ? { status: 'unavailable', rows: [], capturedAt, reason }
+    : { status: 'ready', rows: rows.filter(row => !row.unreadable), capturedAt };
 }
 
 function compactError(error: unknown): string {
@@ -134,17 +157,17 @@ export async function readProcessCwdSnapshot(
       const rows = (await readCloseOpenFileRows())
         .filter(row => row.descriptor === 'cwd')
         .filter(row => {
-          const key = JSON.stringify([row.pid, row.file]);
+          const key = JSON.stringify([row.pid, row.file, row.owner, row.unreadable]);
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
         })
         .map(row => {
-          if (!path.isAbsolute(row.file)) throw new Error('Native cwd has no absolute namespace.');
-          return { pid: row.pid, cwd: row.file, commandName: row.commandName };
+          if (!row.unreadable && !path.isAbsolute(row.file)) throw new Error('Native cwd has no absolute namespace.');
+          return { pid: row.pid, cwd: row.file, commandName: row.commandName, owner: row.owner, unreadable: row.unreadable };
         });
-      return { status: 'ready', rows, capturedAt };
-    } catch { return { status: 'unavailable', rows: [], capturedAt, reason: 'Native open-file snapshot is unavailable or inconclusive.' }; }
+      return processCwdSnapshotFromRows(rows, capturedAt);
+    } catch (error) { return { status: 'unavailable', rows: [], capturedAt, reason: compactError(error) }; }
   });
   return snapshot.status === 'ready'
     ? { ...snapshot, rows: snapshot.rows.filter(row => !closeObservedHelperSettled(row.pid)) } : snapshot;
@@ -174,14 +197,14 @@ async function readNativeProcessCwdSnapshot(options: ProcessCwdSnapshotOptions):
   const promise = (async (): Promise<ProcessCwdSnapshot> => {
     let snapshot: ProcessCwdSnapshot;
     try {
-      const { stdout } = await run('lsof', ['-nP', '-d', 'cwd', '-F', 'pcn'], {
+      const { stdout } = await run('lsof', ['-nP', '-d', 'cwd', '-F', 'pcLftn'], {
         windowsHide: true,
         maxBuffer: 16 * 1024 * 1024,
         timeout: 3_000,
       });
       const rows = parseProcessCwdSnapshot(outputText(stdout));
-      snapshot = { status: 'ready', rows, capturedAt: startedAt };
-      lastRowCount = rows.length;
+      snapshot = processCwdSnapshotFromRows(rows, startedAt);
+      lastRowCount = snapshot.rows.length;
     } catch (error) {
       failures += 1;
       lastRowCount = 0;
@@ -244,6 +267,7 @@ export function processCwdRowsInside(
   if (snapshot.status !== 'ready') return [];
   const target = canonicalCwdPath(dirPath);
   return snapshot.rows.filter((row) => {
+    if (row.unreadable) return false;
     const cwd = canonicalCwdPath(row.cwd);
     return cwd === target || cwd.startsWith(`${target}${path.sep}`);
   });
