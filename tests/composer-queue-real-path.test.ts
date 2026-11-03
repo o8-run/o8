@@ -213,4 +213,16 @@ describe('durable composer queue API and persisted state', () => {
     expect(queue.admitComposerSend('queue-behind')).toBe(false);
     expect(queue.settleComposerSend('queue-behind', { status: 'applied' })).toBe(false);
   });
+
+  it('settles the turn Stop ended, so a message sent after Stop runs (#5193)', async () => {
+    await enqueue('queue-running'); queue.claimNextComposerSend(target);
+    expect(queue.admitComposerSend('queue-running')).toBe(true);
+    await enqueue('queue-waiting');
+    queue.holdComposerSends(target);
+    expect(queue.readComposerSend('queue-running')).toMatchObject({ status: 'applied' });
+    expect(queue.readComposerSend('queue-waiting')).toMatchObject({ status: 'held', reason: 'Chat stopped.' });
+    await DELETE(request('DELETE', { ...target, id: 'queue-waiting' }));
+    await enqueue('queue-after-stop');
+    expect(queue.claimNextComposerSend(target)?.id).toBe('queue-after-stop');
+  });
 });
