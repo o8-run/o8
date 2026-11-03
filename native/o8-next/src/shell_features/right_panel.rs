@@ -745,7 +745,7 @@ pub(super) fn open_file_at(
     let key = key(s, Tool::Files);
     let view = s.features.get::<Panel>().files.get(&key).cloned();
     if let Some(view) = view {
-        view.update(cx, |view, cx| view.open_at(path, line, cx));
+        view.update(cx, |view, cx| view.open_at(&path, line, cx));
     }
 }
 

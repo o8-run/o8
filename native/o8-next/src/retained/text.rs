@@ -52,6 +52,26 @@ pub(super) fn link_target(run: &Run) -> Option<&str> {
     run.style.strip_prefix("link:")
 }
 
+/// Where a file pill really points, shown before anyone clicks it.
+pub(super) fn file_tip(root: Option<&str>, url: &str) -> Option<String> {
+    let (path, line) = crate::text::file_ref(url.strip_prefix("file:")?)?;
+    let at = line.map_or_else(String::new, |line| format!(":{line}"));
+    Some(match root {
+        Some(root) => format!("{}/{path}{at}", root.trim_end_matches('/')),
+        None => format!("{path}{at}"),
+    })
+}
+#[cfg(test)]
+#[test]
+fn a_pill_names_the_file_it_opens() {
+    assert_eq!(
+        file_tip(Some("/repo/"), "file:src/a.rs:12").as_deref(),
+        Some("/repo/src/a.rs:12")
+    );
+    assert_eq!(file_tip(None, "file:a.rs").as_deref(), Some("a.rs"));
+    assert_eq!(file_tip(Some("/repo"), "https://a.com"), None);
+}
+
 /// Issues and pull requests read as pills, like the trace's chips.
 pub(super) fn is_item(url: &str) -> bool {
     url.starts_with('#')

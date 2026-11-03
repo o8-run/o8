@@ -125,6 +125,8 @@ const CODE_FILES: [&str; 21] = [
 ];
 /// What a reply's inline code or link target points at in the workspace: the
 /// path and its line, from `src/a.rs:12`, `src/a.rs:12:4` or `src/a.rs#L12`.
+/// Reply text can be planted, so only a path that stays inside the workspace
+/// qualifies: no root, no home and no `..`. Anything else stays plain text.
 pub(crate) fn file_ref(text: &str) -> Option<(&str, Option<usize>)> {
     let (path, line) = match text.rsplit_once("#L") {
         Some((path, line)) => (path, line.parse().ok()),
@@ -144,7 +146,10 @@ pub(crate) fn file_ref(text: &str) -> Option<(&str, Option<usize>)> {
     };
     let name = path.rsplit('/').next()?;
     let (stem, extension) = name.rsplit_once('.')?;
-    let plain = !stem.is_empty()
+    let inside = !path.starts_with(['/', '~'])
+        && path.split(['/', '\\']).all(|part| !part.is_empty() && part != "..");
+    let plain = inside
+        && !stem.is_empty()
         && extension.len() >= 2
         && extension.chars().all(|c| c.is_ascii_alphanumeric())
         && extension.starts_with(|c: char| c.is_ascii_alphabetic())
@@ -434,6 +439,12 @@ mod file_ref_tests {
             "self.client",
             "https://a.com/b.ts",
             "note:todo.rs",
+            "../x.json",
+            "src/../../x.json",
+            "/etc/x.txt",
+            "~/.ssh/id.txt",
+            "..\\x.json",
+            "src//a.rs",
         ] {
             assert_eq!(file_ref(text), None, "{text}");
         }
