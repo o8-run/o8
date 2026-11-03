@@ -120,11 +120,13 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   const response = await fetch(origin + path, { headers: { authorization: `Bearer ${server.token}` } });
   expect(response.status).toBe(status);
   expect(await response.text()).not.toContain('Native route unavailable');
-  expect(nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods).toEqual(['GET']);
-  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE']) {
+  // A2 adds POST to /api/cortex/proposals; every other A1 read stays GET-only.
+  const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
+  expect(methods).toEqual(routePath === '/api/cortex/proposals' ? ['GET', 'POST'] : ['GET']);
+  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);
-    expect(refused.headers.get('allow')).toBe('GET');
+    expect(refused.headers.get('allow')).toBe(methods.join(', '));
     await refused.arrayBuffer();
   }
 });
