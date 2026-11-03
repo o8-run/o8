@@ -956,6 +956,12 @@
       ]
     },
     {
+      "path": "src/lib/runtime/session-manager-cwd-exempt.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/lib/runtime/worker-dumpability.test.ts",
       "reasons": [
         "child-process",
