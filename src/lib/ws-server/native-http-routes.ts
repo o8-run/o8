@@ -11,7 +11,7 @@ type Handler = (request: NextRequest, context: { params: Promise<Record<string, 
 const REQUEST_LIMIT = 16 * 1024 * 1024;
 
 /** Returns false for unregistered paths so the existing listener keeps its behavior. */
-export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse, publicPort = req.socket.localPort): Promise<boolean> {
+export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse, publicPort = req.socket.localPort, authenticatedBridge = false): Promise<boolean> {
   if (!req.url?.startsWith('/api/')) return false;
   const abort = new AbortController();
   const disconnected = () => { if (!res.writableEnded) abort.abort(); };
@@ -37,7 +37,15 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     const gate = panelGateMiddleware(new NextRequest(url, init));
     let response: Response;
     if (gate.headers.get('x-middleware-next') !== '1') response = gate;
-    else if (!match.route.methods.includes(req.method ?? 'GET')) {
+    else if (authenticatedBridge && process.env.O8D_NATIVE_SESSION_READS === '1'
+      && req.method === 'GET' && req.headers['x-o8d-session-read'] === 'authorize'
+      && ['/api/mobile/orchestrator/threads', '/api/mobile/history', '/api/v2/chat-history', '/api/orchestrator/composer-queue'].includes(url.pathname)) {
+      // Admission only. Keep the middleware and queue's existing defense-in-depth
+      // gate authoritative; the bridge credential cannot authorize a principal.
+      const denied = url.pathname === '/api/orchestrator/composer-queue'
+        ? (await import('@/lib/panel/auth')).requirePanelAuth(new NextRequest(url, init)) : null;
+      response = denied ?? new Response(null, { status: 204 });
+    } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: match.route.methods.join(', ') } });
     } else if (match.route.path === '/api/runtime/archive' && typeof mutationWorkspace({ url: url.href }) !== 'string') {
       response = Response.json({ error: 'An absolute workspace is required for native archive' }, { status: 400 });
@@ -66,7 +74,9 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
       }
     }
     if (res.destroyed) { await response.body?.cancel(); return true; }
-    res.writeHead(response.status, Object.fromEntries(response.headers));
+    const responseHeaders = Object.fromEntries(response.headers);
+    if (process.env.O8_WS_O8D === '1' && process.env.O8D_NATIVE_SESSION_READS === '1') responseHeaders.connection = 'close';
+    res.writeHead(response.status, responseHeaders);
     if (response.body) {
       const reader = response.body.getReader();
       const cancel = () => { void reader.cancel().catch(() => {}); };
