@@ -162,7 +162,8 @@ it('routes Stop from a symlink-backed chat to the admitted queued provider contr
   expect(controller).toBeDefined();
   queue.holdComposerSends({ ...target, repoPath: alias }); controller!.abort();
   await vi.waitFor(() => expect(controllers.size).toBe(0));
-  expect(queue.readComposerSend('queue-alias-stop')?.status).toBe('held');
+  // The provider admitted it, so Stop settles the turn it ended (#5193).
+  expect(queue.readComposerSend('queue-alias-stop')?.status).toBe('applied');
 });
 
 const boundFollowup = (): ComposerQueuePayload => ({ ...base, afterTaskId: 'orch-user-original',

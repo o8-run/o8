@@ -186,7 +186,15 @@ export function recoverComposerSends(): void {
   getSqlite().prepare(`UPDATE composer_send_queue SET status = 'held', reason = 'Delivery interrupted. Inspect the chat before sending again.', updated_at = ? WHERE status = 'dispatching'`).run(Date.now());
 }
 /** Stop also fences a claimed item while server preparation is still awaiting. */
+/** The turn the provider already admitted was delivered; Stop ended it, so it settles instead of blocking later sends. */
 export function holdComposerSends(target: ComposerQueueTarget): void {
-  getSqlite().prepare(`UPDATE composer_send_queue SET status = 'held', reason = 'Chat stopped.', updated_at = ?
-    WHERE repo_path = ? AND thread_id = ? AND status IN ('queued','dispatching')`).run(Date.now(), composerQueueRepoKey(target.repoPath), target.threadId);
+  const sqlite = getSqlite();
+  const repo = composerQueueRepoKey(target.repoPath);
+  sqlite.transaction(() => {
+    const delivered = sqlite.prepare(`SELECT id FROM composer_send_queue
+      WHERE repo_path = ? AND thread_id = ? AND status = 'dispatching' AND admitted_at IS NOT NULL`).all(repo, target.threadId) as Array<{ id: string }>;
+    for (const { id } of delivered) settleComposerSend(id, { status: 'applied', reason: 'Chat stopped.' });
+    sqlite.prepare(`UPDATE composer_send_queue SET status = 'held', reason = 'Chat stopped.', updated_at = ?
+      WHERE repo_path = ? AND thread_id = ? AND status IN ('queued','dispatching')`).run(Date.now(), repo, target.threadId);
+  }).immediate();
 }
