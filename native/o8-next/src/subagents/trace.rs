@@ -57,6 +57,8 @@ pub(crate) fn native_agents(rows: &[Rc<RefCell<RowState>>]) -> Vec<model::Agent>
         {
             let (group, status) = match step.status.as_str() {
                 "running" if trace.live => (Group::Working, "Working"),
+                // The lead's turn stays open while its background agents run.
+                "ok" if step.launched && trace.live => (Group::Working, "Working"),
                 "failed" => (Group::Attention, "Failed"),
                 _ => (Group::Done, "Done"),
             };
@@ -114,7 +116,8 @@ pub(crate) fn items(steps: &[Step], trace: &Trace, agents: &[model::Agent]) -> V
             let known = agents
                 .iter()
                 .find(|a| a.id == id || a.session.as_deref() == Some(id));
-            let running = step.status == "running" && trace.live;
+            let running =
+                (step.status == "running" || step.launched && step.status == "ok") && trace.live;
             let group = known.map_or(if running { Group::Working } else { Group::Done }, |a| {
                 a.group
             });
@@ -504,6 +507,59 @@ mod roster_tests {
         watch("full:new", fresh(Group::Working), true, 3.);
         let size = WATCHED.with(|w| w.borrow().len());
         assert!(size < WATCH_LIMIT, "{size} clocks kept");
+    }
+
+    #[test]
+    fn a_background_agent_is_working_until_its_turn_ends() {
+        let launch = crate::activity::activity(
+            "bg",
+            &serde_json::json!({
+                "name": "Agent", "status": "done",
+                "args": {"description": "Sleep then date", "prompt": "p", "run_in_background": true},
+                "result": "Async agent launched successfully. agentId: x",
+            }),
+            "",
+        );
+        assert!(launch.launched);
+        let live = Trace {
+            live: true,
+            ..Default::default()
+        };
+        let items = super::items(std::slice::from_ref(&launch), &live, &[]);
+        assert_eq!(
+            items[0].group,
+            Group::Working,
+            "a launch notice isn't a finish"
+        );
+        assert_eq!(native_agents_for(&launch, &live), Group::Working);
+        let settled = Trace::default();
+        let items = super::items(std::slice::from_ref(&launch), &settled, &[]);
+        assert_eq!(items[0].group, Group::Done);
+        let answered = crate::activity::activity(
+            "fg",
+            &serde_json::json!({
+                "name": "Agent", "status": "done",
+                "args": {"description": "Run date", "prompt": "p"},
+                "result": "Mon Nov 2",
+            }),
+            "",
+        );
+        assert!(!answered.launched);
+        let items = super::items(std::slice::from_ref(&answered), &live, &[]);
+        assert_eq!(
+            items[0].group,
+            Group::Done,
+            "a foreground answer is a finish"
+        );
+    }
+
+    fn native_agents_for(step: &Step, trace: &Trace) -> Group {
+        let row = RowState::new(Row::Activity {
+            id: "turn".into(),
+            steps: vec![step.clone()],
+            trace: trace.clone(),
+        });
+        native_agents(&[Rc::new(RefCell::new(row))])[0].group
     }
 
     #[test]
