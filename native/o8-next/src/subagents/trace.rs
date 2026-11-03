@@ -9,6 +9,9 @@ use crate::{
 use gpui::{AnyElement, SharedString};
 use model::Group;
 use std::{cell::RefCell, rc::Rc};
+#[path = "roster_actions.rs"]
+mod actions;
+pub(crate) use actions::Controls;
 
 thread_local! {
     /// When this window first saw each live agent working, and when it stopped,
@@ -32,6 +35,8 @@ pub(crate) struct Item {
     pub activity: Option<String>,
     pub started: Option<f64>,
     pub finished: Option<f64>,
+    stop: Option<actions::Stop>,
+    cleanup: Option<model::Worktree>,
 }
 
 fn title(step: &Step) -> String {
@@ -65,6 +70,7 @@ pub(crate) fn native_agents(rows: &[Rc<RefCell<RowState>>]) -> Vec<model::Agent>
             agents.push(model::Agent {
                 shared: false,
                 native: true,
+                cleanup: None,
                 prompt: step.delegate_prompt.clone(),
                 run: step.id.clone(),
                 id: step.id.clone(),
@@ -110,19 +116,20 @@ pub(crate) fn items(steps: &[Step], trace: &Trace, agents: &[model::Agent]) -> V
         .filter(|s| s.delegate || !s.delegations.is_empty())
     {
         let mut push = |id: &str, fallback: String| {
-            if !seen.insert(id.to_owned()) {
-                return;
-            }
             let known = agents
                 .iter()
                 .find(|a| a.id == id || a.session.as_deref() == Some(id));
+            let id = known.map_or_else(|| id.to_owned(), |a| a.id.clone());
+            if !seen.insert(id.clone()) {
+                return;
+            }
             let running =
                 (step.status == "running" || step.launched && step.status == "ok") && trace.live;
             let group = known.map_or(if running { Group::Working } else { Group::Done }, |a| {
                 a.group
             });
             items.push(Item {
-                id: id.to_owned(),
+                id,
                 title: known.map_or(fallback, |a| a.title.clone()),
                 group,
                 failed: known.map_or(step.status == "failed", |a| a.status == "Failed"),
@@ -131,6 +138,20 @@ pub(crate) fn items(steps: &[Step], trace: &Trace, agents: &[model::Agent]) -> V
                 finished: known
                     .map_or(step.finished, |a| a.finished)
                     .filter(|_| group != Group::Working),
+                stop: known
+                    .map(|a| {
+                        if a.native {
+                            actions::Stop::Native
+                        } else if a.shared {
+                            actions::Stop::Shared(a.id.clone())
+                        } else {
+                            actions::Stop::Packet(a.id.clone())
+                        }
+                    })
+                    .or_else(|| step.delegations.is_empty().then_some(actions::Stop::Native)),
+                cleanup: known
+                    .and_then(|a| a.cleanup.clone())
+                    .filter(|_| group == Group::Done),
             });
         };
         if step.delegations.is_empty() {
@@ -310,8 +331,23 @@ pub(crate) fn element(
         );
         animating |= arrive < 1. || swap < 1.;
         let card = card(&state, item, inspector.as_ref(), arrive, swap, beat);
+        let open = inspector
+            .as_ref()
+            .filter(|_| item.group == Group::Attention)
+            .map(|inspector| {
+                let selector = format!("subagent-roster-open-{}", item.id);
+                let focus = state.subagent_focus.get(&selector).cloned();
+                let inspector = inspector.clone();
+                let id = item.id.clone();
+                actions::button(&state, selector, "Open", true, move |w, cx| {
+                    if let Some(focus) = &focus {
+                        focus.focus(w);
+                    }
+                    inspector.update(cx, |s, cx| s.inspect(Some(id.clone()), w, cx));
+                })
+            });
         line = line.child(if roster {
-            roster_row(item, card, arrive)
+            roster_row(item, card, open, arrive)
         } else {
             card
         });
@@ -345,6 +381,9 @@ pub(crate) fn element(
                 .text_color(theme().text_muted)
                 .child(summary(&items)),
         );
+        if let Some(inspector) = &inspector {
+            line = line.child(actions::footer(&state, &items, inspector));
+        }
     }
     Some((line.into_any_element(), animating))
 }
@@ -382,7 +421,7 @@ fn watch(key: &str, mut item: Item, live: bool, now: f64) -> Item {
 }
 
 /// A roster row: the agent's card, what it is doing now, and its time.
-fn roster_row(item: &Item, card: AnyElement, arrive: f32) -> AnyElement {
+fn roster_row(item: &Item, card: AnyElement, open: Option<AnyElement>, arrive: f32) -> AnyElement {
     let selector = format!("subagent-roster-{}", item.id);
     div()
         .debug_selector(move || selector.clone())
@@ -408,6 +447,7 @@ fn roster_row(item: &Item, card: AnyElement, arrive: f32) -> AnyElement {
                 .text_color(theme().text_muted)
                 .child(time)
         }))
+        .children(open)
         .into_any_element()
 }
 
@@ -442,6 +482,10 @@ fn summary(items: &[Item]) -> String {
 }
 
 #[cfg(test)]
+#[path = "roster_tests.rs"]
+mod action_tests;
+
+#[cfg(test)]
 mod roster_tests {
     use super::*;
 
@@ -454,6 +498,8 @@ mod roster_tests {
             activity: Some("Searching the worktree\nmore".into()),
             started: Some(1_000.),
             finished: None,
+            stop: None,
+            cleanup: None,
         }
     }
 
