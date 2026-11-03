@@ -6,6 +6,7 @@ import path from 'node:path';
 import { build } from 'esbuild';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 // Retirement is exercised separately; keep these retained fixtures on disk.
 vi.mock('@/lib/lane/terminal-lane-cleanup', () => ({ scheduleTerminalLaneCleanup: vi.fn() }));
@@ -57,7 +58,7 @@ function cli(human = false): Promise<{ code: number | null; stdout: string; stde
 }
 
 beforeAll(async () => {
-  await build({ entryPoints: ['cli/src/index.ts'], outfile: bundle, bundle: true, platform: 'node',
+  await build({ alias: cliBundleAlias, entryPoints: ['cli/src/index.ts'], outfile: bundle, bundle: true, platform: 'node',
     format: 'esm', target: 'node22', define: { __O8_CLI_VERSION__: JSON.stringify('fixture') },
     banner: { js: "import { createRequire as __fixtureCreateRequire } from 'node:module'; const require = __fixtureCreateRequire(import.meta.url);" } });
   server = createServer(async (request, response) => {

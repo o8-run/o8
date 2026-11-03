@@ -6,6 +6,7 @@ import * as esbuild from 'esbuild';
 import { chmodSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cliBundleAlias } from './bundle-alias.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const entry = join(__dirname, 'src', 'index.ts');
@@ -56,7 +57,7 @@ await esbuild.build({
   banner: { js: ESM_BANNER },
   define: { __O8_CLI_VERSION__: JSON.stringify(cliVersion) },
   plugins: [sqlitePlugin],
-  alias: { 'server-only': join(__dirname, '..', 'scripts', 'server-only-stub.js') },
+  alias: cliBundleAlias,
   outfile: outFile,
 });
 
@@ -74,7 +75,7 @@ await esbuild.build({
   banner: { js: ESM_BANNER },
   alias: {
     '@': join(__dirname, '..', 'src'),
-    'server-only': join(__dirname, '..', 'scripts', 'server-only-stub.js'),
+    ...cliBundleAlias,
   },
   external: ['node-pty'],
   outfile: join(__dirname, 'dist', 'worker-login.mjs'),

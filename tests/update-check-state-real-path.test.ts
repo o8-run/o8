@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import * as updateApplyRoute from '@/app/api/panel/update/apply/route';
 import * as updateStateRoute from '@/app/api/panel/app/update-state/route';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-update-check-state-'));
 const cliEntry = join(dataDir, 'o8.mjs');
@@ -84,6 +85,7 @@ async function runCli(args: string[]) {
 beforeAll(async () => {
   await build({
     entryPoints: [join(process.cwd(), 'cli/src/index.ts')],
+    alias: cliBundleAlias,
     outfile: cliEntry,
     bundle: true,
     platform: 'node',

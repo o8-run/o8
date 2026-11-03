@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 import { afterAll, describe, expect, it } from 'vitest';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 const tmux = spawnSync('which', ['tmux'], { encoding: 'utf8' }).stdout?.trim();
 const directory = mkdtempSync(join(tmpdir(), 'o8-settlement-cli-'));
@@ -90,7 +91,7 @@ describe.skipIf(!tmux || process.platform === 'win32')('settlement reservation t
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('missing port');
     const bundle = join(directory, 'o8.mjs');
-    await build({ entryPoints: [join(process.cwd(), 'cli/src/index.ts')], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
+    await build({ alias: cliBundleAlias, entryPoints: [join(process.cwd(), 'cli/src/index.ts')], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
       define: { __O8_CLI_VERSION__: '"fixture"' }, banner: { js: "import { createRequire as __o8_createRequire } from 'node:module'; const require = __o8_createRequire(import.meta.url); globalThis.require = require;" } });
     const bindingFile = join(directory, 'binding.json');
     writeFileSync(bindingFile, JSON.stringify({ schema: 'o8/managed-run-settlement-binding/v1', executionKey: 'fixture-cli', generation: 1,

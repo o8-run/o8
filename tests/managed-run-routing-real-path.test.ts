@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { build } from 'esbuild';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 const tmux = spawnSync('which', ['tmux'], { encoding: 'utf8' }).stdout?.trim();
 const tsxImport = import.meta.resolve('tsx');
@@ -61,7 +62,7 @@ describe.skipIf(!tmux || process.platform === 'win32')('managed CLI routing thro
     const root = mkdtempSync(join(tmpdir(), 'o8-route-'));
     roots.push(root);
     const bundle = join(root, 'o8.mjs');
-    await build({ entryPoints: [cli], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
+    await build({ alias: cliBundleAlias, entryPoints: [cli], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
       define: { __O8_CLI_VERSION__: JSON.stringify('test-fixture') },
       banner: { js: `import { createRequire as __o8_createRequire } from 'node:module';
 import { fileURLToPath as __o8_fileURLToPath } from 'node:url';
@@ -137,7 +138,7 @@ await runVersion({ human: false, verbose: false });
     const root = mkdtempSync(join(tmpdir(), 'o8-unregistered-run-'));
     roots.push(root);
     const bundle = join(root, 'o8.mjs');
-    await build({ entryPoints: [cli], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
+    await build({ alias: cliBundleAlias, entryPoints: [cli], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
       define: { __O8_CLI_VERSION__: JSON.stringify('test-fixture') },
       banner: { js: `import { createRequire as __o8_createRequire } from 'node:module'; const require = __o8_createRequire(import.meta.url); globalThis.require = require;` } });
     const data = join(root, 'data'), bin = join(root, 'bin'), socket = `/tmp/o8-rg-${process.pid}-${Date.now()}`;

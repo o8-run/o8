@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DistillBatchInput } from '@/lib/cortex/indexer/doc-distill';
 import type { TypedRow } from '@/lib/cortex/qa/types';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 const fixture = await vi.hoisted(async () => {
   const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'o8-knowledge-')));
@@ -176,7 +177,7 @@ it('rejects linked roots and invalid patterns before persisting sources or start
 it('runs the built CLI source commands against the real authenticated API', async () => {
   const { build } = await import('esbuild'); const { spawn } = await import('node:child_process'); const { createServer } = await import('node:http');
   const bundle = path.join(fixture.root, 'cli.mjs');
-  await build({ entryPoints: ['cli/src/index.ts'], bundle: true, platform: 'node', format: 'esm', target: 'node22', outfile: bundle,
+  await build({ alias: cliBundleAlias, entryPoints: ['cli/src/index.ts'], bundle: true, platform: 'node', format: 'esm', target: 'node22', outfile: bundle,
     banner: { js: 'import { createRequire as __o8_knowledge_require } from "node:module"; const require = __o8_knowledge_require(import.meta.url); globalThis.require = require;' }, define: { __O8_CLI_VERSION__: '"test"' } });
   const server = createServer(async (req, res) => {
     try {

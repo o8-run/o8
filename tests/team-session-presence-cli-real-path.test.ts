@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-team-session-cli-'));
 const cli = join(root, 'o8.mjs');
@@ -52,6 +53,7 @@ function run(repo: string, status: string, bindings: Partial<NodeJS.ProcessEnv>)
 beforeAll(async () => {
   await build({
     entryPoints: ['cli/src/index.ts'],
+    alias: cliBundleAlias,
     bundle: true,
     platform: 'node',
     format: 'esm',

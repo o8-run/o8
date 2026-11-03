@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { build } from 'esbuild';
 import type { PacketTaskContract } from '@/lib/orchestrator/types';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 const telemetry = vi.hoisted(() => ({ path: '' }));
 vi.mock('@/lib/codex/sessions', async (original) => ({
@@ -284,7 +285,7 @@ describe('reviewer evidence recovery (#4150)', () => {
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Missing fixture port.');
       const bundle = join(root, 'cli.mjs');
-      await build({ entryPoints: [join(process.cwd(), 'cli/src/index.ts')], outfile: bundle,
+      await build({ alias: cliBundleAlias, entryPoints: [join(process.cwd(), 'cli/src/index.ts')], outfile: bundle,
         bundle: true, platform: 'node', format: 'esm', target: 'node22',
         define: { __O8_CLI_VERSION__: '"fixture"' },
         plugins: [{ name: 'fixture-native-sqlite', setup(bundle) {
