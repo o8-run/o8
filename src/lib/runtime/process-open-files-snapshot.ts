@@ -14,35 +14,84 @@ export function isUnreadableCwdName(name: string, fileType: string): boolean {
     && /^\/proc\/[1-9]\d*\/cwd \(readlink: .+\)$/.test(name);
 }
 
-function isNonDumpableSameUid(pid: number, uid: number): boolean {
-  // Non-Linux hosts (including macOS) have no /proc; keep the denied-cwd refusal there.
-  if (platform() !== 'linux') return false;
-  try {
-    const status = readFileSync(`/proc/${pid}/status`, 'utf8');
-    const fields = /^Uid:[ \t]+(\d+)[ \t]+\d+[ \t]+\d+[ \t]+\d+[ \t]*$/m.exec(status);
-    if (!fields) return false;
-    const realUid = Number(fields[1]);
-    // An ownership change since lsof's observation cannot attest this process.
-    if (!Number.isSafeInteger(realUid) || realUid !== uid) return false;
-    // Inspect the link itself: lstat works even when readlink is denied.
-    const cwdOwnerUid = lstatSync(`/proc/${pid}/cwd`).uid;
-    // o8 workers are always dumpable; a non-dumpable same-uid process is never a worker.
-    // If o8 ever spawns a worker through setuid, a sandbox or prctl that drops dumpability,
-    // this becomes a fail-open for that worker.
-    // Caveat: in a user namespace where root maps to our uid, the /proc owner comparison can misread.
-    return cwdOwnerUid !== realUid;
-  } catch {
-    // Missing or unreadable /proc metadata never exempts a process from coverage.
-    return false;
-  }
+/** /proc metadata needed to attest a denied-cwd process, behind a test seam. */
+export interface ProcExemptProbe {
+  /** `/proc/<pid>/status` real uid, comm name and PPid, or null when unreadable. */
+  status(pid: number): { uid: number; name?: string; ppid?: number } | null;
+  /** Owner uid of the `/proc/<pid>/cwd` magic link (lstat works under readlink denial). */
+  cwdLinkUid(pid: number): number | null;
 }
 
-export function unreadableCwdReason(rows: readonly { pid: number; owner?: string; unreadable?: true }[]): string | null {
+const realProcProbe: ProcExemptProbe = {
+  status(pid) {
+    try {
+      const status = readFileSync(`/proc/${pid}/status`, 'utf8');
+      const uidField = /^Uid:[ \t]+(\d+)[ \t]+\d+[ \t]+\d+[ \t]+\d+[ \t]*$/m.exec(status);
+      if (!uidField) return null;
+      const uid = Number(uidField[1]);
+      if (!Number.isSafeInteger(uid)) return null;
+      // Name and PPid are only needed for the session-manager lineage check;
+      // the non-dumpable branch attests on uid alone, so keep them optional.
+      const nameField = /^Name:[ \t]+(.+?)[ \t]*$/m.exec(status);
+      const ppidField = /^PPid:[ \t]+(\d+)[ \t]*$/m.exec(status);
+      const ppid = ppidField && Number.isSafeInteger(Number(ppidField[1])) ? Number(ppidField[1]) : undefined;
+      return { uid, ...(nameField ? { name: nameField[1]! } : {}), ...(ppid === undefined ? {} : { ppid }) };
+    } catch {
+      return null;
+    }
+  },
+  cwdLinkUid(pid) {
+    try {
+      return lstatSync(`/proc/${pid}/cwd`).uid;
+    } catch {
+      return null;
+    }
+  },
+};
+
+/**
+ * A same-uid process whose cwd readlink is denied is exempt from refusal ONLY
+ * when it provably cannot hold a worktree. Everything else — an unknown owner
+ * or any other same-uid process — still refuses, so the live-worker guard
+ * (#1585) stays strict.
+ *
+ * Exempt cases:
+ *  - Non-dumpable: `/proc/<pid>/cwd` is no longer owned by the process uid
+ *    (root-owned /proc). An o8 worker is always dumpable, so this is never one.
+ *    If o8 ever spawned a worker through setuid/sandbox/prctl that drops
+ *    dumpability, this would fail open for that worker.
+ */
+function sameUidCwdHolderExempt(pid: number, uid: number, probe: ProcExemptProbe): boolean {
+  if (platform() !== 'linux') return false;
+  const status = probe.status(pid);
+  // An ownership change since lsof's observation cannot attest this process.
+  if (!status || status.uid !== uid) return false;
+  // Caveat: in a user namespace where root maps to our uid, this can misread.
+  const cwdLinkUid = probe.cwdLinkUid(pid);
+  if (cwdLinkUid !== null && cwdLinkUid !== uid) return true;
+  // Session manager by LINEAGE, not name alone (#5423): on ptrace_scope=1 hosts
+  // the runner cannot readlink the cwd of its own `systemd --user`, which is not
+  // its descendant, yet that process (PPid 1) and its `(sd-pam)` child always
+  // have cwd `/` and are never o8 workers. Requiring PPid 1 for systemd, and an
+  // exempt systemd parent for sd-pam, keeps a worker that merely names itself
+  // `systemd` from slipping through.
+  if (status.name === 'systemd' && status.ppid === 1) return true;
+  if (status.name === '(sd-pam)' && status.ppid !== undefined) {
+    const parent = probe.status(status.ppid);
+    if (parent && parent.uid === uid && parent.name === 'systemd' && parent.ppid === 1) return true;
+  }
+  return false;
+}
+
+export function unreadableCwdReason(
+  rows: readonly { pid: number; owner?: string; unreadable?: true }[],
+  probe: ProcExemptProbe = realProcProbe,
+): string | null {
   const unreadable = rows.filter(row => row.unreadable);
   if (unreadable.length === 0) return null;
   const { username: login, uid } = userInfo();
   const row = unreadable.find(row => !row.owner
-    || (row.owner === login && !isNonDumpableSameUid(row.pid, uid)));
+    || (row.owner === login && !sameUidCwdHolderExempt(row.pid, uid, probe)));
   return row ? `cwd unreadable for uid-owned/unknown process pid ${row.pid}` : null;
 }
 function processName(value: string): string {

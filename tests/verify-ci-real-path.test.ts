@@ -403,7 +403,7 @@ describe('local CI verification through its command entry point', () => {
     }
     if (nativeLocal) {
       expect(result.stdout).toContain('PASS o8 next Native Tests (Linux)');
-      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(12);
+      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(24);
     }
     for (const command of ['lint', 'protocol:check', 'typecheck:fast', 'typecheck',
       'test:classification:check', 'test:integration', 'scripts/smoke-merge-requires-review.ts', 'audit']) {
@@ -510,9 +510,9 @@ describe('local CI verification through its command entry point', () => {
       const test = ['--config', `target.x86_64-unknown-linux-gnu.runner=${JSON.stringify([process.execPath, path.join(result.directory, 'scripts/ci/native-test-shard.mjs')])}`,
         'test', '--locked', '--manifest-path', 'native/o8-next/Cargo.toml', '--', '--test-threads=4'];
       const probes = [...test.slice(0, -1), '--test-threads=1'];
-      expect(calls.map(call => call.args)).toEqual([1, 2, 3, 4].flatMap(() => [build, test, probes]));
-      expect(calls.map(call => call.nativeShard)).toEqual([1, 2, 3, 4].flatMap(shard => Array(3).fill(`${shard}/4`)));
-      expect(calls.map(call => call.nativePhase)).toEqual([1, 2, 3, 4].flatMap(() => [undefined, 'regular', 'timed']));
+      expect(calls.map(call => call.args)).toEqual([1, 2, 3, 4, 5, 6, 7, 8].flatMap(() => [build, test, probes]));
+      expect(calls.map(call => call.nativeShard)).toEqual([1, 2, 3, 4, 5, 6, 7, 8].flatMap(shard => Array(3).fill(`${shard}/8`)));
+      expect(calls.map(call => call.nativePhase)).toEqual([1, 2, 3, 4, 5, 6, 7, 8].flatMap(() => [undefined, 'regular', 'timed']));
       for (const call of calls) {
         expect(call.ci).toBe('true');
         expect(call.targetDir).toMatch(/native\/o8-next\/target$/);
@@ -529,7 +529,7 @@ describe('local CI verification through its command entry point', () => {
     'selects $nativeState input $nativeChange against origin/main', ({ nativeChange, nativeState }) => {
       const result = executeFixture('tests/fixture.test.ts', false, { nativeChange, nativeState });
       expect(result.status, result.stderr + result.stdout).toBe(0);
-      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(12);
+      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(24);
     }, 60_000);
 
   nativeIt('runs native and hermetic work concurrently while retaining the required aggregate', () => {

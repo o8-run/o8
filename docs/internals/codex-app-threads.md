@@ -31,7 +31,8 @@ The model, reasoning effort and service tier go on the thread and turn requests.
 
 - Solo stays on the private home. It runs the whole Codex process in o8's sandbox with its own Codex home and blocked credentials.
 - Local models (`ollama:`, `lmstudio:`) stay on `codex exec --oss`.
-- Switching the setting starts a new Codex thread for an existing chat. The saved thread belongs to the other home, so resume reports a missing rollout and the session starts fresh.
+- Outside Solo mode, exec resumes of discovered external threads link the rollout into o8's private home, preserving its configuration. Direct discovered-session resumes use the home containing the rollout. A discovered thread whose rollout is missing is refused with a message explaining that it would start fresh.
+- Switching the setting can leave a saved thread in the other home. When it cannot be resumed, the session reports the missing rollout before recovering the conversation in a new thread.
 - A turn the operator continues in the Codex app uses the operator's own Codex settings, not o8's tools. o8 sees those turns as thread history on its next turn.
 
 ## Turns added in the Codex app

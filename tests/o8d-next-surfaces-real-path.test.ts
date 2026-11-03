@@ -6,9 +6,18 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import { startParityReference } from './fixtures/ws-parity-server';
 import { cutoverClient } from './fixtures/ws-cutover-client';
 
-const binary = process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
+const binary = process.env.O8D_BINARY ?? process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
 // Native paths that still need Next (#5243). Remove a path when it is registered.
 const NEXT_ONLY_NATIVE_PATHS = new Set([
+  // Existing native inventory drift, outside the A1 and A2 slices. No methods added.
+  '/api/panel/connect/attach',
+  '/api/panel/mobile-pairing',
+  '/api/mobile/devices',
+  '/api/mobile/devices/revoke',
+  '/api/setup/mcp-config',
+  '/api/setup/claude-desktop',
+  '/api/setup/external-client',
+  '/api/orchestrator/packet-transcript',
   '/api/panel/connect',
   '/api/mcp',
   '/api/panel/ssh-machines',
@@ -20,48 +29,21 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/cortex/codebase-memory',
   '/api/cortex/cross-repo-proposals',
   '/api/cortex/diagnostics',
-  '/api/cortex/proposals',
-  '/api/cortex/reingest',
   '/api/mobile/media',
-  '/api/next/voice-host',
   '/api/orchestrator/archive',
   '/api/orchestrator/backend-models',
-  '/api/orchestrator/compact',
-  '/api/orchestrator/comparison-diff',
-  '/api/orchestrator/comparison-pick',
-  '/api/orchestrator/delegate',
-  '/api/orchestrator/discard-packet',
-  '/api/orchestrator/handoff',
+  '/api/orchestrator/comparison-diff', // GET has a write path; held for review.
   '/api/orchestrator/pull-request-context',
-  '/api/orchestrator/reset-session',
-  '/api/orchestrator/session-rules',
-  '/api/orchestrator/status',
-  '/api/orchestrator/steer-packet',
-  '/api/orchestrator/workspace',
   '/api/panel/account/avatar',
-  '/api/panel/branches',
   '/api/panel/browse-folder',
-  '/api/panel/commits/[id]',
   '/api/panel/devices',
   '/api/panel/file-asset',
-  '/api/panel/file-diff',
   '/api/panel/file-io',
-  '/api/panel/files',
   '/api/panel/o8-update-summary',
   '/api/panel/problem-dossiers',
   '/api/panel/prs/[id]/timeline',
-  '/api/panel/resource-usage',
-  '/api/panel/serve-image',
-  '/api/panel/status',
   '/api/panel/update/apply',
-  '/api/repo-spec',
   '/api/repo-spec/asset',
-  '/api/review/workspace',
-  '/api/runtime/capabilities',
-  '/api/runtime/capacity',
-  '/api/runtime/service-tiers',
-  '/api/runtime/telemetry',
-  '/api/setup/cli-updates',
   '/api/setup/identity',
   '/api/tasks',
   '/api/tasks/[id]/preview',
@@ -69,14 +51,33 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/v2/files',
   '/api/v2/files/quick-docs',
   '/api/visualizations',
-  '/api/visualizations/[id]',
   '/api/worktrees/retention-usage',
 ]);
+// A1 reads: exercise the gate and original handler through the public socket.
+const NATIVE_READS = [
+  ['session', '/api/panel/branches', 400],
+  ['diff', '/api/panel/commits/[hash]', 400],
+  ['session', '/api/panel/files', 200],
+  ['session', '/api/panel/file-diff', 400],
+  ['settings', '/api/panel/status', 200],
+  ['session', '/api/panel/resource-usage', 200],
+  ['session', '/api/panel/serve-image', 400],
+  ['session', '/api/visualizations/[id]', 404],
+  ['session', '/api/repo-spec', 400],
+  ['activity', '/api/review/workspace', 200],
+  ['settings', '/api/runtime/capabilities', 200],
+  ['settings', '/api/runtime/capacity', 200],
+  ['session', '/api/runtime/service-tiers', 200],
+  ['session', '/api/runtime/telemetry', 400],
+  ['session', '/api/orchestrator/status', 404],
+  ['setup', '/api/setup/cli-updates?runtime=fixture-unknown', 400],
+  ['activity', '/api/cortex/proposals', 200],
+] as const;
 let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;
 beforeAll(async () => {
-  if (!process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
-  server = await startParityReference({ o8d: true, binary, nativeHttp: true });
+  if (!process.env.O8D_BINARY && !process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
+  server = await startParityReference({ o8d: true, binary, nativeHttp: true, startupTimeoutMs: 120_000 });
   origin = server.url.replace('ws:', 'http:').replace('/ws', '');
   await server.stopNext();
 }, 180_000);
@@ -100,6 +101,34 @@ it.each([
     ...(method === 'POST' ? { body: '{}' } : {}) });
   expect(response.status).toBe(status);
   expect(response.headers.get('content-type')).toContain('application/json');
+});
+
+it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next stopped', async (surface, pattern, status) => {
+  const { nativeSurfaceRoutes } = await import('@/lib/ws-server/native-http-registry');
+  const routePath = pattern.split('?')[0];
+  const path = pattern.replace(/\[\w+\]/g, 'fixture');
+  // Public health is deliberately readable without credentials. All other
+  // reads must refuse missing/wrong credentials even with forged local headers.
+  for (const authorization of [undefined, 'Bearer fixture-wrong-token']) {
+    const response = await fetch(origin + path, { headers: {
+      ...(authorization ? { authorization } : {}),
+      'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
+    } });
+    expect(response.status).toBe(routePath === '/api/panel/status' ? 200 : 401);
+    await response.arrayBuffer();
+  }
+  const response = await fetch(origin + path, { headers: { authorization: `Bearer ${server.token}` } });
+  expect(response.status).toBe(status);
+  expect(await response.text()).not.toContain('Native route unavailable');
+  // A2 adds POST to /api/cortex/proposals; every other A1 read stays GET-only.
+  const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
+  expect(methods).toEqual(routePath === '/api/cortex/proposals' ? ['GET', 'POST'] : ['GET']);
+  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
+    const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
+    expect(refused.status).toBe(405);
+    expect(refused.headers.get('allow')).toBe(methods.join(', '));
+    await refused.arrayBuffer();
+  }
 });
 
 it('reads saved fixture sessions with Next stopped', async () => {
@@ -154,7 +183,7 @@ it('walks every production surface registration and its HTTP routes', async () =
         const response = await fetch(origin + path, { method, headers: {
           'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
         } });
-        expect(response.status, `${name}: ${method} ${path}`).toBe(401);
+        expect(response.status, `${name}: ${method} ${path}`).toBe(route.path === '/api/panel/status' && method === 'GET' ? 200 : 401);
         await response.arrayBuffer();
       }
     }
@@ -181,7 +210,7 @@ it('walks every production surface registration and its HTTP routes', async () =
       expect([...paths].some(known => normalized(known) === normalized(path)), `${file}: ${path}`).toBe(true);
     }
   }
-});
+}, 120_000);
 
 it('delivers a native session checkpoint after Next stops', async () => {
   const client = await cutoverClient(server.url, server.token);
@@ -280,13 +309,14 @@ it('does not turn the Rust relay peer into unauthenticated loopback authority', 
   expect(authenticated.status).toBe(200);
 });
 
-it('preserves packet-worker lane diff admission and authoritative ownership through o8d', async () => {
+it('preserves packet-worker lane diff and visualization ownership through o8d', async () => {
   const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
     CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token };
   const seeded = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
     (async () => {
       const { createLane } = require('./src/lib/lane/registry.ts');
       const { mintPacketWorkerToken } = require('./src/lib/auth/packet-worker-token.ts');
+      const { insertVisualization } = require('./src/lib/visualizations/store.ts');
       const { registerPacketWorkerTokenHash } = require('./src/lib/auth/worker-token.ts');
       const { createHash } = require('node:crypto');
       const { NextRequest } = require('next/server');
@@ -295,12 +325,17 @@ it('preserves packet-worker lane diff admission and authoritative ownership thro
       const lane = createLane({ repoPath: root, branch: 'fixture-unresolved-', runtime: 'codex', packetId: 'fixture-native-worker' });
       const foreign = createLane({ repoPath: root, branch: 'fixture-foreign-', runtime: 'codex', packetId: 'fixture-native-foreign' });
       const token = mintPacketWorkerToken(lane.packetId);
+      const foreignToken = mintPacketWorkerToken(foreign.packetId);
+      const visualizationId = 'vis-00000000-0000-4000-8000-000000000001';
+      insertVisualization({ kind: 'o8-visualization', id: visualizationId, title: 'Native read fixture',
+        html: '<p>Persisted native read</p>', height: 320, repoPath: root, threadId: null,
+        packetId: lane.packetId, createdAt: new Date().toISOString() });
       const ghostToken = 'o8pw_fixture-recognized-without-row';
       registerPacketWorkerTokenHash(createHash('sha256').update(ghostToken).digest('hex'));
       const response = await GET(new NextRequest('http://127.0.0.1/api/lanes/' + lane.id + '/diff', {
         headers: { host: '127.0.0.1', authorization: 'Bearer ' + token, 'x-o8-client-addr': '127.0.0.1' },
       }), { params: Promise.resolve({ id: lane.id }) });
-      console.log(JSON.stringify({ laneId: lane.id, foreignLaneId: foreign.id, token, ghostToken, status: response.status, body: await response.json() }));
+      console.log(JSON.stringify({ laneId: lane.id, foreignLaneId: foreign.id, visualizationId, token, foreignToken, ghostToken, status: response.status, body: await response.json() }));
       require('./src/lib/db/index.ts').closeDb();
     })().catch(() => { process.exitCode = 1; });
   `], { env });
@@ -317,6 +352,16 @@ it('preserves packet-worker lane diff admission and authoritative ownership thro
   expect((await foreign.json()).error.code).toBe('worker_packet_mismatch');
   expect((await read(fixture.laneId, fixture.ghostToken)).status).toBe(401);
   expect((await read(fixture.laneId, fixture.token, 'POST')).status).toBe(403);
+  const visualization = await fetch(`${origin}/api/visualizations/${fixture.visualizationId}`, {
+    headers: { authorization: `Bearer ${fixture.token}` },
+  });
+  expect(visualization.status).toBe(200);
+  expect((await visualization.json()).result.visualization.html).toBe('<p>Persisted native read</p>');
+  const foreignVisualization = await fetch(`${origin}/api/visualizations/${fixture.visualizationId}`, {
+    headers: { authorization: `Bearer ${fixture.foreignToken}` },
+  });
+  expect(foreignVisualization.status).toBe(404);
+  await foreignVisualization.arrayBuffer();
   const unrelated = await fetch(`${origin}/api/prompt-library`, { headers: { authorization: `Bearer ${fixture.token}` } });
   expect(unrelated.status).toBe(403);
   await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
@@ -326,4 +371,129 @@ it('preserves packet-worker lane diff admission and authoritative ownership thro
   `], { env });
   expect((await read(fixture.laneId)).status).toBe(401);
   expect((await read(fixture.foreignLaneId)).status).toBe(401);
+  const revokedVisualization = await fetch(`${origin}/api/visualizations/${fixture.visualizationId}`, {
+    headers: { authorization: `Bearer ${fixture.token}` },
+  });
+  // The production visualization handler hides documents from unbound workers.
+  expect(revokedVisualization.status).toBe(404);
+  expect(await revokedVisualization.text()).not.toContain('Persisted native read');
+});
+
+// Write routes from #5243, each with the auth basis its gate and handler enforce.
+const WRITE_ROUTES: Array<[method: string, path: string, workerStatus: number]> = [
+  ['POST', '/api/orchestrator/handoff', 403],
+  ['POST', '/api/orchestrator/reset-session', 403],
+  ['POST', '/api/orchestrator/compact', 403],
+  ['POST', '/api/orchestrator/session-rules', 403],
+  ['DELETE', '/api/orchestrator/session-rules?id=fixture', 403],
+  ['POST', '/api/orchestrator/delegate', 403],
+  ['POST', '/api/next/voice-host', 403],
+  ['POST', '/api/orchestrator/discard-packet', 403],
+  ['POST', '/api/orchestrator/comparison-pick', 403],
+  ['POST', '/api/orchestrator/workspace', 403],
+  ['POST', '/api/orchestrator/steer-packet', 403],
+  ['POST', '/api/cortex/reingest', 403],
+  ['POST', '/api/orchestrator/stop-packet', 403],
+  ['POST', '/api/runtime/action', 403],
+  // Packet-bound workers reach proposals through the gate; the handler binds the packet.
+  ['POST', '/api/cortex/proposals', 403],
+];
+
+async function seedPacketWorker(packetId: string) {
+  const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token };
+  const seeded = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { createLane } = require('./src/lib/lane/registry.ts');
+    const { mintPacketWorkerToken } = require('./src/lib/auth/packet-worker-token.ts');
+    const root = process.env.CORTEX_IDE_DATA_DIR;
+    const lane = createLane({ repoPath: root, branch: 'fixture-writes-', runtime: 'codex', packetId: ${JSON.stringify(packetId)} });
+    console.log(JSON.stringify({ laneId: lane.id, token: mintPacketWorkerToken(lane.packetId) }));
+    require('./src/lib/db/index.ts').closeDb();
+  `], { env });
+  return JSON.parse(seeded.stdout.split('\n').find(line => line.startsWith('{"laneId":'))!) as { laneId: string; token: string };
+}
+
+let refusalWorker: ReturnType<typeof seedPacketWorker> | undefined;
+it.each(WRITE_ROUTES)('refuses native %s %s without the operator bearer', async (method, path, workerStatus) => {
+  const worker = await (refusalWorker ??= seedPacketWorker('fixture-writes-refusal'));
+  const forged = { 'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged', 'content-type': 'application/json' };
+  const send = (authorization?: string) => fetch(origin + path, { method,
+    headers: { ...forged, ...(authorization ? { authorization } : {}) },
+    body: JSON.stringify({ action: 'dismiss_observation', id: 'fixture', threadId: 'thoughts-fixture', text: 'Denied fixture' }) });
+  for (const [authorization, status] of [[undefined, 401], ['Bearer fixture-invalid', 401],
+    ['Bearer o8ro_fixture-read-only', 403], [`Bearer ${worker.token}`, workerStatus]] as const) {
+    const response = await send(authorization);
+    expect(response.status, `${method} ${path} ${authorization ?? 'no bearer'}`).toBe(status);
+    await response.arrayBuffer();
+  }
+});
+
+it('adds, lists and removes a session rule through the native transport', async () => {
+  const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
+  const added = await fetch(`${origin}/api/orchestrator/session-rules`, { method: 'POST', headers,
+    body: JSON.stringify({ threadId: 'thoughts-native-rules', text: 'Fixture native rule' }) });
+  expect(added.status).toBe(200);
+  const rule = (await added.json()).result.rule;
+  expect(rule.text).toBe('Fixture native rule');
+  const listed = await fetch(`${origin}/api/orchestrator/session-rules?threadId=thoughts-native-rules`, { headers });
+  expect(listed.status).toBe(200);
+  expect((await listed.json()).result.rules.map((entry: { id: string }) => entry.id)).toEqual([rule.id]);
+  const removed = await fetch(`${origin}/api/orchestrator/session-rules?id=${encodeURIComponent(rule.id)}`, { method: 'DELETE', headers });
+  expect(removed.status).toBe(200);
+  expect((await removed.json()).result.removed).toBe(true);
+});
+
+it('keeps proposal writes bound to the worker packet through the native transport', async () => {
+  const own = await seedPacketWorker('fixture-writes-proposals');
+  const foreign = await seedPacketWorker('fixture-writes-proposals-foreign');
+  const propose = (token: string, body: Record<string, unknown>) => fetch(`${origin}/api/cortex/proposals`, { method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'propose_observation', kind: 'pattern', text: 'Fixture observation', ...body }) });
+  const foreignPacket = await propose(own.token, { packetId: 'fixture-writes-proposals-foreign', laneId: foreign.laneId });
+  expect(foreignPacket.status).toBe(403);
+  expect((await foreignPacket.json()).error.code).toBe('worker_packet_mismatch');
+  const foreignLane = await propose(own.token, { packetId: 'fixture-writes-proposals', laneId: foreign.laneId });
+  expect(foreignLane.status).toBe(403);
+  expect((await foreignLane.json()).error.code).toBe('worker_lane_mismatch');
+  const dismissal = await propose(own.token, { action: 'dismiss_observation', id: 'fixture' });
+  expect(dismissal.status).toBe(403);
+  expect((await dismissal.json()).error.code).toBe('operator_required');
+  const created = await propose(own.token, { packetId: 'fixture-writes-proposals', laneId: own.laneId });
+  expect(created.status).toBe(200);
+  const proposal = (await created.json()).proposal;
+  expect(proposal).toMatchObject({ packetId: 'fixture-writes-proposals', laneId: own.laneId });
+  const operator = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
+  const listed = await fetch(`${origin}/api/cortex/proposals`, { headers: operator });
+  expect(listed.status).toBe(200);
+  expect((await listed.json()).proposals.map((entry: { id: string }) => entry.id)).toContain(proposal.id);
+  const dismissed = await fetch(`${origin}/api/cortex/proposals`, { method: 'POST', headers: operator,
+    body: JSON.stringify({ action: 'dismiss_observation', id: proposal.id }) });
+  expect(dismissed.status).toBe(200);
+  expect(await dismissed.json()).toMatchObject({ ok: true, dismissed: true });
+});
+
+it.each([
+  ['POST', '/api/orchestrator/handoff', {}, 400, 'invalid_handoff_request'],
+  ['POST', '/api/orchestrator/compact', { repoPath: '' }, 400, 'repoPath is required'],
+  ['POST', '/api/orchestrator/delegate', {}, 400, 'clientMutationId is required'],
+  ['POST', '/api/orchestrator/discard-packet', { packetId: 'fixture-missing' }, 400, 'client_mutation_id_required'],
+  ['POST', '/api/orchestrator/comparison-pick', {}, 400, 'packetId is required'],
+  ['POST', '/api/orchestrator/workspace', { action: 'restore', packetId: 'fixture-missing', clientMutationId: 'fixture' }, 404, 'workspace_not_found'],
+  ['POST', '/api/orchestrator/steer-packet', {}, 400, 'invalid_request'],
+  ['POST', '/api/cortex/reingest', { repoPath: '/fixture-missing' }, 404, 'No connected repo'],
+  ['POST', '/api/orchestrator/stop-packet', {}, 400, 'packetId is required'],
+  ['POST', '/api/runtime/action', {}, 400, 'action, surfaceId, and clientMutationId are required'],
+])('runs the production %s %s handler for the operator with Next stopped', async (method, path, body, status, detail) => {
+  const response = await fetch(origin + path, { method, body: JSON.stringify(body),
+    headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' } });
+  expect(response.status).toBe(status);
+  expect(await response.text()).toContain(detail);
+});
+
+it('resets an orchestrator session through the native transport', async () => {
+  const response = await fetch(`${origin}/api/orchestrator/reset-session`, { method: 'POST',
+    headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ repoPath: server.directory, threadId: 'thoughts-native-reset' }) });
+  expect(response.status).toBe(200);
+  expect((await response.json()).ok).toBe(true);
 });

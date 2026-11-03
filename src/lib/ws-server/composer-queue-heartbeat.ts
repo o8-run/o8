@@ -1,7 +1,7 @@
 import { readSteerTranscriptAnchor } from './steer-transcript-anchor';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { backendSwitchRequiresExplicitHandoff } from '@/lib/orchestrator/backend-switch-carry';
-import { assertComposerSendClaim, admitComposerSend, claimNextComposerSend, listComposerQueueTargets,
+import { assertComposerSendClaim, admitComposerSend, claimNextComposerSend, listComposerQueueTargets, peekNextComposerSend,
   listQueuedComposerSends, recoverComposerSends, settleComposerSend, validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
 import type { QueuedComposerSendRecord } from '@/lib/orchestrator/composer-queue-types';
 import type { ReviewChatOrigin } from '@/lib/orchestrator/review-continuation-origin';
@@ -130,7 +130,7 @@ export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks):
         continue;
       }
       if (steering.has(key)) continue;
-      const next = listQueuedComposerSends(target)[0];
+      const next = peekNextComposerSend(target);
       if (!next || next.status !== 'queued' || active.has(key) || input.isBusy(target.repoPath, originFor(next))) continue;
       const item = claimNextComposerSend(target);
       if (!item) continue;

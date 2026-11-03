@@ -60,6 +60,13 @@ function run(shard: string, fail = '', phase = 'regular') {
   });
 }
 
+it('checks eight-way assignment through the Node listing fixture', () => {
+  const result = spawnSync(process.execPath, ['--test', 'scripts/ci/native-test-shard.test.mjs'], {
+    encoding: 'utf8', timeout: 30_000,
+  });
+  expect(result.status, result.stderr + result.stdout).toBe(0);
+}, 30_000);
+
 it.skipIf(process.platform !== 'linux' || process.arch !== 'x64')('runs every real test exactly once across shards, retains ignored cases and propagates assertion failures', () => {
   let output = '';
   for (let index = 1; index <= 4; index++) {

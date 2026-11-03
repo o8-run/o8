@@ -26,6 +26,7 @@ import { splitCodexOrchestratorPrompt, writeCodexAppBridgeSpec } from '@/lib/cod
 import { codexAppBridgeLaunch } from '@/lib/codex/app-bridge-launch';
 import { registerCodexAppBridgeSteer } from '@/lib/codex/app-bridge-steer';
 import { noteCodexAppTurnLine } from '@/lib/codex/app-thread-sync';
+import { linkDiscoveredCodexRollout } from '@/lib/codex/discovered-resume';
 import { orchestratorErrorText } from '@/lib/transcripts/orchestrator-error';
 export { ensureCodexHome, mergeCodexMcpConfig, prepareCodexHome, stripPluginSections } from './codex-orchestrator-config';
 import { parseLocalModel } from '@/lib/codex/local-model';
@@ -427,6 +428,18 @@ async function sendToCodexOrchestratorAttempt(
   // it. Solo keeps its sandboxed private home; local models keep exec's --oss path.
   const codexApp = options.orchestrationMode !== 'single' && !isLocalModel && resolveCodexAppThreadsSync();
   const messageOnStdin = Boolean(recovery) && !codexApp;
+
+  if (session.threadId && !codexApp && options.orchestrationMode !== 'single') {
+    try {
+      await linkDiscoveredCodexRollout(session.threadId, codexHome);
+    } catch (error) {
+      session.status = 'ready';
+      onEvent({ type: 'error', error: error instanceof Error ? error.message : String(error) });
+      onEvent({ type: 'done', terminalOutcome: 'failed', sessionId: session.threadId, cost: null });
+      return;
+    }
+    if (settleBeforeSpawnIfAborted()) return;
+  }
 
   // First-turn launch vs resume.
   const isResume = Boolean(session.threadId);

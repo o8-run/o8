@@ -1,5 +1,5 @@
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
-import { readVisualization, readVisualizationMetadata } from '@/lib/visualizations/service';
+import { readVisualization, readVisualizationMetadata } from '@/lib/visualizations/read';
 import { visualizationFailure, visualizationResponse } from '@/lib/visualizations/http';
 import { visualizationVersions } from '@/lib/visualizations/store';
 import { nativeVisualizationDocument } from '@/lib/visualizations/document';

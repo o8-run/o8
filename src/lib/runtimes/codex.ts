@@ -421,7 +421,7 @@ export const codexRuntime: AgentRuntime = {
       if (!providerSession || providerSession.threadId !== threadId) {
         return {
           ok: false,
-          note: 'The Codex session is missing or ambiguous across registered identities, so it was not resumed.',
+          note: 'The Codex session is missing or ambiguous across registered identities, or its rollout could not be found. It was not resumed because it would start fresh.',
         };
       }
       const { execFile } = await import('@/lib/providers/child-process');

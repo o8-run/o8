@@ -8,10 +8,13 @@ import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { ORCHESTRATOR_THREAD_ID_PATTERN } from '@/lib/task-artifacts/types';
 import { VisualizationError } from './errors';
 import { prepareVisualizationHtml } from './prepare';
-import { getVisualization, getVisualizationMetadata, insertVisualization, latestVisualizationId, listVisualizations } from './store';
+import { insertVisualization, latestVisualizationId, listVisualizations } from './store';
 import { checkVisualization } from './preflight';
 import { visualizationInputSource } from './templates';
-import { VISUALIZATION_ID, VISUALIZATION_LIMITS, type VisualizationDocument } from './types';
+import { readVisualizationMetadata } from './read';
+import { VISUALIZATION_LIMITS, type VisualizationDocument } from './types';
+
+export { readVisualization, readVisualizationMetadata } from './read';
 
 export interface VisualizationTarget {
   repoPath: string;
@@ -75,28 +78,6 @@ export async function publishVisualization(input: Record<string, unknown>, princ
     source: layout ? { layout } : { html: html as string } };
   insertVisualization(document);
   return { document, warnings: [...prepared.warnings, ...checked.check.diagnostics], check: checked.check };
-}
-
-function validateRead(id: string, principal: RequestPrincipalContext): void {
-  if (principal.role !== 'operator' && principal.role !== 'worker') throw new VisualizationError('unauthorized', 'Visualization access requires an operator or packet worker credential.', 401);
-  if (!VISUALIZATION_ID.test(id)) throw new VisualizationError('not_found', 'Visualization not found.', 404);
-}
-
-function authorizeRead<T extends { packetId: string | null }>(document: T | null, principal: RequestPrincipalContext): T {
-  if (!document || (principal.role === 'worker' && (principal.readOnly || !principal.packetId || principal.packetId !== document.packetId))) {
-    throw new VisualizationError('not_found', 'Visualization not found.', 404);
-  }
-  return document;
-}
-
-export function readVisualization(id: string, principal: RequestPrincipalContext): VisualizationDocument {
-  validateRead(id, principal);
-  return authorizeRead(getVisualization(id), principal);
-}
-
-export function readVisualizationMetadata(id: string, principal: RequestPrincipalContext) {
-  validateRead(id, principal);
-  return authorizeRead(getVisualizationMetadata(id), principal);
 }
 
 export async function listTranscriptVisualizations(input: Record<string, unknown>, principal: RequestPrincipalContext) {

@@ -956,6 +956,12 @@
       ]
     },
     {
+      "path": "src/lib/runtime/session-manager-cwd-exempt.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/lib/runtime/worker-dumpability.test.ts",
       "reasons": [
         "child-process",
@@ -2488,6 +2494,15 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/codex-discovered-resume-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
         "real-path"
       ]
     },

@@ -170,7 +170,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const native = jobs['o8-next-tests'];
   requireCondition(native.name === 'o8 next Native Tests (Linux)' && native['runs-on'] === 'ubuntu-24.04'
     && native.if === testCondition && !native.defaults && !native.needs
-    && isDeepStrictEqual(native.strategy, { 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } })
+    && isDeepStrictEqual(native.strategy, { 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] } })
     && !native['continue-on-error'] && native.steps.every(step => !step['continue-on-error']),
   'native test runner or condition needs a verify:ci equivalent');
   const nativeCondition = "steps.native.outputs.changed == 'true'";
@@ -203,7 +203,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     CARGO_PROFILE_DEV_DEBUG: '0', CARGO_INCREMENTAL: '0',
     O8_NATIVE_REAL_WINDOW_TESTS: 'true',
     O8D_HTTP_TEST_BINARY: '${{ github.workspace }}/native/o8-next/target/debug/o8d',
-    O8_NATIVE_TEST_SHARD: '${{ matrix.shard }}/4',
+    O8_NATIVE_TEST_SHARD: '${{ matrix.shard }}/8',
   };
   requireCondition(JSON.stringify(native.env) === JSON.stringify(nativeEnv), 'native environment needs a verify:ci equivalent');
   const setup = parse(readFileSync(path.join(root, '.github/actions/next-linux-setup/action.yml'), 'utf8'));
@@ -244,7 +244,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     timeoutMs: native['timeout-minutes'] * 60_000,
     // Each matrix job shares one build/test deadline. Run the same pairs
     // serially against a shared cache without charging earlier shard time.
-    steps: [1, 2, 3, 4].flatMap(shard => nativeRunSteps.slice(1).map(step => ({
+    steps: native.strategy.matrix.shard.flatMap(shard => nativeRunSteps.slice(1).map(step => ({
       ...runStep({ ...step, env: {} }, {
         ...native, env: Object.fromEntries(Object.entries(nativeEnv).map(([key, value]) =>
           [key, value.replaceAll('${{ github.workspace }}', root)])),
