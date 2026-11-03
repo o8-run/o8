@@ -233,7 +233,8 @@ export function assertBrowserDeclarations(root, files) {
     if (!metadata.has(file)) metadata.set(file, inspect(file, source(file)));
     return metadata.get(file);
   };
-  const resolve = (file, specifier, script = false) => {
+  const resolutions = new Map();
+  const resolveUncached = (file, specifier, script) => {
     const bases = specifier.startsWith('@/') ? [path.join(root, 'src', specifier.slice(2))]
       : specifier.startsWith('.') ? [path.resolve(path.dirname(file), specifier)]
         : script ? [path.resolve(root, specifier), path.resolve(path.dirname(file), specifier)] : [];
@@ -243,6 +244,13 @@ export function assertBrowserDeclarations(root, files) {
         && existsSync(candidate) && statSync(candidate).isFile()) return candidate;
     }
     return undefined;
+  };
+  // Tests repeatedly reach the same imports under different mock policies.
+  // Resolution is policy-independent; cache hits and misses for this audit.
+  const resolve = (file, specifier, script = false) => {
+    const key = JSON.stringify([file, specifier, script]);
+    if (!resolutions.has(key)) resolutions.set(key, resolveUncached(file, specifier, script));
+    return resolutions.get(key);
   };
   // Prune modules with no possible browser/process dependency before building
   // their syntax trees. This is only a conservative prefilter; the audit below
