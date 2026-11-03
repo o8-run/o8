@@ -64,6 +64,9 @@ impl Port for Terminal {
     fn tick(view: &Entity<Self::View>, cx: &mut Context<Shell>) {
         view.update(cx, |pane, cx| pane.poll(cx));
     }
+    fn run(view: &Entity<Self::View>, line: String, cx: &mut App) {
+        view.update(cx, |pane, cx| pane.run_line(line, cx));
+    }
     fn own(client: &Client, workspace: &str) -> Option<Result<String, String>> {
         // Fixture servers in unit tests host no terminal process.
         (!cfg!(test)).then(|| client.own_terminal(workspace))
