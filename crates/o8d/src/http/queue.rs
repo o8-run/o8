@@ -16,6 +16,9 @@ pub(super) fn read(store: &Store, params: &Params) -> Response {
     }
     let repo = key(repo);
     let history = store.history(thread).unwrap_or(Value::Null);
+    if history["source"] == "bot-network" {
+        return unavailable();
+    }
     if history["repoPath"]
         .as_str()
         .is_some_and(|s| !s.is_empty() && key(s) != repo)

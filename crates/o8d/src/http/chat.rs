@@ -120,6 +120,9 @@ pub(super) fn threads(store: &Store, params: &Params) -> ReadResult {
         if is_archived {
             continue;
         }
+        if record["source"] == "bot-network" {
+            return Err(());
+        }
         let backend = backend(&record);
         if if filter.is_empty() {
             backend == "openclaw"
@@ -209,7 +212,15 @@ pub(super) fn threads(store: &Store, params: &Params) -> ReadResult {
         return Ok(json!({"archivedIds":ids}));
     }
     threads.sort_by(|a, b| text(b, "lastMessageAt").cmp(text(a, "lastMessageAt")));
+    let offset = value(params, "offset")
+        .parse::<usize>()
+        .unwrap_or(0)
+        .min(threads.len());
+    threads.drain(..offset);
     threads.truncate(limit(params, 20, 500));
+    for thread in &mut threads {
+        thread_context::append(store, thread)?;
+    }
     Ok(json!({"threads":threads}))
 }
 
@@ -222,6 +233,9 @@ pub(super) fn transcript(store: &Store, params: &Params) -> Response {
         return unavailable();
     };
     let record = store.history(id).unwrap_or(Value::Null);
+    if record["source"] == "bot-network" {
+        return unavailable();
+    }
     let Ok(db) = store.database() else {
         return unavailable();
     };
@@ -257,6 +271,11 @@ pub(super) fn transcript(store: &Store, params: &Params) -> Response {
         for field in [
             "id",
             "role",
+            "author",
+            "network",
+            "runtime",
+            "persistedVersion",
+            "steerAnchor",
             "media",
             "timestamp",
             "backend",
@@ -437,7 +456,7 @@ pub(super) fn context(store: &Store, params: &Params) -> Response {
         return problem("tabId required");
     }
     let mut record = store.history(id).unwrap_or_else(|_|json!({"messages":[],"model":null,"savedAt":null,"starred":false,"title":null,"planText":null,"repoName":null,"repoPath":null,"repoBranch":null,"projectId":null,"githubOwner":null,"githubRepo":null,"remoteUrl":null,"backend":null,"agent":null,"archivedAt":null,"orchestratorSessionIds":null,"orchestratorSessionUpdatedAt":null,"exists":false}));
-    if !record.is_object() {
+    if !record.is_object() || record["source"] == "bot-network" {
         return unavailable();
     }
     let messages = stable(record["messages"].as_array().cloned().unwrap_or_default());

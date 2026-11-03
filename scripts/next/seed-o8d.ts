@@ -28,6 +28,19 @@ async function main() {
     ...seed, repoPath: repo, repoName: 'fixture-repo', backend: 'claude', model: 'claude-code',
     savedAt: '2026-10-01T00:00:00.000Z', orchestratorVisible: true,
   }));
+  const { enqueueComposerSend, holdComposerSends } = await import('../../src/lib/orchestrator/composer-queue');
+  enqueueComposerSend({ repoPath: repo, threadId: 'thoughts-review', id: 'fixture-queue-item', intent: 'send-next', payload: {
+    text: 'Fixture queued message', wireMessage: 'Fixture queued message', images: [],
+    routing: { backend: 'claude', model: 'claude-code', effort: 'medium', permissionMode: 'full', mode: 'single', pickedMode: 'solo', collide: false },
+  } });
+  holdComposerSends({ repoPath: repo, threadId: 'thoughts-review' });
+  // Fixed fixture times make the corpus reproducible without masking persisted fields.
+  getSqlite().prepare('UPDATE composer_send_queue SET created_at = ?, updated_at = ?').run(1790812800000, 1790812800000);
+  const { inboxSubject, mutateInboxPreferences, recordInboxConversationEvent } = await import('../../src/lib/inbox/store');
+  mutateInboxPreferences(inboxSubject('conversation', 'thoughts-review', repo), { action: 'pin' }, () => {});
+  recordInboxConversationEvent({ event: 'status', data: { threadId: 'thoughts-review', repoPath: repo, status: 'busy' } });
+  getSqlite().prepare("UPDATE app_state SET value = json_set(value, '$.pinnedAt', ?, '$.runAt', ?, '$.runStartedAt', ?) WHERE key LIKE 'inbox:subject:%'")
+    .run('2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z');
   closeDb();
 }
 void main().catch(() => { console.error('Owned o8d fixture seeding failed'); process.exitCode = 1; });

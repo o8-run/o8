@@ -1,6 +1,7 @@
 //! Opt-in persisted reads for the native client. No upstream, migration or writer.
 mod chat;
 mod queue;
+mod thread_context;
 
 use axum::{
     body::Body,
@@ -235,6 +236,52 @@ fn dispatch(store: &Store, path: &str, params: &Params) -> Response {
         }
         _ => reply(StatusCode::NOT_FOUND, json!({"error":"Not found"})),
     }
+}
+
+/// Shared inventory for native admission; non-GET dispatch remains with TS.
+pub fn is_session_read(path: &str) -> bool {
+    matches!(
+        path,
+        "/api/mobile/orchestrator/threads"
+            | "/api/mobile/history"
+            | "/api/v2/chat-history"
+            | "/api/orchestrator/composer-queue"
+    )
+}
+
+/// Called only after the app transport's per-request TypeScript auth admission.
+pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &str) -> Response {
+    let store = Store {
+        directory,
+        database,
+    };
+    let mut params = Params::new();
+    for (key, value) in form_urlencoded::parse(query.as_bytes()).into_owned() {
+        params.entry(key).or_insert(value);
+    }
+    if !is_session_read(path) {
+        return unavailable();
+    }
+    // A missing JSON file can still be a network thread. Its agent-bus
+    // projection and projection health remain owned by TypeScript.
+    let id = match path {
+        "/api/mobile/history" => value(&params, "sessionKey")
+            .trim()
+            .strip_prefix("llm-chat:")
+            .unwrap_or(""),
+        "/api/v2/chat-history" => value(&params, "tabId"),
+        "/api/orchestrator/composer-queue" => value(&params, "threadId"),
+        _ => "",
+    };
+    if store.database().ok().is_some_and(|db| {
+        db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM bot_network_threads WHERE ? = '/api/mobile/orchestrator/threads' OR thread_id = ?)",
+            [path, id], |r| r.get::<_, bool>(0),
+        ).unwrap_or(false)
+    }) {
+        return unavailable();
+    }
+    dispatch(&store, path, &params)
 }
 
 pub async fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {

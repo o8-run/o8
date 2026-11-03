@@ -7736,6 +7736,9 @@ function resolvePacketWorkerRequest(req: import('http').IncomingMessage) {
 // ── Server startup ──
 
 const httpServer = createServer(async (req, res) => {
+  // Rust classifies HTTP before opening a streaming TS tunnel. End each
+  // flagged response so the next request is classified on a fresh socket.
+  if (o8dBridge && process.env.O8_NEXT_O8D === '1' && process.env.O8D_NATIVE_SESSION_READS === '1') res.setHeader('Connection', 'close');
   // Transport health is independent of Next and recovery. Stateful requests
   // retain the original recovery-before-use ordering.
   if (req.url !== '/health') await wsStartupReady;
@@ -7746,7 +7749,7 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
-  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT)) return;
+  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.peer(req)))) return;
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
   const allowedOrigins = new Set([

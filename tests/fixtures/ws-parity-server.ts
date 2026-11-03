@@ -23,9 +23,9 @@ async function freePort(): Promise<number> {
 
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
 export async function startParityReference(options: {
-  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number;
+  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean;
 } = {}) {
-  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-ws-parity-')));
+  const directory = options.directory ?? realpathSync(mkdtempSync(join(tmpdir(), 'o8-ws-parity-')));
   const token = 'ws-parity-fixture-credential';
   writeFileSync(join(directory, 'ws-token'), token, { mode: 0o600 });
   // Startup performs Git maintenance; point it at an owned empty repository.
@@ -83,6 +83,7 @@ export async function startParityReference(options: {
       CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${port}`,
       O8_WS_O8D: (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
       O8_NEXT_O8D: options.nativeHttp ? '1' : '0',
+      O8D_NATIVE_SESSION_READS: options.nativeSessionReads ? '1' : '0',
       O8D_BINARY: options.binary ?? process.env.O8D_TEST_BINARY,
       O8_REALTIME_LOG_LIMIT: String(options.logLimit ?? 4), NEXT_ORIGIN: apiUrl },
   });
@@ -95,13 +96,13 @@ export async function startParityReference(options: {
       clearTimeout(timer);
     }
     if (api.listening) await new Promise<void>((resolve) => api.close(() => resolve()));
-    rmSync(directory, { recursive: true, force: true });
+    if (!options.directory) rmSync(directory, { recursive: true, force: true });
   };
   // Consume output without exposing incidental background-service diagnostics.
   child.stdout?.resume();
   child.stderr?.resume();
   try {
-    const deadline = Date.now() + (options.startupTimeoutMs ?? 30_000);
+    const deadline = Date.now() + (options.startupTimeoutMs ?? 60_000);
     while (Date.now() < deadline) {
       if (child.exitCode !== null) throw new Error('reference WS process exited');
       try {

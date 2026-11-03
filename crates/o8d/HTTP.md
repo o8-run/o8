@@ -86,6 +86,61 @@ combined memory and CPU, macOS evidence, the 500 MB target and full-surface
 request replay remain unverified; fixture/backend figures do not meet those
 acceptance items.
 
+## Flagged native session reads
+
+With `O8_NEXT_O8D=1 O8_WS_O8D=1 O8D_NATIVE_SESSION_READS=1`, the app
+transport serves saved GETs for `/api/mobile/orchestrator/threads`,
+`/api/mobile/history`, `/api/v2/chat-history` and
+`/api/orchestrator/composer-queue` in Rust. `experimental-ws` includes the
+saved-read dependencies. The flag defaults off. All other paths and all
+non-GET methods retain their existing TypeScript handlers. In flagged mode,
+TS HTTP responses close their connection after completion so the next request
+cannot remain inside an earlier streaming TS tunnel. WebSocket delivery retains
+its existing transport.
+
+Every native request first asks the private TS backhaul to admit its original
+path, method and headers through `panelGateMiddleware`, plus
+`requirePanelAuth` for composer-queue. Only a bridge-authenticated request can
+obtain admission; client-supplied bridge/peer headers cannot obtain it. No
+authorization result is cached. This retains credential rotation, host/origin
+checks and principal restrictions without a second account or credential store.
+Rust opens only the selected profile's saved files and read-only SQLite data.
+
+Runtime-owned transcripts, durable lane overlays, network projections, parked
+workspace receipt projections and dynamic steering capabilities still defer to
+the original TS handler when the saved reader returns unavailable. These
+fallbacks are explicit limitations of the saved-read slice. A native response
+carries `x-o8d-native-session-read: 1`; the parity harness requires it for every
+replayed fixture request so fallback cannot conceal a missing Rust projection.
+
+Run the deterministic fixture oracle and benchmark with Next stopped:
+
+```sh
+CARGO_TARGET_DIR="$HOME/o8d-target-c" cargo build -j 4 --locked --release \
+  --manifest-path crates/o8d/Cargo.toml --features experimental-ws
+O8D_BINARY="$HOME/o8d-target-c/release/o8d" node --import=tsx \
+  scripts/o8d/parity.ts --report=session-parity.json
+```
+
+The harness seeds through `scripts/next/seed-o8d.ts`, records status/body pairs
+through the real WS entry with the flag off, stops that backend, and replays
+against a second backend using the same profile with the flag on. It includes
+TS-generated cursors, validation failures and a nonempty queue. JSON object
+keys are sorted; array order, missing fields and null remain significant.
+Only the explicit `VOLATILE_FIELDS` list (`requestId`, `epoch`, `generatedAt`)
+is omitted. Persisted timestamps, message IDs, revisions and computed sidebar
+fields are compared. The first difference reports its JSON path and values.
+
+Per-route p50 includes 10 warmups and 100 samples per mode, including auth
+admission and body decoding. Backend RSS sums the WS process and its descendants
+after warming each mode, with the fixture's Next listener stopped. This is a seeded backend measurement,
+not a whole-app or production idle-memory claim.
+
+B1's [verification receipt](evidence/session-reads-b1/verification.md) records
+route/auth coverage, residual failures and bundle sizes; its
+[measurement report](evidence/session-reads-b1/metrics.json) retains the p50 and
+backend RSS figures.
+
 ## Standalone persisted-read mode
 
 This is a partial slice of [#4547](https://github.com/o8-run/o8/issues/4547).

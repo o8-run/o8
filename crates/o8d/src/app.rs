@@ -18,6 +18,7 @@ use tokio_tungstenite::{
 };
 
 mod input;
+mod session_reads;
 
 pub async fn serve(
     listener: TcpListener,
@@ -120,6 +121,9 @@ async fn connection(
         })
     });
     if !upgrade {
+        if session_reads::serve(&mut socket, header, &upstream, &key).await? {
+            return Ok(());
+        }
         let mut backend = TcpStream::connect(&upstream).await.map_err(|_| ())?;
         tokio::io::copy_bidirectional(&mut socket, &mut backend)
             .await
