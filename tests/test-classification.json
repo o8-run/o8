@@ -5458,6 +5458,12 @@
       ]
     },
     {
+      "path": "tests/owned-session-symlinked-data-dir-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/owned-stdin-survival-real-path.test.ts",
       "reasons": [
         "child-process",
