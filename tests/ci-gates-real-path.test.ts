@@ -332,7 +332,7 @@ describe('native next CI through persisted fixtures', () => {
     expect(job, 'native tests must have an automatic CI job').toBeDefined();
     expect(job['runs-on']).toBe('ubuntu-24.04');
     expect(job['timeout-minutes']).toBe(30);
-    expect(job.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } });
+    expect(job.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] } });
     expect(job.if).toBe(workflow.jobs['test-shards'].if);
     const step = job.steps.find((entry: { run?: string }) => entry.run?.includes('native-test-shard.mjs'));
     expect(step.if).toBe("needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'");
