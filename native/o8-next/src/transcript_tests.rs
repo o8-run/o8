@@ -82,6 +82,41 @@ fn issue_pills_in_different_rows_each_click(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn rows_from_a_saved_read_keep_a_reader_at_the_end(cx: &mut TestAppContext) {
+    let (_host, client) = fixture();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    let install = |count: usize, view: &gpui::Entity<Surface>, cx: &mut gpui::VisualTestContext| {
+        view.update(cx, |s, cx| {
+            let entries: Vec<_> = (0..count)
+                .map(|index| {
+                    serde_json::json!({"id":format!("row-{index}"),"role":"assistant",
+                        "text":"A long enough reply to take up its own line.","timestamp":index})
+                })
+                .collect();
+            let transcript = Transcript::new(
+                serde_json::from_value(
+                    serde_json::json!({"sessionKey":"llm-chat:follow","transcript":entries}),
+                )
+                .unwrap(),
+            );
+            let rows = transcript.rows.clone();
+            s.transcript = Some(transcript);
+            s.install_rows(rows, cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+    };
+    install(80, &view, cx);
+    install(90, &view, cx);
+    view.update(cx, |s, _| {
+        assert!(crate::retained::at_end(&s.list), "the new rows stay in view");
+    });
+}
+
+#[gpui::test]
 fn system_events_are_compact_and_expand_on_click(cx: &mut TestAppContext) {
     let (_host, client) = fixture();
     let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
