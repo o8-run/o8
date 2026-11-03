@@ -16,6 +16,9 @@ await esbuild.build({
   outfile: outFile,
   bundle: true,
   platform: 'node',
+  // Keep the native addon's CommonJS wrapper (and its fs/bindings requires)
+  // in Node's loader rather than esbuild's ESM dynamic-require fallback.
+  external: ['better-sqlite3'],
   alias: { 'server-only': path.join(repoRoot, 'scripts/server-only-stub.js') },
   target: 'node22',
   format: 'esm',
