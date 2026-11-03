@@ -118,6 +118,40 @@ pub struct FilesPanel {
     spec: Option<Entity<spec::Spec>>,
 }
 
+/// The workspace-relative form of a path a reply named, when it stays inside.
+fn inside_workspace<'a>(workspace: &str, path: &'a str) -> Option<&'a str> {
+    let prefix = format!("{}/", workspace.trim_end_matches('/'));
+    let relative = if path.starts_with('/') {
+        path.strip_prefix(prefix.as_str())?
+    } else {
+        path
+    };
+    let inside = !relative.starts_with('~')
+        && relative
+            .split(['/', '\\'])
+            .all(|part| !part.is_empty() && part != "..");
+    inside.then_some(relative)
+}
+#[cfg(test)]
+#[test]
+fn reply_paths_stay_inside_the_workspace() {
+    let inside = |path| inside_workspace("/repo", path);
+    assert_eq!(inside("src/a.rs"), Some("src/a.rs"));
+    assert_eq!(inside("/repo/src/a.rs"), Some("src/a.rs"));
+    assert_eq!(inside("./src/a.rs"), Some("./src/a.rs"));
+    for path in [
+        "../x.json",
+        "src/../../x.json",
+        "/etc/x.txt",
+        "/repo/../x.json",
+        "/repository/x.json",
+        "~/x.json",
+        "..\\x.json",
+    ] {
+        assert_eq!(inside(path), None, "{path}");
+    }
+}
+
 impl FilesPanel {
     pub fn new(client: Client, workspace: String, mode: Mode, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| Search::new(client.clone(), workspace.clone(), false, cx));
@@ -232,14 +266,17 @@ impl FilesPanel {
     }
 
     fn open_file(&mut self, path: String, cx: &mut Context<Self>) {
+        self.pending_line = None;
         self.open_file_inner(path, false, cx);
     }
     /// Opens a file by the path a reply gave it, at that line if it gave one.
-    pub fn open_at(&mut self, path: String, line: Option<usize>, cx: &mut Context<Self>) {
-        let prefix = format!("{}/", self.workspace.trim_end_matches('/'));
-        let path = path.strip_prefix(&prefix).map_or(path.clone(), str::to_owned);
+    /// Reply text never chooses a file outside this workspace.
+    pub fn open_at(&mut self, path: &str, line: Option<usize>, cx: &mut Context<Self>) {
+        let Some(path) = inside_workspace(&self.workspace, path) else {
+            return;
+        };
+        self.open_file(path.to_owned(), cx);
         self.pending_line = line;
-        self.open_file(path, cx);
         self.show_pending_line();
     }
     /// The line waits here until the file it belongs to has loaded.
