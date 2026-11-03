@@ -11,9 +11,12 @@ import { runNext } from './next.js';
 
 const config = (port = 49123) => ({ apiBase: `http://127.0.0.1:${port}`, dataDir: '/fixture',
   token: 'fixture-operator', source: { token: 'data-dir' } });
+const hostPlatform = process.platform;
+const hostExecPath = process.execPath;
 let health: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   vi.clearAllMocks();
+  Object.defineProperty(process, 'platform', { value: 'darwin' });
   for (const key of ['O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN']) vi.stubEnv(key, '');
   mocks.config.mockReturnValue(config());
   mocks.serve.mockResolvedValue(0);
@@ -27,7 +30,11 @@ beforeEach(() => {
   vi.spyOn(process.stdout, 'write').mockReturnValue(true);
   vi.spyOn(process.stderr, 'write').mockReturnValue(true);
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+afterEach(() => {
+  Object.defineProperty(process, 'platform', { value: hostPlatform });
+  Object.defineProperty(process, 'execPath', { value: hostExecPath });
+  vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks();
+});
 
 describe('o8 next standalone launcher', () => {
   it('defaults to the installed binary and reuses a healthy local server', async () => {
@@ -37,6 +44,21 @@ describe('o8 next standalone launcher', () => {
       expect.objectContaining({ shell: false, env: expect.objectContaining({ O8_NEXT_API_TOKEN: 'fixture-operator' }) }));
     expect(health).toHaveBeenCalledWith(`${config().apiBase}/api/setup/identity`, expect.objectContaining({ redirect: 'error' }));
     expect(mocks.serve).not.toHaveBeenCalled();
+  });
+
+  it('finds the Linux binary beside the runtime before the system installation', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    Object.defineProperty(process, 'execPath', { value: '/fixture/payload/node' });
+    expect(await runNext([])).toBe(0);
+    expect(mocks.spawn.mock.calls[0]?.[0]).toBe('/fixture/payload/o8-next');
+  });
+
+  it('falls back to the system Linux installation for an ordinary Node runtime', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    Object.defineProperty(process, 'execPath', { value: '/fixture/node' });
+    mocks.access.mockImplementationOnce(() => { throw new Error('missing'); });
+    expect(await runNext([])).toBe(0);
+    expect(mocks.spawn.mock.calls[0]?.[0]).toBe('/usr/lib/o8/o8-next');
   });
 
   it('starts serve before launch and reloads its published port and credential', async () => {

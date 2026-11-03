@@ -241,6 +241,24 @@ it.skipIf(process.platform !== 'linux')('stages a relocatable payload, desktop e
   expect(command(join(f.relocated, 'AppRun'), ['version'], f.env).status).toBe(0);
 });
 
+it.skipIf(process.platform !== 'linux')('bare next launches the installed binary from a relocated Linux payload', async () => {
+  const f = installation('bare-next');
+  const serve = command(f.launcher, ['serve'], f.env);
+  expect(serve.status, serve.stderr).toBe(0);
+  const child = spawn(f.launcher, ['next'], { env: f.env, stdio: 'ignore' });
+  children.push(child);
+  await until(() => events(f.env).length === 1 || child.exitCode !== null);
+  expect(child.exitCode, 'bare next must open the installed window').toBeNull();
+  expect(events(f.env)[0]).toContain(join(f.relocated, 'usr/lib/o8/o8-next'));
+  expect(visibleWindows(f.relocated)).toHaveLength(1);
+  await stop(child);
+  rmSync(join(f.relocated, 'usr/lib/o8/o8-next'));
+  const missing = command(f.launcher, ['next'], f.env);
+  expect(missing.status).not.toBe(0);
+  expect(missing.stderr).toContain('native binary');
+  expect(events(f.env)).toHaveLength(1);
+}, 60_000);
+
 it.skipIf(process.platform !== 'linux')('starts packaged serve once, reuses its window and reopens after that window closes', async () => {
   const f = installation('fresh');
   const first = launch(f.launcher, f.env);
