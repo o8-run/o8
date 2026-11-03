@@ -9,6 +9,7 @@ import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dashSessionNameForOwnerKey, dashTmuxArgs } from '@/lib/ws-server/dash-terminal-persistence';
 import { renderTerminalBytes } from './helpers/headless-terminal';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 type WireFrame = {
   channel?: string;
@@ -251,6 +252,7 @@ beforeAll(async () => {
   writeFileSync(join(dataDir, 'ws-token'), `${token}\n`, { mode: 0o600 });
   await build({
     entryPoints: [join(process.cwd(), 'cli/src/index.ts')],
+    alias: cliBundleAlias,
     outfile: cliBundle,
     bundle: true,
     platform: 'node',

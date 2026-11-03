@@ -6,6 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { NextRequest } from 'next/server';
 import { afterAll, expect, it, vi } from 'vitest';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 const fixture = vi.hoisted(() => ({ compose: vi.fn(), vector: null as number[] | null,
   classify: vi.fn(async (): Promise<{ class: 'A' | 'B'; bm25Variants: string[] }> => ({ class: 'A', bm25Variants: ['release policy'] })) }));
@@ -166,7 +167,7 @@ if (!address || typeof address === 'string') throw new Error('Missing fixture ad
 const base = `http://127.0.0.1:${address.port}`;
 const inherited = { ...process.env, O8_API_PORT: String(address.port), O8_API_TOKEN: readFileSync(path.join(data, 'ws-token'), 'utf8') };
 const cli = path.join(root, 'cli.mjs');
-await (await import('esbuild')).build({ entryPoints: [path.join(process.cwd(), 'cli/src/index.ts')],
+await (await import('esbuild')).build({ alias: cliBundleAlias, entryPoints: [path.join(process.cwd(), 'cli/src/index.ts')],
   bundle: true, platform: 'node', format: 'esm', target: 'node22', outfile: cli,
   banner: { js: 'import { createRequire as __fixture_require } from "node:module"; const require = __fixture_require(import.meta.url); globalThis.require = require;' },
   define: { __O8_CLI_VERSION__: JSON.stringify('fixture') },

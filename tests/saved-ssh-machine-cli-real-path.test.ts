@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'o8-saved-ssh-machine-'));
 const cli = join(dir, 'o8.mjs');
@@ -31,12 +32,13 @@ beforeAll(async () => {
   writeFileSync(join(dir, 'ws-token'), 'local-operator-test-token\n', { mode: 0o600 });
   await build({
     entryPoints: ['cli/src/index.ts'],
+    alias: cliBundleAlias,
     bundle: true,
     platform: 'node',
     format: 'esm',
     target: 'node22',
     outfile: cli,
-    banner: { js: 'import { createRequire } from "node:module"; globalThis.require = createRequire(import.meta.url);' },
+    banner: { js: 'import { createRequire as __o8_createRequire } from "node:module"; globalThis.require = __o8_createRequire(import.meta.url);' },
     define: { __O8_CLI_VERSION__: '"test"' },
   });
   writeFileSync(ssh, `#!/bin/sh

@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dashSessionNameForOwnerKey } from '@/lib/ws-server/dash-terminal-persistence';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-terminal-wait-'));
 const tmuxServer = `o8-wait-${process.pid}`;
@@ -70,7 +71,7 @@ beforeAll(async () => {
   if (!tmuxAvailable) return;
   writeFileSync(join(dataDir, 'ws-token'), `${token}\n`, { mode: 0o600 });
   await build({
-    entryPoints: ['cli/src/index.ts'], outfile: cli, bundle: true,
+    alias: cliBundleAlias, entryPoints: ['cli/src/index.ts'], outfile: cli, bundle: true,
     platform: 'node', format: 'esm', target: 'node22',
     define: { __O8_CLI_VERSION__: '"test"' },
     banner: { js: `import { createRequire as __o8_createRequire } from 'node:module';

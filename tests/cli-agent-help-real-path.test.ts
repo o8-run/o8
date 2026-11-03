@@ -4,12 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 const directory = mkdtempSync(join(tmpdir(), 'o8-help-audit-'));
 const executable = join(directory, 'o8.mjs');
 
 beforeAll(async () => {
-  await build({ entryPoints: ['cli/src/index.ts'], outfile: executable, bundle: true,
+  await build({ alias: cliBundleAlias, entryPoints: ['cli/src/index.ts'], outfile: executable, bundle: true,
     platform: 'node', format: 'esm', target: 'node22',
     banner: { js: 'import { createRequire as __helpRequire } from "node:module"; const require = __helpRequire(import.meta.url); globalThis.require = require;' },
   });

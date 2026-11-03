@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { afterEach, describe, expect, it } from 'vitest';
 import { prepareWorkerSandbox } from '@/lib/runtimes/shared/owned-session/sandbox';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 
 const tmux = spawnSync('which', ['tmux'], { encoding: 'utf8' }).stdout?.trim();
 const roots: string[] = [], sockets: string[] = [], servers: Server[] = [];
@@ -31,7 +32,7 @@ async function fixture() {
   for (const dir of [data, temp, cwd, profiles, bin]) mkdirSync(dir, { recursive: true });
   execFileSync('git', ['init', '-q', cwd]);
   const bundle = join(root, 'o8.mjs');
-  await build({ entryPoints: ['cli/src/index.ts'], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
+  await build({ alias: cliBundleAlias, entryPoints: ['cli/src/index.ts'], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
     define: { __O8_CLI_VERSION__: JSON.stringify('test-fixture') },
     banner: { js: `import { createRequire as __o8_createRequire } from 'node:module';
 import { fileURLToPath as __o8_fileURLToPath } from 'node:url';
