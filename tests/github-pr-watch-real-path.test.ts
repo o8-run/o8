@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { GET, POST } from '@/app/api/panel/prs/[number]/route';
 import { getSqlite } from '@/lib/db';
 import { githubInstallationFetch } from '@/lib/github-broker/auth';
+import { cacheStats } from '@/lib/github/cache';
 
 const state = vi.hoisted(() => ({ installation: 8100, token: 'fixture-token', head: 'a'.repeat(40), comments: [] as Array<{ id: number; body: string; user: { login: string }; created_at: string }> }));
 vi.mock('@/lib/github-broker/env', () => ({ getGitHubAppConfig: () => null }));
@@ -21,6 +22,17 @@ const responseFor = (url: string) => {
 };
 beforeEach(() => { state.installation++; state.head = 'a'.repeat(40); state.token = 'fixture-token'; state.comments = []; request.mockReset(); request.mockImplementation(async (url: string) => responseFor(url)); vi.stubGlobal('fetch', request); });
 afterEach(() => vi.unstubAllGlobals());
+
+it('exposes outgoing API calls in the PR watch diagnostics through the real route', async () => {
+  const before = cacheStats();
+  const response = await read(2104);
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(request.mock.calls.length).toBeGreaterThan(0);
+  expect(cacheStats()).toMatchObject({ githubApiCalls: { calls: request.mock.calls.length } });
+  expect(before).toMatchObject({ githubApiCalls: { calls: 0 } });
+  expect(body.pr.watch.githubApiCalls).toEqual(cacheStats().githubApiCalls);
+});
 
 it('protects the durable route baseline when overlapping reads finish backwards', async () => {
   await read(2100);

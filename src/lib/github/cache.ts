@@ -13,6 +13,27 @@ interface CacheEntry<T> {
 
 const cache = new Map<string, CacheEntry<unknown>>();
 
+export interface GitHubApiCallStats {
+  /** Start of the current UTC hour, in milliseconds since the epoch. */
+  hourStartedAt: number;
+  calls: number;
+}
+const HOUR_MS = 60 * 60 * 1000;
+let apiCalls: GitHubApiCallStats = { hourStartedAt: 0, calls: 0 };
+
+/** Process-local broker dispatches in the current UTC hour; resets on restart. */
+export function githubApiCallStats(): GitHubApiCallStats {
+  const hourStartedAt = Math.floor(Date.now() / HOUR_MS) * HOUR_MS;
+  if (apiCalls.hourStartedAt !== hourStartedAt) apiCalls = { hourStartedAt, calls: 0 };
+  return { ...apiCalls };
+}
+
+/** Call only immediately before a network fetch, including retries and revalidations. */
+export function recordGitHubApiCall(): void {
+  githubApiCallStats();
+  apiCalls.calls += 1;
+}
+
 /** Default TTL: 5 minutes — repo data rarely changes faster than this */
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
 
@@ -58,6 +79,6 @@ export function invalidate(keyOrPrefix: string): void {
 /**
  * Get cache stats (for debugging).
  */
-export function cacheStats(): { entries: number; keys: string[] } {
-  return { entries: cache.size, keys: [...cache.keys()] };
+export function cacheStats(): { entries: number; keys: string[]; githubApiCalls: GitHubApiCallStats } {
+  return { entries: cache.size, keys: [...cache.keys()], githubApiCalls: githubApiCallStats() };
 }
