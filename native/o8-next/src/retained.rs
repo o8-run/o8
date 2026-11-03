@@ -37,6 +37,9 @@ pub struct RowState {
     #[cfg(test)]
     pub(crate) painted_geometry: RefCell<PaintedGeometry>,
     expanded: Option<bool>,
+    /// The reader opened or closed this trace, so updates keep that choice
+    /// instead of holding a running trace open.
+    chosen: bool,
     cache: Option<Layout>,
     pub(crate) images: crate::ui::images::Cache,
     pub cards: crate::visualizations::Cards,
@@ -76,6 +79,7 @@ impl RowState {
             #[cfg(test)]
             painted_geometry: RefCell::new(PaintedGeometry::default()),
             expanded,
+            chosen: false,
             cache: None,
             images: Default::default(),
             cards: Default::default(),
@@ -92,9 +96,11 @@ impl RowState {
         self.subagent_focus = previous.subagent_focus.clone();
         if self.expanded.is_some() && previous.expanded.is_some() {
             self.expanded = previous.expanded;
+            self.chosen = previous.chosen;
         }
         if let (Row::Activity { .. }, Row::Activity { trace, .. }) = (&self.row, &previous.row)
             && trace.live
+            && !self.chosen
         {
             self.expanded = Some(true);
         }
@@ -111,9 +117,20 @@ impl RowState {
     pub(crate) fn disclosure(&self) -> bool {
         self.expanded.unwrap_or(false)
     }
-    pub(crate) fn toggle_disclosure(&mut self) {
-        if let Some(expanded) = self.expanded.as_mut() {
-            *expanded = !*expanded;
+    /// Whether a trace shows its lines: a running one stays open until the
+    /// reader closes it.
+    pub(crate) fn trace_open(&self, live: bool) -> bool {
+        if live && !self.chosen {
+            true
+        } else {
+            self.disclosure()
+        }
+    }
+    /// The reader's click on a trace header, from what it showed.
+    pub(crate) fn choose_disclosure(&mut self, open: bool) {
+        if self.expanded.is_some() {
+            self.expanded = Some(open);
+            self.chosen = true;
             self.cache = None;
         }
     }
@@ -1169,5 +1186,46 @@ impl Element for RetainedRow {
             image.paint(window, cx);
         }
         self.painted.borrow_mut().insert(self.index);
+    }
+}
+
+#[cfg(test)]
+mod trace_disclosure_tests {
+    use super::*;
+
+    fn row(live: bool) -> RowState {
+        RowState::new(Row::Activity {
+            id: "turn:working".into(),
+            steps: vec![],
+            trace: crate::model::Trace {
+                live,
+                ..Default::default()
+            },
+        })
+    }
+
+    #[test]
+    fn a_running_trace_folds_on_click_and_stays_folded_through_updates() {
+        let mut first = row(true);
+        assert!(first.trace_open(true), "a running trace opens by itself");
+        first.choose_disclosure(false);
+        assert!(!first.trace_open(true));
+        let mut update = row(true);
+        update.keep_disclosure(&first);
+        assert!(!update.trace_open(true), "a new step doesn't reopen it");
+        let mut finished = row(false);
+        finished.keep_disclosure(&update);
+        assert!(!finished.trace_open(false), "nor does finishing");
+        finished.choose_disclosure(true);
+        assert!(finished.trace_open(false));
+    }
+
+    #[test]
+    fn an_untouched_running_trace_is_still_open_when_it_finishes() {
+        let live = row(true);
+        let mut finished = row(false);
+        finished.keep_disclosure(&live);
+        assert!(finished.trace_open(false));
+        assert!(!row(false).trace_open(false), "a saved trace starts folded");
     }
 }
