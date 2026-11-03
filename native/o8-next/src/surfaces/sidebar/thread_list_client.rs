@@ -9,6 +9,28 @@ use std::collections::{HashMap, HashSet};
 struct Sessions {
     threads: Vec<Session>,
 }
+/// A runtime inventory entry as a sidebar row, when it's a worker.
+fn worker_session(agent: &Value) -> Option<Result<Session, String>> {
+    let key = agent["sessionKey"]
+        .as_str()
+        .filter(|key| key.contains(':'))?;
+    Some(
+        serde_json::from_value(json!({
+            "id": key,
+            "title": crate::text::sanitize(agent["name"].as_str().unwrap_or("Worker")),
+            "status": agent["status"].as_str().unwrap_or("idle"),
+            "runtime": agent["runtime"],
+            "model": agent["model"],
+            "currentTask": agent["currentTask"],
+            "branch": agent["branch"].as_str().filter(|branch| *branch != "unknown"),
+            "parkedWorkspaces": agent["parkedWorkspaces"].as_array().cloned().unwrap_or_default(),
+            "repoPath": agent["workspace"],
+            "lastMessageAt": agent["lastActivityAt"].as_i64().map(|t| format!("{t:020}")).unwrap_or_default(),
+        }))
+        .map_err(|_| "Invalid worker inventory".to_string()),
+    )
+}
+
 impl Client {
     pub(crate) fn sidebar_threads(&self) -> Result<Vec<Session>, String> {
         self.sidebar_threads_with_state()
@@ -115,7 +137,8 @@ impl Client {
             sessions.push(Session {
                 machine: None,
                 machine_label: None,
-                parked_workspaces: serde_json::from_value(agent["parkedWorkspaces"].clone()).unwrap_or_default(),
+                parked_workspaces: serde_json::from_value(agent["parkedWorkspaces"].clone())
+                    .unwrap_or_default(),
                 repo_slug: None,
                 pinned_at: agent["pinnedAt"].as_str().map(str::to_owned),
                 pin_order_key: agent["pinOrderKey"].as_str().map(str::to_owned),
@@ -150,6 +173,8 @@ impl Client {
                     .cloned(),
                 settled_override: agent["settledOverride"].as_str().map(str::to_owned),
                 settled_at: agent["settledAt"].as_str().map(str::to_owned),
+                model: None,
+                current_task: None,
                 auto_settled_reason: agent["autoSettledReason"].as_str().map(str::to_owned),
                 auto_settle_disabled_at: agent["autoSettleDisabledAt"].as_str().map(str::to_owned),
             });
@@ -184,14 +209,19 @@ impl Client {
     }
     pub(crate) fn sidebar_workers(&self) -> Result<Vec<Session>, String> {
         let inventory: Value = self.get("/api/runtime/inventory", &[("fresh", "1")])?;
-        inventory["agents"].as_array().into_iter().flatten().filter_map(|agent| {
-            let key = agent["sessionKey"].as_str().filter(|key| key.contains(':'))?;
-            Some(serde_json::from_value(json!({"id":key,"title":crate::text::sanitize(agent["name"].as_str().unwrap_or("Worker")),
-                "status":agent["status"].as_str().unwrap_or("idle"),"runtime":agent["runtime"],
-                "parkedWorkspaces":agent["parkedWorkspaces"].as_array().cloned().unwrap_or_default(),
-                "repoPath":agent["workspace"],"lastMessageAt":agent["lastActivityAt"].as_i64().map(|t| format!("{t:020}")).unwrap_or_default()
-            })).map_err(|_| "Invalid worker inventory".to_string()))
-        }).collect()
+        inventory["agents"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(worker_session)
+            .collect()
+    }
+    /// The end of a worker's transcript, for its hover card.
+    pub(crate) fn worker_tail(&self, key: &str) -> Result<Value, String> {
+        self.get(
+            "/api/orchestrator/packet-transcript",
+            &[("sessionKey", key), ("tail", "1"), ("limit", "30")],
+        )
     }
     #[cfg(test)]
     pub(crate) fn sidebar_sessions(&self) -> Result<Vec<Session>, String> {
@@ -240,9 +270,42 @@ impl Client {
                 ]
                 .into_iter()
                 .flatten()
-                .map(move |id| (id.strip_prefix("llm-chat:").unwrap_or(id).to_owned(), branch.to_owned()))
+                .map(move |id| {
+                    (
+                        id.strip_prefix("llm-chat:").unwrap_or(id).to_owned(),
+                        branch.to_owned(),
+                    )
+                })
             })
             .collect();
         Ok((sessions, branches))
+    }
+}
+
+#[cfg(test)]
+mod worker_tests {
+    use super::*;
+
+    #[test]
+    fn a_worker_row_keeps_the_facts_its_card_shows() {
+        let worker = worker_session(&json!({
+            "sessionKey": "codex:7", "name": "w7", "status": "running", "runtime": "codex",
+            "model": "gpt-6.1-sol", "currentTask": "Fix the list", "branch": "q/list",
+        }))
+        .unwrap()
+        .unwrap();
+        assert_eq!(worker.model.as_deref(), Some("gpt-6.1-sol"));
+        assert_eq!(worker.current_task.as_deref(), Some("Fix the list"));
+        assert_eq!(worker.branch.as_deref(), Some("q/list"));
+    }
+
+    #[test]
+    fn an_unknown_branch_is_no_branch_and_a_plain_session_is_no_worker() {
+        let worker =
+            worker_session(&json!({"sessionKey": "a:b", "runtime": "codex", "branch": "unknown"}))
+                .unwrap()
+                .unwrap();
+        assert_eq!(worker.branch, None);
+        assert!(worker_session(&json!({"sessionKey": "plain"})).is_none());
     }
 }
