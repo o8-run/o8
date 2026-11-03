@@ -219,6 +219,11 @@ pub struct Session {
     /// `owner/repo` from the repo's git remote, else its folder; older hosts omit it.
     #[serde(default)]
     pub repo_slug: Option<String>,
+    /// A worker's model and what it's working on, from the runtime inventory.
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub current_task: Option<String>,
     /// The worktree's current branch; older hosts omit it.
     #[serde(default)]
     pub branch: Option<String>,
