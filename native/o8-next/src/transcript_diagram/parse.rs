@@ -1,6 +1,6 @@
 use super::*;
 
-const LIMIT: usize = 200;
+pub(super) const LIMIT: usize = 200;
 fn label(text: &str) -> Result<String, ParseError> {
     let text = text.trim();
     let text = if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 {
@@ -15,6 +15,22 @@ fn label(text: &str) -> Result<String, ParseError> {
         return Err(ParseError::Unsupported);
     }
     Ok(text.to_owned())
+}
+/// Free text in state and class diagrams, which are drawn as plain text.
+pub(super) fn text(text: &str) -> Result<String, ParseError> {
+    let text = text.trim();
+    if text.len() > 512 {
+        return Err(ParseError::Limit);
+    }
+    if text.is_empty() || text.chars().any(char::is_control) {
+        return Err(ParseError::Unsupported);
+    }
+    Ok(text.to_owned())
+}
+/// A `"quoted"` string at the start of `input`, and the rest after it.
+pub(super) fn quoted(input: &str) -> Option<(&str, &str)> {
+    let (value, rest) = input.trim_start().strip_prefix('"')?.split_once('"')?;
+    Some((value, rest.trim_start()))
 }
 fn identifier(input: &str) -> Result<(&str, &str), ParseError> {
     let input = input.trim_start();
@@ -77,7 +93,7 @@ fn vertex<'a>(input: &'a str, nodes: &mut Vec<Vertex>) -> Result<(usize, &'a str
         nodes.push(Vertex {
             id: id.into(),
             label: id.into(),
-            shape: Shape::Rect,
+            ..Default::default()
         });
         nodes.len() - 1
     };
@@ -128,6 +144,7 @@ fn flow(lr: bool, lines: &[String]) -> Result<Diagram, ParseError> {
                 label: text,
                 dashed,
                 arrow: head,
+                ..Default::default()
             });
             from = to;
             rest = tail;
@@ -209,6 +226,7 @@ fn sequence(lines: &[String]) -> Result<Diagram, ParseError> {
             label: label(text)?,
             dashed,
             arrow: true,
+            ..Default::default()
         }));
     }
     if participants.is_empty() {
@@ -226,7 +244,9 @@ pub(super) fn parse(source: &str) -> Result<Diagram, ParseError> {
     }
     let mut lines = vec![];
     // Semicolons separate flow statements, except inside labels or quotes.
-    let sequence_kind = source.trim_start().starts_with("sequenceDiagram");
+    let flow_kind = ["flowchart", "graph"]
+        .iter()
+        .any(|kind| source.trim_start().starts_with(kind));
     for line in source
         .lines()
         .map(str::trim)
@@ -246,7 +266,7 @@ pub(super) fn parse(source: &str) -> Result<Diagram, ParseError> {
                 if matches!(c, ']' | ')' | '}') {
                     depth = depth.saturating_sub(1);
                 }
-                if c == ';' && depth == 0 && !sequence_kind {
+                if c == ';' && depth == 0 && flow_kind {
                     let statement = line[start..index].trim();
                     if !statement.is_empty() {
                         lines.push(statement.to_owned());
@@ -265,6 +285,9 @@ pub(super) fn parse(source: &str) -> Result<Diagram, ParseError> {
         "flowchart TD" | "flowchart TB" | "graph TD" | "graph TB" => flow(false, body),
         "flowchart LR" | "graph LR" => flow(true, body),
         "sequenceDiagram" => sequence(body),
+        "stateDiagram" | "stateDiagram-v2" => super::state::parse(body),
+        "classDiagram" | "classDiagram-v2" => super::class::parse(body),
+        _ if header.split_whitespace().next() == Some("pie") => super::pie::parse(header, body),
         _ => Err(ParseError::Unsupported),
     }
 }

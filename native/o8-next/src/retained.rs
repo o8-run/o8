@@ -42,6 +42,7 @@ pub struct RowState {
     chosen: bool,
     cache: Option<Layout>,
     diagram_sources: BTreeSet<usize>,
+    diagram_views: crate::transcript_diagram::Views,
     diagram_list: Option<(gpui::ListState, usize)>,
     pub(crate) images: crate::ui::images::Cache,
     pub cards: crate::visualizations::Cards,
@@ -85,6 +86,7 @@ impl RowState {
             chosen: false,
             cache: None,
             diagram_sources: BTreeSet::new(),
+            diagram_views: Default::default(),
             diagram_list: None,
             images: Default::default(),
             cards: Default::default(),
@@ -102,6 +104,7 @@ impl RowState {
         self.subagent_focus = previous.subagent_focus.clone();
         self.subagent_roster = previous.subagent_roster.clone();
         self.diagram_sources = previous.diagram_sources.clone();
+        self.diagram_views = previous.diagram_views.clone();
         if self.expanded.is_some() && previous.expanded.is_some() {
             self.expanded = previous.expanded;
             self.chosen = previous.chosen;
@@ -227,6 +230,7 @@ struct Builder {
     links: Vec<LinkSpot>,
     diagrams: Vec<crate::transcript_diagram::Placement>,
     diagram_sources: BTreeSet<usize>,
+    diagram_views: crate::transcript_diagram::Views,
     /// Where the last paragraph gap ended, so blank lines collapse to one gap.
     gap_end: Option<Pixels>,
 }
@@ -275,6 +279,7 @@ impl Builder {
                         gap_end: None,
                         diagrams: vec![],
                         diagram_sources: self.diagram_sources.clone(),
+                        diagram_views: Default::default(),
                     };
                     let mut runs: Vec<Run> =
                         serde_json::from_value(cell.clone()).unwrap_or_default();
@@ -534,6 +539,7 @@ impl Builder {
             point(px(24.), self.y + px(8.)),
             (self.width - px(48.)).max(px(1.)),
             &self.diagram_sources,
+            &self.diagram_views,
             window,
         ) {
             self.y = card.bounds.bottom() + px(8.);
@@ -657,6 +663,7 @@ fn layout(
     images: crate::ui::images::Cache,
     cards: &crate::visualizations::Cards,
     diagram_sources: &BTreeSet<usize>,
+    diagram_views: &crate::transcript_diagram::Views,
     window: &Window,
 ) -> Layout {
     let mut b = Builder {
@@ -671,6 +678,7 @@ fn layout(
         gap_end: None,
         diagrams: vec![],
         diagram_sources: diagram_sources.clone(),
+        diagram_views: diagram_views.clone(),
     };
     let mut placements = vec![];
     match row {
@@ -1018,7 +1026,8 @@ impl IntoElement for RetainedRow {
 }
 impl Element for RetainedRow {
     type RequestLayoutState = ();
-    type PrepaintState = Vec<gpui::AnyElement>;
+    /// Child elements, and a hitbox for each diagram's zoom and pan.
+    type PrepaintState = (Vec<gpui::AnyElement>, Vec<gpui::Hitbox>);
     fn id(&self) -> Option<ElementId> {
         (!self.state.borrow().cards.is_empty()).then(|| {
             ElementId::Name(format!("visualization-row:{}", self.state.borrow().row.id()).into())
@@ -1055,6 +1064,7 @@ impl Element for RetainedRow {
                     state.images.clone(),
                     &state.cards,
                     &state.diagram_sources,
+                    &state.diagram_views,
                     window,
                 ));
                 state.layouts += 1;
@@ -1071,7 +1081,7 @@ impl Element for RetainedRow {
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
-    ) -> Vec<gpui::AnyElement> {
+    ) -> (Vec<gpui::AnyElement>, Vec<gpui::Hitbox>) {
         use gpui::{prelude::*, *};
         if let Some(global_id) = global_id {
             let cards: Vec<_> = self.state.borrow().cards.values().cloned().collect();
@@ -1102,6 +1112,11 @@ impl Element for RetainedRow {
                 );
             }
         }
+        let hitboxes = cache
+            .diagrams
+            .iter()
+            .map(|card| card.hitbox(origin, window))
+            .collect();
         let controls: Vec<_> = cache
             .diagrams
             .iter()
@@ -1128,7 +1143,7 @@ impl Element for RetainedRow {
                 )
             })
             .collect();
-        cache
+        let elements = cache
             .images
             .iter()
             .map(|image| {
@@ -1195,7 +1210,8 @@ impl Element for RetainedRow {
                 child
             }))
             .chain(controls)
-            .collect()
+            .collect();
+        (elements, hitboxes)
     }
     fn paint(
         &mut self,
@@ -1203,7 +1219,7 @@ impl Element for RetainedRow {
         _: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _: &mut (),
-        images: &mut Vec<gpui::AnyElement>,
+        (images, hitboxes): &mut (Vec<gpui::AnyElement>, Vec<gpui::Hitbox>),
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -1234,6 +1250,9 @@ impl Element for RetainedRow {
         }
         for card in &cache.diagrams {
             card.paint(origin, window, cx);
+        }
+        for (card, hitbox) in cache.diagrams.iter().zip(hitboxes.iter()) {
+            card.interact(origin, hitbox, window);
         }
         let fades = tail_fades(&state.fading, &cache.lines);
         if !fades.is_empty() {

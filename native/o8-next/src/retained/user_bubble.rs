@@ -23,6 +23,7 @@ pub(super) fn layout(
         gap_end: None,
         diagrams: vec![],
         diagram_sources: b.diagram_sources.clone(),
+        diagram_views: b.diagram_views.clone(),
     };
     for node in super::trimmed(nodes) {
         bubble.node(node, expanded, window);
