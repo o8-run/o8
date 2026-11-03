@@ -950,6 +950,12 @@
       ]
     },
     {
+      "path": "src/lib/runtime/proc-cleanup-evidence.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/claude-code-status.test.ts",
       "reasons": [
         "terminal-tool"

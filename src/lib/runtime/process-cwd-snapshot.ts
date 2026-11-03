@@ -3,7 +3,8 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { closeObservedHelperSettled, hasCloseProcessObservation, observeCloseProcess, refreshCloseProcessObservation } from './close-process-observation';
-import { readCloseOpenFileRows } from './process-open-files-snapshot';
+import { parseOpenFileSnapshot, readCloseOpenFileRows } from './process-open-files-snapshot';
+import { missingLinuxLsof, readProcOpenFiles } from './proc-open-files-snapshot';
 
 const execFileAsync = promisify(execFile);
 const ACTIVE_SNAPSHOT_TTL_MS = 15_000;
@@ -183,14 +184,20 @@ async function readNativeProcessCwdSnapshot(options: ProcessCwdSnapshotOptions):
       snapshot = { status: 'ready', rows, capturedAt: startedAt };
       lastRowCount = rows.length;
     } catch (error) {
-      failures += 1;
-      lastRowCount = 0;
-      snapshot = {
-        status: 'unavailable',
-        rows: [],
-        capturedAt: startedAt,
-        reason: compactError(error),
-      };
+      try {
+        if (!missingLinuxLsof(error)) throw error;
+        const rows = parseOpenFileSnapshot(await readProcOpenFiles())
+          .filter(row => row.descriptor === 'cwd')
+          .map(row => ({ pid: row.pid, cwd: row.file, commandName: row.commandName }));
+        snapshot = { status: 'ready', rows, capturedAt: startedAt };
+        lastRowCount = rows.length;
+      } catch (failure) {
+        failures += 1;
+        lastRowCount = 0;
+        snapshot = {
+          status: 'unavailable', rows: [], capturedAt: startedAt, reason: compactError(failure),
+        };
+      }
     }
 
     lastDurationMs = Math.max(0, now() - startedAt);
