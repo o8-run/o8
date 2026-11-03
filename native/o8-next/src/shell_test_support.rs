@@ -31,13 +31,17 @@ impl Fixture {
         Self::start_port(false, "", port)
     }
     fn start_port(projects: bool, option: &str, port: u16) -> Self {
+        // The clock alone repeats between parallel tests: macOS reports whole
+        // microseconds.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
-            "o8-shell-{}-{}",
+            "o8-shell-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         fs::create_dir(&root).unwrap();
         let root = fs::canonicalize(root).unwrap();
