@@ -1140,16 +1140,21 @@ fn rail_canvas(rail: Rail, first: bool, last: bool, slide: f32) -> impl IntoElem
 }
 
 /// The trace for one block of steps. `expanded` is the row's disclosure; a live
-/// trace stays open.
+/// trace stays open until the reader closes it.
 pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListState) -> AnyElement {
     let (id, steps, trace, expanded) = {
         let state = state.borrow();
         let crate::model::Row::Activity { id, steps, trace } = &state.row else {
             return div().into_any_element();
         };
-        (id.clone(), steps.clone(), trace.clone(), state.disclosure())
+        (
+            id.clone(),
+            steps.clone(),
+            trace.clone(),
+            state.trace_open(trace.live),
+        )
     };
-    let open = trace.live || expanded;
+    let open = expanded;
     // One clock for every trace keeps shimmers and arcs in step.
     let beat = seen("trace:clock", true).elapsed().as_secs_f32();
     // A saved trace drawn for the first time starts settled; a live trace and
@@ -1193,9 +1198,9 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
         .h(px(ROW * header_open))
         .flex()
         .items_center()
-        .when(expandable && !trace.live, |row| {
+        .when(expandable, |row| {
             row.cursor_pointer().on_click(move |_, window, cx| {
-                toggle_state.borrow_mut().toggle_disclosure();
+                toggle_state.borrow_mut().choose_disclosure(!open);
                 toggle_list.splice(index..index + 1, 1);
                 window.refresh();
                 cx.stop_propagation();
