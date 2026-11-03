@@ -858,7 +858,7 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
     out
 }
 
-fn seconds(ms: f64) -> String {
+pub(crate) fn seconds(ms: f64) -> String {
     let total = (ms / 1000.).round().max(0.) as u64;
     if total < 60 {
         format!("{total}s")
