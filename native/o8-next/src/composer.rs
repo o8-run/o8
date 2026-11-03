@@ -5,6 +5,7 @@ use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) mod commands;
+pub(crate) mod mention;
 pub(crate) mod controls;
 pub(crate) mod images;
 pub(crate) mod mode_store;
@@ -181,6 +182,7 @@ impl Composer {
                 self.controls.slash.index = 0;
                 self.controls.slash.dismissed = None;
             }
+            self.sync_mention(cx);
         }
         self.revision += 1;
         self.reveal_cursor = true;
@@ -285,7 +287,7 @@ impl Composer {
             cx.stop_propagation();
             return;
         }
-        if self.slash_key(key, window, cx) {
+        if self.mention_key(key, window, cx) || self.slash_key(key, window, cx) {
             return;
         }
         let command = key.modifiers.control || key.modifiers.platform;
