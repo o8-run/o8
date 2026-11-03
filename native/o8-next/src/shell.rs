@@ -427,6 +427,8 @@ impl Shell {
             self.open_pr_in_panel(repo, number, window, cx);
         } else if url.starts_with("https://") || url.starts_with("http://") {
             cx.open_url(url);
+        } else if let Some((path, line)) = crate::text::file_ref(url.trim_start_matches("file:")) {
+            self.open_file_link(path.to_owned(), line, window, cx);
         }
     }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {

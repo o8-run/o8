@@ -8,6 +8,10 @@ fn sidebar_recents_groups_times_more_and_keyboard(cx: &mut TestAppContext) {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
+    // Just after midnight there's less than 14 minutes of today to place rows in.
+    let today =
+        now - crate::shell::sidebar::thread_list::recents::calendar::midnight(now / 1000) * 1000;
+    let recent = today.min(14 * 60_000);
     for index in 0..20 {
         let id = format!("thoughts-sidebar-{index:04}");
         let record: Value = fixture
@@ -15,7 +19,7 @@ fn sidebar_recents_groups_times_more_and_keyboard(cx: &mut TestAppContext) {
             .get("/api/v2/chat-history", &[("tabId", &id)])
             .unwrap();
         let age = if index < 16 {
-            14 * 60_000
+            recent
         } else if index < 18 {
             2 * 86_400_000
         } else {
@@ -47,7 +51,10 @@ fn sidebar_recents_groups_times_more_and_keyboard(cx: &mut TestAppContext) {
         "Recents must use desktop age groups rather than workspace/status shelves: {labels:?}"
     );
     assert!(
-        rows.as_array().unwrap().iter().any(|r| r["age"] == "14m"),
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["age"] == "14m" || (recent < 14 * 60_000 && r["age"].is_string())),
         "visible rows must include compact relative ages"
     );
     let marker = rows

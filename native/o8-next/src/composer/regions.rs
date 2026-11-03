@@ -82,6 +82,12 @@ impl Surface {
         let queue_enabled = self.queue_ready && !self.saving;
         let steerable = Rc::new(self.queue["steerableIds"].clone());
         let painted_rows = self.painted_rows.clone();
+        let file_root: Option<gpui::SharedString> = self
+            .selected
+            .as_ref()
+            .and_then(|id| self.sessions.iter().find(|s| s.id == *id))
+            .and_then(|s| s.repo_path.clone())
+            .map(Into::into);
         // Play and Copy under each finished turn's answer; a row that gains or
         // loses them is measured again.
         let ends = Rc::new(crate::transcript_actions::turn_ends(&rows));
@@ -129,6 +135,9 @@ impl Surface {
                                 &steerable,
                                 view.clone(),
                             );
+                        }
+                        if rows[index].borrow().file_root != file_root {
+                            rows[index].borrow_mut().file_root = file_root.clone();
                         }
                         let row = RetainedRow {
                             state: rows[index].clone(),

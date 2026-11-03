@@ -22,6 +22,13 @@ impl Source {
             horizontal: gpui::ScrollHandle::new(),
         }
     }
+    /// Brings a 1-based line into view, with a little context above it.
+    pub(super) fn reveal_line(&self, line: usize) {
+        self.list.scroll_to(gpui::ListOffset {
+            item_ix: line.saturating_sub(3),
+            offset_in_item: px(0.),
+        });
+    }
     pub(super) fn view(
         &self,
         lines: &[SharedString],
