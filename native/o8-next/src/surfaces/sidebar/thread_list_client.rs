@@ -301,9 +301,10 @@ mod worker_tests {
 
     #[test]
     fn an_unknown_branch_is_no_branch_and_a_plain_session_is_no_worker() {
-        let worker = worker_session(&json!({"sessionKey": "a:b", "branch": "unknown"}))
-            .unwrap()
-            .unwrap();
+        let worker =
+            worker_session(&json!({"sessionKey": "a:b", "runtime": "codex", "branch": "unknown"}))
+                .unwrap()
+                .unwrap();
         assert_eq!(worker.branch, None);
         assert!(worker_session(&json!({"sessionKey": "plain"})).is_none());
     }
