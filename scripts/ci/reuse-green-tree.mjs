@@ -15,7 +15,7 @@ export const REQUIRED_CHECKS = [
   'Lint',
   'Hermetic Unit Tests',
   ...[1, 2, 3, 4].map(shard => `Hermetic Unit Tests (shard ${shard}/4)`),
-  ...[1, 2, 3, 4].map(shard => `o8 next Native Tests (Linux) (${shard})`),
+  ...[1, 2, 3, 4, 5, 6, 7, 8].map(shard => `o8 next Native Tests (Linux) (${shard})`),
   'Integration Tests (changed files)',
   'Security Audit',
   'Governance Smoke',
