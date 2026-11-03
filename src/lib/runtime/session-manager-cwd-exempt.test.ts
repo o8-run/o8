@@ -58,7 +58,7 @@ describe('unreadableCwdReason session-manager exemption (#5423)', () => {
   });
 
   it('returns null when there are no denied-cwd rows', () => {
-    expect(unreadableCwdReason([{ pid: 10, descriptor: 'cwd', commandName: 'x', file: '/tmp' }], runnerProbe)).toBeNull();
+    expect(unreadableCwdReason([{ pid: 10 }], runnerProbe)).toBeNull();
   });
 
   it.skipIf(!onLinux)('exempts the uid\'s own `systemd --user` (PPid 1)', () => {
