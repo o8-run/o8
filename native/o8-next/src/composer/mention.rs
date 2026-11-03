@@ -214,6 +214,9 @@ pub(crate) fn thread_matches(
     let query = query.to_lowercase();
     let mut threads: Vec<_> = sessions
         .iter()
+        // Another machine's history is on its own server, which this read
+        // does not reach yet (#5305), so its threads stay out.
+        .filter(|s| s.machine.is_none() && !crate::shell::session::reserved_thread_id(&s.id))
         .filter(|s| s.id != current && s.title.to_lowercase().contains(&query))
         .collect();
     threads.sort_by(|a, b| {
