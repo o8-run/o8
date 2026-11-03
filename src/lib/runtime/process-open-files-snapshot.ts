@@ -76,7 +76,7 @@ function sameUidCwdHolderExempt(pid: number, uid: number, probe: ProcExemptProbe
   // exempt systemd parent for sd-pam, keeps a worker that merely names itself
   // `systemd` from slipping through.
   if (status.name === 'systemd' && status.ppid === 1) return true;
-  if (status.name === '(sd-pam)') {
+  if (status.name === '(sd-pam)' && status.ppid !== undefined) {
     const parent = probe.status(status.ppid);
     if (parent && parent.uid === uid && parent.name === 'systemd' && parent.ppid === 1) return true;
   }

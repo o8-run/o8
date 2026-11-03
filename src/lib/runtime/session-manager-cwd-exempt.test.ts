@@ -45,7 +45,7 @@ const runnerProbe: ProcExemptProbe = {
 describe('unreadableCwdReason session-manager exemption (#5423)', () => {
   it('still refuses a denied-cwd row with an unknown owner (no L field)', () => {
     // lsof emitted no owner, so we cannot attest it even if its pid looks like a manager.
-    const noOwner = { pid: 1293, descriptor: 'cwd', commandName: 'process', file: '', unreadable: true as const };
+    const noOwner = { pid: 1293, unreadable: true as const };
     expect(unreadableCwdReason([noOwner], runnerProbe)).toMatch(/pid 1293/);
   });
 
