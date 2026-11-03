@@ -2484,6 +2484,15 @@
       ]
     },
     {
+      "path": "tests/codex-discovered-resume-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-discovery-readonly-real-path.test.ts",
       "reasons": [
         "child-process",
