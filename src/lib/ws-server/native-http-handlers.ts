@@ -59,6 +59,19 @@ import { POST as api_runtime_action_POST } from '@/app/api/runtime/action/route'
 import { POST as api_runtime_launch_POST } from '@/app/api/runtime/launch/route';
 import { POST as api_orchestrator_headless_tick_POST } from '@/app/api/orchestrator/headless-tick/route';
 import { POST as api_review_auto_review_POST } from '@/app/api/review/auto-review/route';
+import { POST as api_orchestrator_handoff_POST } from '@/app/api/orchestrator/handoff/route';
+import { POST as api_orchestrator_reset_session_POST } from '@/app/api/orchestrator/reset-session/route';
+import { POST as api_orchestrator_compact_POST } from '@/app/api/orchestrator/compact/route';
+import { GET as api_orchestrator_session_rules_GET, POST as api_orchestrator_session_rules_POST, DELETE as api_orchestrator_session_rules_DELETE } from '@/app/api/orchestrator/session-rules/route';
+import { POST as api_orchestrator_delegate_POST } from '@/app/api/orchestrator/delegate/route';
+import { GET as api_next_voice_host_GET, POST as api_next_voice_host_POST } from '@/app/api/next/voice-host/route';
+import { POST as api_orchestrator_discard_packet_POST } from '@/app/api/orchestrator/discard-packet/route';
+import { GET as api_cortex_proposals_GET, POST as api_cortex_proposals_POST } from '@/app/api/cortex/proposals/route';
+import { POST as api_orchestrator_comparison_pick_POST } from '@/app/api/orchestrator/comparison-pick/route';
+import { POST as api_orchestrator_workspace_POST } from '@/app/api/orchestrator/workspace/route';
+import { POST as api_orchestrator_steer_packet_POST } from '@/app/api/orchestrator/steer-packet/route';
+import { POST as api_cortex_reingest_POST } from '@/app/api/cortex/reingest/route';
+import { POST as api_orchestrator_stop_packet_POST } from '@/app/api/orchestrator/stop-packet/route';
 
 import { GET as api_panel_branches_GET } from '@/app/api/panel/branches/route';
 import { GET as api_panel_commits_hash_GET } from '@/app/api/panel/commits/[hash]/route';
@@ -75,7 +88,6 @@ import { GET as api_runtime_service_tiers_GET } from '@/app/api/runtime/service-
 import { GET as api_runtime_telemetry_GET } from '@/app/api/runtime/telemetry/route';
 import { GET as api_orchestrator_status_GET } from '@/app/api/orchestrator/status/route';
 import { GET as api_setup_cli_updates_GET } from '@/app/api/setup/cli-updates/route';
-import { GET as api_cortex_proposals_GET } from '@/app/api/cortex/proposals/route';
 
 export const api_mobile_orchestrator_threads = { GET: api_mobile_orchestrator_threads_GET };
 export const api_orchestrator_state = { GET: api_orchestrator_state_GET, PATCH: api_orchestrator_state_PATCH };
@@ -153,4 +165,16 @@ export const api_runtime_service_tiers = { GET: api_runtime_service_tiers_GET };
 export const api_runtime_telemetry = { GET: api_runtime_telemetry_GET };
 export const api_orchestrator_status = { GET: api_orchestrator_status_GET };
 export const api_setup_cli_updates = { GET: api_setup_cli_updates_GET };
-export const api_cortex_proposals = { GET: api_cortex_proposals_GET };
+export const api_orchestrator_handoff = { POST: api_orchestrator_handoff_POST };
+export const api_orchestrator_reset_session = { POST: api_orchestrator_reset_session_POST };
+export const api_orchestrator_compact = { POST: api_orchestrator_compact_POST };
+export const api_orchestrator_session_rules = { GET: api_orchestrator_session_rules_GET, POST: api_orchestrator_session_rules_POST, DELETE: api_orchestrator_session_rules_DELETE };
+export const api_orchestrator_delegate = { POST: api_orchestrator_delegate_POST };
+export const api_next_voice_host = { GET: api_next_voice_host_GET, POST: api_next_voice_host_POST };
+export const api_orchestrator_discard_packet = { POST: api_orchestrator_discard_packet_POST };
+export const api_cortex_proposals = { GET: api_cortex_proposals_GET, POST: api_cortex_proposals_POST };
+export const api_orchestrator_comparison_pick = { POST: api_orchestrator_comparison_pick_POST };
+export const api_orchestrator_workspace = { POST: api_orchestrator_workspace_POST };
+export const api_orchestrator_steer_packet = { POST: api_orchestrator_steer_packet_POST };
+export const api_cortex_reingest = { POST: api_cortex_reingest_POST };
+export const api_orchestrator_stop_packet = { POST: api_orchestrator_stop_packet_POST };

@@ -9,9 +9,7 @@ import { cutoverClient } from './fixtures/ws-cutover-client';
 const binary = process.env.O8D_BINARY ?? process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
 // Native paths that still need Next (#5243). Remove a path when it is registered.
 const NEXT_ONLY_NATIVE_PATHS = new Set([
-  // Existing native inventory drift, outside the A1 read slice. No methods added.
-  '/api/orchestrator/stop-packet',
-  '/api/runtime/action',
+  // Existing native inventory drift, outside the A1 and A2 slices. No methods added.
   '/api/panel/connect/attach',
   '/api/panel/mobile-pairing',
   '/api/mobile/devices',
@@ -31,22 +29,11 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/cortex/codebase-memory',
   '/api/cortex/cross-repo-proposals',
   '/api/cortex/diagnostics',
-  '/api/cortex/reingest',
   '/api/mobile/media',
-  '/api/next/voice-host',
   '/api/orchestrator/archive',
   '/api/orchestrator/backend-models',
-  '/api/orchestrator/compact',
   '/api/orchestrator/comparison-diff', // GET has a write path; held for review.
-  '/api/orchestrator/comparison-pick',
-  '/api/orchestrator/delegate',
-  '/api/orchestrator/discard-packet',
-  '/api/orchestrator/handoff',
   '/api/orchestrator/pull-request-context',
-  '/api/orchestrator/reset-session',
-  '/api/orchestrator/session-rules',
-  '/api/orchestrator/steer-packet',
-  '/api/orchestrator/workspace',
   '/api/panel/account/avatar',
   '/api/panel/browse-folder',
   '/api/panel/devices',
@@ -388,4 +375,123 @@ it('preserves packet-worker lane diff and visualization ownership through o8d', 
   // The production visualization handler hides documents from unbound workers.
   expect(revokedVisualization.status).toBe(404);
   expect(await revokedVisualization.text()).not.toContain('Persisted native read');
+});
+
+// Write routes from #5243, each with the auth basis its gate and handler enforce.
+const WRITE_ROUTES: Array<[method: string, path: string, workerStatus: number]> = [
+  ['POST', '/api/orchestrator/handoff', 403],
+  ['POST', '/api/orchestrator/reset-session', 403],
+  ['POST', '/api/orchestrator/compact', 403],
+  ['POST', '/api/orchestrator/session-rules', 403],
+  ['DELETE', '/api/orchestrator/session-rules?id=fixture', 403],
+  ['POST', '/api/orchestrator/delegate', 403],
+  ['POST', '/api/next/voice-host', 403],
+  ['POST', '/api/orchestrator/discard-packet', 403],
+  ['POST', '/api/orchestrator/comparison-pick', 403],
+  ['POST', '/api/orchestrator/workspace', 403],
+  ['POST', '/api/orchestrator/steer-packet', 403],
+  ['POST', '/api/cortex/reingest', 403],
+  ['POST', '/api/orchestrator/stop-packet', 403],
+  ['POST', '/api/runtime/action', 403],
+  // Packet-bound workers reach proposals through the gate; the handler binds the packet.
+  ['POST', '/api/cortex/proposals', 403],
+];
+
+async function seedPacketWorker(packetId: string) {
+  const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token };
+  const seeded = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { createLane } = require('./src/lib/lane/registry.ts');
+    const { mintPacketWorkerToken } = require('./src/lib/auth/packet-worker-token.ts');
+    const root = process.env.CORTEX_IDE_DATA_DIR;
+    const lane = createLane({ repoPath: root, branch: 'fixture-writes-', runtime: 'codex', packetId: ${JSON.stringify(packetId)} });
+    console.log(JSON.stringify({ laneId: lane.id, token: mintPacketWorkerToken(lane.packetId) }));
+    require('./src/lib/db/index.ts').closeDb();
+  `], { env });
+  return JSON.parse(seeded.stdout.split('\n').find(line => line.startsWith('{"laneId":'))!) as { laneId: string; token: string };
+}
+
+let refusalWorker: ReturnType<typeof seedPacketWorker> | undefined;
+it.each(WRITE_ROUTES)('refuses native %s %s without the operator bearer', async (method, path, workerStatus) => {
+  const worker = await (refusalWorker ??= seedPacketWorker('fixture-writes-refusal'));
+  const forged = { 'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged', 'content-type': 'application/json' };
+  const send = (authorization?: string) => fetch(origin + path, { method,
+    headers: { ...forged, ...(authorization ? { authorization } : {}) },
+    body: JSON.stringify({ action: 'dismiss_observation', id: 'fixture', threadId: 'thoughts-fixture', text: 'Denied fixture' }) });
+  for (const [authorization, status] of [[undefined, 401], ['Bearer fixture-invalid', 401],
+    ['Bearer o8ro_fixture-read-only', 403], [`Bearer ${worker.token}`, workerStatus]] as const) {
+    const response = await send(authorization);
+    expect(response.status, `${method} ${path} ${authorization ?? 'no bearer'}`).toBe(status);
+    await response.arrayBuffer();
+  }
+});
+
+it('adds, lists and removes a session rule through the native transport', async () => {
+  const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
+  const added = await fetch(`${origin}/api/orchestrator/session-rules`, { method: 'POST', headers,
+    body: JSON.stringify({ threadId: 'thoughts-native-rules', text: 'Fixture native rule' }) });
+  expect(added.status).toBe(200);
+  const rule = (await added.json()).result.rule;
+  expect(rule.text).toBe('Fixture native rule');
+  const listed = await fetch(`${origin}/api/orchestrator/session-rules?threadId=thoughts-native-rules`, { headers });
+  expect(listed.status).toBe(200);
+  expect((await listed.json()).result.rules.map((entry: { id: string }) => entry.id)).toEqual([rule.id]);
+  const removed = await fetch(`${origin}/api/orchestrator/session-rules?id=${encodeURIComponent(rule.id)}`, { method: 'DELETE', headers });
+  expect(removed.status).toBe(200);
+  expect((await removed.json()).result.removed).toBe(true);
+});
+
+it('keeps proposal writes bound to the worker packet through the native transport', async () => {
+  const own = await seedPacketWorker('fixture-writes-proposals');
+  const foreign = await seedPacketWorker('fixture-writes-proposals-foreign');
+  const propose = (token: string, body: Record<string, unknown>) => fetch(`${origin}/api/cortex/proposals`, { method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'propose_observation', kind: 'pattern', text: 'Fixture observation', ...body }) });
+  const foreignPacket = await propose(own.token, { packetId: 'fixture-writes-proposals-foreign', laneId: foreign.laneId });
+  expect(foreignPacket.status).toBe(403);
+  expect((await foreignPacket.json()).error.code).toBe('worker_packet_mismatch');
+  const foreignLane = await propose(own.token, { packetId: 'fixture-writes-proposals', laneId: foreign.laneId });
+  expect(foreignLane.status).toBe(403);
+  expect((await foreignLane.json()).error.code).toBe('worker_lane_mismatch');
+  const dismissal = await propose(own.token, { action: 'dismiss_observation', id: 'fixture' });
+  expect(dismissal.status).toBe(403);
+  expect((await dismissal.json()).error.code).toBe('operator_required');
+  const created = await propose(own.token, { packetId: 'fixture-writes-proposals', laneId: own.laneId });
+  expect(created.status).toBe(200);
+  const proposal = (await created.json()).proposal;
+  expect(proposal).toMatchObject({ packetId: 'fixture-writes-proposals', laneId: own.laneId });
+  const operator = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
+  const listed = await fetch(`${origin}/api/cortex/proposals`, { headers: operator });
+  expect(listed.status).toBe(200);
+  expect((await listed.json()).proposals.map((entry: { id: string }) => entry.id)).toContain(proposal.id);
+  const dismissed = await fetch(`${origin}/api/cortex/proposals`, { method: 'POST', headers: operator,
+    body: JSON.stringify({ action: 'dismiss_observation', id: proposal.id }) });
+  expect(dismissed.status).toBe(200);
+  expect(await dismissed.json()).toMatchObject({ ok: true, dismissed: true });
+});
+
+it.each([
+  ['POST', '/api/orchestrator/handoff', {}, 400, 'invalid_handoff_request'],
+  ['POST', '/api/orchestrator/compact', { repoPath: '' }, 400, 'repoPath is required'],
+  ['POST', '/api/orchestrator/delegate', {}, 400, 'clientMutationId is required'],
+  ['POST', '/api/orchestrator/discard-packet', { packetId: 'fixture-missing' }, 400, 'client_mutation_id_required'],
+  ['POST', '/api/orchestrator/comparison-pick', {}, 400, 'packetId is required'],
+  ['POST', '/api/orchestrator/workspace', { action: 'restore', packetId: 'fixture-missing', clientMutationId: 'fixture' }, 404, 'workspace_not_found'],
+  ['POST', '/api/orchestrator/steer-packet', {}, 400, 'invalid_request'],
+  ['POST', '/api/cortex/reingest', { repoPath: '/fixture-missing' }, 404, 'No connected repo'],
+  ['POST', '/api/orchestrator/stop-packet', {}, 400, 'packetId is required'],
+  ['POST', '/api/runtime/action', {}, 400, 'action, surfaceId, and clientMutationId are required'],
+])('runs the production %s %s handler for the operator with Next stopped', async (method, path, body, status, detail) => {
+  const response = await fetch(origin + path, { method, body: JSON.stringify(body),
+    headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' } });
+  expect(response.status).toBe(status);
+  expect(await response.text()).toContain(detail);
+});
+
+it('resets an orchestrator session through the native transport', async () => {
+  const response = await fetch(`${origin}/api/orchestrator/reset-session`, { method: 'POST',
+    headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ repoPath: server.directory, threadId: 'thoughts-native-reset' }) });
+  expect(response.status).toBe(200);
+  expect((await response.json()).ok).toBe(true);
 });
