@@ -10,6 +10,7 @@ import { isSecondaryGitHubLimit } from './rate-limit-response';
 import { GitHubOrgNotCoveredError, githubRepoAccessKey, managedGitHubOwnerMatches, publicGitHubDecision } from './repo-access';
 import { publicGitHubRead } from './public-read';
 import { withGitHubAbort } from './abort';
+import { recordGitHubApiCall } from '@/lib/github/cache';
 
 const INSTALLATION_TOKEN_TTL_SKEW_MS = 60_000;
 const installationTokenCache = new Map<number, { token: string; expiresAtMs: number }>();
@@ -95,6 +96,7 @@ async function githubAppFetch(path: string, init?: RequestInit) {
   const config = requireGitHubAppConfig();
   const jwt = await createAppJwt();
   init?.signal?.throwIfAborted();
+  recordGitHubApiCall();
   return fetch(`${config.apiBaseUrl}${path}`, {
     ...init,
     headers: githubHeaders(jwt, init?.headers),
@@ -222,7 +224,10 @@ export async function githubInstallationFetch(repoFullName: string, path: string
     // No await between this guard and dispatch. Never resolve another account's
     // token after a creation has been reserved for the captured account.
     if (authorization) requireGitHubAccount(authorization.account);
-    const response = await withGitHubAbort(signal, () => fetch(`${apiBaseUrl}${path}`, { ...init, signal, headers, cache: 'no-store', redirect: 'manual' }));
+    const response = await withGitHubAbort(signal, () => {
+      recordGitHubApiCall();
+      return fetch(`${apiBaseUrl}${path}`, { ...init, signal, headers, cache: 'no-store', redirect: 'manual' });
+    });
     observeGitHubRequestBudget(budgetScope, resource, response, Date.now(), await withGitHubAbort(signal, () => isSecondaryGitHubLimit(response)));
     if (response.status === 403 || response.status === 429) assertGitHubRequestBudget(budgetScope, resource, 'interactive');
     // Retry only reads. Never use public fallback to authorize a mutation.

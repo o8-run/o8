@@ -18,6 +18,8 @@ pub(in crate::shell) trait Port: 'static {
         cx: &mut Context<Self::View>,
     ) -> Self::View;
     fn tick(_view: &Entity<Self::View>, _cx: &mut Context<Shell>) {}
+    /// Hands a command line to an attached target.
+    fn run(_view: &Entity<Self::View>, _line: String, _cx: &mut App) {}
     /// The target a surface opens by itself when nothing is selected (the
     /// workspace's own shell). `None` keeps the picker.
     fn own(_client: &Client, _workspace: &str) -> Option<Result<String, String>> {
@@ -45,6 +47,8 @@ pub(in crate::shell) struct Picker<P: Port> {
     workspace: String,
     pub selected: Option<String>,
     pub child: Option<Entity<P::View>>,
+    /// A command line waiting for a target to attach.
+    waiting_line: Option<String>,
     choices: Vec<Choice>,
     focus: FocusHandle,
     child_focus: Option<FocusHandle>,
@@ -75,6 +79,7 @@ impl<P: Port> Picker<P> {
             workspace,
             selected: selected.clone(),
             child: None,
+            waiting_line: None,
             choices: vec![],
             focus: cx.focus_handle(),
             child_focus: None,
@@ -98,6 +103,7 @@ impl<P: Port> Picker<P> {
             workspace,
             selected: Some(id.clone()),
             child: None,
+            waiting_line: None,
             choices: vec![Choice {
                 id: id.clone(),
                 label: id.clone(),
@@ -224,10 +230,21 @@ impl<P: Port> Picker<P> {
         self.open_own = false;
         self.requested = None;
         let client = self.client.clone();
-        self.child = Some(cx.new(|cx| P::create(client, id.clone(), window, cx)));
+        let child = cx.new(|cx| P::create(client, id.clone(), window, cx));
+        if let Some(line) = self.waiting_line.take() {
+            P::run(&child, line, cx);
+        }
+        self.child = Some(child);
         self.child_focus = window.focused(cx);
         self.selected = Some(id);
         cx.notify();
+    }
+    /// Runs a command line in the attached target, or the next one to attach.
+    pub fn run(&mut self, line: String, cx: &mut Context<Self>) {
+        match &self.child {
+            Some(child) => P::run(child, line, cx),
+            None => self.waiting_line = Some(line),
+        }
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();

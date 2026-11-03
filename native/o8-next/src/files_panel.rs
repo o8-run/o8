@@ -56,8 +56,9 @@ enum File {
     None,
     Loading,
     Loaded {
-        lines: Vec<SharedString>,
+        lines: std::rc::Rc<Vec<SharedString>>,
         truncated: bool,
+        large: source::Large,
         markdown: std::rc::Rc<std::cell::RefCell<crate::retained::RowState>>,
         source: source::Source,
         image: Option<media::Preview>,
@@ -106,6 +107,7 @@ pub struct FilesPanel {
     tree_focus: FocusHandle,
     tree_cursor: Option<String>,
     tree_scroll: gpui::UniformListScrollHandle,
+    pending_line: Option<usize>,
     reveal: Option<String>,
     tree_type: String,
     tree_type_at: std::time::Instant,
@@ -115,6 +117,40 @@ pub struct FilesPanel {
     show_changes: bool,
     changes: Option<Entity<changes::Changes>>,
     spec: Option<Entity<spec::Spec>>,
+}
+
+/// The workspace-relative form of a path a reply named, when it stays inside.
+fn inside_workspace<'a>(workspace: &str, path: &'a str) -> Option<&'a str> {
+    let prefix = format!("{}/", workspace.trim_end_matches('/'));
+    let relative = if path.starts_with('/') {
+        path.strip_prefix(prefix.as_str())?
+    } else {
+        path
+    };
+    let inside = !relative.starts_with('~')
+        && relative
+            .split(['/', '\\'])
+            .all(|part| !part.is_empty() && part != "..");
+    inside.then_some(relative)
+}
+#[cfg(test)]
+#[test]
+fn reply_paths_stay_inside_the_workspace() {
+    let inside = |path| inside_workspace("/repo", path);
+    assert_eq!(inside("src/a.rs"), Some("src/a.rs"));
+    assert_eq!(inside("/repo/src/a.rs"), Some("src/a.rs"));
+    assert_eq!(inside("./src/a.rs"), Some("./src/a.rs"));
+    for path in [
+        "../x.json",
+        "src/../../x.json",
+        "/etc/x.txt",
+        "/repo/../x.json",
+        "/repository/x.json",
+        "~/x.json",
+        "..\\x.json",
+    ] {
+        assert_eq!(inside(path), None, "{path}");
+    }
 }
 
 impl FilesPanel {
@@ -187,6 +223,7 @@ impl FilesPanel {
             tree_focus: cx.focus_handle(),
             tree_cursor: None,
             tree_scroll: gpui::UniformListScrollHandle::new(),
+            pending_line: None,
             reveal: None,
             tree_type: String::new(),
             tree_type_at: std::time::Instant::now(),
@@ -230,7 +267,26 @@ impl FilesPanel {
     }
 
     fn open_file(&mut self, path: String, cx: &mut Context<Self>) {
+        self.pending_line = None;
         self.open_file_inner(path, false, cx);
+    }
+    /// Opens a file by the path a reply gave it, at that line if it gave one.
+    /// Reply text never chooses a file outside this workspace.
+    pub fn open_at(&mut self, path: &str, line: Option<usize>, cx: &mut Context<Self>) {
+        let Some(path) = inside_workspace(&self.workspace, path) else {
+            return;
+        };
+        self.open_file(path.to_owned(), cx);
+        self.pending_line = line;
+        self.show_pending_line();
+    }
+    /// The line waits here until the file it belongs to has loaded.
+    fn show_pending_line(&mut self) {
+        if let File::Loaded { source, .. } = &self.file
+            && let Some(line) = self.pending_line.take()
+        {
+            source.reveal_line(line);
+        }
     }
     fn open_file_inner(&mut self, path: String, reload: bool, cx: &mut Context<Self>) {
         self.reveal = search::repo_relative(&self.workspace, &path).map(str::to_owned);
@@ -349,29 +405,13 @@ impl FilesPanel {
                         if content.contains('\0') {
                             File::Failed("This binary file has no text preview.".into())
                         } else {
-                            File::Loaded {
+                            this.loaded_file(
+                                content,
+                                body["truncated"] == true,
+                                body["mtimeMs"].as_f64(),
                                 image,
-                                buffer: {
-                                    let mut buffer =
-                                        edit::Buffer::new(content, body["mtimeMs"].as_f64(), cx);
-                                    buffer.editing = body["truncated"] != true
-                                        && this.editing_path == this.selected;
-                                    buffer
-                                },
-                                source: source::Source::new(content.split('\n').count(), cx),
-                                lines: content
-                                    .split('\n')
-                                    .map(|line| SharedString::from(line.replace('\t', "  ")))
-                                    .collect(),
-                                truncated: body["truncated"] == true,
-                                markdown: viewer::markdown(
-                                    if this.selected.as_deref().is_some_and(viewer::is_markdown) {
-                                        content
-                                    } else {
-                                        ""
-                                    },
-                                ),
-                            }
+                                cx,
+                            )
                         }
                     }
                     Ok((body, _)) => {
@@ -379,6 +419,7 @@ impl FilesPanel {
                     }
                     Err(error) => File::Failed(error),
                 };
+                this.show_pending_line();
                 this.watch_editor(cx);
                 cx.notify();
             });
@@ -450,7 +491,7 @@ impl FilesPanel {
                     .child(crate::icon::stroke(file_icon(&title), file_color(&title), 14., 1.6))
                     .child(viewer::file_heading(&title, cx))
                     .when(previewable, |bar| bar.child(self.preview_toggle(cx)))
-                    .when(self.mode==Mode::Files && matches!(self.file, File::Loaded {truncated:false,..}),|bar|bar.child(self.edit_toggle(cx)))
+                    .when(self.mode==Mode::Files && matches!(self.file, File::Loaded {truncated:false,large,..} if large != source::Large::ReadOnly),|bar|bar.child(self.edit_toggle(cx)))
                     .when(!preview && matches!(&self.file, File::Loaded {truncated:false,buffer,..} if !buffer.editing), |bar| bar.child(self.wrap_toggle(cx)))
                     .child(self.privacy_toggle(cx))
                     .when(self.mode == Mode::Files, |bar| {
@@ -498,6 +539,11 @@ impl FilesPanel {
                 view.child(div().debug_selector(||"files-truncated".into()).px(px(12.)).py(px(8.)).text_size(px(11.))
                     .text_color(theme().text_muted)
                     .child("Read-only preview · first 1 MB. Use an editor to change the full file."))
+            })
+            .when_some(match &self.file {File::Loaded {truncated:false,large,..}=>large.banner(),_=>None}, |view, banner| {
+                view.child(div().debug_selector(||"files-large".into()).px(px(12.)).py(px(8.)).text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child(banner))
             })
             .when_some(match &self.file {File::Failed(error)=>Some(error.clone()),_=>None},|d,error|d.child(div().min_h(px(34.)).flex_shrink_0().px(px(12.)).py(px(8.)).text_size(px(11.)).text_color(theme().danger).border_b_1().border_color(theme().border).child(error)))
             .child(self.edit_status(cx))

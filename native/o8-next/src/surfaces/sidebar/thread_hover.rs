@@ -3,6 +3,7 @@
 use super::*;
 use crate::theme::current as theme;
 use gpui::{AnyElement, Corner, Div, Stateful, anchored, deferred, div, point, prelude::*, px};
+use serde_json::Value;
 use std::time::Duration;
 
 const OPEN_DELAY: Duration = Duration::from_millis(450);
@@ -15,6 +16,8 @@ pub(super) struct ThreadHover {
     open: bool,
     over_card: bool,
     wait: u64,
+    /// What a worker last did, read once when its card opens.
+    activity: Option<String>,
 }
 
 /// Where a thread runs, in a person's words.
@@ -30,6 +33,20 @@ pub(super) fn machine_mark() -> impl IntoElement {
         11.,
         1.8,
     ))
+}
+
+/// The newest thing a worker did, as classic's card says it.
+fn last_activity(tail: &Value) -> Option<String> {
+    tail["events"].as_array()?.iter().rev().find_map(|event| {
+        let text = |key: &str| event[key].as_str().map(str::to_owned);
+        match event["type"].as_str()? {
+            "tool_call" | "tool_result" => text("summary"),
+            "error" => text("message"),
+            "done" if event["exitCode"] == 0 => Some("Finished (exit 0)".to_owned()),
+            "done" => Some(format!("Exited with {}", event["exitCode"])),
+            _ => None,
+        }
+    })
 }
 
 fn updated(age: String) -> String {
@@ -102,6 +119,7 @@ impl ThreadList {
             open: false,
             over_card: false,
             wait: 0,
+            activity: None,
         });
         if !same {
             *hover = ThreadHover {
@@ -109,6 +127,7 @@ impl ThreadList {
                 open: false,
                 over_card: false,
                 wait: hover.wait,
+                activity: None,
             };
         }
         hover.wait += 1;
@@ -122,9 +141,35 @@ impl ThreadList {
                 };
                 if hovering {
                     hover.open = true;
+                    this.load_activity(cx);
                 } else if !hover.over_card {
                     this.thread_hover = None;
                 }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// One read per open card; a hover is brief, so nothing polls.
+    fn load_activity(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.thread_hover.as_ref().map(|hover| hover.id.clone()) else {
+            return;
+        };
+        if !id.contains(':') {
+            return;
+        }
+        let (client, key) = self.owner(&id);
+        let task = cx
+            .background_executor()
+            .spawn(async move { client.worker_tail(&key) });
+        cx.spawn(async move |this, cx| {
+            let tail = task.await;
+            let _ = this.update(cx, |this, cx| {
+                let Some(hover) = this.thread_hover.as_mut().filter(|h| h.id == id) else {
+                    return;
+                };
+                hover.activity = tail.ok().as_ref().and_then(last_activity);
                 cx.notify();
             });
         })
@@ -147,6 +192,18 @@ impl ThreadList {
             .as_ref()
             .filter(|hover| hover.open && hover.id == id && self.row_menu.is_none())?;
         let session = self.sessions.iter().find(|s| s.id == id)?;
+        let activity = self.thread_hover.as_ref()?.activity.clone();
+        let state = self
+            .rows
+            .iter()
+            .find(|row| row.id.as_deref() == Some(id))
+            .and_then(|row| self.row_state(row));
+        let prs = self
+            .links_for(id)
+            .iter()
+            .map(|link| format!("#{}", link.number))
+            .collect::<Vec<_>>()
+            .join(", ");
         let repo = session
             .repo_slug
             .clone()
@@ -176,8 +233,11 @@ impl ThreadList {
                     .child(crate::text::sanitize(&session.title)),
             )
             .child(fact("Machine", place(session).to_owned()))
+            .children(state.map(|state| fact("Status", state.label().to_owned())))
+            .children(session.model.clone().map(|model| fact("Model", model)))
             .children(repo.map(|repo| fact("Repo", repo)))
             .children(self.branch_of(session).map(|branch| fact("Branch", branch)))
+            .when(!prs.is_empty(), |card| card.child(fact("PR", prs)))
             .children(
                 session
                     .repo_path
@@ -191,7 +251,9 @@ impl ThreadList {
                     .clone()
                     .filter(|backend| !backend.is_empty())
                     .map(|backend| fact("Backend", titled(&backend))),
-            );
+            )
+            .children(session.current_task.clone().map(|task| fact("Task", task)))
+            .children(activity.map(|activity| fact("Activity", activity)));
         Some(
             div()
                 .absolute()
@@ -233,6 +295,24 @@ mod tests {
         let mut cloud = session(None);
         cloud.runtime = "cloud".into();
         assert_eq!(place(&cloud), "Cloud");
+    }
+
+    #[test]
+    fn a_workers_activity_is_the_newest_thing_it_did() {
+        let tail = json!({"events":[
+            {"type":"tool_call","summary":"Read file"},
+            {"type":"assistant","text":"Looking"},
+            {"type":"tool_result","summary":"Ran tests"},
+            {"type":"assistant","text":"Done"},
+        ]});
+        assert_eq!(last_activity(&tail).as_deref(), Some("Ran tests"));
+        let done = |code: i64| json!({"events":[{"type":"done","exitCode":code}]});
+        assert_eq!(
+            last_activity(&done(0)).as_deref(),
+            Some("Finished (exit 0)")
+        );
+        assert_eq!(last_activity(&done(2)).as_deref(), Some("Exited with 2"));
+        assert_eq!(last_activity(&json!({"events":[]})), None);
     }
 
     #[test]

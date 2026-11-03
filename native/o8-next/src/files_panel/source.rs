@@ -1,7 +1,89 @@
 //! Source rows use measured heights. GPUI's list remeasures on width changes.
 use super::*;
 use gpui::{ListAlignment, ListState, Pixels, TextRun, font, list};
-use std::cell::Cell;
+use std::{cell::Cell, rc::Rc};
+
+/// Whole-file syntax colors stop here; the file still opens and edits.
+const PLAIN_LINES: usize = 300_000;
+const PLAIN_BYTES: usize = 20 << 20;
+/// Above this the file opens read-only.
+const READ_ONLY_LINES: usize = 2_000_000;
+const READ_ONLY_BYTES: usize = 128 << 20;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum Large {
+    No,
+    /// No syntax colors.
+    Plain,
+    /// No syntax colors and no editing.
+    ReadOnly,
+}
+impl Large {
+    pub(super) fn of(lines: usize, bytes: usize) -> Self {
+        if lines > READ_ONLY_LINES || bytes > READ_ONLY_BYTES {
+            Self::ReadOnly
+        } else if lines > PLAIN_LINES || bytes > PLAIN_BYTES {
+            Self::Plain
+        } else {
+            Self::No
+        }
+    }
+    pub(super) fn banner(self) -> Option<&'static str> {
+        match self {
+            Self::No => None,
+            Self::Plain => Some("Large file · syntax colors are off to keep it smooth."),
+            Self::ReadOnly => Some("Large file · read-only, without syntax colors."),
+        }
+    }
+}
+
+pub(super) fn split(text: &str) -> Rc<Vec<SharedString>> {
+    Rc::new(
+        text.split('\n')
+            .map(|line| {
+                if line.contains('\t') {
+                    SharedString::from(line.replace('\t', "  "))
+                } else {
+                    SharedString::from(line.to_owned())
+                }
+            })
+            .collect(),
+    )
+}
+
+impl FilesPanel {
+    pub(super) fn loaded_file(
+        &self,
+        content: &str,
+        truncated: bool,
+        mtime: Option<f64>,
+        image: Option<media::Preview>,
+        cx: &mut Context<Self>,
+    ) -> File {
+        let lines = split(content);
+        let large = Large::of(lines.len(), content.len());
+        File::Loaded {
+            image,
+            buffer: {
+                let mut buffer = edit::Buffer::new(content, mtime, cx);
+                buffer.editing =
+                    !truncated && large != Large::ReadOnly && self.editing_path == self.selected;
+                buffer
+            },
+            source: Source::new(lines.len(), large, cx),
+            lines,
+            truncated,
+            large,
+            markdown: viewer::markdown(
+                if self.selected.as_deref().is_some_and(viewer::is_markdown) {
+                    content
+                } else {
+                    ""
+                },
+            ),
+        }
+    }
+}
 
 pub(super) struct Source {
     list: ListState,
@@ -10,10 +92,12 @@ pub(super) struct Source {
     selection: super::selection::Selection,
     focus: FocusHandle,
     horizontal: gpui::ScrollHandle,
+    plain: bool,
 }
 impl Source {
-    pub(super) fn new(count: usize, cx: &mut Context<FilesPanel>) -> Self {
+    pub(super) fn new(count: usize, large: Large, cx: &mut Context<FilesPanel>) -> Self {
         Self {
+            plain: large != Large::No,
             list: ListState::new(count, ListAlignment::Top, px(300.)),
             width: Cell::new(None),
             colors: super::syntax::Colors::default(),
@@ -22,9 +106,16 @@ impl Source {
             horizontal: gpui::ScrollHandle::new(),
         }
     }
+    /// Brings a 1-based line into view, with a little context above it.
+    pub(super) fn reveal_line(&self, line: usize) {
+        self.list.scroll_to(gpui::ListOffset {
+            item_ix: line.saturating_sub(3),
+            offset_in_item: px(0.),
+        });
+    }
     pub(super) fn view(
         &self,
-        lines: &[SharedString],
+        lines: &Rc<Vec<SharedString>>,
         raw: &str,
         path: &str,
         wrap: bool,
@@ -33,7 +124,11 @@ impl Source {
         cx: &mut Context<FilesPanel>,
     ) -> gpui::AnyElement {
         let gutter = ((lines.len().max(1).to_string().len() as f32) * 7.5 + 16.).max(36.);
-        let colors = self.colors.rows(path, lines, cx);
+        let colors = if self.plain {
+            Rc::new(vec![])
+        } else {
+            self.colors.rows(path, lines, cx)
+        };
         #[cfg(test)]
         cx.set_global(super::tests::source_tests::Painted(
             vec![],
@@ -43,8 +138,9 @@ impl Source {
             px(0.)
         } else {
             self.width.get().unwrap_or_else(|| {
-                let width = lines
-                    .iter()
+                let width = super::editor::lines::widest(lines.iter().map(|line| line.len()))
+                    .into_iter()
+                    .map(|line| &lines[line])
                     .map(|line| {
                         window
                             .text_system()
@@ -81,7 +177,7 @@ impl Source {
         let scroll = self.list.clone();
         let horizontal = self.horizontal.clone();
         let count = lines.len();
-        let lines = lines.to_vec();
+        let lines = lines.clone();
         div()
             .id("files-source")
             .debug_selector(move || format!("files-source-{generation}"))

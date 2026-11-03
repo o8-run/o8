@@ -44,6 +44,10 @@ pub struct Step {
     /// What a delegate call asked for and what came back, for its own tab.
     #[serde(skip)]
     pub delegate_prompt: Option<String>,
+    /// A background agent whose call has only returned its launch notice:
+    /// the call ending says it started, not that it finished.
+    #[serde(skip)]
+    pub launched: bool,
     #[serde(skip)]
     pub delegate_result: Option<String>,
     /// Messages this call sent to or read from other threads.
@@ -750,6 +754,7 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
         delegate_prompt: delegate
             .then(|| args["prompt"].as_str().map(str::to_owned))
             .flatten(),
+        launched: delegate && output.starts_with("Async agent launched"),
         // A background agent's launch notice is not its answer.
         delegate_result: (delegate
             && !output.trim().is_empty()
@@ -921,6 +926,7 @@ mod tests {
             delegate: false,
             thread: None,
             delegate_prompt: None,
+            launched: false,
             delegate_result: None,
             messages: vec![],
             todos: vec![],

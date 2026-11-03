@@ -1,11 +1,19 @@
 import { spawn } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { CliError, EXIT } from '../api.js';
 import { resolveConfig, resolveCliDataDir, resolveCliTokenFiles } from '../config.js';
 import { runServe } from './serve.js';
 
-const INSTALLED_BINARY = '/Applications/o8.app/Contents/MacOS/o8-next';
+function installedBinary(): string {
+  if (process.platform === 'linux') {
+    // Packaged Node and the native executable remain siblings after relocation.
+    const bundled = join(dirname(process.execPath), 'o8-next');
+    try { accessSync(bundled, constants.X_OK); return bundled; } catch { /* Try the system installation. */ }
+    return '/usr/lib/o8/o8-next';
+  }
+  return '/Applications/o8.app/Contents/MacOS/o8-next';
+}
 
 // A loaded machine can hold a healthy daemon's answer past the quick probe (#5081).
 const ATTACH_TIMEOUT_MS = 10_000;
@@ -41,11 +49,11 @@ async function ensureServer(): Promise<void> {
 /** The default shell shares the existing local server and credential resolver. */
 export async function runNext(args: string[]): Promise<number> {
   if (args.includes('--help')) {
-    process.stdout.write('o8 next [--binary ABSOLUTE_PATH] [--server ORIGIN] [--shell-state ABSOLUTE_FILE]\nOpens the native app shell using /Applications/o8.app/Contents/MacOS/o8-next by default. Reuses a healthy local server or starts o8 serve and waits for health.\nQuitting the window leaves the headless server running. Stop it with: o8 serve stop\nExplicit fixture mode: --enable-next --binary ABSOLUTE_PATH --server ORIGIN [--offscreen] [--terminal SESSION_ID]\n--app-shell explicitly selects the shell. Explicit --server attaches only; existing env-only credentials and numeric loopback HTTP rules apply.\n');
+    process.stdout.write('o8 next [--binary ABSOLUTE_PATH] [--server ORIGIN] [--shell-state ABSOLUTE_FILE]\nOpens the installed native app shell (macOS: /Applications/o8.app/Contents/MacOS/o8-next; Linux: beside bundled Node or /usr/lib/o8/o8-next). Reuses a healthy local server or starts o8 serve and waits for health.\nQuitting the window leaves the headless server running. Stop it with: o8 serve stop\nExplicit fixture mode: --enable-next --binary ABSOLUTE_PATH --server ORIGIN [--offscreen] [--terminal SESSION_ID]\n--app-shell explicitly selects the shell. Explicit --server attaches only; existing env-only credentials and numeric loopback HTTP rules apply.\n');
     return 0;
   }
   const at = args.indexOf('--binary');
-  const binary = at >= 0 ? args[at + 1] : INSTALLED_BINARY;
+  const binary = at >= 0 ? args[at + 1] : installedBinary();
   const shell = args.includes('--app-shell') || !args.includes('--enable-next');
   if (!binary || !isAbsolute(binary) || (!shell && !args.includes('--server'))) {
     throw new CliError('invalid_args', 'Pass --binary with an absolute executable path; fixture mode also requires --server.', EXIT.INVALID_ARGS);

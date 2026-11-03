@@ -825,7 +825,9 @@ impl ThreadList {
                                         && worker.last_message_at > old.last_message_at;
                             }
                         }
-                        this.sessions.retain(|s| !s.id.contains(':'));
+                        // Machine workers stay; their own read replaces them.
+                        this.sessions
+                            .retain(|s| s.machine.is_some() || !s.id.contains(':'));
                         workers
                             .retain(|worker| !this.sessions.iter().any(|s| s.key() == worker.id));
                         this.sessions.extend(workers);

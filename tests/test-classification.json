@@ -950,6 +950,12 @@
       ]
     },
     {
+      "path": "src/lib/runtime/proc-cleanup-evidence.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/lib/runtime/worker-dumpability.test.ts",
       "reasons": [
         "child-process",
@@ -2403,6 +2409,15 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cloud-worker-bundle-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
         "real-path"
       ]
     },
@@ -4558,6 +4573,14 @@
       "reasons": [
         "real-path"
       ]
+    },
+    {
+      "path": "tests/mobile-chat-swipe-settle-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "real-path"
+      ],
+      "browser": true
     },
     {
       "path": "tests/mobile-e2ee-required-real-path.test.ts",
@@ -7539,6 +7562,13 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/triage-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },

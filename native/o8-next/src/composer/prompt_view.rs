@@ -96,6 +96,132 @@ impl Surface {
                 .into_any_element(),
         )
     }
+    /// The files matching the composer's `@` word, newest word wins.
+    pub(crate) fn search_mentions(&mut self, cx: &mut Context<Self>) {
+        let editor = self.composer.clone();
+        let Some(query) = editor.read(cx).controls.mention.query.clone() else {
+            return;
+        };
+        let repo = self
+            .selected
+            .as_ref()
+            .and_then(|id| self.sessions.iter().find(|s| s.id == *id))
+            .and_then(|s| s.repo_path.clone());
+        let Some(repo) = repo else {
+            return;
+        };
+        let client = self.client.clone();
+        let task = cx.spawn(async move |_, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(80))
+                .await;
+            let word = query.clone();
+            let body = cx
+                .background_executor()
+                .spawn(async move {
+                    let (key, value) = if word.is_empty() {
+                        ("directory", ".")
+                    } else {
+                        ("search", word.as_str())
+                    };
+                    client.get::<Value>(
+                        "/api/panel/files",
+                        &[("workspace", repo.as_str()), (key, value)],
+                    )
+                })
+                .await;
+            let results = mention_files(&body.unwrap_or_default(), &query);
+            let _ = editor.update(cx, |i, cx| {
+                if i.controls.mention.query.as_ref() == Some(&query) {
+                    i.controls.mention.results = results;
+                    i.controls.mention.index = 0;
+                    cx.emit(crate::composer::commands::Changed(false));
+                    cx.notify();
+                }
+            });
+        });
+        self.composer
+            .update(cx, |i, _| i.controls.mention.search = Some(task));
+    }
+    pub(super) fn mention_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let editor = self.composer.read(cx);
+        if editor.controls.open.is_some() {
+            return None;
+        }
+        let files = editor.mention_suggestions().to_vec();
+        if files.is_empty() {
+            return None;
+        }
+        let selected = editor.controls.mention.index.min(files.len() - 1);
+        let scroll = editor.controls.mention.scroll.clone();
+        let bounds = editor.controls.context.card_bounds?;
+        let mut list = div()
+            .id("composer-mention-list")
+            .max_h(px(292.))
+            .overflow_y_scroll()
+            .track_scroll(&scroll)
+            .flex()
+            .flex_col()
+            .gap(px(2.));
+        for (index, path) in files.into_iter().enumerate() {
+            let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
+            let target = path.clone();
+            list = list.child(
+                div()
+                    .id(SharedString::from(format!("mention-{index}")))
+                    .debug_selector(move || format!("mention-{index}"))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.))
+                    .px(px(8.))
+                    .py(px(6.))
+                    .rounded(px(8.))
+                    .cursor_pointer()
+                    .when(index == selected, |v| v.bg(theme().selection))
+                    .hover(|v| v.bg(theme().hover))
+                    .on_click(cx.listener(move |s, _, w, cx| {
+                        s.composer
+                            .update(cx, |i, cx| i.apply_mention(&target, w, cx));
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .text_size(px(12.5))
+                            .font_weight(FontWeight(300.))
+                            .child(crate::text::sanitize(&name)),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .text_size(px(11.))
+                            .text_color(theme().text_secondary)
+                            .child(crate::text::sanitize(&path)),
+                    ),
+            );
+        }
+        let menu = panel_content(
+            "composer-mention-menu",
+            (f32::from(bounds.size.width) - 16.).min(520.),
+        )
+        .child(small("Files"))
+        .child(list)
+        .on_mouse_down_out(cx.listener(|s, _, _, cx| {
+            s.composer.update(cx, |i, cx| i.dismiss_mention(cx));
+            cx.notify();
+        }));
+        Some(
+            gpui::anchored()
+                .position(point(bounds.left() + px(8.), bounds.top() - px(6.)))
+                .anchor(gpui::Corner::BottomLeft)
+                .child(menu)
+                .into_any_element(),
+        )
+    }
     pub(super) fn prompt_popover(
         &mut self,
         open: &'static str,
@@ -324,6 +450,39 @@ impl Surface {
         ))
         .into_any_element()
     }
+}
+/// The files in a listing: names starting with the word first, then the
+/// shortest paths, so `package.json` at the root beats one buried in a folder.
+fn mention_files(body: &Value, word: &str) -> Vec<String> {
+    const LIMIT: usize = 12;
+    let word = word.to_lowercase();
+    let mut files: Vec<String> = body["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry["kind"] != "directory" && entry["type"] != "directory")
+        .filter_map(|entry| entry["path"].as_str().map(str::to_owned))
+        .collect();
+    files.sort_by_key(|path| {
+        let name = path.rsplit('/').next().unwrap_or(path).to_lowercase();
+        (!name.starts_with(&word), path.len())
+    });
+    files.truncate(LIMIT);
+    files
+}
+#[cfg(test)]
+#[test]
+fn a_file_named_like_the_word_comes_first_and_folders_never_do() {
+    let body = serde_json::json!({"entries":[
+        {"path":"cli/deep/package.json"},
+        {"path":"src/backpack.ts"},
+        {"path":"package.json"},
+        {"path":"packages","kind":"directory"},
+    ]});
+    assert_eq!(
+        mention_files(&body, "pack"),
+        ["package.json", "cli/deep/package.json", "src/backpack.ts"]
+    );
 }
 pub(super) fn small(text: impl Into<SharedString>) -> impl IntoElement {
     div()

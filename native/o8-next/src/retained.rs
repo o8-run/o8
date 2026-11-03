@@ -29,7 +29,7 @@ mod user_bubble;
 
 #[path = "retained/text.rs"]
 mod row_text;
-use row_text::{is_item, link_target, text_run};
+use row_text::{file_tip, is_item, link_target, text_run};
 
 pub struct RowState {
     pub row: Row,
@@ -37,9 +37,15 @@ pub struct RowState {
     #[cfg(test)]
     pub(crate) painted_geometry: RefCell<PaintedGeometry>,
     expanded: Option<bool>,
+    /// The reader opened or closed this trace, so updates keep that choice
+    /// instead of holding a running trace open.
+    chosen: bool,
     cache: Option<Layout>,
     pub(crate) images: crate::ui::images::Cache,
     pub cards: crate::visualizations::Cards,
+    /// The workspace a transcript row belongs to, so its file pills can say
+    /// where they point.
+    pub(crate) file_root: Option<gpui::SharedString>,
     pub(crate) subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
     pub(crate) subagent_agents: Rc<Vec<crate::subagents::model::Agent>>,
     pub(crate) subagent_focus: std::collections::HashMap<String, gpui::FocusHandle>,
@@ -73,9 +79,11 @@ impl RowState {
             #[cfg(test)]
             painted_geometry: RefCell::new(PaintedGeometry::default()),
             expanded,
+            chosen: false,
             cache: None,
             images: Default::default(),
             cards: Default::default(),
+            file_root: None,
             subagents: None,
             subagent_agents: Default::default(),
             subagent_focus: Default::default(),
@@ -88,9 +96,11 @@ impl RowState {
         self.subagent_focus = previous.subagent_focus.clone();
         if self.expanded.is_some() && previous.expanded.is_some() {
             self.expanded = previous.expanded;
+            self.chosen = previous.chosen;
         }
         if let (Row::Activity { .. }, Row::Activity { trace, .. }) = (&self.row, &previous.row)
             && trace.live
+            && !self.chosen
         {
             self.expanded = Some(true);
         }
@@ -107,9 +117,20 @@ impl RowState {
     pub(crate) fn disclosure(&self) -> bool {
         self.expanded.unwrap_or(false)
     }
-    pub(crate) fn toggle_disclosure(&mut self) {
-        if let Some(expanded) = self.expanded.as_mut() {
-            *expanded = !*expanded;
+    /// Whether a trace shows its lines: a running one stays open until the
+    /// reader closes it.
+    pub(crate) fn trace_open(&self, live: bool) -> bool {
+        if live && !self.chosen {
+            true
+        } else {
+            self.disclosure()
+        }
+    }
+    /// The reader's click on a trace header, from what it showed.
+    pub(crate) fn choose_disclosure(&mut self, open: bool) {
+        if self.expanded.is_some() {
+            self.expanded = Some(open);
+            self.chosen = true;
             self.cache = None;
         }
     }
@@ -1083,6 +1104,8 @@ impl Element for RetainedRow {
                 // and one row's mouse-up then cancels another's press.
                 let selector = format!("transcript-link-{}-{index}", self.index);
                 let name = SharedString::from(selector.clone());
+                let root = state.file_root.as_ref().map(|root| root.as_ref());
+                let tip = file_tip(root, &url).map(SharedString::from);
                 let mut child = div()
                     .id(name)
                     .debug_selector(move || selector.clone())
@@ -1090,6 +1113,11 @@ impl Element for RetainedRow {
                     .h(link.bounds.size.height)
                     .cursor_pointer()
                     .on_click(move |_, window, cx| crate::ui::open_link(&url, window, cx))
+                    .when_some(tip, |link, tip| {
+                        link.tooltip(move |_, cx| {
+                            cx.new(|_| crate::icon::Tip(tip.clone())).into()
+                        })
+                    })
                     .into_any_element();
                 child.layout_as_root(link.bounds.size.map(AvailableSpace::Definite), window, cx);
                 child.prepaint_at(origin + link.bounds.origin, window, cx);
@@ -1158,5 +1186,46 @@ impl Element for RetainedRow {
             image.paint(window, cx);
         }
         self.painted.borrow_mut().insert(self.index);
+    }
+}
+
+#[cfg(test)]
+mod trace_disclosure_tests {
+    use super::*;
+
+    fn row(live: bool) -> RowState {
+        RowState::new(Row::Activity {
+            id: "turn:working".into(),
+            steps: vec![],
+            trace: crate::model::Trace {
+                live,
+                ..Default::default()
+            },
+        })
+    }
+
+    #[test]
+    fn a_running_trace_folds_on_click_and_stays_folded_through_updates() {
+        let mut first = row(true);
+        assert!(first.trace_open(true), "a running trace opens by itself");
+        first.choose_disclosure(false);
+        assert!(!first.trace_open(true));
+        let mut update = row(true);
+        update.keep_disclosure(&first);
+        assert!(!update.trace_open(true), "a new step doesn't reopen it");
+        let mut finished = row(false);
+        finished.keep_disclosure(&update);
+        assert!(!finished.trace_open(false), "nor does finishing");
+        finished.choose_disclosure(true);
+        assert!(finished.trace_open(false));
+    }
+
+    #[test]
+    fn an_untouched_running_trace_is_still_open_when_it_finishes() {
+        let live = row(true);
+        let mut finished = row(false);
+        finished.keep_disclosure(&live);
+        assert!(finished.trace_open(false));
+        assert!(!row(false).trace_open(false), "a saved trace starts folded");
     }
 }

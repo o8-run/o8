@@ -88,6 +88,9 @@ pub struct Pane {
     pub painted_rows: Rc<RefCell<BTreeSet<usize>>>,
     pub terminal_session: Option<String>,
     pub terminal: Option<gpui::Entity<crate::terminal::Pane>>,
+    /// The session's repository, so a file reference's hover names the file
+    /// it opens, as in the main chat.
+    file_root: Option<gpui::SharedString>,
 }
 impl Pane {
     pub fn new(key: Option<String>) -> Self {
@@ -99,7 +102,9 @@ impl Pane {
             transcript: None,
             rows: Rc::new(vec![]),
             images: Default::default(),
-            list: ListState::new(0, ListAlignment::Top, px(0.)),
+            // With no overdraw a row taller than the pane walls off the next one:
+            // the list can't scroll past what it has measured.
+            list: ListState::new(0, ListAlignment::Top, px(400.)),
             subscription: None,
             client: None,
             revision: 0,
@@ -108,6 +113,7 @@ impl Pane {
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
             terminal_session: None,
             terminal: None,
+            file_root: None,
         }
     }
     pub fn metadata(&mut self, session: &Session) {
@@ -119,6 +125,13 @@ impl Pane {
         if self.terminal_session != binding {
             self.terminal = None;
             self.terminal_session = binding;
+        }
+        let root = session.repo_path.clone().map(gpui::SharedString::from);
+        if self.file_root != root {
+            self.file_root = root;
+            for row in self.rows.iter() {
+                row.borrow_mut().file_root = self.file_root.clone();
+            }
         }
     }
     pub fn install(&mut self, history: History, client: Client) {
@@ -206,6 +219,7 @@ impl Pane {
                     .unwrap_or_else(|| {
                         let mut state = RowState::new(row.clone());
                         state.images = self.images.clone();
+                        state.file_root = self.file_root.clone();
                         if let Some(previous) = old
                             .iter()
                             .find(|previous| previous.borrow().row.id() == row.id())
@@ -333,5 +347,94 @@ impl Pane {
         .min_h_0()
         .w_full()
         .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{Context, IntoElement, Render, TestAppContext, Window};
+
+    struct Short(Pane);
+    impl Render for Short {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(400.))
+                .h(px(90.))
+                .flex()
+                .flex_col()
+                .child(self.0.content())
+        }
+    }
+
+    fn scrolled_to(mut pane: Pane, cx: &mut TestAppContext) -> usize {
+        let prompt = "A prompt taller than this pane.\n\n".repeat(30);
+        let answer = "An answer taller than this pane.\n\n".repeat(30);
+        pane.install_saved(
+            serde_json::from_value(serde_json::json!({
+                "sessionKey": "agent",
+                "transcript": [
+                    {"id": "prompt", "role": "user", "text": prompt},
+                    {"id": "answer", "role": "assistant", "text": answer},
+                ],
+            }))
+            .unwrap(),
+        );
+        let list = pane.list.clone();
+        let (_view, cx) = cx.add_window_view(|_, _| Short(pane));
+        for _ in 0..12 {
+            cx.update(|window, _| window.refresh());
+            cx.run_until_parked();
+            cx.simulate_event(gpui::ScrollWheelEvent {
+                position: gpui::point(px(200.), px(60.)),
+                delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-400.))),
+                ..Default::default()
+            });
+        }
+        cx.run_until_parked();
+        list.logical_scroll_top().item_ix
+    }
+
+    #[gpui::test]
+    fn a_pane_shorter_than_its_first_row_scrolls_to_the_next(cx: &mut TestAppContext) {
+        assert_eq!(scrolled_to(Pane::new(None), cx), 1);
+    }
+}
+
+#[cfg(test)]
+mod file_root_tests {
+    use super::*;
+
+    #[test]
+    fn a_pane_names_files_from_its_sessions_repository() {
+        let mut pane = Pane::new(Some("agent".into()));
+        pane.install_saved(
+            serde_json::from_value(serde_json::json!({
+                "sessionKey": "agent",
+                "transcript": [{"id": "answer", "role": "assistant", "text": "see `src/a.rs:3`"}],
+            }))
+            .unwrap(),
+        );
+        let session: Session = serde_json::from_value(serde_json::json!({
+            "id": "agent", "title": "t", "status": "idle", "repoPath": "/repo"
+        }))
+        .unwrap();
+        pane.metadata(&session);
+        let root = |pane: &Pane| {
+            pane.rows[0]
+                .borrow()
+                .file_root
+                .as_ref()
+                .map(ToString::to_string)
+        };
+        assert_eq!(root(&pane).as_deref(), Some("/repo"));
+        pane.install_saved(
+            serde_json::from_value(serde_json::json!({
+                "sessionKey": "agent",
+                "transcript": [{"id": "later", "role": "assistant", "text": "more"}],
+            }))
+            .unwrap(),
+        );
+        assert_eq!(root(&pane).as_deref(), Some("/repo"), "a new row keeps it");
     }
 }

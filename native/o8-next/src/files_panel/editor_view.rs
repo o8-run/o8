@@ -1,5 +1,59 @@
 //! File textarea layout; the gutter shares the text viewport's vertical offset.
+//! Rows are a fixed height, so only the lines in view (plus the cursor's) are
+//! shaped and painted, whatever the file's length.
 use super::*;
+pub(super) const ROW: Pixels = px(19.);
+/// Lines shaped beyond each edge of the viewport, so arrow keys stay exact.
+const MARGIN: usize = 2;
+fn shape_width(text: &str, window: &mut Window) -> Pixels {
+    let part = text.replace('\t', "  ");
+    window
+        .text_system()
+        .shape_line(
+            part.clone().into(),
+            px(12.),
+            &[TextRun {
+                len: part.len(),
+                font: gpui::font(theme().font_mono),
+                color: theme().text.into(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }],
+            None,
+        )
+        .width
+}
+impl Editor {
+    /// The widest line, measured exactly for ordinary files. Large files
+    /// measure their longest lines once, then only the lines each edit touched.
+    fn text_width(&mut self, window: &mut Window) -> Pixels {
+        let len = self.text.len();
+        if let (Some(width), Some(dirty)) = (self.width, self.width_dirty.take()) {
+            let first = self.lines.line_of(dirty.start.min(len));
+            let last = self.lines.line_of(dirty.end.min(len));
+            if self.lines.len() > lines::EXACT_WIDTH_LINES && last - first <= 256 {
+                let width = (first..=last)
+                    .map(|line| shape_width(&self.text[self.lines.range(line, len)], window))
+                    .fold(width, Pixels::max);
+                self.width = Some(width);
+            } else {
+                self.width = None;
+            }
+        }
+        if let Some(width) = self.width {
+            return width;
+        }
+        let width = self
+            .lines
+            .widest(len)
+            .into_iter()
+            .map(|line| shape_width(&self.text[self.lines.range(line, len)], window))
+            .fold(px(0.), Pixels::max);
+        self.width = Some(width);
+        width
+    }
+}
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         if self.notes {
@@ -10,32 +64,8 @@ impl Render for Editor {
             self.typing = None;
         }
         let input = cx.entity();
-        let height = self.height;
-        let width = self
-            .text
-            .split('\n')
-            .map(|part| {
-                let part = part.replace('\t', "  ");
-                window
-                    .text_system()
-                    .shape_line(
-                        part.clone().into(),
-                        px(12.),
-                        &[TextRun {
-                            len: part.len(),
-                            font: gpui::font(theme().font_mono),
-                            color: theme().text.into(),
-                            background_color: None,
-                            underline: None,
-                            strikethrough: None,
-                        }],
-                        None,
-                    )
-                    .width
-            })
-            .max()
-            .unwrap_or(px(0.))
-            + px(1.);
+        let height = ROW * self.lines.len() as f32;
+        let width = self.text_width(window) + px(1.);
         let gutter_input = input.clone();
         let gutter = div()
             .debug_selector(|| "files-editor-gutter".into())
@@ -52,9 +82,12 @@ impl Render for Editor {
                     move |bounds, _, window, cx| {
                         let (count, offset) = {
                             let editor = gutter_input.read(cx);
-                            (editor.text.split('\n').count(), editor.scroll.offset().y)
+                            (editor.lines.len(), editor.scroll.offset().y)
                         };
-                        for line in 0..count {
+                        let first = (f32::from(-offset - px(8.)) / f32::from(ROW)).max(0.) as usize;
+                        let shown =
+                            (f32::from(bounds.size.height) / f32::from(ROW)).ceil() as usize;
+                        for line in first.min(count)..(first + shown + 2).min(count) {
                             let y = bounds.top() + px(8.) + offset + px(line as f32 * 19.);
                             if y + px(19.) < bounds.top() || y > bounds.bottom() {
                                 continue;
@@ -97,13 +130,40 @@ impl Render for Editor {
                         canvas(
                             |_, _, _| (),
                             move |bounds, _, window, cx| {
-                                let (text, marked, selection, cursor, focus) = {
+                                // Only the lines inside the scroll viewport, plus the
+                                // cursor's line for reveal and IME bounds.
+                                let view = window.content_mask().bounds;
+                                let (parts, empty, marked, selection, cursor, focus) = {
                                     let i = input.read(cx);
+                                    let count = i.lines.len();
+                                    let row =
+                                        |y: Pixels| f32::from(y - bounds.top()) / f32::from(ROW);
+                                    let first = (row(view.top()).max(0.) as usize)
+                                        .saturating_sub(MARGIN)
+                                        .min(count);
+                                    let last = ((row(view.bottom()).max(0.).ceil() as usize)
+                                        + MARGIN)
+                                        .min(count);
+                                    let cursor = i.cursor();
+                                    let mut wanted: Vec<usize> = (first..last).collect();
+                                    let cursor_line = i.lines.line_of(cursor);
+                                    if !(first..last).contains(&cursor_line) {
+                                        wanted.push(cursor_line);
+                                        wanted.sort_unstable();
+                                    }
+                                    let parts: Vec<(usize, usize, String)> = wanted
+                                        .into_iter()
+                                        .map(|line| {
+                                            let range = i.lines.range(line, i.text.len());
+                                            (line, range.start, i.text[range].to_owned())
+                                        })
+                                        .collect();
                                     (
-                                        i.text.clone(),
+                                        parts,
+                                        i.text.is_empty(),
                                         i.marked.clone(),
                                         i.selection.clone(),
-                                        i.cursor(),
+                                        cursor,
                                         i.focus.clone(),
                                     )
                                 };
@@ -113,12 +173,11 @@ impl Render for Editor {
                                     cx,
                                 );
                                 let style = window.text_style();
-                                let mut offset = 0;
-                                let mut y = bounds.top();
                                 let mut layouts = vec![];
-                                // Hard lines retain their byte offsets; wrapped positions stay native.
-                                let display_text = text.as_str();
-                                for part in display_text.split('\n') {
+                                // Hard lines retain their byte offsets; code rows never wrap.
+                                for (line, offset, part) in &parts {
+                                    let (offset, part) = (*offset, part.as_str());
+                                    let mut y = bounds.top() + ROW * *line as f32;
                                     let tabs: Vec<usize> = part
                                         .bytes()
                                         .enumerate()
@@ -165,12 +224,12 @@ impl Render for Editor {
                                             TextRun {
                                                 len: span[1] - span[0],
                                                 font: style.font(),
-                                                color: if text.is_empty() {
+                                                color: if empty {
                                                     theme().text_muted.into()
                                                 } else {
                                                     style.color
                                                 },
-                                                background_color: (!text.is_empty()
+                                                background_color: (!empty
                                                     && selection.contains(&index))
                                                 .then(|| theme().selection.into()),
                                                 underline: marked
@@ -239,14 +298,9 @@ impl Render for Editor {
                                             rich: None,
                                         });
                                     }
-                                    offset += part.len() + 1;
                                 }
                                 input.update(cx, |input, cx| {
-                                    let height = (y - bounds.top()).max(px(19.));
-                                    if input.height != height {
-                                        input.height = height;
-                                        cx.notify();
-                                    }
+                                    input.canvas_top = bounds.top();
                                     if input.reveal_cursor {
                                         if let Some(position) =
                                             layouts.iter().find_map(|row: &EditorLine| {
@@ -284,7 +338,11 @@ impl Render for Editor {
                                             } else {
                                                 scroll.x
                                             };
-                                            input.scroll.set_offset(point(next_x, next));
+                                            if point(next_x, next) != scroll {
+                                                input.scroll.set_offset(point(next_x, next));
+                                                // The new lines in view paint next frame.
+                                                cx.notify();
+                                            }
                                         }
                                         input.reveal_cursor = false;
                                     }

@@ -52,6 +52,9 @@ impl Surface {
         if let Some(menu) = self.slash_menu(window, cx) {
             view = view.child(menu);
         }
+        if let Some(menu) = self.mention_menu(cx) {
+            view = view.child(menu);
+        }
         view.into_any_element()
     }
     /// ModeChip: icon only, a checkout for Shared and a branch for Worktrees,

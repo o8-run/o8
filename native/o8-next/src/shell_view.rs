@@ -42,23 +42,38 @@ impl Render for Shell {
             .line_height(gpui::relative(crate::theme::TYPE.chrome_line))
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
-            .capture_key_up(cx.listener(|this, event: &gpui::KeyUpEvent, _, cx| {
-                this.dictation_key_up(event, cx)
-            }))
+            .capture_key_up(
+                cx.listener(|this, event: &gpui::KeyUpEvent, _, cx| {
+                    this.dictation_key_up(event, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &crate::ui::ToggleVoice, _, cx| this.toggle_voice(cx)))
-            .on_action(cx.listener(|this, _: &crate::ui::ToggleDictation, _, cx| {
-                this.toggle_dictation(cx)
-            }))
-            .on_action(cx.listener(|this, _: &crate::ui::OpenTranscriptLink, window, cx| {
-                if let Some(url) = crate::ui::take_pending_link() {
-                    this.open_transcript_link(&url, window, cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &crate::lineage::OpenThreadLink, window, cx| {
-                if let Some(id) = crate::lineage::take_pending() {
-                    this.open_thread_by_id(id, window, cx);
-                }
-            }))
+            .on_action(
+                cx.listener(|this, _: &crate::ui::ToggleDictation, _, cx| {
+                    this.toggle_dictation(cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::ui::OpenTranscriptLink, window, cx| {
+                    if let Some(url) = crate::ui::take_pending_link() {
+                        this.open_transcript_link(&url, window, cx);
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::ui::RunShellLine, window, cx| {
+                    if let Some(line) = crate::ui::take_pending_shell_line() {
+                        this.run_shell_line(line, window, cx);
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::lineage::OpenThreadLink, window, cx| {
+                    if let Some(id) = crate::lineage::take_pending() {
+                        this.open_thread_by_id(id, window, cx);
+                    }
+                }),
+            )
             .children(slots)
             // The traffic-light corner above the rail moves the window too.
             .child(

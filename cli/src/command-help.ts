@@ -7,6 +7,13 @@ interface CommandHelp {
 }
 
 const help: Record<string, CommandHelp> = {
+  triage: {
+    usage: '[--model <id>]',
+    required: 'An installed local codex agent. No flags are required.',
+    defaults: 'Uses the codex runtime and the saved Brain model. JSON output; --human prints Markdown.',
+    details: 'Bundles doctor output, desktop and headless server logs, and crash records. Prints a draft and never files an issue. The local agent may contact its configured model service. Missing logs are reported; oversized logs are omitted.',
+    example: 'o8 triage --human',
+  },
   'mission create': {
     usage: '--title <text> [--repo <path>] [--dispatch] [--runtime <id>] [--effort <tier>]',
     required: '--title <text>. Use --repo <path> to select the repository explicitly.',
@@ -80,7 +87,7 @@ const help: Record<string, CommandHelp> = {
 };
 
 export function commandUsage(primary: string, secondary: string | undefined): string | null {
-  const command = `${primary} ${secondary ?? ''}`;
+  const command = `${primary} ${secondary ?? ''}`.trim();
   const entry = help[command];
   if (!entry) return null;
   return `usage: o8 ${command} ${entry.usage}\n\nRequired: ${entry.required}\nDefaults: ${entry.defaults}\n${entry.details}\n\nExample: ${entry.example}\n\nRun \`o8 ${primary} --help\` for related commands.\n`;

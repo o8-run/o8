@@ -4,6 +4,7 @@ import { assertGitHubRequestBudget, githubCredentialScope, observeGitHubRequestB
 import { isSecondaryGitHubLimit } from './rate-limit-response';
 import { GitHubOrgNotCoveredError, publicGitHubDecision, rememberPublicGitHubDecision } from './repo-access';
 import { withGitHubAbort } from './abort';
+import { recordGitHubApiCall } from '@/lib/github/cache';
 
 class UncachedPublicResponse extends Error {
   constructor(readonly response: Response) { super('GitHub public read was refused.'); }
@@ -23,7 +24,10 @@ export async function publicGitHubRead(repo: string, path: string, apiBaseUrl: s
     headers.set('User-Agent', 'o8-github-broker');
     headers.set('X-GitHub-Api-Version', '2022-11-28');
     if (etag) headers.set('If-None-Match', etag);
-    const result = await withGitHubAbort(signal, () => fetch(`${apiBaseUrl}${target}`, { ...init, signal, headers, cache: 'no-store' }));
+    const result = await withGitHubAbort(signal, () => {
+      recordGitHubApiCall();
+      return fetch(`${apiBaseUrl}${target}`, { ...init, signal, headers, cache: 'no-store' });
+    });
     observeGitHubRequestBudget(scope, 'core', result, Date.now(), await withGitHubAbort(signal, () => isSecondaryGitHubLimit(result)));
     if (result.status === 403 || result.status === 429) assertGitHubRequestBudget(scope, 'core', 'interactive');
     return result;
