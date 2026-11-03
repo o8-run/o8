@@ -29,6 +29,13 @@ fn mention_at(text: &str, cursor: usize) -> Option<(usize, &str)> {
     head[start..].strip_prefix('@').map(|query| (start, query))
 }
 
+/// A pick replaces the whole word, not only the part before the cursor.
+fn word_end(text: &str, cursor: usize) -> usize {
+    text[cursor..]
+        .find(char::is_whitespace)
+        .map_or(text.len(), |offset| cursor + offset)
+}
+
 impl Composer {
     fn mention_token(&self) -> Option<(usize, &str)> {
         if !self.controls.slash.enabled
@@ -71,7 +78,7 @@ impl Composer {
         let Some((start, _)) = self.mention_token() else {
             return;
         };
-        let end = self.cursor();
+        let end = word_end(&self.text, self.cursor());
         self.selection = start..end;
         self.insert_prompt(&format!("@{path} "), cx);
         self.focus.focus(window);
@@ -136,7 +143,14 @@ impl Composer {
 
 #[cfg(test)]
 mod tests {
-    use super::mention_at;
+    use super::{mention_at, word_end};
+
+    #[test]
+    fn a_pick_reaches_the_end_of_the_word() {
+        assert_eq!(word_end("@pack", 4), 5);
+        assert_eq!(word_end("@pack and", 4), 5);
+        assert_eq!(word_end("@pack", 5), 5);
+    }
 
     #[test]
     fn a_mention_is_the_at_word_the_cursor_ends() {
