@@ -33,17 +33,26 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/composer-queue', 'GET POST PATCH DELETE', () => import('@/app/api/orchestrator/composer-queue/route')),
     route('/api/panel/ws-info', 'GET', () => import('@/app/api/panel/ws-info/route')),
     route('/api/panel/ports', 'GET', () => import('@/app/api/panel/ports/route')),
+    route('/api/orchestrator/handoff', 'POST', () => import('@/app/api/orchestrator/handoff/route')),
+    route('/api/orchestrator/reset-session', 'POST', () => import('@/app/api/orchestrator/reset-session/route')),
+    route('/api/orchestrator/compact', 'POST', () => import('@/app/api/orchestrator/compact/route')),
+    route('/api/orchestrator/session-rules', 'GET POST DELETE', () => import('@/app/api/orchestrator/session-rules/route')),
+    route('/api/orchestrator/delegate', 'POST', () => import('@/app/api/orchestrator/delegate/route')),
+    route('/api/next/voice-host', 'GET POST', () => import('@/app/api/next/voice-host/route')),
+    route('/api/orchestrator/stop-packet', 'POST', () => import('@/app/api/orchestrator/stop-packet/route')),
+    route('/api/runtime/action', 'POST', () => import('@/app/api/runtime/action/route')),
   ],
   brain: [route('/api/cortex/ask', 'POST', () => import('@/app/api/cortex/ask/route'))],
   activity: [
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
-    route('/api/cortex/proposals', 'GET', () => import('@/app/api/cortex/proposals/route')),
+    route('/api/cortex/proposals', 'GET POST', () => import('@/app/api/cortex/proposals/route')),
     route('/api/panel/commits', 'GET', () => import('@/app/api/panel/commits/route')),
     route('/api/panel/ci', 'GET', () => import('@/app/api/panel/ci/route')),
     route('/api/panel/ci/[id]', 'GET', () => import('@/app/api/panel/ci/[id]/route')),
     route('/api/panel/pr', 'GET', () => import('@/app/api/panel/pr/route')),
     route('/api/orchestrator/stop-mission', 'POST', () => import('@/app/api/orchestrator/stop-mission/route')),
+    route('/api/orchestrator/discard-packet', 'POST', () => import('@/app/api/orchestrator/discard-packet/route')),
   ],
   pull_requests: [
     route('/api/panel/file-diff', 'GET', () => import('@/app/api/panel/file-diff/route')),
@@ -52,6 +61,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/prs/[number]', 'GET POST', () => import('@/app/api/panel/prs/[number]/route')),
     route('/api/panel/github-status', 'GET', () => import('@/app/api/panel/github-status/route')),
     route('/api/orchestrator/merge-preview', 'GET', () => import('@/app/api/orchestrator/merge-preview/route')),
+    route('/api/orchestrator/comparison-pick', 'POST', () => import('@/app/api/orchestrator/comparison-pick/route')),
   ],
   bots: [
     route('/api/bots', 'GET', () => import('@/app/api/bots/route')),
@@ -80,12 +90,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/v2/chat-history/list', 'GET', () => import('@/app/api/v2/chat-history/list/route')),
     route('/api/v2/chat-history', 'GET POST PATCH', () => import('@/app/api/v2/chat-history/route')),
     route('/api/runtime/archive', 'POST', () => import('@/app/api/runtime/archive/route')),
+    route('/api/orchestrator/workspace', 'POST', () => import('@/app/api/orchestrator/workspace/route')),
   ],
   workers: [
     route('/api/lanes', 'GET', () => import('@/app/api/lanes/route')),
     route('/api/lanes/[id]', 'GET', () => import('@/app/api/lanes/[id]/route')),
     route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
     route('/api/orchestrator/lane-events', 'GET', () => import('@/app/api/orchestrator/lane-events/route')),
+    route('/api/orchestrator/steer-packet', 'POST', () => import('@/app/api/orchestrator/steer-packet/route')),
   ],
   settings: [
     route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
@@ -94,6 +106,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/setup/cli-updates', 'GET', () => import('@/app/api/setup/cli-updates/route')),
     route('/api/panel/operator-defaults', 'GET POST', () => import('@/app/api/panel/operator-defaults/route')),
     route('/api/v2/keys', 'GET POST PATCH DELETE', () => import('@/app/api/v2/keys/route')),
+    route('/api/cortex/reingest', 'POST', () => import('@/app/api/cortex/reingest/route')),
   ],
   setup: [
     route('/api/setup/cli-updates', 'GET', () => import('@/app/api/setup/cli-updates/route')),
@@ -138,7 +151,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
 
 // Authoritative producers requested by the existing WS checkpoint/command path.
 const producers = [
-  route('/api/next/voice-host', 'GET POST', () => import('@/app/api/next/voice-host/route')),
   route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
   route('/api/setup/identity', 'GET', () => import('@/app/api/setup/identity/route')),
   route('/api/mobile/sync', 'POST', () => import('@/app/api/mobile/sync/route')),
@@ -146,7 +158,6 @@ const producers = [
   route('/api/command-center/snapshot', 'GET', () => import('@/app/api/command-center/snapshot/route')),
   route('/api/browser/inventory', 'GET', () => import('@/app/api/browser/inventory/route')),
   route('/api/runtime/transcript', 'GET', () => import('@/app/api/runtime/transcript/route')),
-  route('/api/runtime/action', 'POST', () => import('@/app/api/runtime/action/route')),
   route('/api/runtime/launch', 'POST', () => import('@/app/api/runtime/launch/route')),
   route('/api/orchestrator/headless-tick', 'POST', () => import('@/app/api/orchestrator/headless-tick/route')),
   route('/api/review/auto-review', 'POST', () => import('@/app/api/review/auto-review/route')),

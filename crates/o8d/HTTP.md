@@ -21,7 +21,14 @@ reads also require a bearer; public peer/address headers cannot grant local
 authority. After the middleware gate admits a lane-diff GET, an authoritative
 packet-worker token lookup restores that handler's local-worker admission;
 the handler then rechecks the bearer against the requested packet. Unknown,
-revoked and foreign-packet workers remain refused. Dynamic route parameters
+revoked and foreign-packet workers remain refused. The #5243 write routes
+(session handoff, reset, compact, rules, delegate, stop, runtime action and
+voice host; Activity discard and proposals; Pull Requests comparison pick;
+Workers steer; Sidebar workspace restore; Settings reingest) need the operator
+bearer. Two exceptions come from the existing gate. A packet-bound worker may
+propose an observation for its own packet and lane. An enrolled device may
+steer. File I/O, folder and file pickers, TTS, CLI updates and app update apply
+stay on Next pending a security review. Dynamic route parameters
 are decoded per request; queries, account headers, HTTP status,
 cooldowns and response headers reach the original handlers. Brain SSE is passed
 incrementally with backpressure, and a disconnected consumer cancels its reader.
