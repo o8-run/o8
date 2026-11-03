@@ -106,20 +106,25 @@ export function enqueueComposerSend(input: ComposerQueueTarget & { id: string; i
     return readComposerSend(input.id)!;
   }).immediate();
 }
+/**
+ * The next message that may start. A held message waits for the operator. A message sent
+ * after that hold is the operator's answer, so it goes ahead; the held one keeps Retry and
+ * Remove. Messages already waiting when the hold happened still wait behind it. The heartbeat
+ * and the claim share this rule, so neither can park a message the other would start (#5433).
+ */
+export function peekNextComposerSend(target: ComposerQueueTarget): QueuedComposerSendRecord | null {
+  let heldAt = -Infinity;
+  const first = listQueuedComposerSends(target).find(item => {
+    if (item.status !== 'held') return true;
+    heldAt = Math.max(heldAt, item.updatedAt);
+    return false;
+  });
+  return first && heldAt < first.createdAt ? first : null;
+}
 export function claimNextComposerSend(target: ComposerQueueTarget): QueuedComposerSendRecord | null {
   return getSqlite().transaction(() => {
-    // A held message waits for the operator. A message sent after that hold is
-    // the operator's answer, so it goes ahead; the held one keeps Retry and Remove.
-    // Messages already waiting when the hold happened still wait behind it; one
-    // created in the same millisecond as the hold counts as waiting.
-    let heldAt = -Infinity;
-    const items = listQueuedComposerSends(target);
-    const first = items.find(item => {
-      if (item.status !== 'held') return true;
-      heldAt = Math.max(heldAt, item.updatedAt);
-      return false;
-    });
-    if (first?.status !== 'queued' || first.intent !== 'send-next' || heldAt >= first.createdAt) return null;
+    const first = peekNextComposerSend(target);
+    if (first?.status !== 'queued' || first.intent !== 'send-next') return null;
     const claimed = getSqlite().prepare(`UPDATE composer_send_queue SET status = 'dispatching', updated_at = ? WHERE id = ? AND status = 'queued' AND intent = 'send-next'`).run(Date.now(), first.id);
     return claimed.changes ? readComposerSend(first.id) : null;
   }).immediate();
