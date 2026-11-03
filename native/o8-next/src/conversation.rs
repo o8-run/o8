@@ -82,7 +82,7 @@ impl Surface {
                 .as_ref()
                 .is_some_and(|(text, _)| *text == raw);
             if !expanded
-                && let Some(line) = crate::composer::commands::shell_line(&raw)
+                && let Some(line) = crate::composer::commands::shell_line(raw.as_str())
                 && let Some(window) = input.controls.slash.window
             {
                 let line = line.to_owned();
