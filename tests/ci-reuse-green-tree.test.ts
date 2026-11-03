@@ -234,7 +234,7 @@ describe('merge-queue reuse decision', () => {
 
   it('requires every reuse-gated check to be present', async () => {
     const names = checkNames();
-    expect(names).toEqual(expect.arrayContaining(['Type Check', 'Lint', 'Hermetic Unit Tests', 'Security Audit',
+    expect(names).toEqual(expect.arrayContaining(['Type Check', 'Lint', 'Test Classification', 'Hermetic Unit Tests', 'Security Audit',
       'Governance Smoke', 'Rust Compile Gate (Windows)', 'Rust Compile Gate (Linux)', 'Integration Tests (changed files)',
       'Server Bundle Size', ...[1, 2, 3, 4].map(shard => `o8 next Native Tests (Linux) (${shard})`)]));
     for (const name of names) {
@@ -333,8 +333,8 @@ describe('merge-queue reuse wiring', () => {
     const decision = jobs.reuse.steps.find((step: { id?: string }) => step.id === 'decide');
     expect(decision.run).toBe('node scripts/ci/reuse-green-tree.mjs');
     const gated = Object.keys(jobs).filter(id => [jobs[id].needs ?? []].flat().includes('reuse'));
-    expect(gated.sort()).toEqual(['governance-smoke', 'integration-changed', 'lint', 'o8-next-tests', 'rust-check-linux',
-      'rust-check-windows', 'security', 'server-bundle-size', 'test-shards', 'typecheck']);
+    expect(gated.sort()).toEqual(['classification', 'governance-smoke', 'integration-changed', 'lint', 'o8-next-tests',
+      'rust-check-linux', 'rust-check-windows', 'security', 'server-bundle-size', 'test-shards', 'typecheck']);
     for (const id of gated) {
       expect(String(jobs[id].if ?? ''), `${id} job condition`).not.toContain('reuse');
       for (const step of jobs[id].steps) {
@@ -342,7 +342,7 @@ describe('merge-queue reuse wiring', () => {
           `${id} step ${step.name ?? step.uses ?? step.run}`).toBe(true);
       }
     }
-    expect(jobs.test.needs).toEqual(['test-shards', 'o8-next-tests']);
+    expect(jobs.test.needs).toEqual(['test-shards', 'o8-next-tests', 'classification']);
     expect(jobs.test.if).toBe("always() && github.event.schedule != '41 13 * * 1'");
   });
 });

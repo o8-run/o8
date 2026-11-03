@@ -204,6 +204,30 @@ jobs:
           path: .cache/eslint
           key: ${{ steps.lint-cache.outputs.cache-primary-key }}
 
+  classification:
+    name: Test Classification
+    if: github.event.schedule != '41 13 * * 1'
+    needs: [reuse]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - if: needs.reuse.outputs.reuse != 'true'
+        uses: actions/checkout@v4
+      - if: needs.reuse.outputs.reuse != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: needs.reuse.outputs.reuse != 'true'
+        run: npm install -g "$(node -p 'require("./package.json").packageManager')"
+      - if: needs.reuse.outputs.reuse != 'true'
+        run: npm ci --prefer-offline
+      - name: Test Classification
+        if: needs.reuse.outputs.reuse != 'true'
+        run: npm run test:classification:check
+      - if: needs.reuse.outputs.reuse != 'true'
+        run: node --test scripts/ci/test-classification-listing.test.mjs
+
   test-shards:
     name: Hermetic Unit Tests (shard ${{ matrix.shard }}/4)
     if: github.event.schedule != '41 13 * * 1'
@@ -230,9 +254,6 @@ jobs:
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - if: needs.reuse.outputs.reuse != 'true'
         run: npm ci --prefer-offline
-      - name: Test Classification
-        if: needs.reuse.outputs.reuse != 'true' && matrix.shard == 1
-        run: npm run test:classification:check
       - if: needs.reuse.outputs.reuse != 'true' && matrix.shard == 1
         run: node scripts/ci/check-hermetic-shards.mjs
       - if: needs.reuse.outputs.reuse != 'true'
@@ -249,19 +270,21 @@ jobs:
   # always() prevents a failed/cancelled matrix from skipping this check.
   test:
     name: Hermetic Unit Tests
-    needs: [test-shards, o8-next-tests]
+    needs: [test-shards, o8-next-tests, classification]
     if: always() && github.event.schedule != '41 13 * * 1'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require unit and native tests
+      - name: Require unit, native and classification checks
         env:
           SHARD_RESULT: ${{ needs.test-shards.result }}
           NATIVE_RESULT: ${{ needs.o8-next-tests.result }}
+          CLASSIFICATION_RESULT: ${{ needs.classification.result }}
         run: |
           echo "Hermetic shard result: $SHARD_RESULT"
           echo "Native test result: $NATIVE_RESULT"
-          test "$SHARD_RESULT" = success && test "$NATIVE_RESULT" = success
+          echo "Classification result: $CLASSIFICATION_RESULT"
+          test "$SHARD_RESULT" = success && test "$NATIVE_RESULT" = success && test "$CLASSIFICATION_RESULT" = success
 
   # PR lane (#2391): runs exactly the resource-owning test files the branch
   # touches, diffed from the merge-base with the base branch. No touched files

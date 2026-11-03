@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 export const REQUIRED_CHECKS = [
   'Type Check',
   'Lint',
+  'Test Classification',
   'Hermetic Unit Tests',
   ...[1, 2, 3, 4].map(shard => `Hermetic Unit Tests (shard ${shard}/4)`),
   ...[1, 2, 3, 4, 5, 6, 7, 8].map(shard => `o8 next Native Tests (Linux) (${shard})`),

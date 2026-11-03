@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { assertBrowserDeclarations, declaresBrowser } from './browser-prerequisites.mjs';
 
@@ -52,6 +53,34 @@ function walkTestFiles(root, directory, results) {
   }
 }
 
+function listTestFiles(root) {
+  const git = (...args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  const top = git('rev-parse', '--show-toplevel');
+  if (top.status === 0 && realpathSync(top.stdout.trim()) === realpathSync(root)) {
+    // Include new local tests as well as the index; tracked deletions must not
+    // resurrect stale manifest entries. No test modules are imported here.
+    // Match the walk's exclusions rather than .gitignore: even an ignored local
+    // test can be scheduled by Vitest and must be classified.
+    const listed = git('ls-files', '-z', '--cached', '--others',
+      '--exclude=node_modules/', '--exclude=.git/', '--exclude=.next/', '--', ...TEST_ROOTS);
+    if (listed.status === 0) {
+      return [...new Set(listed.stdout.split('\0').filter(path => path
+        && !path.split('/').some(part => ['node_modules', '.git', '.next'].includes(part))
+        && (TEST_FILE_RE.test(path) || EXTRA_TEST_FILES.has(path))))].filter(path => {
+        try { return lstatSync(join(root, path)).isFile(); }
+        catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+      }).sort();
+    }
+  }
+  // Standalone source fixtures and archives do not necessarily have Git.
+  const files = [];
+  for (const testRoot of TEST_ROOTS) {
+    const absolute = join(root, testRoot);
+    if (existsSync(absolute)) walkTestFiles(root, absolute, files);
+  }
+  return files.sort();
+}
+
 export function classifyTestSource(path, source) {
   const reasons = [];
   for (const [reason, pattern] of PATH_RULES) {
@@ -65,12 +94,7 @@ export function classifyTestSource(path, source) {
 }
 
 export function buildTestClassificationReport(root) {
-  const files = [];
-  for (const testRoot of TEST_ROOTS) {
-    const absolute = join(root, testRoot);
-    try { walkTestFiles(root, absolute, files); } catch {}
-  }
-  files.sort();
+  const files = listTestFiles(root);
   assertBrowserDeclarations(root, files);
   const resourceOwning = files.flatMap((path) => {
     const reasons = classifyTestSource(path, readFileSync(join(root, path), 'utf8'));
