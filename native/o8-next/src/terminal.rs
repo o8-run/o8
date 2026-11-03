@@ -40,6 +40,8 @@ pub struct Pane {
     painted_bounds: Rc<Cell<Bounds<Pixels>>>,
     pub paints: Rc<Cell<usize>>,
     composition: String,
+    /// A command waiting for the shell to attach.
+    waiting_line: Option<String>,
 }
 impl Pane {
     pub fn new(
@@ -71,6 +73,15 @@ impl Pane {
             painted_bounds: Rc::new(Cell::new(Bounds::default())),
             paints: Rc::new(Cell::new(0)),
             composition: String::new(),
+            waiting_line: None,
+        }
+    }
+    /// Runs a command line in this shell, as if it were typed and entered.
+    pub fn run_line(&mut self, line: String, cx: &mut Context<Self>) {
+        if self.ready {
+            self.input(format!("{line}\r"), cx);
+        } else {
+            self.waiting_line = Some(line);
         }
     }
     pub fn focus_handle(&self) -> FocusHandle {
@@ -97,6 +108,9 @@ impl Pane {
                 Event::Ready => {
                     self.ready = true;
                     self.notice = "Terminal · connected";
+                    if let Some(line) = self.waiting_line.take() {
+                        self.input(format!("{line}\r"), cx);
+                    }
                 }
                 Event::Exited => {
                     self.ready = false;

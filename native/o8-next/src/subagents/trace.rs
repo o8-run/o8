@@ -10,6 +10,14 @@ use gpui::{AnyElement, SharedString};
 use model::Group;
 use std::{cell::RefCell, rc::Rc};
 
+thread_local! {
+    /// When this window first saw each live agent working, and when it stopped,
+    /// epoch ms: a live delegate call carries no times of its own.
+    static WATCHED: RefCell<std::collections::HashMap<String, (f64, Option<f64>)>> =
+        RefCell::default();
+}
+
+const WATCH_LIMIT: usize = 256;
 pub(crate) const MARK: &str = "M4 9h16M4 15h16M10 3 8 21M16 3l-2 18";
 const NAME: usize = 32;
 const NAMES: usize = 4;
@@ -20,6 +28,10 @@ pub(crate) struct Item {
     pub title: String,
     pub group: Group,
     pub failed: bool,
+    /// What the agent is doing now, as its worker last reported.
+    pub activity: Option<String>,
+    pub started: Option<f64>,
+    pub finished: Option<f64>,
 }
 
 fn title(step: &Step) -> String {
@@ -111,6 +123,11 @@ pub(crate) fn items(steps: &[Step], trace: &Trace, agents: &[model::Agent]) -> V
                 title: known.map_or(fallback, |a| a.title.clone()),
                 group,
                 failed: known.map_or(step.status == "failed", |a| a.status == "Failed"),
+                activity: known.and_then(|a| a.progress.clone()),
+                started: known.and_then(|a| a.started).or(step.started),
+                finished: known
+                    .map_or(step.finished, |a| a.finished)
+                    .filter(|_| group != Group::Working),
             });
         };
         if step.delegations.is_empty() {
@@ -242,22 +259,36 @@ pub(crate) fn element(
     beat: f32,
 ) -> Option<(AnyElement, bool)> {
     let state = state.borrow();
-    let items = items(steps, trace, &state.subagent_agents);
+    let now = crate::lineage::now_ms();
+    let items: Vec<Item> = items(steps, trace, &state.subagent_agents)
+        .into_iter()
+        .map(|item| watch(&format!("{row}:{}", item.id), item, trace.live, now))
+        .collect();
     if items.is_empty() {
         return None;
     }
     let inspector = state.subagents.clone();
     let settled = !trace.live;
     let mut animating = items.iter().any(|i| i.group == Group::Working);
+    // Two or more agents read as a roster, one row each with what it is
+    // doing and how long it has taken; one agent stays a single card.
+    let roster = items.len() > 1;
     let mut line = div()
         .debug_selector(|| "trace-subagents".into())
         .py(px(4.))
         .flex()
-        .flex_wrap()
-        .items_center()
         .gap(px(6.))
         .text_size(px(12.5))
-        .line_height(px(18.));
+        .line_height(px(18.))
+        .when(roster, |v| {
+            v.flex_col()
+                .gap(px(4.))
+                .p(px(6.))
+                .rounded(px(10.))
+                .border_1()
+                .border_color(theme().border)
+        })
+        .when(!roster, |v| v.flex_wrap().items_center());
     // Finished agents read first, then the ones still going.
     let ordered = items
         .iter()
@@ -275,7 +306,12 @@ pub(crate) fn element(
             crate::trace::SWAP,
         );
         animating |= arrive < 1. || swap < 1.;
-        line = line.child(card(&state, item, inspector.as_ref(), arrive, swap, beat));
+        let card = card(&state, item, inspector.as_ref(), arrive, swap, beat);
+        line = line.child(if roster {
+            roster_row(item, card, arrive)
+        } else {
+            card
+        });
     }
     if items.len() > NAMES {
         let inspector = inspector.clone();
@@ -297,5 +333,191 @@ pub(crate) fn element(
                 .child(format!("+{} more", items.len() - NAMES)),
         );
     }
+    if roster {
+        line = line.child(
+            div()
+                .debug_selector(|| "subagent-trace-summary".into())
+                .px(px(3.))
+                .text_size(px(11.))
+                .text_color(theme().text_muted)
+                .child(summary(&items)),
+        );
+    }
     Some((line.into_any_element(), animating))
+}
+
+/// Fills in times the server didn't send from what this window watched: a
+/// working agent starts its clock, and the clock stops once it isn't working.
+/// An agent first seen finished keeps no time rather than a made-up one.
+fn watch(key: &str, mut item: Item, live: bool, now: f64) -> Item {
+    if item.started.is_some() {
+        return item;
+    }
+    WATCHED.with(|watched| {
+        let mut watched = watched.borrow_mut();
+        let clock = if item.group == Group::Working && live {
+            // Finished clocks only matter while their row is on screen; keep
+            // the map small for a long-lived window.
+            if watched.len() >= WATCH_LIMIT && !watched.contains_key(key) {
+                watched.retain(|_, (_, end)| end.is_none());
+            }
+            let clock = watched.entry(key.to_owned()).or_insert((now, None));
+            clock.1 = None;
+            Some(*clock)
+        } else {
+            watched.get_mut(key).map(|clock| {
+                clock.1.get_or_insert(now);
+                *clock
+            })
+        };
+        if let Some((started, finished)) = clock {
+            item.started = Some(started);
+            item.finished = item.finished.or(finished);
+        }
+    });
+    item
+}
+
+/// A roster row: the agent's card, what it is doing now, and its time.
+fn roster_row(item: &Item, card: AnyElement, arrive: f32) -> AnyElement {
+    let selector = format!("subagent-roster-{}", item.id);
+    div()
+        .debug_selector(move || selector.clone())
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .min_w_0()
+        .opacity(arrive)
+        .child(div().flex_none().child(card))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(px(11.5))
+                .text_color(theme().text_muted)
+                .children(activity(item)),
+        )
+        .children(elapsed(item, crate::lineage::now_ms()).map(|time| {
+            div()
+                .flex_none()
+                .text_size(px(11.))
+                .text_color(theme().text_muted)
+                .child(time)
+        }))
+        .into_any_element()
+}
+
+/// The worker's last report while it runs; a finished agent says nothing more.
+fn activity(item: &Item) -> Option<String> {
+    (item.group != Group::Done)
+        .then(|| item.activity.as_deref())
+        .flatten()
+        .and_then(|text| text.lines().next())
+        .map(str::to_owned)
+}
+
+/// How long the agent has run, or ran; nothing until its start is known.
+fn elapsed(item: &Item, now: f64) -> Option<String> {
+    let started = item.started?;
+    Some(crate::trace::seconds(
+        item.finished.unwrap_or(now) - started,
+    ))
+}
+
+/// "2 working · 1 done", counting every agent, not only the rows shown.
+fn summary(items: &[Item]) -> String {
+    let count = |word: &str| items.iter().filter(|i| status(i) == word).count();
+    ["working", "needs you", "failed", "done"]
+        .into_iter()
+        .filter_map(|word| match count(word) {
+            0 => None,
+            n => Some(format!("{n} {word}")),
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+#[cfg(test)]
+mod roster_tests {
+    use super::*;
+
+    fn item(id: &str, group: Group) -> Item {
+        Item {
+            id: id.into(),
+            title: id.into(),
+            group,
+            failed: false,
+            activity: Some("Searching the worktree\nmore".into()),
+            started: Some(1_000.),
+            finished: None,
+        }
+    }
+
+    #[test]
+    fn a_running_agent_shows_its_last_report_and_a_live_time() {
+        let working = item("a", Group::Working);
+        assert_eq!(
+            activity(&working).as_deref(),
+            Some("Searching the worktree")
+        );
+        assert_eq!(elapsed(&working, 27_000.).as_deref(), Some("26s"));
+        let done = Item {
+            finished: Some(66_000.),
+            ..item("b", Group::Done)
+        };
+        assert_eq!(activity(&done), None, "a finished agent says nothing more");
+        assert_eq!(elapsed(&done, 999_000.).as_deref(), Some("1m 5s"));
+        let unknown = Item {
+            started: None,
+            ..item("c", Group::Working)
+        };
+        assert_eq!(elapsed(&unknown, 5_000.), None);
+    }
+
+    #[test]
+    fn a_watched_agent_keeps_the_time_it_ran_and_an_unwatched_one_has_none() {
+        let fresh = |group| Item {
+            started: None,
+            ..item("w", group)
+        };
+        let working = watch("row:w", fresh(Group::Working), true, 1_000.);
+        assert_eq!(working.started, Some(1_000.));
+        let done = watch("row:w", fresh(Group::Done), true, 9_000.);
+        assert_eq!(elapsed(&done, 50_000.).as_deref(), Some("8s"));
+        let later = watch("row:w", fresh(Group::Done), false, 70_000.);
+        assert_eq!(later.finished, Some(9_000.), "the stop time holds");
+        let loaded = watch("row:old", fresh(Group::Done), false, 5_000.);
+        assert_eq!(elapsed(&loaded, 5_000.), None);
+    }
+
+    #[test]
+    fn finished_clocks_are_dropped_once_the_map_is_full() {
+        let fresh = |group| Item {
+            started: None,
+            ..item("x", group)
+        };
+        for n in 0..WATCH_LIMIT {
+            watch(&format!("full:{n}"), fresh(Group::Working), true, 1.);
+            watch(&format!("full:{n}"), fresh(Group::Done), false, 2.);
+        }
+        watch("full:new", fresh(Group::Working), true, 3.);
+        let size = WATCHED.with(|w| w.borrow().len());
+        assert!(size < WATCH_LIMIT, "{size} clocks kept");
+    }
+
+    #[test]
+    fn the_summary_counts_every_agent_by_state() {
+        let failed = Item {
+            failed: true,
+            ..item("d", Group::Done)
+        };
+        let items = [
+            item("a", Group::Working),
+            item("b", Group::Working),
+            item("c", Group::Done),
+            failed,
+        ];
+        assert_eq!(summary(&items), "2 working · 1 failed · 1 done");
+    }
 }

@@ -2,9 +2,10 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
 import { recordAutomationSourceEvent } from '@/lib/automations/source-events';
+import { githubApiCallStats, type GitHubApiCallStats } from '@/lib/github/cache';
 
 export type PrWatchChange = 'head' | 'checks' | 'state' | 'comments' | 'reviews';
-export interface PrWatchResult { changes: PrWatchChange[]; commentUpdatesPaused: boolean; superseded?: boolean }
+export interface PrWatchResult { changes: PrWatchChange[]; commentUpdatesPaused: boolean; superseded?: boolean; githubApiCalls: GitHubApiCallStats }
 type RemarkSignature = [string, number, string];
 interface Baseline { head: string; checks: string; state: string; comments: string; reviews: string; commentSignatures: RemarkSignature[]; reviewSignatures: RemarkSignature[]; commentWakes: number; generation: number; readOrder: number }
 interface Remark { id: number; author: string; body: string; state?: string; kind?: 'comments' | 'inline' | 'reviews' }
@@ -36,7 +37,7 @@ export function recordPrWatchSnapshot(input: {
     const row = db.prepare('SELECT baseline FROM github_pr_watch_baselines WHERE scope=? AND repo=? AND number=?').get(input.scope, repo, input.number) as { baseline: string } | undefined;
     const prior = row ? JSON.parse(row.baseline) as Baseline : undefined;
     const readOrder = input.readOrder ?? beginPrWatchRead();
-    if (prior && readOrder <= prior.readOrder) return { changes: [], commentUpdatesPaused: prior.commentWakes > 3, superseded: true };
+    if (prior && readOrder <= prior.readOrder) return { changes: [], commentUpdatesPaused: prior.commentWakes > 3, superseded: true, githubApiCalls: githubApiCallStats() };
     const own = db.prepare('SELECT kind,id FROM github_pr_watch_own_remarks WHERE scope=? AND repo=? AND number=?').all(input.scope, repo, input.number) as Array<{ kind: string; id: number }>;
     const excludeOwn = (values: RemarkSignature[]) => values.filter(value => !own.some(saved => saved.kind === value[0] && saved.id === value[1]));
     const signatures = (kind: 'comments' | 'reviews', values: Remark[]): RemarkSignature[] => excludeOwn(values.map(value => [value.kind ?? kind, value.id, hash([value.author, value.body, value.state ?? ''])] as RemarkSignature))
@@ -64,6 +65,6 @@ export function recordPrWatchSnapshot(input: {
     if (actionable.length && input.repoPath) recordAutomationSourceEvent({ sourceKind: 'repository', sourceId: `github:${repo}#${input.number}`, repoPath: input.repoPath,
       eventType: 'pull_request_updated', fingerprint: hash([input.scope, repo, input.number, next.generation, actionable, next]),
       payload: { pullRequestNumber: input.number, headSha: input.head, changes: actionable }, occurredAt: Date.now() });
-    return { changes: actionable, commentUpdatesPaused };
+    return { changes: actionable, commentUpdatesPaused, githubApiCalls: githubApiCallStats() };
   })();
 }

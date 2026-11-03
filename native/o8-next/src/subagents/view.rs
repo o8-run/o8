@@ -238,7 +238,32 @@ impl Inspector {
                             "{} {}",
                             agent.status,
                             timing(&agent)
-                        ))),
+                        )))
+                        .child(div().flex_1())
+                        .when(!output.is_empty(), |v| {
+                            v.child(
+                                self.button(
+                                    "subagents-copy",
+                                    "Copy agent output",
+                                    cx,
+                                    |s, _, cx| {
+                                        let text = s.output();
+                                        if !text.is_empty() {
+                                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                                text,
+                                            ));
+                                            s.copied = true;
+                                            cx.notify();
+                                        }
+                                    },
+                                )
+                                .child(if self.copied {
+                                    "Copied"
+                                } else {
+                                    "Copy output"
+                                }),
+                            )
+                        }),
                 )
                 .when_some(agent.progress.clone(), |v, progress| {
                     v.child(
@@ -247,24 +272,6 @@ impl Inspector {
                             .text_size(px(11.))
                             .text_color(theme().text_muted)
                             .child(progress),
-                    )
-                })
-                .when(!output.is_empty(), |v| {
-                    v.child(
-                        self.button("subagents-copy", "Copy agent output", cx, |s, _, cx| {
-                            let text = s.output();
-                            if !text.is_empty() {
-                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
-                                s.copied = true;
-                                cx.notify();
-                            }
-                        })
-                        .mt(px(8.))
-                        .child(if self.copied {
-                            "Copied"
-                        } else {
-                            "Copy output"
-                        }),
                     )
                 }),
         );

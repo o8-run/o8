@@ -338,6 +338,14 @@ impl Shell {
     ) {
         open_file_at(self, path, line, window, cx);
     }
+    pub(crate) fn run_shell_line(
+        &mut self,
+        line: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        run_in_terminal(self, line, window, cx);
+    }
     /// The content key of the open panel's front tool, so a surface knows it
     /// is on screen there as well as in the main area.
     pub(crate) fn panel_shows(&self, probe: impl Fn(&str) -> bool) -> bool {
@@ -746,6 +754,19 @@ pub(super) fn open_file_at(
     let view = s.features.get::<Panel>().files.get(&key).cloned();
     if let Some(view) = view {
         view.update(cx, |view, cx| view.open_at(&path, line, cx));
+    }
+}
+
+/// Runs a composer `!` line in this workspace's terminal, shown in the panel.
+pub(super) fn run_in_terminal(
+    s: &mut Shell,
+    line: String,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    show(s, Tool::Terminal, window, cx);
+    if let Some(Content::Terminal(view)) = s.content.get(&key(s, Tool::Terminal)) {
+        view.clone().update(cx, |view, cx| view.run(line, cx));
     }
 }
 
