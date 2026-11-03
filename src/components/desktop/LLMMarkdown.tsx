@@ -11,7 +11,7 @@
 import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { Copy, Check, ChevronDown, ChevronRight, FileCode, PanelRight, Play } from './lucide-shims';
 import { DiffCard } from './DiffCard';
-import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
+import { renderMermaidSvg } from '@/lib/render/mermaid';
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
 const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
@@ -416,29 +416,16 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
     let cancelled = false;
     (async () => {
       try {
-        const mermaid = (await import('mermaid')).default;
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'strict' });
-        // Render in an offscreen container to prevent DOM pollution on error
-        const offscreen = document.createElement('div');
-        offscreen.style.position = 'absolute';
-        offscreen.style.left = '-9999px';
-        offscreen.style.top = '-9999px';
-        document.body.appendChild(offscreen);
-        const id = 'mermaid-' + Math.random().toString(36).slice(2, 8);
-        try {
-          const { svg: rendered } = await mermaid.render(id, code, offscreen);
-          if (!cancelled) setSvg(sanitizeAgentHtml(rendered));
-        } finally {
-          // Clean up offscreen container and any error elements mermaid injected
-          offscreen.remove();
-          // Also remove any stray mermaid error elements from the DOM
-          document.querySelectorAll('[id^="d-mermaid-"], .mermaid-error, [id^="mermaid-"]').forEach(el => {
-            if (el.closest('[data-llm-mermaid]')) return; // don't remove our own
-            el.remove();
-          });
+        const rendered = await renderMermaidSvg(code);
+        if (!cancelled) {
+          setSvg(rendered);
+          setError('');
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Render failed');
+        if (!cancelled) {
+          setSvg('');
+          setError(err instanceof Error ? err.message : 'Render failed');
+        }
       }
     })();
     return () => { cancelled = true; };

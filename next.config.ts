@@ -150,9 +150,9 @@ const nextConfig: NextConfig = {
             chunks: 'all' as const,
             priority: 20,
           },
-          mermaid: {
-            test: /[\\/]node_modules[\\/]mermaid[\\/]/,
-            name: 'vendor-mermaid',
+          pele: {
+            test: /[\\/]node_modules[\\/]pele[\\/]/,
+            name: 'vendor-pele',
             chunks: 'async' as const,
             priority: 30,
           },
