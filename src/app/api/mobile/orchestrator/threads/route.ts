@@ -67,10 +67,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ threads: threads.map(thread => {
       const subject = inboxSubject('conversation', thread.id, thread.repoPath, thread.projectId);
       const projection = inboxProjection(subject, null, undefined, legacyInboxPin(thread));
-      // Additive sidebar context: owner/repo (or folder) and the worktree's live branch.
+      // Additive checkout context: owner/repo (or folder), live branch and worktree identity.
       const git = threadGitContext(thread.repoPath);
       const remoteSlug = thread.githubOwner && thread.githubRepo ? `${thread.githubOwner}/${thread.githubRepo}` : null;
       return { ...thread, ...projection, ...parkedWorkspaceProjection(subject, parked), pinned: projection.pinnedAt != null,
+        isWorktree: git.isWorktree, worktreePath: git.worktreePath,
         repoSlug: remoteSlug ?? git.repoSlug ?? thread.repoName, branch: git.branch ?? thread.repoBranch, runStartedAt: inboxRunStartedAt(subject) };
     }) }, { headers: NO_STORE });
   } catch (error) {

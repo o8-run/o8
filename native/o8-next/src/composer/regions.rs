@@ -63,6 +63,38 @@ impl Surface {
             .min(crate::theme::GEOMETRY.sidebar_width);
         self.session_sidebar(px(width), cx)
     }
+    pub(super) fn thread_worktree_badge(&self) -> Option<gpui::Div> {
+        self.selected
+            .as_ref()
+            .and_then(|id| self.sessions.iter().find(|s| s.id == *id))
+            .filter(|s| {
+                s.is_worktree.unwrap_or_else(|| {
+                    s.branch.as_deref().is_some_and(|branch| {
+                        !branch.is_empty() && !matches!(branch, "main" | "master")
+                    })
+                })
+            })
+            .map(|s| {
+                let path = s.worktree_path.as_deref().or(s.repo_path.as_deref());
+                let tip =
+                    path.map_or_else(|| "Worktree".into(), |path| format!("Worktree: {path}"));
+                div().flex().flex_shrink_0().px(px(16.)).py(px(4.)).child(
+                    div()
+                        .id("thread-worktree-badge")
+                        .debug_selector(|| "thread-worktree-badge".into())
+                        .px(px(6.))
+                        .py(px(2.))
+                        .rounded(px(5.))
+                        .text_size(px(11.))
+                        .text_color(theme().text_muted)
+                        .bg(theme().surface_raised)
+                        .tooltip(move |_, cx| {
+                            cx.new(|_| crate::icon::Tip(tip.clone().into())).into()
+                        })
+                        .child("Worktree"),
+                )
+            })
+    }
     pub(super) fn session_transcript(
         &mut self,
         _: &mut Window,

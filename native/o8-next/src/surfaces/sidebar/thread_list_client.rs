@@ -23,6 +23,8 @@ fn worker_session(agent: &Value) -> Option<Result<Session, String>> {
             "model": agent["model"],
             "currentTask": agent["currentTask"],
             "branch": agent["branch"].as_str().filter(|branch| *branch != "unknown"),
+            "isWorktree": agent["isWorktree"],
+            "worktreePath": agent["worktreePath"],
             "parkedWorkspaces": agent["parkedWorkspaces"].as_array().cloned().unwrap_or_default(),
             "repoPath": agent["workspace"],
             "lastMessageAt": agent["lastActivityAt"].as_i64().map(|t| format!("{t:020}")).unwrap_or_default(),
@@ -140,6 +142,8 @@ impl Client {
                 parked_workspaces: serde_json::from_value(agent["parkedWorkspaces"].clone())
                     .unwrap_or_default(),
                 repo_slug: None,
+                is_worktree: agent["isWorktree"].as_bool(),
+                worktree_path: agent["worktreePath"].as_str().map(str::to_owned),
                 pinned_at: agent["pinnedAt"].as_str().map(str::to_owned),
                 pin_order_key: agent["pinOrderKey"].as_str().map(str::to_owned),
                 inbox_revision: agent["inboxRevision"].as_u64(),

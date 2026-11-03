@@ -25,9 +25,15 @@ describe('thread git context', () => {
     writeFileSync(join(repo, '.git', 'worktrees', 'wt', 'commondir'), '../..\n');
     const plain = join(root, 'plain-folder');
     mkdirSync(plain);
-    expect(threadGitContext(repo)).toEqual({ repoSlug: 'o8-run/o8', repoSlugFromRemote: true, branch: 'main' });
-    expect(threadGitContext(join(wt, 'sub'))).toEqual({ repoSlug: 'o8-run/o8', repoSlugFromRemote: true, branch: 'feature/rows' });
+    expect(threadGitContext(repo)).toEqual({ repoSlug: 'o8-run/o8', repoSlugFromRemote: true, branch: 'main', isWorktree: false, worktreePath: null });
+    expect(threadGitContext(join(wt, 'sub'))).toEqual({ repoSlug: 'o8-run/o8', repoSlugFromRemote: true, branch: 'feature/rows', isWorktree: true, worktreePath: wt });
     expect(threadGitContext(plain).repoSlugFromRemote).toBe(false);
-    expect(threadGitContext(null)).toEqual({ repoSlug: null, repoSlugFromRemote: false, branch: null });
+    expect(threadGitContext(join(wt, 'missing'))).toMatchObject({ isWorktree: false, worktreePath: null });
+    // Reuse the same cached result until the ten-second metadata TTL expires.
+    const cached = threadGitContext(wt, 100);
+    writeFileSync(join(repo, '.git', 'worktrees', 'wt', 'commondir'), '.\n');
+    expect(threadGitContext(wt, 101)).toBe(cached);
+    expect(threadGitContext(wt, 10_100)).toMatchObject({ isWorktree: false, worktreePath: null });
+    expect(threadGitContext(null)).toEqual({ repoSlug: null, repoSlugFromRemote: false, branch: null, isWorktree: false, worktreePath: null });
   });
 });

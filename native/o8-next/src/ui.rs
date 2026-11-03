@@ -934,6 +934,7 @@ impl Render for Surface {
                             .flex_col()
                             .flex_1()
                             .min_w_0()
+                            .children(self.thread_worktree_badge())
                             .when(empty, |view| {
                                 view.when(!self.notice.is_empty(), |view| {
                                     view.child(
