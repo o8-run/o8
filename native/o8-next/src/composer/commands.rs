@@ -185,10 +185,11 @@ pub(crate) struct Slash {
 }
 pub(crate) struct Execute(pub String, pub AnyWindowHandle);
 /// The command in a `!` line, which runs in the terminal instead of reaching
-/// the agent. A message with several lines stays a message.
+/// the agent. A message with several lines, or any control character, stays a
+/// message.
 pub(crate) fn shell_line(text: &str) -> Option<&str> {
     let line = text.strip_prefix('!')?.trim();
-    (!line.is_empty() && !line.contains('\n')).then_some(line)
+    (!line.is_empty() && !line.contains(char::is_control)).then_some(line)
 }
 
 impl EventEmitter<Execute> for Composer {}
@@ -341,6 +342,8 @@ mod shell_line_tests {
         assert_eq!(shell_line("! ls -la "), Some("ls -la"));
         assert_eq!(shell_line("!"), None);
         assert_eq!(shell_line("!first\nsecond"), None);
+        assert_eq!(shell_line("!first\rsecond"), None);
+        assert_eq!(shell_line("!printf \x1b[2J"), None);
         assert_eq!(shell_line("say !hello"), None);
     }
 }
