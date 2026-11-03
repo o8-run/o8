@@ -135,6 +135,8 @@ mod tests {
         assert_eq!(list.len(), 2);
         let id = machine_thread_id("box", &list[1].id);
         assert_eq!(owner(&id, true, true), Owner::Machine("box", "codex:7"));
+        let both = with_workers(vec![row("codex:7")], vec![row("codex:7")]);
+        assert_eq!(both.len(), 1, "a worker already listed as a thread");
     }
 
     #[test]

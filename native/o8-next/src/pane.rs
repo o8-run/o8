@@ -88,6 +88,9 @@ pub struct Pane {
     pub painted_rows: Rc<RefCell<BTreeSet<usize>>>,
     pub terminal_session: Option<String>,
     pub terminal: Option<gpui::Entity<crate::terminal::Pane>>,
+    /// The session's repository, so a file reference's hover names the file
+    /// it opens, as in the main chat.
+    file_root: Option<gpui::SharedString>,
 }
 impl Pane {
     pub fn new(key: Option<String>) -> Self {
@@ -110,6 +113,7 @@ impl Pane {
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
             terminal_session: None,
             terminal: None,
+            file_root: None,
         }
     }
     pub fn metadata(&mut self, session: &Session) {
@@ -121,6 +125,13 @@ impl Pane {
         if self.terminal_session != binding {
             self.terminal = None;
             self.terminal_session = binding;
+        }
+        let root = session.repo_path.clone().map(gpui::SharedString::from);
+        if self.file_root != root {
+            self.file_root = root;
+            for row in self.rows.iter() {
+                row.borrow_mut().file_root = self.file_root.clone();
+            }
         }
     }
     pub fn install(&mut self, history: History, client: Client) {
@@ -208,6 +219,7 @@ impl Pane {
                     .unwrap_or_else(|| {
                         let mut state = RowState::new(row.clone());
                         state.images = self.images.clone();
+                        state.file_root = self.file_root.clone();
                         if let Some(previous) = old
                             .iter()
                             .find(|previous| previous.borrow().row.id() == row.id())
@@ -386,5 +398,43 @@ mod tests {
     #[gpui::test]
     fn a_pane_shorter_than_its_first_row_scrolls_to_the_next(cx: &mut TestAppContext) {
         assert_eq!(scrolled_to(Pane::new(None), cx), 1);
+    }
+}
+
+#[cfg(test)]
+mod file_root_tests {
+    use super::*;
+
+    #[test]
+    fn a_pane_names_files_from_its_sessions_repository() {
+        let mut pane = Pane::new(Some("agent".into()));
+        pane.install_saved(
+            serde_json::from_value(serde_json::json!({
+                "sessionKey": "agent",
+                "transcript": [{"id": "answer", "role": "assistant", "text": "see `src/a.rs:3`"}],
+            }))
+            .unwrap(),
+        );
+        let session: Session = serde_json::from_value(serde_json::json!({
+            "id": "agent", "title": "t", "status": "idle", "repoPath": "/repo"
+        }))
+        .unwrap();
+        pane.metadata(&session);
+        let root = |pane: &Pane| {
+            pane.rows[0]
+                .borrow()
+                .file_root
+                .as_ref()
+                .map(ToString::to_string)
+        };
+        assert_eq!(root(&pane).as_deref(), Some("/repo"));
+        pane.install_saved(
+            serde_json::from_value(serde_json::json!({
+                "sessionKey": "agent",
+                "transcript": [{"id": "later", "role": "assistant", "text": "more"}],
+            }))
+            .unwrap(),
+        );
+        assert_eq!(root(&pane).as_deref(), Some("/repo"), "a new row keeps it");
     }
 }
