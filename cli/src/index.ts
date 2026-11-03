@@ -32,6 +32,7 @@ import { runBrowser } from './commands/browser.js';
 import { runBroadcast } from './commands/broadcast.js';
 import { runConnect } from './commands/connect.js';
 import { runDoctor } from './commands/doctor.js';
+import { runTriage } from './commands/triage.js';
 import { runCortexObserve } from './commands/cortex.js';
 import { runCi } from './commands/ci.js';
 import {
@@ -228,6 +229,7 @@ commands:
   chat                 interactive conversation (o8 chat --help)
   version              CLI version + connected server version
   doctor               verify port + token resolution, ping server; --repair reinstalls the o8 CLI symlink
+  triage               bundle diagnostics and print a draft issue; never files anything
   status               snapshot: running packets, lanes, merges, approvals
   conversation-prs list|add|remove|reverse  durable conversation PR provenance
   history <thread-id>  continuous orchestrator transcript + audited handoff seams
@@ -426,6 +428,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runVersion(args.mode, args.rest.includes('--offline'));
     case 'doctor':
       return runDoctor(args.mode, args.rest);
+    case 'triage':
+      return runTriage(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'status':
       return runStatus(args.mode);
     case 'conversation-prs':

@@ -7536,6 +7536,13 @@
       ]
     },
     {
+      "path": "tests/triage-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/truth-cli-real-path.test.ts",
       "reasons": [
         "child-process",

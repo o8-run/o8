@@ -56,6 +56,7 @@ await esbuild.build({
   banner: { js: ESM_BANNER },
   define: { __O8_CLI_VERSION__: JSON.stringify(cliVersion) },
   plugins: [sqlitePlugin],
+  alias: { 'server-only': join(__dirname, '..', 'scripts', 'server-only-stub.js') },
   outfile: outFile,
 });
 

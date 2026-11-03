@@ -118,6 +118,8 @@ export interface CallCodexOptions {
   /** CLI invocation timeout. Default 30s — Codex bootstrap is ~15s. */
   timeoutMs?: number;
   readOnly?: boolean;
+  /** Keep stdout available for a structured response owned by the caller. */
+  quiet?: boolean;
 }
 
 /** Default Engineering Brain Codex model when operator settings are unavailable. */
@@ -224,7 +226,7 @@ export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Pr
   });
   if (opts.readOnly) cliArgs.push('--ignore-user-config', '--sandbox', 'read-only', '-c', 'approval_policy="never"',
     '-c', 'tools.image_generation=false', '--disable', 'apps', '--disable', 'plugins');
-  console.info(`[qa][codex] launching model=${route.model} effort=${route.reasoningEffort ?? 'runtime-default'}`);
+  if (!opts.quiet) console.info(`[qa][codex] launching model=${route.model} effort=${route.reasoningEffort ?? 'runtime-default'}`);
 
   // tmpdir cwd so no project .codex/ config bleeds in.
   const cwd = os.tmpdir();
