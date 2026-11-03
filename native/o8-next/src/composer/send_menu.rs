@@ -146,17 +146,14 @@ impl Surface {
             return;
         };
         let session = session.clone();
-        let thread = session.id.clone();
-        let thread_id = thread.clone();
+        let thread_id = session.id.clone();
         let backend = self
             .composer_routing(cx)
             .and_then(|routing| routing["backend"].as_str().map(str::to_owned));
         let client = self.client.clone();
-        let task = cx.background_executor().spawn(async move {
-            let state = crate::transport::interrupt(&client, &repo, &thread, backend.as_deref())?;
-            release_stopped(&client, &session);
-            Ok::<_, String>(state)
-        });
+        let task = cx
+            .background_executor()
+            .spawn(async move { stop_chat(&client, &session, &repo, backend.as_deref()) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |s, cx| {
@@ -244,20 +241,18 @@ impl Surface {
     }
 }
 
-/// The server holds the stopped turn's message ("Chat stopped."), and a held
-/// item blocks every later send in this chat. That message already reached
-/// the agent, so it is removed as classic's Remove would; items that never
-/// started stay held.
-fn release_stopped(client: &crate::client::Client, session: &Session) {
-    let Ok(queue) = client.queue(session) else {
-        return;
-    };
-    for item in queue["items"].as_array().into_iter().flatten() {
-        if item["status"] == "held" && !item["admittedAt"].is_null() {
-            let _ = client.mutate_queue(
-                "DELETE",
-                &json!({"repoPath": session.repo_path, "threadId": session.id, "id": item["id"]}),
-            );
-        }
-    }
+/// Stops one chat's turn and returns the server's stop state. The server
+/// settles the stopped turn's queue row as applied (#5193), so the queue is
+/// left alone: a row still held after Stop never started, so it stays.
+fn stop_chat(
+    client: &crate::client::Client,
+    session: &Session,
+    repo: &str,
+    backend: Option<&str>,
+) -> Result<String, String> {
+    crate::transport::interrupt(client, repo, &session.id, backend)
 }
+
+#[cfg(test)]
+#[path = "stop_tests.rs"]
+mod stop_tests;
