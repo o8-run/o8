@@ -18,6 +18,47 @@ struct Ink {
     event: Option<String>,
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct Activation {
+    last_id: Option<String>,
+}
+
+#[cfg(target_os = "linux")]
+fn activate_main_window(
+    s: &mut Shell,
+    payload: &Value,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    // Activation is transient and scoped to the launcher's shell-state file.
+    let recent = payload["createdAt"]
+        .as_str()
+        .and_then(crate::clock::timestamp)
+        .and_then(|created| crate::clock::now().checked_sub(created))
+        .is_some_and(|age| age <= 10);
+    if !recent
+        || payload["surfaceId"].as_str() != s.file.to_str()
+        || payload["source"] != "desktop"
+        || payload["status"] != "completed"
+    {
+        return;
+    }
+    let Some(id) = payload["mutationId"]
+        .as_str()
+        .filter(|id| !id.is_empty() && id.len() <= 128)
+    else {
+        return;
+    };
+    let activation = s.features.get::<Activation>();
+    if activation.last_id.as_deref() == Some(id) {
+        return;
+    }
+    activation.last_id = Some(id.to_owned());
+    cx.activate(true);
+    window.activate_window();
+}
+
 impl Shell {
     pub(crate) fn ui_command(
         &mut self,
@@ -31,6 +72,8 @@ impl Shell {
             .filter(|payload| payload.is_object())
             .unwrap_or(frame);
         match frame["kind"].as_str() {
+            #[cfg(target_os = "linux")]
+            Some("activate-main-window") => activate_main_window(self, payload, window, cx),
             Some("open-settings") => self.execute(Command::Settings, window, cx),
             Some("voice-toggle") => self.toggle_voice(cx),
             Some("voice-host-state") => super::voice::host_state(self, payload, cx),

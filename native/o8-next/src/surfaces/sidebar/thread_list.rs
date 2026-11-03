@@ -652,6 +652,23 @@ impl ThreadList {
                     cx.emit(Event::UiCommand(frame));
                     continue;
                 }
+                #[cfg(target_os = "linux")]
+                if frame["channel"] == "realtime" && frame["event"] == "batch" {
+                    // Only the existing global subscription forwards activation.
+                    for event in frame["data"]["events"].as_array().into_iter().flatten() {
+                        let mutation = &event["data"]["mutation"];
+                        if event["stream"] == "global"
+                            && event["channel"] == "mutation"
+                            && event["event"] == "mutation.settled"
+                            && mutation["action"] == "main-window.activate"
+                        {
+                            cx.emit(Event::UiCommand(json!({
+                                "type":"ui-command", "kind":"activate-main-window",
+                                "payload":mutation
+                            })));
+                        }
+                    }
+                }
                 if frame["channel"] == "orchestrator-threads"
                     && matches!(
                         frame["event"].as_str(),

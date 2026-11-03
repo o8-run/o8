@@ -1,10 +1,12 @@
 /** Linux desktop entry. CLI subcommands continue to use the ordinary CLI bundle. */
 import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { resolveCliDataDir } from './config.js';
+import { resolveCliDataDir, resolveConfig } from './config.js';
+import { resolveWsBase } from './api.js';
 import { linuxWindowOwnerIsDead } from '../../src/lib/next/linux-window-startup.js';
 
 // The stage places this entry in <payload>/server/cli/ beside o8.mjs.
@@ -83,6 +85,24 @@ function windowIsOpen(): boolean {
     } catch { /* A process may exit between directory enumeration and inspection. */ }
   }
   return false;
+}
+
+async function activateMainWindow(): Promise<void> {
+  try {
+    // Both server-owned and CLI-owned windows subscribe to this local relay.
+    // The startup-result file is only a first-paint receipt, not a control pipe.
+    const config = resolveConfig();
+    const origin = resolveWsBase(config).replace(/^ws:/, 'http:');
+    await fetch(`${origin}/internal/realtime`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}) },
+      body: JSON.stringify({ kind: 'mutation', mutation: {
+        mutationId: randomUUID(), source: 'desktop', action: 'main-window.activate',
+        status: 'completed', surfaceId: shellState, createdAt: new Date().toISOString(),
+      } }),
+      signal: AbortSignal.timeout(2_500), redirect: 'error',
+    });
+  } catch { /* A failed activation must never start a competing window or server. */ }
 }
 
 // The server claims an attempt by renaming `pending` just before it spawns;
@@ -166,7 +186,10 @@ async function openDesktop(): Promise<number> {
     }
     if (windowIsOpen()) {
       const status = await runCli(['serve', 'status'], true);
-      if (healthy(status)) return 0;
+      if (healthy(status)) {
+        await activateMainWindow();
+        return 0;
+      }
       // A CLI-owned window can outlive a stopped daemon. Leave that window's
       // visible retry state intact rather than creating a second main window.
       throw new Error('An o8 next window is still open, but its server is not healthy. Close that window and launch o8 again.');
@@ -191,7 +214,10 @@ async function openDesktop(): Promise<number> {
       // Its hook can start arbitrarily later than serve's health response.
       const result = await serverWindowResult(attempt);
       if (result === 'ready' && windowIsOpen()) return 0;
-    } else if (windowIsOpen()) return 0;
+    } else if (windowIsOpen()) {
+      await activateMainWindow();
+      return 0;
+    }
     // A terminal daemon cannot inherit this launcher's packaged environment.
     // The existing CLI resolves its health, ports, credentials and shell state.
     let finished = false;
