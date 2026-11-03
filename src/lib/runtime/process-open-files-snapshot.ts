@@ -1,6 +1,7 @@
 import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import { observeCloseProcess } from './close-process-observation';
+import { missingLinuxLsof, readProcOpenFiles } from './proc-open-files-snapshot';
 
 const run = promisify(execFile);
 export interface OpenFileRow { pid: number; commandName: string; descriptor: string; file: string }
@@ -64,11 +65,16 @@ export function parseOpenFileSnapshot(files: string): OpenFileRow[] {
 
 export function readCloseOpenFiles(): Promise<string> {
   return observeCloseProcess('open-files', async () => {
-    const { stdout, stderr } = await run('lsof', ['-nP', '-Fpcftn'], {
-      encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
-    });
-    if (stderr.trim() || !stdout.trim()) throw new Error('Native open-file snapshot is incomplete.');
-    return stdout;
+    try {
+      const { stdout, stderr } = await run('lsof', ['-nP', '-Fpcftn'], {
+        encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
+      });
+      if (stderr.trim() || !stdout.trim()) throw new Error('Native open-file snapshot is incomplete.');
+      return stdout;
+    } catch (error) {
+      if (!missingLinuxLsof(error)) throw error;
+      return readProcOpenFiles();
+    }
   });
 }
 
