@@ -329,6 +329,15 @@ fn key(s: &Shell, tool: Tool) -> String {
 }
 
 impl Shell {
+    pub(crate) fn open_file_link(
+        &mut self,
+        path: String,
+        line: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        open_file_at(self, path, line, window, cx);
+    }
     pub(crate) fn run_shell_line(
         &mut self,
         line: String,
@@ -730,6 +739,22 @@ pub(super) fn open_surface(
         view.update(cx, |browser, cx| browser.agent_navigate(url, cx));
     }
     true
+}
+
+/// Opens a file a reply named, in this workspace's Files panel.
+pub(super) fn open_file_at(
+    s: &mut Shell,
+    path: String,
+    line: Option<usize>,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    show(s, Tool::Files, window, cx);
+    let key = key(s, Tool::Files);
+    let view = s.features.get::<Panel>().files.get(&key).cloned();
+    if let Some(view) = view {
+        view.update(cx, |view, cx| view.open_at(path, line, cx));
+    }
 }
 
 /// Runs a composer `!` line in this workspace's terminal, shown in the panel.

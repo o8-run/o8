@@ -24,7 +24,11 @@ pub struct Run {
 }
 /// A link's target is native-only; the recorded tree keeps the web's style name.
 fn wire_style<S: serde::Serializer>(style: &str, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(if style.starts_with("link") { "link" } else { style })
+    serializer.serialize_str(if style.starts_with("link") {
+        "link"
+    } else {
+        style
+    })
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Node {
@@ -114,6 +118,40 @@ pub fn sanitize(text: &str) -> String {
     text
 }
 
+/// Files a bare name can mean; a name with a folder needs no list.
+const CODE_FILES: [&str; 21] = [
+    "css", "go", "html", "java", "js", "json", "jsx", "lock", "md", "mjs", "py", "rb", "rs", "sh",
+    "sql", "swift", "toml", "ts", "tsx", "txt", "yaml",
+];
+/// What a reply's inline code or link target points at in the workspace: the
+/// path and its line, from `src/a.rs:12`, `src/a.rs:12:4` or `src/a.rs#L12`.
+pub(crate) fn file_ref(text: &str) -> Option<(&str, Option<usize>)> {
+    let (path, line) = match text.rsplit_once("#L") {
+        Some((path, line)) => (path, line.parse().ok()),
+        None => {
+            let mut parts = text.split(':');
+            let path = parts.next()?;
+            let line = parts.next();
+            let column = parts.next();
+            if parts.next().is_some()
+                || column.is_some_and(|c| c.parse::<usize>().is_err())
+                || line.is_some_and(|l| l.parse::<usize>().is_err())
+            {
+                return None;
+            }
+            (path, line.and_then(|l| l.parse().ok()))
+        }
+    };
+    let name = path.rsplit('/').next()?;
+    let (stem, extension) = name.rsplit_once('.')?;
+    let plain = !stem.is_empty()
+        && extension.len() >= 2
+        && extension.chars().all(|c| c.is_ascii_alphanumeric())
+        && extension.starts_with(|c: char| c.is_ascii_alphabetic())
+        && !path.starts_with('-')
+        && !path.chars().any(|c| c.is_whitespace() || c.is_control());
+    (plain && (path.contains('/') || CODE_FILES.contains(&extension))).then_some((path, line))
+}
 pub fn inline(text: &str) -> Vec<Run> {
     static INLINE: LazyLock<Regex> = LazyLock::new(|| {
         re(
@@ -133,6 +171,7 @@ pub fn inline(text: &str) -> Vec<Run> {
         let target = c.get(5).map(|url| url.as_str()).unwrap_or(m.as_str());
         let link = format!("link:{target}");
         let number = c.get(11).map(|n| format!("#{}", n.as_str()));
+        let code_link;
         let (style, value) = if c.get(3).is_some() {
             ("image", c.get(2).unwrap().as_str())
         } else if c.get(5).is_some() {
@@ -156,7 +195,12 @@ pub fn inline(text: &str) -> Vec<Run> {
         } else if c.get(8).is_some() {
             ("strike", &c[8])
         } else if c.get(9).is_some() {
-            ("code", &c[9])
+            if file_ref(&c[9]).is_some() {
+                code_link = format!("link:file:{}", &c[9]);
+                (code_link.as_str(), &c[9])
+            } else {
+                ("code", &c[9])
+            }
         } else {
             ("citation", &c[10])
         };
@@ -361,5 +405,37 @@ mod link_tests {
     #[test]
     fn short_numbers_and_anchors_stay_plain() {
         assert!(links("step #2 of page#1234").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod file_ref_tests {
+    use super::file_ref;
+
+    #[test]
+    fn file_references_name_a_path_and_maybe_a_line() {
+        assert_eq!(file_ref("src/a.rs"), Some(("src/a.rs", None)));
+        assert_eq!(file_ref("src/a.rs:12"), Some(("src/a.rs", Some(12))));
+        assert_eq!(file_ref("src/a.rs:12:4"), Some(("src/a.rs", Some(12))));
+        assert_eq!(file_ref("src/a.ts#L5"), Some(("src/a.ts", Some(5))));
+        assert_eq!(file_ref("package.json"), Some(("package.json", None)));
+    }
+
+    #[test]
+    fn things_that_only_look_like_files_stay_text() {
+        for text in [
+            "and/or",
+            "e.g",
+            "o8.run",
+            "1.2.3",
+            "foo bar.rs",
+            "--flag.rs",
+            "a:b:c.rs",
+            "self.client",
+            "https://a.com/b.ts",
+            "note:todo.rs",
+        ] {
+            assert_eq!(file_ref(text), None, "{text}");
+        }
     }
 }

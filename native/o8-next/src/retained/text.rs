@@ -54,5 +54,8 @@ pub(super) fn link_target(run: &Run) -> Option<&str> {
 
 /// Issues and pull requests read as pills, like the trace's chips.
 pub(super) fn is_item(url: &str) -> bool {
-    url.starts_with('#') || url.contains("/issues/") || url.contains("/pull/")
+    url.starts_with('#')
+        || url.starts_with("file:")
+        || url.contains("/issues/")
+        || url.contains("/pull/")
 }
