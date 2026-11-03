@@ -51,6 +51,7 @@ pub struct RowState {
     pub(crate) subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
     pub(crate) subagent_agents: Rc<Vec<crate::subagents::model::Agent>>,
     pub(crate) subagent_focus: std::collections::HashMap<String, gpui::FocusHandle>,
+    pub(crate) subagent_roster: Rc<RefCell<crate::subagents::trace::Controls>>,
     /// The steps of a reply still fading in, oldest first.
     pub(crate) fading: Vec<crate::stream::RevealStep>,
 }
@@ -91,6 +92,7 @@ impl RowState {
             subagents: None,
             subagent_agents: Default::default(),
             subagent_focus: Default::default(),
+            subagent_roster: Default::default(),
             fading: vec![],
         }
     }
@@ -98,6 +100,7 @@ impl RowState {
     /// a trace watched while live stays open once it finishes.
     pub fn keep_disclosure(&mut self, previous: &RowState) {
         self.subagent_focus = previous.subagent_focus.clone();
+        self.subagent_roster = previous.subagent_roster.clone();
         self.diagram_sources = previous.diagram_sources.clone();
         if self.expanded.is_some() && previous.expanded.is_some() {
             self.expanded = previous.expanded;
@@ -112,7 +115,15 @@ impl RowState {
     }
     pub(crate) fn bind_subagent_focus(&mut self, cx: &App) {
         if let Row::Activity { steps, trace, .. } = &self.row {
+            for key in ["subagent-roster-stop-all", "subagent-roster-clean-up"] {
+                self.subagent_focus
+                    .entry(key.into())
+                    .or_insert_with(|| cx.focus_handle());
+            }
             for item in crate::subagents::trace::items(steps, trace, &self.subagent_agents) {
+                self.subagent_focus
+                    .entry(format!("subagent-roster-open-{}", item.id))
+                    .or_insert_with(|| cx.focus_handle());
                 self.subagent_focus
                     .entry(item.id)
                     .or_insert_with(|| cx.focus_handle());

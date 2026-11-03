@@ -498,6 +498,7 @@ fn native_agents_out_of_title_order_settle_after_one_notify(cx: &mut TestAppCont
     let agent = |id: &str, title: &str| crate::subagents::model::Agent {
         shared: false,
         native: true,
+        cleanup: None,
         prompt: None,
         run: id.into(),
         id: id.into(),

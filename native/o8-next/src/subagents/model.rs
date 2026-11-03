@@ -12,10 +12,16 @@ pub(crate) enum Group {
     Done,
 }
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Worktree {
+    pub lane: String,
+    pub path: String,
+}
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Agent {
     pub shared: bool,
     /// Read from the house's own delegate call in the transcript, with no packet.
     pub native: bool,
+    pub cleanup: Option<Worktree>,
     pub prompt: Option<String>,
     pub run: String,
     pub id: String,
@@ -91,6 +97,14 @@ pub(crate) fn agents(state: &Value, scope: &Scope) -> Result<Vec<Agent>, String>
         agents.push(Agent {
             shared: false,
             native: false,
+            cleanup: (group == Group::Done)
+                .then(|| {
+                    Some(Worktree {
+                        lane: text(&packet["lane"]["laneId"])?,
+                        path: text(&packet["lane"]["worktreePath"])?,
+                    })
+                })
+                .flatten(),
             prompt: None,
             run: format!(
                 "{}:{}:{}",
@@ -180,6 +194,7 @@ fn shared_agents(response: &Value, parent: &str) -> Result<Vec<Agent>, String> {
             Some(Ok(Agent {
                 shared: true,
                 native: false,
+                cleanup: None,
                 prompt: None,
                 run: worker["recovery"]["runId"].as_str().unwrap_or("").into(),
                 id: session.clone(),
