@@ -89,6 +89,16 @@ it('Stop during asynchronous preparation holds the message before a provider see
   expect(queue.readComposerSend('queue-stopped')).toMatchObject({ status: 'held', admittedAt: null });
   expect(mocks.send).not.toHaveBeenCalled(); expect(readPersistedLlmChat(threadId)?.history.messages).toEqual([]);
 });
+it('starts a message sent after a held one from the heartbeat, and keeps the held one for Retry or Remove (#5433)', async () => {
+  await enqueue('queue-held'); queue.claimNextComposerSend(target); queue.admitComposerSend('queue-held');
+  queue.settleComposerSend('queue-held', { status: 'held', reason: 'Codex produced no output for 45s.' });
+  await new Promise(resolve => setTimeout(resolve, 2));
+  await enqueue('queue-after-hold', { ...base, text: 'After the hold', wireMessage: 'After the hold' });
+  const heartbeat = createChatContinuationHeartbeat(hooks); heartbeat();
+  await vi.waitFor(() => expect(queue.readComposerSend('queue-after-hold')?.status).toBe('applied'));
+  expect(queue.readComposerSend('queue-held')).toMatchObject({ status: 'held', reason: expect.stringContaining('no output') });
+  expect(mocks.send).toHaveBeenCalledTimes(1); expect(mocks.send.mock.calls[0][1]).toContain('After the hold');
+});
 it('does not let a stale window overtake the queue or a heartbeat overtake an accepted preparing send', async () => {
   await enqueue('queue-existing'); const direct = vi.fn(async () => {});
   await expect(withImmediateComposerSend(target, direct)).rejects.toThrow('saved messages'); expect(direct).not.toHaveBeenCalled();
