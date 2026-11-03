@@ -360,6 +360,14 @@ impl Surface {
                     }
                 },
             ));
+            self.subscriptions.push(cx.subscribe(
+                &editor,
+                |s, editor, _: &crate::composer::mention::MentionQuery, cx| {
+                    if s.composer == editor {
+                        s.search_mentions(cx);
+                    }
+                },
+            ));
             self.subscriptions
                 .push(cx.subscribe(&editor, |this, _, event: &Submit, cx| {
                     if event.0 {

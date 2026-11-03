@@ -700,6 +700,13 @@ impl Surface {
                 if s.prompt_picker_key(event, window, cx) {
                     return;
                 }
+                if event.keystroke.key == "tab"
+                    && !event.keystroke.modifiers.shift
+                    && s.composer.update(cx, |i, cx| i.mention_accept(window, cx))
+                {
+                    cx.stop_propagation();
+                    return;
+                }
                 match event.keystroke.key.as_str() {
                     "tab" => {
                         if s.composer.read(cx).focus.is_focused(window)

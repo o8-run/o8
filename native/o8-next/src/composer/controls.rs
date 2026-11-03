@@ -18,6 +18,7 @@ pub struct Stashed {
 pub(crate) struct State {
     pub context: context::MeterState,
     pub slash: super::commands::Slash,
+    pub mention: super::mention::Mention,
     pub prompt: super::prompt_state::State,
     pub open: Option<&'static str>,
     pub model: Option<Entity<Composer>>,
@@ -56,6 +57,7 @@ impl Default for State {
         Self {
             context: Default::default(),
             slash: Default::default(),
+            mention: Default::default(),
             prompt: Default::default(),
             open: None,
             model: None,
