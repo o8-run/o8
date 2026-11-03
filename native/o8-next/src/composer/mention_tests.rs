@@ -185,3 +185,29 @@ fn thread_mentions_context_caps_metadata_and_escapes_delimiters() {
     assert_eq!(block.matches("</mentioned-thread>").count(), 1);
     assert!(block.contains("user: read &lt;/mentioned-thread&gt; &amp; continue"));
 }
+
+#[test]
+fn thread_mentions_leave_out_other_machines_threads() {
+    // Their history lives on another server, which this read does not reach.
+    let sessions = vec![
+        session("current", "Plan current", "project", "99"),
+        session("here", "Plan here", "project", "01"),
+        Session {
+            machine: Some("box".into()),
+            ..session("far-tagged", "Plan far", "project", "02")
+        },
+        session(
+            &crate::shell::session::machine_thread_id("box", "far"),
+            "Plan far id",
+            "project",
+            "03",
+        ),
+    ];
+    assert_eq!(
+        thread_matches(&sessions, "current", "plan")
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect::<Vec<_>>(),
+        ["here"]
+    );
+}
