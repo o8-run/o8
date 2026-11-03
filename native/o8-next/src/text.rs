@@ -32,6 +32,9 @@ fn wire_style<S: serde::Serializer>(style: &str, serializer: S) -> Result<S::Ok,
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Node {
+    /// Native layout metadata; the recorded render tree stays wire-compatible.
+    #[serde(skip)]
+    pub fence_closed: bool,
     pub kind: String,
     pub runs: Vec<Run>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,6 +45,7 @@ pub struct Node {
 impl Node {
     pub fn notice(text: &str) -> Self {
         Self {
+            fence_closed: false,
             kind: "notice".into(),
             runs: vec![Run {
                 style: "text".into(),
@@ -227,14 +231,25 @@ pub fn inline(text: &str) -> Vec<Run> {
 pub fn markdown(source: &str) -> Vec<Node> {
     let source = sanitize(source);
     let mut nodes = Vec::new();
-    let mut fence: Option<String> = None;
+    let mut fence: Option<(String, usize)> = None;
     let mut code = String::new();
     let lines: Vec<_> = source.split('\n').collect();
     let mut lines = lines.iter().peekable();
     while let Some(&line) = lines.next() {
-        if line.starts_with("```") {
-            if let Some(language) = fence.take() {
+        let markers = line.bytes().take_while(|&b| b == b'`').count();
+        if markers >= 3 && fence.is_none() {
+            fence = Some((line[markers..].trim().into(), markers));
+            continue;
+        }
+        if markers >= 3
+            && line[markers..].trim().is_empty()
+            && fence
+                .as_ref()
+                .is_some_and(|(_, opening)| markers >= *opening)
+        {
+            if let Some((language, _)) = fence.take() {
                 nodes.push(Node {
+                    fence_closed: true,
                     kind: if language.eq_ignore_ascii_case("diff") {
                         "diff-card"
                     } else {
@@ -253,8 +268,6 @@ pub fn markdown(source: &str) -> Vec<Node> {
                     data: None,
                 });
                 code.clear();
-            } else {
-                fence = Some(line[3..].trim().into());
             }
             continue;
         }
@@ -308,6 +321,7 @@ pub fn markdown(source: &str) -> Vec<Node> {
                 );
             }
             nodes.push(Node {
+                fence_closed: false,
                 kind: "table".into(),
                 runs: vec![],
                 language: None,
@@ -334,15 +348,17 @@ pub fn markdown(source: &str) -> Vec<Node> {
             ("p".into(), line)
         };
         nodes.push(Node {
+            fence_closed: false,
             kind,
             runs: inline(body),
             language: None,
             data: None,
         });
     }
-    if let Some(language) = fence {
+    if let Some((language, _)) = fence {
         if !code.is_empty() {
             nodes.push(Node {
+                fence_closed: false,
                 kind: if language.eq_ignore_ascii_case("diff") {
                     "diff-card"
                 } else {

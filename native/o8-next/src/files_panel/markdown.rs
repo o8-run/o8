@@ -20,6 +20,7 @@ fn text<'a>(node: Ast, source: &'a str) -> &'a str {
 }
 fn node(kind: &str, runs: Vec<Run>) -> Node {
     Node {
+        fence_closed: false,
         kind: kind.into(),
         runs,
         language: None,

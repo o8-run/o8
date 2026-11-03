@@ -21,6 +21,8 @@ pub(super) fn layout(
         images: vec![],
         links: vec![],
         gap_end: None,
+        diagrams: vec![],
+        diagram_sources: b.diagram_sources.clone(),
     };
     for node in super::trimmed(nodes) {
         bubble.node(node, expanded, window);
@@ -34,6 +36,12 @@ pub(super) fn layout(
                 .images
                 .iter()
                 .map(|image| image.bounds.right() - px(24.)),
+        )
+        .chain(
+            bubble
+                .diagrams
+                .iter()
+                .map(|card| card.bounds.right() - px(24.)),
         )
         .fold(px(1.), Pixels::max);
     let right = width - px(24.);
@@ -66,6 +74,10 @@ pub(super) fn layout(
     for mut image in bubble.images {
         image.bounds.origin.x += shift;
         b.images.push(image);
+    }
+    for mut card in bubble.diagrams {
+        card.bounds.origin.x += shift;
+        b.diagrams.push(card);
     }
     b.y = bubble.y + px(16.);
 }

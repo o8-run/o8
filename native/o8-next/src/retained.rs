@@ -41,6 +41,8 @@ pub struct RowState {
     /// instead of holding a running trace open.
     chosen: bool,
     cache: Option<Layout>,
+    diagram_sources: BTreeSet<usize>,
+    diagram_list: Option<(gpui::ListState, usize)>,
     pub(crate) images: crate::ui::images::Cache,
     pub cards: crate::visualizations::Cards,
     /// The workspace a transcript row belongs to, so its file pills can say
@@ -81,6 +83,8 @@ impl RowState {
             expanded,
             chosen: false,
             cache: None,
+            diagram_sources: BTreeSet::new(),
+            diagram_list: None,
             images: Default::default(),
             cards: Default::default(),
             file_root: None,
@@ -94,6 +98,7 @@ impl RowState {
     /// a trace watched while live stays open once it finishes.
     pub fn keep_disclosure(&mut self, previous: &RowState) {
         self.subagent_focus = previous.subagent_focus.clone();
+        self.diagram_sources = previous.diagram_sources.clone();
         if self.expanded.is_some() && previous.expanded.is_some() {
             self.expanded = previous.expanded;
             self.chosen = previous.chosen;
@@ -198,6 +203,7 @@ struct Layout {
     images: Vec<Thumbnail>,
     links: Vec<LinkSpot>,
     cards: Vec<(String, Bounds<Pixels>)>,
+    diagrams: Vec<crate::transcript_diagram::Placement>,
 }
 struct Builder {
     row_id: String,
@@ -208,6 +214,8 @@ struct Builder {
     backgrounds: Vec<Backdrop>,
     images: Vec<Thumbnail>,
     links: Vec<LinkSpot>,
+    diagrams: Vec<crate::transcript_diagram::Placement>,
+    diagram_sources: BTreeSet<usize>,
     /// Where the last paragraph gap ended, so blank lines collapse to one gap.
     gap_end: Option<Pixels>,
 }
@@ -254,6 +262,8 @@ impl Builder {
                         lines: vec![],
                         backgrounds: vec![],
                         gap_end: None,
+                        diagrams: vec![],
+                        diagram_sources: self.diagram_sources.clone(),
                     };
                     let mut runs: Vec<Run> =
                         serde_json::from_value(cell.clone()).unwrap_or_default();
@@ -507,6 +517,21 @@ impl Builder {
         );
     }
     fn node(&mut self, node: &Node, expanded: bool, window: &Window) {
+        if let Some(card) = crate::transcript_diagram::Placement::new(
+            node,
+            self.diagrams.len(),
+            point(px(24.), self.y + px(8.)),
+            (self.width - px(48.)).max(px(1.)),
+            &self.diagram_sources,
+            window,
+        ) {
+            self.y = card.bounds.bottom() + px(8.);
+            let shown = card.shown;
+            self.diagrams.push(card);
+            if !shown {
+                return;
+            }
+        }
         if let Some(data) = &node.data {
             self.rich_node(&node.kind, data, expanded, window);
             return;
@@ -515,7 +540,9 @@ impl Builder {
             // A blank line is classic's paragraph margin: once, and never
             // before the first block.
             if self.gap_end != Some(self.y)
-                && (!self.lines.is_empty() || !self.backgrounds.is_empty())
+                && (!self.lines.is_empty()
+                    || !self.backgrounds.is_empty()
+                    || !self.diagrams.is_empty())
             {
                 self.y += px(PARAGRAPH_GAP);
                 self.gap_end = Some(self.y);
@@ -618,6 +645,7 @@ fn layout(
     expanded: bool,
     images: crate::ui::images::Cache,
     cards: &crate::visualizations::Cards,
+    diagram_sources: &BTreeSet<usize>,
     window: &Window,
 ) -> Layout {
     let mut b = Builder {
@@ -630,6 +658,8 @@ fn layout(
         lines: vec![],
         backgrounds: vec![],
         gap_end: None,
+        diagrams: vec![],
+        diagram_sources: diagram_sources.clone(),
     };
     let mut placements = vec![];
     match row {
@@ -756,6 +786,7 @@ fn layout(
                     images: vec![],
                     links: b.links,
                     cards: vec![],
+                    diagrams: vec![],
                 };
             }
             b.y += px(4.);
@@ -789,6 +820,7 @@ fn layout(
         images: b.images,
         links: b.links,
         cards: placements,
+        diagrams: b.diagrams,
     }
 }
 /// The desktop transcript's reading column: the chat width plus the 24px row insets.
@@ -888,6 +920,7 @@ pub struct RetainedRow {
 impl RetainedRow {
     pub fn interactive(self, list: &gpui::ListState) -> gpui::AnyElement {
         use gpui::prelude::*;
+        self.state.borrow_mut().diagram_list = Some((list.clone(), self.index));
         if matches!(self.state.borrow().row, Row::Activity { .. }) {
             return crate::trace::element(self.state.clone(), self.index, list);
         }
@@ -1010,6 +1043,7 @@ impl Element for RetainedRow {
                     state.expanded.unwrap_or(false),
                     state.images.clone(),
                     &state.cards,
+                    &state.diagram_sources,
                     window,
                 ));
                 state.layouts += 1;
@@ -1057,6 +1091,32 @@ impl Element for RetainedRow {
                 );
             }
         }
+        let controls: Vec<_> = cache
+            .diagrams
+            .iter()
+            .enumerate()
+            .flat_map(|(index, card)| {
+                let state = self.state.clone();
+                card.controls(
+                    self.index,
+                    index,
+                    origin,
+                    move |window, _| {
+                        let mut state = state.borrow_mut();
+                        if !state.diagram_sources.remove(&index) {
+                            state.diagram_sources.insert(index);
+                        }
+                        state.cache = None;
+                        if let Some((list, index)) = &state.diagram_list {
+                            list.splice(*index..*index + 1, 1);
+                        }
+                        window.refresh();
+                    },
+                    window,
+                    cx,
+                )
+            })
+            .collect();
         cache
             .images
             .iter()
@@ -1123,6 +1183,7 @@ impl Element for RetainedRow {
                 child.prepaint_at(origin + link.bounds.origin, window, cx);
                 child
             }))
+            .chain(controls)
             .collect()
     }
     fn paint(
@@ -1159,6 +1220,9 @@ impl Element for RetainedRow {
             window.paint_quad(
                 gpui::fill(painted_bounds, background.color).corner_radii(background.radius),
             );
+        }
+        for card in &cache.diagrams {
+            card.paint(origin, window, cx);
         }
         let fades = tail_fades(&state.fading, &cache.lines);
         if !fades.is_empty() {
