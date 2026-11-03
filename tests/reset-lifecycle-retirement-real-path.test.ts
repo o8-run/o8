@@ -309,7 +309,7 @@ describe('packet lifecycle retirement through the operator route', () => {
     });
     const calls = fixture.readLog();
     const releaseIndex = calls.findIndex((call) => call.startsWith('opencode api delete /api/debug/location?'));
-    const removalProbeIndex = calls.findIndex((call) => call === 'lsof -nP -Fpcftn');
+    const removalProbeIndex = calls.findIndex((call) => call === 'lsof -nP -FpcLftn');
     expect(releaseIndex).toBeGreaterThanOrEqual(0);
     expect(removalProbeIndex).toBeGreaterThan(releaseIndex);
   });

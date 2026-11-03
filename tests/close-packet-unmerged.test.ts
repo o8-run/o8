@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -12,10 +12,14 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { createManagedOpenCodeWorktree } from './helpers/managed-opencode-worktree';
 import { createOpenCodeServiceFixture } from './helpers/opencode-service-fixture';
 
-const realDataDir = mkdtempSync(join(os.tmpdir(), 'o8-close-unmerged-'));
-// Reached through a symlink, as /tmp is on macOS, so a path-spelling mismatch fails on every platform.
-const dataDir = `${realDataDir}-link`;
-symlinkSync(realDataDir, dataDir);
+const realBase = mkdtempSync(join(os.tmpdir(), 'o8-close-unmerged-'));
+// Reached through a symlinked ancestor, as /tmp is on macOS, so a path-spelling
+// mismatch fails on every platform. The data dir itself stays a real directory:
+// owned session storage refuses a redirected namespace parent.
+const linkBase = `${realBase}-link`;
+symlinkSync(realBase, linkBase);
+mkdirSync(join(realBase, 'data'));
+const dataDir = join(linkBase, 'data');
 const wsToken = 'operator-close-unmerged-token-0123456789';
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -36,8 +40,8 @@ const { listInboxItems } = await import('@/lib/supervisor/inbox');
 
 afterAll(() => {
   closeDb();
-  rmSync(dataDir, { force: true });
-  rmSync(realDataDir, { recursive: true, force: true });
+  rmSync(linkBase, { force: true });
+  rmSync(realBase, { recursive: true, force: true });
 });
 
 function operatorRequest(body: Record<string, unknown>) {
@@ -694,7 +698,7 @@ process.exit(run.status ?? 1);
     expect(getLane(lane.id)?.status).toBe('archived');
     const calls = fixture.readLog();
     const releaseIndex = calls.findIndex((call) => call.startsWith('opencode api delete /api/debug/location?'));
-    const removalProbeIndex = calls.findIndex((call) => call === 'lsof -nP -Fpcftn');
+    const removalProbeIndex = calls.findIndex((call) => call === 'lsof -nP -FpcLftn');
     expect(releaseIndex).toBeGreaterThanOrEqual(0);
     expect(removalProbeIndex).toBeGreaterThan(releaseIndex);
     expect(calls.filter((call) => call.startsWith('opencode api delete /api/debug/location?'))).toHaveLength(1);
@@ -778,7 +782,7 @@ process.exit(run.status ?? 1);
     const calls = fixture.readLog();
     expect(calls.filter((call) => call.startsWith('opencode api delete /api/debug/location?'))).toHaveLength(2);
     // Admission refuses before rename; cwd and descriptors share one snapshot.
-    expect(calls.filter((call) => call === 'lsof -nP -Fpcftn')).toHaveLength(1);
+    expect(calls.filter((call) => call === 'lsof -nP -FpcLftn')).toHaveLength(1);
     expect(getLaneEvents(lane.id).find((event) => event.payload.phase === 'retirement_process_refused')).toMatchObject({
       payload: { state: 'live', failed: expect.arrayContaining([['filesystem_users', 'live', 'owned_process_live']]) },
     });

@@ -5,7 +5,7 @@ import {
 } from './close-process-observation';
 import { parseOpenFileSnapshot } from './process-open-files-snapshot';
 import * as openFiles from './process-open-files-snapshot';
-import { readProcessCwdSnapshot } from './process-cwd-snapshot';
+import { parseProcessCwdSnapshot, readProcessCwdSnapshot } from './process-cwd-snapshot';
 import { parseCloseProcessTable } from './close-process-table';
 
 describe('close-scoped native observations', () => {
@@ -55,6 +55,32 @@ describe('close-scoped native observations', () => {
     expect(parseOpenFileSnapshot('p12\ncnode\nf4\ntPIPE\nn\n')[0]?.file).toBe('');
     expect(() => parseOpenFileSnapshot('p12\ncnode\nf4\ntUNKNOWN\nn\n')).toThrow();
   });
+
+  it('marks unreadable cwd names without retaining a diagnostic as a path', () => {
+    const raw = 'p12\ncnode\nLfixture-owner\nfcwd\ntunknown\nn/proc/12/cwd (readlink: Permission denied)\n';
+    expect(parseOpenFileSnapshot(raw)).toEqual([
+      { pid: 12, commandName: 'node', owner: 'fixture-owner', descriptor: 'cwd', file: '', unreadable: true },
+    ]);
+    expect(parseProcessCwdSnapshot(raw)).toEqual([
+      { pid: 12, commandName: 'node', owner: 'fixture-owner', cwd: '', unreadable: true },
+    ]);
+  });
+
+  it('does not carry ownership across process records', () => {
+    const raw = 'p12\ncnode\nLfixture-owner\nfcwd\ntDIR\nn/outside\np13\ncnode\nfcwd\ntunknown\nn/proc/13/cwd (readlink: Permission denied)\n';
+    expect(parseOpenFileSnapshot(raw)[1]).toMatchObject({ pid: 13, file: '', unreadable: true });
+    expect(parseOpenFileSnapshot(raw)[1]?.owner).toBeUndefined();
+    expect(parseProcessCwdSnapshot(raw)[1]).toMatchObject({ pid: 13, cwd: '', unreadable: true });
+    expect(parseProcessCwdSnapshot(raw)[1]?.owner).toBeUndefined();
+  });
+
+  it.each(['Lfixture-owner\nLduplicate\n', 'L\n'])(
+    'refuses ambiguous owner coverage %j', ownerFields => {
+      const raw = `p12\ncnode\n${ownerFields}fcwd\ntDIR\nn/outside\n`;
+      expect(() => parseOpenFileSnapshot(raw)).toThrow();
+      expect(() => parseProcessCwdSnapshot(raw)).toThrow();
+    },
+  );
 
   it('keeps full process parent, group and marker identity and refuses malformed rows', () => {
     expect(parseCloseProcessTable('12 12 1 node O8_OWNED_RUN_MARKER=retained')).toEqual([

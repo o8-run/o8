@@ -193,7 +193,7 @@ describe('supervisor process cwd probe budget', () => {
     expect(execFile).toHaveBeenCalledTimes(1 + candidatePids.length + 1);
     expect(execFile).toHaveBeenCalledWith(
       'lsof',
-      ['-nP', '-d', 'cwd', '-F', 'pcn'],
+      ['-nP', '-d', 'cwd', '-F', 'pcLftn'],
       expect.any(Object),
     );
     expect(readProcessCwdProbeDiagnostics()).toMatchObject({
