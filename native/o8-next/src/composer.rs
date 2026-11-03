@@ -10,6 +10,7 @@ pub(crate) mod controls;
 pub(crate) mod images;
 pub(crate) mod mode_store;
 pub(crate) mod prompt_state;
+pub(crate) mod stash;
 
 #[derive(Clone)]
 struct Snapshot {
@@ -320,6 +321,10 @@ impl Composer {
             "enter" if command && key.modifiers.shift => cx.emit(Submit(true)),
             "enter" if !key.modifiers.shift => cx.emit(Submit(false)),
             "enter" => self.replace_text_in_range(None, "\n", window, cx),
+            // Cmd-S sets the draft aside, or brings the newest one back.
+            "s" if self.send_intents && key.modifiers.secondary() && !key.modifiers.shift => {
+                self.toggle_stash(cx)
+            }
             "a" if command => {
                 self.anchor = 0;
                 self.selection = 0..self.text.len();
@@ -878,6 +883,9 @@ mod tests;
 #[cfg(test)]
 #[path = "composer/native_tests.rs"]
 mod native_tests;
+#[cfg(test)]
+#[path = "composer/stash_tests.rs"]
+mod stash_tests;
 
 /// Classic's ComposerArea: max(52px, min(200px, 28vh)). A long draft grows the
 /// input to this, then scrolls; 52 is the floor, not the ceiling.

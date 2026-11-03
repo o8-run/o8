@@ -7,8 +7,8 @@ use std::collections::HashMap;
 #[path = "context.rs"]
 pub(crate) mod context;
 
-/// One draft set aside with Cmd-S (T3 Code's stash): text and attachments.
-#[derive(Clone, Debug, PartialEq)]
+/// One draft set aside with Cmd-S: text and attachments.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Stashed {
     pub text: String,
     pub images: Vec<Value>,
@@ -29,8 +29,12 @@ pub(crate) struct State {
     pub images: Vec<Value>,
     /// Non-image attachments (a video, a log, a PDF), sent to the agent as paths.
     pub files: Vec<std::path::PathBuf>,
-    /// Drafts set aside with Cmd-S, newest last. They live with this composer.
+    /// Drafts set aside with Cmd-S, newest last, saved beside the thread's mode.
     pub stash: Vec<Stashed>,
+    /// The Drafts list under the composer is open.
+    pub stash_open: bool,
+    /// The latest stash load or write; each write waits for the one before it.
+    pub stash_save: Option<gpui::Task<()>>,
     pub previews: HashMap<String, std::sync::Arc<RenderImage>>,
     pub attachment_target: bool,
     pub images_enabled: bool,
@@ -68,6 +72,8 @@ impl Default for State {
             images: vec![],
             files: vec![],
             stash: vec![],
+            stash_open: false,
+            stash_save: None,
             previews: HashMap::new(),
             attachment_target: false,
             images_enabled: false,

@@ -68,6 +68,28 @@ pub(crate) fn take_prompt_draft(path: Option<&Path>) -> Result<Option<PromptDraf
         .map_err(|_| "The restored prompt could not be marked as opened.".to_owned())?;
     Ok(Some(draft))
 }
+/// Cmd-S drafts for this thread, oldest first, beside its mode and prelude.
+pub(crate) fn save_stash(
+    path: Option<&Path>,
+    stash: &[super::controls::Stashed],
+) -> Result<(), String> {
+    let path = path.map(|p| p.with_extension("stash.json"));
+    let text = serde_json::to_string(stash).map_err(|e| e.to_string())?;
+    if serde_json::to_vec(&text).map_err(|e| e.to_string())?.len() > 32 * 1024 * 1024 {
+        return Err(
+            "Drafts exceed the native draft limit. Delete a draft to save the rest.".into(),
+        );
+    }
+    save(path.as_deref(), &text)
+        .map_err(|_| "Drafts could not be saved for the next launch.".into())
+}
+pub(crate) fn load_stash(path: Option<&Path>) -> Result<Vec<super::controls::Stashed>, String> {
+    let path = path.map(|p| p.with_extension("stash.json"));
+    let Some(text) = load_text(path.as_deref(), 32 * 1024 * 1024) else {
+        return Ok(vec![]);
+    };
+    serde_json::from_str(&text).map_err(|_| "Saved drafts could not be opened.".to_owned())
+}
 pub(crate) fn save(path: Option<&Path>, mode: &str) -> Result<(), String> {
     let Some(path) = path else {
         return Ok(());
