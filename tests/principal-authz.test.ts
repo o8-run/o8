@@ -462,9 +462,10 @@ describe('principal-authz — approvals resolve (CRIT-1: a worker cannot self-ap
     expect(getApproval(approval.id)?.status).toBe('approved');
   });
 
-  it('unauthenticated REMOTE → denied at the middleware entry point (401)', () => {
+  it('unauthenticated REMOTE → refused at the middleware Host gate (421, #4814)', () => {
     // /api/panel/approvals has no in-handler auth; the middleware IS its gate.
-    expect(panelGateMiddleware(lanReq(url)).status).toBe(401);
+    // A non-loopback Host is refused at the Host gate (421) before the auth path.
+    expect(panelGateMiddleware(lanReq(url)).status).toBe(421);
   });
 });
 
@@ -490,9 +491,9 @@ describe('principal-authz — recurring problem dossiers are worker-readable onl
     expect((await problemDossiers.POST(request)).status).toBe(403);
   });
 
-  it('unauthenticated REMOTE GET stays denied at both authorization layers', async () => {
+  it('unauthenticated REMOTE GET stays denied at both layers (Host gate 421, in-handler 401)', async () => {
     const request = lanReq(url, 'GET');
-    expect(panelGateMiddleware(request).status).toBe(401);
+    expect(panelGateMiddleware(request).status).toBe(421);
     expect((await problemDossiers.GET(request)).status).toBe(401);
   });
 });
@@ -668,7 +669,18 @@ describe('principal-authz — worker credentials are bound to their persisted pa
     const packetB = `pkt-authz-owner-b-${Date.now()}`;
     // The worker card reads the lane diff through hardened lane Git, which needs a real repository.
     const repoPath = join(dataDir, 'packet-owner-repo');
+    // #5449: the merge route reads the lane diff through hardened lane Git, which runs
+    // `git rev-parse HEAD`. A bare `git init` leaves HEAD unborn, so the route 500s
+    // before it can reach the ownership decision this test asserts. Give the repo a
+    // real initial commit (matching the merge-preview fixture above) so HEAD resolves
+    // and the authz checks below actually run.
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repoPath, stdio: 'pipe' });
     execFileSync('git', ['init', '-q', '-b', 'main', repoPath], { stdio: 'pipe' });
+    git('config', 'user.email', 'test@o8.dev');
+    git('config', 'user.name', 'o8 test');
+    writeFileSync(join(repoPath, 'README.md'), 'base\n');
+    git('add', 'README.md');
+    git('commit', '-q', '-m', 'base');
     for (const [label, packetId] of [['A', packetA], ['B', packetB]]) {
       createLane({ label: `packet ownership ${label}`, repoPath, branch: `agent/${packetId}`, baseBranch: 'main', runtime: 'codex', packetId });
     }
@@ -866,8 +878,8 @@ describe('principal-authz — fail-closed: unknown/absent principal is denied on
     'http://192.168.1.50:3001/api/panel/file-io',
   ];
 
-  it.each(mutating)('LAN POST with no credential is 401 at the gate: %s', (url) => {
-    expect(panelGateMiddleware(lanReq(url)).status).toBe(401);
+  it.each(mutating)('LAN POST with no credential is refused at the Host gate (421): %s', (url) => {
+    expect(panelGateMiddleware(lanReq(url)).status).toBe(421);
   });
 });
 
