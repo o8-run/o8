@@ -12,14 +12,17 @@ impl Scene {
                 text: text.into(),
                 rect,
                 background,
+                ..Default::default()
             });
         }
     }
-    fn stroke(&mut self, points: Vec<(f32, f32)>, dashed: bool, arrow: bool) {
+    fn stroke(&mut self, points: Vec<(f32, f32)>, dashed: bool, arrow: bool, marks: [Marker; 2]) {
         self.strokes.push(Stroke {
             points,
             dashed,
             arrow,
+            marks,
+            gap: None,
         });
     }
     fn fit(mut self, width: f32) -> Self {
@@ -29,17 +32,31 @@ impl Scene {
             .boxes
             .iter_mut()
             .chain(self.labels.iter_mut().map(|label| &mut label.rect))
+            .chain(self.swatches.iter_mut().map(|swatch| &mut swatch.0))
+            .chain(
+                self.strokes
+                    .iter_mut()
+                    .filter_map(|stroke| stroke.gap.as_mut()),
+            )
         {
             rect.x = rect.x * scale + offset;
             rect.y *= scale;
             rect.w *= scale;
             rect.h *= scale;
         }
-        for stroke in &mut self.strokes {
-            for (x, y) in &mut stroke.points {
-                *x = *x * scale + offset;
-                *y *= scale;
-            }
+        for (x, y) in self
+            .strokes
+            .iter_mut()
+            .flat_map(|stroke| stroke.points.iter_mut())
+            .chain(self.rules.iter_mut().flatten())
+        {
+            *x = *x * scale + offset;
+            *y *= scale;
+        }
+        for wedge in &mut self.wedges {
+            wedge.cx = wedge.cx * scale + offset;
+            wedge.cy *= scale;
+            wedge.r *= scale;
         }
         self.width = width.max(1.);
         self.height *= scale;
@@ -47,11 +64,41 @@ impl Scene {
         self
     }
 }
+// A compartment row, and the band a title takes when compartments follow it.
+const ROW: f32 = 18.;
+const TITLE: f32 = 16.;
+const EMPTY_SECTION: f32 = 10.;
+fn compartments(node: &Vertex) -> bool {
+    !node.sections.is_empty() || !node.above.is_empty()
+}
+fn section_height(lines: &[String]) -> f32 {
+    if lines.is_empty() {
+        EMPTY_SECTION
+    } else {
+        lines.len() as f32 * ROW + 12.
+    }
+}
 fn node_size(node: &Vertex) -> (f32, f32) {
+    use super::state::{CHOICE, END, START};
+    if compartments(node) {
+        let widest = std::iter::once(&node.label)
+            .chain(&node.above)
+            .chain(node.sections.iter().flatten())
+            .map(|text| text.chars().count())
+            .max()
+            .unwrap_or(0);
+        let height = TITLE
+            + (node.above.len() + 1) as f32 * ROW
+            + node.sections.iter().map(|s| section_height(s)).sum::<f32>();
+        return ((widest as f32 * 7. + 32.).clamp(100., 360.), height);
+    }
     let width = (node.label.chars().count() as f32 * 7. + 40.).clamp(100., 320.);
     match node.shape {
         Shape::Circle | Shape::DoubleCircle => (width, width),
         Shape::Diamond => (width * 1.4, 88.),
+        Shape::Start => (START, START),
+        Shape::End => (END, END),
+        Shape::Choice => (CHOICE, CHOICE),
         _ => (width, 52.),
     }
 }
@@ -90,8 +137,10 @@ fn port(start: f32, length: f32, slot: &mut usize, count: usize) -> f32 {
 fn forward_port(rect: BoxRect, shape: Shape, cross: f32, bottom: bool, lr: bool) -> f32 {
     let t = ((cross - rect.x - rect.w / 2.) / (rect.w / 2.)).clamp(-1., 1.);
     let inset = match shape {
-        Shape::Diamond => rect.h / 2. * t.abs(),
-        Shape::Circle | Shape::DoubleCircle => rect.h / 2. * (1. - (1. - t * t).sqrt()),
+        Shape::Diamond | Shape::Choice => rect.h / 2. * t.abs(),
+        Shape::Circle | Shape::DoubleCircle | Shape::Start | Shape::End => {
+            rect.h / 2. * (1. - (1. - t * t).sqrt())
+        }
         Shape::Hexagon if lr => rect.h * 0.15 * t.abs(),
         Shape::Slant if lr => rect.h * 0.15 * if bottom { (1. + t) / 2. } else { (1. - t) / 2. },
         Shape::Cylinder if !lr => (rect.h * 0.12).min(6.) * (1. - (1. - t * t).sqrt()),
@@ -111,6 +160,283 @@ fn forward_port(rect: BoxRect, shape: Shape, cross: f32, bottom: bool, lr: bool)
     } else {
         rect.y + inset
     }
+}
+/// A title band, then each compartment under a rule. Class members read
+/// left to right; state descriptions stay centred.
+fn compartment_labels(scene: &mut Scene, node: &Vertex, rect: BoxRect) {
+    let left = node.shape == Shape::Class;
+    let mut y = rect.y + TITLE / 2.;
+    for line in node.above.iter().chain([&node.label]) {
+        scene.label(
+            line,
+            BoxRect {
+                x: rect.x + 12.,
+                y,
+                w: rect.w - 24.,
+                h: ROW,
+            },
+            false,
+        );
+        y += ROW;
+    }
+    y += TITLE / 2.;
+    for section in &node.sections {
+        scene.rules.push([(rect.x, y), (rect.x + rect.w, y)]);
+        let mut row = y + 6.;
+        for line in section {
+            scene.label(
+                line,
+                BoxRect {
+                    x: rect.x + 12.,
+                    y: row,
+                    w: rect.w - 24.,
+                    h: ROW,
+                },
+                false,
+            );
+            if let Some(label) = scene.labels.last_mut() {
+                label.left = left;
+            }
+            row += ROW;
+        }
+        y += section_height(section);
+    }
+}
+pub(super) fn overlap(a: BoxRect, b: BoxRect) -> bool {
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+}
+/// The part of segment `a`–`b` inside `rect`, as a parameter range along it.
+pub(super) fn clip(rect: BoxRect, a: (f32, f32), b: (f32, f32)) -> Option<(f32, f32)> {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let (mut t0, mut t1) = (0f32, 1f32);
+    for (p, q) in [
+        (-dx, a.0 - rect.x),
+        (dx, rect.x + rect.w - a.0),
+        (-dy, a.1 - rect.y),
+        (dy, rect.y + rect.h - a.1),
+    ] {
+        if p == 0. {
+            if q < 0. {
+                return None;
+            }
+        } else {
+            let t = q / p;
+            if p < 0. {
+                t0 = t0.max(t);
+            } else {
+                t1 = t1.min(t);
+            }
+        }
+    }
+    (t0 < t1).then_some((t0, t1))
+}
+/// Whether a segment passes through the inside of `rect`, not just along its rim.
+pub(super) fn crosses(rect: BoxRect, a: (f32, f32), b: (f32, f32)) -> bool {
+    let inner = BoxRect {
+        x: rect.x + 0.5,
+        y: rect.y + 0.5,
+        w: rect.w - 1.,
+        h: rect.h - 1.,
+    };
+    clip(inner, a, b).is_some()
+}
+impl Stroke {
+    /// The polylines to draw: the route with its label plate cut out.
+    pub(super) fn pieces(&self) -> Vec<Vec<(f32, f32)>> {
+        let Some(gap) = self.gap else {
+            return vec![self.points.clone()];
+        };
+        let mut pieces = vec![];
+        let mut piece = vec![];
+        for pair in self.points.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let at = |t: f32| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+            if piece.is_empty() {
+                piece.push(a);
+            }
+            match clip(gap, a, b) {
+                Some((t0, t1)) => {
+                    if t0 > 0. {
+                        piece.push(at(t0));
+                    }
+                    if piece.len() > 1 {
+                        pieces.push(std::mem::take(&mut piece));
+                    }
+                    piece.clear();
+                    if t1 < 1. {
+                        piece.extend([at(t1), b]);
+                    }
+                }
+                None => piece.push(b),
+            }
+        }
+        if piece.len() > 1 {
+            pieces.push(piece);
+        }
+        pieces
+    }
+}
+fn point_along(points: &[(f32, f32)], fraction: f32) -> (f32, f32) {
+    let length: f32 = points
+        .windows(2)
+        .map(|p| (p[1].0 - p[0].0).hypot(p[1].1 - p[0].1))
+        .sum();
+    let mut left = length * fraction;
+    for pair in points.windows(2) {
+        let step = (pair[1].0 - pair[0].0).hypot(pair[1].1 - pair[0].1);
+        if step > 0. && left <= step {
+            let t = left / step;
+            return (
+                pair[0].0 + (pair[1].0 - pair[0].0) * t,
+                pair[0].1 + (pair[1].1 - pair[0].1) * t,
+            );
+        }
+        left -= step;
+    }
+    points[points.len() - 1]
+}
+/// Places end labels beside their boxes, then each edge label on a plate:
+/// centred on its line, which stops at the plate, or beside a return lane.
+/// A spot that would cover another edge, a box or a label is passed over.
+/// Returns the strokes to cut at their label, with the label's index.
+fn edge_labels(scene: &mut Scene, edges: &[Edge], adjacent: &[bool]) -> Vec<(usize, usize)> {
+    // A plate that cuts its own line may sit on it; any other spot keeps clear
+    // of its own line too.
+    let clear = |scene: &Scene, rect: BoxRect, own: usize, cut: bool| {
+        rect.x >= 0.
+            && rect.y >= 0.
+            && scene.boxes.iter().all(|&b| !overlap(rect, b))
+            && scene
+                .labels
+                .iter()
+                .filter(|l| l.edge.is_some())
+                .all(|l| !overlap(rect, l.rect))
+            && scene.strokes.iter().enumerate().all(|(index, stroke)| {
+                (index == own && cut)
+                    || stroke.points.windows(2).all(|p| !crosses(rect, p[0], p[1]))
+            })
+    };
+    for (index, edge) in edges.iter().enumerate() {
+        let points = scene.strokes[index].points.clone();
+        for (side, end) in edge.ends.iter().enumerate() {
+            if end.is_empty() {
+                continue;
+            }
+            let (tip, next) = if side == 0 {
+                (points[0], points[1])
+            } else {
+                (points[points.len() - 1], points[points.len() - 2])
+            };
+            let (dx, dy) = (next.0 - tip.0, next.1 - tip.1);
+            let length = dx.hypot(dy).max(1.);
+            let (ux, uy) = (dx / length, dy / length);
+            let (w, h) = (end.chars().count() as f32 * 7. + 8., 18.);
+            // Clear of the box along the line, and 8px to one side of it.
+            let along = ux.abs() * w / 2. + uy.abs() * h / 2. + 4.;
+            let perp = uy.abs() * w / 2. + ux.abs() * h / 2. + 8.;
+            let spot = |sign: f32| {
+                let (x, y) = (
+                    tip.0 + ux * along - uy * perp * sign,
+                    tip.1 + uy * along + ux * perp * sign,
+                );
+                BoxRect {
+                    x: x - w / 2.,
+                    y: y - h / 2.,
+                    w,
+                    h,
+                }
+            };
+            let rect = [1., -1.]
+                .into_iter()
+                .map(spot)
+                .find(|&rect| clear(scene, rect, index, false))
+                .unwrap_or_else(|| spot(1.));
+            scene.labels.push(Label {
+                text: end.clone(),
+                rect,
+                edge: Some(index),
+                multiplicity: true,
+                ..Default::default()
+            });
+        }
+    }
+    let mut gaps = vec![];
+    for (index, edge) in edges.iter().enumerate() {
+        if edge.label.is_empty() {
+            continue;
+        }
+        let points = scene.strokes[index].points.clone();
+        let (w, h) = (
+            (edge.label.chars().count() as f32 * 6.5 + 12.).clamp(24., 180.),
+            20.,
+        );
+        let centred: Vec<_> = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8]
+            .into_iter()
+            .map(|fraction| {
+                let (x, y) = point_along(&points, fraction);
+                (
+                    BoxRect {
+                        x: x - w / 2.,
+                        y: y - h / 2.,
+                        w,
+                        h,
+                    },
+                    true,
+                )
+            })
+            .collect();
+        let longest = points
+            .windows(2)
+            .max_by(|a, b| {
+                let length = |p: &[(f32, f32)]| (p[1].0 - p[0].0).hypot(p[1].1 - p[0].1);
+                length(a).total_cmp(&length(b))
+            })
+            .map(|p| (p[0], p[1]))
+            .unwrap_or((points[0], points[0]));
+        let ((ax, ay), (bx, by)) = longest;
+        let length = (bx - ax).hypot(by - ay).max(1.);
+        let (ux, uy) = ((bx - ax) / length, (by - ay) / length);
+        let beside: Vec<_> = [0.5, 0.35, 0.65, 0.2, 0.8]
+            .into_iter()
+            .flat_map(|t| [(t, 1f32), (t, -1.)])
+            .map(|(t, sign)| {
+                let perp = uy.abs() * w / 2. + ux.abs() * h / 2. + 6.;
+                let (x, y) = (
+                    ax + (bx - ax) * t - uy * perp * sign,
+                    ay + (by - ay) * t + ux * perp * sign,
+                );
+                (
+                    BoxRect {
+                        x: x - w / 2.,
+                        y: y - h / 2.,
+                        w,
+                        h,
+                    },
+                    false,
+                )
+            })
+            .collect();
+        let candidates = if adjacent[index] {
+            [centred.clone(), beside].concat()
+        } else {
+            [beside, centred.clone()].concat()
+        };
+        let (rect, cut) = candidates
+            .into_iter()
+            .find(|&(rect, cut)| clear(scene, rect, index, cut))
+            .unwrap_or(centred[0]);
+        if cut {
+            gaps.push((index, scene.labels.len()));
+        }
+        scene.labels.push(Label {
+            text: edge.label.clone(),
+            rect,
+            background: true,
+            edge: Some(index),
+            ..Default::default()
+        });
+    }
+    gaps
 }
 fn flow(lr: bool, nodes: &[Vertex], edges: &[Edge]) -> Scene {
     let mut scene = Scene::default();
@@ -137,7 +463,19 @@ fn flow(lr: bool, nodes: &[Vertex], edges: &[Edge]) -> Scene {
     // Work top-to-bottom, then transpose the geometry for horizontal graphs.
     let dimensions: Vec<_> = nodes
         .iter()
-        .map(|node| {
+        .enumerate()
+        .map(|(index, node)| {
+            if node.shape == Shape::Bar {
+                // A fork or join spans the flow, long enough for its transitions.
+                let degree = edges
+                    .iter()
+                    .filter(|e| e.from == index || e.to == index)
+                    .count();
+                return (
+                    (40. * degree as f32 + 16.).clamp(72., 320.),
+                    super::state::BAR,
+                );
+            }
             let (w, h) = node_size(node);
             if lr { (h, w) } else { (w, h) }
         })
@@ -163,14 +501,22 @@ fn flow(lr: bool, nodes: &[Vertex], edges: &[Edge]) -> Scene {
         if adjacent {
             outgoing[edge.from] += 1;
             incoming[edge.to] += 1;
-            if !edge.label.is_empty() {
-                let room = if lr {
-                    (edge.label.chars().count() as f32 * 7. + 8.).min(96.)
+            let mut room = if edge.label.is_empty() {
+                0.
+            } else if lr {
+                (edge.label.chars().count() as f32 * 7. + 8.).min(96.)
+            } else {
+                20.
+            };
+            // End labels sit along the line by their boxes, clear of the middle one.
+            for end in edge.ends.iter().filter(|end| !end.is_empty()) {
+                room += if lr {
+                    end.chars().count() as f32 * 7. + 12.
                 } else {
-                    20.
+                    22.
                 };
-                label_room[rank[edge.from]] = label_room[rank[edge.from]].max(room);
             }
+            label_room[rank[edge.from]] = label_room[rank[edge.from]].max(room);
         } else {
             sideways[edge.from] += 1;
             sideways[edge.to] += 1;
@@ -204,6 +550,10 @@ fn flow(lr: bool, nodes: &[Vertex], edges: &[Edge]) -> Scene {
         let rect = orient_box(rect, lr);
         scene.boxes.push(rect);
         scene.shapes.push(node.shape);
+        if compartments(node) {
+            compartment_labels(&mut scene, node, rect);
+            continue;
+        }
         let inset = if node.shape == Shape::Diamond {
             0.25
         } else {
@@ -269,20 +619,17 @@ fn flow(lr: bool, nodes: &[Vertex], edges: &[Edge]) -> Scene {
         let a = boxes[edge.from];
         let b = boxes[edge.to];
         let (from, to) = ports[index];
-        let (points, middle) = if adjacent[index] {
+        let points = if adjacent[index] {
             let y = channel(rank[edge.from]);
-            (
-                vec![
-                    (
-                        from,
-                        forward_port(a, nodes[edge.from].shape, from, true, lr),
-                    ),
-                    (from, y),
-                    (to, y),
-                    (to, forward_port(b, nodes[edge.to].shape, to, false, lr)),
-                ],
-                ((from + to) / 2., y),
-            )
+            vec![
+                (
+                    from,
+                    forward_port(a, nodes[edge.from].shape, from, true, lr),
+                ),
+                (from, y),
+                (to, y),
+                (to, forward_port(b, nodes[edge.to].shape, to, false, lr)),
+            ]
         } else {
             let x = outside + lane as f32 * 16.;
             lane += 1;
@@ -308,25 +655,12 @@ fn flow(lr: bool, nodes: &[Vertex], edges: &[Edge]) -> Scene {
                 points.extend([(stub, target_y), (stub, to)]);
             }
             points.push((b.x + b.w, to));
-            (points, (x, (source_y + target_y) / 2.))
+            points
         };
-        let (x, y) = orient_point(middle, lr);
-        scene.label(
-            &edge.label,
-            BoxRect {
-                x: x - 48.,
-                y: y - 22.,
-                w: 96.,
-                h: 20.,
-            },
-            true,
-        );
-        scene.stroke(
-            points.into_iter().map(|p| orient_point(p, lr)).collect(),
-            edge.dashed,
-            edge.arrow,
-        );
+        let points: Vec<_> = points.into_iter().map(|p| orient_point(p, lr)).collect();
+        scene.stroke(points, edge.dashed, edge.arrow, edge.marks);
     }
+    let gaps = edge_labels(&mut scene, edges, &adjacent);
     // Fit actual node, route and label extents, with the normal outer padding.
     scene.width = scene
         .boxes
@@ -359,6 +693,9 @@ fn flow(lr: bool, nodes: &[Vertex], edges: &[Edge]) -> Scene {
             .rect
             .x
             .clamp(4., (scene.width - label.rect.w - 4.).max(4.));
+    }
+    for (stroke, label) in gaps {
+        scene.strokes[stroke].gap = Some(scene.labels[label].rect);
     }
     scene
 }
@@ -399,6 +736,7 @@ fn sequence(participants: &[Vertex], events: &[Event]) -> Scene {
             vec![(x + lane / 2., 56.), (x + lane / 2., height - 12.)],
             true,
             false,
+            [Marker::None; 2],
         );
     }
     for (index, event) in events.iter().enumerate() {
@@ -433,7 +771,7 @@ fn sequence(participants: &[Vertex], events: &[Event]) -> Scene {
                     },
                     true,
                 );
-                scene.stroke(points, edge.dashed, edge.arrow);
+                scene.stroke(points, edge.dashed, edge.arrow, edge.marks);
             }
             Event::Note {
                 from,
@@ -482,6 +820,11 @@ pub(super) fn layout(diagram: &Diagram, width: f32) -> Scene {
             participants,
             events,
         } => sequence(participants, events),
+        Diagram::Pie {
+            title,
+            show_data,
+            slices,
+        } => super::pie::layout(title, *show_data, slices, width),
     }
     .fit(width)
 }
