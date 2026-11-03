@@ -707,3 +707,49 @@ fn privacy_eye_hides_contents_across_files(cx: &mut TestAppContext) {
     wait(cx, "files-markdown-2");
     assert!(cx.debug_bounds("files-hidden").is_none());
 }
+
+#[path = "large_file_tests.rs"]
+mod large_file_tests;
+/// `cargo test --bin o8-next large_file_receipt -- --ignored --nocapture`
+#[gpui::test]
+#[ignore = "receipt: prints open, scroll, edit and highlight times at 10k, 100k and 1M lines"]
+fn large_file_receipt(cx: &mut TestAppContext) {
+    let sizes: Vec<usize> = std::env::var("O8_LARGE_FILE_LINES")
+        .map(|v| v.split(',').map(|n| n.trim().parse().unwrap()).collect())
+        .unwrap_or_else(|_| vec![10_000, 100_000, 1_000_000]);
+    for lines in sizes {
+        large_file_tests::print(&large_file_tests::measure(lines, cx));
+    }
+}
+#[gpui::test]
+fn editor_undo_and_redo_steps_restore_each_state(cx: &mut TestAppContext) {
+    large_file_tests::undo_steps_restore_each_state(cx);
+}
+#[gpui::test]
+fn large_file_above_the_cap_opens_read_only_with_a_banner(cx: &mut TestAppContext) {
+    large_file_tests::read_only_above_the_cap(cx);
+}
+/// Regression bound for #5310. Debug builds measured about 0.7 s to open and
+/// 16 ms per middle keystroke; before virtualisation a keystroke took ~50 s.
+/// The bounds leave room for slower shared CI runners.
+#[gpui::test]
+fn large_file_one_million_lines_stays_within_bounds(cx: &mut TestAppContext) {
+    let receipt = large_file_tests::measure(1_000_000, cx);
+    large_file_tests::print(&receipt);
+    assert!(receipt.open_ms < 5_000., "open {:.0}ms", receipt.open_ms);
+    assert!(
+        receipt.edit_open_ms < 2_000.,
+        "edit open {:.0}ms",
+        receipt.edit_open_ms
+    );
+    for (name, ms) in [
+        ("scroll middle", receipt.scroll_middle_ms),
+        ("scroll end", receipt.scroll_end_ms),
+        ("edit scroll middle", receipt.edit_scroll_middle_ms),
+        ("edit scroll end", receipt.edit_scroll_end_ms),
+        ("middle keystroke p95", receipt.key_p95_ms),
+        ("middle backspace p95", receipt.backspace_p95_ms),
+    ] {
+        assert!(ms < 250., "{name} {ms:.0}ms");
+    }
+}

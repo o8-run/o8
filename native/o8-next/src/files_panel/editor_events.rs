@@ -39,11 +39,7 @@ impl Editor {
                     this.typing = None;
                     let cursor = this.index_at(event.position);
                     let range = match event.click_count {
-                        2 => this
-                            .text
-                            .split_word_bound_indices()
-                            .find(|(i, word)| *i <= cursor && cursor < i + word.len())
-                            .map(|(i, word)| i..i + word.len()),
+                        2 => this.word_at(cursor),
                         3.. => Some(
                             this.text[..cursor].rfind('\n').map(|i| i + 1).unwrap_or(0)
                                 ..this.text[cursor..]

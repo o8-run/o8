@@ -11,6 +11,11 @@ pub(super) struct Buffer {
     pub conflict: bool,
     pub confirm_reload: bool,
     pub mtime: Option<f64>,
+    /// The editor's text-change count already reflected in `dirty`.
+    edits: u64,
+    dirty: bool,
+    /// `text`, lines and previews lag the editor until editing ends.
+    stale: bool,
 }
 impl Buffer {
     pub(super) fn new(text: &str, mtime: Option<f64>, cx: &mut Context<FilesPanel>) -> Self {
@@ -24,10 +29,13 @@ impl Buffer {
             conflict: false,
             confirm_reload: false,
             mtime,
+            edits: 0,
+            dirty: false,
+            stale: false,
         }
     }
     pub(super) fn dirty(&self) -> bool {
-        self.text != self.original
+        self.dirty
     }
 }
 impl FilesPanel {
@@ -38,37 +46,54 @@ impl FilesPanel {
                 Some(cx.observe(&buffer.editor, |this, _, cx| this.update_draft(cx)));
         }
     }
+    /// A keystroke costs one length check (or compare) for Modified. The
+    /// source rows and previews, which editing hides, rebuild when it ends.
     fn update_draft(&mut self, cx: &mut Context<Self>) {
         let path = self.selected.clone().unwrap_or_default();
-        let mut svg = false;
-        if let File::Loaded {
-            buffer,
-            lines,
-            source,
-            markdown,
-            ..
-        } = &mut self.file
-        {
-            let text = buffer.editor.read(cx).text.clone();
-            if buffer.text == text {
-                return;
-            }
-            buffer.text = text;
-            *lines = buffer
-                .text
-                .split('\n')
-                .map(|line| SharedString::from(line.replace('\t', "  ")))
-                .collect();
-            *source = source::Source::new(lines.len(), cx);
-            if viewer::is_markdown(&path) {
-                *markdown = viewer::markdown(&buffer.text);
-            }
-            svg = media::is_svg(&path);
+        let File::Loaded { buffer, .. } = &mut self.file else {
+            return;
+        };
+        let editor = buffer.editor.read(cx);
+        if editor.edits == buffer.edits {
+            return;
+        }
+        buffer.edits = editor.edits;
+        buffer.dirty = editor.text.len() != buffer.original.len() || editor.text != buffer.original;
+        buffer.stale = true;
+        let svg = media::is_svg(&path);
+        if svg || !buffer.editing {
+            self.sync_draft(cx);
         }
         if svg {
             self.update_svg(cx);
         }
         cx.notify();
+    }
+    pub(super) fn sync_draft(&mut self, cx: &mut Context<Self>) {
+        let path = self.selected.clone().unwrap_or_default();
+        if let File::Loaded {
+            buffer,
+            lines,
+            source,
+            markdown,
+            large,
+            ..
+        } = &mut self.file
+            && buffer.stale
+        {
+            buffer.stale = false;
+            let text = buffer.editor.read(cx).text.clone();
+            if buffer.text == text {
+                return;
+            }
+            buffer.text = text;
+            *lines = source::split(&buffer.text);
+            *large = source::Large::of(lines.len(), buffer.text.len());
+            *source = source::Source::new(lines.len(), *large, cx);
+            if viewer::is_markdown(&path) {
+                *markdown = viewer::markdown(&buffer.text);
+            }
+        }
     }
     fn update_svg(&mut self, cx: &mut Context<Self>) {
         let File::Loaded { buffer, .. } = &self.file else {
@@ -105,8 +130,10 @@ impl FilesPanel {
         if let File::Loaded {
             buffer,
             truncated: false,
+            large,
             ..
         } = &mut self.file
+            && *large != source::Large::ReadOnly
         {
             buffer.editing = !buffer.editing;
             self.editing_path = buffer.editing.then(|| self.selected.clone()).flatten();
@@ -117,6 +144,7 @@ impl FilesPanel {
                 }
                 buffer.editor.read(cx).focus.focus(window);
             } else {
+                self.sync_draft(cx);
                 self.viewer_focus.focus(window);
             }
             cx.notify();
@@ -126,12 +154,13 @@ impl FilesPanel {
         let File::Loaded {
             buffer,
             truncated: false,
+            large,
             ..
         } = &mut self.file
         else {
             return;
         };
-        if buffer.saving || !buffer.dirty() {
+        if *large == source::Large::ReadOnly || buffer.saving || !buffer.dirty() {
             return;
         }
         let Some(path) = self.selected.clone() else {
@@ -144,7 +173,7 @@ impl FilesPanel {
         let client = self.client.clone();
         let workspace = self.workspace.clone();
         let original = buffer.original.clone();
-        let text = buffer.text.clone();
+        let text = buffer.editor.read(cx).text.clone();
         let saved = text.clone();
         let mtime = buffer.mtime;
         let generation = self.file_generation;
@@ -163,6 +192,7 @@ impl FilesPanel {
                         Ok(mtime) => {
                             buffer.original = saved;
                             buffer.mtime = mtime;
+                            buffer.dirty = buffer.editor.read(cx).text != buffer.original;
                         }
                         Err(super::io::SaveError::Conflict) => {
                             buffer.conflict = true;

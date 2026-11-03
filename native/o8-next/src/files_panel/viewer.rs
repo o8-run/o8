@@ -159,6 +159,7 @@ impl FilesPanel {
         {
             buffer.editing = false;
             self.editing_path = None;
+            self.sync_draft(cx);
         }
         if let Some(path) = &self.selected {
             self.view_modes.insert(path.clone(), mode);

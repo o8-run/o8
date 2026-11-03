@@ -16,9 +16,11 @@ struct State {
 #[derive(Clone, Default)]
 pub(super) struct Selection(Rc<RefCell<State>>);
 impl Selection {
+    /// Each Source owns one Selection over one text, so it indexes the text
+    /// once rather than comparing the whole file every frame.
     pub(super) fn configure(&self, raw: &str) {
         let mut s = self.0.borrow_mut();
-        if s.raw != raw || s.offsets.is_empty() {
+        if s.offsets.is_empty() || s.raw.len() != raw.len() {
             s.raw = raw.into();
             s.display = raw.replace('\t', "  ");
             s.range = 0..0;
