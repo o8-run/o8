@@ -82,10 +82,8 @@ impl Surface {
                 .as_ref()
                 .is_some_and(|(text, _)| *text == raw);
             if !expanded
-                && let (Some(line), Some(window)) = (
-                    crate::composer::commands::shell_line(&raw),
-                    input.controls.slash.window,
-                )
+                && let Some(line) = crate::composer::commands::shell_line(&raw)
+                && let Some(window) = input.controls.slash.window
             {
                 let line = line.to_owned();
                 editor.update(cx, |i, cx| i.set_text("", cx));
