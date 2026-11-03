@@ -214,6 +214,18 @@ describe('durable composer queue API and persisted state', () => {
     expect(queue.settleComposerSend('queue-behind', { status: 'applied' })).toBe(false);
   });
 
+  it('runs a message sent after a failed turn was held, and keeps the held one for Retry or Remove', async () => {
+    await enqueue('queue-failed'); await enqueue('queue-waiting-at-hold');
+    queue.claimNextComposerSend(target); queue.admitComposerSend('queue-failed');
+    queue.settleComposerSend('queue-failed', { status: 'held', reason: 'Codex produced no output for 45s.' });
+    expect(queue.claimNextComposerSend(target)).toBeNull();
+    await DELETE(request('DELETE', { ...target, id: 'queue-waiting-at-hold' }));
+    await new Promise(resolve => setTimeout(resolve, 2));
+    await enqueue('queue-after-hold');
+    expect(queue.claimNextComposerSend(target)?.id).toBe('queue-after-hold');
+    expect(queue.readComposerSend('queue-failed')).toMatchObject({ status: 'held', reason: expect.stringContaining('no output') });
+  });
+
   it('settles the turn Stop ended, so a message sent after Stop runs (#5193)', async () => {
     await enqueue('queue-running'); queue.claimNextComposerSend(target);
     expect(queue.admitComposerSend('queue-running')).toBe(true);
