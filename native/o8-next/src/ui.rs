@@ -306,6 +306,7 @@ impl Surface {
                 editor.send_intents = true;
                 editor.controls.prompt.store = store;
                 editor.controls.prompt.prelude = prelude;
+                editor.load_stash(cx);
                 match prompt_draft {
                     Ok(Some(draft)) => {
                         editor.set_text(&draft.text, cx);
