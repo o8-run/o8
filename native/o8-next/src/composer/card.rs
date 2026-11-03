@@ -84,11 +84,16 @@ impl Surface {
         position: gpui::Point<gpui::Pixels>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.composer_card.get().is_some_and(|card| card.contains(&position)) {
+        if !self
+            .composer_card
+            .get()
+            .is_some_and(|card| card.contains(&position))
+        {
             return false;
         }
         let next = with_thread_link(&self.draft(cx), title, id);
-        self.composer.update(cx, |composer, cx| composer.set_text(&next, cx));
+        self.composer
+            .update(cx, |composer, cx| composer.set_text(&next, cx));
         true
     }
     fn primary_view(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
@@ -677,6 +682,20 @@ impl Surface {
                     .absolute()
                     .size_full()
             })
+            .when(
+                crate::composer::commands::shell_line(self.composer.read(cx).text.trim()).is_some(),
+                |card| {
+                    card.child(
+                        div()
+                            .debug_selector(|| "composer-shell-hint".into())
+                            .px(px(14.))
+                            .pt(px(8.))
+                            .text_size(px(11.5))
+                            .text_color(theme().text_muted)
+                            .child("Shell command · Runs in this workspace's terminal"),
+                    )
+                },
+            )
             .capture_key_down(cx.listener(|s, event: &KeyDownEvent, window, cx| {
                 if s.prompt_picker_key(event, window, cx) {
                     return;

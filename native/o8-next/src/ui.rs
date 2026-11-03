@@ -4,24 +4,22 @@ mod composer_capture;
 use crate::theme::current as theme;
 #[path = "brain_dock.rs"]
 mod brain_dock;
+#[path = "browser_panel/composer_geometry.rs"]
+mod browser_preview_geometry;
 #[path = "composer_bench.rs"]
 mod composer_bench;
 #[path = "composer/regions.rs"]
 mod composer_regions;
-#[path = "browser_panel/composer_geometry.rs"]
-mod browser_preview_geometry;
 #[path = "conversation.rs"]
 mod conversation;
 #[path = "history.rs"]
 mod history;
-#[path = "lineage_view.rs"]
-mod lineage_view;
 #[path = "transcript_images.rs"]
 pub(crate) mod images;
+#[path = "lineage_view.rs"]
+mod lineage_view;
 #[path = "prompt_actions.rs"]
 mod prompt_actions;
-#[path = "subagents/binding.rs"]
-mod subagent_binding;
 #[path = "session_sidebar.rs"]
 mod session_sidebar;
 #[path = "shell_session.rs"]
@@ -29,6 +27,8 @@ mod shell_session;
 #[cfg(test)]
 #[path = "speed_receipt.rs"]
 mod speed_receipt;
+#[path = "subagents/binding.rs"]
+mod subagent_binding;
 #[path = "transcript_visualizations.rs"]
 mod transcript_visualizations;
 use crate::{
@@ -63,7 +63,9 @@ gpui::actions!(
         /// The composer mic: start dictation, or stop it and send what was said.
         ToggleDictation,
         /// Opens the transcript link last clicked.
-        OpenTranscriptLink
+        OpenTranscriptLink,
+        /// Runs the composer's `!` line in this workspace's terminal.
+        RunShellLine
     ]
 );
 
@@ -76,6 +78,12 @@ thread_local! {
 pub(crate) fn open_link(url: &str, window: &mut Window, cx: &mut App) {
     PENDING_LINK.with(|pending| *pending.borrow_mut() = Some(url.to_owned()));
     window.dispatch_action(Box::new(OpenTranscriptLink), cx);
+}
+
+/// Asks the shell to run a composer `!` line.
+pub(crate) fn run_shell_line(line: String, window: &mut Window, cx: &mut App) {
+    PENDING_LINK.with(|pending| *pending.borrow_mut() = Some(line));
+    window.dispatch_action(Box::new(RunShellLine), cx);
 }
 
 pub(crate) fn take_pending_link() -> Option<String> {
@@ -575,7 +583,10 @@ impl Surface {
     /// that opens its rows over a few frames scrolls with them. The reader
     /// scrolling the transcript ends the follow.
     pub(crate) fn follow_frame(&mut self) {
-        let live = self.transcript.as_ref().is_some_and(|t| t.context_snapshot().1);
+        let live = self
+            .transcript
+            .as_ref()
+            .is_some_and(|t| t.context_snapshot().1);
         if self.following.is_some() || (self.pinned && live) {
             crate::retained::pin_end(&self.list);
         }
@@ -1209,6 +1220,8 @@ mod enter_default_tests {
         use serde_json::json;
         assert!(!super::enter_queues(&json!({"values":{}})));
         assert!(!super::enter_queues(&json!(null)));
-        assert!(super::enter_queues(&json!({"values":{"composerEnterQueues":true}})));
+        assert!(super::enter_queues(
+            &json!({"values":{"composerEnterQueues":true}})
+        ));
     }
 }
