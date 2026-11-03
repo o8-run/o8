@@ -47,7 +47,7 @@ function isNative(changedPaths) {
     const inputs = nativeTestInputs(fileURLToPath(new URL('../../', import.meta.url)));
     return paths.some(file =>
       inputs.has(file)
-      || ['scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'tsconfig.json'].includes(file)
+      || ['scripts/ci/native-test-inputs.mjs', 'scripts/ci/native-test-cache.mjs', 'scripts/ci/install-native-linux-deps.sh', 'tsconfig.json'].includes(file)
       || /^(\.cargo\/|rust-toolchain(?:\.toml)?$|Cargo\.(?:toml|lock)$)/.test(file)
       || /^(native\/o8-next|scripts\/next|crates\/o8d|\.github\/actions\/next-linux-setup)\//.test(file)
       || ['package.json', 'package-lock.json', '.github/workflows/ci.yml',

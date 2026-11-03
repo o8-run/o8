@@ -60,8 +60,10 @@ function run(shard: string, fail = '', phase = 'regular') {
   });
 }
 
-it('checks eight-way assignment through the Node listing fixture', () => {
-  const result = spawnSync(process.execPath, ['--test', 'scripts/ci/native-test-shard.test.mjs'], {
+it('checks native shard assignment and cache contracts through Node fixtures', () => {
+  const fixtures = ['scripts/ci/native-test-shard.test.mjs'];
+  if (process.platform === 'linux') fixtures.push('scripts/ci/native-test-cache.test.mjs');
+  const result = spawnSync(process.execPath, ['--test', ...fixtures], {
     encoding: 'utf8', timeout: 30_000,
   });
   expect(result.status, result.stderr + result.stdout).toBe(0);

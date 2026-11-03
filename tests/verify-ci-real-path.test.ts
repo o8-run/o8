@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { parse, stringify } from 'yaml';
-import { createVerifierCoverageFixture } from './helpers/verify-ci-coverage.fixture';
+import { createVerifierCoverageFixture, mutateNativeSetupFixture } from './helpers/verify-ci-coverage.fixture';
 
 const repo = process.cwd();
 const root = mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-'));
@@ -122,7 +122,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
     '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs',
-    'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'scripts/lib/test-classification.mjs',
+    'scripts/ci/native-test-cache.mjs', 'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'scripts/lib/test-classification.mjs',
     'scripts/lib/browser-prerequisites.mjs', '.github/actions/linux-package-prerequisites/action.yml',
     'scripts/ci/prepare-integration-policy.mjs', '.github/workflows/next-surface-boundary.yml',
     'scripts/next/check-surface-boundary.mjs'];
@@ -152,8 +152,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   if (setupChange) {
     const file = path.join(directory, '.github/actions/next-linux-setup/action.yml');
     const setup = parse(readFileSync(file, 'utf8'));
-    if (setupChange === 'architecture') setup.runs.steps[0].with.architecture = 'arm64';
-    if (setupChange === 'missing install') setup.runs.steps = setup.runs.steps.filter((step: { run?: string }) => step.run !== 'npm ci --prefer-offline');
+    mutateNativeSetupFixture(setup, setupChange);
     writeFileSync(file, stringify(setup));
   }
   if (packageChange) {
@@ -499,7 +498,7 @@ describe('local CI verification through its command entry point', () => {
     expect(result.calls.find(call => call.args.includes('test:integration'))?.args).toContain('tests/fixture.test.ts');
   }, 60_000);
 
-  nativeIt.each(['native/o8-next/src/main.rs', 'crates/o8d/src/main.rs', 'package-lock.json', '.cargo/config.toml', 'rust-toolchain.toml'])(
+  nativeIt.each(['native/o8-next/src/main.rs', 'crates/o8d/src/main.rs', 'scripts/ci/native-test-cache.mjs', 'package-lock.json', '.cargo/config.toml', 'rust-toolchain.toml'])(
     'runs the native CI cargo commands on a local %s change', nativeChange => {
       const result = executeFixture('tests/fixture.test.ts', false, { nativeChange });
       expect(result.status, result.stderr + result.stdout).toBe(0);
@@ -608,8 +607,8 @@ describe('local CI verification through its command entry point', () => {
     if (change === 'checkout ref') job.steps[0].with.ref = 'main';
     if (change === 'missing native shard') job.strategy.matrix.shard.pop();
     if (change === 'native fail fast') job.strategy['fail-fast'] = true;
-    if (change === 'timed phase command') job.steps.at(-1).run += '\necho unchecked';
-    if (change === 'timed phase condition') job.steps.at(-1).if = 'false';
+    if (change === 'timed phase command') job.steps.find((step: { name?: string }) => step.name === 'Fixed-rate native terminal probes without sibling tests').run += '\necho unchecked';
+    if (change === 'timed phase condition') job.steps.find((step: { name?: string }) => step.name === 'Fixed-rate native terminal probes without sibling tests').if = 'false';
     if (change === 'shard tolerance') workflow.jobs['test-shards']['continue-on-error'] = true;
     if (change === 'shard step tolerance') workflow.jobs['test-shards'].steps.find((step: { run?: string }) => step.run?.startsWith('npm run test:unit'))['continue-on-error'] = true;
     if (change === 'native tolerance') job['continue-on-error'] = true;
@@ -623,7 +622,7 @@ describe('local CI verification through its command entry point', () => {
     expect(result.stderr).toContain('verify:ci');
   });
 
-  it.each(['architecture', 'missing install'])('rejects uncovered native prerequisite changes: %s', setupChange => {
+  it.each(['architecture', 'missing install', 'cache dependencies only', 'cache without source key'])('rejects uncovered native prerequisite changes: %s', setupChange => {
     const result = executeFixture('tests/fixture.test.ts', false, { setupChange });
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(1);

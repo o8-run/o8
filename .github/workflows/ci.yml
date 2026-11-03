@@ -564,9 +564,9 @@ jobs:
         id: native
         run: node scripts/ci/native-changes.mjs --o8-next
       - uses: ./.github/actions/next-linux-setup
+        id: native-setup
         if: steps.native.outputs.changed == 'true'
         with:
-          cache-key: tests-${{ hashFiles('crates/o8d/Cargo.lock') }}
           headless-tests: 'true'
       - name: Build the persisted-history fixture daemon
         if: steps.native.outputs.changed == 'true'
@@ -583,6 +583,19 @@ jobs:
           unset DISPLAY WAYLAND_DISPLAY
           TIMEFORMAT='o8 next native probes wall=%3R s'
           time node scripts/ci/native-test-shard.mjs --cargo --phase=timed
+      - name: Measure native cache size
+        id: native-cache-size
+        if: steps.native.outputs.changed == 'true'
+        run: node scripts/ci/native-test-cache.mjs measure
+      - name: Save native test build outputs
+        if: steps.native.outputs.changed == 'true' && github.ref == 'refs/heads/main' && matrix.shard == 8 && steps.native-setup.outputs.native-cache-hit != 'true' && steps.native-cache-size.outputs.cacheable == 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            native/o8-next/target
+            .o8-next-cargo/registry
+            .o8-next-cargo/git
+          key: ${{ steps.native-setup.outputs.native-cache-key }}
 
   roadmap-check:
     name: Roadmap Drift Check

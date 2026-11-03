@@ -119,7 +119,10 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       const supported = setupActions.some(prefix => step.uses.startsWith(prefix))
         || (id === 'security' && step.uses.startsWith(auditAction))
         || (['integration-changed', 'integration-weekly'].includes(id) && step.uses === './.github/actions/linux-package-prerequisites')
-        || (id === 'o8-next-tests' && step.uses === './.github/actions/next-linux-setup');
+        || (id === 'o8-next-tests' && [
+          './.github/actions/next-linux-setup',
+          'actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684',
+        ].includes(step.uses));
       requireCondition(supported, `action ${step.uses} in ${id} has no verify:ci equivalent`);
     }
   }
@@ -143,17 +146,16 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   'native test runner or condition needs a verify:ci equivalent');
   const nativeCondition = "steps.native.outputs.changed == 'true'";
   const nativeRunSteps = native.steps.filter(step => step.run);
-  requireCondition(native.steps.length === 6 && nativeRunSteps.length === 4
+  requireCondition(native.steps.length === 8 && nativeRunSteps.length === 5
     && nativeRunSteps[0].id === 'native' && nativeRunSteps[0].run === 'node scripts/ci/native-changes.mjs --o8-next'
     && !nativeRunSteps[0].if && !nativeRunSteps[0].env && !nativeRunSteps[0].shell
     && !nativeRunSteps[0]['working-directory']
     && native.steps[0].uses === 'actions/checkout@v4'
     && native.steps[2].uses === './.github/actions/next-linux-setup'
-    && native.steps[2].if === nativeCondition
+    && native.steps[2].if === nativeCondition && native.steps[2].id === 'native-setup'
     && !native.steps[0].if && !native.steps[0].env && !native.steps[2].env
     && isDeepStrictEqual(native.steps[0].with, { 'fetch-depth': 0, filter: 'blob:none' })
     && JSON.stringify(native.steps[2].with) === JSON.stringify({
-      'cache-key': "tests-${{ hashFiles('crates/o8d/Cargo.lock') }}",
       'headless-tests': 'true',
     }),
   'native selection or setup needs a verify:ci equivalent');
@@ -162,9 +164,21 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const probes = "unset DISPLAY WAYLAND_DISPLAY\nTIMEFORMAT='o8 next native probes wall=%3R s'\ntime node scripts/ci/native-test-shard.mjs --cargo --phase=timed";
   requireCondition(nativeRunSteps[1].run === build && nativeRunSteps[2].run.trim() === test
     && nativeRunSteps[3].run.trim() === probes
-    && nativeRunSteps.slice(1).every(step => step.if === nativeCondition
+    && nativeRunSteps.slice(1, 4).every(step => step.if === nativeCondition
       && !step.shell && !step['working-directory'] && !step['continue-on-error'] && !step.env),
   'native test commands need a verify:ci equivalent');
+  // Cache measurement and publication are hosted infrastructure. Guard their
+  // exact shape while local verification runs the same build/test commands.
+  const cachePaths = 'native/o8-next/target\n.o8-next-cargo/registry\n.o8-next-cargo/git\n';
+  const saveCondition = "steps.native.outputs.changed == 'true' && github.ref == 'refs/heads/main' && matrix.shard == 8 && steps.native-setup.outputs.native-cache-hit != 'true' && steps.native-cache-size.outputs.cacheable == 'true'";
+  requireCondition(isDeepStrictEqual(native.steps[6], {
+    name: 'Measure native cache size', id: 'native-cache-size', if: nativeCondition,
+    run: 'node scripts/ci/native-test-cache.mjs measure',
+  }) && isDeepStrictEqual(native.steps[7], {
+    name: 'Save native test build outputs', if: saveCondition,
+    uses: 'actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684',
+    with: { path: cachePaths, key: '${{ steps.native-setup.outputs.native-cache-key }}' },
+  }), 'native cache measurement or publication needs a verify:ci equivalent');
   const nativeEnv = {
     CARGO_HOME: '${{ github.workspace }}/.o8-next-cargo',
     CARGO_TARGET_DIR: '${{ github.workspace }}/native/o8-next/target',
@@ -181,9 +195,18 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     { shell: 'bash', run: `npm install -g "$(node -p 'require("./package.json").packageManager')"` },
     { shell: 'bash', run: 'npm ci --prefer-offline' },
     { uses: 'dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c', with: { toolchain: 'stable' } },
-    { uses: 'Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32', with: {
+    { if: "inputs.headless-tests != 'true'", uses: 'Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32', with: {
       workspaces: 'native/o8-next', key: '${{ inputs.cache-key }}', 'save-if': "${{ github.ref == 'refs/heads/main' }}",
     } },
+    { id: 'native-cache-key', if: "inputs.headless-tests == 'true'", shell: 'bash',
+      run: 'node scripts/ci/native-test-cache.mjs key' },
+    { id: 'native-cache', if: "inputs.headless-tests == 'true'",
+      uses: 'actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684',
+      with: { path: cachePaths, key: '${{ steps.native-cache-key.outputs.key }}',
+        'restore-keys': '${{ steps.native-cache-key.outputs.restore-key }}' } },
+    { if: "inputs.headless-tests == 'true'", shell: 'bash',
+      env: { O8_NATIVE_CACHE_HIT: '${{ steps.native-cache.outputs.cache-hit }}' },
+      run: 'node scripts/ci/native-test-cache.mjs restore' },
     { shell: 'bash', env: { O8_NATIVE_HEADLESS_TESTS: '${{ inputs.headless-tests }}' },
       run: 'bash scripts/ci/install-native-linux-deps.sh' },
     { if: "inputs.browser == 'true'", shell: 'bash', run: 'npx --no-install playwright-core install --with-deps chromium' },
@@ -191,7 +214,9 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const execution = setup.runs?.steps?.map(step => Object.fromEntries(Object.entries(step).filter(([key]) => key !== 'name')));
   requireCondition(setup.runs?.using === 'composite' && isDeepStrictEqual(execution, expectedSetup)
     && setup.inputs?.browser?.default === 'false' && setup.inputs?.['cache-key']?.default === ''
-    && setup.inputs?.['headless-tests']?.default === 'false',
+    && setup.inputs?.['headless-tests']?.default === 'false'
+    && setup.outputs?.['native-cache-key']?.value === '${{ steps.native-cache-key.outputs.key }}'
+    && setup.outputs?.['native-cache-hit']?.value === '${{ steps.native-cache.outputs.cache-hit }}',
   'native setup action needs a verify:ci equivalent');
   const shardJob = jobs['test-shards'];
   const shards = shardJob.strategy?.matrix?.shard;
@@ -212,7 +237,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     timeoutMs: native['timeout-minutes'] * 60_000,
     // Each matrix job shares one build/test deadline. Run the same pairs
     // serially against a shared cache without charging earlier shard time.
-    steps: native.strategy.matrix.shard.flatMap(shard => nativeRunSteps.slice(1).map(step => ({
+    steps: native.strategy.matrix.shard.flatMap(shard => nativeRunSteps.slice(1, 4).map(step => ({
       ...runStep({ ...step, env: {} }, {
         ...native, env: Object.fromEntries(Object.entries(nativeEnv).map(([key, value]) =>
           [key, value.replaceAll('${{ github.workspace }}', root)])),
