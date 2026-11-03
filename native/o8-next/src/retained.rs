@@ -29,7 +29,7 @@ mod user_bubble;
 
 #[path = "retained/text.rs"]
 mod row_text;
-use row_text::{is_item, link_target, text_run};
+use row_text::{file_tip, is_item, link_target, text_run};
 
 pub struct RowState {
     pub row: Row,
@@ -40,6 +40,9 @@ pub struct RowState {
     cache: Option<Layout>,
     pub(crate) images: crate::ui::images::Cache,
     pub cards: crate::visualizations::Cards,
+    /// The workspace a transcript row belongs to, so its file pills can say
+    /// where they point.
+    pub(crate) file_root: Option<gpui::SharedString>,
     pub(crate) subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
     pub(crate) subagent_agents: Rc<Vec<crate::subagents::model::Agent>>,
     pub(crate) subagent_focus: std::collections::HashMap<String, gpui::FocusHandle>,
@@ -76,6 +79,7 @@ impl RowState {
             cache: None,
             images: Default::default(),
             cards: Default::default(),
+            file_root: None,
             subagents: None,
             subagent_agents: Default::default(),
             subagent_focus: Default::default(),
@@ -1083,6 +1087,8 @@ impl Element for RetainedRow {
                 // and one row's mouse-up then cancels another's press.
                 let selector = format!("transcript-link-{}-{index}", self.index);
                 let name = SharedString::from(selector.clone());
+                let root = state.file_root.as_ref().map(|root| root.as_ref());
+                let tip = file_tip(root, &url).map(SharedString::from);
                 let mut child = div()
                     .id(name)
                     .debug_selector(move || selector.clone())
@@ -1090,6 +1096,11 @@ impl Element for RetainedRow {
                     .h(link.bounds.size.height)
                     .cursor_pointer()
                     .on_click(move |_, window, cx| crate::ui::open_link(&url, window, cx))
+                    .when_some(tip, |link, tip| {
+                        link.tooltip(move |_, cx| {
+                            cx.new(|_| crate::icon::Tip(tip.clone())).into()
+                        })
+                    })
                     .into_any_element();
                 child.layout_as_root(link.bounds.size.map(AvailableSpace::Definite), window, cx);
                 child.prepaint_at(origin + link.bounds.origin, window, cx);
