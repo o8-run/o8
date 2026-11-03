@@ -110,7 +110,8 @@ export function claimNextComposerSend(target: ComposerQueueTarget): QueuedCompos
   return getSqlite().transaction(() => {
     // A held message waits for the operator. A message sent after that hold is
     // the operator's answer, so it goes ahead; the held one keeps Retry and Remove.
-    // Messages already waiting when the hold happened still wait behind it.
+    // Messages already waiting when the hold happened still wait behind it; one
+    // created in the same millisecond as the hold counts as waiting.
     let heldAt = -Infinity;
     const items = listQueuedComposerSends(target);
     const first = items.find(item => {
@@ -118,7 +119,7 @@ export function claimNextComposerSend(target: ComposerQueueTarget): QueuedCompos
       heldAt = Math.max(heldAt, item.updatedAt);
       return false;
     });
-    if (first?.status !== 'queued' || first.intent !== 'send-next' || heldAt > first.createdAt) return null;
+    if (first?.status !== 'queued' || first.intent !== 'send-next' || heldAt >= first.createdAt) return null;
     const claimed = getSqlite().prepare(`UPDATE composer_send_queue SET status = 'dispatching', updated_at = ? WHERE id = ? AND status = 'queued' AND intent = 'send-next'`).run(Date.now(), first.id);
     return claimed.changes ? readComposerSend(first.id) : null;
   }).immediate();
