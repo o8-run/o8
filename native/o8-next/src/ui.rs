@@ -544,6 +544,10 @@ impl Surface {
         if initial {
             self.list = self.list.clone().measure_all();
         }
+        self.changed_at = std::time::Instant::now();
+        if self.pinned && !initial {
+            crate::retained::pin_end(&self.list);
+        }
         // After a send, keep the turn in view until its reply lands and nothing runs.
         if let Some(start) = self.following
             && let Some(last) = self.rows.last()
@@ -628,10 +632,6 @@ impl Surface {
             self.install_rows(self.transcript.as_ref().unwrap().rows.clone(), cx);
             if let Some(transcript) = &self.transcript {
                 crate::retained::mark_fading(&self.rows, transcript.fading());
-            }
-            self.changed_at = std::time::Instant::now();
-            if self.pinned {
-                crate::retained::pin_end(&self.list);
             }
             cx.notify();
         }
