@@ -1,5 +1,5 @@
 import { observedCacheTokens } from '@/lib/prompt-cache/usage-evidence';
-import { open, realpath } from 'node:fs/promises';
+import { open, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type {
@@ -160,15 +160,26 @@ async function findCodexThreadAcrossHomes(threadId: string, identityId?: string)
 export async function resolveCodexDiscoveredSessionHome(
   surfaceId: string,
   identityId?: string,
-): Promise<{ threadId: string; identityId?: string; configHomeRef: string } | null> {
+): Promise<{ threadId: string; identityId?: string; configHomeRef: string; rolloutPath: string } | null> {
   const threadId = surfaceId.replace(/^codex(?:-discovered)?:/, '').trim();
   if (!threadId || threadId === surfaceId) return null;
   const found = await findCodexThreadAcrossHomes(threadId, identityId);
-  return found ? {
+  if (!found) return null;
+  // The discovery database can live in o8's private home while the thread
+  // was written by another Codex client. Resume must use the rollout's home.
+  const rolloutPath = await realpath(found.thread.rollout_path).catch(() => null);
+  if (!rolloutPath || !(await stat(rolloutPath).catch(() => null))?.isFile()) return null;
+  let sessionsRoot = path.dirname(rolloutPath);
+  while (path.basename(sessionsRoot) !== 'sessions' && path.dirname(sessionsRoot) !== sessionsRoot) {
+    sessionsRoot = path.dirname(sessionsRoot);
+  }
+  if (path.basename(sessionsRoot) !== 'sessions') return null;
+  return {
     threadId,
     identityId: found.home.identityId,
-    configHomeRef: found.home.configHomeRef,
-  } : null;
+    configHomeRef: path.dirname(sessionsRoot),
+    rolloutPath,
+  };
 }
 
 export async function queryCodexThreadById(threadId: string, identityId?: string) {

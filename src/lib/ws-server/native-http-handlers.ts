@@ -60,6 +60,23 @@ import { POST as api_runtime_launch_POST } from '@/app/api/runtime/launch/route'
 import { POST as api_orchestrator_headless_tick_POST } from '@/app/api/orchestrator/headless-tick/route';
 import { POST as api_review_auto_review_POST } from '@/app/api/review/auto-review/route';
 
+import { GET as api_panel_branches_GET } from '@/app/api/panel/branches/route';
+import { GET as api_panel_commits_hash_GET } from '@/app/api/panel/commits/[hash]/route';
+import { GET as api_panel_files_GET } from '@/app/api/panel/files/route';
+import { GET as api_panel_file_diff_GET } from '@/app/api/panel/file-diff/route';
+import { GET as api_panel_resource_usage_GET } from '@/app/api/panel/resource-usage/route';
+import { GET as api_panel_serve_image_GET } from '@/app/api/panel/serve-image/route';
+import { GET as api_visualizations_id_GET } from '@/app/api/visualizations/[id]/route';
+import { GET as api_repo_spec_GET } from '@/app/api/repo-spec/route';
+import { GET as api_review_workspace_GET } from '@/app/api/review/workspace/route';
+import { GET as api_runtime_capabilities_GET } from '@/app/api/runtime/capabilities/route';
+import { GET as api_runtime_capacity_GET } from '@/app/api/runtime/capacity/route';
+import { GET as api_runtime_service_tiers_GET } from '@/app/api/runtime/service-tiers/route';
+import { GET as api_runtime_telemetry_GET } from '@/app/api/runtime/telemetry/route';
+import { GET as api_orchestrator_status_GET } from '@/app/api/orchestrator/status/route';
+import { GET as api_setup_cli_updates_GET } from '@/app/api/setup/cli-updates/route';
+import { GET as api_cortex_proposals_GET } from '@/app/api/cortex/proposals/route';
+
 export const api_mobile_orchestrator_threads = { GET: api_mobile_orchestrator_threads_GET };
 export const api_orchestrator_state = { GET: api_orchestrator_state_GET, PATCH: api_orchestrator_state_PATCH };
 export const api_lanes = { GET: api_lanes_GET };
@@ -120,3 +137,20 @@ export const api_runtime_action = { POST: api_runtime_action_POST };
 export const api_runtime_launch = { POST: api_runtime_launch_POST };
 export const api_orchestrator_headless_tick = { POST: api_orchestrator_headless_tick_POST };
 export const api_review_auto_review = { POST: api_review_auto_review_POST };
+
+export const api_panel_branches = { GET: api_panel_branches_GET };
+export const api_panel_commits_hash = { GET: api_panel_commits_hash_GET };
+export const api_panel_files = { GET: api_panel_files_GET };
+export const api_panel_file_diff = { GET: api_panel_file_diff_GET };
+export const api_panel_resource_usage = { GET: api_panel_resource_usage_GET };
+export const api_panel_serve_image = { GET: api_panel_serve_image_GET };
+export const api_visualizations_id = { GET: api_visualizations_id_GET };
+export const api_repo_spec = { GET: api_repo_spec_GET };
+export const api_review_workspace = { GET: api_review_workspace_GET };
+export const api_runtime_capabilities = { GET: api_runtime_capabilities_GET };
+export const api_runtime_capacity = { GET: api_runtime_capacity_GET };
+export const api_runtime_service_tiers = { GET: api_runtime_service_tiers_GET };
+export const api_runtime_telemetry = { GET: api_runtime_telemetry_GET };
+export const api_orchestrator_status = { GET: api_orchestrator_status_GET };
+export const api_setup_cli_updates = { GET: api_setup_cli_updates_GET };
+export const api_cortex_proposals = { GET: api_cortex_proposals_GET };
