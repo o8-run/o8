@@ -1,11 +1,21 @@
+import { execFile } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Agent, get } from 'node:http';
-import { expect, it } from 'vitest';
+import { promisify } from 'node:util';
+import { beforeAll, expect, it } from 'vitest';
 import { firstDifference, normalize, runSessionParity, seedSessionFixture, send, SESSION_READ_PATHS, startSessionServer } from '../scripts/o8d/parity';
 
-const binary = process.env.O8D_TEST_BINARY ?? process.env.O8D_BINARY ?? join(process.cwd(), 'crates/o8d/target/release/o8d');
+// CI ships no daemon: build the session-reads feature set into its own target
+// directory so a sibling surface test's experimental-ws build cannot replace it.
+const targetDir = join(process.cwd(), 'crates/o8d/target/session-reads');
+const binary = process.env.O8D_TEST_BINARY ?? process.env.O8D_BINARY ?? join(targetDir, 'debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
+beforeAll(async () => {
+  if (process.env.O8D_TEST_BINARY || process.env.O8D_BINARY) return;
+  await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-session-reads', '--target-dir', targetDir],
+    { maxBuffer: 64 * 1024 * 1024 });
+}, 900_000);
 it('records TS session reads and replays them natively with zero differences and Next stopped', async () => {
   expect(await runSessionParity(binary, false)).toMatchObject({ requests: 18, differences: 0 });
 }, 180_000);

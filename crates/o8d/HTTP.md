@@ -91,8 +91,9 @@ acceptance items.
 With `O8_NEXT_O8D=1 O8_WS_O8D=1 O8D_NATIVE_SESSION_READS=1`, the app
 transport serves saved GETs for `/api/mobile/orchestrator/threads`,
 `/api/mobile/history`, `/api/v2/chat-history` and
-`/api/orchestrator/composer-queue` in Rust. `experimental-ws` includes the
-saved-read dependencies. The flag defaults off. All other paths and all
+`/api/orchestrator/composer-queue` in Rust. The `experimental-session-reads`
+feature adds the saved-read dependencies on top of `experimental-ws`; a plain
+`experimental-ws` build proxies every HTTP request as before. The flag defaults off. All other paths and all
 non-GET methods retain their existing TypeScript handlers. In flagged mode,
 TS HTTP responses close their connection after completion so the next request
 cannot remain inside an earlier streaming TS tunnel. WebSocket delivery retains
@@ -117,7 +118,7 @@ Run the deterministic fixture oracle and benchmark with Next stopped:
 
 ```sh
 CARGO_TARGET_DIR="$HOME/o8d-target-c" cargo build -j 4 --locked --release \
-  --manifest-path crates/o8d/Cargo.toml --features experimental-ws
+  --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads
 O8D_BINARY="$HOME/o8d-target-c/release/o8d" node --import=tsx \
   scripts/o8d/parity.ts --report=session-parity.json
 ```

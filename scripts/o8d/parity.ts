@@ -129,7 +129,7 @@ export async function runSessionParity(binary: string, benchmark = true, corpusF
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const binary = process.env.O8D_BINARY;
-  if (!binary) throw new Error('Set O8D_BINARY to the release o8d built with experimental-ws');
+  if (!binary) throw new Error('Set O8D_BINARY to the o8d built with experimental-session-reads');
   void runSessionParity(binary, true, process.argv.find(arg => arg.startsWith('--corpus='))?.slice(9)).then(report => {
     const output = process.argv.find(arg => arg.startsWith('--report='))?.slice(9);
     if (output) writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);

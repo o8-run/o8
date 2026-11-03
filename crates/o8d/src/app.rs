@@ -18,6 +18,7 @@ use tokio_tungstenite::{
 };
 
 mod input;
+#[cfg(feature = "experimental-session-reads")]
 mod session_reads;
 
 pub async fn serve(
@@ -121,6 +122,7 @@ async fn connection(
         })
     });
     if !upgrade {
+        #[cfg(feature = "experimental-session-reads")]
         if session_reads::serve(&mut socket, header, &upstream, &key).await? {
             return Ok(());
         }
