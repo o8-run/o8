@@ -107,11 +107,12 @@ impl Surface {
                     cx.notify();
                     return;
                 }
-                let (text, images, files) = editor.update(cx, |i, cx| {
+                let (text, images, files, threads) = editor.update(cx, |i, cx| {
                     let carried = (
                         i.text.clone(),
                         std::mem::take(&mut i.controls.images),
                         std::mem::take(&mut i.controls.files),
+                        i.thread_mentions(),
                     );
                     i.clear(cx);
                     carried
@@ -121,6 +122,7 @@ impl Surface {
                     i.set_text(&text, cx);
                     i.controls.images = images;
                     i.controls.files = files;
+                    i.controls.mention.threads = threads;
                     if !prelude.is_empty() {
                         i.controls.prompt.prelude = prelude;
                     }

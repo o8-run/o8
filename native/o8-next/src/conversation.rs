@@ -322,6 +322,11 @@ impl Surface {
                 return;
             }
             if let Some(pending) = self.pending.get(&session.id) {
+                if pending["payload"]["wireMessage"].is_null() {
+                    self.notice = "Mentioned thread context is loading.".into();
+                    cx.notify();
+                    return;
+                }
                 if pending["payload"]["text"] != text {
                     self.notice = "An earlier send is unconfirmed. Restore that draft to retry its saved identity, or inspect the shared queue.".into();
                     cx.notify();
@@ -435,41 +440,72 @@ impl Surface {
             .unwrap_or_default();
         let network_send = body["payload"]["routing"]["source"] == "bot-network";
         let request_identity = (session.id.clone(), body["id"].clone());
-        let task = cx.background_executor().spawn(async move {
-            let response = client.mutate_queue(method, &body).map_err(|error| {
-                let terminal = error.network_send.as_ref().is_some_and(|receipt| {
-                    receipt["id"] == body["id"]
-                        && receipt["threadId"] == session.id
-                        && matches!(
-                            receipt["status"].as_str(),
-                            Some("accepted" | "cancelled" | "rejected")
-                        )
-                });
-                (
-                    error.message,
-                    error.status.is_some_and(|code| (400..500).contains(&code)),
-                    terminal,
-                )
-            })?;
-            let matches = if method == "DELETE" {
-                response["ok"] == true
-            } else {
-                receipt_matches(method, &body, &response)
-            };
-            if !matches {
-                return Err((
-                    "Message receipt did not match. Draft retained; inspect the shared queue."
-                        .into(),
-                    false,
-                    false,
-                ));
-            }
-            let queue = client.queue(&session);
-            let history = client.history(&session.id);
-            Ok::<_, (String, bool, bool)>((method, session, queue, history))
-        });
+        let picks = if method == "POST" && fresh {
+            self.composer.update(cx, |i, _| i.thread_mentions())
+        } else {
+            Vec::new()
+        };
+        let context = if picks.is_empty() {
+            None
+        } else {
+            // A retry must wait until the initial read has frozen the wire prompt.
+            self.pending.get_mut(&session.id).unwrap()["payload"]["wireMessage"] = Value::Null;
+            let (client, sessions, source) =
+                (client.clone(), self.sessions.clone(), session.clone());
+            Some(cx.background_executor().spawn(async move {
+                crate::composer::mention::thread_context(&client, picks, sessions, source)
+            }))
+        };
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let mut body = body;
+            if let Some(context) = context {
+                let context = context.await;
+                let wire = body["payload"]["wireMessage"].as_str().unwrap_or_default();
+                body["payload"]["wireMessage"] = json!(format!("{wire}\n\n{context}"));
+                let _ = this.update(cx, |s, _| {
+                    if let Some(pending) = s.pending.get_mut(&request_identity.0)
+                        && pending["id"] == request_identity.1
+                    {
+                        *pending = body.clone();
+                    }
+                });
+            }
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let response = client.mutate_queue(method, &body).map_err(|error| {
+                        let terminal = error.network_send.as_ref().is_some_and(|receipt| {
+                            receipt["id"] == body["id"]
+                                && receipt["threadId"] == session.id
+                                && matches!(
+                                    receipt["status"].as_str(),
+                                    Some("accepted" | "cancelled" | "rejected")
+                                )
+                        });
+                        (
+                            error.message,
+                            error.status.is_some_and(|code| (400..500).contains(&code)),
+                            terminal,
+                        )
+                    })?;
+                    let matches = if method == "DELETE" {
+                        response["ok"] == true
+                    } else {
+                        receipt_matches(method, &body, &response)
+                    };
+                    if !matches {
+                        return Err((
+                            "Message receipt did not match. Draft retained; inspect the shared queue."
+                                .into(),
+                            false,
+                            false,
+                        ));
+                    }
+                    let queue = client.queue(&session);
+                    let history = client.history(&session.id);
+                    Ok::<_, (String, bool, bool)>((method, session, queue, history))
+                })
+                .await;
             let _ = this.update(cx, |this, cx| {
                 if result.is_ok()
                     || result
