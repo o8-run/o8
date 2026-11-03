@@ -14,7 +14,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Copy, Expand, Minus, Plus, X, FileCode, PanelRight, Play } from './lucide-shims';
-import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
+import { renderMermaidSvg } from '@/lib/render/mermaid';
 
 interface CodeBlockProps {
   code: string;
@@ -38,42 +38,6 @@ function formatLabel(lang?: string): string {
   if (lang === 'tool-output') return 'exec output';
   return LANG_ALIASES[lang.toLowerCase()] ?? lang;
 }
-
-// o8 mermaid theme — glass white / frost with red accent
-// Brand: clear glass, super light blue frost, bright red accents
-const MERMAID_THEME = {
-  theme: 'base' as const,
-  themeVariables: {
-    // Primary: frost glass white with red accent borders
-    primaryColor: 'var(--t-panel)',
-    primaryTextColor: 'var(--t-text)',
-    primaryBorderColor: 'var(--t-panel-border)',
-    // Secondary: super light blue frost
-    secondaryColor: '#f0f7ff',
-    secondaryTextColor: 'var(--t-text)',
-    secondaryBorderColor: 'var(--t-text-faint)',
-    // Tertiary: bright red (Cortex accent)
-    tertiaryColor: '#fef2f2',
-    tertiaryTextColor: '#991b1b',
-    tertiaryBorderColor: '#ef4444',
-    // Lines and text
-    lineColor: 'var(--t-text-muted)',
-    textColor: 'var(--t-text)',
-    // Node defaults
-    mainBkg: 'var(--t-panel)',
-    nodeBorder: 'var(--t-panel-border)',
-    clusterBkg: 'var(--t-bg-subtle)',
-    clusterBorder: 'var(--t-panel-border)',
-    titleColor: 'var(--t-text-strong)',
-    edgeLabelBackground: 'var(--t-panel)',
-    nodeTextColor: 'var(--t-text)',
-    // Decision nodes (diamonds)
-    cScale0: '#ef4444',
-    // Typography
-    fontFamily: 'var(--font-sans-system)',
-    fontSize: '14px',
-  },
-};
 
 // ── Glass Modal for Mermaid Zoom ──
 
@@ -294,21 +258,14 @@ const MermaidDiagram = memo(function MermaidDiagram({ code, onOpenMermaid }: { c
 
     async function render() {
       try {
-        const mermaid = (await import('mermaid')).default;
-        mermaid.initialize({
-          startOnLoad: false,
-          ...MERMAID_THEME,
-          securityLevel: 'strict',
-        });
-
-        const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const { svg } = await mermaid.render(id, code);
-
+        const svg = await renderMermaidSvg(code);
         if (!cancelled) {
-          setSvgHtml(sanitizeAgentHtml(svg));
+          setSvgHtml(svg);
+          setError(null);
         }
       } catch (err) {
         if (!cancelled) {
+          setSvgHtml(null);
           setError(String(err));
         }
       }
@@ -330,6 +287,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code, onOpenMermaid }: { c
         fontFamily: 'ui-monospace, monospace',
       }}>
         Mermaid render error: {error}
+        <pre style={{ whiteSpace: 'pre-wrap', overflowX: 'auto' }}><code>{code}</code></pre>
       </div>
     );
   }

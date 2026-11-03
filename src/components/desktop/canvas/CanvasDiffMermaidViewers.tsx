@@ -3,7 +3,7 @@ import type React from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Clipboard, RotateCcw, Trash2 } from '../lucide-shims';
 import { DiffStatusIcon, renderDiffLines } from '@/components/desktop/diff-utils';
-import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
+import { renderMermaidSvg } from '@/lib/render/mermaid';
 interface ChangedFile {
   path: string;
   status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked';
@@ -32,40 +32,16 @@ function MermaidViewerBase({ code }: { code: string }) {
     let cancelled = false;
     async function render() {
       try {
-        const mermaid = (await import('mermaid')).default;
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: 'base' as const,
-          themeVariables: {
-            primaryColor: 'var(--t-panel)',
-            primaryTextColor: 'var(--t-text)',
-            primaryBorderColor: 'var(--t-panel-border)',
-            secondaryColor: '#f0f7ff',
-            secondaryTextColor: 'var(--t-text)',
-            secondaryBorderColor: 'var(--t-text-faint)',
-            tertiaryColor: '#fef2f2',
-            tertiaryTextColor: '#991b1b',
-            tertiaryBorderColor: '#ef4444',
-            lineColor: 'var(--t-text-muted)',
-            textColor: 'var(--t-text)',
-            mainBkg: 'var(--t-panel)',
-            nodeBorder: 'var(--t-panel-border)',
-            clusterBkg: 'var(--t-bg-subtle)',
-            clusterBorder: 'var(--t-panel-border)',
-            titleColor: 'var(--t-text-strong)',
-            edgeLabelBackground: 'var(--t-panel)',
-            nodeTextColor: 'var(--t-text)',
-            cScale0: '#ef4444',
-            fontFamily: 'var(--font-sans-system)',
-            fontSize: '14px',
-          },
-          securityLevel: 'strict',
-        });
-        const id = `mermaid-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const { svg } = await mermaid.render(id, code);
-        if (!cancelled) setSvgHtml(sanitizeAgentHtml(svg));
+        const svg = await renderMermaidSvg(code);
+        if (!cancelled) {
+          setSvgHtml(svg);
+          setError(null);
+        }
       } catch (err) {
-        if (!cancelled) setError(String(err));
+        if (!cancelled) {
+          setSvgHtml(null);
+          setError(String(err));
+        }
       }
     }
     void render();
@@ -102,6 +78,7 @@ function MermaidViewerBase({ code }: { code: string }) {
     return (
       <div style={{ paddingTop: 20, paddingRight: 20, paddingBottom: 20, paddingLeft: 20, fontSize: 13, color: '#ef4444', fontFamily: 'ui-monospace, monospace' }}>
         Mermaid render error: {error}
+        <pre style={{ whiteSpace: 'pre-wrap', overflowX: 'auto' }}><code>{code}</code></pre>
       </div>
     );
   }

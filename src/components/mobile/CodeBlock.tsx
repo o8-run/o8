@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, createElement, memo } from 'react';
-import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
+import { renderMermaidSvg } from '@/lib/render/mermaid';
 
 interface CodeBlockProps {
   code: string;
@@ -21,34 +21,6 @@ function formatLanguageLabel(lang?: string): string {
   return aliases[lang.toLowerCase()] ?? lang;
 }
 
-// Cortex brand mermaid theme — glass frost + red accent
-const MERMAID_THEME = {
-  theme: 'base' as const,
-  themeVariables: {
-    primaryColor: '#ffffff',
-    primaryTextColor: '#1e293b',
-    primaryBorderColor: '#e2e8f0',
-    secondaryColor: '#f0f7ff',
-    secondaryTextColor: '#334155',
-    secondaryBorderColor: '#cbd5e1',
-    tertiaryColor: '#fef2f2',
-    tertiaryTextColor: '#991b1b',
-    tertiaryBorderColor: '#ef4444',
-    lineColor: '#94a3b8',
-    textColor: '#1e293b',
-    mainBkg: '#ffffff',
-    nodeBorder: '#e2e8f0',
-    clusterBkg: '#f8fafc',
-    clusterBorder: '#e2e8f0',
-    titleColor: '#0f172a',
-    edgeLabelBackground: '#ffffff',
-    nodeTextColor: '#1e293b',
-    cScale0: '#ef4444',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
-    fontSize: '13px',
-  },
-};
-
 const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) {
   const [svgHtml, setSvgHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,19 +30,16 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
 
     async function render() {
       try {
-        const mermaid = (await import('mermaid')).default;
-        mermaid.initialize({
-          startOnLoad: false,
-          ...MERMAID_THEME,
-          securityLevel: 'strict',
-        });
-
-        const id = `mermaid-m-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const { svg } = await mermaid.render(id, code);
-
-        if (!cancelled) setSvgHtml(sanitizeAgentHtml(svg));
+        const svg = await renderMermaidSvg(code, 13);
+        if (!cancelled) {
+          setSvgHtml(svg);
+          setError(null);
+        }
       } catch (err) {
-        if (!cancelled) setError(String(err));
+        if (!cancelled) {
+          setSvgHtml(null);
+          setError(String(err));
+        }
       }
     }
 
@@ -86,7 +55,11 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
         color: '#ef4444',
         fontFamily: 'ui-monospace, monospace',
       },
-    }, `Diagram error: ${error}`);
+    },
+      createElement('div', null, `Diagram error: ${error}`),
+      createElement('pre', { style: { whiteSpace: 'pre-wrap', overflowX: 'auto' } },
+        createElement('code', null, code)),
+    );
   }
 
   return createElement('div', {
@@ -99,9 +72,9 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
       justifyContent: 'center',
       alignItems: 'center',
       minHeight: svgHtml ? undefined : 50,
-      backgroundColor: '#fafbfd',
-      borderTop: '1px solid #e5e7eb',
-      backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.8) 0%, rgba(240,247,255,0.4) 100%)',
+      backgroundColor: 'var(--t-bg-subtle)',
+      borderTop: '1px solid var(--t-divider)',
+      backgroundImage: 'linear-gradient(135deg, var(--t-panel) 0%, var(--t-bg-subtle) 100%)',
       overflowX: 'auto' as const,
       WebkitOverflowScrolling: 'touch' as const,
     },
