@@ -69,6 +69,10 @@ pub struct Row {
     pub folder: Option<folders::Folder>,
     /// The other computer this thread lives on.
     pub machine: Option<String>,
+    /// Visible lineage depth, direct child count and disclosure state.
+    pub depth: usize,
+    pub child_count: usize,
+    pub children_open: bool,
 }
 impl Row {
     /// A place name, with the machine in front when it isn't this computer.
@@ -123,6 +127,8 @@ pub struct ThreadList {
     pub failed_starts: HashSet<String>,
     /// Closed By repo folders, by repository path.
     closed: HashSet<String>,
+    /// Explicit helper disclosures override status and density for this session.
+    child_disclosures: HashMap<String, bool>,
     /// A Settle or Un-settle awaiting the server.
     settling: Option<String>,
     undo: Option<inbox::Undo>,
@@ -258,6 +264,7 @@ impl ThreadList {
             settling: None,
             undo: None,
             closed: HashSet::new(),
+            child_disclosures: HashMap::new(),
             sessions: vec![],
             rows: Rc::new(vec![]),
             selected: None,
@@ -341,15 +348,6 @@ impl ThreadList {
             self.expanded.insert(self.group_key(session).into());
             rows = self.view_rows(&sessions);
         }
-        if !self.archived_open
-            && self.query.trim().is_empty()
-            && let Some(index) = rows
-                .iter()
-                .position(|r| r.kind == "section" && r.title == "Archived")
-        {
-            // Collapsed, Archived is still a group: its heading stays in the list.
-            rows.truncate(index + 1);
-        }
         self.rows = Rc::new(rows);
         // Remeasure detailed rows; keep the reader's place.
         let top = self.detailed_list.logical_scroll_top();
@@ -395,6 +393,16 @@ impl ThreadList {
         let mut rows = self.view_rows_base(sessions);
         detailed::mark_dev_working(&mut rows);
         rows = pins::fold_pinned(rows, &pins::pinned_order(sessions));
+        if !self.archived_open
+            && self.query.trim().is_empty()
+            && let Some(index) = rows
+                .iter()
+                .position(|r| r.kind == "section" && r.title == "Archived")
+        {
+            // Hidden archived parents cannot take active children off this page.
+            rows.truncate(index + 1);
+        }
+        rows = self.nest_rows(rows, sessions);
         if self.working_section {
             // The Pinned shelf stays first and keeps its running threads.
             let shelf = if rows.first().is_some_and(|r| r.status == "pinned") {
@@ -1095,6 +1103,7 @@ impl ThreadList {
             "f2" => self.start_rename(window, cx),
             "delete" if !self.editing => self.archive(cx),
             "enter" if !self.editing => self.submit(cx),
+            "left" | "right" if !self.editing && self.children_key(key, cx) => {}
             "up" | "down" | "home" | "end" if !self.editing => {
                 if key == "end" {
                     self.expanded.extend(
@@ -1230,3 +1239,10 @@ impl ThreadList {
 
 #[path = "parking.rs"]
 mod parking;
+
+#[path = "nesting.rs"]
+mod nesting;
+
+#[cfg(test)]
+#[path = "nesting_tests.rs"]
+mod nesting_tests;

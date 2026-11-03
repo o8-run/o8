@@ -23,6 +23,9 @@ fn header(kind: &str, title: &str, _status: &str) -> Row {
         marker: "",
         folder: None,
         machine: None,
+        depth: 0,
+        child_count: 0,
+        children_open: false,
     }
 }
 fn thread(id: &str, running: bool) -> Row {

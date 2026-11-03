@@ -70,9 +70,9 @@ pub(super) fn mark_dev_working(rows: &mut [Row]) {
         }
     }
 }
-/// Running threads (not those waiting on you) leave their groups for a
-/// Working section, placed before Merged, Snoozed, Settled and Archived. o8 has no
-/// pinned threads yet, so none stay behind.
+/// Running top-level threads leave their groups for a Working section before
+/// Merged, Snoozed, Settled and Archived. Nested children travel with their row;
+/// the caller keeps the pinned shelf outside this fold.
 pub(crate) fn fold_working(rows: Vec<Row>, closed: bool) -> Vec<Row> {
     let end = rows
         .iter()
@@ -83,14 +83,26 @@ pub(crate) fn fold_working(rows: Vec<Row>, closed: bool) -> Vec<Row> {
         .unwrap_or(rows.len());
     let mut rows = rows;
     let tail = rows.split_off(end);
-    let (working, rest): (Vec<_>, Vec<_>) = rows
-        .into_iter()
-        .partition(|r| r.kind == "thread" && r.running && r.marker != "input");
+    let (mut working, mut rest) = (Vec::new(), Vec::new());
+    let (mut moving, mut count) = (false, 0);
+    for row in rows {
+        if row.depth == 0 {
+            moving = row.kind == "thread" && row.running && row.marker != "input";
+            if moving {
+                count += 1;
+            }
+        }
+        if moving {
+            working.push(row);
+        } else {
+            rest.push(row);
+        }
+    }
     let mut out = Vec::new();
     if !working.is_empty() {
         out.push(recents::header(
             "section",
-            &format!("Working · {}", working.len()),
+            &format!("Working · {count}"),
             "working",
         ));
         if !closed {
@@ -280,7 +292,7 @@ impl ThreadList {
         div()
             .flex()
             .flex_col()
-            .w_full()
+            .flex_1()
             .min_w_0()
             .gap(px(2.))
             .child(first)

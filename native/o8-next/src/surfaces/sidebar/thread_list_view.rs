@@ -233,7 +233,8 @@ impl ThreadList {
                         .when(row.kind == "section" && i > 0, |v| v.items_end())
                         // With the list's 6, a highlight has even margins on
                         // both sides.
-                        .px(px(6.))
+                        .pl(px(Self::child_inset(&row)))
+                        .pr(px(6.))
                         .rounded(px(8.))
                         .overflow_hidden()
                         .bg(if selected
@@ -352,6 +353,7 @@ impl ThreadList {
                                     })
                                 }),
                         ))
+                        .children(this.children_disclosure(&row, cx))
                         .when(row.kind == "section" && row.status == "working", |view| {
                             view.debug_selector(|| "sidebar-working-header".into())
                                 .cursor_pointer()
