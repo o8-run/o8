@@ -27,6 +27,53 @@ function observe<T>(promise: Promise<T>) {
 function sharedRead(signal?: AbortSignal) {
   return githubInstallationFetch('example/deadline', '/repos/example/deadline/pulls', { signal }, { share: true });
 }
+it('counts outgoing broker requests once for shared consumers and counts 304 revalidation', async () => {
+  const { cacheStats } = await import('@/lib/github/cache');
+  const request = vi.fn(async () => Response.json({ number: 7 }, { headers: { etag: '"counted"' } }));
+  vi.stubGlobal('fetch', request);
+  await Promise.all([sharedRead(), sharedRead()]);
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(cacheStats()).toMatchObject({ githubApiCalls: { calls: 1 } });
+  request.mockImplementationOnce(async () => new Response(null, { status: 304 }));
+  await sharedRead();
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(cacheStats()).toMatchObject({ githubApiCalls: { calls: 2 } });
+});
+
+it('keeps the hourly count flat on a cached public read and resets at the next hour', async () => {
+  const { cacheStats } = await import('@/lib/github/cache');
+  vi.setSystemTime(new Date('2026-01-01T10:59:00Z'));
+  const request = vi.fn(async () => Response.json({ number: 7 }));
+  vi.stubGlobal('fetch', request);
+  const read = () => githubInstallationFetch('public-example/counter', '/repos/public-example/counter/pulls/7');
+  await read();
+  expect(cacheStats()).toMatchObject({ githubApiCalls: { calls: 1, hourStartedAt: Date.parse('2026-01-01T10:00:00Z') } });
+  await read();
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(cacheStats()).toMatchObject({ githubApiCalls: { calls: 1 } });
+  vi.setSystemTime(new Date('2026-01-01T11:00:00Z'));
+  await read();
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(cacheStats()).toMatchObject({ githubApiCalls: { calls: 0, hourStartedAt: Date.parse('2026-01-01T11:00:00Z') } });
+  vi.setSystemTime(new Date('2026-01-01T11:01:01Z'));
+  await read();
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(cacheStats()).toMatchObject({ githubApiCalls: { calls: 1 } });
+});
+
+it('counts failed network dispatches and excludes requests canceled before dispatch', async () => {
+  const { cacheStats } = await import('@/lib/github/cache');
+  const request = vi.fn(async () => { throw new Error('Transport unavailable'); });
+  vi.stubGlobal('fetch', request);
+  await expect(sharedRead()).rejects.toThrow('Transport unavailable');
+  expect(cacheStats()).toMatchObject({ githubApiCalls: { calls: 1 } });
+  const controller = new AbortController();
+  controller.abort();
+  await expect(sharedRead(controller.signal)).rejects.toThrow();
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(cacheStats()).toMatchObject({ githubApiCalls: { calls: 1 } });
+});
+
 it('shares real broker reads, sends conditional validators and clones the unchanged response per consumer', async () => {
   const request = vi.fn(async () => Response.json({ number: 7 }, { headers: { etag: '"fixture"' } }));
   vi.stubGlobal('fetch', request);
