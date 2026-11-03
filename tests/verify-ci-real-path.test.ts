@@ -10,6 +10,7 @@ const repo = process.cwd();
 const root = mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-'));
 const coverageRoot = createVerifierCoverageFixture(repo, root);
 const workflowPath = path.join(repo, '.github/workflows/ci.yml');
+const reuseGate = "needs.reuse.outputs.reuse != 'true'";
 const guard = path.join(coverageRoot, 'scripts/ci/check-verify-ci.mjs');
 const manifest = JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8'));
 const nativeLocal = process.platform === 'linux' && process.arch === 'x64';
@@ -146,7 +147,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   if (lintDependency) {
     const file = path.join(directory, '.github/workflows/ci.yml');
     const workflow = parse(readFileSync(file, 'utf8'));
-    workflow.jobs.lint.needs = lintDependency;
+    workflow.jobs.lint.needs = ['reuse', lintDependency];
     writeFileSync(file, stringify(workflow));
   }
   if (setupChange) {
@@ -679,10 +680,20 @@ describe('local CI verification through its command entry point', () => {
 
   it('rejects an action without local coverage inside an existing required job', () => {
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
-    workflow.jobs.typecheck.steps.push({ uses: './.github/actions/required-fixture' });
+    workflow.jobs.typecheck.steps.push({ if: reuseGate, uses: './.github/actions/required-fixture' });
     const result = coverage(workflow);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('required-fixture');
+  });
+
+  it.each(['ungated step', 'ungated job', 'gated aggregate'])('rejects merge-queue reuse wiring with an %s', change => {
+    const workflow = parse(readFileSync(workflowPath, 'utf8'));
+    if (change === 'ungated step') delete workflow.jobs.lint.steps.find((step: { run?: string }) => step.run?.startsWith('npm run lint')).if;
+    if (change === 'ungated job') delete workflow.jobs.security.needs;
+    if (change === 'gated aggregate') workflow.jobs.test.needs = ['reuse', 'test-shards', 'o8-next-tests'];
+    const result = coverage(workflow);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('merge-queue reuse');
   });
 
   it('covers the browser prerequisite selected by classification metadata', () => {
@@ -691,7 +702,7 @@ describe('local CI verification through its command entry point', () => {
       .filter((step: { name?: string }) => step.name !== 'Install touched browser-test prerequisites');
     workflow.jobs['integration-changed'].steps.splice(-1, 0, {
       name: 'Install touched browser-test prerequisites',
-      if: "steps.select.outputs.browser == 'true'",
+      if: `${reuseGate} && steps.select.outputs.browser == 'true'`,
       run: 'npx --no-install playwright-core install --with-deps chromium',
     });
     const result = coverage(workflow);
@@ -704,7 +715,7 @@ describe('local CI verification through its command entry point', () => {
     const browser = steps.find((step: { name?: string }) => step.name === 'Install touched browser-test prerequisites');
     if (change === 'missing') steps.splice(steps.indexOf(browser), 1);
     if (change === 'duplicate') steps.push({ ...browser });
-    if (change === 'filename condition') browser.if = "contains(steps.select.outputs.files, 'tests/example.test.ts')";
+    if (change === 'filename condition') browser.if = `${reuseGate} && contains(steps.select.outputs.files, 'tests/example.test.ts')`;
     const result = coverage(workflow);
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain('browser prerequisite');

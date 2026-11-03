@@ -154,7 +154,7 @@ describe('required CI gates through workflow commands', () => {
       expect(steps[0].with['fetch-depth']).toBe(0);
       expect(steps[0].with.filter).toBe('blob:none');
       expect(steps[1].id).toBe('native');
-      for (const step of steps.slice(2)) expect(step.if).toBe("steps.native.outputs.changed == 'true'");
+      for (const step of steps.slice(2)) expect(step.if).toBe("needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'");
       const cache = steps.find((step: { uses?: string }) => step.uses?.startsWith('Swatinem/rust-cache@'));
       expect(cache.with['save-if']).toBe("${{ github.ref == 'refs/heads/main' }}");
     }
@@ -335,7 +335,7 @@ describe('native next CI through persisted fixtures', () => {
     expect(job.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } });
     expect(job.if).toBe(workflow.jobs['test-shards'].if);
     const step = job.steps.find((entry: { run?: string }) => entry.run?.includes('native-test-shard.mjs'));
-    expect(step.if).toBe("steps.native.outputs.changed == 'true'");
+    expect(step.if).toBe("needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'");
     expect(step['continue-on-error']).toBeUndefined();
     expect(step.run).toContain('node scripts/ci/native-test-shard.mjs --cargo');
     const directory = probeRoot;
