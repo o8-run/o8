@@ -81,6 +81,21 @@ impl Surface {
                 .command_wire
                 .as_ref()
                 .is_some_and(|(text, _)| *text == raw);
+            if !expanded
+                && let (Some(line), Some(window)) = (
+                    crate::composer::commands::shell_line(&raw),
+                    input.controls.slash.window,
+                )
+            {
+                let line = line.to_owned();
+                editor.update(cx, |i, cx| i.set_text("", cx));
+                cx.defer(move |cx| {
+                    let _ = window.update(cx, |_, window, cx| {
+                        crate::ui::run_shell_line(line, window, cx);
+                    });
+                });
+                return;
+            }
             if !expanded && crate::composer::commands::recognized(raw.as_str()) {
                 if self.saving || input.controls.busy || input.controls.slash.scheduled {
                     return;
