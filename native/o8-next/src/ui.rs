@@ -72,6 +72,9 @@ gpui::actions!(
 thread_local! {
     /// The link an OpenTranscriptLink dispatch opens; set just before dispatch.
     static PENDING_LINK: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// The `!` line a RunShellLine dispatch runs. Apart from links, so text
+    /// from a reply can never reach a shell.
+    static PENDING_SHELL_LINE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Asks the shell to open a transcript link.
@@ -82,8 +85,12 @@ pub(crate) fn open_link(url: &str, window: &mut Window, cx: &mut App) {
 
 /// Asks the shell to run a composer `!` line.
 pub(crate) fn run_shell_line(line: String, window: &mut Window, cx: &mut App) {
-    PENDING_LINK.with(|pending| *pending.borrow_mut() = Some(line));
+    PENDING_SHELL_LINE.with(|pending| *pending.borrow_mut() = Some(line));
     window.dispatch_action(Box::new(RunShellLine), cx);
+}
+
+pub(crate) fn take_pending_shell_line() -> Option<String> {
+    PENDING_SHELL_LINE.with(|pending| pending.borrow_mut().take())
 }
 
 pub(crate) fn take_pending_link() -> Option<String> {
