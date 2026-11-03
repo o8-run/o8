@@ -19,12 +19,14 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
   }
   const queue = await import('../../../src/app/api/orchestrator/composer-queue/route');
   const history = await import('../../../src/app/api/v2/chat-history/route');
+  const handoff = composer ? await import('../../../src/app/api/orchestrator/handoff/route') : undefined;
+  const steers: string[] = [];
   // Same injectable native admission boundary as the existing composer tests.
   if (composer) {
     const { getOrchestratorBackend } = await import('../../../src/lib/lane/orchestrator-backends/registry');
     Object.defineProperty(getOrchestratorBackend('pi'), 'liveSteer', { value:
-      async (_repo: string, _text: string, options: { beforeAdmit: () => void }) => {
-        options.beforeAdmit(); return { accepted: true };
+      async (_repo: string, text: string, options: { beforeAdmit: () => void }) => {
+        options.beforeAdmit(); steers.push(text); return { accepted: true };
       }, configurable: true });
   }
   let responseLost = false;
@@ -33,19 +35,22 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
       'GET /api/orchestrator/composer-queue': queue.GET,
       ...(composer ? { 'POST /api/orchestrator/composer-queue': queue.POST,
         'PATCH /api/orchestrator/composer-queue': queue.PATCH, 'DELETE /api/orchestrator/composer-queue': queue.DELETE,
-        'POST /api/v2/chat-history': history.POST } : {}),
+        'POST /api/v2/chat-history': history.POST,
+        'POST /api/orchestrator/handoff': handoff!.POST,
+        'GET /api/composer-steer-fixture': async () => Response.json(steers) } : {}),
     },
     // The repository is supplied by the owned host, never by an external account.
     admit: ({ route, body }) => {
       if (!body) return 200;
       try {
         const target = JSON.parse(body);
+        if (route === handoff?.POST) return seeds.some(seed => seed.id === target.threadId) ? 200 : 404;
         if (route === history.POST) {
           const owned = seeds.some(seed => seed.id === target.tabId && seed.id.startsWith('thoughts-composer-'))
             || /^thoughts-next-\d+$/.test(target.tabId);
           return owned && realpathSync(target.repoPath) === realpathSync(repo) ? 200 : 400;
         }
-        return target.threadId?.startsWith('thoughts-composer-') && realpathSync(target.repoPath) === realpathSync(repo) ? 200 : 400;
+        return (target.threadId?.startsWith('thoughts-composer-') || /^thoughts-next-\d+$/.test(target.threadId)) && realpathSync(target.repoPath) === realpathSync(repo) ? 200 : 400;
       } catch { return 400; }
     },
     after: async (input, response) => {

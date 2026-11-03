@@ -1,5 +1,6 @@
 //! Native menu presentation, shared by the composer controls.
 use super::*;
+use crate::composer::mention::{MentionResult, thread_matches};
 use gpui::{AnyElement, FontWeight, SharedString, StatefulInteractiveElement};
 impl Surface {
     pub(super) fn slash_menu(
@@ -96,7 +97,7 @@ impl Surface {
                 .into_any_element(),
         )
     }
-    /// The files matching the composer's `@` word, newest word wins.
+    /// Threads and files matching the composer's `@` word, newest word wins.
     pub(crate) fn search_mentions(&mut self, cx: &mut Context<Self>) {
         let editor = self.composer.clone();
         let Some(query) = editor.read(cx).controls.mention.query.clone() else {
@@ -107,6 +108,25 @@ impl Surface {
             .as_ref()
             .and_then(|id| self.sessions.iter().find(|s| s.id == *id))
             .and_then(|s| s.repo_path.clone());
+        let threads = thread_matches(
+            &self.sessions,
+            self.selected.as_deref().unwrap_or(""),
+            &query,
+        )
+        .into_iter()
+        .map(|s| MentionResult::Thread {
+            id: s.id,
+            title: s.title,
+            status: s.status,
+        })
+        .collect();
+        editor.update(cx, |i, cx| {
+            i.controls.mention.search = None;
+            i.controls.mention.results = threads;
+            i.controls.mention.index = 0;
+            cx.emit(crate::composer::commands::Changed(false));
+            cx.notify();
+        });
         let Some(repo) = repo else {
             return;
         };
@@ -133,8 +153,10 @@ impl Surface {
             let results = mention_files(&body.unwrap_or_default(), &query);
             let _ = editor.update(cx, |i, cx| {
                 if i.controls.mention.query.as_ref() == Some(&query) {
-                    i.controls.mention.results = results;
-                    i.controls.mention.index = 0;
+                    i.controls
+                        .mention
+                        .results
+                        .extend(results.into_iter().map(MentionResult::File));
                     cx.emit(crate::composer::commands::Changed(false));
                     cx.notify();
                 }
@@ -148,11 +170,11 @@ impl Surface {
         if editor.controls.open.is_some() {
             return None;
         }
-        let files = editor.mention_suggestions().to_vec();
-        if files.is_empty() {
+        let results = editor.mention_suggestions().to_vec();
+        if results.is_empty() {
             return None;
         }
-        let selected = editor.controls.mention.index.min(files.len() - 1);
+        let selected = editor.controls.mention.index.min(results.len() - 1);
         let scroll = editor.controls.mention.scroll.clone();
         let bounds = editor.controls.context.card_bounds?;
         let mut list = div()
@@ -163,9 +185,32 @@ impl Surface {
             .flex()
             .flex_col()
             .gap(px(2.));
-        for (index, path) in files.into_iter().enumerate() {
-            let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
-            let target = path.clone();
+        let mut previous = None;
+        for (index, target) in results.into_iter().enumerate() {
+            let group = target.group();
+            if previous != Some(group) {
+                let id = if group == "Threads" {
+                    "mention-group-threads"
+                } else {
+                    "mention-group-files"
+                };
+                list = list.child(
+                    div()
+                        .id(id)
+                        .debug_selector(move || id.into())
+                        .px(px(8.))
+                        .child(small(group)),
+                );
+                previous = Some(group);
+            }
+            let thread = matches!(&target, MentionResult::Thread { .. });
+            let (name, detail) = match &target {
+                MentionResult::File(path) => (
+                    path.rsplit('/').next().unwrap_or(path).to_owned(),
+                    path.clone(),
+                ),
+                MentionResult::Thread { title, status, .. } => (title.clone(), status.clone()),
+            };
             list = list.child(
                 div()
                     .id(SharedString::from(format!("mention-{index}")))
@@ -187,7 +232,8 @@ impl Surface {
                     }))
                     .child(
                         div()
-                            .flex_shrink_0()
+                            .when(!thread, |v| v.flex_shrink_0())
+                            .when(thread, |v| v.min_w_0().flex_1().truncate())
                             .text_size(px(12.5))
                             .font_weight(FontWeight(300.))
                             .child(crate::text::sanitize(&name)),
@@ -200,7 +246,7 @@ impl Surface {
                             .text_ellipsis()
                             .text_size(px(11.))
                             .text_color(theme().text_secondary)
-                            .child(crate::text::sanitize(&path)),
+                            .child(crate::text::sanitize(&detail)),
                     ),
             );
         }
@@ -208,7 +254,6 @@ impl Surface {
             "composer-mention-menu",
             (f32::from(bounds.size.width) - 16.).min(520.),
         )
-        .child(small("Files"))
         .child(list)
         .on_mouse_down_out(cx.listener(|s, _, _, cx| {
             s.composer.update(cx, |i, cx| i.dismiss_mention(cx));
