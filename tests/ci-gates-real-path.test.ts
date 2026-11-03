@@ -163,13 +163,13 @@ describe('required CI gates through workflow commands', () => {
   it('runs four independent shards and fails the stable aggregate on every non-success', () => {
     const shards = workflow.jobs['test-shards'];
     expect(shards.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } });
-    expect(workflow.jobs.test.needs).toEqual(['test-shards', 'o8-next-tests']);
+    expect(workflow.jobs.test.needs).toEqual(['test-shards', 'o8-next-tests', 'classification']);
     for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
       expect(condition(workflow.jobs.test.if, { event: {} }, { 'test-shards': { result } })).toBe(true);
       const step = workflow.jobs.test.steps[0];
       const run = spawnSync(step.run, {
         shell: true, encoding: 'utf8',
-        env: { ...process.env, SHARD_RESULT: result, NATIVE_RESULT: 'success' },
+        env: { ...process.env, SHARD_RESULT: result, NATIVE_RESULT: 'success', CLASSIFICATION_RESULT: 'success' },
       });
       expect(run.status).toBe(result === 'success' ? 0 : 1);
     }
@@ -386,7 +386,7 @@ fn persisted_state() {
     for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
       const run = spawnSync(step.run, {
         shell: true, encoding: 'utf8',
-        env: { ...process.env, SHARD_RESULT: 'success', NATIVE_RESULT: result },
+        env: { ...process.env, SHARD_RESULT: 'success', NATIVE_RESULT: result, CLASSIFICATION_RESULT: 'success' },
       });
       expect(run.status, `native result ${result} must reach the required gate`).toBe(result === 'success' ? 0 : 1);
     }
