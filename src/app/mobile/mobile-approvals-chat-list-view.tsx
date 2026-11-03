@@ -25,6 +25,7 @@ import {
 } from './mobile-shell-primitives';
 import { FilterPillRow, type FilterPillOption } from '@/components/mobile/shared/FilterPillRow';
 import { PullToRefresh } from '@/components/mobile/PullToRefresh';
+import { SwipeActions } from '@/components/mobile/SwipeActions';
 import { triggerHaptic } from '@/lib/mobile/haptic';
 
 type ChatFilter = 'all' | 'active' | 'idle' | 'errored';
@@ -202,6 +203,37 @@ export function ChatListView({
   const [renameValue, setRenameValue] = useState('');
   const [filter, setFilter] = useState<ChatFilter>('all');
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settling = useRef(new Set<string>());
+  const [settlingIds, setSettlingIds] = useState<ReadonlySet<string>>(new Set());
+  const [settleError, setSettleError] = useState<string | null>(null);
+  const [settleStatus, setSettleStatus] = useState('');
+
+  const handleSettle = useCallback(async (tabId: string) => {
+    if (settling.current.has(tabId)) return;
+    settling.current.add(tabId);
+    setSettlingIds(new Set(settling.current));
+    setSettleError(null);
+    setSettleStatus('Settling conversation...');
+    try {
+      const response = await fetch('/api/v2/chat-history', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tabId, inboxAction: 'settle' }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(typeof body?.error === 'string' ? body.error : 'Unable to settle conversation. Try again.');
+      }
+      setSettleStatus('Conversation settled.');
+      await onRefresh();
+    } catch (error) {
+      setSettleStatus('');
+      setSettleError(error instanceof Error ? error.message : 'Unable to settle conversation. Try again.');
+    } finally {
+      settling.current.delete(tabId);
+      setSettlingIds(new Set(settling.current));
+    }
+  }, [onRefresh]);
 
   const counts = useMemo(() => {
     const now = Date.now();
@@ -320,6 +352,15 @@ export function ChatListView({
         palette={palette}
         style={{ marginLeft: -16, marginRight: -16 }}
       />
+
+      {settleError ? (
+        <div role="alert" style={{ color: palette.danger, fontSize: 13, marginBottom: 8 }}>
+          {settleError}
+        </div>
+      ) : null}
+      <div role="status" style={{ color: palette.subduedText, fontSize: 13 }}>
+        {settleStatus}
+      </div>
 
       <div
         style={{
@@ -458,15 +499,31 @@ export function ChatListView({
               }
 
               return (
-                <button
+                <SwipeActions
                   key={conversation.tabId}
+                  palette={palette}
+                  onLeftSwipe={() => { void handleSettle(conversation.tabId); }}
+                  onRightSwipe={() => { void handleSettle(conversation.tabId); }}
+                  leftLabel="Settle"
+                  rightLabel="Settle"
+                  leftConfirmLabel="Confirm settle"
+                  rightConfirmLabel="Confirm settle"
+                  leftColor={palette.success}
+                  disabled={loading || settlingIds.has(conversation.tabId) || contextMenu !== null}
+                  confirmationPlacement="below"
+                  style={{ minWidth: 0, borderRadius: 0 }}
+                >
+                <button
                   type="button"
+                  disabled={settlingIds.has(conversation.tabId)}
+                  aria-busy={settlingIds.has(conversation.tabId)}
                   onClick={() => {
                     if (!contextMenu) onSelect(conversation.tabId);
                   }}
                   onMouseDown={(event) => handleLongPressStart(conversation.tabId, conversation.title, conversation.starred ?? false, event)}
                   onMouseUp={handleLongPressEnd}
                   onMouseLeave={handleLongPressEnd}
+                  onMouseMove={handleLongPressEnd}
                   onTouchStart={(event) => handleLongPressStart(conversation.tabId, conversation.title, conversation.starred ?? false, event)}
                   onTouchEnd={handleLongPressEnd}
                   onTouchMove={handleLongPressEnd}
@@ -487,7 +544,7 @@ export function ChatListView({
                     paddingRight: 14,
                     border: 'none',
                     borderBottom: `1px solid ${palette.cardBorder}`,
-                    background: 'transparent',
+                    background: palette.panelBackground,
                     textAlign: 'left',
                     cursor: 'pointer',
                     fontFamily: mobileFontFamily(),
@@ -496,6 +553,7 @@ export function ChatListView({
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
+                    opacity: settlingIds.has(conversation.tabId) ? 0.5 : 1,
                   }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -515,6 +573,7 @@ export function ChatListView({
                       </div>
                     </div>
                 </button>
+                </SwipeActions>
               );
                 })}
               </MobileThreadListRoot>

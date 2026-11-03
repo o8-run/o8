@@ -4553,6 +4553,14 @@
       ]
     },
     {
+      "path": "tests/mobile-chat-swipe-settle-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
       "path": "tests/mobile-e2ee-required-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -1,7 +1,7 @@
 'use client';
 
 import type { CSSProperties, ReactNode } from 'react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   useSwipeAction,
   mobileSwipeVibrate,
@@ -50,6 +50,8 @@ export interface SwipeActionsProps {
   palette: MobilePalette;
   /** Wrapper style (border-radius etc.). */
   style?: CSSProperties;
+  /** Expand below short rows instead of overlaying their content. */
+  confirmationPlacement?: 'overlay' | 'below';
 }
 
 interface ConfirmingState {
@@ -72,8 +74,10 @@ export function SwipeActions({
   disabled = false,
   palette,
   style,
+  confirmationPlacement = 'overlay',
 }: SwipeActionsProps) {
   const [confirming, setConfirming] = useState<ConfirmingState | null>(null);
+  const suppressClick = useRef(false);
 
   const handleCommit = useCallback((committedSide: SwipeSide) => {
     // Threshold-cross haptic already fired on the way out; this buzz is the
@@ -94,6 +98,10 @@ export function SwipeActions({
   });
   const swipeReset = swipe.reset;
 
+  useEffect(() => {
+    if (swipe.side) suppressClick.current = true;
+  }, [swipe.side]);
+
   const handleConfirm = useCallback(() => {
     if (!confirming) return;
     if (confirming.side === 'right') {
@@ -109,6 +117,7 @@ export function SwipeActions({
 
   const handleCancel = useCallback(() => {
     setConfirming(null);
+    suppressClick.current = false;
     swipeReset();
   }, [swipeReset]);
 
@@ -169,6 +178,18 @@ export function SwipeActions({
           confirming). */}
       <div
         {...swipe.handlers}
+        onPointerDown={(event) => {
+          suppressClick.current = false;
+          swipe.handlers.onPointerDown(event);
+        }}
+        onClickCapture={(event) => {
+          if (confirming || (suppressClick.current && event.detail !== 0)) {
+            event.preventDefault();
+            event.stopPropagation();
+            suppressClick.current = false;
+          }
+        }}
+        inert={confirming !== null}
         style={{
           position: 'relative',
           transform: `translate3d(${pinnedOffset}px, 0, 0)`,
@@ -190,14 +211,17 @@ export function SwipeActions({
           role="alertdialog"
           aria-label={confirming.side === 'right' ? rightConfirmLabel : leftConfirmLabel}
           style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 0,
+            position: confirmationPlacement === 'below' ? 'relative' : 'absolute',
+            left: confirmationPlacement === 'below' ? undefined : 0,
+            right: confirmationPlacement === 'below' ? undefined : 0,
+            bottom: confirmationPlacement === 'below' ? undefined : 0,
             display: 'grid',
             gridTemplateColumns: '1fr auto',
             gap: 8,
-            padding: 12,
+            paddingTop: 12,
+            paddingBottom: 12,
+            paddingLeft: 12,
+            paddingRight: 12,
             background: confirming.side === 'right' ? resolvedRightColor : resolvedLeftColor,
             borderTop: `1px solid ${palette.cardBorder}`,
           }}
