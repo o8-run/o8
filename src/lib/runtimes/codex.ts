@@ -281,7 +281,7 @@ export const codexRuntime: AgentRuntime = {
     // discovery is reserved for explicit fresh reads so shell boot cannot
     // stampede the host with CLI probes.
     const [discovered, owned] = await Promise.allSettled([
-      fresh ? getCodexDiscoveredFleetAdditions({ fresh: true }) : Promise.resolve({ agents: [] }),
+      fresh ? getCodexDiscoveredFleetAdditions({ fresh: true, includeHistorical: options.includeHistorical }) : Promise.resolve({ agents: [] }),
       getOwnedCodexFleetAdditions({ fresh }),
     ]);
 

@@ -3144,6 +3144,14 @@
       ]
     },
     {
+      "path": "tests/discovered-session-import-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/discovered-worker-effort-review-real-path.test.ts",
       "reasons": [
         "child-process",
