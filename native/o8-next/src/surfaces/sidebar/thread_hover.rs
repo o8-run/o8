@@ -159,8 +159,7 @@ impl ThreadList {
         if !id.contains(':') {
             return;
         }
-        let client = self.client.clone();
-        let key = id.clone();
+        let (client, key) = self.owner(&id);
         let task = cx
             .background_executor()
             .spawn(async move { client.worker_tail(&key) });
