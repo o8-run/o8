@@ -164,7 +164,7 @@ pub(crate) fn file_ref(text: &str) -> Option<(&str, Option<usize>)> {
 pub fn inline(text: &str) -> Vec<Run> {
     static INLINE: LazyLock<Regex> = LazyLock::new(|| {
         re(
-            r"(!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`([^`]+)`|\[(\d{1,2})\]|https://github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/(\d+)|\B#(\d{3,})\b)",
+            r#"(!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`([^`]+)`|\[(\d{1,2})\]|https://github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/(\d+)|\B#(\d{3,})\b|(https?://[^\s<>()\[\]`'"*]*[^\s<>()\[\]`'"*.,;:!?]))"#,
         )
     });
     let mut runs = Vec::new();
@@ -187,7 +187,7 @@ pub fn inline(text: &str) -> Vec<Run> {
             (link.as_str(), &c[4])
         } else if let Some(number) = &number {
             (link.as_str(), number.as_str())
-        } else if c.get(12).is_some() {
+        } else if c.get(12).is_some() || c.get(13).is_some() {
             (link.as_str(), m.as_str())
         } else if c.get(6).is_some() {
             // Links and issue numbers keep working inside bold text.
@@ -422,6 +422,27 @@ mod link_tests {
         assert_eq!(links("**#2952 and #5095**").len(), 2);
         let runs = inline("**#2952 and #5095**");
         assert_eq!(runs[1].style, "strong");
+    }
+    #[test]
+    fn bare_web_addresses_read_as_links() {
+        assert_eq!(
+            links("see https://example.com/a/b?c=1. Then http://x.dev, too"),
+            [
+                (
+                    "link:https://example.com/a/b?c=1".to_owned(),
+                    "https://example.com/a/b?c=1".to_owned()
+                ),
+                ("link:http://x.dev".to_owned(), "http://x.dev".to_owned())
+            ]
+        );
+        assert_eq!(
+            links("**at https://example.com**"),
+            [(
+                "link:https://example.com".to_owned(),
+                "https://example.com".to_owned()
+            )]
+        );
+        assert!(links("`https://example.com` and https:// alone").is_empty());
     }
     #[test]
     fn short_numbers_and_anchors_stay_plain() {

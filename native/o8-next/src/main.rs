@@ -53,6 +53,7 @@ mod trace;
 mod subagents;
 mod transcript_actions;
 mod transcript_diagram;
+mod transcript_peek;
 mod transport;
 mod ui;
 mod visualizations;

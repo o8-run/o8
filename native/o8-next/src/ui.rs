@@ -155,6 +155,7 @@ pub(crate) struct Surface {
     bound_session: Option<String>,
     rows: Rc<Vec<Rc<RefCell<RowState>>>>,
     images: images::Cache,
+    peeks: crate::transcript_peek::Peeks,
     transcript: Option<Transcript>,
     saved_visualizations: transcript_visualizations::Saved,
     subscription: Option<Subscription>,
@@ -216,6 +217,8 @@ impl Surface {
             }
         })
         .detach();
+        let peeks = crate::transcript_peek::Peeks::default();
+        peeks.connect(client.clone());
         Self {
             client,
             embedded: false,
@@ -237,6 +240,7 @@ impl Surface {
             bound_session: None,
             rows: Rc::new(vec![]),
             images: Default::default(),
+            peeks,
             transcript: None,
             saved_visualizations: Default::default(),
             subscription: None,
@@ -552,6 +556,7 @@ impl Surface {
                     .unwrap_or_default();
                 let mut state = RowState::new(row);
                 state.images = self.images.clone();
+                state.peeks = Some(self.peeks.clone());
                 state.cards = cards;
                 state.attach_visualizations(&self.client);
                 if let Some(previous) = indexed.get(state.row.id()).and_then(|c| c.first()) {

@@ -91,6 +91,7 @@ pub struct Pane {
     /// The session's repository, so a file reference's hover names the file
     /// it opens, as in the main chat.
     file_root: Option<gpui::SharedString>,
+    peeks: crate::transcript_peek::Peeks,
 }
 impl Pane {
     pub fn new(key: Option<String>) -> Self {
@@ -114,6 +115,7 @@ impl Pane {
             terminal_session: None,
             terminal: None,
             file_root: None,
+            peeks: Default::default(),
         }
     }
     pub fn metadata(&mut self, session: &Session) {
@@ -136,6 +138,7 @@ impl Pane {
     }
     pub fn install(&mut self, history: History, client: Client) {
         self.client = Some(client.clone());
+        self.peeks.connect(client.clone());
         let key = history.session_key.clone();
         self.transcript = Some(Transcript::new(history));
         self.sync_rows();
@@ -220,6 +223,7 @@ impl Pane {
                         let mut state = RowState::new(row.clone());
                         state.images = self.images.clone();
                         state.file_root = self.file_root.clone();
+                        state.peeks = Some(self.peeks.clone());
                         if let Some(previous) = old
                             .iter()
                             .find(|previous| previous.borrow().row.id() == row.id())
