@@ -1,6 +1,69 @@
 //! Selection transitions and untrusted titles through the real sidebar surface.
 use super::*;
 
+#[cfg(target_os = "linux")]
+#[gpui::test]
+fn repeat_launch_activation_reaches_main_window_from_global_stream(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--sidebar");
+    let file = fixture.root.join("activate.json");
+    let (shell, mut cx) = open(fixture.client.clone(), file.clone(), State::default(), cx);
+    ready(&shell, &mut cx);
+    let handle = cx.update(|window, _| window.window_handle());
+    cx.update(|window, _| window.activate_window());
+    cx.deactivate_window();
+    let windows = cx.update(|_, cx| cx.windows().len());
+    assert!(cx.update(|_, cx| cx.active_window().is_none()));
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    sidebar(&shell, &cx).update(&mut cx, |s, _| s.subscription.receiver = receiver);
+    let frame = |id: &str, state: &std::path::Path, created: u64| {
+        Incoming::Frame(
+            json!({"channel":"realtime","event":"batch","data":{"events":[{
+                "stream":"global","channel":"mutation","event":"mutation.settled",
+                "data":{"mutation":{"mutationId":id,"source":"desktop",
+                    "action":"main-window.activate","status":"completed",
+                    "surfaceId":state,"createdAt":created.to_string()}}
+            }]}}),
+        )
+    };
+    // Other profiles and delayed/replayed launch requests must not steal focus.
+    sender
+        .send(frame(
+            "other",
+            &fixture.root.join("other.json"),
+            crate::clock::now(),
+        ))
+        .unwrap();
+    sender
+        .send(frame("stale", &file, crate::clock::now() - 60))
+        .unwrap();
+    sidebar(&shell, &cx).update(&mut cx, |s, cx| s.tick(cx));
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| cx.active_window().is_none()));
+
+    sender
+        .send(frame("repeat", &file, crate::clock::now()))
+        .unwrap();
+    sidebar(&shell, &cx).update(&mut cx, |s, cx| s.tick(cx));
+    cx.run_until_parked();
+    assert!(
+        cx.update(|_, cx| cx.active_window()) == Some(handle),
+        "the global activation message must focus the existing main window"
+    );
+    assert_eq!(cx.update(|_, cx| cx.windows().len()), windows);
+
+    cx.deactivate_window();
+    sender
+        .send(frame("repeat", &file, crate::clock::now()))
+        .unwrap();
+    sidebar(&shell, &cx).update(&mut cx, |s, cx| s.tick(cx));
+    cx.run_until_parked();
+    assert!(
+        cx.update(|_, cx| cx.active_window().is_none()),
+        "duplicate delivery must not activate again"
+    );
+}
+
 fn create(fixture: &Fixture, id: &str, title: &str, archived: bool, timestamp: u64) {
     let record: Value = fixture
         .client
