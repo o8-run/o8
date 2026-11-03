@@ -56,8 +56,9 @@ enum File {
     None,
     Loading,
     Loaded {
-        lines: Vec<SharedString>,
+        lines: std::rc::Rc<Vec<SharedString>>,
         truncated: bool,
+        large: source::Large,
         markdown: std::rc::Rc<std::cell::RefCell<crate::retained::RowState>>,
         source: source::Source,
         image: Option<media::Preview>,
@@ -404,29 +405,13 @@ impl FilesPanel {
                         if content.contains('\0') {
                             File::Failed("This binary file has no text preview.".into())
                         } else {
-                            File::Loaded {
+                            this.loaded_file(
+                                content,
+                                body["truncated"] == true,
+                                body["mtimeMs"].as_f64(),
                                 image,
-                                buffer: {
-                                    let mut buffer =
-                                        edit::Buffer::new(content, body["mtimeMs"].as_f64(), cx);
-                                    buffer.editing = body["truncated"] != true
-                                        && this.editing_path == this.selected;
-                                    buffer
-                                },
-                                source: source::Source::new(content.split('\n').count(), cx),
-                                lines: content
-                                    .split('\n')
-                                    .map(|line| SharedString::from(line.replace('\t', "  ")))
-                                    .collect(),
-                                truncated: body["truncated"] == true,
-                                markdown: viewer::markdown(
-                                    if this.selected.as_deref().is_some_and(viewer::is_markdown) {
-                                        content
-                                    } else {
-                                        ""
-                                    },
-                                ),
-                            }
+                                cx,
+                            )
                         }
                     }
                     Ok((body, _)) => {
@@ -506,7 +491,7 @@ impl FilesPanel {
                     .child(crate::icon::stroke(file_icon(&title), file_color(&title), 14., 1.6))
                     .child(viewer::file_heading(&title, cx))
                     .when(previewable, |bar| bar.child(self.preview_toggle(cx)))
-                    .when(self.mode==Mode::Files && matches!(self.file, File::Loaded {truncated:false,..}),|bar|bar.child(self.edit_toggle(cx)))
+                    .when(self.mode==Mode::Files && matches!(self.file, File::Loaded {truncated:false,large,..} if large != source::Large::ReadOnly),|bar|bar.child(self.edit_toggle(cx)))
                     .when(!preview && matches!(&self.file, File::Loaded {truncated:false,buffer,..} if !buffer.editing), |bar| bar.child(self.wrap_toggle(cx)))
                     .child(self.privacy_toggle(cx))
                     .when(self.mode == Mode::Files, |bar| {
@@ -554,6 +539,11 @@ impl FilesPanel {
                 view.child(div().debug_selector(||"files-truncated".into()).px(px(12.)).py(px(8.)).text_size(px(11.))
                     .text_color(theme().text_muted)
                     .child("Read-only preview · first 1 MB. Use an editor to change the full file."))
+            })
+            .when_some(match &self.file {File::Loaded {truncated:false,large,..}=>large.banner(),_=>None}, |view, banner| {
+                view.child(div().debug_selector(||"files-large".into()).px(px(12.)).py(px(8.)).text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child(banner))
             })
             .when_some(match &self.file {File::Failed(error)=>Some(error.clone()),_=>None},|d,error|d.child(div().min_h(px(34.)).flex_shrink_0().px(px(12.)).py(px(8.)).text_size(px(11.)).text_color(theme().danger).border_b_1().border_color(theme().border).child(error)))
             .child(self.edit_status(cx))

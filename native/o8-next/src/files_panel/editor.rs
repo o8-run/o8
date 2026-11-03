@@ -10,6 +10,8 @@ pub(super) mod assets;
 mod context_menu;
 #[path = "editor_events.rs"]
 mod events;
+#[path = "editor_lines.rs"]
+pub(super) mod lines;
 #[path = "notes_editor.rs"]
 mod notes_view;
 #[path = "notes_rail.rs"]
@@ -19,11 +21,38 @@ mod rich_layout;
 #[path = "editor_view.rs"]
 mod view;
 
+/// One undo step: the edits made since it was taken, as the `removed` bytes
+/// that now span `start..start + inserted`. A step never copies the document.
 #[derive(Clone)]
 struct Snapshot {
-    text: String,
+    start: usize,
+    removed: String,
+    inserted: usize,
+    touched: bool,
     selection: Range<usize>,
     anchor: usize,
+}
+impl Snapshot {
+    /// Folds an edit of `text` (before it is applied) into this step.
+    fn absorb(&mut self, text: &str, range: &Range<usize>, inserted: usize) {
+        if !self.touched {
+            self.touched = true;
+            self.start = range.start;
+            self.removed = text[range.clone()].to_owned();
+            self.inserted = inserted;
+            return;
+        }
+        let end = self.start + self.inserted;
+        let start = self.start.min(range.start);
+        let stop = end.max(range.end);
+        let mut removed = String::with_capacity(self.removed.len() + stop - start);
+        removed.push_str(&text[start..self.start]);
+        removed.push_str(&self.removed);
+        removed.push_str(&text[end..stop]);
+        self.removed = removed;
+        self.inserted = stop - start - range.len() + inserted;
+        self.start = start;
+    }
 }
 struct EditorLine {
     start: usize,
@@ -82,6 +111,12 @@ pub struct Editor {
     pub(super) assets: assets::Assets,
     pub context: &'static str,
     pub text: String,
+    lines: lines::Lines,
+    /// Counts text changes; selection-only changes leave it alone.
+    pub(super) edits: u64,
+    width: Option<Pixels>,
+    width_dirty: Option<Range<usize>>,
+    canvas_top: Pixels,
     selection: Range<usize>,
     anchor: usize,
     marked: Option<Range<usize>>,
@@ -106,6 +141,11 @@ impl Editor {
             assets: assets::Assets::default(),
             note_color: crate::theme::brand_orange(),
             text: text.to_owned(),
+            lines: lines::Lines::new(text),
+            edits: 0,
+            width: None,
+            width_dirty: None,
+            canvas_top: px(0.),
             selection: 0..0,
             anchor: 0,
             marked: None,
@@ -126,28 +166,78 @@ impl Editor {
         self.selection = 0..self.text.len();
         self.changed(cx);
     }
+    #[cfg(test)]
+    pub(in crate::files_panel) fn place_cursor(&mut self, byte: usize, cx: &mut Context<Self>) {
+        self.typing = None;
+        self.anchor = byte;
+        self.selection = byte..byte;
+        self.changed(cx);
+    }
+    #[cfg(test)]
+    pub(in crate::files_panel) fn scroll_to_y(&self, y: Pixels) {
+        self.scroll.set_offset(point(px(0.), -y));
+    }
     pub fn composing(&self) -> bool {
         self.marked.is_some()
     }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
-            text: self.text.clone(),
+            start: 0,
+            removed: String::new(),
+            inserted: 0,
+            touched: false,
             selection: self.selection.clone(),
             anchor: self.anchor,
         }
     }
-    fn restore(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
-        self.text = snapshot.text;
+    /// Applies an undo or redo step and returns the step that reverses it.
+    fn restore(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) -> Snapshot {
+        let mut inverse = Snapshot {
+            start: snapshot.start,
+            removed: String::new(),
+            inserted: snapshot.removed.len(),
+            touched: snapshot.touched,
+            selection: self.selection.clone(),
+            anchor: self.anchor,
+        };
+        if snapshot.touched {
+            let range = snapshot.start..snapshot.start + snapshot.inserted;
+            inverse.removed = self.text[range.clone()].to_owned();
+            self.splice(range, &snapshot.removed);
+        }
         self.selection = snapshot.selection;
         self.anchor = snapshot.anchor;
         self.marked = None;
         self.composition = None;
         self.typing = None;
         self.changed(cx);
+        inverse
+    }
+    /// Replaces document bytes and keeps the line index and width current.
+    fn splice(&mut self, range: Range<usize>, text: &str) {
+        let removed16 = lines::units(&self.text[range.clone()]);
+        self.text.replace_range(range.clone(), text);
+        self.lines.edit(&self.text, range.clone(), text, removed16);
+        self.edits += 1;
+        // A second unmeasured edit may have moved the first; measure afresh.
+        self.width_dirty = match self.width_dirty.take() {
+            None if self.width.is_some() => Some(range.start..range.start + text.len()),
+            _ => {
+                self.width = None;
+                None
+            }
+        };
+    }
+    fn reindex(&mut self) {
+        self.lines = lines::Lines::new(&self.text);
+        self.edits += 1;
+        self.width = None;
+        self.width_dirty = None;
     }
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         self.typing = None;
         self.text.clear();
+        self.reindex();
         self.selection = 0..0;
         self.anchor = 0;
         self.undo.clear();
@@ -158,23 +248,28 @@ impl Editor {
     }
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
         self.typing = None;
-        self.undo.push(self.snapshot());
-        self.redo.clear();
-        self.text = text.to_owned();
-        self.selection = self.text.len()..self.text.len();
-        self.anchor = self.text.len();
+        if let Some(composition) = self.composition.take() {
+            self.undo.push(composition);
+        }
         self.marked = None;
-        self.composition = None;
+        self.undo.push(self.snapshot());
+        let all = 0..self.text.len();
+        self.replace(all, text);
         self.changed(cx);
     }
     /// Initial document load is not an operator edit and has no undo entry.
     pub(super) fn initial_text(&mut self, text: &str, cx: &mut Context<Self>) {
-        self.set_text(text, cx);
+        self.typing = None;
         self.undo.clear();
         self.redo.clear();
+        self.marked = None;
+        self.composition = None;
+        self.text = text.to_owned();
+        self.reindex();
         self.selection = 0..0;
         self.anchor = 0;
         self.layout.clear();
+        self.changed(cx);
     }
     fn changed(&mut self, cx: &mut Context<Self>) {
         self.revision += 1;
@@ -192,13 +287,19 @@ impl Editor {
         text.len()
     }
     fn utf16(&self, bytes: usize) -> usize {
-        self.text[..bytes].encode_utf16().count()
+        self.lines.to_utf16(&self.text, bytes)
     }
     fn range(&self, range: Range<usize>) -> Range<usize> {
-        Self::byte(&self.text, range.start)..Self::byte(&self.text, range.end.max(range.start))
+        self.lines.to_byte(&self.text, range.start)
+            ..self.lines.to_byte(&self.text, range.end.max(range.start))
     }
+    /// An operator edit: it joins the open composition, else the latest undo step.
     fn replace(&mut self, range: Range<usize>, text: &str) {
-        self.text.replace_range(range.clone(), text);
+        if let Some(step) = self.composition.as_mut().or(self.undo.last_mut()) {
+            step.absorb(&self.text, &range, text.len());
+        }
+        self.redo.clear();
+        self.splice(range.clone(), text);
         let cursor = range.start + text.len();
         self.selection = cursor..cursor;
         self.anchor = cursor;
@@ -287,6 +388,9 @@ impl Editor {
         index
     }
     fn index_at(&self, point: Point<Pixels>) -> usize {
+        if !self.notes {
+            return self.code_index_at(point);
+        }
         for row in &self.layout {
             if point.y
                 < row.origin.y
@@ -307,6 +411,44 @@ impl Editor {
             }
         }
         self.text.len()
+    }
+    /// Code rows are a fixed height, so the line comes from y alone; only the
+    /// painted lines are shaped, and a line outside them resolves to its start
+    /// (above the painted lines) or its end (below them).
+    fn code_index_at(&self, point: Point<Pixels>) -> usize {
+        let row = f32::from(point.y - self.canvas_top) / f32::from(view::ROW);
+        if row >= self.lines.len() as f32 {
+            return self.text.len();
+        }
+        let line = row.max(0.) as usize;
+        let range = self.lines.range(line, self.text.len());
+        if let Some(row) = self.layout.iter().find(|row| row.start == range.start) {
+            let index = row
+                .line
+                .closest_index_for_position(point - row.origin, row.line_height)
+                .unwrap_or_else(|i| i);
+            return (row.start + row.raw_index(index)).min(self.text.len());
+        }
+        if self
+            .layout
+            .first()
+            .is_some_and(|row| row.start > range.start)
+        {
+            range.start
+        } else {
+            range.end
+        }
+    }
+    /// The word (or separator) around a byte, searched within its line only.
+    fn word_at(&self, cursor: usize) -> Option<Range<usize>> {
+        let line = self
+            .lines
+            .range(self.lines.line_of(cursor), self.text.len());
+        let end = (line.end + 1).min(self.text.len());
+        self.text[line.start..end]
+            .split_word_bound_indices()
+            .map(|(i, word)| line.start + i..line.start + i + word.len())
+            .find(|word| word.start <= cursor && cursor < word.end)
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_key(&event.keystroke, window, cx);
@@ -380,13 +522,12 @@ impl Editor {
                     self.undo.pop()
                 };
                 if let Some(snapshot) = snapshot {
-                    let current = self.snapshot();
+                    let inverse = self.restore(snapshot, cx);
                     if redo {
-                        self.undo.push(current);
+                        self.undo.push(inverse);
                     } else {
-                        self.redo.push(current);
+                        self.redo.push(inverse);
                     }
-                    self.restore(snapshot, cx);
                 }
             }
             "left" => self.move_to(
