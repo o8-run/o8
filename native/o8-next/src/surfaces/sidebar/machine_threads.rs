@@ -83,15 +83,28 @@ pub(super) fn read(client: &Client, links: &Links) -> Reading {
     reading
 }
 
+/// A machine's threads and its workers, one row each: a worker that a thread
+/// already stands for isn't listed twice.
+fn with_workers(mut list: Vec<Session>, workers: Vec<Session>) -> Vec<Session> {
+    let fresh: Vec<_> = workers
+        .into_iter()
+        .filter(|worker| !list.iter().any(|thread| thread.key() == worker.id))
+        .collect();
+    list.extend(fresh);
+    list
+}
+
 fn answer(machine: Machine) -> ((String, Option<String>), Option<Vec<Session>>) {
     let offline = format!("{} · offline", machine.label);
     match machine.reach {
         Reach::Online(remote) => {
+            let workers = remote.sidebar_workers().unwrap_or_default();
             let list = remote
                 .sidebar_sessions_with_branches()
                 .ok()
                 .map(|(list, _)| {
-                    list.into_iter()
+                    with_workers(list, workers)
+                        .into_iter()
                         .filter(|session| !reserved_thread_id(&session.id))
                         .map(|mut session| {
                             session.id = machine_thread_id(&machine.id, &session.id);
@@ -112,6 +125,17 @@ fn answer(machine: Machine) -> ((String, Option<String>), Option<Vec<Session>>) 
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_machines_worker_is_listed_once() {
+        let row = |id: &str| -> Session {
+            serde_json::from_value(json!({"id":id,"title":"t","status":"idle"})).unwrap()
+        };
+        let list = with_workers(vec![row("a")], vec![row("codex:7")]);
+        assert_eq!(list.len(), 2);
+        let id = machine_thread_id("box", &list[1].id);
+        assert_eq!(owner(&id, true, true), Owner::Machine("box", "codex:7"));
+    }
 
     #[test]
     fn the_same_thread_id_on_two_computers_stays_two_threads() {
