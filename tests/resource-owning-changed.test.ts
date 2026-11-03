@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseNameStatus, selectResourceOwning } from '../scripts/ci/resource-owning-changed.mjs';
+import { WORKFLOW_MIRROR_TESTS, parseNameStatus, selectResourceOwning } from '../scripts/ci/resource-owning-changed.mjs';
 
 const classification = {
   resourceOwning: [
@@ -41,5 +41,20 @@ describe('resource-owning-changed', () => {
     expect(selectResourceOwning(parseNameStatus(output), classification)).toEqual([
       'src/lib/lane/merge-lock.test.ts',
     ]);
+  });
+
+  it('runs the workflow mirror tests whenever ci.yml or a composite action changes', () => {
+    // The mirror tests pin the workflow's shape; a workflow edit must run them
+    // even when the tests themselves are untouched (#5443: two stale assertions
+    // landed on main because nothing selected the file).
+    expect(WORKFLOW_MIRROR_TESTS).toEqual(['tests/ci-gates-real-path.test.ts', 'tests/verify-ci-real-path.test.ts']);
+    const manifest = { resourceOwning: [...classification.resourceOwning, ...WORKFLOW_MIRROR_TESTS.map((path) => ({ path }))] };
+    for (const changed of ['.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml']) {
+      expect(selectResourceOwning(parseNameStatus(nameStatus(['M', changed])), manifest)).toEqual(WORKFLOW_MIRROR_TESTS);
+    }
+    // Only tests the manifest classifies as resource-owning are selected.
+    expect(selectResourceOwning(parseNameStatus(nameStatus(['M', '.github/workflows/ci.yml'])), classification)).toEqual([]);
+    // Other workflows and ordinary sources do not pull the mirror tests in.
+    expect(selectResourceOwning(parseNameStatus(nameStatus(['M', '.github/workflows/next-parity.yml'], ['M', 'src/lib/lane/merge.ts'])), manifest)).toEqual([]);
   });
 });
