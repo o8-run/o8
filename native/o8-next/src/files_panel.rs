@@ -106,6 +106,7 @@ pub struct FilesPanel {
     tree_focus: FocusHandle,
     tree_cursor: Option<String>,
     tree_scroll: gpui::UniformListScrollHandle,
+    pending_line: Option<usize>,
     reveal: Option<String>,
     tree_type: String,
     tree_type_at: std::time::Instant,
@@ -187,6 +188,7 @@ impl FilesPanel {
             tree_focus: cx.focus_handle(),
             tree_cursor: None,
             tree_scroll: gpui::UniformListScrollHandle::new(),
+            pending_line: None,
             reveal: None,
             tree_type: String::new(),
             tree_type_at: std::time::Instant::now(),
@@ -231,6 +233,22 @@ impl FilesPanel {
 
     fn open_file(&mut self, path: String, cx: &mut Context<Self>) {
         self.open_file_inner(path, false, cx);
+    }
+    /// Opens a file by the path a reply gave it, at that line if it gave one.
+    pub fn open_at(&mut self, path: String, line: Option<usize>, cx: &mut Context<Self>) {
+        let prefix = format!("{}/", self.workspace.trim_end_matches('/'));
+        let path = path.strip_prefix(&prefix).map_or(path.clone(), str::to_owned);
+        self.pending_line = line;
+        self.open_file(path, cx);
+        self.show_pending_line();
+    }
+    /// The line waits here until the file it belongs to has loaded.
+    fn show_pending_line(&mut self) {
+        if let File::Loaded { source, .. } = &self.file
+            && let Some(line) = self.pending_line.take()
+        {
+            source.reveal_line(line);
+        }
     }
     fn open_file_inner(&mut self, path: String, reload: bool, cx: &mut Context<Self>) {
         self.reveal = search::repo_relative(&self.workspace, &path).map(str::to_owned);
@@ -379,6 +397,7 @@ impl FilesPanel {
                     }
                     Err(error) => File::Failed(error),
                 };
+                this.show_pending_line();
                 this.watch_editor(cx);
                 cx.notify();
             });
