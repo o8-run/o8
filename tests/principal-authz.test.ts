@@ -462,9 +462,10 @@ describe('principal-authz — approvals resolve (CRIT-1: a worker cannot self-ap
     expect(getApproval(approval.id)?.status).toBe('approved');
   });
 
-  it('unauthenticated REMOTE → denied at the middleware entry point (401)', () => {
+  it('unauthenticated REMOTE → refused at the middleware Host gate (421, #4814)', () => {
     // /api/panel/approvals has no in-handler auth; the middleware IS its gate.
-    expect(panelGateMiddleware(lanReq(url)).status).toBe(401);
+    // A non-loopback Host is refused at the Host gate (421) before the auth path.
+    expect(panelGateMiddleware(lanReq(url)).status).toBe(421);
   });
 });
 
@@ -490,9 +491,9 @@ describe('principal-authz — recurring problem dossiers are worker-readable onl
     expect((await problemDossiers.POST(request)).status).toBe(403);
   });
 
-  it('unauthenticated REMOTE GET stays denied at both authorization layers', async () => {
+  it('unauthenticated REMOTE GET stays denied at both layers (Host gate 421, in-handler 401)', async () => {
     const request = lanReq(url, 'GET');
-    expect(panelGateMiddleware(request).status).toBe(401);
+    expect(panelGateMiddleware(request).status).toBe(421);
     expect((await problemDossiers.GET(request)).status).toBe(401);
   });
 });
@@ -866,8 +867,8 @@ describe('principal-authz — fail-closed: unknown/absent principal is denied on
     'http://192.168.1.50:3001/api/panel/file-io',
   ];
 
-  it.each(mutating)('LAN POST with no credential is 401 at the gate: %s', (url) => {
-    expect(panelGateMiddleware(lanReq(url)).status).toBe(401);
+  it.each(mutating)('LAN POST with no credential is refused at the Host gate (421): %s', (url) => {
+    expect(panelGateMiddleware(lanReq(url)).status).toBe(421);
   });
 });
 
