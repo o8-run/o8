@@ -105,6 +105,9 @@ pub(super) fn header(kind: &str, title: &str, status: &str) -> Row {
         marker: "",
         folder: None,
         machine: None,
+        depth: 0,
+        child_count: 0,
+        children_open: false,
     }
 }
 pub(super) fn thread_row(s: &Session, now: u64, branches: &HashSet<String>) -> Row {
@@ -126,6 +129,9 @@ pub(super) fn thread_row(s: &Session, now: u64, branches: &HashSet<String>) -> R
         marker: "",
         folder: None,
         machine: s.away().map(str::to_owned),
+        depth: 0,
+        child_count: 0,
+        children_open: false,
     }
 }
 /// A titled group of threads, at most `cap` until disclosed or searched.
