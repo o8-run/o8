@@ -18,11 +18,22 @@ export async function assertOwnedSessionPath(root: string, target: string, optio
   const scope = [active, archive].find(value => absolute === value || absolute.startsWith(`${value}${path.sep}`));
   if (!scope) refuseOwnedSessionPath('session directory is outside its owned root');
   const parent = path.dirname(active);
-  const parentStat = await lstat(parent);
-  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) refuseOwnedSessionPath('owned namespace parent is redirected or invalid');
-  const canonicalParent = await realpath(parent);
+  // The data directory itself may be a symlink (e.g. ~/.o8 relocated to another
+  // disk and linked back), which makes this namespace parent a symlink. Resolve
+  // it to its canonical real directory ONCE and anchor on that fixed point; every
+  // descendant below is validated against the canonical path, so symlinks INSIDE
+  // the namespace stay refused (the loop and final recheck are unchanged).
+  let canonicalParent: string;
+  let parentStat: Stats;
+  try {
+    canonicalParent = await realpath(parent);
+    parentStat = await lstat(canonicalParent);
+  } catch {
+    refuseOwnedSessionPath('owned namespace parent is redirected or invalid');
+  }
+  if (!parentStat.isDirectory()) refuseOwnedSessionPath('owned namespace parent is redirected or invalid');
   const parts = [path.basename(scope), ...path.relative(scope, absolute).split(path.sep).filter(Boolean)];
-  let named = parent; let canonical = canonicalParent;
+  let named = canonicalParent; let canonical = canonicalParent;
   let result: Stats | null = null;
   for (let index = 0; index < parts.length; index++) {
     named = path.join(named, parts[index]); canonical = path.join(canonical, parts[index]);
@@ -44,8 +55,8 @@ export async function assertOwnedSessionPath(root: string, target: string, optio
     const after = await lstat(named);
     if (after.isSymbolicLink() || after.dev !== result.dev || after.ino !== result.ino) refuseOwnedSessionPath(`${label} changed during validation`);
   }
-  const afterParent = await lstat(parent);
-  if (afterParent.isSymbolicLink() || afterParent.dev !== parentStat.dev || afterParent.ino !== parentStat.ino
+  const afterParent = await lstat(canonicalParent);
+  if (afterParent.dev !== parentStat.dev || afterParent.ino !== parentStat.ino
     || await realpath(parent) !== canonicalParent) refuseOwnedSessionPath('owned namespace parent changed during validation');
   if (options.identity && (result?.dev !== options.identity.dev || result?.ino !== options.identity.ino)) {
     refuseOwnedSessionPath('session directory changed before mutation');
