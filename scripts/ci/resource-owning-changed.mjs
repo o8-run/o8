@@ -35,10 +35,22 @@ export function parseNameStatus(output) {
   return paths.filter((path) => typeof path === 'string' && path.length > 0);
 }
 
+/**
+ * The workflow mirror tests pin the shape of ci.yml and its composite actions.
+ * A workflow change must run them even when the tests themselves are untouched;
+ * otherwise their assertions rot on main until the next PR that edits the test.
+ */
+export const WORKFLOW_MIRROR_TESTS = ['tests/ci-gates-real-path.test.ts', 'tests/verify-ci-real-path.test.ts'];
+const WORKFLOW_INPUT = /^\.github\/(?:workflows\/ci\.yml|actions\/)/;
+
 /** Intersects changed paths with the manifest's resourceOwning list. */
 export function selectResourceOwning(changedPaths, classification) {
   const owning = new Set((classification.resourceOwning ?? []).map((entry) => entry.path));
-  return [...new Set(changedPaths)].filter((path) => owning.has(path)).sort();
+  const changed = new Set(changedPaths);
+  if ([...changed].some((path) => WORKFLOW_INPUT.test(path))) {
+    for (const test of WORKFLOW_MIRROR_TESTS) changed.add(test);
+  }
+  return [...changed].filter((path) => owning.has(path)).sort();
 }
 
 function runGit(args) {

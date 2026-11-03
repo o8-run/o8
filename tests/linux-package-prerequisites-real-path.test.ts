@@ -181,5 +181,5 @@ it('pins archive cache actions and saves only the reviewed main-branch cache', (
   const workflow = parse(readFileSync(path.join(source, '.github/workflows/ci.yml'), 'utf8'));
   const rust = workflow.jobs['rust-check-linux'].steps.find((step: { uses?: string }) => step.uses === './.github/actions/linux-package-prerequisites');
   expect(rust.with).toEqual({ group: 'rust' });
-  expect(rust.if).toBe("steps.native.outputs.changed == 'true'");
+  expect(rust.if).toBe("needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'");
 });

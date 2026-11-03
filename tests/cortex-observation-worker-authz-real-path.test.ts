@@ -124,12 +124,18 @@ describe('packet worker Cortex observation authorization through the real route'
     expect(proposals.readObservationProposals()).not.toContainEqual(expect.objectContaining({ id: proposal.id }));
   });
 
-  it('keeps unauthenticated remote mutation denied at the global gate', () => {
+  it('refuses an unauthenticated non-loopback-Host mutation at the Host gate (421, #4814)', () => {
     const remote = new NextRequest('http://192.0.2.20:3001/api/cortex/proposals', {
       method: 'POST',
       headers: { host: '192.0.2.20:3001', 'content-type': 'application/json' },
       body: JSON.stringify(observation()),
     });
-    expect(panelGateMiddleware(remote).status).toBe(401);
+    // A non-loopback Host is refused at the middleware Host gate before auth.
+    expect(panelGateMiddleware(remote).status).toBe(421);
+  });
+
+  it('keeps an unauthenticated loopback mutation denied at the auth gate (401)', () => {
+    // Allowed Host, no principal: refused at the bearer gate, not the Host gate.
+    expect(panelGateMiddleware(request(observation(), null)).status).toBe(401);
   });
 });

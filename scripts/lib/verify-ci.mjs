@@ -15,6 +15,7 @@ const alwaysHostedJobs = {
   'rust-check-windows': 'native target runner',
   'rust-check-linux': 'native target runner',
   'roadmap-check': 'authenticated issue inventory',
+  reuse: 'merge-queue reuse of a passed pull request tree',
 };
 const alwaysLocalJobs = ['typecheck', 'server-bundle-size', 'lint', 'classification', 'test-shards', 'test', 'security', 'governance-smoke', 'integration-changed'];
 const setupActions = ['actions/checkout@', 'actions/setup-node@', 'actions/cache/restore@',
@@ -25,6 +26,11 @@ const bootstrapCommands = new Set([
   `npm install -g "$(node -p 'require("./package.json").packageManager')"`,
 ]);
 const integrationPolicyCommand = 'node scripts/ci/prepare-integration-policy.mjs';
+// Merge-queue reuse only ever skips steps on the runner. Local verification
+// always runs them, so the uniform gate is removed before exact shape checks.
+const reuseGate = "needs.reuse.outputs.reuse != 'true'";
+const reuseGatedJobs = ['typecheck', 'server-bundle-size', 'lint', 'classification', 'test-shards', 'integration-changed',
+  'security', 'governance-smoke', 'rust-check-windows', 'rust-check-linux', 'o8-next-tests'];
 
 function requireCondition(condition, message) {
   if (!condition) throw new Error(`verify:ci coverage: ${message}`);
@@ -40,6 +46,31 @@ function expand(value, shard) {
   const result = (refs[String(value)] ?? String(value)).replaceAll('${{ matrix.shard }}', String(shard));
   requireCondition(!result.includes('${{'), 'unsupported hosted expression in a local command or environment');
   return result;
+}
+function withoutReuseGate(jobs) {
+  const reuse = jobs.reuse;
+  requireCondition(reuse && !reuse.if && !reuse.needs && !reuse.strategy
+    && isDeepStrictEqual(reuse.outputs, { reuse: '${{ steps.decide.outputs.reuse }}' }),
+  'merge-queue reuse job changed; update verify:ci coverage');
+  for (const [id, job] of Object.entries(jobs)) {
+    const needs = [job.needs ?? []].flat();
+    const gated = reuseGatedJobs.includes(id);
+    requireCondition(needs.includes('reuse') === gated, `${id} merge-queue reuse gating needs a verify:ci equivalent`);
+    if (!gated) continue;
+    const rest = needs.filter(need => need !== 'reuse');
+    if (rest.length === 0) delete job.needs;
+    else job.needs = rest.length === 1 ? rest[0] : rest;
+    for (const step of job.steps ?? []) {
+      if (step.if === reuseGate) {
+        delete step.if;
+        continue;
+      }
+      const prefix = `${reuseGate} && `;
+      requireCondition(typeof step.if === 'string' && step.if.startsWith(prefix) && !step.if.includes('||'),
+        `every ${id} step must carry the merge-queue reuse gate`);
+      step.if = step.if.slice(prefix.length);
+    }
+  }
 }
 function usesTestProcess(command, scripts, seen = new Set()) {
   if (/\bvitest\b|npm run test:(?:unit|integration|classification:check)\b|scripts\/ci\/check-hermetic-shards\.mjs|native-test-shard\.mjs --cargo --phase=timed/.test(command)) return true;
@@ -100,6 +131,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const jobs = workflow.jobs;
   requireCondition(jobs && typeof jobs === 'object', 'CI must define jobs');
   requireCondition(workflow.defaults?.run === undefined, 'workflow run defaults need a verify:ci equivalent');
+  withoutReuseGate(jobs);
   for (const id of Object.keys(jobs)) {
     requireCondition(localJobs.includes(id) || Object.hasOwn(hostedJobs, id), `CI job ${id} is missing from verify:ci`);
   }
