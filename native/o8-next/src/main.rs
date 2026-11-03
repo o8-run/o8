@@ -52,6 +52,7 @@ mod theme_tests;
 mod trace;
 mod subagents;
 mod transcript_actions;
+mod transcript_diagram;
 mod transport;
 mod ui;
 mod visualizations;

@@ -149,6 +149,7 @@ pub fn attach(rows: &mut Vec<Row>, buckets: &Buckets) {
             );
             nodes.retain(|n| n.kind != "visualization");
             nodes.extend(refs.into_iter().map(|reference| Node {
+                fence_closed: false,
                 kind: "visualization".into(),
                 runs: vec![],
                 language: None,
@@ -171,6 +172,7 @@ pub fn attach(rows: &mut Vec<Row>, buckets: &Buckets) {
                 role: "assistant".into(),
                 author: None,
                 nodes: vec![Node {
+                    fence_closed: false,
                     kind: "visualization".into(),
                     runs: vec![],
                     language: None,

@@ -87,6 +87,7 @@ pub fn nodes(entry: &Entry) -> Vec<Node> {
         && entry.extra.get(kind).is_some_and(Value::is_object)
     {
         vec![Node {
+            fence_closed: false,
             kind: kind.into(),
             runs: vec![],
             language: None,
@@ -105,6 +106,7 @@ pub fn nodes(entry: &Entry) -> Vec<Node> {
         .flatten()
     {
         nodes.push(Node {
+            fence_closed: false,
             kind: "media".into(),
             runs: vec![],
             language: None,
@@ -113,6 +115,7 @@ pub fn nodes(entry: &Entry) -> Vec<Node> {
     }
     for reference in crate::visualizations::protocol::references(entry.tools.as_ref()) {
         nodes.push(Node {
+            fence_closed: false,
             kind: "visualization".into(),
             runs: vec![],
             language: None,

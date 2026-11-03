@@ -56,6 +56,7 @@ fn user_rich_backdrops_stay_inside_bubble_and_reading_column(cx: &mut TestAppCon
         (
             "media",
             vec![Node {
+                fence_closed: false,
                 kind: "media".into(),
                 runs: vec![],
                 language: None,
@@ -124,5 +125,135 @@ fn user_rich_backdrops_stay_inside_bubble_and_reading_column(cx: &mut TestAppCon
                 "{name}: rich backdrop {bounds:?} escapes bubble {bubble:?}"
             );
         }
+    }
+}
+
+#[gpui::test]
+fn mermaid_retained_stream_copy_toggle_and_fallback(cx: &mut TestAppContext) {
+    let source = "flowchart TD\nA[Start] -->|ready| B{Check}\nB --> C([Done])";
+    let message = |text: &str| {
+        crate::model::render_tree(&[serde_json::from_value(serde_json::json!({
+            "id":"diagram", "role":"assistant", "text":text,
+        }))
+        .unwrap()])
+        .remove(0)
+    };
+    let state = Rc::new(RefCell::new(RowState::new(message(&format!(
+        "```mermaid\n{source}"
+    )))));
+    let (_, cx) = cx.add_window_view(|_, _| TranscriptRow(state.clone()));
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    assert!(
+        state
+            .borrow()
+            .rendered()
+            .1
+            .iter()
+            .any(|s| s.contains("flowchart"))
+    );
+    *state.borrow_mut() = RowState::new(message(&format!("```mermaid\n{source}\n```")));
+    for width in [360., 900., 1680.] {
+        cx.simulate_resize(size(px(width), px(1050.)));
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let copy = cx
+            .debug_bounds("mermaid-0-0-copy")
+            .expect("closed fence gets a native card");
+        assert!(copy.right() <= px(width));
+    }
+    let layouts = state.borrow().layouts;
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    assert_eq!(
+        state.borrow().layouts,
+        layouts,
+        "repaints reuse diagram layout"
+    );
+    let copy = cx.debug_bounds("mermaid-0-0-copy").unwrap();
+    cx.simulate_click(copy.center(), gpui::Modifiers::default());
+    cx.update(|_, cx| {
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some(source)
+        )
+    });
+    let toggle = cx.debug_bounds("mermaid-0-0-source").unwrap();
+    cx.simulate_click(toggle.center(), gpui::Modifiers::default());
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    assert!(
+        state
+            .borrow()
+            .rendered()
+            .1
+            .iter()
+            .any(|s| s.contains("flowchart"))
+    );
+    cx.simulate_click(toggle.center(), gpui::Modifiers::default());
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    assert!(
+        !state
+            .borrow()
+            .rendered()
+            .1
+            .iter()
+            .any(|s| s.contains("flowchart"))
+    );
+    *state.borrow_mut() = RowState::new(message(&format!(
+        "```mermaid\n{source}\n```\n\n```mermaid\n{source}\n```"
+    )));
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    let toggle = cx.debug_bounds("mermaid-0-0-source").unwrap();
+    cx.simulate_click(toggle.center(), gpui::Modifiers::default());
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    assert_eq!(
+        state
+            .borrow()
+            .rendered()
+            .1
+            .iter()
+            .filter(|s| s.contains("flowchart"))
+            .count(),
+        1,
+        "identical diagrams have independent source toggles"
+    );
+    let oversize = format!("flowchart TD\n{}", "A-->B\n".repeat(201));
+    for invalid in ["garbage", oversize.as_str()] {
+        *state.borrow_mut() = RowState::new(message(&format!("```mermaid\n{invalid}\n```")));
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let state = state.borrow();
+        assert!(
+            state
+                .rendered()
+                .1
+                .iter()
+                .any(|s| s.contains(invalid.lines().next().unwrap()))
+        );
+        assert_eq!(
+            state.cache.as_ref().unwrap().backgrounds.len(),
+            1,
+            "plain code fallback"
+        );
     }
 }
