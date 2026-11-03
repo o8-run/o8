@@ -115,6 +115,7 @@ impl ThreadList {
             return;
         };
         let workspace = session.repo_path.clone();
+        let (client, _) = self.owner(&id);
         let mutation = self
             .pending_workspace_restores
             .entry(packet.clone())
@@ -131,7 +132,6 @@ impl ThreadList {
         self.saving = true;
         self.notice.clear();
         self.generation += 1;
-        let client = self.client.clone();
         let target = packet.clone();
         let task = cx.background_executor().spawn(async move {
             client.restore_sidebar_workspace(workspace.as_deref(), &target, &mutation)

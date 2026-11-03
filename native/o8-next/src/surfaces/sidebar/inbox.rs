@@ -294,8 +294,7 @@ impl ThreadList {
         let workspace = session.repo_path.clone();
         self.settling = Some(id.clone());
         self.notice.clear();
-        let client = self.client_for(&id);
-        let target = id.clone();
+        let (client, target) = self.owner(&id);
         let task = cx
             .background_executor()
             .spawn(async move { client.inbox_action(workspace.as_deref(), &target, action) });

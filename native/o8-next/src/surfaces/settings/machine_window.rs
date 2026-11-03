@@ -16,6 +16,10 @@ const DEFAULT_WS_PORT: u16 = 47125;
 const REMOTE_COMMAND: &str = "cat ~/.o8/ws-token || exit 1; echo; cat ~/.o8/api-port 2>/dev/null; \
      echo; cat ~/.o8/ws-port 2>/dev/null; true";
 const TUNNEL_WAIT: Duration = Duration::from_secs(15);
+/// The tunnel holds this open on a pipe from the app instead of running `-N`,
+/// which never notices its parent. However the app ends, the pipe closes, this
+/// reads end of input, and ssh exits with it.
+const HOLD_COMMAND: &str = "cat > /dev/null";
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Route {
@@ -84,7 +88,10 @@ impl Drop for Link {
 impl Route {
     pub(crate) fn parse(machine: &Value) -> Option<Self> {
         Some(Self {
-            id: machine["id"].as_str()?.to_owned(),
+            id: machine["id"]
+                .as_str()
+                .filter(|id| usable_id(id))?
+                .to_owned(),
             target: machine["target"].as_str()?.to_owned(),
             port: machine["port"]
                 .as_u64()
@@ -122,7 +129,6 @@ impl Route {
         let forward = |local: u16, remote: u16| format!("127.0.0.1:{local}:127.0.0.1:{remote}");
         let mut args = self.base_args();
         args.extend([
-            "-N".to_owned(),
             // A shared SSH connection would take these forwards and let this
             // process exit, so they'd outlive the tunnel that asked for them.
             "-o".to_owned(),
@@ -139,6 +145,7 @@ impl Route {
             forward(ws, remote.ws),
             "--".to_owned(),
             self.target.clone(),
+            HOLD_COMMAND.to_owned(),
         ]);
         args
     }
@@ -160,7 +167,7 @@ impl Route {
         let (api, ws) = (free_port()?, free_port()?);
         let mut tunnel = Command::new("ssh")
             .args(self.tunnel_args(api, ws, &remote))
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -215,6 +222,12 @@ impl Route {
     }
 }
 
+/// A machine id goes inside sidebar ids and workspace keys, so it can't hold
+/// their separators. The server only saves UUIDs; this holds for any other.
+fn usable_id(id: &str) -> bool {
+    !id.is_empty() && !id.chars().any(|c| c == '~' || c == '|' || c.is_control())
+}
+
 fn free_port() -> Result<u16, String> {
     TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .and_then(|listener| listener.local_addr())
@@ -247,11 +260,23 @@ mod tests {
         let remote = Remote::parse("t\n47100\n47105\n").unwrap();
         let args = route().tunnel_args(5000, 5001, &remote);
         assert!(args.contains(&"ControlPath=none".to_owned()));
-        assert_eq!(&args[args.len() - 2..], ["--", "me@box"]);
+        assert_eq!(&args[args.len() - 3..], ["--", "me@box", HOLD_COMMAND]);
+        assert!(!args.contains(&"-N".to_owned()), "-N outlives a killed app");
         assert!(args.contains(&"127.0.0.1:5000:127.0.0.1:47100".to_owned()));
         assert!(args.contains(&"127.0.0.1:5001:127.0.0.1:47105".to_owned()));
         let read = route().remote_args();
         assert_eq!(&read[read.len() - 3..], ["--", "me@box", REMOTE_COMMAND]);
+    }
+
+    #[test]
+    fn the_hold_ends_when_its_pipe_closes() {
+        let mut hold = Command::new("sh")
+            .args(["-c", HOLD_COMMAND])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        drop(hold.stdin.take());
+        assert!(hold.wait().unwrap().success());
     }
 
     #[test]
@@ -279,6 +304,15 @@ mod tests {
         assert_eq!((remote.api, remote.ws), (47120, 47125));
         assert_eq!(Remote::parse("\n47100\n47105\n"), None);
         assert_eq!(Remote::parse(""), None);
+    }
+
+    #[test]
+    fn an_id_that_would_break_a_sidebar_id_is_refused() {
+        let with = |id: &str| json!({"id":id,"target":"me@box","port":22});
+        assert!(Route::parse(&with("1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed")).is_some());
+        for id in ["a~b", "a|b", "a\nb", ""] {
+            assert_eq!(Route::parse(&with(id)), None, "{id:?}");
+        }
     }
 
     #[test]

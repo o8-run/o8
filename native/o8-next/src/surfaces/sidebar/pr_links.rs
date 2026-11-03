@@ -118,7 +118,7 @@ impl ThreadList {
         let ids: Vec<String> = self
             .sessions
             .iter()
-            .filter(|s| s.status != "archived")
+            .filter(|s| s.status != "archived" && s.machine.is_none())
             .map(|s| s.id.clone())
             .collect();
         let task = cx.background_executor().spawn(async move { fetch(&client, &ids) });
