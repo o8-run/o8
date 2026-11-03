@@ -2,7 +2,8 @@ import { execFile } from 'node:child_process';
 import { constants, closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
+import { callCodex, CODEX_DEFAULT_MODEL } from '@/lib/cortex/qa/llm/codex-adapter';
+import { resolveBrainCodexRouteSync } from '@/lib/operator/brain-routing';
 import { redactSecrets, scrubPaths, stripQueryStrings } from '@/lib/telemetry/scrub';
 import { CliError, EXIT } from '../api.js';
 import { resolveCliDataDir } from '../config.js';
@@ -34,17 +35,20 @@ function collectLogs(dataDir: string) {
     try {
       fd = openSync(join(dataDir, source), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       const info = fstatSync(fd);
-      if (!info.isFile() || info.size > MAX_LOG_BYTES) return { source, status: 'omitted', text: '' };
-      const buffer = Buffer.alloc(MAX_LOG_BYTES + 1);
+      if (!info.isFile()) return { source, status: 'omitted', text: '' };
+      const truncated = info.size > MAX_LOG_BYTES;
+      const buffer = Buffer.alloc(truncated ? MAX_LOG_BYTES : MAX_LOG_BYTES + 1);
       let bytes = 0;
       while (bytes < buffer.length) {
-        const count = readSync(fd, buffer, bytes, buffer.length - bytes, null);
+        const count = readSync(fd, buffer, bytes, buffer.length - bytes, truncated ? info.size - MAX_LOG_BYTES + bytes : null);
         if (!count) break;
         bytes += count;
       }
       if (bytes > MAX_LOG_BYTES) return { source, status: 'omitted', text: '' };
-      const text = stripQueryStrings(scrubPaths(redactSecrets(buffer.toString('utf8', 0, bytes))));
-      return { source, status: 'included', truncated: text.length > MAX_LOG_CHARS, text: text.slice(-MAX_LOG_CHARS) };
+      let raw = buffer.toString('utf8', 0, bytes);
+      if (truncated) raw = raw.includes('\n') ? raw.slice(raw.indexOf('\n') + 1) : '';
+      const text = stripQueryStrings(scrubPaths(redactSecrets(raw)));
+      return { source, status: 'included', truncated: truncated || text.length > MAX_LOG_CHARS, text: text.slice(-MAX_LOG_CHARS) };
     } catch (error) {
       return { source, status: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unavailable', text: '' };
     } finally {
@@ -91,6 +95,17 @@ export async function runTriage(mode: OutputMode, rest: string[]): Promise<numbe
     JSON.stringify(diagnostics),
     'END DIAGNOSTIC BUNDLE',
   ].join('\n');
+  if (mode.human) {
+    let chosenModel = model ?? CODEX_DEFAULT_MODEL;
+    if (!model) {
+      try {
+        chosenModel = resolveBrainCodexRouteSync().model;
+      } catch {
+        // Match the adapter's fallback when configured defaults are unavailable.
+      }
+    }
+    process.stderr.write(`Sending scrubbed doctor output and logs to your configured Codex model (${chosenModel})...\n`);
+  }
   let result: string;
   try {
     result = await callCodex(prompt, { ...(model ? { model } : {}), readOnly: true, quiet: true, timeoutMs: 120_000 });
