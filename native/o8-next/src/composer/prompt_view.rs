@@ -103,6 +103,13 @@ impl Surface {
         let Some(query) = editor.read(cx).controls.mention.query.clone() else {
             return;
         };
+        let shell = {
+            let input = editor.read(cx);
+            crate::composer::shell::token(&input.text, input.cursor()).map(|(.., command)| command)
+        };
+        if let Some(command) = shell {
+            return self.search_shell(query, command, cx);
+        }
         let repo = self
             .selected
             .as_ref()
@@ -165,6 +172,68 @@ impl Surface {
         self.composer
             .update(cx, |i, _| i.controls.mention.search = Some(task));
     }
+    /// A `!` line's command word, from this computer's PATH, or a path in
+    /// the project's folder, read through the files route. Both are read on
+    /// the background executor and capped.
+    fn search_shell(&mut self, query: String, command: bool, cx: &mut Context<Self>) {
+        use crate::composer::shell;
+        let editor = self.composer.clone();
+        editor.update(cx, |i, cx| {
+            i.controls.mention.search = None;
+            i.controls.mention.results.clear();
+            i.controls.mention.index = 0;
+            cx.emit(crate::composer::commands::Changed(false));
+            cx.notify();
+        });
+        let repo = self
+            .selected
+            .as_ref()
+            .and_then(|id| self.sessions.iter().find(|s| s.id == *id))
+            .and_then(|s| s.repo_path.clone());
+        if !command && repo.is_none() {
+            return;
+        }
+        let client = self.client.clone();
+        let task = cx.spawn(async move |_, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(80))
+                .await;
+            let word = query.clone();
+            let results = cx
+                .background_executor()
+                .spawn(async move {
+                    if command {
+                        return shell::command_matches(shell::executables(), &word)
+                            .into_iter()
+                            .map(MentionResult::Command)
+                            .collect::<Vec<_>>();
+                    }
+                    let (folder, name) = shell::split_path(&word);
+                    let directory = if folder.is_empty() { "." } else { folder };
+                    let body = client.get::<Value>(
+                        "/api/panel/files",
+                        &[
+                            ("workspace", repo.as_deref().unwrap_or_default()),
+                            ("directory", directory),
+                        ],
+                    );
+                    shell::path_matches(&body.unwrap_or_default(), folder, name)
+                        .into_iter()
+                        .map(|(path, directory)| MentionResult::Path { path, directory })
+                        .collect()
+                })
+                .await;
+            let _ = editor.update(cx, |i, cx| {
+                if i.controls.mention.query.as_ref() == Some(&query) {
+                    i.controls.mention.results = results;
+                    cx.emit(crate::composer::commands::Changed(false));
+                    cx.notify();
+                }
+            });
+        });
+        self.composer
+            .update(cx, |i, _| i.controls.mention.search = Some(task));
+    }
     pub(super) fn mention_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let editor = self.composer.read(cx);
         if editor.controls.open.is_some() {
@@ -189,10 +258,11 @@ impl Surface {
         for (index, target) in results.into_iter().enumerate() {
             let group = target.group();
             if previous != Some(group) {
-                let id = if group == "Threads" {
-                    "mention-group-threads"
-                } else {
-                    "mention-group-files"
+                let id = match group {
+                    "Threads" => "mention-group-threads",
+                    "Commands" => "mention-group-commands",
+                    "Paths" => "mention-group-paths",
+                    _ => "mention-group-files",
                 };
                 list = list.child(
                     div()
@@ -210,6 +280,12 @@ impl Surface {
                     path.clone(),
                 ),
                 MentionResult::Thread { title, status, .. } => (title.clone(), status.clone()),
+                MentionResult::Command(name) => (name.clone(), String::new()),
+                MentionResult::Path { path, directory } => {
+                    let name = path.rsplit('/').next().unwrap_or(path);
+                    let slash = if *directory { "/" } else { "" };
+                    (format!("{name}{slash}"), format!("{path}{slash}"))
+                }
             };
             list = list.child(
                 div()

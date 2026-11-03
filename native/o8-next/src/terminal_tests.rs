@@ -441,3 +441,25 @@ fn terminal_keys_follow_application_cursor_and_modifiers() {
         Some("\x1bOA")
     );
 }
+
+#[test]
+fn a_command_s_output_is_what_follows_its_echo() {
+    let mut grid = Grid::new(Size(20, 5));
+    grid.feed(b"~/r$ ls\r\nold\r\n~/r$ git status\r\n", false);
+    let output = grid.command_output("git status").unwrap();
+    assert!(output.lines.is_empty());
+    assert!(!output.finished, "no prompt back yet");
+    grid.feed(
+        b"On branch main\r\na line long enough to wrap twice over\r\n~/r$ ",
+        false,
+    );
+    let output = grid.command_output("git status").unwrap();
+    assert_eq!(
+        output.lines,
+        ["On branch main", "a line long enough to wrap twice over"],
+        "wrapped rows read as the one line printed"
+    );
+    assert!(output.finished, "the prompt came back");
+    assert_eq!(grid.command_output("ls").unwrap().lines, ["old"]);
+    assert!(grid.command_output("make").is_none());
+}

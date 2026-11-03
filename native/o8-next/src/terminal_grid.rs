@@ -4,6 +4,7 @@ use alacritty_terminal::{
     Term,
     event::{Event, EventListener, WindowSize},
     grid::{Dimensions, Scroll},
+    index::{Column, Line},
     term::{Config, Osc52, cell::Flags},
     vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb},
 };
@@ -186,10 +187,89 @@ impl Grid {
                 content.cursor.shape,
             ))
     }
+    /// The output of the last run of a command typed at this shell, read from
+    /// the rows after its echo up to the prompt that followed it.
+    pub fn command_output(&self, command: &str) -> Option<CommandOutput> {
+        output_after(&self.lines(LOOKBACK), command)
+    }
+    /// The last `limit` rows up to the cursor, wrapped rows joined into the
+    /// lines a program printed.
+    fn lines(&self, limit: usize) -> Vec<String> {
+        let grid = self.term.grid();
+        let columns = grid.columns();
+        let end = grid.cursor.point.line.0;
+        let start = (end + 1 - limit as i32).max(grid.topmost_line().0);
+        let mut lines = vec![];
+        let mut current = String::new();
+        for line in start..=end {
+            let row = &grid[Line(line)];
+            for column in 0..columns {
+                let cell = &row[Column(column)];
+                if cell
+                    .flags
+                    .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+                {
+                    continue;
+                }
+                if cell.flags.contains(Flags::HIDDEN) {
+                    current.push(' ');
+                    continue;
+                }
+                current.push(cell.c);
+                if let Some(extra) = cell.zerowidth() {
+                    current.extend(extra);
+                }
+            }
+            if columns == 0 || !row[Column(columns - 1)].flags.contains(Flags::WRAPLINE) {
+                lines.push(current.trim_end().to_owned());
+                current.clear();
+            }
+        }
+        if !current.is_empty() {
+            lines.push(current.trim_end().to_owned());
+        }
+        lines
+    }
     #[cfg(test)]
     pub fn text(&self) -> String {
         self.cells().into_iter().map(|c| c.text).collect()
     }
+}
+/// How far back a command's echo is looked for.
+const LOOKBACK: usize = 3_000;
+/// The lines after the last echo of `command` (a prompt, then the command),
+/// stopping at the next line that starts with the same prompt.
+fn output_after(lines: &[String], command: &str) -> Option<CommandOutput> {
+    let echo = lines.iter().rposition(|line| line.ends_with(command))?;
+    let prompt = lines[echo].strip_suffix(command)?.trim_end();
+    let mut output = vec![];
+    let mut finished = false;
+    for line in &lines[echo + 1..] {
+        if !prompt.is_empty()
+            && (line == prompt
+                || line
+                    .strip_prefix(prompt)
+                    .is_some_and(|r| r.starts_with(' ')))
+        {
+            finished = true;
+            break;
+        }
+        output.push(line.clone());
+    }
+    while output.last().is_some_and(|line| line.trim().is_empty()) {
+        output.pop();
+    }
+    Some(CommandOutput {
+        lines: output,
+        finished,
+    })
+}
+/// What a command printed after its echo, and whether the shell's prompt
+/// came back after it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommandOutput {
+    pub lines: Vec<String>,
+    pub finished: bool,
 }
 #[derive(Clone, Debug)]
 pub struct PaintCell {

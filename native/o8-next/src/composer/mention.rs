@@ -1,5 +1,6 @@
-//! `@` picks workspace files or threads. Thread titles stay visible in the
-//! draft while their identities travel separately to the send path.
+//! `@` picks workspace files or threads, and a `!` line its command and
+//! paths. Thread titles stay visible in the draft while their identities
+//! travel separately to the send path.
 use super::*;
 use commands::Changed;
 
@@ -25,17 +26,26 @@ pub(crate) enum MentionResult {
         title: String,
         status: String,
     },
+    /// A command for a `!` line's command word.
+    Command(String),
+    /// A path for a later `!` word, as typed folder plus name.
+    Path {
+        path: String,
+        directory: bool,
+    },
 }
 impl MentionResult {
     pub(crate) fn group(&self) -> &'static str {
         match self {
             Self::File(_) => "Files",
             Self::Thread { .. } => "Threads",
+            Self::Command(_) => "Commands",
+            Self::Path { .. } => "Paths",
         }
     }
     pub(crate) fn label(&self) -> &str {
         match self {
-            Self::File(path) => path,
+            Self::File(path) | Self::Command(path) | Self::Path { path, .. } => path,
             Self::Thread { title, .. } => title,
         }
     }
@@ -68,6 +78,11 @@ impl Composer {
             || self.controls.mention.dismissed.as_ref() == Some(&self.text)
         {
             return None;
+        }
+        // A `!` line completes its command and paths instead.
+        if self.text.starts_with('!') {
+            return super::shell::token(&self.text, self.cursor())
+                .map(|(start, word, _)| (start, word));
         }
         mention_at(&self.text, self.cursor())
     }
@@ -106,7 +121,20 @@ impl Composer {
         };
         let end = word_end(&self.text, self.cursor());
         self.selection = start..end;
-        self.insert_prompt(&format!("@{} ", result.label()), cx);
+        let text = match result {
+            MentionResult::Command(name) => format!("{name} "),
+            // A folder keeps completing, so it ends in `/`, not a space.
+            MentionResult::Path { path, directory } => {
+                let path = path.replace(' ', "\\ ");
+                if *directory {
+                    format!("{path}/")
+                } else {
+                    format!("{path} ")
+                }
+            }
+            _ => format!("@{} ", result.label()),
+        };
+        self.insert_prompt(&text, cx);
         if let MentionResult::Thread { id, title, .. } = result {
             self.controls
                 .mention

@@ -65,7 +65,11 @@ gpui::actions!(
         /// Opens the transcript link last clicked.
         OpenTranscriptLink,
         /// Runs the composer's `!` line in this workspace's terminal.
-        RunShellLine
+        RunShellLine,
+        /// Stops the composer's last `!` line with Ctrl-C in its terminal.
+        StopShellLine,
+        /// Reads the composer's last `!` line's output back into its draft.
+        AddShellOutput
     ]
 );
 
@@ -75,6 +79,10 @@ thread_local! {
     /// The `!` line a RunShellLine dispatch runs. Apart from links, so text
     /// from a reply can never reach a shell.
     static PENDING_SHELL_LINE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// The `!` line a StopShellLine dispatch interrupts.
+    static PENDING_SHELL_STOP: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// The `!` line an AddShellOutput dispatch reads, and the view it goes to.
+    static PENDING_SHELL_OUTPUT: std::cell::RefCell<Option<(String, gpui::WeakEntity<Surface>)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Asks the shell to open a transcript link.
@@ -91,6 +99,31 @@ pub(crate) fn run_shell_line(line: String, window: &mut Window, cx: &mut App) {
 
 pub(crate) fn take_pending_shell_line() -> Option<String> {
     PENDING_SHELL_LINE.with(|pending| pending.borrow_mut().take())
+}
+
+/// Asks the shell to stop a composer `!` line still running.
+pub(crate) fn stop_shell_line(line: String, window: &mut Window, cx: &mut App) {
+    PENDING_SHELL_STOP.with(|pending| *pending.borrow_mut() = Some(line));
+    window.dispatch_action(Box::new(StopShellLine), cx);
+}
+
+pub(crate) fn take_pending_shell_stop() -> Option<String> {
+    PENDING_SHELL_STOP.with(|pending| pending.borrow_mut().take())
+}
+
+/// Asks the shell for a composer `!` line's output, for that view's draft.
+pub(crate) fn add_shell_output(
+    line: String,
+    view: gpui::WeakEntity<Surface>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    PENDING_SHELL_OUTPUT.with(|pending| *pending.borrow_mut() = Some((line, view)));
+    window.dispatch_action(Box::new(AddShellOutput), cx);
+}
+
+pub(crate) fn take_pending_shell_output() -> Option<(String, gpui::WeakEntity<Surface>)> {
+    PENDING_SHELL_OUTPUT.with(|pending| pending.borrow_mut().take())
 }
 
 pub(crate) fn take_pending_link() -> Option<String> {
@@ -193,6 +226,8 @@ pub(crate) struct Surface {
     fork_send: Option<String>,
     /// The dictation wave's level history.
     wave: Rc<RefCell<conversation::dictation_wave::Wave>>,
+    /// The `!` line this composer last ran, for Esc and Add to chat.
+    shell_run: Option<crate::composer::shell::ShellRun>,
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -268,6 +303,7 @@ impl Surface {
             subagent_observer: None,
             fork_send: None,
             wave: Default::default(),
+            shell_run: None,
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {

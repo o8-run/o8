@@ -84,6 +84,23 @@ impl Pane {
             self.waiting_line = Some(line);
         }
     }
+    /// Stops a command run here with Ctrl-C, unless its prompt is back, and
+    /// drops it if the shell had not attached yet.
+    pub fn interrupt(&mut self, line: &str, cx: &mut Context<Self>) {
+        if self.waiting_line.as_deref() == Some(line) {
+            self.waiting_line = None;
+            return;
+        }
+        if self
+            .command_output(line)
+            .is_none_or(|output| !output.finished)
+        {
+            self.input("\x03".into(), cx);
+        }
+    }
+    pub fn command_output(&self, line: &str) -> Option<crate::terminal_grid::CommandOutput> {
+        self.grid.lock().unwrap().command_output(line)
+    }
     pub fn focus_handle(&self) -> FocusHandle {
         self.focus.clone()
     }

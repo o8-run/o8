@@ -346,6 +346,20 @@ impl Shell {
     ) {
         run_in_terminal(self, line, window, cx);
     }
+    /// Ctrl-C to a composer `!` line still running in this workspace's terminal.
+    pub(crate) fn stop_shell_line(&mut self, line: &str, cx: &mut Context<Self>) {
+        if let Some(pane) = terminal_pane(self, cx) {
+            pane.update(cx, |pane, cx| pane.interrupt(line, cx));
+        }
+    }
+    /// What a composer `!` line printed in this workspace's terminal.
+    pub(crate) fn shell_output(
+        &self,
+        line: &str,
+        cx: &App,
+    ) -> Option<crate::terminal_grid::CommandOutput> {
+        terminal_pane(self, cx)?.read(cx).command_output(line)
+    }
     /// The content key of the open panel's front tool, so a surface knows it
     /// is on screen there as well as in the main area.
     pub(crate) fn panel_shows(&self, probe: impl Fn(&str) -> bool) -> bool {
@@ -767,6 +781,14 @@ pub(super) fn run_in_terminal(
     show(s, Tool::Terminal, window, cx);
     if let Some(Content::Terminal(view)) = s.content.get(&key(s, Tool::Terminal)) {
         view.clone().update(cx, |view, cx| view.run(line, cx));
+    }
+}
+
+/// The shell attached to this workspace's terminal panel, if any.
+fn terminal_pane(s: &Shell, cx: &App) -> Option<Entity<crate::terminal::Pane>> {
+    match s.content.get(&key(s, Tool::Terminal)) {
+        Some(Content::Terminal(view)) => view.read(cx).child.clone(),
+        _ => None,
     }
 }
 
