@@ -402,7 +402,7 @@ describe('local CI verification through its command entry point', () => {
     }
     if (nativeLocal) {
       expect(result.stdout).toContain('PASS o8 next Native Tests (Linux)');
-      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(12);
+      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(24);
     }
     for (const command of ['lint', 'protocol:check', 'typecheck:fast', 'typecheck',
       'test:classification:check', 'test:integration', 'scripts/smoke-merge-requires-review.ts', 'audit']) {
@@ -528,7 +528,7 @@ describe('local CI verification through its command entry point', () => {
     'selects $nativeState input $nativeChange against origin/main', ({ nativeChange, nativeState }) => {
       const result = executeFixture('tests/fixture.test.ts', false, { nativeChange, nativeState });
       expect(result.status, result.stderr + result.stdout).toBe(0);
-      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(12);
+      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(24);
     }, 60_000);
 
   nativeIt('runs native and hermetic work concurrently while retaining the required aggregate', () => {
