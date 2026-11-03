@@ -63,7 +63,7 @@ const sdk = new Set([
 const timed = name => name.startsWith('terminal::tests::production_pty_')
   || name === 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark'
   || sdk.has(name);
-// Keep the compile-contract test away from the other known expensive cases.
+// Give the compile-contract test its own shard.
 // There are more heavy tests than eight shards: reserve the first shard for
 // registration, then round-robin the rest across the remaining shards. Sorting
 // makes the assignment independent of libtest's discovery order.
@@ -75,8 +75,16 @@ const heavy = [
 ];
 const heavyShards = new Map(heavy.map((name, ordinal) => [name,
   ordinal === 0 || count === 1 ? 0 : 1 + (ordinal - 1) % (count - 1)]));
+const shardFor = name => {
+  if (heavyShards.has(name)) return heavyShards.get(name);
+  const hash = createHash('sha256').update(name).digest().readUInt32BE(0);
+  const bucket = hash % count;
+  // Keep the other hash buckets intact. Redistribute only shard 1's ordinary
+  // tests, using higher hash bits so they do not all land on the same shard.
+  return count > 1 && bucket === 0 ? 1 + Math.floor(hash / count) % (count - 1) : bucket;
+};
 const selected = names.filter(name =>
-  (heavyShards.get(name) ?? createHash('sha256').update(name).digest().readUInt32BE(0) % count) === index - 1
+  shardFor(name) === index - 1
   && (timed(name) ? 'timed' : 'regular') === phase);
 console.log(`[native-tests] shard=${index}/${count} phase=${phase} selected=${selected.length} total=${names.length}`);
 // An empty filter runs everything in libtest; do not launch an empty shard.

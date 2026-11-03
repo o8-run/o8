@@ -61,6 +61,7 @@ test('the real runner assigns the listing exactly once across eight nonempty sha
   }
   assert.deepEqual([...owners.keys()].sort(), [...names].sort());
   assert.equal(owners.get(registration), 1);
+  assert.deepEqual([...owners].filter(([, shard]) => shard === 1).map(([name]) => name), [registration]);
   // The four largest explicit entries have separate owners. There are more
   // heavy cases than shards; the rest share shards 2–8 evenly, never shard 1.
   assert.equal(new Set([registration, ...sdk].map(name => owners.get(name))).size, 4);
@@ -69,7 +70,9 @@ test('the real runner assigns the listing exactly once across eight nonempty sha
   assert.equal(heavyCounts[0], 1);
   assert.ok(Math.max(...heavyCounts.slice(1)) - Math.min(...heavyCounts.slice(1)) <= 1, heavyCounts.join('/'));
   for (const name of names.filter(name => !heavy.includes(name))) {
-    assert.equal(owners.get(name), createHash('sha256').update(name).digest().readUInt32BE(0) % 8 + 1, name);
+    const hashed = createHash('sha256').update(name).digest().readUInt32BE(0) % 8 + 1;
+    if (hashed !== 1) assert.equal(owners.get(name), hashed, name);
+    else assert.ok(owners.get(name) >= 2 && owners.get(name) <= 8, name);
   }
 });
 
