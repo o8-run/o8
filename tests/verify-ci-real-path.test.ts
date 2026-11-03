@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { parse, stringify } from 'yaml';
-import { createVerifierCoverageFixture, mutateNativeSetupFixture } from './helpers/verify-ci-coverage.fixture';
+import { createVerifierCoverageFixture, mutateNativeSetupFixture, registerClassificationCoverageTests, writeListingCheckFixture } from './helpers/verify-ci-coverage.fixture';
 
 const repo = process.cwd();
 const root = mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-'));
@@ -167,6 +167,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   // The verifier's scheduler is under test. Keep unrelated bundle building and
   // Vitest discovery bounded, while retaining the real plan, selector and audit.
   writeFileSync(path.join(directory, 'scripts/check-server-bundle-size.mjs'), 'process.exit(0);\n');
+  writeListingCheckFixture(directory);
   writeFileSync(path.join(directory, 'scripts/ci/check-hermetic-shards.mjs'), `
     import { appendFileSync } from 'node:fs';
     const started = performance.now();
@@ -312,8 +313,8 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   const calls = readFileSync(receipt, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
   return { ...result, calls, directory };
 }
-
 describe('local CI verification through its command entry point', () => {
+  registerClassificationCoverageTests(coverageRoot, workflowPath, coverage, execute);
   it.each([
     { mainFailure: true, detachedMain: false },
     { mainFailure: false, detachedMain: false },
@@ -593,7 +594,7 @@ describe('local CI verification through its command entry point', () => {
     const plan = JSON.parse(result.stdout);
     expect(plan.hosted).toContain('Linux x64');
     expect(plan.ids).not.toContain('o8-next-tests');
-    expect(plan.required).toEqual([]);
+    expect(plan.required).toEqual(['classification']);
   });
 
   it.each(['command', 'action', 'condition', 'native tolerance', 'native step tolerance',

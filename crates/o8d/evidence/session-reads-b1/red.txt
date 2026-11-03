@@ -1,0 +1,74 @@
+Baseline: transport dispatch and flag forwarding absent; release daemon built with experimental-ws.
+ FAIL  tests/o8d-parity-real-path.test.ts > records TS session reads and replays them natively with zero differences and Next stopped
+Error: Native session read was not reached: /api/mobile/orchestrator/threads
+ ❯ runSessionParity scripts/o8d/parity.ts:121:26
+    119|     for (const record of recorded) {
+    120|       const { status, body, native } = await send(server, record.path);
+    121|       if (!native) throw new Error(`Native session read was not reache…
+       |                          ^
+    122|       const difference = firstDifference(record.response, normalize({ …
+    123|       if (difference) throw new Error(`Session parity ${record.path.sp…
+ ❯ tests/o8d-parity-real-path.test.ts:9:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  12:46:07
+   Duration  101.45s (transform 334ms, setup 272ms, import 311ms, tests 96.63s, environment 15ms)
+
+Pre-fix release binary, missing DB-only network fallback:
+ FAIL  tests/o8d-parity-real-path.test.ts > defers DB-bound and JSON-only network threads to the TS projection owner
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ tests/o8d-parity-real-path.test.ts:76:30
+     74|     server = await startSessionServer(directory, true, binary);
+     75|     const projected = await send(server, '/api/v2/chat-history?tabId=t…
+     76|     expect(projected.native).toBe(false);
+       |                              ^
+     77|     expect(projected.status).toBe(200);
+     78|     expect(projected.body).toMatchObject({ source: 'bot-network', mess…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  13:02:01
+   Duration  57.12s (transform 685ms, setup 499ms, import 463ms, tests 53.69s, environment 1ms)
+
+Pre-fix keep-alive dispatch, TS request followed by a native read:
+ FAIL  tests/o8d-parity-real-path.test.ts > reclassifies native reads after a TS request on a keep-alive client
+AssertionError: expected { status: 200, native: false } to deeply equal { status: 200, native: true }
+
+- Expected
++ Received
+
+  {
+-   "native": true,
++   "native": false,
+    "status": 200,
+  }
+
+ ❯ tests/o8d-parity-real-path.test.ts:65:70
+     63|     });
+     64|     expect(await read('/api/panel/projects')).toEqual({ status: 200, n…
+     65|     expect(await read('/api/v2/chat-history?tabId=thoughts-review')).t…
+       |                                                                      ^
+     66|   } finally { agent.destroy(); await server?.stop(); rmSync(directory,…
+     67| }, 180_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  13:06:13
+   Duration  60.25s (transform 502ms, setup 399ms, import 399ms, tests 58.23s, environment 0ms)

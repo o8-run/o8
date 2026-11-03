@@ -59,6 +59,20 @@ React Bits source code or implementation was used.
 - Upstream: <https://github.com/JaceThings/Lisse>
 - Use in o8: smooth-corner geometry across dashboard and preview surfaces
 
+## Pele
+
+- Project and revision: Pele, commit
+  `3a2f075ee0c3d914f0fad3545fc0f193693975ac`
+- Copyright: Copyright (c) 2026 kepano
+- Authors: kepano and the Pele contributors
+- License: MIT
+- Upstream: <https://github.com/obsidianmd/pele>
+- Use in o8: the native transcript's state, class and pie diagrams and its
+  diagram zoom and pan, ported to Rust from `src/diagrams/state/`,
+  `src/diagrams/class/`, `src/diagrams/pie/` and `src/zoom.ts` into
+  `native/o8-next/src/transcript_diagram/`
+- Unmodified license text: [Pele](licenses/pele-MIT.txt)
+
 ## Visual Studio Code Codicons
 
 - Package and version: `@vscode/codicons` 0.0.45

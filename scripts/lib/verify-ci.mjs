@@ -16,7 +16,7 @@ const alwaysHostedJobs = {
   'rust-check-linux': 'native target runner',
   'roadmap-check': 'authenticated issue inventory',
 };
-const alwaysLocalJobs = ['typecheck', 'server-bundle-size', 'lint', 'test-shards', 'test', 'security', 'governance-smoke', 'integration-changed'];
+const alwaysLocalJobs = ['typecheck', 'server-bundle-size', 'lint', 'classification', 'test-shards', 'test', 'security', 'governance-smoke', 'integration-changed'];
 const setupActions = ['actions/checkout@', 'actions/setup-node@', 'actions/cache/restore@',
   'actions/cache/save@', 'actions/upload-artifact@'];
 const auditAction = 'rustsec/audit-check@';
@@ -126,17 +126,21 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       requireCondition(supported, `action ${step.uses} in ${id} has no verify:ci equivalent`);
     }
   }
-  requireCondition(JSON.stringify(jobs.test.needs) === JSON.stringify(['test-shards', 'o8-next-tests']),
-    'the hermetic aggregate must require both shard and native jobs');
+  requireCondition(JSON.stringify(jobs.test.needs) === JSON.stringify(['test-shards', 'o8-next-tests', 'classification']),
+    'the hermetic aggregate must require shard, native and classification jobs');
   const testCondition = "github.event.schedule != '41 13 * * 1'";
   requireCondition(jobs['test-shards'].if === testCondition && jobs.test.if === `always() && ${testCondition}`
     && !jobs.test['continue-on-error'], 'required test conditions or failure tolerance need a verify:ci equivalent');
+  requireCondition(jobs.classification.if === testCondition && !jobs.classification.needs
+    && jobs.classification.name === 'Test Classification',
+  'classification must run independently under the test condition');
   const aggregate = jobs.test.steps;
   requireCondition(aggregate?.length === 1 && !aggregate[0].if && !aggregate[0]['continue-on-error']
-    && aggregate[0].run?.trim() === 'echo "Hermetic shard result: $SHARD_RESULT"\necho "Native test result: $NATIVE_RESULT"\ntest "$SHARD_RESULT" = success && test "$NATIVE_RESULT" = success'
+    && aggregate[0].run?.trim() === 'echo "Hermetic shard result: $SHARD_RESULT"\necho "Native test result: $NATIVE_RESULT"\necho "Classification result: $CLASSIFICATION_RESULT"\ntest "$SHARD_RESULT" = success && test "$NATIVE_RESULT" = success && test "$CLASSIFICATION_RESULT" = success'
     && aggregate[0].shell === undefined && aggregate[0]['working-directory'] === undefined
     && JSON.stringify(aggregate[0].env) === JSON.stringify({
       SHARD_RESULT: '${{ needs.test-shards.result }}', NATIVE_RESULT: '${{ needs.o8-next-tests.result }}',
+      CLASSIFICATION_RESULT: '${{ needs.classification.result }}',
     }), 'hermetic aggregate steps changed; update verify:ci coverage');
   const native = jobs['o8-next-tests'];
   requireCondition(native.name === 'o8 next Native Tests (Linux)' && native['runs-on'] === 'ubuntu-24.04'
@@ -222,8 +226,11 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const shards = shardJob.strategy?.matrix?.shard;
   requireCondition(Array.isArray(shards) && shards.length > 0, 'hermetic shard matrix is missing');
   requireCondition(new Set(shards).size === shards.length, 'hermetic shards must be unique');
-  const classification = selectedSteps(shardJob, 1).filter(step => step.run === 'npm run test:classification:check');
-  requireCondition(classification.length === 1, 'CI must check test classification exactly once');
+  const classification = selectedSteps(jobs.classification);
+  requireCondition(classification.filter(step => step.run === 'npm run test:classification:check').length === 1
+    && classification.every(step => !step.if)
+    && !shardJob.steps.some(step => step.run === 'npm run test:classification:check'),
+  'CI must check test classification exactly once outside the shards');
   const checks = [];
   const dependencies = job => [job.needs ?? []].flat().map(id => id === 'test-shards' ? 'test' : id);
   const appendJob = id => {
@@ -244,16 +251,15 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       }, shard, scripts), budgetGroup: shard,
     }))),
   });
-  checks.push({ id: 'classification', after: dependencies(shardJob), name: classification[0].name ?? 'Test Classification',
-    steps: classification.map(step => runStep(step, shardJob, 1, scripts)) });
+  appendJob('classification');
   const unitSteps = shards.flatMap(shard => selectedSteps(shardJob, shard)
-    .filter(step => step.run !== classification[0].run)
     .map(step => {
       const unit = runStep(step, shardJob, shard, scripts);
       return { ...unit, env: { NODE_ENV: 'test', ...unit.env } };
     }));
   requireCondition(unitSteps.some(step => step.command.startsWith('npm run test:unit -- ')), 'CI must execute its hermetic unit entry point');
-  checks.push({ id: 'test', after: ['classification'], requiredResults: nativeLocal ? ['o8-next-tests'] : [], name: jobs.test.name, steps: unitSteps });
+  checks.push({ id: 'test', after: dependencies(shardJob),
+    requiredResults: ['classification', ...(nativeLocal ? ['o8-next-tests'] : [])], name: jobs.test.name, steps: unitSteps });
   appendJob('server-bundle-size');
   const integration = jobs['integration-changed'];
   const packageAction = './.github/actions/linux-package-prerequisites';
