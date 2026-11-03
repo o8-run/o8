@@ -12,6 +12,18 @@ const route = (path: string, methods: string, load: Route['load']): Route => ({ 
 // Each route loads its own implementation; unrelated surfaces stay cold.
 export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
+    route('/api/panel/branches', 'GET', () => import('@/app/api/panel/branches/route')),
+    route('/api/panel/files', 'GET', () => import('@/app/api/panel/files/route')),
+    route('/api/panel/file-diff', 'GET', () => import('@/app/api/panel/file-diff/route')),
+    route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
+    route('/api/panel/resource-usage', 'GET', () => import('@/app/api/panel/resource-usage/route')),
+    route('/api/panel/serve-image', 'GET', () => import('@/app/api/panel/serve-image/route')),
+    route('/api/visualizations/[id]', 'GET', () => import('@/app/api/visualizations/[id]/route')),
+    route('/api/repo-spec', 'GET', () => import('@/app/api/repo-spec/route')),
+    route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
+    route('/api/runtime/service-tiers', 'GET', () => import('@/app/api/runtime/service-tiers/route')),
+    route('/api/runtime/telemetry', 'GET', () => import('@/app/api/runtime/telemetry/route')),
+    route('/api/orchestrator/status', 'GET', () => import('@/app/api/orchestrator/status/route')),
     route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),
     route('/api/orchestrator/state', 'GET PATCH', () => import('@/app/api/orchestrator/state/route')),
     route('/api/orchestrator/shared-team/active', 'GET', () => import('@/app/api/orchestrator/shared-team/active/route')),
@@ -24,6 +36,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   ],
   brain: [route('/api/cortex/ask', 'POST', () => import('@/app/api/cortex/ask/route'))],
   activity: [
+    route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
+    route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
+    route('/api/cortex/proposals', 'GET', () => import('@/app/api/cortex/proposals/route')),
     route('/api/panel/commits', 'GET', () => import('@/app/api/panel/commits/route')),
     route('/api/panel/ci', 'GET', () => import('@/app/api/panel/ci/route')),
     route('/api/panel/ci/[id]', 'GET', () => import('@/app/api/panel/ci/[id]/route')),
@@ -31,6 +46,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/stop-mission', 'POST', () => import('@/app/api/orchestrator/stop-mission/route')),
   ],
   pull_requests: [
+    route('/api/panel/file-diff', 'GET', () => import('@/app/api/panel/file-diff/route')),
+    route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
     route('/api/panel/prs', 'GET', () => import('@/app/api/panel/prs/route')),
     route('/api/panel/prs/[number]', 'GET POST', () => import('@/app/api/panel/prs/[number]/route')),
     route('/api/panel/github-status', 'GET', () => import('@/app/api/panel/github-status/route')),
@@ -50,9 +67,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/automations/connected', 'GET POST PATCH', () => import('@/app/api/automations/connected/route')),
     route('/api/panel/repos', 'GET', () => import('@/app/api/panel/repos/route')),
   ],
-  usage: [route('/api/runtime/usage', 'GET', () => import('@/app/api/runtime/usage/route'))],
+  usage: [
+    route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
+    route('/api/runtime/usage', 'GET', () => import('@/app/api/runtime/usage/route')),
+  ],
   palette: [], // Local commands and workspace navigation reuse the selected surface's transport.
   sidebar: [
+    route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
     route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),
     route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
     route('/api/runtime/inventory', 'GET', () => import('@/app/api/runtime/inventory/route')),
@@ -67,10 +88,17 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/lane-events', 'GET', () => import('@/app/api/orchestrator/lane-events/route')),
   ],
   settings: [
+    route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
+    route('/api/runtime/capabilities', 'GET', () => import('@/app/api/runtime/capabilities/route')),
+    route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
+    route('/api/setup/cli-updates', 'GET', () => import('@/app/api/setup/cli-updates/route')),
     route('/api/panel/operator-defaults', 'GET POST', () => import('@/app/api/panel/operator-defaults/route')),
     route('/api/v2/keys', 'GET POST PATCH DELETE', () => import('@/app/api/v2/keys/route')),
   ],
-  setup: [route('/api/setup/config', 'GET POST', () => import('@/app/api/setup/config/route'))],
+  setup: [
+    route('/api/setup/cli-updates', 'GET', () => import('@/app/api/setup/cli-updates/route')),
+    route('/api/setup/config', 'GET POST', () => import('@/app/api/setup/config/route')),
+  ],
   projects: [
     route('/api/panel/projects', 'GET', () => import('@/app/api/panel/projects/route')),
     route('/api/panel/projects/active', 'POST', () => import('@/app/api/panel/projects/active/route')),
@@ -92,6 +120,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/approvals', 'GET POST', () => import('@/app/api/panel/approvals/route')),
   ],
   diff: [
+    route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/orchestrator/review-state', 'GET', () => import('@/app/api/orchestrator/review-state/route')),
     route('/api/orchestrator/review', 'POST', () => import('@/app/api/orchestrator/review/route')),
     route('/api/lanes/[id]/diff', 'GET', () => import('@/app/api/lanes/[id]/diff/route')),
