@@ -65,7 +65,7 @@ impl Surface {
     }
     pub(super) fn session_transcript(
         &mut self,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let rows = self.rows.clone();
@@ -91,7 +91,7 @@ impl Surface {
         // Play and Copy under each finished turn's answer; a row that gains or
         // loses them is measured again.
         let ends = Rc::new(crate::transcript_actions::turn_ends(&rows));
-        let prompts = Rc::new(self.prompt_action_rows(cx));
+        let prompts = Rc::new(self.prompt_action_rows(window, cx));
         let marked: BTreeSet<usize> = ends.keys().chain(prompts.keys()).copied().collect();
         for index in marked.symmetric_difference(&self.action_rows) {
             if *index < rows.len() {
@@ -147,12 +147,11 @@ impl Surface {
                         }
                         .interactive(&list_state);
                         if let Some(prompt) = prompts.get(&index) {
-                            return div()
+                            return super::prompt_actions::container(view.clone(), prompt)
                                 .debug_selector(move || format!("transcript-row-{index}"))
                                 .w_full()
                                 .flex()
                                 .flex_col()
-                                .group("prompt-row")
                                 .child(row)
                                 .child(super::prompt_actions::row(&view, prompt, window))
                                 .into_any_element();

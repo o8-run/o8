@@ -63,7 +63,7 @@ fn seed(client: &Client, count: usize, cx: &mut TestAppContext) -> Session {
 }
 
 fn show(view: &Entity<Surface>, id: &str, cx: &mut VisualTestContext) {
-    view.update(cx, |s, cx| {
+    let index = view.update(cx, |s, cx| {
         let index = s
             .rows
             .iter()
@@ -74,7 +74,13 @@ fn show(view: &Entity<Surface>, id: &str, cx: &mut VisualTestContext) {
             offset_in_item: px(0.),
         });
         cx.notify();
+        index
     });
+    paint(cx);
+    let bounds = view.read_with(cx, |s, _| {
+        s.rows[index].borrow().painted_geometry.borrow().row
+    });
+    cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
     paint(cx);
 }
 
@@ -284,14 +290,13 @@ fn prompt_toolbar_rewind_confirms_and_preserves_source_draft(cx: &mut TestAppCon
     );
     view.read_with(cx, |s, cx| {
         assert_eq!(s.composer.read(cx).text, "same **exact** prompt\nnext line");
-        assert!(
-            !s.composer
-                .read(cx)
-                .controls
-                .prompt
-                .prelude
-                .contains("Answer 1")
-        );
+        assert!(!s
+            .composer
+            .read(cx)
+            .controls
+            .prompt
+            .prelude
+            .contains("Answer 1"));
         assert!(s.queue["items"].as_array().unwrap().is_empty());
     });
 }
@@ -584,4 +589,168 @@ fn prompt_toolbar_archived_retry_preserves_consumed_draft_and_history(cx: &mut T
         archived,
         "retry must not POST or rename the archived canonical record"
     );
+}
+
+#[gpui::test]
+fn prompt_actions_build_hidden_controls_only_on_hover(cx: &mut TestAppContext) {
+    let (_host, client) = fixture();
+    let session = seed(&client, 2, cx);
+    let saved_client = client.clone();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| {
+        s.sessions = saved_client.sessions().unwrap();
+        s.select(session.id, cx);
+    });
+    settle(&view, cx, |s, _| s.queue_ready);
+    show(&view, "ask-0", cx);
+    cx.simulate_mouse_move(gpui::point(px(1.), px(1.)), None, Modifiers::default());
+    paint(cx);
+    let hidden = cx.debug_bounds("transcript-row-0").unwrap();
+    for selector in [
+        "prompt-copy-ask-0",
+        "prompt-rewind-ask-0",
+        "prompt-fork-ask-0",
+    ] {
+        assert!(
+            cx.debug_bounds(selector).is_none(),
+            "hidden control built: {selector}"
+        );
+    }
+    cx.simulate_mouse_move(hidden.center(), None, Modifiers::default());
+    paint(cx);
+    for selector in [
+        "prompt-copy-ask-0",
+        "prompt-rewind-ask-0",
+        "prompt-fork-ask-0",
+    ] {
+        assert!(
+            cx.debug_bounds(selector).is_some(),
+            "hover did not build: {selector}"
+        );
+        assert_eq!(cx.debug_opacity(selector), Some(1.));
+    }
+    assert_eq!(cx.debug_bounds("transcript-row-0").unwrap(), hidden);
+    cx.simulate_mouse_move(gpui::point(px(1.), px(1.)), None, Modifiers::default());
+    paint(cx);
+    assert!(
+        cx.debug_bounds("prompt-copy-ask-0").is_none(),
+        "pointer leave must hide the controls again"
+    );
+    assert_eq!(cx.debug_bounds("transcript-row-0").unwrap(), hidden);
+}
+
+#[gpui::test]
+fn prompt_actions_tab_from_composer_reveals_copy_then_rewind_and_fork(cx: &mut TestAppContext) {
+    let (_host, client) = fixture();
+    let session = seed(&client, 1, cx);
+    let saved_client = client.clone();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| {
+        s.sessions = saved_client.sessions().unwrap();
+        s.select(session.id, cx);
+    });
+    settle(&view, cx, |s, _| s.queue_ready);
+    show(&view, "ask-0", cx);
+    cx.simulate_mouse_move(gpui::point(px(1.), px(1.)), None, Modifiers::default());
+    view.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
+    paint(cx);
+    assert!(cx.debug_bounds("prompt-copy-ask-0").is_none());
+    for _ in 0..64 {
+        cx.simulate_keystrokes("tab");
+        paint(cx);
+        if cx.debug_bounds("prompt-copy-ask-0").is_some() {
+            break;
+        }
+    }
+    assert_eq!(cx.debug_opacity("prompt-copy-ask-0"), Some(1.));
+    let copy = cx.update(|window, cx| window.focused(cx).unwrap());
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string("not the prompt".into()));
+    cx.simulate_keystrokes("enter");
+    assert_eq!(
+        cx.read_from_clipboard().unwrap().text().unwrap(),
+        "same **exact** prompt\nnext line"
+    );
+    cx.simulate_keystrokes("tab");
+    paint(cx);
+    let rewind = cx.update(|window, cx| window.focused(cx).unwrap());
+    assert_ne!(copy, rewind);
+    cx.simulate_keystrokes("tab");
+    paint(cx);
+    let fork = cx.update(|window, cx| window.focused(cx).unwrap());
+    assert_ne!(rewind, fork);
+    cx.simulate_keystrokes("shift-tab");
+    paint(cx);
+    assert_eq!(cx.update(|window, cx| window.focused(cx).unwrap()), rewind);
+    cx.simulate_keystrokes("enter");
+    paint(cx);
+    assert!(cx.debug_bounds("prompt-rewind-confirm-ask-0").is_some());
+    click(cx, "prompt-rewind-cancel-ask-0");
+    cx.simulate_keystrokes("shift-tab");
+    paint(cx);
+    assert_eq!(cx.update(|window, cx| window.focused(cx).unwrap()), copy);
+}
+
+#[gpui::test]
+fn prompt_actions_confirmation_stays_visible_without_hover_or_action_focus(
+    cx: &mut TestAppContext,
+) {
+    let (_host, client) = fixture();
+    let session = seed(&client, 1, cx);
+    let saved_client = client.clone();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| {
+        s.sessions = saved_client.sessions().unwrap();
+        s.select(session.id, cx);
+    });
+    settle(&view, cx, |s, _| s.queue_ready);
+    show(&view, "ask-0", cx);
+    click(cx, "prompt-rewind-ask-0");
+    cx.simulate_mouse_move(gpui::point(px(1.), px(1.)), None, Modifiers::default());
+    view.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
+    paint(cx);
+    for selector in [
+        "prompt-copy-ask-0",
+        "prompt-rewind-ask-0",
+        "prompt-fork-ask-0",
+        "prompt-rewind-confirm-ask-0",
+    ] {
+        assert!(cx.debug_bounds(selector).is_some());
+        assert_eq!(cx.debug_opacity(selector), Some(1.));
+    }
+}
+
+#[gpui::test]
+fn prompt_actions_reverse_tab_enters_a_hidden_row_at_fork(cx: &mut TestAppContext) {
+    let (_host, client) = fixture();
+    let session = seed(&client, 2, cx);
+    let saved_client = client.clone();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| {
+        s.sessions = saved_client.sessions().unwrap();
+        s.select(session.id, cx);
+    });
+    settle(&view, cx, |s, _| s.queue_ready);
+    show(&view, "ask-0", cx);
+    cx.simulate_mouse_move(gpui::point(px(1.), px(1.)), None, Modifiers::default());
+    view.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
+    paint(cx);
+    for _ in 0..64 {
+        cx.simulate_keystrokes("tab");
+        paint(cx);
+        if cx.debug_bounds("prompt-copy-ask-0").is_some() {
+            break;
+        }
+    }
+    assert_eq!(cx.debug_opacity("prompt-copy-ask-0"), Some(1.));
+    cx.simulate_keystrokes("tab tab");
+    paint(cx);
+    let fork = cx.update(|window, cx| window.focused(cx).unwrap());
+    cx.simulate_keystrokes("tab");
+    paint(cx);
+    assert!(cx.debug_bounds("prompt-copy-ask-1").is_some());
+    assert!(cx.debug_bounds("prompt-fork-ask-0").is_none());
+    cx.simulate_keystrokes("shift-tab");
+    paint(cx);
+    assert_eq!(cx.update(|window, cx| window.focused(cx).unwrap()), fork);
+    assert_eq!(cx.debug_opacity("prompt-fork-ask-0"), Some(1.));
 }
