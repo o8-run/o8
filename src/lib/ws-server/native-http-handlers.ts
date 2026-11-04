@@ -89,7 +89,6 @@ import { GET as api_runtime_telemetry_GET } from '@/app/api/runtime/telemetry/ro
 import { GET as api_orchestrator_status_GET } from '@/app/api/orchestrator/status/route';
 import { GET as api_setup_cli_updates_GET } from '@/app/api/setup/cli-updates/route';
 import { GET as api_panel_problem_dossiers_GET } from '@/app/api/panel/problem-dossiers/route';
-import { GET as api_cortex_diagnostics_GET } from '@/app/api/cortex/diagnostics/route';
 
 export const api_mobile_orchestrator_threads = { GET: api_mobile_orchestrator_threads_GET };
 export const api_orchestrator_state = { GET: api_orchestrator_state_GET, PATCH: api_orchestrator_state_PATCH };
@@ -168,7 +167,6 @@ export const api_runtime_telemetry = { GET: api_runtime_telemetry_GET };
 export const api_orchestrator_status = { GET: api_orchestrator_status_GET };
 export const api_setup_cli_updates = { GET: api_setup_cli_updates_GET };
 export const api_panel_problem_dossiers = { GET: api_panel_problem_dossiers_GET };
-export const api_cortex_diagnostics = { GET: api_cortex_diagnostics_GET };
 export const api_orchestrator_handoff = { POST: api_orchestrator_handoff_POST };
 export const api_orchestrator_reset_session = { POST: api_orchestrator_reset_session_POST };
 export const api_orchestrator_compact = { POST: api_orchestrator_compact_POST };

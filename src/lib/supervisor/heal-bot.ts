@@ -757,6 +757,11 @@ async function drainHealBotQueue(): Promise<void> {
   }
 }
 
+/** True while the heal-bot loop runs; its maintenance reconciles problem dossiers. */
+export function healBotLoopRunning(): boolean {
+  return healBotTimer !== null;
+}
+
 export async function runHealBotTickOnce(): Promise<void> {
   await drainHealBotQueue();
 }

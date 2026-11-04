@@ -105,7 +105,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/steer-packet', 'POST', () => import('@/app/api/orchestrator/steer-packet/route')),
   ],
   settings: [
-    route('/api/cortex/diagnostics', 'GET', () => import('@/app/api/cortex/diagnostics/route')),
     route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
     route('/api/runtime/capabilities', 'GET', () => import('@/app/api/runtime/capabilities/route')),
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),

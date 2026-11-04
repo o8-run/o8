@@ -25,6 +25,7 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/runtime/provider-instances',
   '/api/setup/detect',
   '/api/cortex/codebase-memory',
+  '/api/cortex/diagnostics',
   '/api/cortex/cross-repo-proposals',
   '/api/orchestrator/archive',
   '/api/orchestrator/backend-models',

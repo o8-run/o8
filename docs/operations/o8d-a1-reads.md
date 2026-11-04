@@ -31,7 +31,6 @@ No peer header grants local authority.
 | `/api/setup/cli-updates` | setup, settings | shell_features/update.rs | gate |
 | `/api/cortex/proposals` | activity | surfaces/activity/proposals.rs | gate |
 | `/api/panel/problem-dossiers` | activity | surfaces/activity/decisions.rs | gate + panel |
-| `/api/cortex/diagnostics` | settings | settings_indexing.rs | gate |
 
 `[hash]` uses the production parameter name for the native commit path
 inventoried as `[id]`.
@@ -50,9 +49,9 @@ new migrator and no second writer. This holds only when:
    flushes, ledger bootstraps, and creating user-visible directories.
 4. Identity is decided case by case: tokens, instance or boot IDs, and keys.
 
-`/api/panel/problem-dossiers` and `/api/cortex/diagnostics` are registered under
-this rule. Their GETs no longer reconcile or flush: heal-bot maintenance
-reconciles dossiers every tick, and `recordTiming` persists every ten samples.
+`/api/panel/problem-dossiers` is registered under this rule. Its GET no longer
+reconciles: a dossier reconcile interval runs in the ws-server whether or not
+the heal-bot is on, and skips the ticks the running heal-bot already covers.
 
 ## Held Next-only
 
@@ -67,6 +66,7 @@ reconciles dossiers every tick, and `recordTiming` persists every ten samples.
 | `/api/orchestrator/backend-models` | GET probes and writes model disk caches; key resolution also has side effects. |
 | `/api/orchestrator/pull-request-context` | GET accepts refresh queries that call `ensureGitHubPullRequest` and update the mirror. |
 | `/api/setup/identity` | `getInstanceIdentity` creates persisted instance/boot IDs when absent. Existing producer registration is preserved; no surface entry is added. |
+| `/api/cortex/diagnostics` | Timings are recorded in the Next process; the native process loads the disk snapshot once, so a native GET would omit them. |
 | `/api/cortex/codebase-memory` | GET calls `ensureCodebaseMemoryBootIndex`, starting indexing and persistent writes. |
 
 Seven additional GETs remain held because `listRepos()` repairs and
