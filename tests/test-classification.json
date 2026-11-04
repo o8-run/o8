@@ -1473,6 +1473,7 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "native-build",
         "worktree-api"
       ]
     },
