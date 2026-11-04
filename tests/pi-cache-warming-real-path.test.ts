@@ -18,6 +18,7 @@ const history = path.join(agentDir, 'sessions');
 const source = path.join(history, 'saved.jsonl');
 const binary = path.join(root, 'pi.mjs');
 const receipt = path.join(root, 'calls.jsonl');
+// Seed a non-allowlisted parent name so each real provider launch proves it is dropped.
 const env = { PI_CODING_AGENT_DIR: agentDir, PI_CODING_AGENT_SESSION_DIR: history, O8_PI_BIN: binary,
   O8_OWNED_PI_ROOT: path.join(root, 'owned'), O8_OWNED_PI_ARCHIVE_ROOT: path.join(root, 'archive'), PI_WARM_FIXTURE_ROOT: root };
 const prior = new Map(Object.keys(env).map(key => [key, process.env[key]]));
@@ -32,6 +33,7 @@ const original = [header, { type: 'usage', id: 'old-warm', parentId: null,
   timestamp: '2099-01-01T00:00:00.000Z', kind: 'cache_warm', provider: 'fixture', model: 'fixture-model', usage: usage(99) }]
   .map(entry => JSON.stringify(entry)).join('\n') + '\n';
 writeFileSync(source, original);
+// Provider children only inherit allowlisted names (#4585); embed fixture plumbing.
 writeFileSync(binary, `#!${process.execPath}
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
@@ -39,9 +41,9 @@ import path from 'node:path';
 import readline from 'node:readline';
 const argv = process.argv.slice(2);
 if (argv.includes('--version')) { console.log('pi 1.1.0'); process.exit(0); }
-const root = process.env.PI_WARM_FIXTURE_ROOT;
+const root = ${JSON.stringify(root)};
 const file = argv.includes('--session') ? argv[argv.indexOf('--session') + 1] : path.join(root, 'fresh-' + process.pid + '.jsonl');
-appendFileSync(path.join(root, 'calls.jsonl'), JSON.stringify({ argv, file, pid: process.pid }) + '\\n');
+appendFileSync(path.join(root, 'calls.jsonl'), JSON.stringify({ argv, file, pid: process.pid, fixtureRootEnv: process.env.PI_WARM_FIXTURE_ROOT ?? null }) + '\\n');
 const usage = cost => ({ input: 10, output: 1, cacheRead: 5, cacheWrite: 0, totalTokens: 16, cost: { input: cost, output: 0, cacheRead: 0, cacheWrite: 0, total: cost } });
 const input = readline.createInterface({ input: process.stdin });
 input.on('line', line => {
@@ -76,10 +78,12 @@ const { invalidateCliCache } = await import('@/lib/runtimes/shared/cli-resolver'
 const { GET } = await import('@/app/api/runtime/transcript/route');
 invalidateCliCache('pi');
 const keys: string[] = [];
-interface Call { argv: string[]; file: string; pid: number }
+interface Call { argv: string[]; file: string; pid: number; fixtureRootEnv: string | null }
 const calls = (): Call[] => existsSync(receipt) ? readFileSync(receipt, 'utf8').trim().split('\n').map(line => JSON.parse(line)) : [];
 async function settled(count: number) {
   await vi.waitFor(() => expect(calls()).toHaveLength(count));
+  expect(process.env.PI_WARM_FIXTURE_ROOT).toBe(root);
+  expect(calls()[count - 1].fixtureRootEnv).toBeNull();
   await vi.waitFor(() => expect(() => process.kill(calls()[count - 1].pid, 0)).toThrow());
 }
 afterAll(async () => {
