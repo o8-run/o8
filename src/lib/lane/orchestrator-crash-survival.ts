@@ -161,6 +161,8 @@ export function discardOrchestratorTurnRecord(record?: OrchestratorTurnRecord | 
 // Settled turns are kept this long as the durable "how did the last turn end"
 // answer, then pruned together with their stream files.
 const TURN_LEDGER_RETENTION_MS = 24 * 60 * 60 * 1000;
+const SUBAGENT_TRANSCRIPT_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+let lastSubagentTranscriptSweepAt = -Infinity;
 
 export function finishOrchestratorTurn(
   record?: OrchestratorTurnRecord | null,
@@ -194,8 +196,36 @@ function readAllTurnRecords(): OrchestratorTurnRecord[] {
     });
 }
 
+function pruneSubagentTranscripts(cutoff: number): void {
+  const now = Date.now();
+  if (now - lastSubagentTranscriptSweepAt < SUBAGENT_TRANSCRIPT_SWEEP_INTERVAL_MS) return;
+  lastSubagentTranscriptSweepAt = now;
+  const dir = join(getDataDir(), 'subagent-transcripts');
+  let files;
+  try {
+    files = readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn('[orchestrator-retention] Failed to list subagent transcripts', error);
+    }
+    return;
+  }
+  // PROCESS_TIMEOUT_MS caps turns at 4 hours, below the 24-hour retention.
+  // Children age out with the turn ledger and stream files, so age alone suffices.
+  for (const file of files) {
+    if (!file.isFile() || !file.name.endsWith('.jsonl')) continue;
+    const filePath = join(dir, file.name);
+    try {
+      if (statSync(filePath).mtimeMs < cutoff) rmSync(filePath, { force: true });
+    } catch (error) {
+      console.warn(`[orchestrator-retention] Failed to prune ${filePath}`, error);
+    }
+  }
+}
+
 function pruneSettledTurns(records: OrchestratorTurnRecord[]): void {
   const cutoff = Date.now() - TURN_LEDGER_RETENTION_MS;
+  pruneSubagentTranscripts(cutoff);
   for (const record of records) {
     if (!record.settledAt || record.settledAt >= cutoff) continue;
     rmSync(recordPath(record.id), { force: true });
