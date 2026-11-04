@@ -663,14 +663,11 @@ impl Surface {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let rise = self.composer.read(cx).rise(window);
         div()
             .w_full()
             .max_w(px(crate::theme::chat_width()))
             .mx_auto()
-            // A growing draft lifts the card over the transcript rather than
-            // shrinking it, so the transcript region is reused while typing.
-            .mt(px(-rise))
+            // Reserve the full card height so the transcript above yields space.
             .flex()
             .flex_col()
             .children(self.lineage_strip(cx))

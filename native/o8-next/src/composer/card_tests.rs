@@ -786,53 +786,8 @@ fn native_composer_loaded_typing_benchmark(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui::test]
-fn native_composer_loaded_wrapping_keeps_transcript_geometry(cx: &mut TestAppContext) {
-    let fixture = Fixture::with_loaded(true);
-    let (surface, cx) = loaded(cx, &fixture);
-    let before = cx.debug_bounds("composer-card").unwrap();
-    let space = cx.debug_bounds("composer-space").unwrap();
-    let regions = surface.read_with(cx, |s, cx| s.regions.renders(cx));
-    cx.write_to_clipboard(gpui::ClipboardItem::new_string(
-        "a long draft line\n".repeat(20),
-    ));
-    cx.simulate_keystrokes("ctrl-v");
-    for _ in 0..2 {
-        cx.update(|window, cx| window.draw(cx).clear());
-    }
-    // Classic's composer grows with a long draft, up to its cap, by rising
-    // over the transcript; the conversation keeps its size.
-    let after = cx.debug_bounds("composer-card").unwrap();
-    assert!(
-        after.size.height > before.size.height,
-        "a long draft grows the card"
-    );
-    assert_eq!(after.bottom(), before.bottom(), "the card grows upward");
-    assert_eq!(
-        cx.debug_bounds("composer-space").unwrap(),
-        space,
-        "growing a draft must not resize the conversation"
-    );
-    surface.read_with(cx, |s, cx| assert_eq!(s.regions.renders(cx), regions));
-    let viewport = cx.debug_bounds("composer-input").unwrap();
-    surface.update_in(cx, |s, window, cx| {
-        s.composer.update(cx, |i, cx| {
-            let end = i.text.encode_utf16().count();
-            let caret = gpui::EntityInputHandler::bounds_for_range(
-                i,
-                end..end,
-                gpui::Bounds::default(),
-                window,
-                cx,
-            )
-            .expect("native caret bounds");
-            assert!(
-                caret.top() >= viewport.top() && caret.bottom() <= viewport.bottom(),
-                "the fixed composer viewport must scroll the insertion point into view"
-            );
-        });
-    });
-}
+#[path = "tall_draft_tests.rs"]
+mod tall_draft_tests;
 
 #[gpui::test]
 fn native_composer_loaded_resize_reshapes_rows_then_resumes_isolation(cx: &mut TestAppContext) {

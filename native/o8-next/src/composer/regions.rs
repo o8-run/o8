@@ -105,6 +105,7 @@ impl Surface {
             self.action_feedback.clone(),
         );
         div()
+            .debug_selector(|| "transcript-viewport".into())
             .size_full()
             .relative()
             .flex()
@@ -147,6 +148,7 @@ impl Surface {
                         .interactive(&list_state);
                         if let Some(prompt) = prompts.get(&index) {
                             return div()
+                                .debug_selector(move || format!("transcript-row-{index}"))
                                 .w_full()
                                 .flex()
                                 .flex_col()
@@ -157,6 +159,7 @@ impl Surface {
                         }
                         match ends.get(&index) {
                             Some(text) => div()
+                                .debug_selector(move || format!("transcript-row-{index}"))
                                 .w_full()
                                 .flex()
                                 .flex_col()
@@ -169,7 +172,11 @@ impl Surface {
                                     text.clone(),
                                 ))
                                 .into_any_element(),
-                            None => row,
+                            None => div()
+                                .debug_selector(move || format!("transcript-row-{index}"))
+                                .w_full()
+                                .child(row)
+                                .into_any_element(),
                         }
                     }
                 })

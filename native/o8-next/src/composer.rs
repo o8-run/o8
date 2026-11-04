@@ -107,16 +107,6 @@ impl Composer {
         self.typing = None;
         self.changed(cx);
     }
-    /// How far a long draft has grown the chat input past its 52px floor.
-    /// The card spends it upward over the transcript, as classic's floating
-    /// composer did, so the transcript keeps its size while you type.
-    pub(crate) fn rise(&self, window: &Window) -> f32 {
-        if self.framed || self.inline {
-            return 0.;
-        }
-        // The unframed input pads 11px above and 4px below its text.
-        (f32::from(self.height) + 15.).clamp(52., card_max(window)) - 52.
-    }
     pub fn composing(&self) -> bool {
         self.marked.is_some()
     }
@@ -626,7 +616,12 @@ impl Render for Composer {
             .rounded(px(crate::theme::GEOMETRY.row_radius))
             .p(px(8.))
             .when(!self.framed, |d| {
-                d.min_h(px(52.)).pt(px(11.)).px(px(14.)).pb(px(4.))
+                // Reserve two lines and their padding so the first wrap does not
+                // grow the card by 3px and invalidate the cached transcript.
+                d.min_h(px(2. * crate::theme::TYPE.body_line + 11. + 4.))
+                    .pt(px(11.))
+                    .px(px(14.))
+                    .pb(px(4.))
             })
             .when(self.inline, |d| {
                 d.min_h_0()

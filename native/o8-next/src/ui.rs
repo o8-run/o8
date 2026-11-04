@@ -938,6 +938,7 @@ impl Render for Surface {
                             .flex()
                             .flex_col()
                             .flex_1()
+                            .min_h_0()
                             .min_w_0()
                             .when(empty, |view| {
                                 view.when(!self.notice.is_empty(), |view| {
