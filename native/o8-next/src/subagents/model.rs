@@ -277,8 +277,8 @@ pub(crate) struct Snapshot {
 pub(crate) fn unread(
     agents: &[Agent],
     known: &std::collections::HashMap<String, Lane>,
-) -> (bool, Vec<String>) {
-    let mut any = false;
+) -> (Vec<String>, Vec<String>) {
+    let mut any = Vec::new();
     let mut stats = Vec::new();
     for agent in agents {
         let Some(id) = &agent.facts.lane else {
@@ -287,7 +287,8 @@ pub(crate) fn unread(
         let done = agent.group == Group::Done;
         match known.get(id) {
             Some(lane) if lane.stat_read || !done => continue,
-            _ => any = true,
+            _ if !any.contains(id) => any.push(id.clone()),
+            _ => {}
         }
         if done && !stats.contains(id) && stats.len() < STAT_LIMIT {
             stats.push(id.clone());
@@ -306,12 +307,31 @@ pub(crate) fn load(
     // The same lane read the roster's Clean up makes, asked for the finished
     // lanes' diff stats; once known, a lane is not read again.
     let lanes = match packets.as_ref().map(|agents| unread(agents, known)) {
-        Ok((true, stats)) => client
+        Ok((wanted, stats)) if !wanted.is_empty() => client
             .get::<Value>(
                 "/api/lanes",
                 &[("active", "false"), ("diffStat", &stats.join(","))],
             )
-            .and_then(|response| lanes(&response, &stats)),
+            .and_then(|response| lanes(&response, &stats))
+            .map(|mut read| {
+                // Only the lanes asked about: a known lane keeps its stat.
+                read.retain(|(lane, _)| wanted.contains(lane));
+                // A lane this caller can't see is known to have nothing to
+                // show, rather than read again on every refresh.
+                for id in wanted {
+                    if !read.iter().any(|(lane, _)| *lane == id) {
+                        let stat_read = stats.contains(&id);
+                        read.push((
+                            id,
+                            Lane {
+                                stat_read,
+                                ..Default::default()
+                            },
+                        ));
+                    }
+                }
+                read
+            }),
         _ => Ok(vec![]),
     };
     let shared = (|| {
