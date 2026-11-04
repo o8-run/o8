@@ -95,6 +95,7 @@ const {
   invalidateRuntimeAuthCache,
 } = await import('./auth-detect');
 const { writeClaudeCodeWorkerProfile } = await import('@/lib/claude-code/worker-profile');
+const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
 const claudeCodeProfileRoute = await import('@/app/api/runtime/claude-code-profile/route');
 const genUiRoute = await import('@/app/api/mobile/genui/stream/route');
@@ -475,7 +476,10 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
     );
   });
 
-  it('invalidates the warmed native refusal through the authenticated profile POST route', async () => {
+  it('invalidates the warmed native refusal through the authenticated profile POST route', async ({ onTestFinished }) => {
+    // An OpenRouter profile is an API payer choice; opt in the way runtime settings do.
+    saveRuntimeBillingMode('claude-code', 'api');
+    onTestFinished(() => saveRuntimeBillingMode('claude-code', 'subscription'));
     writeStaleMarkers();
     invalidateRuntimeAuthCache();
     expect((await getRuntimeAuthSnapshot()).statuses.claude).toMatchObject({

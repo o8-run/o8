@@ -110,6 +110,7 @@ describe('Claude Code dispatch spawn', () => {
     if (priorClaudeOauthToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
     else process.env.CLAUDE_CODE_OAUTH_TOKEN = priorClaudeOauthToken;
     try { unlinkSync(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'claude-code-worker.json')); } catch {}
+    rmSync(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'runtime-billing', 'claude-code.json'), { force: true });
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
@@ -166,7 +167,14 @@ describe('Claude Code dispatch spawn', () => {
     expect(readFileSync(stdinPath, 'utf8')).toContain('implement the packet');
   }, 20_000);
 
+  // An API key reaches the worker only after the persisted My API key payer choice.
+  async function optIntoApiBilling(): Promise<void> {
+    const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
+    saveRuntimeBillingMode('claude-code', 'api');
+  }
+
   it('carries a non-empty environment credential through the actual native worker spawn', async () => {
+    await optIntoApiBilling();
     process.env.ANTHROPIC_API_KEY = 'sk-ant-native-spawn-test';
     const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
     const result = await claudeCodeRuntime.launch({
@@ -267,6 +275,7 @@ describe('Claude Code dispatch spawn', () => {
   }, 20_000);
 
   it('pins an OpenRouter model and gateway environment to the owned worker child', async () => {
+    await optIntoApiBilling();
     process.env.OPENROUTER_API_KEY = 'sk-or-test-worker';
     const profile = await import('@/lib/claude-code/worker-profile');
     await profile.writeClaudeCodeWorkerProfile({
