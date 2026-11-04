@@ -231,7 +231,8 @@ it.skipIf(process.platform !== 'linux')('stages a relocatable payload, desktop e
   expect(cli.status, cli.stderr).toBe(0);
   expect(cli.stdout).toContain('0.1.');
   const desktop = readFileSync(join(f.relocated, 'usr/share/applications/o8.desktop'), 'utf8');
-  expect(desktop).toContain('Exec=/usr/bin/o8\n');
+  expect(desktop).toContain('Exec=/usr/bin/o8 %u\n');
+  expect(desktop).toContain('MimeType=x-scheme-handler/o8;\n');
   expect(desktop).toContain('Terminal=false');
   expect(existsSync(join(f.relocated, 'usr/share/icons/hicolor/256x256/apps/o8.png'))).toBe(true);
   expect(readFileSync(join(f.relocated, 'usr/share/doc/o8/node-LICENSE'), 'utf8')).toContain('fixture runtime');
