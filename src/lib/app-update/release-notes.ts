@@ -20,6 +20,7 @@ export interface ReleaseNotes {
 type Memo = { notes: ReleaseNotes; at: number };
 const state = globalThis as typeof globalThis & { __o8ReleaseNotesV1?: { cache: Map<string, Memo>; pending: Map<string, Promise<ReleaseNotes>> } };
 const shared = state.__o8ReleaseNotesV1 ??= { cache: new Map(), pending: new Map() };
+const persisting = new Map<string, Promise<ReleaseNotes>>();
 
 export function normalizeReleaseVersion(value: string): string | null {
   return value === 'latest' ? value : /^v?\d+\.\d+\.\d+(?:-preview\.\d+)?$/.test(value)
@@ -69,8 +70,7 @@ export async function getReleaseNotes(version: string): Promise<ReleaseNotes> {
   const pending = shared.pending.get(key);
   if (pending) return pending;
   const task = (async () => {
-    const directory = path.join(getDataDir(), 'release-notes-cache');
-    const file = path.join(directory, `${key}.json`);
+    const file = releaseNotesCacheFile(key);
     try {
       const saved = JSON.parse(await readFile(file, 'utf8')) as Memo;
       const tag = normalizeReleaseVersion(saved.notes?.version ?? '');
@@ -104,9 +104,31 @@ export async function getReleaseNotes(version: string): Promise<ReleaseNotes> {
       releaseUrl: `https://github.com/${REPO}/releases/tag/v${tag}`, cachedAt: new Date().toISOString() };
     const value = { notes, at: Date.now() };
     shared.cache.set(key, value);
-    try { await mkdir(directory, { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify(value), { mode: 0o600 }); await rename(`${file}.tmp`, file); } catch { /* In-memory caching is sufficient when disk is unavailable. */ }
     return notes;
   })().finally(() => shared.pending.delete(key));
   shared.pending.set(key, task);
+  return task;
+}
+
+function releaseNotesCacheFile(key: string): string {
+  // Inject the environment to resolve the directory without running migration.
+  return path.join(getDataDir({ ...process.env }), 'release-notes-cache', `${key}.json`);
+}
+
+/** Explicit cache maintenance; reads only hydrate the in-memory memo. */
+export async function persistReleaseNotes(version: string): Promise<ReleaseNotes> {
+  const key = normalizeReleaseVersion(version);
+  if (!key) throw new Error('Invalid release version.');
+  const pending = persisting.get(key);
+  if (pending) return pending;
+  const task = (async () => {
+    const notes = await getReleaseNotes(key);
+    const file = releaseNotesCacheFile(key);
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(`${file}.tmp`, JSON.stringify(shared.cache.get(key)), { mode: 0o600 });
+    await rename(`${file}.tmp`, file);
+    return notes;
+  })().finally(() => persisting.delete(key));
+  persisting.set(key, task);
   return task;
 }

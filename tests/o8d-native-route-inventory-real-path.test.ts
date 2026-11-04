@@ -34,7 +34,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/account/avatar',
   '/api/panel/browse-folder',
   '/api/panel/devices',
-  '/api/panel/o8-update-summary',
   '/api/panel/problem-dossiers',
   '/api/panel/prs/[id]/timeline',
   '/api/panel/update/apply',

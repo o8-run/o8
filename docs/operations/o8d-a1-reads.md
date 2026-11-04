@@ -29,6 +29,7 @@ No peer header grants local authority.
 | `/api/runtime/telemetry` | session | composer/context.rs, command_client.rs | gate |
 | `/api/orchestrator/status` | session | composer/command_client.rs | gate + panel |
 | `/api/setup/cli-updates` | setup, settings | shell_features/update.rs | gate |
+| `/api/panel/o8-update-summary` | settings | shell_features/update.rs | gate |
 | `/api/cortex/proposals` | activity | surfaces/activity/proposals.rs | gate |
 
 `[hash]` uses the production parameter name for the native commit path
@@ -38,9 +39,8 @@ inventoried as `[id]`.
 
 | Candidate | Reason |
 | --- | --- |
-| `/api/panel/problem-dossiers` | GET calls `reconcileProblemDossiers`, which persists dossier/remedy state. |
+| `/api/panel/problem-dossiers` | GET initializes auth and database state on a cold data directory, and `reconcileProblemDossiers` persists dossier/remedy state. Held with the security lane. |
 | `/api/panel/devices` | Handler requires verified loopback in addition to operator authority. The adapter stamps `unverified-proxy`; a bearer cannot satisfy the local-peer condition. |
-| `/api/panel/o8-update-summary` | `getReleaseNotes` writes a disk cache on GET. |
 | `/api/tasks` | `getTaskPool` calls `getProjectsLedger`, which bootstraps and writes the project ledger when absent; project context reads share that bootstrap path. |
 | `/api/tasks/[id]/preview` | Native client uses POST/DELETE; production route has no GET. |
 | `/api/repo-spec/asset` | Native client uploads with POST; production route has no GET. |
@@ -48,7 +48,7 @@ inventoried as `[id]`.
 | `/api/orchestrator/backend-models` | GET probes and writes model disk caches; key resolution also has side effects. |
 | `/api/orchestrator/pull-request-context` | GET accepts refresh queries that call `ensureGitHubPullRequest` and update the mirror. |
 | `/api/setup/identity` | `getInstanceIdentity` creates persisted instance/boot IDs when absent. Existing producer registration is preserved; no surface entry is added. |
-| `/api/cortex/diagnostics` | GET calls `flushTimingBuffer`, which writes timing data to disk. |
+| `/api/cortex/diagnostics` | GET initializes database and auth storage on a cold data directory, in addition to `flushTimingBuffer`. Held with the security lane. |
 | `/api/cortex/codebase-memory` | GET calls `ensureCodebaseMemoryBootIndex`, starting indexing and persistent writes. |
 
 Seven additional GETs remain held because `listRepos()` repairs and
