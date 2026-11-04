@@ -48,6 +48,8 @@ mod text;
 mod thread_messages;
 mod theme;
 #[cfg(test)]
+mod theme_font_tests;
+#[cfg(test)]
 mod theme_tests;
 mod trace;
 mod subagents;

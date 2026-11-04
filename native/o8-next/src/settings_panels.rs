@@ -76,11 +76,63 @@ impl Settings {
                 }),
             );
         }
+        let installed = self
+            .font_families
+            .get_or_insert_with(|| window.text_system().all_font_names())
+            .clone();
+        let mut fonts = div().flex().flex_wrap().gap(px(12.));
+        for (mono, kind, title) in [(false, "ui", "UI font"), (true, "mono", "Code font")] {
+            let list_id = format!("setting-font-{kind}-list");
+            let mut list = div()
+                .id(gpui::SharedString::from(list_id.clone()))
+                .debug_selector(move || list_id.clone())
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .w(px(260.))
+                .max_h(px(220.))
+                .overflow_y_scroll();
+            for option in theme::font_options(mono, &installed) {
+                let label = if option.default {
+                    format!("{} (default)", option.family)
+                } else {
+                    option.family.clone()
+                };
+                let family = option.family.clone();
+                let picked = installed.clone();
+                list = list.child(
+                    self.button(
+                        format!("setting-font-{kind}-{}", option.family),
+                        label,
+                        true,
+                        option.current,
+                        window,
+                        cx,
+                        move |this, _, cx| {
+                            if theme::set_font(mono, &family, &picked) {
+                                cx.refresh_windows();
+                            }
+                            this.changed(cx);
+                        },
+                    )
+                    .font_family(option.family),
+                );
+            }
+            fonts = fonts.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(div().text_color(theme().text_muted).child(title))
+                    .child(list),
+            );
+        }
         div().flex().flex_col().gap(px(16.))
             .child(div().text_color(theme().text_muted).child("Theme"))
             .child(choices)
             .child(div().text_color(theme().text_muted).child("Chat width"))
             .child(widths)
+            .child(fonts)
             .child(div().text_size(px(11.)).text_color(theme().text_muted)
                 .child("Changes apply immediately and are saved for the next launch. Glass uses the macOS desktop material where supported; other platforms may use solid surfaces."))
             .into_any_element()

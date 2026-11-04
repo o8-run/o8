@@ -158,6 +158,8 @@ pub(crate) struct Settings {
     about_busy: bool,
     about_status: String,
     about_error: Option<String>,
+    /// Installed font families, listed once for the font pickers.
+    font_families: Option<Vec<String>>,
 }
 impl EventEmitter<Close> for Settings {}
 impl Settings {
@@ -207,6 +209,7 @@ impl Settings {
             about_busy: false,
             about_status: String::new(),
             about_error: None,
+            font_families: None,
         };
         view.load(false, cx);
         view

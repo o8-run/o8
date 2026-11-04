@@ -2,6 +2,17 @@ use super::*;
 struct Material;
 register_shell_feature!(Material);
 impl ShellFeature for Material {
+    fn observers(&self) -> &'static [PreferenceObserver] {
+        // A saved font that is no longer installed runs in its default.
+        &[PreferenceObserver {
+            order: 0,
+            install: |_, window, cx| {
+                if crate::theme::check_installed_fonts(&cx.text_system().all_font_names()) {
+                    window.refresh();
+                }
+            },
+        }]
+    }
     fn slots(&self) -> &'static [RenderSlot] {
         &[
             RenderSlot {

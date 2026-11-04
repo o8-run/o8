@@ -1,8 +1,9 @@
 //! Native counterparts of src/app/globals.css. Keep appearance selection here;
 //! views consume semantic tokens and never choose their own palette or fonts.
 use gpui::{Rgba, rgb};
-use std::sync::LazyLock;
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{LazyLock, Mutex, RwLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Appearance {
@@ -146,7 +147,8 @@ fn saved_chat_width() -> Option<String> {
 }
 /// Changes with the appearance, for caches that keep painted colors.
 pub fn generation() -> u8 {
-    appearance_id(selected())
+    let fonts = FONT_GENERATION.load(Ordering::Relaxed) as u8;
+    appearance_id(selected()).wrapping_add(fonts.wrapping_mul(3))
 }
 fn saved_path() -> Option<std::path::PathBuf> {
     if cfg!(test) {
@@ -179,15 +181,182 @@ pub fn appearance_name() -> &'static str {
         Appearance::Dark => "dark",
     }
 }
-static DARK: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Dark));
-static LIGHT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Light));
-static GLASS: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Glass));
-pub fn current() -> &'static Theme {
-    match selected() {
-        Appearance::Dark => &DARK,
-        Appearance::Light => &LIGHT,
-        Appearance::Glass => &GLASS,
+/// The UI and code font families Settings › Appearance picked, by name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fonts {
+    pub ui: &'static str,
+    pub mono: &'static str,
+}
+pub const DEFAULT_FONTS: Fonts = Fonts {
+    ui: UI_FONT,
+    mono: MONO_FONT,
+};
+/// The running token sets for Dark, Light and Glass with the picked fonts.
+static ACTIVE: LazyLock<RwLock<(Fonts, [&'static Theme; 3])>> = LazyLock::new(|| {
+    let fonts = saved_fonts().unwrap_or(DEFAULT_FONTS);
+    RwLock::new((fonts, themes_with(fonts)))
+});
+/// Bumped by each font switch, for caches that keep shaped text.
+static FONT_GENERATION: AtomicU32 = AtomicU32::new(0);
+/// Token sets live for the process, one per font pairing ever picked.
+fn themes_with(fonts: Fonts) -> [&'static Theme; 3] {
+    static BUILT: Mutex<Vec<(Fonts, [&'static Theme; 3])>> = Mutex::new(Vec::new());
+    let mut built = BUILT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((_, themes)) = built.iter().find(|(pair, _)| *pair == fonts) {
+        return *themes;
     }
+    let themes = [Appearance::Dark, Appearance::Light, Appearance::Glass].map(|appearance| {
+        let mut theme = Theme::for_appearance(appearance);
+        theme.font_ui = fonts.ui;
+        theme.font_mono = fonts.mono;
+        &*Box::leak(Box::new(theme))
+    });
+    built.push((fonts, themes));
+    themes
+}
+pub fn current() -> &'static Theme {
+    let active = ACTIVE
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    active.1[usize::from(appearance_id(selected()))]
+}
+pub fn fonts() -> Fonts {
+    ACTIVE
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .0
+}
+/// A family name kept for the process, so tokens can hold it; one copy each.
+fn intern(family: &str) -> &'static str {
+    static NAMES: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+    if let Some(name) = [UI_FONT, MONO_FONT]
+        .into_iter()
+        .find(|name| *name == family)
+    {
+        return name;
+    }
+    let mut names = NAMES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(name) = names.iter().find(|name| **name == family) {
+        return name;
+    }
+    let name: &'static str = Box::leak(family.to_owned().into_boxed_str());
+    names.push(name);
+    name
+}
+/// A family the text system lists, else the default: a missing font never
+/// reaches a view.
+fn installed_or_default(family: &str, default: &'static str, installed: &[String]) -> &'static str {
+    if family != default && installed.iter().any(|name| name == family) {
+        intern(family)
+    } else {
+        default
+    }
+}
+fn apply_fonts(fonts: Fonts) -> bool {
+    let mut active = ACTIVE
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if active.0 == fonts {
+        return false;
+    }
+    *active = (fonts, themes_with(fonts));
+    FONT_GENERATION.fetch_add(1, Ordering::Relaxed);
+    true
+}
+/// Switches the UI or code font and saves both for the next launch. True when
+/// the running fonts changed; the caller then repaints.
+pub fn set_font(mono: bool, family: &str, installed: &[String]) -> bool {
+    let mut fonts = self::fonts();
+    if mono {
+        fonts.mono = installed_or_default(family, MONO_FONT, installed);
+    } else {
+        fonts.ui = installed_or_default(family, UI_FONT, installed);
+    }
+    if let Some(path) = fonts_path() {
+        let _ = save_fonts(&path, fonts);
+    }
+    apply_fonts(fonts)
+}
+/// Runs a saved family that is no longer installed in its default, keeping
+/// the saved choice for when it returns. True when the fonts changed.
+pub fn check_installed_fonts(installed: &[String]) -> bool {
+    let fonts = self::fonts();
+    apply_fonts(Fonts {
+        ui: if fonts.ui == UI_FONT {
+            UI_FONT
+        } else {
+            installed_or_default(fonts.ui, UI_FONT, installed)
+        },
+        mono: if fonts.mono == MONO_FONT {
+            MONO_FONT
+        } else {
+            installed_or_default(fonts.mono, MONO_FONT, installed)
+        },
+    })
+}
+/// One row of a font picker.
+#[derive(Debug, PartialEq, Eq)]
+pub struct FontOption {
+    pub family: String,
+    pub current: bool,
+    pub default: bool,
+}
+/// The UI or code font picker: the default first, then the installed
+/// families by name. Names starting with a dot are the system's private
+/// faces and are left out.
+pub fn font_options(mono: bool, installed: &[String]) -> Vec<FontOption> {
+    let default = if mono { MONO_FONT } else { UI_FONT };
+    let current = if mono { fonts().mono } else { fonts().ui };
+    let mut families: Vec<&str> = installed
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !name.starts_with('.') && *name != default)
+        .collect();
+    families.sort_by_key(|name| name.to_lowercase());
+    families.dedup();
+    std::iter::once(default)
+        .chain(families)
+        .map(|family| FontOption {
+            family: family.to_string(),
+            current: family == current,
+            default: family == default,
+        })
+        .collect()
+}
+fn fonts_path() -> Option<std::path::PathBuf> {
+    Some(saved_path()?.with_file_name("next-fonts.json"))
+}
+fn saved_fonts() -> Option<Fonts> {
+    load_fonts(&fonts_path()?)
+}
+/// Saved fonts, as `{"ui": family, "mono": family}`.
+pub(crate) fn load_fonts(path: &std::path::Path) -> Option<Fonts> {
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    let family = |key: &str, default: &'static str| {
+        saved[key]
+            .as_str()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map_or(default, intern)
+    };
+    Some(Fonts {
+        ui: family("ui", UI_FONT),
+        mono: family("mono", MONO_FONT),
+    })
+}
+pub(crate) fn save_fonts(path: &std::path::Path, fonts: Fonts) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(
+        path,
+        serde_json::json!({ "ui": fonts.ui, "mono": fonts.mono }).to_string(),
+    )
 }
 pub fn glass() -> bool {
     matches!(selected(), Appearance::Glass)
