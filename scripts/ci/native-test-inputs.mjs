@@ -44,7 +44,10 @@ export function nativeTestInputs(root) {
       || !literal.includes('/') && !/\.[a-z0-9]+$/i.test(literal)) return;
     // A filename constant may be joined to a directory at runtime. Include
     // all matching repository files, including a removed file in the diff.
+    // Only Rust sources and scripts/next fixtures can name Markdown constants;
+    // host TS/JS document lists must not pull repository docs into this closure.
     if (!literal.includes('/') && /\.[a-z0-9]+$/i.test(literal)) {
+      if (/\.mdx?$/i.test(literal) && !origin.endsWith('.rs') && !origin.startsWith('scripts/next/')) return;
       filenameReferences.add(literal);
       for (const file of basenames.get(literal) ?? []) add(file);
     }

@@ -229,16 +229,24 @@ describe('native next CI through persisted fixtures', () => {
   it('discovers new native literals, transitive imports, aliases and dynamic fixture directories without a maintained list', () => {
     const files = {
       'native/o8-next/src/dependency_probe.rs': 'const CONTRACT: &str = include_str!("../../../fixtures/native-contract.json"); const HOST: &str = "scripts/next/dependency-probe.mjs"; const PARITY: &str = "../../scripts/parity/surfaces.json"; const PLAN: &str = "scripts/next/inbox-plan-fixture.ts"; fn family() { std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/native-family").join(format!("{name}.json"))); } const FOLDER: &str = "src/"; const TYPED: &str = "src/ma";',
-      'scripts/next/inbox-plan-fixture.ts': "import '../../tests/helpers/chatgpt-plan-fixture';",
+      'native/o8-next/src/markdown_probe.rs': 'const NOTES: &str = include_str!("../../../docs/native-notes.md"); const TEMPLATE: &str = "rust-template.mdx";',
+      'scripts/next/inbox-plan-fixture.ts': "import '../../tests/helpers/chatgpt-plan-fixture'; const template = 'next-template.md';",
       'scripts/next/dependency-probe.mjs': "import '../../fixtures/native-adapter.mjs';",
       'fixtures/native-contract.json': '{}',
-      'fixtures/native-adapter.mjs': "import '@/lib/native-probe'; import(`./native-records/${name}.json`); const template = 'native-template.md'; readFileSync(join(here, 'prompts', template));",
-      'src/lib/native-probe.ts': "import '../../fixtures/native-bootstrap'; export { value } from '../../fixtures/native-leaf';",
+      'fixtures/native-adapter.mjs': "import '@/lib/native-probe'; import(`./native-records/${name}.json`); const template = 'native-template.json'; readFileSync(join(here, 'prompts', template));",
+      'src/lib/native-probe.ts': "import '../../fixtures/native-bootstrap'; export { value } from '../../fixtures/native-leaf'; const docs = ['ROADMAP.md', 'README.md', 'guide.mdx'];",
       'fixtures/native-bootstrap.mjs': 'globalThis.fixtureReady = true;',
       'fixtures/native-leaf.ts': 'export const value = 1;',
       'fixtures/native-records/one.json': '{}',
       'fixtures/native-family/one.json': '{}',
-      'fixtures/prompts/native-template.md': 'fixture template',
+      'fixtures/prompts/native-template.json': '{}',
+      'fixtures/prompts/next-template.md': 'next fixture template',
+      'fixtures/prompts/rust-template.mdx': 'Rust fixture template',
+      'fixtures/native-family/notes.md': 'discovered fixture notes',
+      'docs/native-notes.md': 'Rust include notes',
+      'ROADMAP.md': 'roadmap',
+      'docs/README.md': 'nested readme',
+      'docs/guide.mdx': 'guide',
     };
     for (const [file, contents] of Object.entries(files)) {
       mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
@@ -251,7 +259,17 @@ describe('native next CI through persisted fixtures', () => {
     git('add', '.');
     git('commit', '-qm', 'native dependency fixture');
     const script = path.join(root, 'scripts/ci/native-changes.mjs');
-    for (const file of Object.keys(files).filter(file => !/^(native|scripts)\//.test(file))) {
+    const nonNativeMarkdown = ['ROADMAP.md', 'docs/README.md', 'docs/guide.mdx'];
+    for (const file of nonNativeMarkdown) {
+      const before = git('rev-parse', 'HEAD');
+      const after = commit(file, false, true);
+      expect.soft(selectNext('push', { before, after }, script), file).toBe('changed=false');
+      expect.soft(selectNext('pull_request', { pull_request: { base: { sha: before }, head: { sha: after } } }, script), file)
+        .toBe('changed=false');
+      expect.soft(selectNext('merge_group', { merge_group: { base_sha: before, head_sha: after } }, script), file)
+        .toBe('changed=false');
+    }
+    for (const file of Object.keys(files).filter(file => !/^(native|scripts)\//.test(file) && !nonNativeMarkdown.includes(file))) {
       const before = git('rev-parse', 'HEAD');
       const after = commit(file, false, true);
       expect(selectNext('push', { before, after }, script), file).toBe('changed=true');
@@ -261,7 +279,8 @@ describe('native next CI through persisted fixtures', () => {
         .toBe('changed=true');
     }
     for (const file of ['fixtures/native-contract.json', 'fixtures/native-records/one.json', 'fixtures/native-family/one.json',
-      'fixtures/prompts/native-template.md']) {
+      'fixtures/prompts/native-template.json', 'fixtures/prompts/next-template.md', 'fixtures/prompts/rust-template.mdx',
+      'docs/native-notes.md']) {
       const before = git('rev-parse', 'HEAD');
       const after = commit(file, true);
       expect(selectNext('push', { before, after }, script), `deleted ${file}`).toBe('changed=true');
