@@ -35,6 +35,35 @@ afterEach(() => {
 });
 
 describe('orchestrator thread history persistence', () => {
+  it('reads the turn ledger once per list for fresh and cached summaries (#5367)', async () => {
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const readdir = vi.fn(fs.readdirSync);
+    vi.doMock('node:fs', () => ({ ...fs, readdirSync: readdir }));
+    try {
+      const history = await loadHistoryModule();
+      const { createOrchestratorTurnRecord, finishOrchestratorTurn } = await import('@/lib/lane/orchestrator-crash-survival');
+      const threads = Array.from({ length: 3 }, (_, index) => history.createMobileOrchestratorThread({
+        repoPath: '/tmp/repo', title: `Thread ${index}`,
+      }));
+      const turns = threads.map(thread => createOrchestratorTurnRecord({
+        backend: 'codex', sessionName: 'single-read-fixture', repoPath: '/tmp/repo', threadId: thread.id, pid: process.pid,
+      }));
+      const ledgerDir = join(process.env.O8_DATA_DIR!, 'orchestrator-turns');
+      const listStatuses = () => {
+        readdir.mockClear();
+        const listed = history.listMobileOrchestratorThreads();
+        expect(readdir.mock.calls.filter(([path]) => path === ledgerDir)).toHaveLength(1);
+        return threads.map(thread => listed.find(item => item.id === thread.id)?.status);
+      };
+      expect(listStatuses()).toEqual(['busy', 'busy', 'busy']);
+      finishOrchestratorTurn(turns[1], 'completed');
+      finishOrchestratorTurn(turns[2], 'failed');
+      expect(listStatuses()).toEqual(['busy', 'ready', 'failed']);
+    } finally {
+      vi.doUnmock('node:fs');
+    }
+  });
+
   it('keeps saved-message status for threads without a turn record (#5367)', async () => {
     const history = await loadHistoryModule();
     const { listOrchestratorTurnsForThread } = await import('@/lib/lane/orchestrator-crash-survival');

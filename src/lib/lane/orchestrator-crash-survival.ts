@@ -226,6 +226,21 @@ export function listOrchestratorTurnsForThread(threadId: string): OrchestratorTu
     .sort((left, right) => right.startedAt - left.startedAt);
 }
 
+/** Read the ledger once for a thread list, newest first within each thread. */
+export function listOrchestratorTurnsByThread(): Map<string, OrchestratorTurnRecord[]> {
+  const byThread = new Map<string, OrchestratorTurnRecord[]>();
+  for (const record of readAllTurnRecords()) {
+    if (!record.threadId) continue;
+    const turns = byThread.get(record.threadId);
+    if (turns) turns.push(record);
+    else byThread.set(record.threadId, [record]);
+  }
+  for (const turns of byThread.values()) {
+    turns.sort((left, right) => right.startedAt - left.startedAt);
+  }
+  return byThread;
+}
+
 /** Includes settled records: abort acknowledgement does not prove process exit. */
 export function listOrchestratorTurnsForSessions(sessionNames: readonly string[]): OrchestratorTurnRecord[] {
   const names = new Set(sessionNames);
