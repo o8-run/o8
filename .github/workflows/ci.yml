@@ -707,6 +707,11 @@ jobs:
           unset DISPLAY WAYLAND_DISPLAY
           TIMEFORMAT='o8 next native probes wall=%3R s'
           time node scripts/ci/native-test-shard.mjs --cargo --phase=timed
+      - uses: actions/upload-artifact@v4
+        if: needs.reuse.outputs.reuse != 'true' && always()
+        with:
+          name: native-timings-${{ matrix.shard }}
+          path: test-results/native-timings-${{ matrix.shard }}.json
       - name: Measure native cache size
         id: native-cache-size
         if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'

@@ -10,6 +10,12 @@ const workflow = parse(readFileSync(path.join(repo, '.github/workflows/ci.yml'),
 const root = mkdtempSync(path.join(tmpdir(), 'o8-ci-gates-'));
 const probeRoot = mkdtempSync(path.join(tmpdir(), 'o8-ci-native-probe-'));
 const nativeScript = path.join(repo, 'scripts/ci/native-changes.mjs');
+const fixtureNativeScript = path.join(root, 'scripts/ci/native-selector-fixture.mjs');
+// Input discovery resolves from the selector's location. Keep it inside the
+// committed fixture, under a name the input-change matrix does not overwrite.
+mkdirSync(path.dirname(fixtureNativeScript), { recursive: true });
+copyFileSync(nativeScript, fixtureNativeScript);
+copyFileSync(path.join(repo, 'scripts/ci/native-test-inputs.mjs'), path.join(root, 'scripts/ci/native-test-inputs.mjs'));
 
 afterAll(() => {
   rmSync(root, { recursive: true, force: true });
@@ -203,7 +209,7 @@ describe('required CI gates through workflow commands', () => {
   }, 60_000);
 });
 
-function selectNext(eventName: string, event: object, script = nativeScript): string {
+function selectNext(eventName: string, event: object, script = fixtureNativeScript): string {
   const job = workflow.jobs['o8-next-tests'];
   expect(job, 'native tests must have an automatic CI job').toBeDefined();
   const step = job.steps.find((entry: { id?: string }) => entry.id === 'native');
@@ -222,7 +228,8 @@ function selectNext(eventName: string, event: object, script = nativeScript): st
 describe('native next CI through persisted fixtures', () => {
   it('discovers new native literals, transitive imports, aliases and dynamic fixture directories without a maintained list', () => {
     const files = {
-      'native/o8-next/src/dependency_probe.rs': 'const CONTRACT: &str = include_str!("../../../fixtures/native-contract.json"); const HOST: &str = "scripts/next/dependency-probe.mjs"; fn family() { std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/native-family").join(format!("{name}.json"))); } const FOLDER: &str = "src/"; const TYPED: &str = "src/ma";',
+      'native/o8-next/src/dependency_probe.rs': 'const CONTRACT: &str = include_str!("../../../fixtures/native-contract.json"); const HOST: &str = "scripts/next/dependency-probe.mjs"; const PARITY: &str = "../../scripts/parity/surfaces.json"; const PLAN: &str = "scripts/next/inbox-plan-fixture.ts"; fn family() { std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/native-family").join(format!("{name}.json"))); } const FOLDER: &str = "src/"; const TYPED: &str = "src/ma";',
+      'scripts/next/inbox-plan-fixture.ts': "import '../../tests/helpers/chatgpt-plan-fixture';",
       'scripts/next/dependency-probe.mjs': "import '../../fixtures/native-adapter.mjs';",
       'fixtures/native-contract.json': '{}',
       'fixtures/native-adapter.mjs': "import '@/lib/native-probe'; import(`./native-records/${name}.json`); const template = 'native-template.md'; readFileSync(join(here, 'prompts', template));",
@@ -302,7 +309,7 @@ describe('native next CI through persisted fixtures', () => {
     'native/o8-next/fixtures/state.json', 'scripts/next/dev-server.ts',
     'scripts/parity/surfaces.json', 'tests/helpers/chatgpt-plan-fixture.ts',
     'crates/o8d/src/main.rs', 'package-lock.json', '.cargo/config.toml', 'rust-toolchain.toml', '.github/workflows/ci.yml',
-    'scripts/ci/native-changes.mjs', 'scripts/ci/native-test-shard.mjs'])('selects native tests for %s', file => {
+    'scripts/ci/native-changes.mjs', 'scripts/ci/native-test-shard.mjs', 'scripts/ci/native-test-weights.json'])('selects native tests for %s', file => {
     const before = git('rev-parse', 'HEAD');
     const after = commit(file);
     expect(selectNext('push', { before, after })).toBe('changed=true');
@@ -341,6 +348,11 @@ describe('native next CI through persisted fixtures', () => {
     expect(step.if).toBe("needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'");
     expect(step['continue-on-error']).toBeUndefined();
     expect(step.run).toContain('node scripts/ci/native-test-shard.mjs --cargo');
+    const artifact = job.steps.find((entry: { with?: { name?: string } }) => entry.with?.name === 'native-timings-${{ matrix.shard }}');
+    expect(artifact).toEqual({
+      uses: 'actions/upload-artifact@v4', if: "needs.reuse.outputs.reuse != 'true' && always()",
+      with: { name: 'native-timings-${{ matrix.shard }}', path: 'test-results/native-timings-${{ matrix.shard }}.json' },
+    });
     const directory = probeRoot;
     const crate = path.join(directory, 'native/o8-next');
     mkdirSync(path.join(crate, 'src'), { recursive: true });
@@ -380,6 +392,8 @@ fn persisted_state() {
     expect(green.error, green.stderr + green.stdout).toBeUndefined();
     expect(green.status, green.stderr).toBe(0);
     expect(green.stdout).toContain('1 passed; 0 failed');
+    const timings = JSON.parse(readFileSync(path.join(directory, 'test-results/native-timings-1.json'), 'utf8'));
+    expect(timings.persisted_state).toBeGreaterThan(0);
     console.log('declared native command: assertion red=101, E0061 red=101, green=0');
   });
 

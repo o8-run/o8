@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,28 +17,27 @@ const sdk = [
   'shell::issues::tests::issues_view_search_link_clear_and_worker_task',
   'ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency',
 ];
-const heavy = [registration, ...sdk, ...names.filter(name =>
-  name.startsWith('shell::sidebar::tests::settle_tests::')
-  || name.startsWith('shell::sidebar::thread_list::races::final_round::'))];
 const isTimed = name => sdk.includes(name) || name.startsWith('terminal::tests::production_pty_')
   || name === 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark';
 const directory = mkdtempSync(join(tmpdir(), 'o8-native-shards-'));
 const harness = join(directory, 'harness.mjs');
 const receipt = join(directory, 'receipt.json');
-writeFileSync(harness, `import { writeFileSync } from 'node:fs';
+writeFileSync(harness, `import { appendFileSync } from 'node:fs';
 if (process.argv.includes('--list')) process.stdout.write(process.env.FIXTURE_LISTING);
-else writeFileSync(process.env.FIXTURE_RECEIPT, JSON.stringify(process.argv.slice(2)));
+else appendFileSync(process.env.FIXTURE_RECEIPT, JSON.stringify(process.argv.slice(2)) + '\\n');
 `);
 after(() => rmSync(directory, { recursive: true, force: true }));
-const runner = fileURLToPath(new URL('./native-test-shard.mjs', import.meta.url));
-function run(shard, phase, fixture = listing) {
+const runner = join(directory, 'runner.mjs');
+copyFileSync(fileURLToPath(new URL('./native-test-shard.mjs', import.meta.url)), runner);
+function run(shard, phase, fixture = listing, weights = {}) {
+  writeFileSync(join(directory, 'native-test-weights.json'), JSON.stringify(weights));
   rmSync(receipt, { force: true });
   const result = spawnSync(process.execPath, [runner, process.execPath, harness, `--test-threads=${phase === 'timed' ? 1 : 4}`], {
-    encoding: 'utf8', env: { ...process.env, O8_NATIVE_TEST_SHARD: shard, O8_NATIVE_TEST_PHASE: phase,
+    cwd: directory, encoding: 'utf8', env: { ...process.env, O8_NATIVE_TEST_SHARD: shard, O8_NATIVE_TEST_PHASE: phase,
       FIXTURE_LISTING: fixture, FIXTURE_RECEIPT: receipt },
   });
   assert.equal(result.status, 0, result.stderr + result.stdout);
-  try { return JSON.parse(readFileSync(receipt, 'utf8')); }
+  try { return readFileSync(receipt, 'utf8').trim().split('\n').map(line => JSON.parse(line)); }
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 
@@ -48,34 +46,30 @@ test('the real runner assigns the listing exactly once across eight nonempty sha
   for (let shard = 1; shard <= 8; shard++) {
     let count = 0;
     for (const phase of ['regular', 'timed']) {
-      const args = run(`${shard}/8`, phase);
-      if (!args) continue;
-      assert.deepEqual(args.slice(0, 2), [`--test-threads=${phase === 'timed' ? 1 : 4}`, '--exact']);
-      for (const name of args.slice(2)) {
-        assert.equal(owners.has(name), false, `duplicate: ${name}`);
-        assert.equal(isTimed(name), phase === 'timed', name);
-        owners.set(name, shard);
-        count++;
+      const commands = run(`${shard}/8`, phase);
+      if (!commands) continue;
+      for (const args of commands) {
+        assert.deepEqual(args.slice(0, 2), [`--test-threads=${phase === 'timed' ? 1 : 4}`, '--exact']);
+        for (const name of args.slice(2)) {
+          assert.equal(owners.has(name), false, `duplicate: ${name}`);
+          assert.equal(isTimed(name), phase === 'timed', name);
+          owners.set(name, shard);
+          count++;
+        }
       }
     }
     assert.ok(count > 0, `empty shard ${shard}`);
   }
   assert.deepEqual([...owners.keys()].sort(), [...names].sort());
   assert.equal(owners.get(registration), 1);
-  assert.deepEqual([...owners].filter(([, shard]) => shard === 1).map(([name]) => name), [registration]);
+  assert.deepEqual([...owners].filter(([, shard]) => shard === 1).map(([name]) => name), names.filter(name => name.startsWith('shell::pull_requests::registration_tests::')).sort());
   assert.equal(owners.get(terminal), 8);
   assert.deepEqual([...owners].filter(([, shard]) => shard === 8).map(([name]) => name), [terminal]);
-  // The four largest explicit entries have separate owners. There are more
-  // heavy cases than shards; the rest share shards 2–7 evenly, never shard 1.
-  assert.equal(new Set([registration, ...sdk].map(name => owners.get(name))).size, 4);
-  const heavyCounts = Array(8).fill(0);
-  for (const name of heavy) heavyCounts[owners.get(name) - 1]++;
-  assert.equal(heavyCounts[0], 1);
-  assert.ok(Math.max(...heavyCounts.slice(1, 7)) - Math.min(...heavyCounts.slice(1, 7)) <= 1, heavyCounts.join('/'));
-  for (const name of names.filter(name => !heavy.includes(name) && name !== terminal)) {
-    const hashed = createHash('sha256').update(name).digest().readUInt32BE(0) % 8 + 1;
-    if (hashed !== 1 && hashed !== 8) assert.equal(owners.get(name), hashed, name);
-    else assert.ok(owners.get(name) >= 2 && owners.get(name) <= 7, name);
+  const moduleOwners = new Map();
+  for (const [name, owner] of owners) {
+    const moduleName = name.includes('::') ? name.slice(0, name.lastIndexOf('::')) : name;
+    if (moduleOwners.has(moduleName)) assert.equal(owner, moduleOwners.get(moduleName), moduleName);
+    moduleOwners.set(moduleName, owner);
   }
 });
 
@@ -84,4 +78,21 @@ test('empty shards and empty listings never launch libtest with an empty filter'
   assert.equal(run('8/8', 'regular', fixture), null);
   assert.equal(run('1/8', 'timed', fixture), null);
   assert.equal(run('1/8', 'regular', ''), null);
+});
+
+test('weights override test count and discovery order; missing modules use one second per test with lexical ties', () => {
+  const fixture = ['a::one', 'a::two', 'a::three', 'b::one', 'b::two', 'c::one', 'd::one'];
+  const assign = (names, weights) => {
+    const owners = {};
+    for (let shard = 1; shard <= 4; shard++) {
+      const commands = run(`${shard}/4`, 'regular', names.map(name => `${name}: test`).join('\n'), weights);
+      for (const args of commands ?? []) for (const name of args.slice(2)) owners[name] = shard;
+    }
+    return owners;
+  };
+  const fallback = assign(fixture, {});
+  assert.deepEqual(fallback, { 'a::one': 2, 'a::three': 2, 'a::two': 2, 'd::one': 2, 'b::one': 3, 'b::two': 3, 'c::one': 3 });
+  const weighted = assign(fixture, { b: 100 });
+  assert.deepEqual(Object.keys(weighted).filter(name => weighted[name] === weighted['b::one']).sort(), ['b::one', 'b::two']);
+  assert.deepEqual(assign([...fixture].reverse(), { b: 100 }), weighted);
 });

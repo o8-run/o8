@@ -122,7 +122,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
-    '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs',
+    '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs', 'scripts/ci/native-test-weights.json',
     'scripts/ci/native-test-cache.mjs', 'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'scripts/lib/test-classification.mjs',
     'scripts/lib/browser-prerequisites.mjs', '.github/actions/linux-package-prerequisites/action.yml',
     'scripts/ci/prepare-integration-policy.mjs', '.github/workflows/next-surface-boundary.yml',
@@ -601,7 +601,7 @@ describe('local CI verification through its command entry point', () => {
   it.each(['command', 'action', 'condition', 'native tolerance', 'native step tolerance',
     'aggregate tolerance', 'aggregate step tolerance', 'aggregate condition', 'checkout ref',
     'shard tolerance', 'shard step tolerance', 'missing native shard', 'native fail fast',
-    'timed phase command', 'timed phase condition'])('rejects uncovered native execution changes: %s', change => {
+    'timed phase command', 'timed phase condition', 'timings artifact path', 'timings artifact condition'])('rejects uncovered native execution changes: %s', change => {
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
     const job = workflow.jobs['o8-next-tests'];
     if (change === 'command') job.steps.push({ run: 'cargo test --required-fixture' });
@@ -611,6 +611,8 @@ describe('local CI verification through its command entry point', () => {
     if (change === 'native fail fast') job.strategy['fail-fast'] = true;
     if (change === 'timed phase command') job.steps.find((step: { name?: string }) => step.name === 'Fixed-rate native terminal probes without sibling tests').run += '\necho unchecked';
     if (change === 'timed phase condition') job.steps.find((step: { name?: string }) => step.name === 'Fixed-rate native terminal probes without sibling tests').if = 'false';
+    if (change === 'timings artifact path') job.steps.find((step: { with?: { name?: string } }) => step.with?.name === 'native-timings-${{ matrix.shard }}').with.path = 'missing.json';
+    if (change === 'timings artifact condition') job.steps.find((step: { with?: { name?: string } }) => step.with?.name === 'native-timings-${{ matrix.shard }}').if = "needs.reuse.outputs.reuse != 'true' && false";
     if (change === 'shard tolerance') workflow.jobs['test-shards']['continue-on-error'] = true;
     if (change === 'shard step tolerance') workflow.jobs['test-shards'].steps.find((step: { run?: string }) => step.run?.startsWith('npm run test:unit'))['continue-on-error'] = true;
     if (change === 'native tolerance') job['continue-on-error'] = true;

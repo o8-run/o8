@@ -182,7 +182,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   'native test runner or condition needs a verify:ci equivalent');
   const nativeCondition = "steps.native.outputs.changed == 'true'";
   const nativeRunSteps = native.steps.filter(step => step.run);
-  requireCondition(native.steps.length === 8 && nativeRunSteps.length === 5
+  requireCondition(native.steps.length === 9 && nativeRunSteps.length === 5
     && nativeRunSteps[0].id === 'native' && nativeRunSteps[0].run === 'node scripts/ci/native-changes.mjs --o8-next'
     && !nativeRunSteps[0].if && !nativeRunSteps[0].env && !nativeRunSteps[0].shell
     && !nativeRunSteps[0]['working-directory']
@@ -203,18 +203,21 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     && nativeRunSteps.slice(1, 4).every(step => step.if === nativeCondition
       && !step.shell && !step['working-directory'] && !step['continue-on-error'] && !step.env),
   'native test commands need a verify:ci equivalent');
-  // Cache measurement and publication are hosted infrastructure. Guard their
+  // Timing uploads, cache measurement and publication are hosted infrastructure. Guard their
   // exact shape while local verification runs the same build/test commands.
   const cachePaths = 'native/o8-next/target\n.o8-next-cargo/registry\n.o8-next-cargo/git\n';
   const saveCondition = "steps.native.outputs.changed == 'true' && github.ref == 'refs/heads/main' && matrix.shard == 8 && steps.native-setup.outputs.native-cache-hit != 'true' && steps.native-cache-size.outputs.cacheable == 'true'";
   requireCondition(isDeepStrictEqual(native.steps[6], {
+    uses: 'actions/upload-artifact@v4', if: 'always()',
+    with: { name: 'native-timings-${{ matrix.shard }}', path: 'test-results/native-timings-${{ matrix.shard }}.json' },
+  }) && isDeepStrictEqual(native.steps[7], {
     name: 'Measure native cache size', id: 'native-cache-size', if: nativeCondition,
     run: 'node scripts/ci/native-test-cache.mjs measure',
-  }) && isDeepStrictEqual(native.steps[7], {
+  }) && isDeepStrictEqual(native.steps[8], {
     name: 'Save native test build outputs', if: saveCondition,
     uses: 'actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684',
     with: { path: cachePaths, key: '${{ steps.native-setup.outputs.native-cache-key }}' },
-  }), 'native cache measurement or publication needs a verify:ci equivalent');
+  }), 'native timings or cache publication needs a verify:ci equivalent');
   const nativeEnv = {
     CARGO_HOME: '${{ github.workspace }}/.o8-next-cargo',
     CARGO_TARGET_DIR: '${{ github.workspace }}/native/o8-next/target',
