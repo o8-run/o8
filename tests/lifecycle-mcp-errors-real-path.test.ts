@@ -93,7 +93,12 @@ describe('lifecycle errors through MCP handlers and durable HTTP state', () => {
     ['retry', handleRetryPacket, 'archived'], ['reset', handleResetPacket, 'archived'],
     ['retry', handleRetryPacket, 'launching'], ['reset', handleResetPacket, 'launching'],
   ] as const)('reports %s contention on a %s packet with a cause and retry hint', async (_verb, handler, state) => {
-    const { packetId, missionId } = fixture(state);
+    const { packetId, missionId, laneId } = fixture(state);
+    if (state === 'launching') {
+      // Reset intentionally pauses pre-session launches before taking the mission
+      // lock. Keep an attached launch here to exercise contention without cancellation.
+      updateLane(laneId, { sessionKey: `test-runtime:${packetId}` });
+    }
     transport();
     h.busy = true;
     const log = vi.spyOn(console, 'error');
