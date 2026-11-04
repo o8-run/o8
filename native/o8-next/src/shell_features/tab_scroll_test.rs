@@ -124,7 +124,7 @@ fn setup(cx: &mut TestAppContext, overflow: bool) -> (Fixture, Entity<Shell>, Vi
     settle(&mut visual);
     click(&mut visual, "panel-tool-devices");
     if overflow {
-        for tool in ["threads", "side-chat", "resources", "targeting"] {
+        for tool in ["activity", "side-chat", "resources", "targeting"] {
             wheel(
                 &mut visual,
                 "panel-tabs",
@@ -284,7 +284,7 @@ fn tab_wheel_activating_offscreen_tabs_reveals_with_classic_inset(cx: &mut TestA
     );
     click(&mut visual, "panel-more-views");
     settle(&mut visual);
-    click(&mut visual, "panel-add-threads");
+    click(&mut visual, "panel-add-activity");
     settle(&mut visual);
     let viewport = bounds(&mut visual, "panel-tabs");
     let tab = bounds(&mut visual, "panel-tab");

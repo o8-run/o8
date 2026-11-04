@@ -105,11 +105,7 @@ fn symon(s: &mut Shell, data: &Value, window: &mut Window, cx: &mut Context<Shel
             window,
             cx,
         ),
-        "prs" => {
-            if !s.open_registered("Pull requests", window, cx) {
-                toasts::info("Pull requests are not in o8 next yet.", cx);
-            }
-        }
+        "prs" => s.execute(Command::PullRequests, window, cx),
         "orchestrator_draft" => {
             if let Some(text) = data["text"].as_str() {
                 draft(s, text, window, cx);

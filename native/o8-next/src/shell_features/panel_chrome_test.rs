@@ -43,13 +43,13 @@ fn saved(f: &Fixture) -> Value {
 fn panel_chrome_launcher_disclosure_and_distinct_drawer(cx: &mut TestAppContext) {
     let (_f, _s, mut v) = setup(cx);
     assert!(
-        v.debug_bounds("panel-tool-threads").is_none(),
+        v.debug_bounds("panel-tool-activity").is_none(),
         "only seven everyday tools initially"
     );
     click(&mut v, "panel-launcher-more");
-    bounds(&mut v, "panel-tool-threads");
+    bounds(&mut v, "panel-tool-activity");
     click(&mut v, "panel-launcher-more");
-    assert!(v.debug_bounds("panel-tool-threads").is_none());
+    assert!(v.debug_bounds("panel-tool-activity").is_none());
     click(&mut v, "panel-tool-devices");
     click(&mut v, "panel-new-tab");
     bounds(&mut v, "panel-launcher-more");
@@ -57,7 +57,7 @@ fn panel_chrome_launcher_disclosure_and_distinct_drawer(cx: &mut TestAppContext)
     click(&mut v, "panel-more-views");
     assert_eq!(bounds(&mut v, "panel-add-menu").size.width, px(340.));
     let a = bounds(&mut v, "panel-add-files");
-    let b = bounds(&mut v, "panel-add-threads");
+    let b = bounds(&mut v, "panel-add-activity");
     assert!(b.left() > a.right());
     v.simulate_keystrokes("end enter");
     settle(&mut v);
@@ -67,7 +67,7 @@ fn panel_chrome_launcher_disclosure_and_distinct_drawer(cx: &mut TestAppContext)
 fn panel_chrome_tabs_geometry_keyboard_close_and_saved_restore(cx: &mut TestAppContext) {
     let (f, _s, mut v) = setup(cx);
     click(&mut v, "panel-launcher-more");
-    click(&mut v, "panel-tool-threads");
+    click(&mut v, "panel-tool-activity");
     click(&mut v, "panel-more-views");
     click(&mut v, "panel-add-resources");
     // ContextualPanel's tab close is a 16px X.
@@ -75,12 +75,12 @@ fn panel_chrome_tabs_geometry_keyboard_close_and_saved_restore(cx: &mut TestAppC
         bounds(&mut v, "panel-tab-close-resources").size,
         size(px(16.), px(16.))
     );
-    click(&mut v, "panel-tab-select-threads");
+    click(&mut v, "panel-tab-select-activity");
     v.simulate_keystrokes("end delete");
     settle(&mut v);
     assert!(v.debug_bounds("panel-tab-close-resources").is_none());
     let data = saved(&f);
-    assert_eq!(data["right_panel"]["primary"], "threads");
+    assert_eq!(data["right_panel"]["primary"], "activity");
     let state: crate::shell_state::State = serde_json::from_value(data).unwrap();
     let (_second, mut relaunched) = open(
         f.client.clone(),
@@ -89,7 +89,7 @@ fn panel_chrome_tabs_geometry_keyboard_close_and_saved_restore(cx: &mut TestAppC
         &mut v.cx,
     );
     settle(&mut relaunched);
-    bounds(&mut relaunched, "panel-tab-close-threads");
+    bounds(&mut relaunched, "panel-tab-close-activity");
     bounds(&mut relaunched, "panel-content");
     assert_eq!(
         relaunched.debug_opacity("panel-content"),
@@ -124,6 +124,62 @@ fn panel_chrome_split_picker_ratio_keyboard_and_relaunch(cx: &mut TestAppContext
         serde_json::from_slice(&fs::read(f.root.join("split-relaunch.json")).unwrap()).unwrap();
     assert_eq!(data["right_panel"]["primary"], "devices");
     assert_eq!(data["right_panel"]["secondary"], "targeting");
+}
+#[gpui::test]
+fn panel_chrome_threads_stays_out_of_the_launcher_and_saved_layouts(cx: &mut TestAppContext) {
+    let fresh = crate::shell_state::State::default().right_panel;
+    assert!(fresh.primary != "threads" && fresh.secondary != "threads");
+    let (f, _s, mut v) = setup(cx);
+    click(&mut v, "panel-launcher-more");
+    bounds(&mut v, "panel-tool-targeting");
+    assert!(v.debug_bounds("panel-tool-threads").is_none());
+    click(&mut v, "panel-tool-resources");
+    click(&mut v, "panel-more-views");
+    bounds(&mut v, "panel-add-targeting");
+    assert!(v.debug_bounds("panel-add-threads").is_none());
+    // A layout saved before Threads was hidden: Threads on top, a Threads
+    // tab, and Threads in the bottom half.
+    let mut data = saved(&f);
+    let panel = &mut data["right_panel"];
+    panel["primary"] = "threads".into();
+    panel["split"] = true.into();
+    panel["secondary"] = "threads".into();
+    let scopes: Vec<String> = panel["utility_tabs"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    assert!(!scopes.is_empty());
+    for scope in scopes {
+        panel["utility_tabs"][&scope] = json!(["threads", "resources"]);
+        panel["secondary_tabs"][&scope] = json!(["threads"]);
+    }
+    let state: crate::shell_state::State = serde_json::from_value(data).unwrap();
+    let (_, mut relaunched) = open(
+        f.client.clone(),
+        f.root.join("hidden-relaunch.json"),
+        state,
+        &mut v.cx,
+    );
+    settle(&mut relaunched);
+    bounds(&mut relaunched, "panel-tab-close-resources");
+    assert!(relaunched.debug_bounds("panel-tab-close-threads").is_none());
+    assert!(
+        relaunched
+            .debug_bounds("panel-tab-select-threads")
+            .is_none()
+    );
+    assert!(relaunched.debug_bounds("panel-split-body").is_none());
+    let data: Value =
+        serde_json::from_slice(&fs::read(f.root.join("hidden-relaunch.json")).unwrap()).unwrap();
+    let panel = &data["right_panel"];
+    assert_eq!(panel["primary"], "resources");
+    assert_eq!(panel["split"], false);
+    for tabs in ["utility_tabs", "secondary_tabs"] {
+        let text = panel[tabs].to_string();
+        assert!(!text.contains("threads"), "{text}");
+    }
 }
 #[gpui::test]
 fn panel_chrome_maximize_escape_and_narrow_guard(cx: &mut TestAppContext) {
@@ -192,7 +248,7 @@ fn panel_chrome_widths_keep_ordinary_and_wide_tool_memory(cx: &mut TestAppContex
     settle(&mut v);
     assert_eq!(saved(&f)["right_panel"]["tool_widths"]["device"], 616.);
     click(&mut v, "panel-more-views");
-    click(&mut v, "panel-add-threads");
+    click(&mut v, "panel-add-activity");
     assert!(bounds(&mut v, "panel-resize").left() > wide);
     click(&mut v, "panel-resize");
     v.simulate_keystrokes("right");
