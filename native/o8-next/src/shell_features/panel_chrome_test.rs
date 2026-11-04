@@ -237,6 +237,19 @@ fn bang_run(
     Entity<crate::terminal::Pane>,
     VisualTestContext,
 ) {
+    bang_line(cx, "sleep 30")
+}
+
+fn bang_line(
+    cx: &mut TestAppContext,
+    line: &str,
+) -> (
+    Fixture,
+    Entity<Shell>,
+    Entity<crate::ui::Surface>,
+    Entity<crate::terminal::Pane>,
+    VisualTestContext,
+) {
     let f = Fixture::start_mode(false, "--terminal");
     let (s, mut v) = open(
         f.client.clone(),
@@ -260,7 +273,7 @@ fn bang_run(
             .terminal_session = Some("cortex-next-terminal-fixture".into());
     });
     click(&mut v, "composer-input");
-    v.simulate_input("!sleep 30");
+    v.simulate_input(&format!("!{line}"));
     // No completion menu can consume Return: the trailing argument has no match.
     settle(&mut v);
     v.simulate_keystrokes("enter");
@@ -277,7 +290,7 @@ fn bang_run(
             }
         });
         if let Some(pane) = pane
-            && pane.read_with(&v, |p, _| p.command_output("sleep 30").is_some())
+            && pane.read_with(&v, |p, _| p.command_output(line).is_some())
         {
             break pane;
         }
@@ -298,14 +311,21 @@ fn panel_chrome_bang_line_keeps_composer_focus_and_escape_stops_terminal(cx: &mu
         composer_focused(&composer, &mut v),
         "Return must keep the composer focused after the terminal attaches"
     );
-    bounds(&mut v, "composer-shell-status-Esc stops");
+    bounds(&mut v, "composer-shell-status-running");
     v.simulate_keystrokes("escape");
     settle(&mut v);
     assert_eq!(
         composer.read_with(&v, |s, cx| s.shell_issue_state(cx)["shellStopped"].clone()),
         true
     );
-    bounds(&mut v, "composer-shell-status-Stopped");
+    follow(&s, &composer, &mut v, |run| !run.running());
+    bounds(&mut v, "composer-shell-status-stopped");
+    assert!(
+        composer
+            .read_with(&v, |s, _| s.shell_run().unwrap().status(Instant::now()))
+            .ends_with("· exit 130"),
+        "the card shows the status the shell reported for the interrupt"
+    );
     let until = Instant::now() + Duration::from_secs(10);
     loop {
         s.update_in(&mut v, |s, w, cx| s.tick(true, w, cx));
@@ -394,4 +414,108 @@ fn panel_chrome_shell_dismiss_returns_focus_to_composer(cx: &mut TestAppContext)
         "next"
     );
     assert!(v.debug_bounds("composer-shell-run").is_none());
+}
+
+/// Ticks the shell, as its pump does, until the card's run satisfies `done`.
+fn follow(
+    s: &Entity<Shell>,
+    composer: &Entity<crate::ui::Surface>,
+    v: &mut VisualTestContext,
+    done: impl Fn(&crate::composer::shell::ShellRun) -> bool,
+) {
+    let until = Instant::now() + Duration::from_secs(20);
+    loop {
+        s.update_in(v, |s, w, cx| s.tick(true, w, cx));
+        v.run_until_parked();
+        draw(v);
+        if composer.read_with(v, |c, _| c.shell_run().is_some_and(&done)) {
+            return;
+        }
+        assert!(
+            Instant::now() < until,
+            "shell card timed out: {:?}",
+            composer.read_with(v, |c, _| c.shell_run().cloned())
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[gpui::test]
+fn panel_chrome_shell_card_streams_output_clock_and_exit(cx: &mut TestAppContext) {
+    let (_f, s, composer, _pane, mut v) = bang_line(cx, "ticks");
+    follow(&s, &composer, &mut v, |run| {
+        run.output.iter().any(|line| line == "tick 1")
+    });
+    let (running, output) = composer.read_with(&v, |c, _| {
+        let run = c.shell_run().unwrap();
+        (run.running(), run.output.clone())
+    });
+    assert!(running, "the first line shows while the command still runs");
+    assert!(!output.contains(&"tick 3".to_owned()), "{output:?}");
+    bounds(&mut v, "composer-shell-status-running");
+    bounds(&mut v, "composer-shell-output");
+    bounds(&mut v, "composer-shell-stop");
+    follow(&s, &composer, &mut v, |run| {
+        run.output.iter().any(|line| line == "tick 2 on stderr")
+    });
+    follow(&s, &composer, &mut v, |run| !run.running());
+    let run = composer.read_with(&v, |c, _| c.shell_run().unwrap().clone());
+    assert_eq!(run.output, ["tick 1", "tick 2 on stderr", "tick 3"]);
+    assert_eq!(run.exit, Some(3));
+    assert!(
+        run.took.unwrap() >= Duration::from_millis(1_000),
+        "the clock covers the run: {:?}",
+        run.took
+    );
+    assert!(run.status(Instant::now()).starts_with("Finished · "));
+    assert!(run.status(Instant::now()).ends_with(" · exit 3"));
+    bounds(&mut v, "composer-shell-status-finished");
+    assert!(
+        v.debug_bounds("composer-shell-stop").is_none(),
+        "a finished run has nothing to stop"
+    );
+    shell_button(&composer, &mut v, "composer-shell-copy");
+    assert_eq!(
+        v.cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("$ ticks\ntick 1\ntick 2 on stderr\ntick 3".to_owned())
+    );
+    assert_eq!(
+        composer.read_with(&v, |s, cx| s.shell_issue_state(cx)["draft"].clone()),
+        "",
+        "the run never went to the chat by itself"
+    );
+    shell_button(&composer, &mut v, "composer-shell-add");
+    let draft = composer.read_with(&v, |s, cx| {
+        s.shell_issue_state(cx)["draft"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    });
+    assert_eq!(
+        draft,
+        "```console\n$ ticks\ntick 1\ntick 2 on stderr\ntick 3\n```\n\n"
+    );
+}
+
+#[gpui::test]
+fn panel_chrome_shell_card_stop_interrupts_the_run(cx: &mut TestAppContext) {
+    let (_f, s, composer, pane, mut v) = bang_run(cx);
+    follow(&s, &composer, &mut v, |run| {
+        run.output.iter().any(|line| line == "sleeping")
+    });
+    shell_button(&composer, &mut v, "composer-shell-stop");
+    assert_eq!(
+        composer.read_with(&v, |c, _| c.shell_run().unwrap().state()),
+        "stopping"
+    );
+    follow(&s, &composer, &mut v, |run| !run.running());
+    assert!(pane.read_with(&v, |p, _| {
+        p.command_output("sleep 30")
+            .unwrap()
+            .lines
+            .contains(&"CTRL-C".to_owned())
+    }));
+    let run = composer.read_with(&v, |c, _| c.shell_run().unwrap().clone());
+    assert_eq!((run.state(), run.exit), ("stopped", Some(130)));
+    bounds(&mut v, "composer-shell-status-stopped");
 }

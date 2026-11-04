@@ -72,7 +72,25 @@ pub struct Grid {
     size: Arc<Mutex<Size>>,
     pub revision: u64,
     pub bytes: u64,
+    /// Live feeds, not replays: what a command typed now can have printed.
+    live: u64,
+    /// Exit statuses the shell reported live (OSC 133;D), and the last one.
+    exits: u64,
+    last_exit: Option<i32>,
+    /// The end of the last feed when it may begin an exit report.
+    osc_tail: Vec<u8>,
 }
+/// Where a terminal stands for one command line: its live feeds, the echoes
+/// of that line still in reach, and the exit reports seen so far.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Mark {
+    pub live: u64,
+    pub echoes: usize,
+    pub exits: u64,
+    pub exit: Option<i32>,
+}
+/// The shell-integration report that a command finished, as in OSC 133;D;0.
+const EXIT_REPORT: &[u8] = b"\x1b]133;D";
 impl Grid {
     pub fn new(size: Size) -> Self {
         let historical = Arc::new(AtomicBool::new(false));
@@ -99,6 +117,10 @@ impl Grid {
             size,
             revision: 0,
             bytes: 0,
+            live: 0,
+            exits: 0,
+            last_exit: None,
+            osc_tail: vec![],
         }
     }
     pub fn size(&self) -> Size {
@@ -117,14 +139,70 @@ impl Grid {
         self.historical.store(historical, Ordering::Relaxed);
         self.parser.advance(&mut self.term, bytes);
         self.historical.store(false, Ordering::Relaxed);
+        // A replay repeats old reports; only live ones count.
+        if historical {
+            self.osc_tail.clear();
+        } else {
+            self.live += 1;
+            self.read_exits(bytes);
+        }
         self.bytes += bytes.len() as u64;
         self.revision += 1;
         self.replies.lock().unwrap().drain(..).collect()
     }
     pub fn reset(&mut self) {
-        let revision = self.revision;
+        let (revision, live, exits) = (self.revision, self.live, self.exits);
         *self = Self::new(self.size());
         self.revision = revision + 1;
+        self.live = live;
+        self.exits = exits;
+    }
+    pub fn mark(&self, command: &str) -> Mark {
+        Mark {
+            live: self.live,
+            echoes: self
+                .lines(LOOKBACK)
+                .iter()
+                .filter(|line| line.ends_with(command))
+                .count(),
+            exits: self.exits,
+            exit: self.last_exit,
+        }
+    }
+    /// Counts the exit statuses a shell with integration reports, which the
+    /// parser itself ignores. A report split across feeds is kept until whole.
+    fn read_exits(&mut self, bytes: &[u8]) {
+        let mut data = std::mem::take(&mut self.osc_tail);
+        data.extend_from_slice(bytes);
+        let (mut at, mut consumed) = (0, 0);
+        // Scan for ESC first: a flood of plain output stays one byte compare.
+        while let Some(found) = data[at..].iter().position(|&b| b == 0x1b) {
+            if !data[at + found..].starts_with(EXIT_REPORT) {
+                at += found + 1;
+                continue;
+            }
+            let start = at + found + EXIT_REPORT.len();
+            let Some(end) = data[start..].iter().position(|&b| b == 0x07 || b == 0x1b) else {
+                if data.len() - start < 32 {
+                    self.osc_tail = data[at + found..].to_vec();
+                }
+                return;
+            };
+            self.exits += 1;
+            self.last_exit = std::str::from_utf8(&data[start..start + end])
+                .ok()
+                .and_then(|params| params.strip_prefix(';'))
+                .and_then(|params| params.split(';').next())
+                .and_then(|code| code.parse().ok());
+            at = start + end;
+            consumed = at;
+        }
+        if let Some(n) = (1..EXIT_REPORT.len())
+            .rev()
+            .find(|&n| data[consumed..].ends_with(&EXIT_REPORT[..n]))
+        {
+            self.osc_tail = data[data.len() - n..].to_vec();
+        }
     }
     pub fn scroll(&mut self, lines: i32) {
         self.term.scroll_display(Scroll::Delta(lines));
