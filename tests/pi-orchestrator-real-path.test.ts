@@ -50,6 +50,8 @@ let api: Server;
 let mcpHoldMs = 0;
 let heldReplyCount = 0;
 const saved = { NEXT_ORIGIN: process.env.NEXT_ORIGIN, O8_API_PORT: process.env.O8_API_PORT };
+// The Pi write helper is a cold cargo build; build it once per file, outside any test's own timeout.
+beforeAll(() => { buildPiWriteHelper(); }, 600_000);
 beforeAll(async () => {
   getOrCreateWsToken();
   const { panelGateMiddleware } = await import('@/middleware');
@@ -261,7 +263,6 @@ describe('Pi orchestrator (#3258)', () => {
   }, 120_000);
 
   it('runs o8 commands through the operator server, keeps approval on repo writes, and resumes after a restart', async () => {
-    buildPiWriteHelper();
     const { repo, stateRoot } = await fixture();
     const seen: Array<{ messages: unknown[]; tools: string[]; system?: string }> = [];
     const approvals: string[] = [];
@@ -596,7 +597,6 @@ describe('Pi orchestrator (#3258)', () => {
   }, 180_000);
 
   it('reports a command the operator stopped as stopped, not as a host failure (#3659)', async () => {
-    buildPiWriteHelper();
     const { repo, stateRoot } = await fixture();
     const stop = new AbortController();
     const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot,
@@ -661,7 +661,6 @@ describe('Pi orchestrator (#3258)', () => {
   }, 180_000);
 
   it('writes and runs without asking in Full access, as the Claude orchestrator does, and still refuses blocked commands (#3555)', async () => {
-    buildPiWriteHelper();
     const { repo, stateRoot } = await fixture();
     inboxCalls.length = 0;
     const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot,
@@ -686,7 +685,6 @@ describe('Pi orchestrator (#3258)', () => {
   }, 180_000);
 
   it('keeps Full access command writes in the workspace and a private temp dir, and keeps git and network (#3658)', async () => {
-    buildPiWriteHelper();
     const { repo, stateRoot } = await fixture();
     const outside = join(repo, '..', 'outside.txt');
     const { port } = api.address() as AddressInfo;

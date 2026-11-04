@@ -15,3 +15,11 @@ export function unmappedEffortError(effort: ThinkingEffort | undefined): Orchest
 export function isUnmappedEffortLead(backend: string): boolean {
   return ['acp', 'hermes', 'opencode', 'pi', 'o8'].includes(backend);
 }
+
+/**
+ * o8 and Pi run a leftover manual effort at their runtime default and say so in the receipt (#5466).
+ * The other unmapped leads keep #4858's refusal of an independent pin.
+ */
+export function dropsStaleEffortPin(backend: string): boolean {
+  return backend === 'o8' || backend === 'pi';
+}

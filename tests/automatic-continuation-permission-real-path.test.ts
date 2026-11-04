@@ -76,6 +76,8 @@ async function launch(id: string) {
   }, { timeout: 15_000, interval: 50 });
   return surface;
 }
+// The Pi write helper is a cold cargo build; build it once per file, outside any test's own timeout.
+beforeAll(() => { buildPiWriteHelper(); }, 600_000);
 beforeAll(async () => {
   const { addRepo } = await import('@/lib/repos/registry'); await addRepo(repo);
   const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
@@ -141,7 +143,6 @@ async function queuedOutside(id: string) {
   expect(readPersistedLlmChat(parent)?.history.messages.at(-1)?.receipt?.permissionMode).toBe('outside-workspace');
 }
 async function origin(id: string) {
-  buildPiWriteHelper();
   if (surfaces.length) await finishSharedCheckoutTeam({ repoPath: repo, parentThreadId: parent,
     reviewSummary: 'Fixed-output worker made no changes.', verification: 'Worker settled; checkout is clean.' });
   parent = `thoughts-automatic-${id}`;

@@ -71,6 +71,8 @@ const callTool = (id: string, name: string, args: Record<string, unknown>) => ()
 const say = (text: string) => () => sse([{ choices: [{ delta: { content: text }, finish_reason: 'stop' }],
   usage: { prompt_tokens: 5, completion_tokens: 2 } }]);
 
+// The Pi write helper is a cold cargo build; build it once per file, outside any test's own timeout.
+beforeAll(() => { buildPiWriteHelper(); }, 600_000);
 beforeAll(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), 'o8-model-pi-')));
   // A paid install: the managed route resolves from this entitlement file to the relay.
@@ -215,7 +217,6 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
   }, 120_000);
 
   it('runs an o8 Full access turn on Pi without redundant command or edit approvals', async () => {
-    buildPiWriteHelper();
     const repo = join(root, 'repo');
     await mkdir(repo);
     relay.requests.length = 0;
@@ -298,7 +299,6 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
   }, 180_000);
 
   it('continues a mission dispatched from an o8 thread in that thread when it reaches review (#3410)', async () => {
-    buildPiWriteHelper();
     const repo = join(root, 'repo-review');
     await mkdir(repo);
     for (const args of [['init', '-q', '-b', 'main'], ['commit', '-q', '--allow-empty', '-m', 'fixture']]) {
