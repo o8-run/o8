@@ -423,14 +423,9 @@ impl ThreadList {
             folders::View::Chronological => {
                 folders::chronological(sessions, query, matches, expanded, branches)
             }
-            folders::View::Inbox => inbox::rows(
-                sessions,
-                query,
-                matches,
-                expanded,
-                branches,
-                &self.snoozes,
-            ),
+            folders::View::Inbox => {
+                inbox::rows(sessions, query, matches, expanded, branches, &self.snoozes)
+            }
             folders::View::Repo => {
                 let keys = self.scope_keys();
                 let repos: Vec<_> = self
@@ -506,7 +501,10 @@ impl ThreadList {
                             this.header = header;
                         }
                         sessions.extend(
-                            this.sessions.iter().filter(|s| s.machine.is_some()).cloned(),
+                            this.sessions
+                                .iter()
+                                .filter(|s| s.machine.is_some())
+                                .cloned(),
                         );
                         let previous: HashMap<_, _> =
                             this.sessions.iter().map(|s| (s.id.as_str(), s)).collect();
@@ -533,11 +531,12 @@ impl ThreadList {
                             cx.emit(Event::Selected(id));
                         }
                     }
-                    // A slow server keeps the last good list, marked stale, and
-                    // retries on the next refresh instead of reporting it down.
+                    // Keep the last good list, but finish the shell's connection
+                    // check even when the list can retain its stale data.
                     Err(error) if !this.sessions.is_empty() && crate::client::transient(&error) => {
                         this.notice = crate::client::stale_notice(&error);
                         this.dirty.get_or_insert_with(Instant::now);
+                        cx.emit(Event::Error(error));
                     }
                     Err(error) => {
                         this.notice = error.clone();
@@ -1202,26 +1201,26 @@ pub(crate) mod folders;
 #[path = "archive_controls.rs"]
 mod archive_controls;
 
-#[path = "inbox.rs"]
-mod inbox;
 #[path = "auto_settle_toggle.rs"]
 mod auto_settle_toggle;
-#[path = "snooze.rs"]
-mod snooze;
 #[path = "bulk.rs"]
 mod bulk;
-#[path = "open_editor.rs"]
-mod open_editor;
-#[path = "pr_links.rs"]
-pub(crate) mod pr_links;
-#[path = "thread_hover.rs"]
-mod thread_hover;
 #[path = "detailed.rs"]
 pub(crate) mod detailed;
+#[path = "inbox.rs"]
+mod inbox;
+#[path = "open_editor.rs"]
+mod open_editor;
 #[path = "pins.rs"]
 pub(crate) mod pins;
+#[path = "pr_links.rs"]
+pub(crate) mod pr_links;
+#[path = "snooze.rs"]
+mod snooze;
 #[path = "status_mark.rs"]
 pub(crate) mod status_mark;
+#[path = "thread_hover.rs"]
+mod thread_hover;
 
 impl ThreadList {
     /// Scroll either list to a row; detailed mode reveals it in its list.
@@ -1232,7 +1231,10 @@ impl ThreadList {
             self.scroll.scroll_to_item(index, strategy);
         }
         if self.detailed {
-            self.detailed_list.scroll_to(gpui::ListOffset { item_ix: index, offset_in_item: gpui::px(0.) });
+            self.detailed_list.scroll_to(gpui::ListOffset {
+                item_ix: index,
+                offset_in_item: gpui::px(0.),
+            });
         }
     }
 }
