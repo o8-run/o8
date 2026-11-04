@@ -96,6 +96,50 @@ fn settings_parity_appearance_drives_the_running_shell(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn settings_parity_appearance_imports_a_vscode_theme_and_applies_it(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, _) = start(cx);
+    let previous = crate::theme::choice_name();
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/themes");
+    let settings = shell.read_with(&visual, |s, _| s.surfaces.settings.view.clone().unwrap());
+    click(&mut visual, "settings-nav-appearance");
+    frame(&shell, &mut visual);
+    assert!(visual.debug_bounds("setting-theme-import").is_some());
+    assert!(visual.debug_bounds("setting-theme-import-error").is_none());
+    // The import button's file prompt hands its path to the same import.
+    let themes = crate::theme::imported_themes();
+    settings.update(&mut visual, |s, cx| {
+        s.import_theme(&fixtures.join("vscode-malformed.json"), cx)
+    });
+    frame(&shell, &mut visual);
+    assert!(visual.debug_bounds("setting-theme-import-error").is_some());
+    assert_eq!(
+        crate::theme::imported_themes(),
+        themes,
+        "a bad file changes nothing"
+    );
+    assert_eq!(crate::theme::choice_name(), previous);
+    let copy = fixture.root.join("harbor.json");
+    std::fs::copy(fixtures.join("vscode-dark.json"), &copy).unwrap();
+    settings.update(&mut visual, |s, cx| s.import_theme(&copy, cx));
+    frame(&shell, &mut visual);
+    assert!(visual.debug_bounds("setting-theme-import-error").is_none());
+    click(&mut visual, "setting-appearance-theme:harbor-night");
+    frame(&shell, &mut visual);
+    assert_eq!(crate::theme::choice_name(), "theme:harbor-night");
+    let background = crate::theme::current().background;
+    assert_eq!(
+        [background.r, background.g, background.b].map(|c| (c * 255.).round() as u8),
+        [0x1e, 0x21, 0x29]
+    );
+    click(&mut visual, "setting-appearance-system");
+    frame(&shell, &mut visual);
+    assert_eq!(crate::theme::choice_name(), "system");
+    click(&mut visual, &format!("setting-appearance-{previous}"));
+    frame(&shell, &mut visual);
+    assert_eq!(crate::theme::choice_name(), previous);
+}
+
+#[gpui::test]
 fn settings_parity_model_defaults_persist(cx: &mut TestAppContext) {
     let (fixture, shell, mut visual, _) = start(cx);
     let cx = &mut visual;

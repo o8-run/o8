@@ -10,22 +10,36 @@ impl Settings {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut choices = div().flex().flex_wrap().gap(px(12.));
+        let current = theme::choice_name();
+        let imported = theme::imported_themes()
+            .into_iter()
+            .map(|(mode, label)| (mode, label, "Imported VS Code theme.".to_string()));
         for (mode, label, description) in [
             ("light", "Light Solid", "Opaque panels and workspace."),
             ("dark", "Dark Solid", "Opaque panels and workspace."),
             ("glass", "All Glass", "Glass across the entire window."),
-        ] {
-            let active = theme::appearance_name() == mode;
+            (
+                "system",
+                "System",
+                "Light or Dark Solid, as the system is set.",
+            ),
+        ]
+        .map(|(mode, label, description)| (mode.into(), label.into(), description.into()))
+        .into_iter()
+        .chain(imported)
+        {
+            let active = current == mode;
+            let action = mode.clone();
             choices = choices.child(
                 self.button(
                     format!("setting-appearance-{mode}"),
-                    label.into(),
+                    label,
                     true,
                     active,
                     window,
                     cx,
                     move |this, _, cx| {
-                        cx.emit(Action::Appearance(mode));
+                        cx.emit(Action::Appearance(action.clone()));
                         this.changed(cx);
                     },
                 )
@@ -50,6 +64,22 @@ impl Settings {
                 ),
             );
         }
+        let import = self.button(
+            "setting-theme-import".into(),
+            "Import VS Code theme…".into(),
+            true,
+            false,
+            window,
+            cx,
+            |this, _, cx| this.choose_theme_file(cx),
+        );
+        let import_error = self.theme_import_error.clone().map(|error| {
+            div()
+                .debug_selector(|| "setting-theme-import-error".into())
+                .text_size(px(11.))
+                .text_color(theme().danger)
+                .child(error)
+        });
         let mut widths = div().flex().flex_wrap().gap(px(12.));
         for (name, label, _) in theme::CHAT_WIDTHS {
             let active = theme::chat_width_name() == name;
@@ -79,11 +109,45 @@ impl Settings {
         div().flex().flex_col().gap(px(16.))
             .child(div().text_color(theme().text_muted).child("Theme"))
             .child(choices)
+            .child(import)
+            .children(import_error)
             .child(div().text_color(theme().text_muted).child("Chat width"))
             .child(widths)
             .child(div().text_size(px(11.)).text_color(theme().text_muted)
                 .child("Changes apply immediately and are saved for the next launch. Glass uses the macOS desktop material where supported; other platforms may use solid surfaces."))
             .into_any_element()
+    }
+    fn choose_theme_file(&mut self, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Import VS Code theme".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            if let Some(path) = paths.first() {
+                let _ = this.update(cx, |this, cx| this.import_theme(path, cx));
+            }
+        })
+        .detach();
+    }
+    /// Adds a VS Code theme file to Appearance's themes. A file that cannot be
+    /// read or mapped leaves an error row and changes nothing.
+    pub(crate) fn import_theme(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let file = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let result = std::fs::read_to_string(path)
+            .map_err(|error| format!("Could not read the file: {error}."))
+            .and_then(|source| theme::import_theme(&source, &file));
+        self.theme_import_error = result
+            .err()
+            .map(|error| format!("Could not import {file}. {error}"));
+        self.changed(cx);
     }
     pub(super) fn panel_result(
         &mut self,
