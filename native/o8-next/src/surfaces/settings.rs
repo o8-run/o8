@@ -80,6 +80,7 @@ impl Shell {
                 crate::settings::Action::Shortcuts => {
                     (super::shortcuts::REGISTRATION.open)(this, Command::Shortcuts, window, cx);
                 }
+                crate::settings::Action::SnapshotHotkey => this.apply_snapshot_hotkey(true, window, cx),
             },
         );
         self.surfaces.settings.subscription = Some((close_subscription, action_subscription));
