@@ -140,13 +140,14 @@ Managed maple routing must preserve a single payer.`);
   getSqlite().prepare(
     'INSERT INTO directives_fts(directive_id, title, body) VALUES (?, ?, ?)',
   ).run('managed-maple-high-priority', 'Managed maple high priority rule', 'Managed maple routing must preserve a single payer.');
+  // Recall requires the outcome to belong to the selected project.
   getSqlite().prepare(`
     INSERT INTO session_outcomes (
-      id, repo_path, runtime, outcome, summary, plan_text,
+      id, project_id, repo_path, runtime, outcome, summary, plan_text,
       retry_history_json, patterns_json, conflict_zones_json, changed_files_json,
       started_at, completed_at, valid_from
-    ) VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', '[]', '[]', ?, ?, ?)
-  `).run('managed-maple-outcome', repoPath, 'codex', 'completed', 'Managed maple routing completed with source evidence.', 'Use managed maple routing.', now, now, now);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', '[]', ?, ?, ?)
+  `).run('managed-maple-outcome', 'managed-brain-route', repoPath, 'codex', 'completed', 'Managed maple routing completed with source evidence.', 'Use managed maple routing.', now, now, now);
   getSqlite().prepare(`
     INSERT INTO facts (
       id, kind, content, source_kind, source_id, source_excerpt,
