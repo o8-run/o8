@@ -25,6 +25,8 @@ pub(crate) struct Snapshot {
     pub sources: BTreeMap<String, String>,
     #[serde(rename = "settingsToml")]
     pub toml: Option<Toml>,
+    #[serde(default)]
+    pub scope: Option<Box<scope::ScopeInfo>>,
 }
 #[derive(Clone, Deserialize)]
 pub(crate) struct BotSetupCandidate {
@@ -159,12 +161,29 @@ pub(crate) struct Settings {
     about_busy: bool,
     about_status: String,
     about_error: Option<String>,
+    /// The open project, whose layer reads resolve against.
+    project: Option<String>,
+    /// The project the latest read asked for; a switch mid-read reads again.
+    requested_project: Option<String>,
+    /// The layer each row edits when a person chose one.
+    scopes: BTreeMap<&'static str, scope::Scope>,
     /// Why the last VS Code theme import was refused.
     pub theme_import_error: Option<String>,
+    /// Installed font families, listed once for the font pickers.
+    font_families: Option<Vec<String>>,
 }
 impl EventEmitter<Close> for Settings {}
 impl Settings {
+    #[cfg(test)]
     pub fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_project(client, None, window, cx)
+    }
+    pub fn with_project(
+        client: Client,
+        project: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let search = cx.new(|cx| {
             let mut input = Composer::new(cx);
             input.focus = input.focus.clone().tab_stop(true);
@@ -210,13 +229,64 @@ impl Settings {
             about_busy: false,
             about_status: String::new(),
             about_error: None,
+            project,
+            requested_project: None,
+            scopes: BTreeMap::new(),
             theme_import_error: None,
+            font_families: None,
         };
         view.load(false, cx);
         view
     }
     pub fn focus(&self, window: &mut Window) {
         self.focus.focus(window);
+    }
+    /// A project switch re-resolves every row against the new project's layer.
+    pub(crate) fn set_project(&mut self, project: Option<String>, cx: &mut Context<Self>) {
+        if self.project == project {
+            return;
+        }
+        self.project = project;
+        // A read in flight finishes first; receive then reads again.
+        self.load(false, cx);
+    }
+    pub(crate) fn scope_row(&self, field: &Field) -> Option<scope::ScopeRow> {
+        if matches!(field.kind, Kind::ReadOnly | Kind::Bots) {
+            return None;
+        }
+        let snapshot = self.snapshot.as_ref()?;
+        scope::scope_row(
+            snapshot.scope.as_deref(),
+            field.id,
+            snapshot.values.get(field.id)?,
+            self.scopes.get(field.id).copied(),
+        )
+    }
+    fn selected_scope(&self, field: &Field) -> scope::Scope {
+        self.scope_row(field)
+            .map_or(scope::Scope::Global, |row| row.selected)
+    }
+    fn choose_scope(&mut self, field: &'static Field, scope: scope::Scope, cx: &mut Context<Self>) {
+        self.scopes.insert(field.id, scope);
+        self.changed(cx);
+    }
+    /// Clears the selected layer's own value so the row falls through.
+    fn clear_scope(&mut self, field: &'static Field, cx: &mut Context<Self>) {
+        let scope = self.selected_scope(field);
+        if !self.locked(field) && scope != scope::Scope::Global {
+            let revision = self
+                .snapshot
+                .as_ref()
+                .and_then(|s| s.toml.as_ref())
+                .map(|t| t.revision.clone());
+            self.write(
+                "POST",
+                false,
+                scope,
+                json!({field.id:Value::Null,"settingsTomlRevision":revision}),
+                cx,
+            );
+        }
     }
     fn changed(&mut self, cx: &mut Context<Self>) {
         self.revision += 1;
@@ -280,8 +350,11 @@ impl Settings {
         }
         self.load_panel(false, cx);
         self.changed(cx);
+        if self.requested_project != self.project {
+            self.load(false, cx);
+        }
     }
-    fn read(client: &Client, keys: bool) -> Result<Data, RequestError> {
+    fn read(client: &Client, keys: bool, project: Option<&str>) -> Result<Data, RequestError> {
         if keys {
             let mut inventory: Inventory = client.settings_request("GET", KEYS, Value::Null)?;
             inventory.providers.retain(|p| {
@@ -292,7 +365,8 @@ impl Settings {
             });
             Ok(Data::Keys(inventory, false))
         } else {
-            let data: Snapshot = client.settings_request("GET", DEFAULTS, Value::Null)?;
+            let path = scope::read_path(DEFAULTS, project);
+            let data: Snapshot = client.settings_request("GET", &path, Value::Null)?;
             if data.values.is_empty() {
                 return Err(RequestError {
                     status: Some(502),
@@ -314,9 +388,11 @@ impl Settings {
         let generation = self.generation;
         let client = self.client.clone();
         let keys = self.section == "keys" && !open_file;
+        self.requested_project = self.project.clone();
+        let project = self.project.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { Self::read(&client, keys) });
+            .spawn(async move { Self::read(&client, keys, project.as_deref()) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -417,7 +493,14 @@ impl Settings {
         self.load(false, cx);
     }
 
-    fn write(&mut self, method: &'static str, keys: bool, body: Value, cx: &mut Context<Self>) {
+    fn write(
+        &mut self,
+        method: &'static str,
+        keys: bool,
+        scope: scope::Scope,
+        body: Value,
+        cx: &mut Context<Self>,
+    ) {
         if self.busy || self.uncertain {
             return;
         }
@@ -427,22 +510,26 @@ impl Settings {
         let bot_choice_write = !keys
             && (body.get("botRailEnabledIds").is_some() || body.get("settingsToml").is_some());
         let client = self.client.clone();
+        self.requested_project = self.project.clone();
+        let project = self.project.clone();
+        let path = scope::write_path(DEFAULTS, scope, project.as_deref());
         let task = cx.background_executor().spawn(async move {
+            let project = project.as_deref();
             if keys {
                 #[derive(Deserialize)]
                 struct Receipt { warning: Option<String> }
                 let receipt: Receipt = client.settings_request(method, KEYS, body)?;
-                let mut result = Self::read(&client, true).map_err(|_| RequestError {
+                let mut result = Self::read(&client, true, project).map_err(|_| RequestError {
                     status: None, message: "The action was accepted, but current key presence is unavailable. Refresh before trying again.".into(),
                 })?;
                 if let Data::Keys(_, warning) = &mut result { *warning = receipt.warning.is_some(); }
                 Ok(result)
             } else {
-                let _: serde::de::IgnoredAny = client.settings_request(method, DEFAULTS, body)?;
+                let _: serde::de::IgnoredAny = client.settings_request(method, &path, body)?;
                 // Invalidate as soon as the save is accepted, independently
                 // of this view's lifetime and of the following readback.
                 if bot_choice_write { crate::settings_fields::bot_rail_changed(&client); }
-                Self::read(&client, false).map_err(|_| RequestError {
+                Self::read(&client, false, project).map_err(|_| RequestError {
                     status: None, message: "The change was accepted, but current settings are unavailable. Refresh before trying again.".into(),
                 })
             }
@@ -461,9 +548,11 @@ impl Settings {
                 .as_ref()
                 .and_then(|s| s.toml.as_ref())
                 .map(|t| t.revision.clone());
+            let scope = self.selected_scope(field);
             self.write(
                 "POST",
                 false,
+                scope,
                 json!({field.id:value,"settingsTomlRevision":revision}),
                 cx,
             );
@@ -484,9 +573,11 @@ impl Settings {
             Target::Field(field, revision) => match field.parse(&text) {
                 Ok(value) => {
                     if !self.locked(field) {
+                        let scope = self.selected_scope(field);
                         self.write(
                             "POST",
                             false,
+                            scope,
                             json!({field.id:value,"settingsTomlRevision":revision}),
                             cx,
                         );
@@ -506,6 +597,7 @@ impl Settings {
                 self.write(
                     "POST",
                     true,
+                    scope::Scope::Global,
                     json!({"provider":provider,"key":text.trim()}),
                     cx,
                 );
@@ -513,6 +605,7 @@ impl Settings {
             Target::File(revision) => self.write(
                 "POST",
                 false,
+                scope::Scope::Global,
                 json!({"settingsToml":text,"settingsTomlRevision":revision}),
                 cx,
             ),
@@ -567,3 +660,6 @@ mod nav_groups;
 
 #[path = "settings_bots.rs"]
 mod bots;
+
+#[path = "settings_scope.rs"]
+pub(crate) mod scope;

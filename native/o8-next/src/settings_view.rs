@@ -118,12 +118,18 @@ impl Settings {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let value = self
-            .snapshot
-            .as_ref()
-            .and_then(|s| s.values.get(field.id))
-            .cloned()
-            .unwrap_or(Value::Null);
+        let scope_row = self.scope_row(field);
+        // Controls show the selected layer's value, else what falls through to it.
+        let value = scope_row.as_ref().map_or_else(
+            || {
+                self.snapshot
+                    .as_ref()
+                    .and_then(|s| s.values.get(field.id))
+                    .cloned()
+                    .unwrap_or(Value::Null)
+            },
+            |row| row.value.clone(),
+        );
         let locked = self.locked(field);
         let env = self
             .snapshot
@@ -279,6 +285,22 @@ impl Settings {
                 ));
             }
         }
+        let mut label = div()
+            .flex_1()
+            .min_w(px(200.))
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .child(div().text_size(px(13.5)).child(field.label))
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child(detail),
+            );
+        if let Some(row) = scope_row {
+            label = label.child(self.scope_selector(field, row, locked, window, cx));
+        }
         div()
             .id(gpui::SharedString::from(format!(
                 "settings-row-{}",
@@ -292,23 +314,60 @@ impl Settings {
             .py(px(16.))
             .border_b_1()
             .border_color(theme().border)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(200.))
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .child(div().text_size(px(13.5)).child(field.label))
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(theme().text_muted)
-                            .child(detail),
-                    ),
-            )
+            .child(label)
             .child(controls.max_w(px(350.)).items_center().justify_end())
             .into_any_element()
+    }
+    /// Global / This project / This machine, a Clear for the selected layer's
+    /// own value, and a note when a higher layer overrides it.
+    fn scope_selector(
+        &mut self,
+        field: &'static Field,
+        row: scope::ScopeRow,
+        locked: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut selector = div().flex().flex_wrap().items_center().gap(px(6.));
+        for choice in row.choices.iter().copied() {
+            selector = selector.child(
+                self.button(
+                    format!("setting-{}-scope-{}", field.id, choice.id()),
+                    choice.label().into(),
+                    !self.busy,
+                    choice == row.selected,
+                    window,
+                    cx,
+                    move |this, _, cx| this.choose_scope(field, choice, cx),
+                )
+                .h(px(22.)),
+            );
+        }
+        if row.clearable {
+            selector = selector.child(
+                self.button(
+                    format!("setting-{}-scope-clear", field.id),
+                    format!("Clear {}", row.selected.label().to_lowercase()),
+                    !locked,
+                    false,
+                    window,
+                    cx,
+                    move |this, _, cx| this.clear_scope(field, cx),
+                )
+                .h(px(22.)),
+            );
+        }
+        if let Some(indicator) = row.indicator {
+            let id = field.id;
+            selector = selector.child(
+                div()
+                    .debug_selector(move || format!("settings-scope-indicator-{id}"))
+                    .text_size(px(11.))
+                    .text_color(theme().text_secondary)
+                    .child(indicator),
+            );
+        }
+        selector
     }
     pub(super) fn clear_search(&mut self, cx: &mut Context<Self>) {
         self.search.update(cx, |s, cx| s.clear(cx));
@@ -365,6 +424,7 @@ impl Settings {
                         this.write(
                             "PATCH",
                             true,
+                            scope::Scope::Global,
                             json!({"provider":toggle_id,"enabled":!provider.enabled}),
                             cx,
                         )
@@ -395,6 +455,7 @@ impl Settings {
                     this.write(
                         "PATCH",
                         true,
+                        scope::Scope::Global,
                         json!({"provider":"openrouter","check":true}),
                         cx,
                     )
@@ -433,7 +494,13 @@ impl Settings {
                             window,
                             cx,
                             move |this, _, cx| {
-                                this.write("DELETE", true, json!({"provider":id}), cx)
+                                this.write(
+                                    "DELETE",
+                                    true,
+                                    scope::Scope::Global,
+                                    json!({"provider":id}),
+                                    cx,
+                                )
                             },
                         )
                         .text_color(theme().danger),
