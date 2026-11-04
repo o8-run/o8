@@ -18,6 +18,12 @@ import { POST as workerEvent } from '@/app/api/worker/event/route';
 vi.mock('@/lib/runtime/pty-bridge', () => ({ spawnBridgeTerminalSession: vi.fn(async () => { throw new Error('No fixture bridge'); }) }));
 const ready = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: ready }));
+// #4899 admits a Codex effort only with the launching account's model/list evidence; the fixture
+// advertises its model's effort instead of running the real codex app-server.
+vi.mock('@/lib/codex/service-tier-catalogue', async (original) => ({
+  ...await original<typeof import('@/lib/codex/service-tier-catalogue')>(),
+  getCodexSpeedCatalogue: async () => ({ models: { 'gpt-6.1-sol': [] }, reasoningEfforts: { 'gpt-6.1-sol': ['high'] } }),
+}));
 // The real owned spawn, HTTP middleware/worker-event route, SQLite and stop path
 // are exercised. A Node child substitutes for provider inference and Seatbelt.
 vi.mock('@/lib/runtimes/shared/owned-session/sandbox', async (original) => ({

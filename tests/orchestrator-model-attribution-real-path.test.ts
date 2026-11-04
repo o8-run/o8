@@ -14,6 +14,12 @@ import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 
+// #4899 admits a Codex effort only with model/list evidence; the fake codex cannot serve one.
+vi.mock('@/lib/codex/service-tier-catalogue', async (original) => ({
+  ...await original<typeof import('@/lib/codex/service-tier-catalogue')>(),
+  getCodexSpeedCatalogue: async () => ({ models: { 'gpt-6.1-sol': [] }, reasoningEfforts: { 'gpt-6.1-sol': ['medium'] } }),
+}));
+
 const networkFetch = globalThis.fetch;
 // Match addRepo's physical paths even when the temporary root is a symlink
 // (for example /var on macOS), so registration cannot create a second repo id.

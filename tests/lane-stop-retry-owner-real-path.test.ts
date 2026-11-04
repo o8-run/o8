@@ -71,6 +71,15 @@ vi.mock('@/lib/runtimes/shared/auth-detect', async (original) => ({
   ...await original<typeof import('@/lib/runtimes/shared/auth-detect')>(),
   assertRuntimeDispatchable: vi.fn(async () => undefined),
 }));
+// #4899 admits a Codex effort only with model/list evidence from the selected account; the fake
+// codex below cannot answer model/list, so advertise the fixture model's effort here.
+vi.mock('@/lib/codex/service-tier-catalogue', async (original) => {
+  const { MODEL_IDS } = await import('@/lib/models');
+  return { ...await original<typeof import('@/lib/codex/service-tier-catalogue')>(), getCodexSpeedCatalogue: async () => ({
+    models: { [MODEL_IDS.raw.openAiGpt61Sol]: [] },
+    reasoningEfforts: { [MODEL_IDS.raw.openAiGpt61Sol]: ['medium'] },
+  }) };
+});
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: vi.fn(async () => ({ ready: true })) }));
 vi.mock('@/lib/worktree/storage-telemetry', async (original) => ({
   ...await original<typeof import('@/lib/worktree/storage-telemetry')>(),
