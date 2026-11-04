@@ -95,7 +95,10 @@ beforeAll(async () => {
     const inbox = {
       generatedAt: '', mode: 'live', sessions: [], fleetSessions: [], approvals: [], reviewUnits: [], items: [], summary: {},
     };
-    if (url.pathname === '/api/command-center/snapshot') {
+    if (url.pathname === '/api/panel/status') {
+      // Bootstrap waits for API readiness before starting the review watchers.
+      response.end(JSON.stringify({ ok: true }));
+    } else if (url.pathname === '/api/command-center/snapshot') {
       if (holdSnapshot) {
         holdSnapshot = false;
         await new Promise<void>((resolve) => { releaseSnapshot = resolve; });
