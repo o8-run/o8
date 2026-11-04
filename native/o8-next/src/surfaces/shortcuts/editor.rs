@@ -47,62 +47,64 @@ impl Render for Editor {
                 },
             ))
         };
-        let header = div()
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .p(px(12.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child("Customize shortcuts")
-                    .child(
-                        button("shortcuts-editor-close".into(), "Close".into(), false).on_click(
-                            cx.listener(|_, _, _, cx| {
-                                cx.emit(Event::Close);
-                                cx.stop_propagation();
-                            }),
+        let header =
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .p(px(12.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child("Customize shortcuts")
+                        .child(
+                            button("shortcuts-editor-close".into(), "Close".into(), false)
+                                .on_click(cx.listener(|_, _, _, cx| {
+                                    cx.emit(Event::Close);
+                                    cx.stop_propagation();
+                                })),
                         ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(div().text_color(theme().text_secondary).child("Save to"))
-                    .child(scope(Scope::Global, "Global", "shortcuts-scope-global", cx))
-                    .child(scope(
-                        Scope::Machine,
-                        "This machine",
-                        "shortcuts-scope-machine",
-                        cx,
-                    ))
-                    .child(div().flex_1())
-                    .child(
-                        button("shortcuts-reset-all".into(), "Reset all".into(), false).on_click(
-                            cx.listener(|_, _, _, cx| {
-                                cx.emit(Event::ResetAll);
-                                cx.stop_propagation();
-                            }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(div().text_color(theme().text_secondary).child("Save to"))
+                        .child(scope(Scope::Global, "Global", "shortcuts-scope-global", cx))
+                        .child(scope(
+                            Scope::Machine,
+                            "This machine",
+                            "shortcuts-scope-machine",
+                            cx,
+                        ))
+                        .child(div().flex_1())
+                        .child(
+                            button("shortcuts-reset-all".into(), "Reset all".into(), false)
+                                .on_click(cx.listener(|_, _, _, cx| {
+                                    cx.emit(Event::ResetAll);
+                                    cx.stop_propagation();
+                                })),
                         ),
-                    ),
-            )
-            .children(self.notice.clone().map(|notice| {
-                div()
-                    .debug_selector(|| "shortcuts-notice".into())
-                    .text_color(theme().text_secondary)
-                    .child(notice)
-            }));
+                )
+                .children(self.notice.clone().map(|notice| {
+                    div()
+                        .debug_selector(|| "shortcuts-notice".into())
+                        .text_color(theme().text_secondary)
+                        .child(notice)
+                }));
         let rows = self.rows.iter().map(|row| {
             let id = row.id.clone();
             let capturing = self.capturing.as_deref() == Some(row.id.as_str());
             let chord = if capturing {
                 "Press a shortcut…".to_string()
             } else {
-                row.chord.as_deref().map(display).unwrap_or_else(|| "—".into())
+                row.chord
+                    .as_deref()
+                    .map(display)
+                    .unwrap_or_else(|| "—".into())
             };
             let begin = id.clone();
             let reset = id.clone();

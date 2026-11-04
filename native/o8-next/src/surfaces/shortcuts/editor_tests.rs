@@ -5,8 +5,14 @@ use super::*;
 fn open_editor(cx: &mut VisualTestContext) {
     shortcuts_open(cx);
     shortcuts_click(cx, "shortcuts-customize");
-    assert!(cx.debug_bounds("shortcuts-editor").is_some(), "Customize opens the editor");
-    assert!(cx.debug_bounds("keyboard-shortcuts").is_none(), "the reference closes");
+    assert!(
+        cx.debug_bounds("shortcuts-editor").is_some(),
+        "Customize opens the editor"
+    );
+    assert!(
+        cx.debug_bounds("keyboard-shortcuts").is_none(),
+        "the reference closes"
+    );
 }
 fn rebind(cx: &mut VisualTestContext, scope: &'static str, id: &str, chord: &str) {
     shortcuts_click(cx, scope);
@@ -38,13 +44,24 @@ fn palette_after(shell: &Entity<Shell>, cx: &mut VisualTestContext, chord: &str)
 fn wait(cx: &mut VisualTestContext, mut done: impl FnMut(&mut VisualTestContext) -> bool) {
     let since = Instant::now();
     while !done(cx) {
-        assert!(since.elapsed() < std::time::Duration::from_secs(15), "timed out");
+        assert!(
+            since.elapsed() < std::time::Duration::from_secs(15),
+            "timed out"
+        );
         std::thread::sleep(std::time::Duration::from_millis(20));
         shortcuts_draw(cx);
     }
 }
 fn row(shell: &Entity<Shell>, cx: &VisualTestContext, id: &str) -> super::super::keymap::Row {
-    shell.read_with(cx, |s, _| s.surfaces.shortcuts.bindings.keymap.row(id).unwrap().clone())
+    shell.read_with(cx, |s, _| {
+        s.surfaces
+            .shortcuts
+            .bindings
+            .keymap
+            .row(id)
+            .unwrap()
+            .clone()
+    })
 }
 
 #[gpui::test]
@@ -53,30 +70,64 @@ fn shortcuts_editor_rebinds_this_machine_live_and_after_restart(cx: &mut TestApp
     let file = fixture.root.join("keymap-machine.json");
     let (shell, mut visual) = open(fixture.client.clone(), file.clone(), State::default(), cx);
     ready(&shell, &mut visual);
-    assert!(palette_after(&shell, &mut visual, "ctrl-k"), "the default chord works first");
+    assert!(
+        palette_after(&shell, &mut visual, "ctrl-k"),
+        "the default chord works first"
+    );
     open_editor(&mut visual);
-    rebind(&mut visual, "shortcuts-scope-machine", "shell.palette", "alt-j");
+    rebind(
+        &mut visual,
+        "shortcuts-scope-machine",
+        "shell.palette",
+        "alt-j",
+    );
     let saved: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
-    assert_eq!(saved["keybindings"]["shell.palette"], "alt-j", "this machine's state file");
+    assert_eq!(
+        saved["keybindings"]["shell.palette"], "alt-j",
+        "this machine's state file"
+    );
     let palette = row(&shell, &visual, "shell.palette");
     assert_eq!(palette.source.label(), "This machine");
     close_editor(&shell, &mut visual);
     // Applied live, without a restart.
-    assert!(palette_after(&shell, &mut visual, "alt-j"), "the new chord opens the palette");
-    assert!(!palette_after(&shell, &mut visual, "ctrl-k"), "the old chord is released");
+    assert!(
+        palette_after(&shell, &mut visual, "alt-j"),
+        "the new chord opens the palette"
+    );
+    assert!(
+        !palette_after(&shell, &mut visual, "ctrl-k"),
+        "the old chord is released"
+    );
     visual.update(|window, _| window.remove_window());
 
-    let (shell, mut visual) = open(fixture.client.clone(), file.clone(), State::load(&file).unwrap(), cx);
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        file.clone(),
+        State::load(&file).unwrap(),
+        cx,
+    );
     ready(&shell, &mut visual);
-    assert_eq!(row(&shell, &visual, "shell.palette").chord.as_deref(), Some("alt-j"));
-    assert!(palette_after(&shell, &mut visual, "alt-j"), "the installed keymap survives restart");
+    assert_eq!(
+        row(&shell, &visual, "shell.palette").chord.as_deref(),
+        Some("alt-j")
+    );
+    assert!(
+        palette_after(&shell, &mut visual, "alt-j"),
+        "the installed keymap survives restart"
+    );
     open_editor(&mut visual);
     shortcuts_click(&mut visual, "shortcuts-scope-machine");
     shortcuts_click(&mut visual, "shortcut-reset-shell.palette");
     let saved: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
-    assert!(saved.get("keybindings").is_none(), "reset removes the override");
+    assert!(
+        saved.get("keybindings").is_none(),
+        "reset removes the override"
+    );
     close_editor(&shell, &mut visual);
-    assert!(palette_after(&shell, &mut visual, "ctrl-k"), "reset restores the default");
+    assert!(
+        palette_after(&shell, &mut visual, "ctrl-k"),
+        "reset restores the default"
+    );
     assert!(!palette_after(&shell, &mut visual, "alt-j"));
 }
 
@@ -98,14 +149,30 @@ fn shortcuts_editor_global_persists_in_settings_and_machine_wins(cx: &mut TestAp
     );
     ready(&shell, &mut visual);
     open_editor(&mut visual);
-    rebind(&mut visual, "shortcuts-scope-global", "shell.palette", "alt-g");
-    rebind(&mut visual, "shortcuts-scope-global", "shell.sidebar", "ctrl-k");
+    rebind(
+        &mut visual,
+        "shortcuts-scope-global",
+        "shell.palette",
+        "alt-g",
+    );
+    rebind(
+        &mut visual,
+        "shortcuts-scope-global",
+        "shell.sidebar",
+        "ctrl-k",
+    );
     assert!(
-        visual.debug_bounds("shortcut-conflict-shell.palette").is_none(),
+        visual
+            .debug_bounds("shortcut-conflict-shell.palette")
+            .is_none(),
         "the palette moved off Ctrl+K, so only the sidebar holds it"
     );
     rebind(&mut visual, "shortcuts-scope-global", "tab.close", "alt-g");
-    assert!(visual.debug_bounds("shortcut-conflict-shell.palette").is_some());
+    assert!(
+        visual
+            .debug_bounds("shortcut-conflict-shell.palette")
+            .is_some()
+    );
     assert!(visual.debug_bounds("shortcut-conflict-tab.close").is_some());
     shortcuts_click(&mut visual, "shortcut-reset-tab.close");
     wait(&mut visual, |_| {
@@ -123,19 +190,38 @@ fn shortcuts_editor_global_persists_in_settings_and_machine_wins(cx: &mut TestAp
         cx,
     );
     ready(&shell, &mut visual);
-    wait(&mut visual, |cx| row(&shell, cx, "shell.palette").source.label() == "Global");
+    wait(&mut visual, |cx| {
+        row(&shell, cx, "shell.palette").source.label() == "Global"
+    });
     assert!(palette_after(&shell, &mut visual, "alt-g"));
     open_editor(&mut visual);
-    rebind(&mut visual, "shortcuts-scope-machine", "shell.palette", "alt-m");
-    assert_eq!(row(&shell, &visual, "shell.palette").source.label(), "This machine");
+    rebind(
+        &mut visual,
+        "shortcuts-scope-machine",
+        "shell.palette",
+        "alt-m",
+    );
+    assert_eq!(
+        row(&shell, &visual, "shell.palette").source.label(),
+        "This machine"
+    );
     close_editor(&shell, &mut visual);
-    assert!(palette_after(&shell, &mut visual, "alt-m"), "this machine beats global");
+    assert!(
+        palette_after(&shell, &mut visual, "alt-m"),
+        "this machine beats global"
+    );
     assert!(!palette_after(&shell, &mut visual, "alt-g"));
 
     open_editor(&mut visual);
     shortcuts_click(&mut visual, "shortcuts-scope-global");
     shortcuts_click(&mut visual, "shortcuts-reset-all");
     wait(&mut visual, |_| global(&fixture).is_empty());
-    assert_eq!(row(&shell, &visual, "shell.sidebar").source.label(), "Default");
-    assert_eq!(row(&shell, &visual, "shell.palette").source.label(), "This machine");
+    assert_eq!(
+        row(&shell, &visual, "shell.sidebar").source.label(),
+        "Default"
+    );
+    assert_eq!(
+        row(&shell, &visual, "shell.palette").source.label(),
+        "This machine"
+    );
 }

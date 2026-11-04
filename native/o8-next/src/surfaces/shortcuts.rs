@@ -47,7 +47,9 @@ pub(super) const REGISTRATION: Registration = Registration {
         s.surfaces.shortcuts.bindings = keymap::Model::new(commands(s), overrides);
         let generation = s.surfaces.shortcuts.global_generation;
         let client = s.client.clone();
-        let task = cx.background_executor().spawn(async move { read_global(&client) });
+        let task = cx
+            .background_executor()
+            .spawn(async move { read_global(&client) });
         cx.spawn(async move |this, cx| {
             // Offline or older servers keep this machine's and default chords.
             if let Ok(global) = task.await {
@@ -93,14 +95,13 @@ impl Shell {
                 window,
                 |s, _, _: &dialog::Close, window, cx| s.set_help(false, window, cx),
             ));
-            self.surfaces.shortcuts.customize = Some(cx.subscribe_in(
-                &view,
-                window,
-                |s, _, _: &dialog::Customize, window, cx| {
-                    s.set_help(false, window, cx);
-                    open_editor(s, window, cx);
-                },
-            ));
+            self.surfaces.shortcuts.customize =
+                Some(
+                    cx.subscribe_in(&view, window, |s, _, _: &dialog::Customize, window, cx| {
+                        s.set_help(false, window, cx);
+                        open_editor(s, window, cx);
+                    }),
+                );
             self.surfaces.shortcuts.view = Some(view);
         } else {
             let view = self.surfaces.shortcuts.view.take().unwrap();
@@ -291,7 +292,8 @@ fn commands(s: &Shell) -> Vec<keymap::Command> {
 fn read_global(
     client: &Client,
 ) -> Result<std::collections::BTreeMap<String, String>, crate::settings::RequestError> {
-    let data: serde_json::Value = client.settings_request("GET", DEFAULTS, serde_json::Value::Null)?;
+    let data: serde_json::Value =
+        client.settings_request("GET", DEFAULTS, serde_json::Value::Null)?;
     Ok(keymap::from_entries(
         data["values"]["nativeKeybindings"]
             .as_array()
@@ -313,7 +315,8 @@ fn save_global(s: &mut Shell, cx: &mut Context<Shell>) {
     let entries = keymap::to_entries(&s.surfaces.shortcuts.bindings.overrides.global);
     let client = s.client.clone();
     let task = cx.background_executor().spawn(async move {
-        let current: serde_json::Value = client.settings_request("GET", DEFAULTS, serde_json::Value::Null)?;
+        let current: serde_json::Value =
+            client.settings_request("GET", DEFAULTS, serde_json::Value::Null)?;
         let revision = current["settingsToml"]["revision"].clone();
         let _: serde::de::IgnoredAny = client.settings_request(
             "POST",
@@ -337,8 +340,10 @@ fn save_global(s: &mut Shell, cx: &mut Context<Shell>) {
             match result {
                 Ok(global) => s.surfaces.shortcuts.bindings.set_global(global),
                 Err(error) => {
-                    s.surfaces.shortcuts.bindings.notice =
-                        Some(format!("Global shortcuts were not saved: {}", error.message));
+                    s.surfaces.shortcuts.bindings.notice = Some(format!(
+                        "Global shortcuts were not saved: {}",
+                        error.message
+                    ));
                 }
             }
             refresh_editor(s, cx);
@@ -396,35 +401,34 @@ fn open_editor(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         scroll: gpui::ScrollHandle::new(),
     });
     view.read(cx).focus.focus(window);
-    s.surfaces.shortcuts.editor_subscription = Some(cx.subscribe_in(
-        &view,
-        window,
-        |s, _, event: &editor::Event, window, cx| {
-            let model = &mut s.surfaces.shortcuts.bindings;
-            let changed = match event {
-                editor::Event::Close => {
-                    close_editor(s, window, cx);
-                    return;
+    s.surfaces.shortcuts.editor_subscription =
+        Some(
+            cx.subscribe_in(&view, window, |s, _, event: &editor::Event, window, cx| {
+                let model = &mut s.surfaces.shortcuts.bindings;
+                let changed = match event {
+                    editor::Event::Close => {
+                        close_editor(s, window, cx);
+                        return;
+                    }
+                    editor::Event::Begin(id) => {
+                        model.begin(id);
+                        None
+                    }
+                    editor::Event::Reset(id) => model.reset(id),
+                    editor::Event::ResetAll => model.reset_all(),
+                    editor::Event::Scope(scope) => {
+                        model.set_scope(*scope);
+                        None
+                    }
+                };
+                if let Some(scope) = changed {
+                    persist(s, scope, cx);
                 }
-                editor::Event::Begin(id) => {
-                    model.begin(id);
-                    None
-                }
-                editor::Event::Reset(id) => model.reset(id),
-                editor::Event::ResetAll => model.reset_all(),
-                editor::Event::Scope(scope) => {
-                    model.set_scope(*scope);
-                    None
-                }
-            };
-            if let Some(scope) = changed {
-                persist(s, scope, cx);
-            }
-            refresh_editor(s, cx);
-            s.revision += 1;
-            cx.notify();
-        },
-    ));
+                refresh_editor(s, cx);
+                s.revision += 1;
+                cx.notify();
+            }),
+        );
     s.surfaces.shortcuts.editor = Some(view);
     refresh_editor(s, cx);
     s.revision += 1;

@@ -189,12 +189,6 @@ pub(crate) struct Overrides {
     pub machine: BTreeMap<String, String>,
 }
 impl Overrides {
-    pub(crate) fn scope(&self, scope: Scope) -> &BTreeMap<String, String> {
-        match scope {
-            Scope::Global => &self.global,
-            Scope::Machine => &self.machine,
-        }
-    }
     pub(crate) fn scope_mut(&mut self, scope: Scope) -> &mut BTreeMap<String, String> {
         match scope {
             Scope::Global => &mut self.global,
@@ -203,7 +197,9 @@ impl Overrides {
     }
 }
 /// Shared settings store global overrides as `command=chord` entries.
-pub(crate) fn from_entries<'a>(entries: impl IntoIterator<Item = &'a str>) -> BTreeMap<String, String> {
+pub(crate) fn from_entries<'a>(
+    entries: impl IntoIterator<Item = &'a str>,
+) -> BTreeMap<String, String> {
     entries
         .into_iter()
         .filter_map(|entry| {
@@ -213,7 +209,9 @@ pub(crate) fn from_entries<'a>(entries: impl IntoIterator<Item = &'a str>) -> BT
         .collect()
 }
 pub(crate) fn to_entries(map: &BTreeMap<String, String>) -> Vec<String> {
-    map.iter().map(|(id, chord)| format!("{id}={chord}")).collect()
+    map.iter()
+        .map(|(id, chord)| format!("{id}={chord}"))
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -270,7 +268,9 @@ impl Keymap {
         for row in &mut rows {
             row.conflicts = found
                 .iter()
-                .filter(|other| other.id != row.id && other.chord.is_some() && other.chord == row.chord)
+                .filter(|other| {
+                    other.id != row.id && other.chord.is_some() && other.chord == row.chord
+                })
                 .map(|other| other.label.clone())
                 .collect();
         }
@@ -316,7 +316,9 @@ impl Keymap {
         let folded = fold(&pressed);
         let moved = self.defaults.iter().any(|(id, default)| {
             fold(default) == folded
-                && self.row(id).is_some_and(|row| row.chord.as_ref() != Some(default))
+                && self
+                    .row(id)
+                    .is_some_and(|row| row.chord.as_ref() != Some(default))
         });
         if moved { Route::Release } else { Route::Pass }
     }
@@ -393,11 +395,18 @@ impl Model {
         }
         self.capturing = None;
         let chord = chord(keystroke);
-        self.overrides.scope_mut(self.scope).insert(id.clone(), chord.clone());
+        self.overrides
+            .scope_mut(self.scope)
+            .insert(id.clone(), chord.clone());
         self.rebuild();
         self.notice = self.keymap.row(&id).and_then(|row| {
-            (!row.conflicts.is_empty())
-                .then(|| format!("{} is also bound to {}.", display(&chord), row.conflicts.join(", ")))
+            (!row.conflicts.is_empty()).then(|| {
+                format!(
+                    "{} is also bound to {}.",
+                    display(&chord),
+                    row.conflicts.join(", ")
+                )
+            })
         });
         Some(self.scope)
     }
