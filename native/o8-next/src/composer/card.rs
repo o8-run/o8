@@ -692,10 +692,13 @@ impl Surface {
                             .pt(px(8.))
                             .text_size(px(11.5))
                             .text_color(theme().text_muted)
-                            .child("Shell command · Runs in this workspace's terminal"),
+                            .child(
+                                "Shell command · Runs in this workspace's terminal · Tab completes",
+                            ),
                     )
                 },
             )
+            .children(self.shell_run_strip(cx))
             .capture_key_down(cx.listener(|s, event: &KeyDownEvent, window, cx| {
                 if s.prompt_picker_key(event, window, cx) {
                     return;
@@ -740,6 +743,9 @@ impl Surface {
                     }
                     "escape" if s.composer.read(cx).controls.open.is_some() => {
                         s.dismiss_composer_picker(window, cx);
+                        cx.stop_propagation();
+                    }
+                    "escape" if s.stop_shell_run(window, cx) => {
                         cx.stop_propagation();
                     }
                     // Esc on an empty composer stops the running turn.

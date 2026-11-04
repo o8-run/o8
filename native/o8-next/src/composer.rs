@@ -11,6 +11,7 @@ pub(crate) mod images;
 pub(crate) mod mode_store;
 pub(crate) mod prompt_state;
 pub(crate) mod stash;
+pub(crate) mod shell;
 
 #[derive(Clone)]
 struct Snapshot {
@@ -218,7 +219,7 @@ impl Composer {
         self.selection = self.anchor.min(cursor)..self.anchor.max(cursor);
         self.changed(cx);
     }
-    fn cursor(&self) -> usize {
+    pub(crate) fn cursor(&self) -> usize {
         if self.anchor == self.selection.end {
             self.selection.start
         } else {

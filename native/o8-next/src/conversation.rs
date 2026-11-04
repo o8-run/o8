@@ -23,6 +23,8 @@ mod prompt_rules;
 mod prompt_view;
 #[path = "composer/send_menu.rs"]
 mod send_menu;
+#[path = "composer/shell_run.rs"]
+mod shell_run;
 
 #[cfg(test)]
 #[path = "composer/card_tests.rs"]
@@ -86,6 +88,10 @@ impl Surface {
                 && let Some(window) = input.controls.slash.window
             {
                 let line = line.to_owned();
+                self.shell_run = Some(crate::composer::shell::ShellRun {
+                    line: line.clone(),
+                    stopped: false,
+                });
                 editor.update(cx, |i, cx| i.set_text("", cx));
                 cx.defer(move |cx| {
                     let _ = window.update(cx, |_, window, cx| {

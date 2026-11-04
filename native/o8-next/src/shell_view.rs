@@ -67,6 +67,17 @@ impl Render for Shell {
                     }
                 }),
             )
+            .on_action(cx.listener(|this, _: &crate::ui::StopShellLine, _, cx| {
+                if let Some(line) = crate::ui::take_pending_shell_stop() {
+                    this.stop_shell_line(&line, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &crate::ui::AddShellOutput, _, cx| {
+                if let Some((line, view)) = crate::ui::take_pending_shell_output() {
+                    let output = this.shell_output(&line, cx);
+                    let _ = view.update(cx, |view, cx| view.add_shell_output(&line, output, cx));
+                }
+            }))
             .on_action(
                 cx.listener(|this, _: &crate::lineage::OpenThreadLink, window, cx| {
                     if let Some(id) = crate::lineage::take_pending() {

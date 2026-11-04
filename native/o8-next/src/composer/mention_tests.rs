@@ -211,3 +211,42 @@ fn thread_mentions_leave_out_other_machines_threads() {
         ["here"]
     );
 }
+
+#[gpui::test]
+fn a_bang_line_completes_its_command_then_paths(cx: &mut gpui::TestAppContext) {
+    let (input, cx) = cx.add_window_view(|_, cx| Composer::new(cx));
+    input.update_in(cx, |i, window, cx| {
+        i.controls.slash.enabled = true;
+        i.set_text("!gi", cx);
+        assert_eq!(i.controls.mention.query.as_deref(), Some("gi"));
+        i.apply_mention(&MentionResult::Command("git".into()), window, cx);
+        assert_eq!(i.text, "!git ");
+        assert_eq!(i.controls.mention.query, None, "a space ends the word");
+        i.set_text("!cat sr", cx);
+        assert_eq!(i.controls.mention.query.as_deref(), Some("sr"));
+        i.apply_mention(
+            &MentionResult::Path {
+                path: "src".into(),
+                directory: true,
+            },
+            window,
+            cx,
+        );
+        assert_eq!(i.text, "!cat src/", "a folder keeps completing");
+        assert_eq!(i.controls.mention.query.as_deref(), Some("src/"));
+        i.apply_mention(
+            &MentionResult::Path {
+                path: "src/my notes.md".into(),
+                directory: false,
+            },
+            window,
+            cx,
+        );
+        assert_eq!(i.text, "!cat src/my\\ notes.md ");
+        i.set_text("!cat @src", cx);
+        assert_eq!(
+            i.controls.mention.query, None,
+            "a ! line completes paths, not @ mentions"
+        );
+    });
+}
