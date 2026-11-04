@@ -144,6 +144,10 @@ impl Settings {
         let result = std::fs::read_to_string(path)
             .map_err(|error| format!("Could not read the file: {error}."))
             .and_then(|source| theme::import_theme(&source, &file));
+        // A re-imported running theme repaints with its new colors.
+        if result.is_ok() {
+            cx.refresh_windows();
+        }
         self.theme_import_error = result
             .err()
             .map(|error| format!("Could not import {file}. {error}"));

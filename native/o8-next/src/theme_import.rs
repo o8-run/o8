@@ -216,7 +216,12 @@ pub(crate) fn save(path: &Path, id: &str, source: &str) -> Result<(), String> {
         let _ = std::fs::create_dir_all(parent);
     }
     let text = serde_json::to_string_pretty(&Value::Array(entries)).unwrap();
-    std::fs::write(path, text).map_err(|error| format!("Could not save the theme: {error}."))
+    // Written beside the store and renamed over it, so a crash mid-write
+    // never leaves a truncated store behind.
+    let staged = path.with_extension("json.tmp");
+    std::fs::write(&staged, text)
+        .and_then(|()| std::fs::rename(&staged, path))
+        .map_err(|error| format!("Could not save the theme: {error}."))
 }
 
 /// Comments become whitespace and a comma before `}` or `]` is dropped;

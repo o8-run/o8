@@ -167,6 +167,7 @@ static IMPORTED: LazyLock<RwLock<Vec<&'static ImportedTheme>>> = LazyLock::new(|
             .map(|path| crate::theme_import::load(&path))
             .unwrap_or_default()
             .into_iter()
+            .take(MAX_IMPORTED)
             .map(|theme| &*Box::leak(Box::new(theme)))
             .collect(),
     )
@@ -185,6 +186,14 @@ pub fn imported_themes() -> Vec<(String, String)> {
 /// nothing is saved and nothing changes.
 pub fn import_theme(source: &str, fallback_name: &str) -> Result<String, String> {
     let theme = crate::theme_import::parse(source, fallback_name)?;
+    let replaces = IMPORTED
+        .read()
+        .unwrap()
+        .iter()
+        .any(|old| old.id == theme.id);
+    if !replaces && IMPORTED.read().unwrap().len() >= MAX_IMPORTED {
+        return Err("Too many imported themes.".into());
+    }
     if let Some(path) = themes_path() {
         crate::theme_import::save(&path, &theme.id, source)?;
     }
@@ -193,8 +202,7 @@ pub fn import_theme(source: &str, fallback_name: &str) -> Result<String, String>
     let mut themes = IMPORTED.write().unwrap();
     match themes.iter().position(|old| old.id == theme.id) {
         Some(index) => themes[index] = theme,
-        None if themes.len() < usize::from(u8::MAX - 1 - FIRST_IMPORTED) => themes.push(theme),
-        None => return Err("Too many imported themes.".into()),
+        None => themes.push(theme),
     }
     drop(themes);
     // A replaced theme that is running repaints with its new colors.
@@ -210,6 +218,8 @@ pub(crate) fn selection_test_guard() -> std::sync::MutexGuard<'static, ()> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
+/// Imported themes fit the choice ids below the unset sentinel.
+const MAX_IMPORTED: usize = (u8::MAX - 1 - FIRST_IMPORTED) as usize;
 fn themes_path() -> Option<std::path::PathBuf> {
     Some(saved_path()?.with_file_name("next-themes.json"))
 }
@@ -541,25 +551,13 @@ pub(crate) fn split_line(
     let line = gpui::div().absolute();
     let (zone, line) = if vertical {
         (
-            zone.top_0()
-                .bottom_0()
-                .left(gpui::px(center - SPLIT_WAKE))
-                .w(span),
-            line.top_0()
-                .bottom_0()
-                .left(gpui::px(SPLIT_WAKE))
-                .w(gpui::px(1.)),
+            zone.top_0().bottom_0().left(gpui::px(center - SPLIT_WAKE)).w(span),
+            line.top_0().bottom_0().left(gpui::px(SPLIT_WAKE)).w(gpui::px(1.)),
         )
     } else {
         (
-            zone.left_0()
-                .right_0()
-                .top(gpui::px(center - SPLIT_WAKE))
-                .h(span),
-            line.left_0()
-                .right_0()
-                .top(gpui::px(SPLIT_WAKE))
-                .h(gpui::px(1.)),
+            zone.left_0().right_0().top(gpui::px(center - SPLIT_WAKE)).h(span),
+            line.left_0().right_0().top(gpui::px(SPLIT_WAKE)).h(gpui::px(1.)),
         )
     };
     zone.child(
