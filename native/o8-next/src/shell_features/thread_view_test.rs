@@ -1,4 +1,4 @@
-use super::thread_view::{NO_SESSION, State, resume_line, thread};
+use super::thread_view::{NO_SESSION, State, Views, resume_line, thread};
 use super::*;
 use crate::shell::test_support::*;
 use gpui::Modifiers;
@@ -201,5 +201,20 @@ fn thread_view_switches_to_the_resumed_cli_in_the_workspace_terminal_and_back(
         _ => panic!("the open shell must be reused"),
     });
     assert_eq!(again, pane.entity_id());
+    assert!(v.debug_bounds("thread-terminal-view").is_some());
+    assert!(!s.read_with(&v, |s, cx| thread(s, cx).unwrap().adopted));
+
+    // Closing the thread drops its pane; the shell, and its CLI, keep running.
+    // Opening it again adopts that shell and types nothing into it.
+    s.update(&mut v, |s, _| s.features.get::<Views>().threads.clear());
+    drop(pane);
+    settle(&mut v);
+    v.simulate_keystrokes("ctrl-alt-v");
+    until(&mut v, "the running shell adopted", |v| {
+        s.read_with(v, |s, cx| {
+            thread(s, cx).is_some_and(|t| matches!(&t.state, State::Open(p) if p.read(cx).ready))
+        })
+    });
+    assert!(s.read_with(&v, |s, cx| thread(s, cx).unwrap().adopted));
     assert!(v.debug_bounds("thread-terminal-view").is_some());
 }

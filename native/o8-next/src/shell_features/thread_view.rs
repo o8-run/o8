@@ -109,6 +109,8 @@ pub(super) struct Thread {
     pub terminal: bool,
     pub state: State,
     pub launch: Option<Launch>,
+    /// The shell was already running, so its CLI was left as it was.
+    pub adopted: bool,
 }
 
 #[derive(Default)]
@@ -193,6 +195,7 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
             terminal: true,
             state: State::Opening,
             launch: None,
+            adopted: false,
         },
     );
     s.focus.focus(window);
@@ -213,7 +216,19 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
             _ => return Err(NO_SESSION.to_owned()),
         };
         let launch = Launch { cwd, owner, line };
-        open_terminal(&opener, &launch).map(|name| (launch, name))
+        // The owner key adopts this thread's shell when it is still running,
+        // such as after the tab was closed or the app restarted. Its CLI is
+        // already there, and typing the line would send it as a prompt.
+        let running: serde_json::Value = opener
+            .get("/api/mobile/terminal-sessions", &[])
+            .map_err(|error| format!("Could not list terminals: {error}"))?;
+        let name = open_terminal(&opener, &launch)?;
+        let adopted = running["sessions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|session| session["name"] == name.as_str());
+        Ok((launch, name, adopted))
     });
     cx.spawn_in(window, async move |this, cx| {
         let result = task.await;
@@ -228,17 +243,24 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
                 return;
             };
             match result {
-                Ok((launch, name)) => {
+                Ok((launch, name, adopted)) => {
                     let line = launch.line.clone();
                     let pane = cx.new(|cx| {
                         let mut pane = Pane::attached(client, name, cx);
-                        pane.run_line(line, cx);
+                        if !adopted {
+                            pane.run_line(line, cx);
+                        }
                         pane
                     });
-                    if thread.terminal {
+                    thread.launch = Some(launch);
+                    thread.adopted = adopted;
+                    // Only a shown terminal takes focus from the window.
+                    if thread.terminal && s.active().is_some_and(|tab| s.key(&tab) == key) {
                         pane.read(cx).focus_handle().focus(window);
                     }
-                    thread.launch = Some(launch);
+                    let Some(thread) = s.features.get::<Views>().threads.get_mut(&key) else {
+                        return;
+                    };
                     thread.state = State::Open(pane);
                 }
                 Err(error) => thread.state = State::Unavailable(error),
@@ -261,6 +283,22 @@ fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
         return;
     }
     let active = s.active().map(|tab| s.key(&tab));
+    // The chat moved to another conversation, or the tab has no thread view:
+    // the view returns to chat and the menu closes.
+    let shown = active_thread(s, cx);
+    let views = s.features.get::<Views>();
+    if shown.is_none() {
+        views.menu = false;
+    }
+    if let Some(thread) = active.as_ref().and_then(|key| views.threads.get_mut(key))
+        && thread.terminal
+        && shown
+            .as_ref()
+            .is_none_or(|(_, session)| session.id != thread.id)
+    {
+        thread.terminal = false;
+        cx.notify();
+    }
     let content: Vec<String> = s.content.keys().cloned().collect();
     let views = s.features.get::<Views>();
     // A closed thread drops its pane, which detaches from the shell.
