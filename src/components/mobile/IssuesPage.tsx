@@ -1,4 +1,5 @@
 'use client';
+import { PullRequestsTab } from './PullRequestsTab';
 import { githubSnapshotTime } from '@/lib/github-client/refresh-policy';
 
 import { useQueries } from '@tanstack/react-query';
@@ -33,6 +34,7 @@ interface Issue {
 }
 
 interface IssuesPageProps {
+  activeRepoPath?: string | null;
   onBack: () => void;
   onOpenPR?: (repo: string, prNumber: number) => void;
   hideHeader?: boolean;
@@ -372,6 +374,7 @@ function SectionHeader({ label }: { label: string }) {
 
 export default function IssuesPage(props: IssuesPageProps) {
   const context = useMobileGithubContext();
+  if (props.activeRepoPath !== undefined) return <PullRequestsTab repoPath={props.activeRepoPath} onBack={props.onBack} refreshSignal={props.refreshSignal} />;
   return <IssuesPageBody key={context.epoch} {...props} context={context} />;
 }
 
