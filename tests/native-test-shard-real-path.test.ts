@@ -8,12 +8,17 @@ import { afterAll, expect, it } from 'vitest';
 const root = mkdtempSync(path.join(tmpdir(), 'o8-native shards-'));
 const runner = path.join(root, 'runner.mjs');
 copyFileSync(path.resolve('scripts/ci/native-test-shard.mjs'), runner);
+writeFileSync(path.join(root, 'native-test-weights.json'), JSON.stringify({ heavy: 10_000 }));
 const receipt = path.join(root, 'executed');
 const crate = path.join(root, 'native/o8-next');
 mkdirSync(path.join(crate, 'src'), { recursive: true });
 writeFileSync(path.join(crate, 'Cargo.toml'), '[package]\nname="shard-fixture"\nversion="0.0.0"\nedition="2024"\n[workspace]\n');
 writeFileSync(path.join(crate, 'Cargo.lock'), 'version=4\n[[package]]\nname="shard-fixture"\nversion="0.0.0"\n');
 const names = ['prefix', 'prefix_longer', ...Array.from({ length: 14 }, (_, i) => `case_${i}`)];
+const heavy = ['heavy::first', 'heavy::second'];
+const registration = 'shell::pull_requests::registration_tests::pull_requests_single_registration_owns_the_request_adapter';
+const ownShell = 'terminal_own_shell_creates_once_reuses_and_accepts_input';
+const regularTerminal = 'terminal::tests::regular_fixture';
 const timed = 'terminal::tests::production_pty_fixture';
 const images = 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark';
 const sdk = [
@@ -29,8 +34,18 @@ const source = `fn record(name: &str) {
   file.write_all(format!("{name}\\n").as_bytes()).unwrap();
   assert_ne!(std::env::var("SHARD_FIXTURE_FAIL").unwrap_or_default(), name);
 }\n` + names.map(name => `#[test] fn ${name}() { record("${name}"); }`).join('\n') + `
-mod terminal { mod tests { #[test] fn production_pty_fixture() { crate::record("${timed}"); } } }
-mod shell { mod session { mod image_loaded_shell_tests {
+mod heavy {
+  #[test] fn first() { crate::record("${heavy[0]}"); }
+  #[test] fn second() { crate::record("${heavy[1]}"); }
+}
+#[test] fn ${ownShell}() { record("${ownShell}"); }
+mod terminal { mod tests {
+  #[test] fn production_pty_fixture() { crate::record("${timed}"); }
+  #[test] fn regular_fixture() { crate::record("${regularTerminal}"); }
+} }
+mod shell { mod pull_requests { mod registration_tests {
+  #[test] fn pull_requests_single_registration_owns_the_request_adapter() { crate::record("${registration}"); }
+} } mod session { mod image_loaded_shell_tests {
   #[test] fn native_composer_loaded_shell_images_typing_benchmark() { crate::record("${images}"); }
 } } mod issues { mod tests {
   #[test] fn issues_worker_receives_linked_context_through_stream() { crate::record("${sdk[0]}"); }
@@ -65,10 +80,46 @@ it('checks native shard assignment and cache contracts through Node fixtures', (
   const fixtures = ['scripts/ci/native-test-shard.test.mjs'];
   if (process.platform === 'linux') fixtures.push('scripts/ci/native-test-cache.test.mjs');
   const result = spawnSync(process.execPath, ['--test', ...fixtures], {
-    encoding: 'utf8', timeout: 30_000,
+    // Module execution starts one fixture process per group in the full listing.
+    encoding: 'utf8', timeout: 120_000,
   });
   expect(result.status, result.stderr + result.stdout).toBe(0);
-}, 30_000);
+}, 120_000);
+
+it.skipIf(process.platform !== 'linux' || process.arch !== 'x64')('assigns weighted modules deterministically as a partition and writes timings across both phases', () => {
+  const assign = () => {
+    const owners: Record<string, number> = {};
+    for (let index = 1; index <= 4; index++) {
+      rmSync(receipt, { force: true });
+      const timingsFile = path.join(root, `test-results/native-timings-${index}.json`);
+      rmSync(timingsFile, { force: true });
+      const regular = run(`${index}/4`);
+      expect(regular.status, regular.stderr + regular.stdout).toBe(0);
+      const before = JSON.parse(readFileSync(timingsFile, 'utf8')) as Record<string, number>;
+      const timedResult = run(`${index}/4`, '', 'timed');
+      expect(timedResult.status, timedResult.stderr + timedResult.stdout).toBe(0);
+      const after = JSON.parse(readFileSync(timingsFile, 'utf8')) as Record<string, number>;
+      for (const [moduleName, seconds] of Object.entries(before)) expect(after[moduleName]).toBeGreaterThanOrEqual(seconds);
+      for (const seconds of Object.values(after)) expect(seconds).toBeGreaterThanOrEqual(0);
+      // This module crosses phases; both measurements must survive in one file.
+      if ('terminal::tests' in before) expect(after['terminal::tests']).toBeGreaterThan(before['terminal::tests']);
+      const executed = readFileSync(receipt, 'utf8').trim().split('\n');
+      for (const name of executed) {
+        expect(owners, `duplicate execution: ${name}`).not.toHaveProperty(name);
+        owners[name] = index;
+        const moduleName = name.includes('::') ? name.slice(0, name.lastIndexOf('::')) : name;
+        expect(after).toHaveProperty(moduleName);
+      }
+    }
+    expect(Object.keys(owners).sort()).toEqual([...names, ...heavy, registration, ownShell, regularTerminal, timed, images, ...sdk].sort());
+    expect(owners[registration]).toBe(1);
+    expect(owners[ownShell]).toBe(4);
+    expect(Object.keys(owners).filter(name => owners[name] === owners[heavy[0]]).sort()).toEqual(heavy);
+    expect(owners[sdk[0]]).toBe(owners[sdk[1]]);
+    return owners;
+  };
+  expect(assign()).toEqual(assign());
+}, 60_000);
 
 it.skipIf(process.platform !== 'linux')('backdates only unchanged sources and safe directories on a prefix cache hit, and every source on an exact hit', () => {
   const directory = mkdtempSync(path.join(root, 'cache-checkout-'));
@@ -153,6 +204,7 @@ it.skipIf(process.platform !== 'linux')('backdates only unchanged sources and sa
 }, 30_000);
 
 it.skipIf(process.platform !== 'linux' || process.arch !== 'x64')('runs every real test exactly once across shards, retains ignored cases and propagates assertion failures', () => {
+  rmSync(receipt, { force: true });
   let output = '';
   for (let index = 1; index <= 4; index++) {
     for (const phase of ['regular', 'timed']) {
@@ -162,7 +214,7 @@ it.skipIf(process.platform !== 'linux' || process.arch !== 'x64')('runs every re
       output += result.stdout;
     }
   }
-  expect(readFileSync(receipt, 'utf8').trim().split('\n').sort()).toEqual([...names, timed, images, ...sdk].sort());
+  expect(readFileSync(receipt, 'utf8').trim().split('\n').sort()).toEqual([...names, ...heavy, registration, ownShell, regularTerminal, timed, images, ...sdk].sort());
   expect(output.match(/ignored_case \.\.\. ignored/g)).toHaveLength(1);
   for (const fault of ['prefix', timed, images]) {
     let failures = 0;
@@ -178,6 +230,6 @@ it.skipIf(process.platform !== 'linux' || process.arch !== 'x64')('runs every re
     }
     expect(failures).toBe(1);
   }
-  for (const invalid of ['', '0/4', '5/4', '1/0', '1/4/2']) expect(run(invalid).status).not.toBe(0);
+  for (const invalid of ['', '0/4', '5/4', '1/0', '1/4/2', '1/33']) expect(run(invalid).status).not.toBe(0);
   expect(run('1/4', '', 'unknown').status).not.toBe(0);
 }, 60_000);
