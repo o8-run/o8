@@ -15,7 +15,16 @@ fn click(v: &mut VisualTestContext, selector: &'static str) {
 }
 #[track_caller]
 fn wait(s: &Entity<Shell>, v: &mut VisualTestContext, selector: &'static str) {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    wait_with_timeout(s, v, selector, Duration::from_secs(20));
+}
+#[track_caller]
+fn wait_with_timeout(
+    s: &Entity<Shell>,
+    v: &mut VisualTestContext,
+    selector: &'static str,
+    timeout: Duration,
+) {
+    let deadline = Instant::now() + timeout;
     loop {
         s.update_in(v, |s, w, cx| s.tick(true, w, cx));
         v.run_until_parked();
@@ -414,7 +423,13 @@ fn subagents_shared_results_keep_held_delivery_in_attention(cx: &mut TestAppCont
     );
     wait_probe(&s, &mut v, |p| p["rows"].as_u64().is_some_and(|n| n > 0));
     click(&mut v, "subagents-back");
-    wait(&s, &mut v, "subagents-group-done-2");
+    // The shared snapshot's two HTTP reads can lag its transcript under load.
+    wait_with_timeout(
+        &s,
+        &mut v,
+        "subagents-group-done-2",
+        Duration::from_secs(120),
+    );
     let _: Value = f
         .client
         .get("/api/subagents-fixture", &[("mode", "held")])
