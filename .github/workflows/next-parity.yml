@@ -13,17 +13,50 @@ on:
       - 'tests/fixtures/next-parity-route-ownership.mjs'
       - '.github/actions/next-linux-setup/**'
       - '.github/workflows/next-parity.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'native/o8-next/**'
+      - 'scripts/next/**'
+      - 'scripts/parity/**'
+      - 'tests/next-parity-harness-real-path.test.ts'
+      - 'tests/next-parity-render-failure-real-path.test.ts'
+      - 'tests/next-parity-preflight-real-path.test.ts'
+      - 'tests/next-parity-route-ownership-real-path.test.ts'
+      - 'tests/fixtures/next-parity-route-ownership.mjs'
+      - '.github/actions/next-linux-setup/**'
+      - '.github/workflows/next-parity.yml'
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
   group: next-parity-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer pull request push supersedes its inventory; a main capture run is
+  # never cancelled, or a busy landing day would never seed its cache.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  parity:
-    name: Paired native and current UI captures
+  inventory:
+    name: Parity inventory and capture guards
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
+      - run: npm ci --prefer-offline
+      - name: Check inventory and reject capture failures through the CLI
+        run: npx vitest run tests/next-parity-harness-real-path.test.ts tests/next-parity-preflight-real-path.test.ts tests/next-parity-render-failure-real-path.test.ts tests/next-parity-route-ownership-real-path.test.ts
+  captures:
+    name: Paired native and current UI captures
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: never
       CARGO_PROFILE_DEV_DEBUG: '0'
@@ -36,8 +69,9 @@ jobs:
       - uses: ./.github/actions/next-linux-setup
         with:
           browser: 'true'
-      - name: Check inventory and reject capture failures through the CLI
-        run: npx vitest run tests/next-parity-harness-real-path.test.ts tests/next-parity-preflight-real-path.test.ts tests/next-parity-render-failure-real-path.test.ts tests/next-parity-route-ownership-real-path.test.ts
+          # Keep the headless shard setup contract and its source cache unchanged.
+          # Main seeds this separate graphical cache; the first run is cold.
+          cache-key: parity-captures
       - name: Build native renderer and test context
         run: |
           cargo build --locked --manifest-path native/o8-next/Cargo.toml
