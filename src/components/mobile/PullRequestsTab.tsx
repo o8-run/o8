@@ -52,7 +52,7 @@ function ProjectPullRequests({ repoPath, onBack, context, refreshSignal }: {
   const passed = checks.filter(check => check.status?.toLowerCase() === 'completed' && check.conclusion?.toLowerCase() === 'success').length;
   const pending = checks.filter(check => !check.conclusion || check.status?.toLowerCase() !== 'completed').length;
   const failed = checks.length - passed - pending;
-  return <section aria-label="Pull requests" style={{ padding: 12, color: colors.text }}>
+  return <section aria-label="Pull requests" style={{ padding: 12, color: colors.text, fontSize: 13.5, fontWeight: 300, lineHeight: 1.5 }}>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
       <button type="button" style={button} disabled={busy} onClick={() => number ? select(null) : onBack()}>Back</button>
       <h1 style={{ fontSize: 18, fontWeight: 400, flex: 1 }}>PRs</h1>
@@ -70,7 +70,7 @@ function ProjectPullRequests({ repoPath, onBack, context, refreshSignal }: {
         {result ? <p role="status">{result}</p> : null}
         {confirmation === identity ? <div role="group" aria-label="Confirm merge">
           <p>No reviewer approval. Confirm that you want to merge this pull request.</p>
-          <button type="button" style={{ ...button, color: colors.red }} disabled={busy} onClick={() => void merge()}>Confirm merge without approval</button>
+          <button type="button" style={{ ...button, color: colors.red }} disabled={busy} onClick={() => void merge()}>{busy ? 'Merging…' : 'Confirm merge without approval'}</button>
           <button type="button" style={button} disabled={busy} onClick={() => setConfirmation(null)}>Cancel</button>
         </div> : <button type="button" style={button} disabled={busy || result === 'Merged' || !mobileMergeAvailable(pr)} onClick={() => void merge()}>{busy ? 'Merging…' : 'Merge'}</button>}
       </>}
