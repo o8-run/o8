@@ -1,4 +1,3 @@
-use super::prompt_acceptance_tests::*;
 use super::*;
 use crate::composer::mention::{MentionResult, groups::Mentioned};
 
@@ -188,7 +187,9 @@ fn workspace_mentions_stay_out_of_another_machines_thread(cx: &mut TestAppContex
     seed_listings(&surface, cx);
     focus(&surface, cx);
     cx.simulate_input("Check @");
-    wait(&surface, cx, |s, cx| groups(s, cx).first() == Some(&"Threads"));
+    wait(&surface, cx, |s, cx| {
+        groups(s, cx).first() == Some(&"Threads")
+    });
     surface.read_with(cx, |s, cx| {
         assert_eq!(groups(s, cx), ["Threads"], "only threads for a far thread");
     });

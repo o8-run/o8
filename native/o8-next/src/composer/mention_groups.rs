@@ -89,7 +89,7 @@ pub(crate) fn agent_matches(agents: &[Agent], query: &str) -> Vec<Mentioned> {
             .cmp(&rank(b.group))
             .then_with(|| {
                 let time = |a: &Agent| a.finished.or(a.started).unwrap_or(0.);
-                time(*b).total_cmp(&time(*a))
+                time(b).total_cmp(&time(a))
             })
             .then_with(|| a.id.cmp(&b.id))
     });
