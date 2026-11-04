@@ -40,7 +40,7 @@ fn card_row(card: Value) -> Row {
     render_tree(&entries(card)).pop().unwrap()
 }
 
-/// Answers one decision POST with a fixed body and reports the raw request.
+/// Answers one decision POST with a fixed body and reports the received request.
 struct Server {
     client: Client,
     request: mpsc::Receiver<String>,
@@ -59,15 +59,15 @@ impl Server {
             socket
                 .set_read_timeout(Some(Duration::from_millis(500)))
                 .unwrap();
-            let mut raw = Vec::new();
+            let mut received = Vec::new();
             let mut bytes = [0; 8192];
             // Read headers and body until the client pauses.
             while let Ok(count) = socket.read(&mut bytes) {
                 if count == 0 {
                     break;
                 }
-                raw.extend_from_slice(&bytes[..count]);
-                let text = String::from_utf8_lossy(&raw);
+                received.extend_from_slice(&bytes[..count]);
+                let text = String::from_utf8_lossy(&received);
                 if let Some((head, body)) = text.split_once("\r\n\r\n") {
                     let length = head
                         .lines()
@@ -82,7 +82,7 @@ impl Server {
                     }
                 }
             }
-            let _ = send.send(String::from_utf8_lossy(&raw).into_owned());
+            let _ = send.send(String::from_utf8_lossy(&received).into_owned());
             let body = body.to_string();
             let _ = write!(
                 socket,
