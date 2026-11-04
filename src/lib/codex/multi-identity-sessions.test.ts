@@ -26,6 +26,7 @@ const previousEnv = {
   O8_CODEX_IDENTITY_AUDIT: process.env.O8_CODEX_IDENTITY_AUDIT,
   O8_CODEX_FIXTURE_WORKSPACE: process.env.O8_CODEX_FIXTURE_WORKSPACE,
   O8_DATA_DIR: process.env.O8_DATA_DIR,
+  O8_WORKER_ENV_ALLOW: process.env.O8_WORKER_ENV_ALLOW,
 };
 
 function sqlString(value: string): string {
@@ -106,6 +107,8 @@ rl.on('line', (line) => {
     process.env.O8_CODEX_BIN = fakeCodex;
     process.env.O8_CODEX_IDENTITY_AUDIT = auditPath;
     process.env.O8_CODEX_FIXTURE_WORKSPACE = workspace;
+    // Worker children inherit only allowlisted names; the fixture reads these test knobs.
+    process.env.O8_WORKER_ENV_ALLOW = 'O8_CODEX_IDENTITY_AUDIT,O8_CODEX_FIXTURE_WORKSPACE';
 
     const {
       registerRuntimeIdentity,

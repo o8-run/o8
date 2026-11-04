@@ -150,6 +150,8 @@ beforeEach(async () => {
   vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
   vi.stubEnv('CLAUDE_CONFIG_DIR', '');
   vi.stubEnv('O8_TEST_CLAUDE_MODE', 'logged_out');
+  // Worker children inherit only allowlisted names; the stand-in CLI reads these test knobs.
+  vi.stubEnv('O8_WORKER_ENV_ALLOW', 'O8_TEST_CLAUDE_MODE,O8_TEST_CLAUDE_STARTED,O8_TEST_CLAUDE_RELEASE');
   await writeClaudeCodeWorkerProfile({
     source: 'native', model: null, codexModel: null, repoSkillAllowlist: [],
   });

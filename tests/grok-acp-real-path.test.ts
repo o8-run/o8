@@ -26,6 +26,8 @@ beforeAll(async () => {
   process.env.O8_GROK_BIN = fixture;
   process.env.O8_GROK_FIXTURE_PID_LOG = pidLog;
   process.env.O8_GROK_FIXTURE_LIFECYCLE_LOG = lifecycleLog;
+  // Worker children inherit only allowlisted names; the fixture reads these test knobs.
+  process.env.O8_WORKER_ENV_ALLOW = 'O8_GROK_FIXTURE_PID_LOG,O8_GROK_FIXTURE_LIFECYCLE_LOG';
   const { invalidateCliCache } = await import('@/lib/runtimes/shared/cli-resolver');
   invalidateCliCache('grok');
 });
@@ -35,6 +37,7 @@ afterAll(async () => {
   delete process.env.O8_GROK_BIN;
   delete process.env.O8_GROK_FIXTURE_PID_LOG;
   delete process.env.O8_GROK_FIXTURE_LIFECYCLE_LOG;
+  delete process.env.O8_WORKER_ENV_ALLOW;
   const { invalidateCliCache } = await import('@/lib/runtimes/shared/cli-resolver');
   invalidateCliCache('grok');
   rmSync(root, { recursive: true, force: true });

@@ -46,6 +46,8 @@ chmodSync(binary, 0o700);
 vi.stubEnv('O8_CODEX_EXEC_TEST_HOME', home);
 vi.stubEnv('O8_CODEX_EXEC_TEST_LOG', log);
 vi.stubEnv('O8_CRASH_SURVIVABLE_ORCHESTRATOR', '0');
+// Worker children inherit only allowlisted names; the stand-in CLI reads this test knob.
+vi.stubEnv('O8_WORKER_ENV_ALLOW', 'O8_CODEX_EXEC_TEST_LOG');
 
 const { ensureCodexOrchestratorSession, sendToCodexOrchestrator } = await import('@/lib/lane/codex-orchestrator-session');
 const { CliNotFoundError, getCachedCli, invalidateCliCache, resolveCli } = await import('@/lib/runtimes/shared/cli-resolver');

@@ -1,13 +1,15 @@
 import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseClaudeUsageCapacity, readClaudeAccountCapacity, readLiveClaudeRuntimeCapacity, resetClaudeCapacityForTests } from './live-capacity';
 import { claudeCodeRuntime } from '@/lib/runtimes/claude-code';
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-claude-capacity-'));
 const fixture = path.resolve('tests/fixtures/claude-capacity-control.mjs');
 chmodSync(fixture, 0o755);
+// Worker children inherit only allowlisted names; the fixture reads these test knobs.
+beforeEach(() => { vi.stubEnv('O8_WORKER_ENV_ALLOW', 'O8_CLAUDE_CAPACITY_TEST_AUDIT,O8_CLAUDE_CAPACITY_TEST_MODE'); });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); resetClaudeCapacityForTests(); });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
