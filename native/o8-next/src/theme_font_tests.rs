@@ -1,12 +1,27 @@
 //! Font picker receipts: the picker model, the saved fonts and a missing family.
 use crate::theme::{self, DEFAULT_FONTS, Fonts, current, font_options};
 
-/// Font switches are process-wide; these tests hold one lock between them.
-pub(crate) fn font_test_guard() -> std::sync::MutexGuard<'static, ()> {
-    static GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    GUARD
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+/// Font switches are process-wide: these tests hold one lock between them,
+/// and the fonts they found are restored when the guard drops, even after a
+/// failed assertion.
+pub(crate) struct FontTestGuard {
+    fonts: Fonts,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+impl Drop for FontTestGuard {
+    fn drop(&mut self) {
+        let installed = [self.fonts.ui, self.fonts.mono].map(String::from);
+        theme::set_font(false, self.fonts.ui, &installed);
+        theme::set_font(true, self.fonts.mono, &installed);
+    }
+}
+pub(crate) fn font_test_guard() -> FontTestGuard {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let lock = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    FontTestGuard {
+        fonts: theme::fonts(),
+        _lock: lock,
+    }
 }
 fn installed() -> Vec<String> {
     [
@@ -49,7 +64,6 @@ fn the_picker_lists_installed_families_with_the_default_first_and_marks_the_curr
             .any(|o| o.family == "Iosevka" && o.current && !o.default)
     );
     assert!(!options[0].current);
-    theme::set_font(true, before.mono, &installed());
 }
 
 #[test]
@@ -78,7 +92,6 @@ fn saved_fonts_round_trip_through_the_store() {
 #[test]
 fn a_missing_family_falls_back_to_the_default_without_a_panic() {
     let _guard = font_test_guard();
-    let before = theme::fonts();
     theme::set_font(false, "No Such Family", &installed());
     assert_eq!(current().font_ui, DEFAULT_FONTS.ui);
     // A saved family that was uninstalled since runs in the default.
@@ -90,5 +103,4 @@ fn a_missing_family_falls_back_to_the_default_without_a_panic() {
         !theme::check_installed_fonts(&installed()),
         "nothing left to change"
     );
-    theme::set_font(false, before.ui, &installed());
 }

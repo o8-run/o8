@@ -196,6 +196,10 @@ static ACTIVE: LazyLock<RwLock<(Fonts, [&'static Theme; 3])>> = LazyLock::new(||
     let fonts = saved_fonts().unwrap_or(DEFAULT_FONTS);
     RwLock::new((fonts, themes_with(fonts)))
 });
+/// The fonts as last saved, which may name a family that is not installed
+/// right now; the running fonts never do.
+static SAVED: LazyLock<Mutex<Fonts>> =
+    LazyLock::new(|| Mutex::new(saved_fonts().unwrap_or(DEFAULT_FONTS)));
 /// Bumped by each font switch, for caches that keep shaped text.
 static FONT_GENERATION: AtomicU32 = AtomicU32::new(0);
 /// Token sets live for the process, one per font pairing ever picked.
@@ -271,14 +275,21 @@ fn apply_fonts(fonts: Fonts) -> bool {
 /// the running fonts changed; the caller then repaints.
 pub fn set_font(mono: bool, family: &str, installed: &[String]) -> bool {
     let mut fonts = self::fonts();
+    let mut saved = SAVED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if mono {
         fonts.mono = installed_or_default(family, MONO_FONT, installed);
+        saved.mono = fonts.mono;
     } else {
         fonts.ui = installed_or_default(family, UI_FONT, installed);
+        saved.ui = fonts.ui;
     }
+    // The other font keeps its saved family, even one not installed now.
     if let Some(path) = fonts_path() {
-        let _ = save_fonts(&path, fonts);
+        let _ = save_fonts(&path, *saved);
     }
+    drop(saved);
     apply_fonts(fonts)
 }
 /// Runs a saved family that is no longer installed in its default, keeping

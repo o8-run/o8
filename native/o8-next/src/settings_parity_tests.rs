@@ -123,9 +123,6 @@ fn settings_parity_appearance_font_pickers_apply_live(cx: &mut TestAppContext) {
     click(&mut visual, &format!("setting-font-ui-{}", default.ui));
     frame(&shell, &mut visual);
     assert_eq!(crate::theme::fonts(), default);
-    let installed = visual.update(|window, _| window.text_system().all_font_names());
-    crate::theme::set_font(false, before.ui, &installed);
-    crate::theme::set_font(true, before.mono, &installed);
 }
 
 #[gpui::test]

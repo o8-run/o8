@@ -100,23 +100,20 @@ impl Settings {
                 };
                 let family = option.family.clone();
                 let picked = installed.clone();
-                list = list.child(
-                    self.button(
-                        format!("setting-font-{kind}-{}", option.family),
-                        label,
-                        true,
-                        option.current,
-                        window,
-                        cx,
-                        move |this, _, cx| {
-                            if theme::set_font(mono, &family, &picked) {
-                                cx.refresh_windows();
-                            }
-                            this.changed(cx);
-                        },
-                    )
-                    .font_family(option.family),
-                );
+                list = list.child(self.button(
+                    format!("setting-font-{kind}-{}", option.family),
+                    label,
+                    true,
+                    option.current,
+                    window,
+                    cx,
+                    move |this, _, cx| {
+                        if theme::set_font(mono, &family, &picked) {
+                            cx.refresh_windows();
+                        }
+                        this.changed(cx);
+                    },
+                ));
             }
             fonts = fonts.child(
                 div()
