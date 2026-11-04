@@ -12,8 +12,9 @@ import {
 } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { buildPiWriteHelper } from './helpers/pi-write-helper';
 import { declarativeLaunchDeadlineTest } from './fixtures/declarative-launch-deadline';
 import { declarativeGovernanceRollbackTests } from './fixtures/declarative-governance-rollback';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -313,6 +314,9 @@ async function waitFor<T>(
   }
   throw new Error(`Timed out waiting for ${label}.`);
 }
+
+// Supervised dependency installs run through the native write helper.
+beforeAll(() => { if (process.platform !== 'win32') buildPiWriteHelper(); }, 600_000);
 
 describe('declarative packet dispatch worktree reachability', () => {
   declarativeLaunchDeadlineTest({ repo: createRemoteBackedRepo, packet, mission, capturePath });
