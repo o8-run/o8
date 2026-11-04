@@ -38,7 +38,7 @@ process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 const { closeDb } = await import('@/lib/db');
 const { WorktreeManager } = await import('@/lib/worktree/manager');
 const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
-const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+const { resolveWorktreeRootLayout, WORKTREE_INDEX_EXCLUSION_SUFFIX } = await import('@/lib/worktree/root-layout');
 const { retireExactManagedDirectory } = await import('@/lib/workspace/exact-managed-directory-retirement');
 const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspace-claim-state');
 
@@ -65,6 +65,7 @@ it.each(['git-worktree', 'apfs-cow-clone'] as const)(
   async (isolationKind) => {
     const repo = makeRepo(`repo-${isolationKind}`);
     const id = `rollback-${isolationKind}`;
+    const worktreeId = `${id}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
     const manager = new WorktreeManager(repo);
     Object.defineProperty(manager, 'runSetupWithMaterialization', {
       value: async () => { throw new Error('forced setup failure'); },
@@ -95,21 +96,21 @@ it.each(['git-worktree', 'apfs-cow-clone'] as const)(
 
     const retained = await withWorktreeMetaTransaction(
       repo,
-      async (transaction) => (await transaction.readAll())[id],
+      async (transaction) => (await transaction.readAll())[worktreeId],
     );
     expect(retained?.materializationIdentity).toBeDefined();
     expect(retained?.materializationParentIdentity).toBeDefined();
     expect(existsSync(retained!.materializationIdentity!.canonicalPath)).toBe(true);
-    expect(readExactWorkspaceClaim('managed-retirement', repo, id)?.authority?.retirementReason).toBe('creation-rollback');
+    expect(readExactWorkspaceClaim('managed-retirement', repo, worktreeId)?.authority?.retirementReason).toBe('creation-rollback');
 
     await expect(new WorktreeManager(repo).cleanup(
-      id,
+      worktreeId,
       { force: true, deleteBranch: true, overrideLiveGuard: true },
     )).resolves.toBe(true);
     expect(existsSync(retained!.materializationIdentity!.canonicalPath)).toBe(false);
     await expect(withWorktreeMetaTransaction(
       repo,
-      async (transaction) => (await transaction.readAll())[id],
+      async (transaction) => (await transaction.readAll())[worktreeId],
     )).resolves.toBeUndefined();
   },
   180_000,
@@ -118,6 +119,7 @@ it.each(['git-worktree', 'apfs-cow-clone'] as const)(
 it('retires prepared Git authority when git worktree add fails', async () => {
   const repo = makeRepo('repo-git-add-failure');
   const id = 'git-add-failure';
+  const worktreeId = `${id}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
 
   await expect(new WorktreeManager(repo).create({
     agentType: 'codex',
@@ -129,9 +131,9 @@ it('retires prepared Git authority when git worktree add fails', async () => {
     isolationPreference: 'git-worktree',
   })).rejects.toThrow();
 
-  expect(existsSync(path.join(resolveWorktreeRootLayout(repo).primaryBase, id))).toBe(false);
+  expect(existsSync(path.join(resolveWorktreeRootLayout(repo).primaryBase, worktreeId))).toBe(false);
   await expect(withWorktreeMetaTransaction(
     repo,
-    async (transaction) => (await transaction.readAll())[id],
+    async (transaction) => (await transaction.readAll())[worktreeId],
   )).resolves.toBeUndefined();
 }, 30_000);
