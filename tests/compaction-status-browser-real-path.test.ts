@@ -59,7 +59,7 @@ beforeAll(async () => {
       'process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY': '""' },
     banner: { js: 'var process = { env: { NODE_ENV: "production" }, platform: "browser", versions: {} };' },
     loader: { '.css': 'empty', '.ttf': 'dataurl' }, legalComments: 'none', logLevel: 'silent' });
-    const html = `<!doctype html><html><head><style>${readFileSync('src/app/globals.css', 'utf8')}</style></head><body style="margin:0"><div id="root"></div><script>${bundle.outputFiles[0].text}</script></body></html>`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"><style>${readFileSync('src/app/globals.css', 'utf8')}</style></head><body style="margin:0"><div id="root"></div><script>${bundle.outputFiles[0].text}</script></body></html>`;
     backend = await startCompactionBrowserBackend(html);
     if (!origin) {
       server = createServer((_request, response) => { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end(html); });
