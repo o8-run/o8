@@ -70,7 +70,7 @@ export function gitLabProjectFromRemote(remoteUrl: string | null | undefined): G
     hostname = url.hostname.toLowerCase();
     // An HTTP remote names the API origin exactly; an SSH port is never the web port.
     if (url.protocol === 'https:' || url.protocol === 'http:') host = url.host.toLowerCase();
-    pathname = decodeURIComponent(url.pathname);
+    try { pathname = decodeURIComponent(url.pathname); } catch { return null; }
   }
   const match = configuredHosts().find((config) => host ? config.host === host : config.hostname === hostname);
   const path = match ? projectPath(pathname) : null;

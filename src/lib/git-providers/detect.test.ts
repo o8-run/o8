@@ -27,7 +27,7 @@ describe('git provider detection from the origin remote', () => {
     expect(detectGitProvider('git@gitlab.com:group/widget.git')).toBeNull();
   });
 
-  it.each([null, '', 'https://example.test/group/widget.git', 'git@gitlab.com:widget.git', 'https://gitlab.com/group/../widget', 'file:///srv/gitlab.com/group/widget'])('returns no provider for %s', (remote) => {
+  it.each([null, '', 'https://example.test/group/widget.git', 'git@gitlab.com:widget.git', 'https://gitlab.com/group/../widget', 'file:///srv/gitlab.com/group/widget', 'https://gitlab.com/group/widget%zz', 'https://example.test/a/b%zz'])('returns no provider for %s', (remote) => {
     expect(detectGitProvider(remote)).toBeNull();
   });
 
