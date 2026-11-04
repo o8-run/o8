@@ -7,6 +7,11 @@ pub(super) use std::{
     process::{Child, Command as Process, Stdio},
     time::Instant,
 };
+
+#[path = "../test-support/scratch.rs"]
+mod scratch;
+pub(crate) use scratch::scratch_path;
+
 pub(super) struct Fixture {
     pub(super) server: Child,
     pub(super) client: Client,
@@ -31,18 +36,7 @@ impl Fixture {
         Self::start_port(false, "", port)
     }
     fn start_port(projects: bool, option: &str, port: u16) -> Self {
-        // The clock alone repeats between parallel tests: macOS reports whole
-        // microseconds.
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let root = std::env::temp_dir().join(format!(
-            "o8-shell-{}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
+        let root = scratch_path("o8-shell");
         fs::create_dir(&root).unwrap();
         let root = fs::canonicalize(root).unwrap();
         let mut command = Process::new("node");

@@ -100,11 +100,7 @@ fn native_composer_recall_survives_reopen_and_is_consumed_by_a_confirmed_send(
     app: &mut TestAppContext,
 ) {
     let fixture = Fixture::start(true);
-    let root = std::env::temp_dir().join(format!(
-        "o8-prelude-store-{}-{}",
-        std::process::id(),
-        crate::clock::now()
-    ));
+    let root = crate::shell::test_support::scratch_path("o8-prelude-store");
     app.update(|cx| cx.set_global(crate::composer::mode_store::TestRoot(root.clone())));
     let (surface, visual) = open(app, &fixture);
     focus(&surface, visual);
@@ -147,11 +143,7 @@ fn native_composer_recall_survives_reopen_and_is_consumed_by_a_confirmed_send(
 #[gpui::test]
 fn native_composer_mode_survives_reopen_through_the_picker(app: &mut TestAppContext) {
     let fixture = Fixture::start(true);
-    let root = std::env::temp_dir().join(format!(
-        "o8-mode-store-{}-{}",
-        std::process::id(),
-        crate::clock::now()
-    ));
+    let root = crate::shell::test_support::scratch_path("o8-mode-store");
     app.update(|cx| cx.set_global(crate::composer::mode_store::TestRoot(root.clone())));
     let (surface, visual) = open(app, &fixture);
     click("composer-attach", visual);

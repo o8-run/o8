@@ -91,11 +91,7 @@ mod tests {
     use super::*;
     #[test]
     fn native_observations_survive_reopen_without_transcript_content() {
-        let root = std::env::temp_dir().join(format!(
-            "o8-context-store-{}-{}",
-            std::process::id(),
-            crate::clock::now()
-        ));
+        let root = crate::shell::test_support::scratch_path("o8-context-store");
         let path = root.join("observations.json");
         let rows = vec![Observation {
             id: "u".into(),

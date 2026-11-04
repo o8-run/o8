@@ -261,7 +261,8 @@ fn browser_restoration_shell_state_retains_order_active_and_empty(cx: &mut TestA
     let restored: crate::shell_state::State = serde_json::from_value(state.clone()).unwrap();
     let saved = serde_json::to_value(&restored).unwrap();
     assert_eq!(saved["browser_pages"], state["browser_pages"]);
-    let file = std::env::temp_dir().join(format!("o8-browser-restore-{}.json", std::process::id()));
+    let file =
+        crate::shell::test_support::scratch_path("o8-browser-restore").with_extension("json");
     restored.save(&file).unwrap();
     let disk = crate::shell_state::State::load(&file).unwrap();
     assert_eq!(disk.browser_pages["workspace-a"].active, Some(2));

@@ -1,3 +1,6 @@
+#[path = "../test-support/scratch.rs"]
+mod support;
+
 use std::process::Command;
 
 #[test]
@@ -27,7 +30,7 @@ fn app_shell_is_explicit_and_documents_persistence() {
 
 #[test]
 fn invalid_shell_state_is_retained_through_native_entrypoint() {
-    let root = std::env::temp_dir().join(format!("o8-shell-state-{}", std::process::id()));
+    let root = support::scratch_path("o8-shell-state");
     std::fs::create_dir_all(&root).unwrap();
     let root = std::fs::canonicalize(root).unwrap();
     let file = root.join("state.json");
@@ -52,7 +55,7 @@ fn invalid_shell_state_is_retained_through_native_entrypoint() {
 
 #[test]
 fn unreadable_shell_state_does_not_abort_native_startup() {
-    let root = std::env::temp_dir().join(format!("o8-shell-unreadable-{}", std::process::id()));
+    let root = support::scratch_path("o8-shell-unreadable");
     std::fs::create_dir_all(&root).unwrap();
     let root = std::fs::canonicalize(root).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_o8-next"))

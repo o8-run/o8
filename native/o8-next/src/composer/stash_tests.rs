@@ -21,13 +21,7 @@ impl Render for Host {
     }
 }
 fn store(name: &str) -> PathBuf {
-    std::env::temp_dir()
-        .join(format!(
-            "o8-{name}-{}-{}",
-            std::process::id(),
-            crate::clock::now()
-        ))
-        .join("thread.json")
+    crate::shell::test_support::scratch_path(&format!("o8-{name}")).join("thread.json")
 }
 /// Opens a thread composer the way the chat surface does: its saved drafts
 /// load from the thread's store.

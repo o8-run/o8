@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn the_remote_read_needs_the_token_and_not_the_port_files() {
-        let home = std::env::temp_dir().join(format!("o8-remote-read-{}", std::process::id()));
+        let home = crate::shell::test_support::scratch_path("o8-remote-read");
         std::fs::create_dir_all(home.join(".o8")).unwrap();
         let read = || {
             Command::new("sh")

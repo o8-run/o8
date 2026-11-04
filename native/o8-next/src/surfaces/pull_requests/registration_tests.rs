@@ -56,11 +56,9 @@ fn pull_requests_single_registration_owns_the_request_adapter() {
     let target = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| original.join("target"));
-    let scratch = Scratch(target.join(format!(
-        "pull-request-registration-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-    )));
+    let scratch = Scratch(crate::shell::test_support::scratch_path(
+        "pull-request-registration",
+    ));
     fs::create_dir_all(&scratch.0).unwrap();
     copy_tree(&original.join("src"), &scratch.0.join("src"));
     copy_tree(&original.join("fixtures"), &scratch.0.join("fixtures"));

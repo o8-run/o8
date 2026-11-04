@@ -1,3 +1,6 @@
+#[path = "../test-support/scratch.rs"]
+mod support;
+
 use std::process::Command;
 
 #[test]
@@ -25,7 +28,7 @@ fn pane_grid_is_an_explicit_native_opt_in() {
 #[test]
 fn pane_grid_rejects_invalid_persistence_before_window_startup() {
     let binary = env!("CARGO_BIN_EXE_o8-next");
-    let root = std::env::temp_dir().join(format!("o8-grid-cli-{}", std::process::id()));
+    let root = support::scratch_path("o8-grid-cli");
     std::fs::create_dir(&root).unwrap();
     let file = root.join("layout.json");
     std::fs::write(&file, b"{invalid").unwrap();
@@ -56,7 +59,7 @@ fn pane_grid_rejects_invalid_persistence_before_window_startup() {
 #[test]
 fn grid_rejects_conflicting_terminal_mode_and_invalid_slot_views() {
     let binary = env!("CARGO_BIN_EXE_o8-next");
-    let root = std::env::temp_dir().join(format!("o8-grid-views-cli-{}", std::process::id()));
+    let root = support::scratch_path("o8-grid-views-cli");
     std::fs::create_dir(&root).unwrap();
     let file = root.join("layout.json");
     for views in [

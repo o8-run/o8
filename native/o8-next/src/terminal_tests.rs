@@ -356,14 +356,7 @@ fn production_pty_to_gpui_terminal(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn production_pty_flood_waits_for_delayed_tail(cx: &mut TestAppContext) {
-    let directory = std::env::temp_dir().join(format!(
-        "o8-terminal-tail-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let directory = crate::shell::test_support::scratch_path("o8-terminal-tail");
     std::fs::create_dir(&directory).unwrap();
     let gate = directory.join("release");
     let (_server, client, session) = fixture_with_tail_gate(Some(gate.clone()));

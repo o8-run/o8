@@ -736,14 +736,7 @@ mod receipt_tests {
 
     #[test]
     fn canonical_receipt_keeps_request_session_payload_and_repository_fences() {
-        let root = std::env::temp_dir().join(format!(
-            "o8-next-receipt-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = crate::shell::test_support::scratch_path("o8-next-receipt");
         fs::create_dir(&root).unwrap();
         let repo = root.join("repo");
         let other = root.join("other");
