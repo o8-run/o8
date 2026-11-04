@@ -35,6 +35,81 @@ afterEach(() => {
 });
 
 describe('orchestrator thread history persistence', () => {
+  it('keeps saved-message status for threads without a turn record (#5367)', async () => {
+    const history = await loadHistoryModule();
+    const { listOrchestratorTurnsForThread } = await import('@/lib/lane/orchestrator-crash-survival');
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });
+    const status = () => history.listMobileOrchestratorThreads().find(item => item.id === thread.id)?.status;
+    expect(listOrchestratorTurnsForThread(thread.id)).toEqual([]);
+    expect(status()).toBe('idle');
+    history.appendMobileOrchestratorUserMessage({ tabId: thread.id, repoPath: '/tmp/repo', message: 'Legacy question' });
+    expect(status()).toBe('busy');
+    history.upsertMobileOrchestratorAssistantMessage({
+      tabId: thread.id, repoPath: '/tmp/repo', messageId: 'legacy-answer', content: 'Legacy answer',
+    });
+    expect(listOrchestratorTurnsForThread(thread.id)).toEqual([]);
+    expect(status()).toBe('ready');
+    expect(history.readProjectedThread(thread.id)?.status).toBe('ready');
+  });
+
+  it.each(['completed', 'failed', 'interrupted'] as const)('refreshes cached status when a turn is %s without a history write (#5367)', async outcome => {
+    const history = await loadHistoryModule();
+    const { createOrchestratorTurnRecord, finishOrchestratorTurn } = await import('@/lib/lane/orchestrator-crash-survival');
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });
+    history.appendMobileOrchestratorUserMessage({ tabId: thread.id, repoPath: '/tmp/repo', message: 'Question' });
+    const turn = createOrchestratorTurnRecord({
+      backend: 'codex', sessionName: 'projection-fixture', repoPath: '/tmp/repo', threadId: thread.id, pid: process.pid,
+    });
+    const file = history.safeOrchestratorHistoryPath(thread.id);
+    const before = statSync(file);
+    const status = () => history.listMobileOrchestratorThreads().find(item => item.id === thread.id)?.status;
+    expect(status()).toBe('busy');
+    finishOrchestratorTurn(turn, outcome);
+    expect(statSync(file).mtimeMs).toBe(before.mtimeMs);
+    const expected = outcome === 'failed' ? 'failed' : 'ready';
+    expect(status()).toBe(expected);
+    expect(history.readProjectedThread(thread.id)?.status).toBe(expected);
+  });
+
+  it('overlays the turn ledger on cached saved reply text (#5367)', async () => {
+    const history = await loadHistoryModule();
+    const { createOrchestratorTurnRecord, finishOrchestratorTurn, discardOrchestratorTurnRecord } = await import('@/lib/lane/orchestrator-crash-survival');
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });
+    history.upsertMobileOrchestratorAssistantMessage({
+      tabId: thread.id, repoPath: '/tmp/repo', messageId: 'streamed-answer', content: 'Still working',
+    });
+    const status = () => history.listMobileOrchestratorThreads().find(item => item.id === thread.id)?.status;
+    expect(status()).toBe('ready');
+    const turn = createOrchestratorTurnRecord({
+      backend: 'codex', sessionName: 'projection-fixture', repoPath: '/tmp/repo', threadId: thread.id, pid: process.pid,
+    });
+    expect(status()).toBe('busy');
+    expect(history.readProjectedThread(thread.id)?.status).toBe('busy');
+    finishOrchestratorTurn(turn);
+    expect(status()).toBe('ready');
+    discardOrchestratorTurnRecord(turn);
+    expect(status()).toBe('ready');
+  });
+
+  it.each(['dead', 'expired'] as const)('does not leave an abandoned %s turn busy (#5367)', async state => {
+    const history = await loadHistoryModule();
+    const { createOrchestratorTurnRecord } = await import('@/lib/lane/orchestrator-crash-survival');
+    const { PROCESS_TIMEOUT_MS } = await import('@/lib/lane/orchestrator-session-core');
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });
+    history.appendMobileOrchestratorUserMessage({ tabId: thread.id, repoPath: '/tmp/repo', message: 'Question' });
+    createOrchestratorTurnRecord({
+      backend: 'codex', sessionName: 'projection-fixture', repoPath: '/tmp/repo', threadId: thread.id,
+      pid: state === 'dead' ? 0 : process.pid,
+    });
+    if (state === 'expired') vi.spyOn(Date, 'now').mockReturnValue(Date.now() + PROCESS_TIMEOUT_MS);
+    try {
+      expect(history.listMobileOrchestratorThreads().find(item => item.id === thread.id)?.status).toBe('ready');
+      expect(history.readProjectedThread(thread.id)?.status).toBe('ready');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('records a refresh the model could not title, so later saves do not retry it', async () => {
     const history = await loadHistoryModule();
     const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });

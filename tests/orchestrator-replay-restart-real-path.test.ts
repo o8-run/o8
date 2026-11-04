@@ -128,6 +128,10 @@ if (prompt.includes('stream-heavy replay fixture')) {
   const { existsSync } = await import('node:fs');
   for (let i = 0; i < 12; i++) emit({ type: 'item.completed', item: { type: 'agent_message', text: 'chunk-' + i + ':' + 'x'.repeat(4 * 1024) } });
   while (!existsSync(${JSON.stringify(join(root, 'release-stream'))})) await new Promise(resolve => setTimeout(resolve, 25));
+} else if (prompt.includes('status projection fixture')) {
+  const { existsSync } = await import('node:fs');
+  emit({ type: 'item.completed', item: { type: 'agent_message', text: 'First saved reply, still working.' } });
+  while (!existsSync(${JSON.stringify(join(root, 'release-status'))})) await new Promise(resolve => setTimeout(resolve, 25));
 } else emit({ type: 'item.completed', item: { type: 'agent_message', text } });
 emit({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } });
 `);
@@ -186,6 +190,39 @@ afterAll(async () => {
 });
 
 describe('orchestrator replay cursor across a ws-server restart (#3665)', () => {
+  it('projects a saved reply as busy until its real turn settles (#5367)', async () => {
+    const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+    const { readProjectedThread, listMobileOrchestratorThreads } = await import('@/lib/mobile/orchestrator-thread-history');
+    const threadId = `thoughts-running-projection-${Date.now()}`;
+    const { socket, events } = await connect(threadId, 0);
+    socket.send(buildOrchestratorSendPayload({
+      repoPath, threadId, clientMessageId: 'running-projection',
+      wireMessage: 'status projection fixture', displayMessage: 'status projection fixture',
+      permissionMode: 'plan', orchestrationMode: 'fleet', pickedMode: 'multitask',
+      model: 'gpt-6.1-sol', backend: 'codex',
+    }));
+    const projected = async () => {
+      const response = await listThreads(new NextRequest('http://localhost/api/mobile/orchestrator/threads?limit=500'));
+      expect(response.status).toBe(200);
+      return (await response.json()).threads.find((thread: { id: string }) => thread.id === threadId);
+    };
+    try {
+      await waitFor(() => (readPersistedLlmChat(threadId)?.history.messages ?? []).some(message => (
+        message.role === 'assistant' && message.content === 'First saved reply, still working.'
+      )), 'the first reply text to save while the turn is held open');
+      expect(readProjectedThread(threadId)?.status).toBe('busy');
+      expect(listMobileOrchestratorThreads().find(thread => thread.id === threadId)?.status).toBe('busy');
+      expect((await projected()).status).toBe('busy');
+      expect((await projected()).status).toBe('busy'); // Cached history must agree.
+    } finally {
+      writeFileSync(join(root, 'release-status'), 'release');
+      await waitFor(() => events.some(event => event.event === 'status' && event.data?.status === 'ready' && !event.data?.snapshot), 'projection turn completion');
+    }
+    expect(readProjectedThread(threadId)?.status).toBe('ready');
+    expect(listMobileOrchestratorThreads().find(thread => thread.id === threadId)?.status).toBe('ready');
+    expect((await projected()).status).toBe('ready');
+  }, 60_000);
+
   it('bounds an unfinished stream by bytes and replays the exact recorded tail (#4422)', async () => {
     const threadId = `thoughts-replay-heavy-${Date.now()}`;
     const first = await connect(threadId, 0);

@@ -2,6 +2,8 @@ import { basename } from 'node:path';
 import { applyNetworkProjectionHealth } from '@/lib/bots/network-health';
 import { orchestratorErrorText } from '@/lib/transcripts/orchestrator-error';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import { isRehydratedTurnAlive, listOrchestratorTurnsForThread } from '@/lib/lane/orchestrator-crash-survival';
+import { PROCESS_TIMEOUT_MS } from '@/lib/lane/orchestrator-session-core';
 import type {
   MobileOrchestratorBackend,
   MobileOrchestratorThread,
@@ -192,6 +194,26 @@ export function repoNameFromPath(repoPath: string | null): string | null {
 }
 
 export function projectOrchestratorThread(
+  tabId: string,
+  record: OrchestratorHistoryRecord,
+  modifiedAt: string,
+): MobileOrchestratorThread {
+  return applyOrchestratorTurnStatus(projectOrchestratorThreadSummary(tabId, record, modifiedAt));
+}
+
+/** Refresh independently of history writes, including when its summary is cached. */
+export function applyOrchestratorTurnStatus(thread: MobileOrchestratorThread): MobileOrchestratorThread {
+  if (thread.source === 'bot-network') return thread;
+  const turns = listOrchestratorTurnsForThread(thread.id);
+  if (!turns.length) return thread;
+  // The persisted ledger crosses the ws-server/API boundary. Bound abandoned
+  // records by the same PID/age check used when recovering turns after a crash.
+  const running = turns.some(turn => !turn.settledAt && isRehydratedTurnAlive(turn, PROCESS_TIMEOUT_MS));
+  return { ...thread, status: running ? 'busy' : turns[0].outcome === 'failed' ? 'failed' : 'ready' };
+}
+
+/** Only history-derived fields belong in the history-stat cache. */
+export function projectOrchestratorThreadSummary(
   tabId: string,
   record: OrchestratorHistoryRecord,
   modifiedAt: string,
