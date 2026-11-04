@@ -55,11 +55,31 @@ beforeAll(() => {
   const next = join(root, 'o8-next');
   writeFileSync(source, 'extern int xkb_x11_get_core_keyboard_device_id(void*); int (*volatile dependency)(void*) = xkb_x11_get_core_keyboard_device_id; int main(void) { return dependency == 0; }');
   expect(run('cc', [source, '-o', next, '-l:libxkbcommon-x11.so.0']).status).toBe(0);
+  // Distinguish the helper from the app while keeping a runnable ELF fixture.
+  writeFileSync(join(root, 'o8-next-viz-render'), Buffer.concat([readFileSync(next), Buffer.from('visualization-helper-fixture')]));
   const staged = run(process.execPath, ['scripts/linux/stage-payload.mjs', '--server', server,
     '--node-root', runtime, '--next-binary', next, '--output', stage]);
   expect(staged.status, staged.stderr).toBe(0);
 }, 60_000);
 afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+it('stages the executable visualization helper beside the app', () => {
+  const helper = join(stage, 'usr/lib/o8/o8-next-viz-render');
+  expect(existsSync(helper)).toBe(true);
+  expect(readFileSync(helper)).toEqual(readFileSync(join(root, 'o8-next-viz-render')));
+  expect(run(helper, []).status).toBe(0);
+});
+
+it('rejects a package stage missing the visualization helper', () => {
+  const input = join(root, 'missing-renderer');
+  cpSync(stage, input, { recursive: true });
+  rmSync(join(input, 'usr/lib/o8/o8-next-viz-render'), { force: true });
+  const output = join(root, 'missing-renderer-output');
+  const result = packagePayload(input, output);
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('Incomplete stage: usr/lib/o8/o8-next-viz-render');
+  expect(existsSync(output)).toBe(false);
+});
 
 it('initializes Next build telemetry with the workflow environment without creating compiler settings', () => {
   const workflow = parse(readFileSync('.github/workflows/linux-downloads.yml', 'utf8'));
@@ -105,8 +125,10 @@ it.skipIf(process.platform !== 'linux' || process.env.O8_LINUX_PACKAGE_TESTS !==
     expect(run(join(installed, 'usr/bin/o8'), ['version']).stdout).toContain(version);
     expect(createHash('sha256').update(readFileSync(join(installed, 'usr/lib/o8/node'))).digest('hex'))
       .toBe(createHash('sha256').update(readFileSync(join(stage, 'usr/lib/o8/node'))).digest('hex'));
-    expect(createHash('sha256').update(readFileSync(join(installed, 'usr/lib/o8/o8-next'))).digest('hex'))
-      .toBe(createHash('sha256').update(readFileSync(join(stage, 'usr/lib/o8/o8-next'))).digest('hex'));
+    for (const binary of ['o8-next', 'o8-next-viz-render']) {
+      expect(createHash('sha256').update(readFileSync(join(installed, 'usr/lib/o8', binary))).digest('hex'))
+        .toBe(createHash('sha256').update(readFileSync(join(stage, 'usr/lib/o8', binary))).digest('hex'));
+    }
   }
   const abi = run(process.execPath, ['scripts/ci/check-linux-glibc.mjs', '--max', '2.39',
     ...receipt.artifacts.map((a: { name: string }) => join(output, a.name))]);

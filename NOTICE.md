@@ -67,9 +67,12 @@ React Bits source code or implementation was used.
 - Authors: kepano and the Pele contributors
 - License: MIT
 - Upstream: <https://github.com/obsidianmd/pele>
-- Use in o8: the native transcript's state, class and pie diagrams and its
-  diagram zoom and pan, ported to Rust from `src/diagrams/state/`,
-  `src/diagrams/class/`, `src/diagrams/pie/` and `src/zoom.ts` into
+- Use in o8: the native transcript's state, class, pie, entity relationship,
+  git graph, gantt and mind map diagrams and its diagram zoom and pan, ported
+  to Rust from `src/diagrams/state/`, `src/diagrams/class/`,
+  `src/diagrams/pie/`, `src/diagrams/er/`, `src/diagrams/git/`,
+  `src/diagrams/gantt/`, `src/diagrams/mindmap/`,
+  `src/diagrams/common/outline.ts` and `src/zoom.ts` into
   `native/o8-next/src/transcript_diagram/`
 - Unmodified license text: [Pele](licenses/pele-MIT.txt)
 

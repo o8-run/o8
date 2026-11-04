@@ -15,6 +15,10 @@ name = "o8-next-macos-check"
 path = "diagnostics/macos_repaint.rs"
 required-features = ["macos-diagnostics"]
 
+[[bin]]
+name = "o8-next-viz-render"
+path = "src/bin/viz_render.rs"
+
 [dependencies]
 async-channel = "=2.5.0"
 alacritty_terminal = { version = "=0.26.0", default-features = false }
@@ -41,6 +45,10 @@ libc = "=0.2.183"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "x11"] }
+# Only src/bin/viz_render.rs may reference the GTK/WebKit crates.
+gtk = "=0.18.2"
+webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
+cairo-rs = { version = "=0.18.5", features = ["png"] }
 
 [dev-dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "test-support"] }

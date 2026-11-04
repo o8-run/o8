@@ -20,7 +20,7 @@ import type {
   ValidatedRepoCandidate,
 } from './types';
 import { isRepoWorkspaceIsolationPreference } from './types';
-import { readCurrentOrigin } from './remote';
+import { readCurrentOrigin, readCurrentOriginReadOnly } from './remote';
 import { emitProductEvent } from '@/lib/analytics/server';
 import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
 import { getRepoDispatchAdmission } from '@/lib/lane/repo-preflight';
@@ -481,9 +481,18 @@ function fireSignatureRecompute(): void {
 
 export async function listRepos() {
   const store = await readStore();
-  // Maintenance reads must remain bounded and read-only. Ordinary reads repair
-  // moved remotes using local git config, then merge only that field under the
-  // same mutation lock as add/update/remove so concurrent edits survive.
+  // Maintenance reads must remain bounded. Ordinary reads project current git
+  // origins without mutating the cached store or acquiring a mutation lock.
+  if (worktreeMetadataReadLimit() !== undefined) return store.repos;
+  return Promise.all(store.repos.map(async repo => {
+    const remote = repo.isGitRepo ? await readCurrentOriginReadOnly(repo.localPath) : undefined;
+    return remote === undefined || remote === repo.remoteUrl ? repo : { ...repo, remoteUrl: remote };
+  }));
+}
+
+/** Persist moved origins only from explicit registry write maintenance. */
+export async function repairRepoRemotes() {
+  const store = await readStore();
   if (worktreeMetadataReadLimit() !== undefined) return store.repos;
   const remotes = await Promise.all(store.repos.map(async repo => ({
     id: repo.id, localPath: repo.localPath, previousRemote: repo.remoteUrl,
@@ -598,7 +607,7 @@ export async function addRepo(localPath: string) {
   // substrate to answer design/convention questions about this repo. Done
   // out-of-band so addRepo's response isn't blocked on disk scans. Errors
   // are logged but never raised; the registry write already succeeded.
-  void scheduleSpecIngest(entry.localPath, entry.name);
+  void scheduleRepoMaintenance(entry.localPath, entry.name);
 
   // Coarse product signal — a new repo was connected (#1249). hasRemote tells
   // local-only vs GitHub-connected; never the name/path/URL. Only the genuinely
@@ -608,7 +617,14 @@ export async function addRepo(localPath: string) {
   return entry;
 }
 
-async function scheduleSpecIngest(repoPath: string, repoSlug: string): Promise<void> {
+async function scheduleRepoMaintenance(repoPath: string, repoSlug: string): Promise<void> {
+  // Add/repoint already schedules spec writes. Repair remotes here so scoped
+  // GETs never acquire the registry write lock, even if spec ingest fails.
+  try {
+    await repairRepoRemotes();
+  } catch (error) {
+    console.warn('[repo-registry] remote repair failed:', error instanceof Error ? error.message : error);
+  }
   try {
     const { ingestRepoSpecs, purgeOrphanedSpecDirectives } = await import('@/lib/cortex/spec-ingest');
     const result = await ingestRepoSpecs(repoPath, repoSlug);
@@ -687,7 +703,7 @@ export async function updateRepo(
   });
   if (candidate) {
     fireSignatureRecompute();
-    void scheduleSpecIngest(next.localPath, next.name);
+    void scheduleRepoMaintenance(next.localPath, next.name);
   }
   return next;
 }

@@ -529,6 +529,7 @@ fn native_agents_out_of_title_order_settle_after_one_notify(cx: &mut TestAppCont
         result: None,
         started: None,
         finished: None,
+        facts: Default::default(),
     };
     // An inspector with no transcript behind it, so only this test feeds it.
     let (f, _s, mut v) = setup(cx);

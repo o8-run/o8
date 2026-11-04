@@ -16,6 +16,7 @@ import {
   validateRepo,
 } from '@/lib/repos/registry';
 import { cloneRepoToDefaultLocation, RepoCloneError } from '@/lib/repos/clone';
+import { createGitHubRepo, RepoCreateError } from '@/lib/repos/create';
 import { RepoFolderError } from '@/lib/repos/folder-error';
 import { assertNotKnowledgeSource, KnowledgeSourceWriteError, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 import { removeRepoPathFromProjects, repointRepoPathInProjects } from '@/lib/repos/project-path-mutations';
@@ -310,6 +311,20 @@ async function handlePOST(request: Request) {
           return NextResponse.json({ repo }, { status: 201 });
         } catch (error) {
           if (error instanceof RepoCloneError) {
+            return NextResponse.json({ error: error.message }, { status: error.statusCode });
+          }
+          throw error;
+        }
+      }
+      case 'create': {
+        try {
+          const { localPath } = await createGitHubRepo('name' in body ? body.name : undefined, 'visibility' in body ? body.visibility : undefined);
+          const repo = { ...enrichRepoReadinessFromCache(await addRepo(localPath)), exists: true };
+          triggerScan(repo.localPath);
+          startChangePolling(repo.localPath);
+          return NextResponse.json({ repo }, { status: 201 });
+        } catch (error) {
+          if (error instanceof RepoCreateError) {
             return NextResponse.json({ error: error.message }, { status: error.statusCode });
           }
           throw error;

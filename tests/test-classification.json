@@ -137,6 +137,12 @@
       ]
     },
     {
+      "path": "src/app/api/panel/resource-usage/route-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/panel/status/route.test.ts",
       "reasons": [
         "terminal-tool"
@@ -3843,6 +3849,14 @@
       ]
     },
     {
+      "path": "tests/lane-diff-stat-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-git-event-loop-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5097,6 +5111,12 @@
       ]
     },
     {
+      "path": "tests/no-project-thread-send-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/npm-release-age-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5247,6 +5267,7 @@
       "path": "tests/o8d-next-surfaces-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
         "native-build",
         "process-signal",
         "real-path"
@@ -5771,6 +5792,15 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/panel-repos-create-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
       ]
     },
     {

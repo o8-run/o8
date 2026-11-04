@@ -47,7 +47,7 @@ fn sidebar_recents_groups_times_more_and_keyboard(cx: &mut TestAppContext) {
         // A row can fall in Yesterday or the last week depending on the time of day.
         labels.starts_with(&["Recents", "Today"])
             && labels.contains(&"Previous 30 days")
-            && !labels.iter().any(|label| *label == "Unassigned"),
+            && !labels.iter().any(|label| *label == "No project"),
         "Recents must use desktop age groups rather than workspace/status shelves: {labels:?}"
     );
     assert!(

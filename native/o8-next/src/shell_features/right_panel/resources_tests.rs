@@ -38,6 +38,25 @@ fn resources_opens_from_launcher_and_shows_live_metrics(cx: &mut TestAppContext)
                 .unwrap()
                 .top()
     );
+    let machine = v
+        .debug_bounds("resources-machine")
+        .expect("the Machine section renders");
+    assert!(
+        machine.top() < v.debug_bounds("resource-row-session-heavy").unwrap().top(),
+        "Machine sits above the per-session rows"
+    );
+    for meter in [
+        "resources-meter-cpu",
+        "resources-meter-memory",
+        "resources-meter-swap",
+        "resources-meter-disk-data",
+        "resources-meter-disk-projects",
+        "resources-meter-network",
+    ] {
+        assert!(v.debug_bounds(meter).is_some(), "{meter}");
+    }
+    assert!(v.debug_bounds("resources-sparkline").is_some());
+    assert_eq!(initial["history"], json!([23.]));
     let reads = snapshot(&f)["reads"].clone();
     for _ in 0..3 {
         tick(&s, &mut v);
@@ -52,6 +71,11 @@ fn resources_opens_from_launcher_and_shows_live_metrics(cx: &mut TestAppContext)
     assert_eq!(
         s.read_with(&v, |s, _| resources::probe(s))["data"]["sessions"][0]["cpuPercent"],
         72.
+    );
+    assert_eq!(
+        s.read_with(&v, |s, _| resources::probe(s))["history"],
+        json!([23., 64.]),
+        "each new machine sample extends the sparkline"
     );
     for failure in ["failed", "payload-error"] {
         mode(&f, failure);

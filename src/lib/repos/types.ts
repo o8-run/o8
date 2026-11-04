@@ -103,6 +103,12 @@ export interface RepoRegistryCloneBody {
   name?: string;
 }
 
+export interface RepoRegistryCreateBody {
+  action: 'create';
+  name: string;
+  visibility: 'public' | 'private' | 'internal';
+}
+
 export interface RepoRegistryUpdateBody {
   action: 'update';
   id: string;
@@ -129,6 +135,7 @@ export type RepoRegistryPostBody =
   | RepoRegistryValidateBody
   | RepoRegistryAddBody
   | RepoRegistryCloneBody
+  | RepoRegistryCreateBody
   | RepoRegistryUpdateBody
   | RepoRegistryIconBody
   | RepoRegistryTouchBody;

@@ -184,7 +184,7 @@ impl Render for Settings {
                 "keyboard",
                 self.section,
                 &query,
-                "keyboard shortcuts help keybindings hotkeys",
+                "keyboard shortcuts help keybindings hotkeys snapshot screenshot shift capture",
             );
             let about = panels::matches(
                 "about",

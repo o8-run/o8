@@ -181,6 +181,26 @@ impl Surface {
             self.select(id, cx);
         }
     }
+    /// Attaches a snapshot through the composer's image path once this chat can
+    /// take images, and focuses the composer; false until then.
+    pub(crate) fn shell_attach_snapshot(
+        &mut self,
+        path: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.queue_ready || !self.composer.read(cx).controls.images_enabled {
+            return false;
+        }
+        self.composer
+            .update(cx, |composer, cx| composer.attach_paths(vec![path], cx));
+        self.composer.read(cx).focus.focus(window);
+        true
+    }
+    #[cfg(test)]
+    pub(crate) fn shell_composer_images(&self, cx: &App) -> Vec<Value> {
+        self.composer.read(cx).controls.images.clone()
+    }
     pub(crate) fn shell_focus(&self, composer: bool, window: &mut Window, cx: &App) {
         if composer {
             self.composer.read(cx).focus.focus(window);

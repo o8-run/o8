@@ -18,6 +18,8 @@ use std::{
 #[cfg(test)]
 #[path = "view_lifecycle_tests.rs"]
 mod lifecycle_tests;
+#[path = "new_project.rs"]
+mod new_project;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +34,7 @@ enum Step {
     Folder,
     Tools,
     Privacy,
+    NewProject,
 }
 #[derive(Clone)]
 struct Snapshot {
@@ -109,6 +112,8 @@ pub struct Setup {
     workers: Vec<String>,
     folder: Entity<Composer>,
     model: Entity<Composer>,
+    name: Entity<Composer>,
+    form: new_project::Form,
     session_id: String,
     busy: bool,
     error: Option<String>,
@@ -121,6 +126,7 @@ enum Action {
     Load(bool),
     Choose(Option<Project>),
     Add(String),
+    Create(Value),
     Use,
     Consent,
 }
@@ -138,7 +144,12 @@ impl Setup {
             Step::Folder => "folder",
             Step::Tools => "tools",
             Step::Privacy => "privacy",
+            Step::NewProject => "new-project",
         })
+    }
+    #[cfg(test)]
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
     }
     pub fn busy(&self) -> bool {
         self.busy
@@ -153,6 +164,8 @@ impl Setup {
             workers: vec![],
             folder: cx.new(Composer::new),
             model: cx.new(Composer::new),
+            name: cx.new(Composer::new),
+            form: new_project::Form::default(),
             session_id: format!(
                 "thoughts-next-{}",
                 SystemTime::now()
@@ -208,18 +221,13 @@ impl Setup {
                 }
                 Action::Choose(project) => {
                     selected = project;
-                    let loaded = Snapshot::load(&client, true)?;
-                    Self::registered(&loaded, selected.as_ref())?;
-                    let (lead, pool) = loaded.recommendation();
-                    if selected.is_some() && (!loaded.ready(&lead, &pool) || loaded.model(&model).is_none()) { target = Step::Tools; }
-                    else {
-                        if loaded.ready(&lead, &pool) && loaded.setup["setupRecommendation"]["preserved"] != true {
-                            client.setup_request("POST", "/api/panel/operator-defaults", &Self::selection(&loaded, &lead, &pool))?;
-                        }
-                        if loaded.setup["values"]["telemetryConsentAnswered"] != true { target = Step::Privacy; }
-                        else { finish = true; }
-                    }
-                    next = Some(loaded);
+                    (next, target, finish) = Self::proceed(&client, selected.as_ref(), &model)?;
+                }
+                Action::Create(request) => {
+                    // gh's refusal (not signed in, name taken) returns as this page's error.
+                    let created = client.setup_request("POST", "/api/panel/repos", &request)?;
+                    selected = Some(serde_json::from_value::<Project>(created["repo"].clone()).map_err(|_| "Invalid project response")?);
+                    (next, target, finish) = Self::proceed(&client, selected.as_ref(), &model)?;
                 }
                 Action::Use => {
                     let current = Snapshot::load(&client, true)?;
@@ -269,6 +277,37 @@ impl Setup {
         self.revision += 1;
         cx.notify();
     }
+    /// Opening a project, or starting without one: tools first when they are
+    /// not ready, then privacy, then the first conversation.
+    fn proceed(
+        client: &Client,
+        selected: Option<&Project>,
+        model: &str,
+    ) -> Result<(Option<Snapshot>, Step, bool), String> {
+        let loaded = Snapshot::load(client, true)?;
+        Self::registered(&loaded, selected)?;
+        let (lead, pool) = loaded.recommendation();
+        let (mut target, mut finish) = (Step::Projects, false);
+        if selected.is_some() && (!loaded.ready(&lead, &pool) || loaded.model(model).is_none()) {
+            target = Step::Tools;
+        } else {
+            if loaded.ready(&lead, &pool)
+                && loaded.setup["setupRecommendation"]["preserved"] != true
+            {
+                client.setup_request(
+                    "POST",
+                    "/api/panel/operator-defaults",
+                    &Self::selection(&loaded, &lead, &pool),
+                )?;
+            }
+            if loaded.setup["values"]["telemetryConsentAnswered"] != true {
+                target = Step::Privacy;
+            } else {
+                finish = true;
+            }
+        }
+        Ok((Some(loaded), target, finish))
+    }
     fn registered(snapshot: &Snapshot, project: Option<&Project>) -> Result<(), String> {
         if project.is_some_and(|p| {
             !snapshot
@@ -313,16 +352,28 @@ impl Setup {
         Self::registered(&current, project)?;
         let mut completion = json!({"setupComplete":true});
         let mut session = None;
-        if let Some(project) = project {
-            let (backend, workers) = snapshot.recommendation();
-            let model = snapshot.model(chosen_model)
-                .ok_or("Choose a model for this runtime before continuing.")?;
+        let (backend, workers) = snapshot.recommendation();
+        // Without a project, a first conversation starts once a lead and model
+        // are ready; it runs in its own scratch folder on the server.
+        let first = match project {
+            Some(_) => Some(
+                snapshot
+                    .model(chosen_model)
+                    .ok_or("Choose a model for this runtime before continuing.")?,
+            ),
+            None => snapshot
+                .model(chosen_model)
+                .filter(|_| current.ready(&backend, &workers)),
+        };
+        if let Some(model) = first {
             if !current.ready(&backend, &workers) {
                 return Err("Connect a coding tool before opening this project.".into());
             }
-            client.setup_request("POST", "/api/v2/chat-history", &json!({"tabId":id,"messages":[],"backend":backend,"model":model,"repoPath":project.local_path,"repoName":project.name,"title":"New conversation"}))?;
+            client.setup_request("POST", "/api/v2/chat-history", &json!({"tabId":id,"messages":[],"backend":backend,"model":model,"repoPath":project.map(|p| &p.local_path),"repoName":project.map(|p| &p.name),"title":"New conversation"}))?;
             let history: Value = client.get("/api/v2/chat-history", &[("tabId", id)])?;
-            completion["repoPath"] = json!(project.local_path);
+            if let Some(project) = project {
+                completion["repoPath"] = json!(project.local_path);
+            }
             completion["completedAt"] = history["savedAt"].clone();
             session = client.sessions()?.into_iter().find(|s| s.id == id);
             if session.is_none() {
@@ -340,6 +391,37 @@ impl Setup {
         self.error = None;
         self.revision += 1;
         cx.notify();
+    }
+    /// New project lists saved machines beside this one as it opens.
+    fn open_new_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy {
+            return;
+        }
+        self.navigate(Step::NewProject, cx);
+        self.name.read(cx).focus.focus(window);
+        let client = self.client.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { new_project::Form::load_machines(&client) });
+        cx.spawn(async move |this, cx| {
+            let machines = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.form.machines = machines;
+                this.revision += 1;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+    fn create(&mut self, cx: &mut Context<Self>) {
+        match self.form.request(&self.name.read(cx).text) {
+            Ok(request) => self.act(Action::Create(request), cx),
+            Err(reason) => {
+                self.error = Some(reason.into());
+                self.revision += 1;
+                cx.notify();
+            }
+        }
     }
 }
 fn control(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Stateful<gpui::Div> {
@@ -446,6 +528,9 @@ impl Render for Setup {
                             snapshot.as_ref().is_some_and(|s| s.projects.is_empty()) && !busy,
                             |v| v.child("No projects yet"),
                         )
+                        .child(control("setup-new-project", "New project", !busy).on_click(
+                            cx.listener(|this, _, window, cx| this.open_new_project(window, cx)),
+                        ))
                         .child(
                             control("setup-change-tools", "Set up tools", !busy).on_click(
                                 cx.listener(|this, _, _, cx| this.navigate(Step::Tools, cx)),
@@ -487,6 +572,9 @@ impl Render for Setup {
                             }),
                         )),
                 )
+            })
+            .when(self.step == Step::NewProject, |v| {
+                v.child(new_project::page(self, busy, cx))
             })
             .when(self.step == Step::Tools, |v| {
                 v.child(
