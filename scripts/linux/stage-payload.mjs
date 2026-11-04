@@ -37,10 +37,11 @@ function stage() {
   const server = realpathSync(options['--server']);
   const runtime = realpathSync(options['--node-root']);
   const next = realpathSync(options['--next-binary']);
+  const renderer = realpathSync(join(dirname(next), 'o8-next-viz-render'));
   const output = options['--output'];
   if (existsSync(output)) throw new Error('Output already exists; choose a new staging directory.');
   const destination = join(realpathSync(dirname(output)), relative(dirname(output), output));
-  for (const input of [server, runtime, next, root]) {
+  for (const input of [server, runtime, next, renderer, root]) {
     if (input === destination || input.startsWith(destination + sep)
       || (input !== root && destination.startsWith(input + sep))) throw new Error('Staging output overlaps an input.');
   }
@@ -51,6 +52,7 @@ function stage() {
   if (!existsSync(join(runtime, 'LICENSE'))) throw new Error('The Node distribution LICENSE is required.');
   assertLinuxX64(join(runtime, 'bin/node'));
   assertLinuxX64(next);
+  assertLinuxX64(renderer);
   const version = spawnSync(join(runtime, 'bin/node'), ['-p', 'JSON.stringify({major:process.versions.node.split(".")[0],platform:process.platform,arch:process.arch})'], { encoding: 'utf8', timeout: 10_000 });
   if (version.error || version.status !== 0) throw new Error('The bundled Node runtime cannot execute.');
   const identity = JSON.parse(version.stdout);
@@ -63,7 +65,8 @@ function stage() {
   cpSync(server, stagedServer, { recursive: true, dereference: true });
   cpSync(join(runtime, 'bin/node'), join(payload, 'node'));
   cpSync(next, join(payload, 'o8-next'));
-  for (const name of ['node', 'o8-next']) chmodSync(join(payload, name), 0o755);
+  cpSync(renderer, join(payload, 'o8-next-viz-render'));
+  for (const name of ['node', 'o8-next', 'o8-next-viz-render']) chmodSync(join(payload, name), 0o755);
   const cli = join(stagedServer, 'cli');
   mkdirSync(cli, { recursive: true });
   cpSync(join(stagedServer, 'bin/o8.mjs'), join(cli, 'o8.mjs'));
@@ -107,7 +110,7 @@ function stage() {
     pty.onExit(({ exitCode }) => { process.exit(exitCode === 0 && output.includes('payload-pty-ready') ? 0 : 1); });
   `, stagedServer], { encoding: 'utf8', timeout: 10_000 });
   if (probe.error || probe.status !== 0) throw new Error('Bundled native addon probe failed; the incomplete stage is retained for diagnosis.');
-  console.log('Staged Linux x64 o8 next, Node 22, CLI and server; native addons loaded.');
+  console.log('Staged Linux x64 o8 next and visualization helper, Node 22, CLI and server; native addons loaded.');
 }
 
 try { stage(); } catch (error) {

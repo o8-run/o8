@@ -1180,6 +1180,34 @@ impl Element for RetainedRow {
                 )
             })
             .collect();
+        let pictures: Vec<gpui::AnyElement> = {
+            #[cfg(target_os = "linux")]
+            {
+                cache
+                    .cards
+                    .iter()
+                    .filter_map(|(id, placement)| {
+                        let picture = state.cards.get(id)?.borrow().picture()?;
+                        let mut picture = img(picture)
+                            .w(placement.size.width)
+                            .h(placement.size.height)
+                            .object_fit(ObjectFit::Fill)
+                            .into_any_element();
+                        picture.layout_as_root(
+                            placement.size.map(AvailableSpace::Definite),
+                            window,
+                            cx,
+                        );
+                        picture.prepaint_at(origin + placement.origin, window, cx);
+                        Some(picture)
+                    })
+                    .collect()
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                Vec::new()
+            }
+        };
         let elements = cache
             .images
             .iter()
@@ -1221,6 +1249,7 @@ impl Element for RetainedRow {
             })
             .collect::<Vec<_>>()
             .into_iter()
+            .chain(pictures)
             .chain(cache.links.iter().enumerate().map(|(index, link)| {
                 let url = link.url.clone();
                 // Unique across rows: elements sharing an id share click state,

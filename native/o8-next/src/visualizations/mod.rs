@@ -1,4 +1,13 @@
 //! Inline transcript documents. The host never exposes application requests to HTML.
+#[cfg(target_os = "linux")]
+pub mod linux;
+#[cfg(target_os = "linux")]
+mod linux_card;
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+mod linux_protocol;
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests;
 #[cfg(test)]
 mod load_tests;
 #[cfg(target_os = "macos")]
@@ -36,6 +45,8 @@ pub struct Card {
     state_file: Option<PathBuf>,
     dirty: bool,
     leases: usize,
+    #[cfg(target_os = "linux")]
+    snapshot: linux_card::Snapshot,
     #[cfg(target_os = "macos")]
     host: Option<Rc<macos::Host>>,
     #[cfg(target_os = "macos")]
@@ -108,7 +119,8 @@ impl Card {
             state_file,
             state,
             nonce: random.iter().map(|b| format!("{b:02x}")).collect(),
-            error: (!entropy || !cfg!(target_os = "macos")).then(|| UNAVAILABLE.into()),
+            error: (!entropy || !cfg!(any(target_os = "macos", target_os = "linux")))
+                .then(|| UNAVAILABLE.into()),
             ready: false,
             loading: None,
             started: None,
@@ -116,6 +128,8 @@ impl Card {
             bounds: None,
             dirty: false,
             leases: 0,
+            #[cfg(target_os = "linux")]
+            snapshot: linux_card::Snapshot::default(),
             #[cfg(target_os = "macos")]
             host: None,
             #[cfg(target_os = "macos")]
@@ -165,6 +179,10 @@ impl Card {
                 Err(error) => self.error = Some(error),
             }
             changed = true;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            changed |= self.poll_picture();
         }
         #[cfg(target_os = "macos")]
         if let Some(host) = &self.host {
@@ -216,6 +234,12 @@ impl Card {
     ) {
         self.bounds = Some(bounds);
         self.start();
+        #[cfg(target_os = "linux")]
+        self.prepare_picture(
+            f32::from(bounds.size.width),
+            crate::theme::visualization(),
+            Instant::now(),
+        );
         #[cfg(target_os = "macos")]
         {
             if self.error.is_some() {
@@ -260,6 +284,13 @@ impl Card {
         if let Some(host) = &self.host {
             host.hide();
         }
+    }
+    #[cfg(target_os = "linux")]
+    pub fn picture(&self) -> Option<std::sync::Arc<gpui::Image>> {
+        self.snapshot
+            .picture
+            .clone()
+            .filter(|_| self.ready && self.error.is_none())
     }
 }
 fn document(client: &Client, reference: &Reference, nonce: &str) -> Result<String, String> {

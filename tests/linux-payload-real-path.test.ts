@@ -210,6 +210,7 @@ beforeAll(async () => {
   `);
   const compile = command('cc', [source, '-o', binary]);
   expect(compile.status, compile.stderr).toBe(0);
+  cpSync(binary, join(root, 'o8-next-viz-render'));
 }, 60_000);
 
 afterAll(async () => {
