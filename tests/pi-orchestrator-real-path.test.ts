@@ -58,7 +58,8 @@ beforeAll(async () => {
     '/api/panel/repos': await import('@/app/api/panel/repos/route') as never,
   };
   api = createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    // The loopback Host gate compares the Host header with the URL's port.
+    const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     const handler = routes[url.pathname]?.[req.method ?? 'GET'];
     if (!handler) { res.writeHead(404).end(); return; }
     const chunks: Buffer[] = [];
