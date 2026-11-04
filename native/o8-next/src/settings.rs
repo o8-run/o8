@@ -169,6 +169,7 @@ pub(crate) struct Settings {
 }
 impl EventEmitter<Close> for Settings {}
 impl Settings {
+    #[cfg(test)]
     pub fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::with_project(client, None, window, cx)
     }

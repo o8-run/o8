@@ -48,6 +48,7 @@ import {
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
 import { operatorDefaultsUpdateFailure } from '@/lib/settings/operator-defaults-error';
+import { isSettingsLayerId } from '@/lib/settings/scopes';
 import { mergeNativeSettingsToml, readNativeSettings, updateNativeScopedSetting, updateNativeSettings } from '@/lib/settings/native-settings';
 import { validateCredentialSafeUrl } from '@/lib/settings/credential-safe-url';
 import { resolveApfsDependencyImagesOverride } from '@/lib/workspace/dependency-image-policy';
@@ -726,7 +727,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 /** `project` names the project layer a native read or write resolves against. */
 function projectParam(query: URLSearchParams): string | null {
   const project = query.get('project')?.trim();
-  return project && project.length <= 200 ? project : null;
+  return project && isSettingsLayerId(project) ? project : null;
 }
 
 /** One key per scoped write; `null` clears the layer value so it falls through. */
@@ -739,11 +740,17 @@ async function postNativeScoped(query: URLSearchParams, body: Record<string, unk
   let value: unknown = null;
   if (body[key] !== null) {
     // Same field validation as a global write.
-    const update = normalizeUpdate({ [key]: body[key] }) as Record<string, unknown>;
+    if (key === 'workerRuntimes' && !isWorkerRuntimeList(body[key])) {
+      return response({ error: 'workerRuntimes must contain at least one dispatchable runtime.' }, 400);
+    }
+    const storageValidationError = workspaceStorageValidationError({ [key]: body[key] });
+    if (storageValidationError) return response({ error: storageValidationError }, 400);
+    const update = normalizeUpdate({ [key]: body[key] });
     if (!Object.hasOwn(update, key)) return response({ error: 'No supported fields in request body.' }, 400);
-    value = update[key];
+    if (update.threecodeWorkerModel) await assertThreecodeWorkerModelAvailable(update.threecodeWorkerModel);
+    value = (update as Record<string, unknown>)[key];
   }
-  await updateNativeScopedSetting(scope, projectParam(query), key, value, body.settingsTomlRevision);
+  await withStoragePressurePolicyLock(() => updateNativeScopedSetting(scope, projectParam(query), key, value, body.settingsTomlRevision));
   return response({ ok: true });
 }
 

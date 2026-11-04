@@ -177,10 +177,13 @@ export async function writeScopedOperatorDefault(
   key: string,
   value: unknown,
   expectedRevision: string,
+  validate: (next: string) => void = () => {},
 ): Promise<void> {
   const raw = await readCurrentSettingsToml();
   if (settingsTomlRevision(raw) !== expectedRevision) throw new SettingsTomlConflictError();
-  await writeSettingsTomlAtRevision(writeScopedSetting(raw, scope, id, key, value), expectedRevision);
+  const next = writeScopedSetting(raw, scope, id, key, value);
+  validate(next);
+  await writeSettingsTomlAtRevision(next, expectedRevision);
 }
 
 export async function readLegacyOperatorDefaults(): Promise<string | null> {

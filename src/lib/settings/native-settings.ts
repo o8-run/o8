@@ -8,6 +8,7 @@ import {
   type OperatorDefaults,
   type OperatorDefaultsWithSources,
 } from '@/lib/operator/defaults';
+import { assertRoutingTomlCompatibility, routingUpdateTouchesCompatibility } from '@/lib/operator/routing-compatibility';
 import { getCachedInstanceIdentity } from '@/lib/panel/instance-identity';
 import {
   SettingsTomlConflictError,
@@ -126,7 +127,21 @@ export async function updateNativeScopedSetting(
 ): Promise<void> {
   if (typeof revision !== 'string' || !revision) throw new Error('Refresh settings before saving.');
   if (!isScopedSettingKey(key)) throw new SettingsScopeError(`${key} can only be set globally.`);
-  const id = scope === 'machine' ? getCachedInstanceIdentity().instanceId : projectId;
+  const machineId = getCachedInstanceIdentity().instanceId;
+  const id = scope === 'machine' ? machineId : projectId;
   if (!id) throw new SettingsScopeError('Choose a project before saving a project setting.');
-  await withOperatorDefaultsWriteLock(() => writeScopedOperatorDefault(scope, id, key, value, revision));
+  // Routing keys must stay compatible as the layer's readers resolve them,
+  // with the same refusals a global write gets.
+  const validate = routingUpdateTouchesCompatibility({ [key]: true } as Partial<OperatorDefaults>)
+    ? (next: string) => {
+      const layers = readSettingsLayers(next);
+      const project = scope === 'project' && Object.hasOwn(layers.project, id) ? layers.project[id] : {};
+      const machine = Object.hasOwn(layers.machine, machineId) ? layers.machine[machineId] : {};
+      assertRoutingTomlCompatibility(
+        serializeOperatorDefaultsToml({ ...layers.global, ...project, ...machine }),
+        OPERATOR_DEFAULTS_FALLBACK,
+      );
+    }
+    : undefined;
+  await withOperatorDefaultsWriteLock(() => writeScopedOperatorDefault(scope, id, key, value, revision, validate));
 }

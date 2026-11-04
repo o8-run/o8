@@ -110,3 +110,27 @@ it('refuses invalid, global-only, multi-key and stale scoped writes without chan
   expect(stale.status).toBe(409);
   expect(readFileSync(join(configDir, 'settings.toml'), 'utf8')).toBe(before);
 });
+
+it('refuses a scoped routing value that would break the routing it resolves into', async () => {
+  writeFileSync(join(configDir, 'settings.toml'), '[models]\ndefault_dispatch_runtime = "claude-code"\ndefault_dispatch_model = ""\n');
+  const before = readFileSync(join(configDir, 'settings.toml'), 'utf8');
+  // The carrier only runs codex; a global write refuses this pair as well.
+  expect((await write('scope=machine', { workerExecutionCarrier: 'ori' })).status).toBe(400);
+  expect((await write('scope=project&project=project-a', { workerExecutionCarrier: 'ori' })).status).toBe(400);
+  expect(readFileSync(join(configDir, 'settings.toml'), 'utf8')).toBe(before);
+  // Pinned to codex in the same layer, the carrier is accepted.
+  expect((await write('scope=machine', { defaultDispatchRuntime: 'codex' })).status).toBe(200);
+  expect((await write('scope=machine', { workerExecutionCarrier: 'ori' })).status).toBe(200);
+});
+
+it('keeps global settings when another layer is invalid and refuses prototype ids', async () => {
+  writeFileSync(join(configDir, 'settings.toml'),
+    '[operator]\nparallel_cap = 4\n\n[scope.project.other.operator]\nparallel_cap = "x"\n\n[scope.machine.elsewhere.operator]\nparallel_cap = "x"\n');
+  expect((await (await call('/api/panel/operator-defaults?include=values')).json()).values.parallelCap).toBe(4);
+  const other = await read('other');
+  expect(other.values.parallelCap).toBe(4);
+  expect(other.scope.layers.project).toEqual({});
+  expect((await write('scope=project&project=__proto__', { parallelCap: 3 })).status).toBe(400);
+  expect((await write('scope=project&project=constructor', { parallelCap: 3 })).status).toBe(400);
+  expect((await read('constructor')).scope.projectId).toBeNull();
+});
