@@ -441,10 +441,17 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                 }
                 ThreadEvent::Error(error) => {
                     shell.loading = false;
-                    shell.connected = false;
-                    shell.notice = format!(
-                        "Local server unavailable: {error}. Start the local o8 server, then Retry."
-                    );
+                    // A busy response retains a healthy connection. A transport
+                    // timeout has spent the load budget and must settle offline.
+                    if !shell.connected
+                        || !crate::client::transient(error)
+                        || error.ends_with("Request timed out")
+                    {
+                        shell.connected = false;
+                        shell.notice = format!(
+                            "Local server unavailable: {error}. Start the local o8 server, then Retry."
+                        );
+                    }
                 }
             }
             cx.notify();

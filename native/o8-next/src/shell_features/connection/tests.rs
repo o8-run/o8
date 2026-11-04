@@ -3,6 +3,8 @@ use crate::shell::test_support::*;
 use crate::shell_state::State;
 #[path = "refresh_tests.rs"]
 mod maintenance;
+#[path = "timeout_tests.rs"]
+mod timeouts;
 // Drive main's retained sidebar lifecycle too: a streamed update can fence an
 // in-flight HTTP load, which is retried by the normal shell tick.
 #[track_caller]
@@ -284,7 +286,6 @@ fn round1_late_token_child(cx: &mut TestAppContext) {
     );
 }
 
-#[ignore = "never settles after the host stops; see #5311"]
 #[gpui::test]
 fn round1_reconnect_keeps_composer_focus_draft_and_queue(cx: &mut TestAppContext) {
     let fixture = Fixture::new();

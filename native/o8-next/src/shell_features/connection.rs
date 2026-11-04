@@ -7,10 +7,14 @@ use std::io::Read;
 #[derive(Default)]
 pub(super) struct Runtime {
     bootstrapped: bool,
+    /// This window has displayed a healthy catalog.
+    loaded: bool,
+    /// A timed-out refresh leaves the loaded view usable from its cache.
+    retained: bool,
     hidden: bool,
     restore: Option<(Option<String>, FocusHandle)>,
     status: Option<Entity<Status>>,
-    /// Seconds since a healthy window last reread the catalog.
+    /// Seconds since a loaded window last reread the catalog.
     idle_ticks: u32,
 }
 /// The sidebar follows the event stream, so a healthy window only needs a slow
@@ -27,6 +31,12 @@ fn management(s: &Shell) -> bool {
     registrations()
         .iter()
         .any(|r| r.overlay_command && (r.overlay_open)(s))
+}
+fn usable(s: &Shell) -> bool {
+    s.connected
+        || s.features
+            .read::<Runtime>()
+            .is_some_and(|runtime| runtime.retained)
 }
 fn key(s: &Shell) -> Option<String> {
     s.active().map(|tab| s.key(&tab))
@@ -72,7 +82,7 @@ fn refresh(client: &Client) -> Result<Client, String> {
 }
 impl ShellExtension for Connection {
     fn overlay(&self, s: &mut Shell) -> Option<gpui::AnyElement> {
-        if s.connected {
+        if usable(s) {
             return None;
         }
         s.features
@@ -94,6 +104,7 @@ impl ShellExtension for Connection {
             Ok(client) => client,
             Err(_) => {
                 shell.connected = false;
+                shell.features.get::<Runtime>().retained = false;
                 shell.notice = "Token rejected".into();
                 cx.notify();
                 return true;
@@ -186,8 +197,22 @@ impl ShellExtension for Connection {
         true
     }
     fn prepare(&self, s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+        if s.connected {
+            let runtime = s.features.get::<Runtime>();
+            runtime.loaded = true;
+            runtime.retained = false;
+        }
         if !s.loading {
             if !s.connected && s.notice.starts_with("Local server unavailable:") {
+                let transient = s
+                    .notice
+                    .strip_prefix("Local server unavailable: ")
+                    .and_then(|error| {
+                        error.strip_suffix(". Start the local o8 server, then Retry.")
+                    })
+                    .is_some_and(crate::client::transient);
+                let runtime = s.features.get::<Runtime>();
+                runtime.retained = runtime.loaded && transient;
                 s.notice = if s.notice.contains("HTTP 401") || s.notice.contains("HTTP 403") {
                     if s.client
                         .request("GET", &s.client.url("/").unwrap())
@@ -204,7 +229,8 @@ impl ShellExtension for Connection {
                 .into();
             }
         }
-        if !s.connected && !management(s) {
+        let usable = usable(s);
+        if !usable && !management(s) {
             if !s.features.get::<Runtime>().hidden {
                 s.capture(window, cx);
                 let restore = window.focused(cx).map(|focus| (key(s), focus));
@@ -212,7 +238,7 @@ impl ShellExtension for Connection {
                 s.features.get::<Runtime>().hidden = true;
             }
             s.focus.focus(window);
-        } else if s.connected && s.features.get::<Runtime>().hidden {
+        } else if usable && s.features.get::<Runtime>().hidden {
             s.features.get::<Runtime>().hidden = false;
             let restore = s.features.get::<Runtime>().restore.take();
             // An overlay opened during the outage owns its current control.
@@ -257,6 +283,8 @@ impl ShellExtension for Connection {
     fn tick(&self, s: &mut Shell, refresh: bool, window: &mut Window, cx: &mut Context<Shell>) {
         self.prepare(s, window, cx);
         if refresh {
+            // A retained window has lost its event stream too, so it keeps
+            // the disconnected cadence until a read succeeds.
             let connected = s.connected;
             let runtime = s.features.get::<Runtime>();
             runtime.idle_ticks += 1;
@@ -274,12 +302,12 @@ impl ShellExtension for Connection {
         })
     }
     fn allow_command(&self, s: &Shell, command: &Command) -> bool {
-        s.connected
+        usable(s)
             || matches!(command, Command::Refresh | Command::Shortcuts)
             || (!matches!(command, Command::Feature(_)) && command.registration().overlay_command)
     }
     fn allow_switch(&self, s: &Shell) -> bool {
-        s.connected
+        usable(s)
     }
     fn key(
         &self,
@@ -288,7 +316,7 @@ impl ShellExtension for Connection {
         _: &mut Window,
         cx: &mut Context<Shell>,
     ) -> KeyResult {
-        if s.connected || management(s) || s.palette || s.shortcuts {
+        if usable(s) || management(s) || s.palette || s.shortcuts {
             return KeyResult::Unhandled;
         }
         let k = &e.keystroke;

@@ -533,11 +533,12 @@ impl ThreadList {
                             cx.emit(Event::Selected(id));
                         }
                     }
-                    // A slow server keeps the last good list, marked stale, and
-                    // retries on the next refresh instead of reporting it down.
+                    // Keep the last good list, but finish the shell's connection
+                    // check even when the list can retain its stale data.
                     Err(error) if !this.sessions.is_empty() && crate::client::transient(&error) => {
                         this.notice = crate::client::stale_notice(&error);
                         this.dirty.get_or_insert_with(Instant::now);
+                        cx.emit(Event::Error(error));
                     }
                     Err(error) => {
                         this.notice = error.clone();
