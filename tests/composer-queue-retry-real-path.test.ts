@@ -104,7 +104,9 @@ it('retries a lost API receipt after renderer and database restart without creat
   expect(dispatch).not.toHaveBeenCalled();
   expect(posts).toHaveLength(2);
   expect(posts[1]).toEqual(original);
-  expect(queue.readComposerSend(original.id)).toMatchObject({ status: 'applied', payload: original.payload, threadId, repoPath: repo });
+  // #5022 compacts a delivered send: routing stays, the message text and screenshot bytes are dropped.
+  expect(queue.readComposerSend(original.id)).toMatchObject({ status: 'applied',
+    payload: { ...original.payload, text: '', wireMessage: '', images: [] }, threadId, repoPath: repo });
   expect(getSqlite().prepare('SELECT COUNT(*) AS count FROM composer_send_queue').get()).toEqual({ count: 1 });
   expect(host.querySelector('textarea')!.value).toBe('');
   expect(host.querySelector('[role="alert"]')).toBeNull();
