@@ -154,6 +154,64 @@ pub(crate) fn picker_inventory(defaults: &Value) -> Option<Vec<Value>> {
     Some(items)
 }
 
+/// Leads a new thread can fall back to, with the model each starts on.
+/// Other runtimes pick their model from a live catalog, so they are not
+/// chosen for the user.
+const FALLBACK_LEADS: [(&str, &str, &str); 2] = [
+    ("claude-code", "claude", "claude-opus-5-5"),
+    ("codex", "codex", "gpt-6.1-sol"),
+];
+
+/// The lead a new thread starts on.
+#[derive(Debug, PartialEq)]
+pub(crate) enum FreshLead {
+    /// The saved lead is usable, or the server did not list runtimes.
+    Saved,
+    /// The saved lead is not available; start on this one instead.
+    Fallback {
+        backend: &'static str,
+        model: &'static str,
+    },
+    /// No coding tool is connected.
+    Unconnected,
+}
+
+/// Keeps the saved orchestrator lead when the server lists its runtime as
+/// available. Otherwise picks the first available lead runtime in the
+/// server's `dispatchableRuntimes` order, and never an unavailable one.
+/// "auto" is read as the server reads it (resolveOrchestratorBackendId).
+pub(crate) fn fresh_lead(defaults: &Value) -> FreshLead {
+    let Some(items) = picker_inventory(defaults) else {
+        return FreshLead::Saved;
+    };
+    let usable = |i: &&Value| i["available"] == true && i["disabled"] != true;
+    let values = &defaults["values"];
+    let saved = match values["orchestratorBackend"].as_str().unwrap_or("auto") {
+        "auto" | "" if values["inAppOrchestratorEnabled"] == true => "claude",
+        "auto" | "" => "codex",
+        backend => backend,
+    };
+    let runtime = match saved {
+        "claude" | "fable" => "claude-code",
+        other => other,
+    };
+    let listed: Vec<&Value> = items.iter().filter(|i| i["id"] == runtime).collect();
+    // A lead the server does not list (the built-in o8 agent) stays as saved.
+    if listed.is_empty() || listed.iter().any(usable) {
+        return FreshLead::Saved;
+    }
+    let available: Vec<&Value> = items.iter().filter(usable).collect();
+    match available
+        .iter()
+        .find_map(|i| FALLBACK_LEADS.iter().find(|(id, ..)| i["id"] == *id))
+    {
+        Some(&(_, backend, model)) => FreshLead::Fallback { backend, model },
+        // Another runtime is connected; leave the choice to the picker.
+        None if !available.is_empty() => FreshLead::Saved,
+        None => FreshLead::Unconnected,
+    }
+}
+
 /// Composer picker: enabled, non-default provider instances as inventory
 /// items (`{"id": "instance:<id>", "instanceOf": runtime, …}`), read on the
 /// settings path. A failed read only hides instances.

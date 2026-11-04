@@ -420,19 +420,28 @@ impl ThreadList {
         let task = cx.background_executor().spawn(async move {
             // Without the lead the server would save its runtime placeholder,
             // and the first send would fail, so an unreadable lead fails here.
+            // The full defaults list which runtimes are connected, so a new
+            // thread never starts on one that is not.
             let defaults: Value = client
-                .get("/api/panel/operator-defaults", &[("include", "values")])
+                .get("/api/panel/operator-defaults", &[])
                 .map_err(|e| e.to_string())?;
             let mut body = json!({
                 "tabId": thread, "messages": [], "repoPath": repo,
                 "repoName": name, "title": "New conversation",
             });
             let lead = &defaults["values"];
-            if let Some(backend) = lead["orchestratorBackend"].as_str().filter(|b| *b != "auto") {
+            use crate::shell::settings::providers::{FreshLead, fresh_lead};
+            let fresh = fresh_lead(&defaults);
+            if let FreshLead::Fallback { backend, model } = fresh {
                 body["backend"] = json!(backend);
-            }
-            if let Some(model) = lead["orchestratorModel"].as_str().filter(|m| !m.is_empty()) {
                 body["model"] = json!(model);
+            } else {
+                if let Some(backend) = lead["orchestratorBackend"].as_str().filter(|b| *b != "auto") {
+                    body["backend"] = json!(backend);
+                }
+                if let Some(model) = lead["orchestratorModel"].as_str().filter(|m| !m.is_empty()) {
+                    body["model"] = json!(model);
+                }
             }
             let url = client
                 .url("/api/v2/chat-history")
@@ -440,14 +449,20 @@ impl ThreadList {
             client
                 .request("POST", &url)
                 .send_json(body)
-                .map(|_| ())
+                .map(|_| fresh == FreshLead::Unconnected)
                 .map_err(|e| e.to_string())
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 match result {
-                    Ok(()) => {
+                    Ok(unconnected) => {
+                        if unconnected {
+                            crate::shell::toasts::info(
+                                "No coding tool is connected. Connect Claude Code or Codex in Settings › Providers before you send.",
+                                cx,
+                            );
+                        }
                         // The shell opens threads from the list it was sent,
                         // so the new thread opens after the next load.
                         if open {
