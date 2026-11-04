@@ -319,20 +319,27 @@ describe('bounded automatic worktree reconciliation', () => {
     expect(Date.now() - started).toBeLessThan(5_000);
   }, 20_000);
 
-  it('recovers an exact collision slot after a terminal lane loses its public path', async () => {
+  // The collision id takes a random four-character suffix, so its metadata key
+  // can sort before or after the original's. Pin each order once.
+  it.each([
+    { order: 'before', random: 0.1 }, // suffix "3lll" sorts below the original's "index" leaf
+    { order: 'after', random: 0.9 }, // suffix "wwww" sorts above it
+  ])('recovers an exact collision slot after a terminal lane loses its public path (collision sorts $order)', async ({ order, random }) => {
     const source = await fixture();
     const second = createLane({ repoPath: source.repoPath, runtime: 'codex', branch: 'inline/collision',
-      packetId: source.session.packetId, sessionKey: 'codex-owned:collision-new' });
+      packetId: source.session.packetId, sessionKey: `codex-owned:collision-new-${order}` });
     const admission = createPacketStorageAdmissionCoordinator();
     const lease = await admission.reserveForLaunch({ id: source.session.packetId!,
       workspaceTargetPath: source.repoPath, storageAdmissionEpoch: 2, launchAttempts: 0 } as OrchestratorPacket);
+    const pinned = vi.spyOn(Math, 'random').mockReturnValue(random);
     const collision = await source.manager.create({ agentType: 'codex', taskName: 'collision',
       packetId: source.session.packetId, laneId: second.id, branchName: second.branch,
       storageAdmissionReservationId: lease.reservation.reservationId,
-      baseBranch: 'main', managed: true, isolationPreference: 'git-worktree', skipSetup: true });
+      baseBranch: 'main', managed: true, isolationPreference: 'git-worktree', skipSetup: true })
+      .finally(() => pinned.mockRestore());
     await admission.commitAfterLaunch(lease);
     expect(collision.path).not.toBe(source.workspace.path);
-    const sessionDir = path.join(process.env.CORTEX_IDE_OWNED_CODEX_ROOT!, 'collision-new');
+    const sessionDir = path.join(process.env.CORTEX_IDE_OWNED_CODEX_ROOT!, `collision-new-${order}`);
     mkdirSync(sessionDir);
     const session = { ...source.session, surfaceId: second.sessionKey!, sessionDir, cwd: collision.path,
       repoPath: collision.path, workspaceBinding: { ...source.session.workspaceBinding!, cwd: collision.path } };
@@ -344,8 +351,12 @@ describe('bounded automatic worktree reconciliation', () => {
     getSqlite().prepare("UPDATE lanes SET status = 'idle' WHERE id = ?").run(source.laneId);
     getSqlite().prepare("UPDATE lanes SET status = 'archived', worktree_path = NULL WHERE id = ?").run(second.id);
     expect(coldRead('status').schema).toBe('o8/worktree-maintenance/v1');
-    // The collision suffix sorts before the original leaf's index-exclusion suffix.
-    const cursor = { after: `${source.metadataRoot}\0`, upper: `${source.metadataRoot}\0${collision.id}` };
+    // Bound the metadata cursor so the collision is the next candidate in either
+    // order: start after the original when it sorts first, otherwise at the root.
+    const originalKey = `${source.metadataRoot}\0${source.workspace.id}`;
+    const collisionKey = `${source.metadataRoot}\0${collision.id}`;
+    expect(collisionKey < originalKey).toBe(order === 'before');
+    const cursor = { after: originalKey < collisionKey ? originalKey : `${source.metadataRoot}\0`, upper: collisionKey };
     writeFileSync(path.join(sessionDir, 'session.json'), JSON.stringify({ ...session,
       workspaceBinding: { ...session.workspaceBinding, cwd: source.workspace.path, version: 2 } }));
     writeMaintenanceState('next-phase', 3);
