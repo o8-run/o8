@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { build } from 'esbuild';
+import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 import { NextRequest } from 'next/server';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { LaunchOptions } from '@/lib/runtimes/types';
@@ -138,7 +139,7 @@ describe('reviewer PR checkout through delegate dispatch', () => {
       method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
       body: JSON.stringify({ expectedHeadSha: f.head, checks: ['1'], clientMutationId: 'selected-repair' }),
     }), { params: Promise.resolve({ number: '7' }) });
-    expect(response.status).toBe(200);
+    expect(response.status, await response.clone().text()).toBe(200);
     const prepared = await response.json();
     expect(prepared.delegation.prompt).toContain('fixture failing assertion');
     expect(prepared.delegation.prompt).toContain('Source repository: fixture/fork');
@@ -280,7 +281,7 @@ describe('reviewer PR checkout through delegate dispatch', () => {
     expect(existsSync(join(f.repo, 'pr-only.test.cjs'))).toBe(false);
 
     const bundle = join(artifacts, 'o8.mjs');
-    await build({ entryPoints: ['cli/src/index.ts'], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22', external: ['better-sqlite3'],
+    await build({ alias: cliBundleAlias, entryPoints: ['cli/src/index.ts'], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22', external: ['better-sqlite3'],
       define: { __O8_CLI_VERSION__: JSON.stringify('test') }, banner: { js: `import { createRequire as __fixtureRequire } from 'node:module';
 import { fileURLToPath as __fixtureFileURLToPath } from 'node:url';
 import { dirname as __fixtureDirname } from 'node:path';
