@@ -1,11 +1,11 @@
 /**
  * Cheap, file-only git context for sidebar rows: owner/repo from the repo's
- * `origin` (or first) remote and the worktree's current branch. Reads .git
+ * `origin` (or first) remote, current branch and linked checkout identity. Reads .git
  * files directly (no git subprocess) and caches briefly per path, so listing
  * many threads stays fast. Folder-only repos fall back to the folder name.
  */
 import { readFileSync, statSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 export interface ThreadGitContext {
   /** `owner/repo` when a remote is parseable, else the folder name. */
@@ -14,6 +14,10 @@ export interface ThreadGitContext {
   repoSlugFromRemote: boolean;
   /** Current branch of the worktree; null when detached or not a git repo. */
   branch: string | null;
+  /** The cwd belongs to a linked checkout, independently of its branch. */
+  isWorktree: boolean;
+  /** Linked checkout root, including when the cwd is a subdirectory. */
+  worktreePath: string | null;
 }
 
 const TTL_MS = 10_000;
@@ -23,19 +27,21 @@ function read(path: string): string | null {
   try { return readFileSync(path, 'utf-8'); } catch { return null; }
 }
 
-function findGitDir(start: string): { gitDir: string; commonDir: string } | null {
+function findGitDir(start: string): { gitDir: string; commonDir: string; root: string } | null {
   let dir = resolve(start);
+  // A deleted cwd must not inherit the checkout of its nearest existing parent.
+  try { if (!statSync(dir).isDirectory()) return null; } catch { return null; }
   for (;;) {
     const dotGit = join(dir, '.git');
     let stat;
     try { stat = statSync(dotGit); } catch { stat = null; }
-    if (stat?.isDirectory()) return { gitDir: dotGit, commonDir: dotGit };
+    if (stat?.isDirectory()) return { gitDir: dotGit, commonDir: dotGit, root: dir };
     if (stat?.isFile()) {
       const pointer = read(dotGit)?.match(/^gitdir:\s*(.+)\s*$/m)?.[1];
       if (!pointer) return null;
-      const gitDir = isAbsolute(pointer) ? pointer : resolve(dir, pointer);
+      const gitDir = resolve(dir, pointer);
       const common = read(join(gitDir, 'commondir'))?.trim();
-      return { gitDir, commonDir: common ? resolve(gitDir, common) : gitDir };
+      return { gitDir, commonDir: common ? resolve(gitDir, common) : gitDir, root: dir };
     }
     const parent = dirname(dir);
     if (parent === dir) return null;
@@ -65,17 +71,19 @@ function remoteUrl(config: string): string | null {
 }
 
 export function threadGitContext(repoPath: string | null | undefined, now = Date.now()): ThreadGitContext {
-  if (!repoPath) return { repoSlug: null, repoSlugFromRemote: false, branch: null };
+  if (!repoPath) return { repoSlug: null, repoSlugFromRemote: false, branch: null, isWorktree: false, worktreePath: null };
   const hit = cache.get(repoPath);
   if (hit && now - hit.at < TTL_MS) return hit.value;
   const folder = basename(resolve(repoPath)) || null;
   const dirs = findGitDir(repoPath);
-  let value: ThreadGitContext = { repoSlug: folder, repoSlugFromRemote: false, branch: null };
+  let value: ThreadGitContext = { repoSlug: folder, repoSlugFromRemote: false, branch: null, isWorktree: false, worktreePath: null };
   if (dirs) {
     const head = read(join(dirs.gitDir, 'HEAD'))?.match(/^ref:\s*refs\/heads\/(.+?)\s*$/m)?.[1] ?? null;
     const url = remoteUrl(read(join(dirs.commonDir, 'config')) ?? '');
     const slug = url ? remoteSlug(url) : null;
-    value = { repoSlug: slug ?? folder, repoSlugFromRemote: slug != null, branch: head };
+    const isWorktree = dirs.gitDir !== dirs.commonDir;
+    value = { repoSlug: slug ?? folder, repoSlugFromRemote: slug != null, branch: head,
+      isWorktree, worktreePath: isWorktree ? dirs.root : null };
   }
   cache.set(repoPath, { at: now, value });
   return value;

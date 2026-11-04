@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -287,5 +288,27 @@ describe('mobile first orchestrator conversation', () => {
     expect(listMobileOrchestratorThreads()).not.toContainEqual(expect.objectContaining({
       id: 'thoughts-desktop-unknown-project',
     }));
+  });
+});
+
+it.each(['linked', 'main', 'missing'] as const)('lists the actual %s checkout worktree flag', async kind => {
+  const root = mkdtempSync(join(testRoot, 'checkout-'));
+  const main = join(root, 'main');
+  const linked = join(root, 'linked');
+  mkdirSync(main);
+  const git = (args: string[]) => execFileSync('git', ['-C', main, ...args], { stdio: 'pipe' });
+  git(['init', '-b', 'topic']);
+  git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'fixture']);
+  git(['worktree', 'add', '-b', 'main', linked]);
+  mkdirSync(join(linked, 'sub'));
+  const repoPath = kind === 'linked' ? join(linked, 'sub') : kind === 'main' ? main : join(linked, 'missing');
+  const id = `thoughts-worktree-${kind}`;
+  const { writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+  writePersistedLlmChat(id, { messages: [], repoPath, title: kind });
+  const response = await threadRoute.GET(new NextRequest('http://localhost/api/mobile/orchestrator/threads'));
+  expect(response.status).toBe(200);
+  const { threads } = await response.json();
+  expect(threads.find((thread: { id: string }) => thread.id === id)).toMatchObject({
+    isWorktree: kind === 'linked', worktreePath: kind === 'linked' ? linked : null,
   });
 });

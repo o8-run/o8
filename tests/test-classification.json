@@ -4630,6 +4630,13 @@
       ]
     },
     {
+      "path": "tests/mobile-first-orchestrator-thread.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/mobile-inbox-referee-chips-real-path.test.ts",
       "reasons": [
         "child-process",
