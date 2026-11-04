@@ -18,7 +18,11 @@ const fixture = await vi.hoisted(async () => {
   return { dir: mkdtempSync(join(tmpdir(), 'o8-completed-tools-')) };
 });
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => fixture.dir, migrateDataDirOnce: () => {} }));
-vi.mock('@/lib/llm/thread-auto-title', () => ({ maybeQueueThreadAutoTitle: () => {} }));
+// Canonical history writes ask the real decideAutoTitle whether to title; only the queued model call is stubbed.
+vi.mock('@/lib/llm/thread-auto-title', async original => ({
+  ...await original<typeof import('@/lib/llm/thread-auto-title')>(),
+  maybeQueueThreadAutoTitle: () => {},
+}));
 vi.mock('@/lib/operator/defaults', async original => ({
   ...await original<typeof import('@/lib/operator/defaults')>(),
   resolveInAppOrchestratorEnabledSync: () => true,

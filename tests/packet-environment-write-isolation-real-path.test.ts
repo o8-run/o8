@@ -28,7 +28,8 @@ vi.stubEnv('O8_QODER_BIN', binary);
 vi.stubEnv('O8_SKIP_PRELAUNCH_TYPECHECK', '1');
 vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', '1');
 vi.stubEnv('O8_WORKER_SANDBOX', '0');
-vi.stubEnv('O8_PACKAGED_APP', '0');
+// Source mode: only O8_PACKAGED_APP=1 marks a packaged app, and the worker CLI (#4800) treats any value as packaged.
+vi.stubEnv('O8_PACKAGED_APP', undefined);
 writeFileSync(binary, String.raw`#!/usr/bin/env node
 const fs = require('node:fs');
 if (process.argv.includes('--version')) { console.log('qodercli 1.0.0'); process.exit(0); }
