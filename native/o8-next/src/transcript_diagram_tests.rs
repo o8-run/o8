@@ -705,3 +705,292 @@ fn mermaid_pie_text_contrasts_with_its_slice() {
     );
     assert!(inside.iter().any(|l| l.text == "45%"));
 }
+
+#[test]
+fn mermaid_parses_and_lays_out_er_diagrams() {
+    let source = "erDiagram\nCUSTOMER ||--o{ ORDER : places\nORDER ||--|{ LINE-ITEM : contains\nCUSTOMER }|..|{ DELIVERY-ADDRESS : \"uses\"\nCUSTOMER |o--o| \"Loyalty Card\" : holds\nCUSTOMER {\n  string name\n  string id PK\n  int address FK, UK \"where it ships\"\n}\nORDER {\n}";
+    let Diagram::Flow { lr, nodes, edges } = parse(source).unwrap() else {
+        panic!("er")
+    };
+    assert!(!lr);
+    let find = |id: &str| nodes.iter().position(|n| n.id == id).unwrap();
+    assert_eq!(nodes.len(), 5);
+    assert_eq!(nodes[find("Loyalty Card")].label, "Loyalty Card");
+    assert_eq!(
+        nodes[find("CUSTOMER")].sections,
+        vec![vec![
+            "string name".to_owned(),
+            "string id PK".to_owned(),
+            "int address FK, UK".to_owned(),
+        ]]
+    );
+    assert_eq!(nodes[find("ORDER")].sections, vec![Vec::<String>::new()]);
+    assert!(nodes[find("LINE-ITEM")].sections.is_empty());
+    assert_eq!(edges.len(), 4);
+    assert_eq!(edges[0].marks, [Marker::OnlyOne, Marker::ZeroOrMore]);
+    assert_eq!(edges[1].marks, [Marker::OnlyOne, Marker::OneOrMore]);
+    assert_eq!(edges[2].marks, [Marker::OneOrMore, Marker::OneOrMore]);
+    assert_eq!(edges[3].marks, [Marker::ZeroOrOne, Marker::ZeroOrOne]);
+    assert!(edges[2].dashed && !edges[0].dashed);
+    assert!(edges.iter().all(|e| !e.arrow));
+    assert_eq!(edges[2].label, "uses");
+    assert_eq!(edges[0].label, "places");
+    assert!(matches!(
+        parse("erDiagram\ndirection LR\nA ||--|| B : is").unwrap(),
+        Diagram::Flow { lr: true, .. }
+    ));
+    let diagram = parse(source).unwrap();
+    for width in [260., 720.] {
+        let scene = layout(&diagram, width);
+        assert_no_overlaps(&scene, width);
+        assert_eq!(scene.boxes.len(), 5);
+        assert_eq!(scene.strokes.len(), 4);
+        // Two entities have attribute blocks, each under one rule.
+        assert_eq!(scene.rules.len(), 2);
+        assert!(
+            scene
+                .strokes
+                .iter()
+                .any(|s| s.marks == [Marker::OnlyOne, Marker::ZeroOrMore])
+        );
+    }
+}
+
+#[test]
+fn mermaid_parses_and_lays_out_git_graphs() {
+    let source = "gitGraph\ncommit\ncommit id: \"base\" tag: \"v0.1\"\nbranch develop\ncheckout develop\ncommit\ncommit type: HIGHLIGHT\ncheckout main\nmerge develop\nbranch hotfix order: 2\ncommit id: \"fix\"\ncheckout develop\ncherry-pick id: \"fix\"\ncheckout main\nmerge hotfix tag: \"v0.2\"";
+    let Diagram::Git { branches, commits } = parse(source).unwrap() else {
+        panic!("git")
+    };
+    assert_eq!(branches, ["main", "develop", "hotfix"]);
+    assert_eq!(commits.len(), 8);
+    assert_eq!(commits[0].id, "0-9e3779b");
+    assert!(commits[0].parents.is_empty());
+    assert_eq!(commits[1].id, "base");
+    assert_eq!(commits[1].tag, "v0.1");
+    assert_eq!(commits[2].branch, 1);
+    assert_eq!(commits[2].parents, [1]);
+    let merge = &commits[4];
+    assert_eq!((merge.branch, merge.parents.clone()), (0, vec![1, 3]));
+    assert!(!merge.shown, "a merge without a custom id hides its id");
+    assert_eq!((commits[5].id.as_str(), commits[5].branch), ("fix", 2));
+    assert_eq!(commits[5].parents, [4]);
+    assert_eq!(commits[6].tag, "cherry-pick:fix");
+    assert_eq!(commits[6].parents, [3, 5]);
+    assert_eq!(commits[7].parents, [4, 5]);
+    let scene = layout(&parse(source).unwrap(), 720.);
+    assert_eq!(scene.wedges.len(), 8);
+    assert_eq!(
+        scene.strokes.len(),
+        commits.iter().map(|c| c.parents.len()).sum::<usize>()
+    );
+    assert!(scene.width <= 720.01);
+    // Each lane keeps its own row and the dots never touch.
+    for (i, a) in scene.wedges.iter().enumerate() {
+        for b in &scene.wedges[i + 1..] {
+            assert!((a.cx - b.cx).hypot(a.cy - b.cy) >= a.r + b.r);
+        }
+    }
+    let lanes: BTreeSet<u32> = scene.wedges.iter().map(|w| w.cy.to_bits()).collect();
+    assert_eq!(lanes.len(), 3);
+}
+
+#[test]
+fn mermaid_parses_and_lays_out_gantt_charts() {
+    let source = "gantt\ntitle Demo day\ndateFormat YYYY-MM-DD\naxisFormat %m-%d\nsection Build\nDesign :done, a1, 2026-11-02, 3d\nCode :a2, after a1, 1w\nTest :2d\nsection Ship\nReview :crit, r1, 2026-11-16, 2026-11-18\nPrep :2026-11-13, until r1\nDemo :milestone, 2026-11-18, 0d";
+    let Diagram::Gantt(chart) = parse(source).unwrap() else {
+        panic!("gantt")
+    };
+    assert_eq!(chart.title, "Demo day");
+    assert_eq!(chart.sections, ["Build", "Ship"]);
+    assert_eq!(chart.tasks.len(), 6);
+    let day = |date: &str| {
+        let Diagram::Gantt(c) = parse(&format!("gantt\nT :{date}, 1d")).unwrap() else {
+            unreachable!()
+        };
+        c.tasks[0].start
+    };
+    assert_eq!(day("1970-01-02"), 1.);
+    assert_eq!(
+        day("2000-03-01") - day("2000-02-28"),
+        2.,
+        "2000 is a leap year"
+    );
+    let span = |i: usize| (chart.tasks[i].start, chart.tasks[i].end);
+    assert_eq!(chart.tasks[0].id, "a1");
+    assert_eq!(span(0), (day("2026-11-02"), day("2026-11-05")));
+    assert_eq!(span(1), (day("2026-11-05"), day("2026-11-12")));
+    assert_eq!(span(2), (day("2026-11-12"), day("2026-11-14")));
+    assert_eq!(span(3), (day("2026-11-16"), day("2026-11-18")));
+    assert!(chart.tasks[3].crit && chart.tasks[3].section == 1);
+    assert_eq!(span(4), (day("2026-11-13"), day("2026-11-16")));
+    assert!(chart.tasks[5].milestone);
+    assert_eq!(span(5), (day("2026-11-18"), day("2026-11-18")));
+    let diagram = parse(source).unwrap();
+    for width in [260., 720.] {
+        let scene = layout(&diagram, width);
+        assert!(scene.width <= width + 0.01);
+        // Five bars and a milestone diamond, one row each.
+        assert_eq!(scene.swatches.len(), 5);
+        assert_eq!(scene.shapes, [Shape::Diamond]);
+        let mut rows: Vec<f32> = scene
+            .swatches
+            .iter()
+            .map(|(r, _)| r.y)
+            .chain(scene.boxes.iter().map(|r| r.y + r.h / 2.))
+            .collect();
+        rows.sort_by(f32::total_cmp);
+        assert!(rows.windows(2).all(|w| w[1] - w[0] > 10. * scene.scale));
+        // Bars keep their dates' order along the axis.
+        let x: Vec<f32> = scene.swatches.iter().map(|(r, _)| r.x).collect();
+        assert!(x[0] < x[1] && x[1] < x[2] && x[4] < x[3]);
+        assert_eq!(scene.swatches[3].1, 6, "a critical task is drawn in danger");
+        assert!(scene.labels.iter().any(|l| l.text == "2026-11-02"));
+        assert!(scene.labels.iter().any(|l| l.text == "Ship" && l.left));
+    }
+}
+
+#[test]
+fn mermaid_parses_and_lays_out_mindmaps() {
+    let source = "mindmap\n  root((o8))\n    Native\n      GPUI\n      ::icon(fa fa-book)\n      Mermaid\n    web[Web]\n      React\n    {{Docs}}\n    )Ideas(";
+    let Diagram::Mindmap { nodes, parents } = parse(source).unwrap() else {
+        panic!("mindmap")
+    };
+    let labels: Vec<&str> = nodes.iter().map(|n| n.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "o8", "Native", "GPUI", "Mermaid", "Web", "React", "Docs", "Ideas"
+        ]
+    );
+    assert_eq!(
+        parents,
+        [
+            None,
+            Some(0),
+            Some(1),
+            Some(1),
+            Some(0),
+            Some(4),
+            Some(0),
+            Some(0)
+        ]
+    );
+    assert_eq!(nodes[0].shape, Shape::Circle);
+    assert_eq!(nodes[4].shape, Shape::Rect);
+    assert_eq!(nodes[4].id, "web");
+    assert_eq!(nodes[6].shape, Shape::Hexagon);
+    assert_eq!(nodes[1].shape, Shape::Round);
+    let plain = parse("mindmap\nRoot\n  Child").unwrap();
+    assert!(matches!(&plain, Diagram::Mindmap { nodes, .. } if nodes[0].shape == Shape::Stadium));
+    let diagram = parse(source).unwrap();
+    for width in [260., 720.] {
+        let scene = layout(&diagram, width);
+        assert_no_overlaps(&scene, width);
+        assert_eq!(scene.boxes.len(), 8);
+        assert_eq!(scene.strokes.len(), 7);
+        // The first half of the branches go right of the root, the rest left.
+        let root = scene.boxes[0];
+        let (right, left) = (scene.boxes[1], scene.boxes[6]);
+        assert!(right.x >= root.x + root.w && left.x + left.w <= root.x);
+        assert_eq!(scene.strokes[0].color, Some(0));
+        assert_eq!(scene.strokes[1].color, Some(0), "a branch keeps its color");
+        assert_eq!(scene.strokes[3].color, Some(1));
+    }
+}
+
+#[test]
+fn mermaid_remaining_types_fall_back_on_garbage_and_limits() {
+    for source in [
+        "erDiagram\nA ||--o{ ",
+        "erDiagram\nA <-> B",
+        "erDiagram\nA {\nstring",
+        "erDiagram\nA {\nstring name ZK\n}",
+        "erDiagram\nA only one to zero or more B : x",
+        "gitGraph\ncheckout nowhere",
+        "gitGraph\ncommit\nbranch main",
+        "gitGraph\ncommit\nmerge main",
+        "gitGraph\ncommit\nbranch dev\nmerge main",
+        "gitGraph\ncommit id: \"a\"\ncommit id: \"a\"",
+        "gitGraph\ncommit\ncherry-pick id: \"nope\"",
+        "gitGraph TB:\ncommit",
+        "gitGraph\nrebase",
+        "gantt\nTask : 3d",
+        "gantt\ndateFormat DD-MM-YYYY\nTask : 01-02-2026, 3d",
+        "gantt\nexcludes weekends\nTask : 2026-01-01, 3d",
+        "gantt\nTask : 2026-02-30, 3d",
+        "gantt\nTask : 2026-01-05, 2026-01-01",
+        "gantt\nTask : after nothing, 3d",
+        "gantt\nTask : 2026-01-01, 3 days",
+        "gantt\nsection Only",
+        "mindmap\n  a\n  b",
+        "mindmap",
+    ] {
+        assert_eq!(
+            parse(source).unwrap_err(),
+            ParseError::Unsupported,
+            "{source}"
+        );
+        let node = crate::text::markdown(&format!("```mermaid\n{source}\n```")).remove(0);
+        assert!(for_node(&node).is_none(), "{source}");
+    }
+    let many = |header: &str, line: &dyn Fn(usize) -> String| {
+        let body: Vec<String> = (0..201).map(line).collect();
+        parse(&format!("{header}\n{}", body.join("\n"))).unwrap_err()
+    };
+    assert_eq!(
+        many("erDiagram", &|i| format!("E{i} ||--|| E{}", i + 1)),
+        ParseError::Limit
+    );
+    assert_eq!(many("gitGraph", &|_| "commit".into()), ParseError::Limit);
+    assert_eq!(
+        many("gantt", &|i| format!("T{i} : 2026-01-01, 1d")),
+        ParseError::Limit
+    );
+    assert_eq!(
+        many("mindmap\nroot", &|i| format!("  N{i}")),
+        ParseError::Limit
+    );
+}
+
+#[test]
+fn mermaid_long_gantt_names_and_tall_mindmap_parents_stay_inside() {
+    let gantt = parse(&format!(
+        "gantt\nT1 : 2026-01-01, 30d\n{} :2026-01-15, 2d\nDone :milestone, 2026-01-31, 0d",
+        "A task name that is fairly long to read ".repeat(4).trim()
+    ))
+    .unwrap();
+    for width in [260., 500., 720.] {
+        let scene = layout(&gantt, width);
+        let bars: Vec<BoxRect> = scene.swatches.iter().map(|(r, _)| *r).collect();
+        for label in &scene.labels {
+            let r = label.rect;
+            assert!(
+                r.x >= -0.01 && r.x + r.w <= width + 0.01,
+                "{width}: {r:?} leaves the chart"
+            );
+            if label.on_fill.is_none() {
+                for bar in &bars {
+                    let beside = r.x + r.w <= bar.x + 0.01 || bar.x + bar.w <= r.x + 0.01;
+                    let other_row = r.y + r.h <= bar.y + 0.01 || bar.y + bar.h <= r.y + 0.01;
+                    assert!(beside || other_row, "{width}: {r:?} covers {bar:?}");
+                }
+            }
+        }
+    }
+    let mindmap = parse(
+        "mindmap\n  root\n    first\n      leaf\n    a((a fairly long circle label))\n      leaf\n    after",
+    )
+    .unwrap();
+    for width in [260., 720.] {
+        let scene = layout(&mindmap, width);
+        assert_no_overlaps(&scene, width);
+        assert!(
+            scene
+                .boxes
+                .iter()
+                .all(|b| b.y >= -0.01 && b.y + b.h <= scene.height + 0.01),
+            "every node sits inside the card"
+        );
+    }
+}
