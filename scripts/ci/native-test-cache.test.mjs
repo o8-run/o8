@@ -115,3 +115,61 @@ test('an oversized target falls back to dependency outputs within the cache budg
   assert.ok(Number(result['registration-bytes']) >= 5 * 1024 ** 3);
   assert.equal(statSync(registration).size, 5 * 1024 ** 3);
 });
+
+test('the source manifest counts against the 4 GiB snapshot budget', () => {
+  const padding = join(cargo, 'registry/cache/padding');
+  write(padding, '');
+  const measured = run('measure');
+  const bytes = [target, join(cargo, 'registry')].reduce((total, directory) => {
+    const result = spawnSync('du', ['-sb', directory], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return total + Number(result.stdout.split(/\s/)[0]);
+  }, -Number(measured['registration-bytes']));
+  const manifestBytes = statSync(join(target, '.o8-native-sources.json')).size;
+  // Leave eight bytes before writing the source manifest. A sparse registry
+  // entry exercises the real measurement command without a large allocation.
+  truncateSync(padding, 4 * 1024 ** 3 - bytes + manifestBytes - 8);
+  try {
+    const result = run('measure');
+    console.log(`[native-cache-proof] manifest=${manifestBytes} budget=${4 * 1024 ** 3} cacheable=${result.cacheable}`);
+    assert.equal(result.cacheable, 'false');
+  } finally { rmSync(padding); }
+});
+
+test('a source-matched checkout reuses the real Cargo test executable', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'o8-native-warm-'));
+  const fixtureCrate = join(fixture, 'native/o8-next');
+  const fixtureTarget = join(fixtureCrate, 'target');
+  const env = { ...process.env, CARGO_HOME: cargo, CARGO_TARGET_DIR: fixtureTarget,
+    CARGO_INCREMENTAL: '0', CARGO_PROFILE_DEV_DEBUG: '0', O8_NATIVE_CACHE_HIT: 'true' };
+  function execute(command, args) {
+    const result = spawnSync(command, args, { cwd: fixture, env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    return result.stdout;
+  }
+  try {
+    write(join(fixtureCrate, 'Cargo.toml'), '[package]\nname = "o8-next"\nversion = "0.0.0"\nedition = "2021"\n[workspace]\n[profile.dev]\nopt-level = 1\n');
+    const source = join(fixtureCrate, 'src/lib.rs');
+    write(source, '#[test] fn smoke() { assert_eq!(2 + 2, 4); }\n');
+    const args = ['test', '--locked', '--manifest-path', 'native/o8-next/Cargo.toml', '--no-run', '--message-format=json'];
+    execute('cargo', ['generate-lockfile', '--offline', '--manifest-path', 'native/o8-next/Cargo.toml']);
+    execute('git', ['init', '-q']);
+    execute('git', ['add', 'native/o8-next/Cargo.toml', 'native/o8-next/Cargo.lock', 'native/o8-next/src/lib.rs']);
+    const artifact = output => output.split('\n').filter(Boolean).map(line => JSON.parse(line))
+      .find(entry => entry.reason === 'compiler-artifact' && entry.profile.test);
+    assert.equal(artifact(execute('cargo', args)).fresh, false);
+    const key = execute(process.execPath, [script, 'key']);
+    const measured = execute(process.execPath, [script, 'measure']);
+    assert.match(measured, /cacheable=true/);
+    // Model a fresh checkout restoring the same cached target directory.
+    const stamp = new Date(Date.now() + 60_000);
+    utimesSync(source, stamp, stamp);
+    assert.equal(execute(process.execPath, [script, 'key']), key);
+    execute(process.execPath, [script, 'restore']);
+    const started = Date.now();
+    const warm = artifact(execute('cargo', args));
+    assert.equal(warm.fresh, true, 'restored test executable must not be recompiled');
+    assert.match(execute(warm.executable, ['--exact', 'smoke']), /1 passed/);
+    console.log(`[native-cache-proof] warm Cargo+libtest=${Date.now() - started}ms\n${measured}`);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});

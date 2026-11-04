@@ -209,7 +209,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const cachePaths = 'native/o8-next/target\n.o8-next-cargo/registry\n.o8-next-cargo/git\n';
   const registrationPath = 'native/o8-next/target/pull-request-registration-target';
   const registrationSaveCondition = "steps.native.outputs.changed == 'true' && github.ref == 'refs/heads/main' && matrix.shard == 1 && steps.native-setup.outputs.registration-cache-hit != 'true'";
-  const saveCondition = "steps.native.outputs.changed == 'true' && github.ref == 'refs/heads/main' && matrix.shard == 8 && steps.native-setup.outputs.native-cache-hit != 'true' && steps.native-cache-size.outputs.cacheable == 'true'";
+  const saveCondition = "steps.native.outputs.changed == 'true' && !(github.ref != 'refs/heads/main' && github.event_name != 'pull_request') && matrix.shard == 8 && steps.native-setup.outputs.native-cache-hit != 'true' && steps.native-cache-size.outputs.cacheable == 'true'";
   requireCondition(isDeepStrictEqual(native.steps[6], {
     uses: 'actions/upload-artifact@v4', if: 'always()',
     with: { name: 'native-timings-${{ matrix.shard }}', path: 'test-results/native-timings-${{ matrix.shard }}.json' },
