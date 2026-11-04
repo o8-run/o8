@@ -18,6 +18,7 @@ const originalDataDir = process.env.CORTEX_IDE_DATA_DIR;
 const originalCodexBin = process.env.O8_CODEX_BIN;
 const originalCrashSurvival = process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR;
 const originalArgsPath = process.env.O8_TEST_CODEX_ARGS_PATH;
+const originalAllow = process.env.O8_WORKER_ENV_ALLOW;
 
 mkdirSync(userCodexHome, { recursive: true });
 mkdirSync(repoPath, { recursive: true });
@@ -50,6 +51,8 @@ afterAll(() => {
   else process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = originalCrashSurvival;
   if (originalArgsPath === undefined) delete process.env.O8_TEST_CODEX_ARGS_PATH;
   else process.env.O8_TEST_CODEX_ARGS_PATH = originalArgsPath;
+  if (originalAllow === undefined) delete process.env.O8_WORKER_ENV_ALLOW;
+  else process.env.O8_WORKER_ENV_ALLOW = originalAllow;
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -303,6 +306,8 @@ describe('Codex orchestrator home model config', () => {
     chmodSync(codexBin, 0o700);
     process.env.O8_CODEX_BIN = codexBin;
     process.env.O8_TEST_CODEX_ARGS_PATH = argsPath;
+    // Children inherit only allowlisted names (#4585); pass the fake codex its args path.
+    process.env.O8_WORKER_ENV_ALLOW = 'O8_TEST_CODEX_ARGS_PATH';
     const events: OrchestratorEvent[] = [];
     const session = ensureCodexOrchestratorSession(process.cwd(), 'thoughts-astra-fallback');
 

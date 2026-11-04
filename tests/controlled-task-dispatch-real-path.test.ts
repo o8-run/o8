@@ -32,6 +32,12 @@ vi.mock('node:fs', async (original) => {
   return { ...actual, fsyncSync: sync };
 });
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: ready }));
+// #4899 admits a Codex effort only with the launching account's model/list evidence; the fixture
+// advertises its model's effort instead of running the real codex app-server.
+vi.mock('@/lib/codex/service-tier-catalogue', async (original) => ({
+  ...await original<typeof import('@/lib/codex/service-tier-catalogue')>(),
+  getCodexSpeedCatalogue: async () => ({ models: { 'gpt-6.1-sol': [] }, reasoningEfforts: { 'gpt-6.1-sol': ['high'] } }),
+}));
 vi.mock('@/lib/runtimes/shared/owned-session/sandbox', async (original) => ({
   ...await original<typeof import('@/lib/runtimes/shared/owned-session/sandbox')>(),
   prepareWorkerSandbox: async (input: { binary: string; args: string[]; finalDenyPaths?: string[]; readOwnerInstructions?: boolean }) => {

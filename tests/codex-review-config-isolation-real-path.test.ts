@@ -58,6 +58,7 @@ const envKeys = [
   'O8_CODEX_BIN',
   'O8_CRASH_SURVIVABLE_ORCHESTRATOR',
   'O8_TEST_CODEX_HOME_RECEIPT',
+  'O8_WORKER_ENV_ALLOW',
 ] as const;
 for (const key of envKeys) priorEnv.set(key, process.env[key]);
 
@@ -120,6 +121,9 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_CODEX_BIN = fakeCodexBin;
 process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = '1';
 process.env.O8_TEST_CODEX_HOME_RECEIPT = generatedHomeReceipt;
+// Children inherit only allowlisted names (#4585); pass the fake codex its receipt and inspect knobs.
+process.env.O8_WORKER_ENV_ALLOW = ['O8_TEST_CODEX_ARGS_RECEIPT', 'O8_TEST_CODEX_HOME_RECEIPT',
+  'O8_TEST_REVIEW_INSPECT', 'O8_TEST_REVIEW_PACKET', 'O8_TEST_REVIEW_HEAD'].join(',');
 
 const { closeDb } = await import('@/lib/db');
 const { getLaneEvents, createLane } = await import('@/lib/lane/registry');

@@ -14,6 +14,12 @@ import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 
+// #4899 admits a Codex effort only with model/list evidence; the fake codex cannot serve one.
+vi.mock('@/lib/codex/service-tier-catalogue', async (original) => ({
+  ...await original<typeof import('@/lib/codex/service-tier-catalogue')>(),
+  getCodexSpeedCatalogue: async () => ({ models: { 'gpt-6.1-sol': [] }, reasoningEfforts: { 'gpt-6.1-sol': ['medium'] } }),
+}));
+
 const networkFetch = globalThis.fetch;
 // Match addRepo's physical paths even when the temporary root is a symlink
 // (for example /var on macOS), so registration cannot create a second repo id.
@@ -418,6 +424,10 @@ console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, o
       O8_TEST_CONNECTED_WORKER_HELPER: connectedWorkerHelper,
       O8_TEST_SOURCE_ROOT: process.cwd(),
       O8_TEST_TARGET_REPO: repoPath,
+      // Children inherit only allowlisted names (#4585); the fake codex and its connected-worker
+      // helper read these fixture knobs. No provider credential is listed.
+      O8_WORKER_ENV_ALLOW: ['O8_TEST_TURN_PROMPT_FILE', 'O8_TEST_CONTINUATION_CAPTURE', 'O8_TEST_CONNECTED_WORKER_FILE',
+        'O8_TEST_CONNECTED_WORKER_HELPER', 'O8_TEST_SOURCE_ROOT', 'O8_TEST_TARGET_REPO'].join(','),
       O8_DEFAULT_DISPATCH_RUNTIME: 'codex',
       O8_SUBSCRIPTION_PROFILE: 'both',
       O8_SKIP_PRELAUNCH_TYPECHECK: '1',
@@ -589,7 +599,7 @@ describe('orchestrator model attribution through the real WebSocket turn handler
     );
 
     expect(turn.receipt).toEqual({
-      permissionMode: 'full', terminal: { userMessageId: `orch-user-${turn.threadId}-client-message`, outcome: 'completed' },
+      permissionMode: 'full', terminal: { userMessageId: `orch-user-${turn.threadId}-client-message`, outcome: 'completed', completedAt: expect.any(Number) },
       leadModel: 'gpt-5.6-sol',
       effort: 'high',
       mode: 'multitask',
@@ -614,7 +624,7 @@ describe('orchestrator model attribution through the real WebSocket turn handler
     );
 
     expect(turn.receipt).toEqual({
-      permissionMode: 'full', terminal: { userMessageId: `orch-user-${turn.threadId}-client-message`, outcome: 'completed' },
+      permissionMode: 'full', terminal: { userMessageId: `orch-user-${turn.threadId}-client-message`, outcome: 'completed', completedAt: expect.any(Number) },
       leadModel: 'gpt-5.6-sol',
       effort: 'high',
       mode: 'fusion',
@@ -776,7 +786,8 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
     const agentHistory = {repoPath, backend, messages: [turn]};
     writePersistedLlmChat(agentThreadId, agentHistory, {replace: true});
     agentRoute(); expect(origin).toHaveBeenCalledOnce();
-    expect(origin.mock.calls[0][1]).toEqual({threadId: agentThreadId, turnId: 'origin-turn', backend, model, effort: 'medium', mode: 'fleet'});
+    // #4858: o8 and Pi leads carry no independent effort pin, so the origin binds with adaptive effort.
+    expect(origin.mock.calls[0][1]).toEqual({threadId: agentThreadId, turnId: 'origin-turn', backend, model, effort: 'adaptive', mode: 'fleet'});
     origin.mockClear();
     for (const invalid of [
       {...agentHistory, repoPath: seedPath},

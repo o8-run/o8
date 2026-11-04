@@ -6,10 +6,13 @@ import { fetchWorkerBranch } from './remote-fetch';
 
 const tempDirs: string[] = [];
 const originalPath = process.env.PATH;
+const originalAllow = process.env.O8_WORKER_ENV_ALLOW;
 
 afterEach(() => {
   process.env.PATH = originalPath;
   delete process.env.O8_REMOTE_FETCH_ARGV_LOG;
+  if (originalAllow === undefined) delete process.env.O8_WORKER_ENV_ALLOW;
+  else process.env.O8_WORKER_ENV_ALLOW = originalAllow;
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -24,6 +27,8 @@ describe('fetchWorkerBranch option termination', () => {
     writeFileSync(fakeGit, `#!/bin/sh\nprintf '%s\\n' "$*" >> "$O8_REMOTE_FETCH_ARGV_LOG"\nif [ "$1" = "rev-parse" ]; then printf '%s\\n' deadbeef; fi\n`);
     chmodSync(fakeGit, 0o755);
     process.env.O8_REMOTE_FETCH_ARGV_LOG = argvLog;
+    // Children inherit only allowlisted names (#4585); pass the fake git its log path.
+    process.env.O8_WORKER_ENV_ALLOW = 'O8_REMOTE_FETCH_ARGV_LOG';
     process.env.PATH = `${fakeBin}${delimiter}${originalPath ?? ''}`;
 
     const branch = '--upload-pack=attacker-command';

@@ -71,6 +71,15 @@ vi.mock('@/lib/runtimes/shared/auth-detect', async (original) => ({
   ...await original<typeof import('@/lib/runtimes/shared/auth-detect')>(),
   assertRuntimeDispatchable: vi.fn(async () => undefined),
 }));
+// #4899 admits a Codex effort only with model/list evidence from the selected account; the fake
+// codex below cannot answer model/list, so advertise the fixture model's effort here.
+vi.mock('@/lib/codex/service-tier-catalogue', async (original) => {
+  const { MODEL_IDS } = await import('@/lib/models');
+  return { ...await original<typeof import('@/lib/codex/service-tier-catalogue')>(), getCodexSpeedCatalogue: async () => ({
+    models: { [MODEL_IDS.raw.openAiGpt61Sol]: [] },
+    reasoningEfforts: { [MODEL_IDS.raw.openAiGpt61Sol]: ['medium'] },
+  }) };
+});
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: vi.fn(async () => ({ ready: true })) }));
 vi.mock('@/lib/worktree/storage-telemetry', async (original) => ({
   ...await original<typeof import('@/lib/worktree/storage-telemetry')>(),
@@ -99,11 +108,22 @@ for (const [key, value] of Object.entries({ O8_DATA_DIR: dataDir, CORTEX_IDE_DAT
   O8_SKIP_PRELAUNCH_TYPECHECK: '1', O8_APFS_DEPENDENCY_IMAGES: '0', O8_WORKER_SANDBOX: '0',
   O8_CRASH_SURVIVABLE_WORKERS: '0', O8_CODEX_BIN: join(root, 'codex'),
   CORTEX_IDE_OWNED_CODEX_ROOT: join(dataDir, 'owned-codex'), O8_TEST_PROVIDER_CAPTURE: join(root, 'starts.jsonl'),
-  O8_TEST_PROVIDER_FINISH: join(root, 'finish') })) vi.stubEnv(key, value);
+  O8_TEST_PROVIDER_FINISH: join(root, 'finish'),
+  // Children inherit only allowlisted names (#4585); the fake codex and its managed `o8 run` read these knobs.
+  O8_WORKER_ENV_ALLOW: 'O8_TEST_PROVIDER_CAPTURE,O8_TEST_PROVIDER_FINISH,O8_TEST_MANAGED_RUN_CAPTURE,O8_TEST_SOURCE_ROOT,O8_TEST_MANAGED_COMMAND,O8_TEST_LINGER_RELEASE',
+})) vi.stubEnv(key, value);
+// A run process that outlives the stopped leader keeps exit finalization unfinished. It carries the
+// run marker in its own session, outside the leader's group and tree, until the test releases it.
+writeFileSync(join(root, 'linger.cjs'), `const fs = require('node:fs'); const release = process.env.O8_TEST_LINGER_RELEASE;
+fs.writeFileSync(release + '.pid', String(process.pid)); const end = Date.now() + 60000;
+setInterval(() => { if (fs.existsSync(release) || Date.now() > end) process.exit(0); }, 20);`);
+writeFileSync(join(root, 'linger-spawn.cjs'), `require('node:child_process').spawn(process.execPath,
+  [require('node:path').join(__dirname, 'linger.cjs')], { detached: true, stdio: 'ignore' }).unref();`);
 writeFileSync(join(root, 'codex'), `#!/usr/bin/env node
 const fs = require('node:fs');
 if (process.argv.includes('--version')) { console.log('codex-cli 1.0.0'); process.exit(0); }
 fs.appendFileSync(process.env.O8_TEST_PROVIDER_CAPTURE, JSON.stringify({pid: process.pid, argv: process.argv.slice(2)}) + String.fromCharCode(10));
+if (process.env.O8_TEST_LINGER_RELEASE) require('node:child_process').spawnSync(process.execPath, [require('node:path').join(__dirname, 'linger-spawn.cjs')]);
 console.log(JSON.stringify({type: 'thread.started', thread_id: 'fixture-thread-' + process.pid}));
 function runManaged() {
  if (!process.env.O8_TEST_MANAGED_RUN_CAPTURE) return;
@@ -461,7 +481,13 @@ it('stops and salvages the exact registered owner after another mission becomes 
 
 it('preserves registered work when Retry races exit finalization, then salvages on a fresh explicit retry', async () => {
   const startsBefore = starts();
+  // #4755 proves a run absent once its leader, group and marker are gone, even if its exit record
+  // lands just before the session lock, so a run process keeps finalization open until released.
+  const linger = join(root, 'linger-release');
+  vi.stubEnv('O8_TEST_LINGER_RELEASE', linger);
   const f = await dispatched('registered-exit-finalization-retry', true, true);
+  vi.stubEnv('O8_TEST_LINGER_RELEASE', '');
+  await observe(() => expect(existsSync(`${linger}.pid`)).toBe(true));
   const savedWork = readFileSync(join(f.owned.cwd, 'worker-result.txt'), 'utf8');
   vi.useFakeTimers({ toFake: ['Date'] });
   payload(await create({ issues_inline: [{ title: 'Unrelated current mission', body: 'Preserve this state.' }] }));
@@ -490,6 +516,8 @@ it('preserves registered work when Retry races exit finalization, then salvages 
   expect(replay.status).toBe(409);
   expect(replay.body.error.code).toBe('kill_unconfirmed');
   expect(rawRegistry(f.created.missionId)).toEqual(held);
+  writeFileSync(linger, '');
+  await observe(() => expect(() => process.kill(Number(readFileSync(`${linger}.pid`, 'utf8')), 0)).toThrow());
   await observeInterruptedExit(f);
   const retry = await post('/api/orchestrator/reset-packet', { ...request, idempotencyKey: 'registered-exit-complete-retry' });
   expect(retry.status, JSON.stringify(retry.body)).toBe(200);

@@ -452,7 +452,9 @@ describe('thin workspace review matrix — post-restore approval re-validation',
     });
 
     expect(result.ok).toBe(false);
-    expect(result.reason).toBe('diff_changed_since_spoken_review');
+    // The governance check runs first, and its fingerprint covers the merge preview and the
+    // review approval for the current head, so the diverged head is refused there.
+    expect(result.reason).toBe('governance_changed_since_spoken_review');
     expect(git(repo, ['rev-parse', 'HEAD'])).toBe(mainBeforeMerge);
     expect(git(repo, ['show', 'HEAD:file.txt'])).toBe('base');
     expect(existsSync(join(repo, 'spoken.txt'))).toBe(false);
