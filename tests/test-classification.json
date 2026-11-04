@@ -1075,6 +1075,7 @@
       "path": "src/lib/runtimes/shared/owned-session/single-attempt.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "git-cli"
       ]
     },
