@@ -12,6 +12,8 @@ const route = (path: string, methods: string, load: Route['load']): Route => ({ 
 // Each route loads its own implementation; unrelated surfaces stay cold.
 export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
+    route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
+    route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/panel/branches', 'GET', () => import('@/app/api/panel/branches/route')),
     route('/api/panel/files', 'GET', () => import('@/app/api/panel/files/route')),
     route('/api/panel/file-diff', 'GET', () => import('@/app/api/panel/file-diff/route')),
@@ -83,6 +85,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   ],
   palette: [], // Local commands and workspace navigation reuse the selected surface's transport.
   sidebar: [
+    route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
+    route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
     route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),
     route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),

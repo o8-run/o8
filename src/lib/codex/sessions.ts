@@ -305,12 +305,12 @@ function buildSyntheticLiveProcessSurface(
 }
 
 export async function getCodexDiscoveredFleetAdditions(
-  options: { fresh?: boolean } = {},
+  options: { fresh?: boolean; includeHistorical?: boolean } = {},
 ): Promise<CodexDiscoveredFleetAdditions> {
   const fresh = options.fresh ?? false;
   const now = Date.now();
   const generation = discoveredFleetGeneration;
-  if (discoveredFleetCache) {
+  if (!options.includeHistorical && discoveredFleetCache) {
     const hasLiveSession = discoveredFleetCache.value.agents.some((agent) => agent.status === 'running');
     const cacheTtlMs = hasLiveSession
       ? CODEX_DISCOVERED_FLEET_TTL_MS
@@ -321,14 +321,15 @@ export async function getCodexDiscoveredFleetAdditions(
     }
   }
 
-  if (discoveredFleetInflight) {
+  if (!options.includeHistorical && discoveredFleetInflight) {
     return discoveredFleetInflight;
   }
 
   const promise = (async () => {
   try {
     const homes = await listCodexDiscoveryHomes();
-    const liveProcesses = await queryAllLiveCodexProcesses();
+    // Historical import needs durable threads, not host process-only terminals.
+    const liveProcesses = options.includeHistorical ? new Map<number, LiveCodexProcess>() : await queryAllLiveCodexProcesses();
     const agentsBySession = new Map<string, AgentSummary & { pid?: number }>();
     const ambiguousSessionKeys = new Set<string>();
     const matchedLivePids = new Set<number>();
@@ -341,7 +342,7 @@ export async function getCodexDiscoveredFleetAdditions(
 
     for (const home of homes) {
       const [recentThreads, boundThreads] = await Promise.all([
-        queryCodexThreadsFromHome(home.configHomeRef, 64).catch(() => []),
+        queryCodexThreadsFromHome(home.configHomeRef, options.includeHistorical ? -1 : 64).catch(() => []),
         Promise.all([...boundThreadIds].map((id) => (
           queryCodexThreadByIdFromHome(home.configHomeRef, id).catch(() => null)
         ))),
@@ -352,11 +353,12 @@ export async function getCodexDiscoveredFleetAdditions(
       ).values()];
       discoveredThreadCount += threads.length;
       if (!threads.length) continue;
-      const activityMap = await buildCodexActivityMap(threads, home.configHomeRef, liveProcesses).catch(
-        () => new Map<string, CodexThreadActivity>(),
-      );
+      const activityMap = options.includeHistorical ? new Map<string, CodexThreadActivity>()
+        : await buildCodexActivityMap(threads, home.configHomeRef, liveProcesses).catch(
+          () => new Map<string, CodexThreadActivity>(),
+        );
       const visibleThreads = threads.filter((thread) => (
-        shouldExposeDiscoveredThread(thread, activityMap.get(thread.id))
+        options.includeHistorical || shouldExposeDiscoveredThread(thread, activityMap.get(thread.id))
       ));
       for (const thread of visibleThreads) {
         const sessionKey = `codex:${thread.id}`;
@@ -502,6 +504,7 @@ export async function getCodexDiscoveredFleetAdditions(
   }
   })();
 
+  if (options.includeHistorical) return promise;
   discoveredFleetInflight = promise;
   return promise.finally(() => {
     if (discoveredFleetInflight === promise) {

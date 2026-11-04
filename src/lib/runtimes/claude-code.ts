@@ -662,7 +662,7 @@ function extractClaudeHeadMetadata(lines: string[]): ClaudeHeadMetadata {
   };
 }
 
-async function discoverProjectSessions(projectDirName: string): Promise<SessionMeta[]> {
+async function discoverProjectSessions(projectDirName: string, includeHistorical = false): Promise<SessionMeta[]> {
   const projectDir = path.join(CLAUDE_PROJECTS_DIR, projectDirName);
 
   let entries: string[];
@@ -683,7 +683,7 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
     try {
       const fileStat = await stat(jsonlPath);
       // Skip sessions older than the recent window
-      if (now - fileStat.mtimeMs > RECENT_WINDOW_MS) continue;
+      if (!includeHistorical && now - fileStat.mtimeMs > RECENT_WINDOW_MS) continue;
 
       // Check mtime cache — skip file I/O if unchanged
       const cached = sessionMetaCache.get(jsonlPath);
@@ -763,9 +763,9 @@ export const claudeCodeRuntime: AgentRuntime = {
 
     const [allSessions, liveProbe] = await Promise.all([
       projectDirs.length > 0
-        ? Promise.all(projectDirs.map((dir) => discoverProjectSessions(dir))).then((r) => r.flat())
+        ? Promise.all(projectDirs.map((dir) => discoverProjectSessions(dir, options.includeHistorical))).then((r) => r.flat())
         : Promise.resolve([]),
-      fresh ? probeLiveClaudeProcesses() : Promise.resolve({ processes: [], probed: false }),
+      fresh && !options.includeHistorical ? probeLiveClaudeProcesses() : Promise.resolve({ processes: [], probed: false }),
     ]);
     const liveProcesses = liveProbe.processes;
     allSessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());

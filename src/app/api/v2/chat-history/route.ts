@@ -374,7 +374,8 @@ export async function POST(request: NextRequest) {
     backend: nextBackend,
     agent: normalizeAgent(body.agent) ?? agent ?? null,
     archivedAt: nextArchivedAt,
-    orchestratorVisible,
+    // Explicit import/create actions keep empty threads until their first send.
+    orchestratorVisible: orchestratorVisible ?? (body.orchestratorVisible === true ? true : undefined),
     mobileCreatedAt,
     mobileRevealRequestedAt,
     orchestratorSessionIds: nextSessionIds,

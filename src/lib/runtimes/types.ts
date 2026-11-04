@@ -369,8 +369,9 @@ export interface AgentRuntime {
    * Find all sessions this runtime knows about.
    * Passive reads should prefer o8-owned state and existing adapter caches;
    * explicit fresh reads may probe external CLI history and live processes.
+   * includeHistorical is for explicit imports, bypassing history recency/row caps.
    */
-  discoverSessions(options?: { fresh?: boolean }): Promise<RuntimeSession[]>;
+  discoverSessions(options?: { fresh?: boolean; includeHistorical?: boolean }): Promise<RuntimeSession[]>;
 
   // ── Transcript ──
 
