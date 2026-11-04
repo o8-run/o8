@@ -70,7 +70,7 @@ export function registerClassificationCoverageTests(
     expect(classification.name).toBe('Test Classification');
     expect(classification.after).toEqual([]);
     expect(classification.steps.map((step: { command: string }) => step.command)).toEqual([
-      'npm run test:classification:check', 'node --test scripts/ci/test-classification-listing.test.mjs scripts/ci/integration-weights.test.mjs scripts/ci/native-test-shard.test.mjs scripts/ci/pr-review-comment.test.mjs',
+      'npm run test:classification:check', 'node --test scripts/ci/test-classification-listing.test.mjs scripts/ci/integration-weights.test.mjs scripts/ci/native-test-shard.test.mjs scripts/ci/pr-review-comment.test.mjs scripts/ci/native-test-cache.test.mjs',
     ]);
     expect(unit.after).not.toContain('classification');
     expect(unit.requiredResults).toContain('classification');
