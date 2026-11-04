@@ -222,7 +222,7 @@ function selectNext(eventName: string, event: object, script = nativeScript): st
 describe('native next CI through persisted fixtures', () => {
   it('discovers new native literals, transitive imports, aliases and dynamic fixture directories without a maintained list', () => {
     const files = {
-      'native/o8-next/src/dependency_probe.rs': 'const CONTRACT: &str = include_str!("../../../fixtures/native-contract.json"); const HOST: &str = "scripts/next/dependency-probe.mjs"; fn family() { std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/native-family").join(format!("{name}.json"))); }',
+      'native/o8-next/src/dependency_probe.rs': 'const CONTRACT: &str = include_str!("../../../fixtures/native-contract.json"); const HOST: &str = "scripts/next/dependency-probe.mjs"; fn family() { std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/native-family").join(format!("{name}.json"))); } const FOLDER: &str = "src/"; const TYPED: &str = "src/ma";',
       'scripts/next/dependency-probe.mjs': "import '../../fixtures/native-adapter.mjs';",
       'fixtures/native-contract.json': '{}',
       'fixtures/native-adapter.mjs': "import '@/lib/native-probe'; import(`./native-records/${name}.json`); const template = 'native-template.md'; readFileSync(join(here, 'prompts', template));",
@@ -262,6 +262,9 @@ describe('native next CI through persisted fixtures', () => {
     const before = git('rev-parse', 'HEAD');
     const after = commit('fixtures/unrelated.ts');
     expect(selectNext('push', { before, after }, script)).toBe('changed=false');
+    // A Rust literal naming a bare top-level folder must not select that folder.
+    const prose = commit('src/unrelated.ts');
+    expect(selectNext('push', { before: after, after: prose }, script), 'bare folder literal').toBe('changed=false');
   });
 
   it.each([true, false])('installs only missing native prerequisites, headless=%s', headless => {
