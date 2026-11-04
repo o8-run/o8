@@ -119,7 +119,7 @@ writeFileSync(fakeWorkerPath, [
   "  process.stdout.write('qodercli 1.0.0\\n');",
   '  process.exit(0);',
   '}',
-  `fs.writeFileSync(${JSON.stringify(instanceReceiptPrefix)} + require('node:path').basename(process.cwd()) + '.json', JSON.stringify({ binary: 'default', region: process.env.WORK_REGION ?? null }));`,
+  `fs.writeFileSync(${JSON.stringify(instanceReceiptPrefix)} + require('node:path').basename(process.cwd()) + '.json', JSON.stringify({ binary: 'default', region: process.env.WORK_REGION ?? null, pid: process.pid }));`,
   "const feature = 'delegated-feature-' + require('node:path').basename(process.cwd()) + '.txt';",
   "fs.writeFileSync(feature, 'delegated work\\n');",
   "execFileSync('git', ['add', '-A'], { stdio: 'ignore' });",
@@ -447,27 +447,37 @@ describe('named provider instance through real worker dispatch', () => {
     expect(workspacePath).toBeTruthy();
     const instanceReceiptPath = `${instanceReceiptPrefix}${basename(workspacePath!)}.json`;
     const readReceipt = () => existsSync(instanceReceiptPath)
-      ? JSON.parse(readFileSync(instanceReceiptPath, 'utf8')) as { binary: string; region: string | null } : null;
+      ? JSON.parse(readFileSync(instanceReceiptPath, 'utf8')) as { binary: string; region: string | null; pid: number } : null;
     const receipt = await waitFor(readReceipt, 'worker executable configuration receipt');
     await waitFor(() => git(workspacePath!, ['status', '--porcelain']) === ''
       && git(workspacePath!, ['rev-parse', 'HEAD']) !== git(repoPath, ['rev-parse', 'HEAD']) ? true : null,
     'named worker commit');
-    expect(receipt).toEqual({ binary: 'named-instance', region: 'fixture-region' });
+    expect(receipt).toMatchObject({ binary: 'named-instance', region: 'fixture-region' });
     expect(readOrchestratorControlPlaneState().packets.find(packet => packet.id === delegated.packetId)?.instanceId).toBe(instance.id);
+
+    // A commit can precede the worker's process exit. Wait for the executable
+    // to finish before launching another worker in the same checkout.
+    const waitForWorkerExit = (pid: number) => waitFor(() => {
+      try { process.kill(pid, 0); return null; }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
+        throw error;
+      }
+    }, 'fixture worker exit');
+    await waitForWorkerExit(receipt.pid);
 
     // A fresh launch has only the durable packet identity, as on resume.
     const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
-    const firstHead = git(workspacePath!, ['rev-parse', 'HEAD']);
     rmSync(instanceReceiptPath, { force: true });
     const relaunch = { runtime: 'qoder' as const, packetId: delegated.packetId,
       existingLaneId: delegated.laneId, repoPath: workspacePath!, projectRepoPath: repoPath,
       isolate: false, skipSetup: true, prompt: 'Continue the fixture task.', clientMutationId: 'instance-worker-relaunch' };
     const resumed = await launchRuntimeSurface(relaunch);
     expect(resumed.ok, resumed.note).toBe(true);
-    expect(await waitFor(readReceipt, 'resumed worker configuration receipt'))
-      .toEqual({ binary: 'named-instance', region: 'fixture-region' });
-    await waitFor(() => git(workspacePath!, ['status', '--porcelain']) === ''
-      && git(workspacePath!, ['rev-parse', 'HEAD']) !== firstHead ? true : null, 'resumed worker commit');
+    const resumedReceipt = await waitFor(readReceipt, 'resumed worker configuration receipt');
+    expect(resumedReceipt).toMatchObject({ binary: 'named-instance', region: 'fixture-region' });
+    expect(resumedReceipt.pid).not.toBe(receipt.pid);
+    await waitForWorkerExit(resumedReceipt.pid);
 
     updateProviderInstance(instance.id, { enabled: false });
     rmSync(instanceReceiptPath, { force: true });
