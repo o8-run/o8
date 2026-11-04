@@ -64,8 +64,12 @@ export function nativeTestInputs(root) {
         else inputs.add(index);
       }
       if (directory && candidate !== '.') {
-        prefixes.add(candidate.replace(/\/$/, '') + '/');
-        for (const file of directories.get(candidate.replace(/\/$/, '')) ?? []) add(file);
+        const folder = candidate.replace(/\/$/, '');
+        // A bare top-level folder ("src/") is typed input or prose, not a
+        // fixture family: as a prefix it would select the whole app.
+        if (!folder.includes('/')) continue;
+        prefixes.add(folder + '/');
+        for (const file of directories.get(folder) ?? []) add(file);
       }
     }
   }
