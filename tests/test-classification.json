@@ -5232,6 +5232,7 @@
       "reasons": [
         "child-process",
         "native-build",
+        "process-signal",
         "real-path"
       ]
     },
