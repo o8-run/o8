@@ -132,12 +132,14 @@ beforeAll(async () => {
   ] }));
   // The production adapters launch these real subprocesses. Only the provider
   // protocol is scripted; the handoff builder/send/store methods are not mocked.
+  // Bake the fixture-owned capture path into the script: provider children
+  // inherit only allowlisted environment names (#4585).
   writeFileSync(fakeCli, `#!/usr/bin/env node
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 if (process.argv.includes('--version')) { console.log('codex-cli 0.130.0'); process.exit(0); }
 const emit = (value) => console.log(JSON.stringify(value));
-const capture = (backend, prompt) => appendFileSync(process.env.O8_TEST_CAPTURE, JSON.stringify({ backend, prompt }) + '\\n');
+const capture = (backend, prompt) => appendFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ backend, prompt }) + '\\n');
 if (process.argv.includes('--input-format')) {
   createInterface({ input: process.stdin }).on('line', (line) => {
     const content = JSON.parse(line).message?.content;
@@ -203,7 +205,7 @@ Server.prototype.listen = function (...args) {
     CORTEX_IDE_OWNED_CODEX_ROOT: join(root, 'owned-codex'),
     CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT: join(root, 'owned-claude'),
     O8_CODEX_BIN: fakeCli, O8_CLAUDE_CODE_BIN: fakeCli,
-    O8_TEST_CAPTURE: capturePath, O8_SUBSCRIPTION_PROFILE: 'both',
+    O8_SUBSCRIPTION_PROFILE: 'both',
     ...(process.env.O8_TEST_FILE_MARKER ? { O8_TEST_FILE_MARKER: process.env.O8_TEST_FILE_MARKER } : {}),
     O8_API_PORT: String(address.port), O8_WS_PORT: String(wsPort),
     NEXT_ORIGIN: `http://127.0.0.1:${address.port}`,
