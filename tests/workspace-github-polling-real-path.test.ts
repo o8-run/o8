@@ -220,12 +220,12 @@ describe('fresh command-center reads through the real workspace review and comma
     replay.branch = 'second';
     await read('/fixture/a', 'example/one');
     expect(ghReads('pr').filter((entry) => entry.args.includes('second'))).toHaveLength(1);
-    replay.credential = 'fixture-account-b';
-    await read('/fixture/a', 'example/one');
-    expect(ghReads('issue')).toHaveLength(3); // The explicit token still identifies the same account.
     vi.stubEnv('GH_TOKEN', 'another-fixture-token');
     await read('/fixture/a', 'example/one');
-    expect(ghReads('issue')).toHaveLength(4);
+    expect(ghReads('issue')).toHaveLength(3); // o8's gh reads never inherit an ambient GH_TOKEN (#4585).
+    replay.credential = 'fixture-account-b';
+    await read('/fixture/a', 'example/one');
+    expect(ghReads('issue')).toHaveLength(4); // gh's stored credential identifies the account.
   });
 
   it('isolates keychain-only changes and pins reads across an in-flight account switch', async () => {
