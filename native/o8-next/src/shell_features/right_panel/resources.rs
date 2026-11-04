@@ -2,6 +2,7 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::VecDeque;
 use std::time::Instant;
 const POLL: Duration = Duration::from_millis(2500);
 const ROUTE: &str = "/api/panel/resource-usage";
@@ -23,12 +24,222 @@ struct Total {
     mem_bytes: Option<f64>,
     ram_total_bytes: Option<f64>,
 }
+#[derive(Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+struct Amount {
+    used_bytes: Option<f64>,
+    total_bytes: Option<f64>,
+}
+#[derive(Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+struct Volume {
+    used_bytes: Option<f64>,
+    free_bytes: Option<f64>,
+    total_bytes: Option<f64>,
+}
+#[derive(Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+struct Disks {
+    data: Option<Volume>,
+    projects: Option<Volume>,
+}
+#[derive(Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+struct Network {
+    in_bytes_per_sec: Option<f64>,
+    out_bytes_per_sec: Option<f64>,
+}
+/// The route's `machine` block. Every field may be missing or null.
+#[derive(Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+struct Machine {
+    name: Option<String>,
+    sampled_at: Option<f64>,
+    cpu_percent: Option<f64>,
+    load_average: Option<Vec<f64>>,
+    cores: Option<u32>,
+    memory: Amount,
+    swap: Amount,
+    disks: Disks,
+    network: Network,
+}
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 struct Snapshot {
     sessions: Vec<Row>,
     processes: Vec<Row>,
     total: Total,
     error: Option<String>,
+    #[serde(default)]
+    machine: Option<Machine>,
+}
+const HISTORY: usize = 60;
+/// The last `HISTORY` machine samples, kept client side for the sparkline.
+/// A poll that returns the server's cached sample does not add a point.
+#[derive(Default)]
+struct History {
+    cpu: VecDeque<f64>,
+    net: VecDeque<f64>,
+    last: Option<f64>,
+}
+impl History {
+    fn push(&mut self, machine: &Machine) {
+        let Some(at) = machine.sampled_at.filter(|at| self.last != Some(*at)) else {
+            return;
+        };
+        self.last = Some(at);
+        let net = machine.network.in_bytes_per_sec.unwrap_or(0.)
+            + machine.network.out_bytes_per_sec.unwrap_or(0.);
+        for (ring, value) in [
+            (&mut self.cpu, machine.cpu_percent.unwrap_or(0.)),
+            (&mut self.net, net),
+        ] {
+            if ring.len() == HISTORY {
+                ring.pop_front();
+            }
+            ring.push_back(value.max(0.));
+        }
+    }
+}
+struct Meter {
+    id: &'static str,
+    label: &'static str,
+    value: String,
+    /// Bar fill in 0..=1; `None` leaves the track empty.
+    fraction: Option<f32>,
+}
+struct MachineView {
+    name: String,
+    summary: String,
+    meters: Vec<Meter>,
+    /// CPU percent per sample, oldest first, as 0..=1 bar heights.
+    spark: Vec<f32>,
+}
+fn known(value: Option<f64>) -> Option<f64> {
+    value.filter(|n| n.is_finite() && *n >= 0.)
+}
+fn share(used: Option<f64>, total: Option<f64>) -> Option<f32> {
+    match (known(used), known(total)) {
+        (Some(used), Some(total)) if total > 0. => Some((used / total).clamp(0., 1.) as f32),
+        _ => None,
+    }
+}
+fn size(value: Option<f64>) -> String {
+    match known(value) {
+        Some(0.) => "0 MB".into(),
+        value => bytes(value),
+    }
+}
+fn rate(value: Option<f64>) -> String {
+    let Some(value) = known(value) else {
+        return "—".into();
+    };
+    if value >= 1048576. {
+        format!("{:.1} MB/s", value / 1048576.)
+    } else if value >= 1024. {
+        format!("{:.0} KB/s", value / 1024.)
+    } else {
+        format!("{value:.0} B/s")
+    }
+}
+fn machine_view(machine: &Machine, history: &History) -> MachineView {
+    let mut summary = Vec::new();
+    if let Some(cores) = machine.cores.filter(|n| *n > 0) {
+        summary.push(format!("{cores} cores"));
+    }
+    if let Some(load) = machine
+        .load_average
+        .as_ref()
+        .filter(|l| l.len() == 3 && l.iter().all(|n| n.is_finite()))
+    {
+        summary.push(format!("load {:.2} {:.2} {:.2}", load[0], load[1], load[2]));
+    }
+    let disk = |id, label, volume: &Option<Volume>| {
+        let volume = volume.clone().unwrap_or_default();
+        Meter {
+            id,
+            label,
+            value: if known(volume.free_bytes).is_some() || known(volume.total_bytes).is_some() {
+                format!(
+                    "{} free of {}",
+                    size(volume.free_bytes),
+                    size(volume.total_bytes)
+                )
+            } else {
+                "—".into()
+            },
+            fraction: share(volume.used_bytes, volume.total_bytes),
+        }
+    };
+    let swap_total = known(machine.swap.total_bytes);
+    let net = known(machine.network.in_bytes_per_sec)
+        .or(known(machine.network.out_bytes_per_sec))
+        .map(|_| {
+            known(machine.network.in_bytes_per_sec).unwrap_or(0.)
+                + known(machine.network.out_bytes_per_sec).unwrap_or(0.)
+        });
+    let peak = history.net.iter().copied().fold(0., f64::max);
+    MachineView {
+        name: machine.name.clone().unwrap_or_else(|| "local".into()),
+        summary: summary.join(" · "),
+        meters: vec![
+            Meter {
+                id: "cpu",
+                label: "CPU",
+                value: cpu(known(machine.cpu_percent)),
+                fraction: known(machine.cpu_percent).map(|n| (n / 100.).clamp(0., 1.) as f32),
+            },
+            Meter {
+                id: "memory",
+                label: "Memory",
+                value: amount(&machine.memory),
+                fraction: share(machine.memory.used_bytes, machine.memory.total_bytes),
+            },
+            Meter {
+                id: "swap",
+                label: "Swap",
+                value: if swap_total == Some(0.) {
+                    "None".into()
+                } else {
+                    amount(&machine.swap)
+                },
+                fraction: share(machine.swap.used_bytes, machine.swap.total_bytes),
+            },
+            disk("disk-data", "Data disk", &machine.disks.data),
+            disk("disk-projects", "Projects disk", &machine.disks.projects),
+            Meter {
+                id: "network",
+                label: "Network",
+                value: if net.is_some() {
+                    format!(
+                        "↓ {} · ↑ {}",
+                        rate(machine.network.in_bytes_per_sec),
+                        rate(machine.network.out_bytes_per_sec)
+                    )
+                } else {
+                    "—".into()
+                },
+                // No link capacity to compare with, so scale to the recent peak.
+                fraction: net.map(|n| {
+                    if peak > 0. {
+                        (n / peak).clamp(0., 1.) as f32
+                    } else {
+                        0.
+                    }
+                }),
+            },
+        ],
+        spark: history
+            .cpu
+            .iter()
+            .map(|n| (n / 100.).clamp(0., 1.) as f32)
+            .collect(),
+    }
+}
+fn amount(value: &Amount) -> String {
+    if known(value.used_bytes).is_none() && known(value.total_bytes).is_none() {
+        return "—".into();
+    }
+    format!("{} / {}", size(value.used_bytes), size(value.total_bytes))
 }
 #[derive(Default)]
 struct State {
@@ -40,6 +251,7 @@ struct State {
     confirming: Option<(String, u32)>,
     stopping: bool,
     scroll: gpui::ScrollHandle,
+    history: History,
 }
 pub(super) fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
     let active = s.features.read::<Panel>().is_some_and(|p| {
@@ -87,6 +299,9 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
             state.next = Some(Instant::now() + POLL);
             let changed = match result {
                 Ok(data) => {
+                    if let Some(machine) = &data.machine {
+                        state.history.push(machine);
+                    }
                     let changed = state.data.as_ref() != Some(&data) || state.error.is_some();
                     state.data = Some(data);
                     state.error = None;
@@ -360,6 +575,86 @@ fn row(s: &Shell, row: &Row, max: f64, cx: &mut Context<Shell>) -> AnyElement {
         .child(right)
         .into_any_element()
 }
+fn bar(fraction: Option<f32>) -> gpui::Div {
+    div()
+        .mt(px(4.))
+        .h(px(3.))
+        .rounded(px(3.))
+        .bg(theme().surface_raised)
+        .child(
+            div()
+                .w(gpui::relative(fraction.unwrap_or(0.)))
+                .h_full()
+                .rounded(px(3.))
+                .bg(theme().text_secondary),
+        )
+}
+fn machine_section(view: &MachineView) -> AnyElement {
+    let spark = div()
+        .debug_selector(|| "resources-sparkline".into())
+        .mt(px(8.))
+        .h(px(24.))
+        .flex()
+        .items_end()
+        .gap(px(1.))
+        .children(view.spark.iter().map(|height| {
+            div()
+                .flex_1()
+                .h(gpui::relative(height.max(0.04)))
+                .bg(theme().text_secondary)
+        }));
+    div()
+        .debug_selector(|| "resources-machine".into())
+        .px(px(14.))
+        .pt(px(10.))
+        .pb(px(10.))
+        .border_b_1()
+        .border_color(theme().border)
+        .child(
+            div()
+                .text_size(px(9.))
+                .text_color(theme().text_muted)
+                .child("MACHINE"),
+        )
+        .child(
+            div()
+                .mt(px(4.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(div().text_size(px(13.)).child(view.name.clone()))
+                .when(!view.summary.is_empty(), |line| {
+                    line.child(
+                        div()
+                            .text_size(px(9.5))
+                            .text_color(theme().text_muted)
+                            .child(view.summary.clone()),
+                    )
+                }),
+        )
+        .children(view.meters.iter().map(|meter| {
+            let id = meter.id;
+            div()
+                .debug_selector(move || format!("resources-meter-{id}"))
+                .mt(px(8.))
+                .child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .gap(px(8.))
+                        .text_size(px(10.5))
+                        .child(div().text_color(theme().text_muted).child(meter.label))
+                        .child(
+                            div()
+                                .font_family(theme().font_mono)
+                                .child(meter.value.clone()),
+                        ),
+                )
+                .child(bar(meter.fraction))
+        }))
+        .when(!view.spark.is_empty(), |v| v.child(spark))
+        .into_any_element()
+}
 pub(super) fn element(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
     let state = s.features.read::<State>();
     let data = state.and_then(|state| state.data.as_ref());
@@ -401,6 +696,12 @@ pub(super) fn element(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
             .chain(&data.processes)
             .filter_map(|row| row.mem_bytes)
             .fold(0., f64::max);
+        if let Some(machine) = &data.machine {
+            body = body.child(machine_section(&machine_view(
+                machine,
+                &state.unwrap().history,
+            )));
+        }
         if data.sessions.is_empty() && data.processes.is_empty() {
             body = body.child(
                 div()
@@ -474,9 +775,12 @@ pub(super) fn element(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
 #[cfg(test)]
 pub(super) fn probe(s: &Shell) -> Value {
     let state = s.features.read::<State>().unwrap();
-    json!({"data":state.data,"pending":state.pending,"active":state.active,"error":state.error})
+    json!({"data":state.data,"pending":state.pending,"active":state.active,"error":state.error,"history":state.history.cpu})
 }
 #[cfg(test)]
 pub(super) fn due(s: &mut Shell) {
     s.features.get::<State>().next = None;
 }
+#[cfg(test)]
+#[path = "resources_machine_tests.rs"]
+mod machine_tests;
