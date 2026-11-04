@@ -182,6 +182,8 @@ describe('controlled owned worker credentials through actual child HTTP', () => 
 
   it('preserves the ordinary packet worker credential and configured attachments as a control', async () => {
     const store = createOwnedSessionStore(adapter(), { workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }) });
+    // The worker's source environment holds GH_TOKEN; since #4585 only RUNTIME_KEYS['copilot-cli'] passes it on.
+    expect(process.env.GH_TOKEN).toBe('fixture-gh-secret');
     const result = await store.launch(request(false));
     expect(result.ok, result.note).toBe(true);
     try {
@@ -189,9 +191,22 @@ describe('controlled owned worker credentials through actual child HTTP', () => 
       expect(child().statuses[0]).toBe(200);
       expect(child().statuses[2]).toBe(400);
       expect(child().injected).toBe(1);
-      expect(child().secrets).toContain('GH_TOKEN');
+      expect(child().secrets).not.toContain('GH_TOKEN');
       expect(resolveRequestPrincipalContext(new Request(url, { headers: { authorization: `Bearer ${child().token}` } })))
         .toMatchObject({ role: 'worker', packetId: 'fixture-credential-packet' });
+    } finally { await store.interrupt(result.surfaceId); }
+  });
+
+  it('passes GH_TOKEN to an ordinary Copilot CLI worker, whose runtime declares it', async () => {
+    const runtime = { ...adapter(), runtimeId: 'copilot-cli', surfaceIdPrefix: 'copilot-cli-owned:' };
+    const store = createOwnedSessionStore(runtime, { workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }) });
+    // Copilot CLI has no reasoning-effort surface, so its launch carries no effort pin.
+    const { effort: _effort, ...ordinary } = request(false);
+    const result = await store.launch(ordinary);
+    expect(result.ok, result.note).toBe(true);
+    try {
+      await vi.waitFor(() => expect(() => child()).not.toThrow(), { timeout: 5000 });
+      expect(child().secrets).toContain('GH_TOKEN');
     } finally { await store.interrupt(result.surfaceId); }
   });
 });
