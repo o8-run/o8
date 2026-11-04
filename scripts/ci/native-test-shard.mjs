@@ -73,6 +73,7 @@ const sdk = new Set([
 ]);
 const timed = name => name.startsWith('terminal::tests::production_pty_')
   || name === 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark'
+  || name === 'files_panel::tests::large_file_one_million_lines_stays_within_bounds'
   || sdk.has(name);
 // The own-shell test needs the ordinary app without GPUI's dev-only
 // test-support feature. Its nested build cannot reuse Cargo's test binary.

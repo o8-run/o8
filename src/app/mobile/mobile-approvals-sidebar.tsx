@@ -95,6 +95,12 @@ export function Sidebar({
       icon: <IconIssues fill={palette.iconFill} />,
     },
     {
+      id: 'prs',
+      label: 'PRs',
+      description: 'Review and merge project pull requests',
+      icon: <IconIssues fill={palette.iconFill} />,
+    },
+    {
       id: 'chat',
       label: 'Assistant',
       description: 'Personal LLM chat with repo context',

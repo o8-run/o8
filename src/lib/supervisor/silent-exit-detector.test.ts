@@ -21,10 +21,11 @@ import {
   INTERESTING_LANE_STATUSES,
   runSilentExitTickForTesting,
 } from './silent-exit-detector';
+import { createCompletionTurnGuard, SupersededCompletionError } from './completion-turn';
 
 const { createLane, deleteLane, getLane, getLaneEvents, listActiveLanes, updateLane } = await import('@/lib/lane/registry');
 const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
-const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { readOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 
 let ownedRoot: string | null = null;
@@ -331,6 +332,19 @@ describe('silent-exit detector policy (wave-1B burial incident)', () => {
         launchContext: { source: 'cli', presentation: 'split', repoContext: 'transient', workMode: 'read-only' },
       }],
     });
+
+    const guard = createCompletionTurnGuard(lane);
+    expect(guard.check).toThrow(SupersededCompletionError);
+
+    // Explicit recovery must re-arm the packet before its continuation can
+    // complete. A fresh receipt alone cannot clear the previous durable hold.
+    await withLockedState((state) => {
+      const packet = state.packets.find((candidate) => candidate.id === packetId)!;
+      packet.queueState = 'queued';
+      packet.status = 'running';
+      packet.blockedReason = null;
+    });
+    expect(guard.check).not.toThrow();
 
     vi.resetModules();
     const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');

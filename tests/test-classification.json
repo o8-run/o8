@@ -137,6 +137,12 @@
       ]
     },
     {
+      "path": "src/app/api/panel/resource-usage/route-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/panel/status/route.test.ts",
       "reasons": [
         "terminal-tool"
@@ -1428,6 +1434,7 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "native-build",
         "process-signal",
         "real-path",
         "worktree-api"
@@ -1473,6 +1480,7 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "native-build",
         "worktree-api"
       ]
     },
@@ -2308,6 +2316,15 @@
       ]
     },
     {
+      "path": "tests/cli-runtime-update-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cli-slow-route-timeouts.test.ts",
       "reasons": [
         "worktree-api"
@@ -3013,11 +3030,18 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "process-signal",
         "real-path"
       ]
     },
     {
       "path": "tests/delegate-effort-correction-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/delegate-instance-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -3502,6 +3526,7 @@
         "git-cli",
         "process-signal",
         "real-path",
+        "terminal-tool",
         "worktree-api"
       ]
     },
@@ -3824,6 +3849,14 @@
       ]
     },
     {
+      "path": "tests/lane-diff-stat-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-git-event-loop-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3910,6 +3943,14 @@
         "native-build",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/lead-background-agents-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
       ]
     },
     {
@@ -4659,10 +4700,26 @@
       ]
     },
     {
+      "path": "tests/mobile-pr-tab-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mobile-ripple-device-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
+    },
+    {
+      "path": "tests/mobile-visualizations-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "network-listener",
+        "real-path"
+      ],
+      "browser": true
     },
     {
       "path": "tests/mock-module-transport-real-path.test.ts",
@@ -5058,6 +5115,7 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "native-build",
         "network-listener",
         "real-path",
         "worktree-api"
@@ -5184,6 +5242,12 @@
       ]
     },
     {
+      "path": "tests/o8d-native-route-inventory-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-next-http-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5198,6 +5262,7 @@
       "reasons": [
         "child-process",
         "native-build",
+        "process-signal",
         "real-path"
       ]
     },
@@ -5516,6 +5581,12 @@
     },
     {
       "path": "tests/owned-session-symlinked-data-dir-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owned-session-validation-save-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -8429,6 +8500,12 @@
       "reasons": [
         "child-process",
         "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/ws-safety-net-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },

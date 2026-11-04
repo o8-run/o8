@@ -28,7 +28,7 @@ impl Entry {
             Self::Surface(command) => command.label(sessions),
         }
     }
-    fn identity(&self) -> String {
+    pub(super) fn identity(&self) -> String {
         match self {
             Self::Workspace(path) => format!("workspace:{path}"),
             Self::Surface(Command::Session(id)) => format!("session:{id}"),

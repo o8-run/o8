@@ -23,6 +23,7 @@ const cwd = path.join(root, 'project');
 const sessions = path.join(root, 'history');
 const sessionFile = path.join(sessions, 'saved.jsonl');
 const binary = path.join(root, 'pi.mjs');
+const versionFile = path.join(root, 'pi-version.txt');
 const receipt = path.join(root, 'receipt.jsonl');
 const marker = 'fixture-auth-value-must-stay-private';
 const env = {
@@ -31,7 +32,6 @@ const env = {
   O8_PI_BIN: binary,
   O8_OWNED_PI_ROOT: path.join(root, 'owned'),
   O8_OWNED_PI_ARCHIVE_ROOT: path.join(root, 'archive'),
-  PI_FIXTURE_RECEIPT: receipt,
 };
 const priorEnv = new Map(Object.keys(env).map((key) => [key, process.env[key]]));
 Object.assign(process.env, env);
@@ -46,13 +46,15 @@ writeFileSync(path.join(cwd, '.pi', 'settings.json'), JSON.stringify({ defaultPr
 const savedBytes = JSON.stringify({ type: 'session', version: 3, id: 'fixture-session', timestamp: '2026-01-01T00:00:00.000Z', cwd }) + '\n';
 writeFileSync(sessionFile, savedBytes);
 const savedMtime = statSync(sessionFile).mtimeMs;
+// Child environments omit fixture-only variables; keep controls in the fixture.
+writeFileSync(versionFile, '1.0.2');
 writeFileSync(binary, `#!${process.execPath}
 import { appendFileSync, readFileSync } from 'node:fs';
 import readline from 'node:readline';
 const argv = process.argv.slice(2);
-if (argv.includes('--version')) { console.log('pi ' + (process.env.PI_FIXTURE_VERSION || '1.0.2')); process.exit(0); }
+if (argv.includes('--version')) { console.log('pi ' + readFileSync(${JSON.stringify(versionFile)}, 'utf8')); process.exit(0); }
 const session = argv[argv.indexOf('--session') + 1];
-appendFileSync(process.env.PI_FIXTURE_RECEIPT, JSON.stringify({ argv, cwd: process.cwd(), agentDir: process.env.PI_CODING_AGENT_DIR, sessionDir: process.env.PI_CODING_AGENT_SESSION_DIR, pid: process.pid }) + '\\n');
+appendFileSync(${JSON.stringify(receipt)}, JSON.stringify({ argv, cwd: process.cwd(), agentDir: process.env.PI_CODING_AGENT_DIR, sessionDir: process.env.PI_CODING_AGENT_SESSION_DIR, pid: process.pid }) + '\\n');
 const input = readline.createInterface({ input: process.stdin });
 input.on('line', line => {
   const command = JSON.parse(line);
@@ -137,20 +139,19 @@ describe.skipIf(process.platform === 'win32')('existing Pi setup through worker 
   it('reports the warming default, configured modes and old Pi versions through inventory', async () => {
     const file = path.join(agentDir, 'settings.json');
     const saved = readFileSync(file);
-    const priorVersion = process.env.PI_FIXTURE_VERSION;
+    const priorVersion = readFileSync(versionFile);
     try {
       for (const mode of [undefined, 'off', 'streaming', 'idle']) {
         writeFileSync(file, JSON.stringify({ cacheWarming: mode }));
         const status = await detectRuntimeAuthStatus('pi');
         expect(status).toMatchObject({ piSetup: { cacheWarming: mode ?? 'streaming', cacheWarmingSupported: true } });
       }
-      process.env.PI_FIXTURE_VERSION = '0.85.9';
+      writeFileSync(versionFile, '0.85.9');
       invalidateCliCache('pi');
       expect(await detectRuntimeAuthStatus('pi')).toMatchObject({ piSetup: { version: '0.85.9', cacheWarmingSupported: false } });
     } finally {
       writeFileSync(file, saved);
-      if (priorVersion === undefined) delete process.env.PI_FIXTURE_VERSION;
-      else process.env.PI_FIXTURE_VERSION = priorVersion;
+      writeFileSync(versionFile, priorVersion);
       invalidateCliCache('pi');
     }
   });
@@ -244,16 +245,17 @@ describe.skipIf(process.platform === 'win32')('existing Pi setup through worker 
     const { POST } = await import('@/app/api/setup/pi/cache-warming/route');
     const file = path.join(agentDir, 'settings.json');
     const saved = readFileSync(file);
+    const priorVersion = readFileSync(versionFile);
     const post = (cacheWarming: unknown) => POST(new Request('http://localhost/api/setup/pi/cache-warming', {
       method: 'POST', body: JSON.stringify({ cacheWarming }),
     }));
     try {
       expect((await post('yes')).status).toBe(400);
-      process.env.PI_FIXTURE_VERSION = '0.85.9';
+      writeFileSync(versionFile, '0.85.9');
       invalidateCliCache('pi');
       expect((await post('idle')).status).toBe(409);
       expect(readFileSync(file)).toEqual(saved);
-    } finally { delete process.env.PI_FIXTURE_VERSION; invalidateCliCache('pi'); }
+    } finally { writeFileSync(versionFile, priorVersion); invalidateCliCache('pi'); }
   });
 
   it('launches an o8 worker through the user binary, environment and cwd without granting trust', async () => {

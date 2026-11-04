@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { buildPiWriteHelper } from '../../../tests/helpers/pi-write-helper';
 import { WorktreeManager } from './manager';
 
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
@@ -23,6 +24,10 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
 
 const execFileAsync = promisify(execFile);
 const roots: string[] = [];
+
+// Supervised dependency installs run through the Pi write helper, a cold cargo build; build it
+// once per file, outside any test's own timeout.
+beforeAll(() => { if (process.platform !== 'win32') buildPiWriteHelper(); }, 600_000);
 
 async function git(cwd: string, args: string[]) {
   await execFileAsync('git', args, {

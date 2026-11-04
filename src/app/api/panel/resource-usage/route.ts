@@ -1,22 +1,27 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { collectResourceUsage, killResourceRow } from '@/lib/lane/resource-attribution';
+import { sampleMachineResources } from '@/lib/lane/machine-resources';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/panel/resource-usage
  *
- * Live per-session CPU/RAM attribution for the Resources panel. Gated by the
+ * Live per-session CPU/RAM attribution for the Resources panel, plus a
+ * `machine` block (host CPU, load, memory, swap, disks, network; null when the
+ * host can't be read) from the shared two-second sampler. Gated by the
  * global middleware under `/api/panel/*` (loopback + ws-token) — no auth code
  * needed here. Never throws; returns a structured error payload on failure.
  */
 export async function GET() {
+  const machine = sampleMachineResources().catch(() => null);
   try {
     const result = await collectResourceUsage();
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, machine: await machine });
   } catch (error) {
     return NextResponse.json({
+      machine: await machine,
       sessions: [],
       processes: [],
       total: { cpuPercent: 0, memBytes: 0, ramTotalBytes: 0 },

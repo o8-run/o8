@@ -5,6 +5,7 @@ import path from 'node:path';
 import { assertOwnedSessionPath, refuseOwnedSessionPath } from './owned-path';
 import { saveRestrictedOwnedSession } from './restricted-session-persistence';
 import { readOwnedSessionMetadata } from './metadata-read';
+import { withOwnedArtifactRootLock } from './artifact-admission';
 import { worktreeMetadataReadLimit, WorktreeMaintenanceHeldError } from '@/lib/worktree/maintenance-budget';
 
 import {
@@ -85,6 +86,10 @@ export function createOwnedSessionIo({
   }
 
   async function saveSession(session: OwnedSessionRecord) {
+    return withOwnedArtifactRootLock(root, () => saveSessionLocked(session), { wait: true });
+  }
+
+  async function saveSessionLocked(session: OwnedSessionRecord) {
     await assertOwnedSessionPath(root, session.sessionDir, { kind: 'directory' });
     await assertOwnedSessionPath(root, metadataPath(session.sessionDir), { missing: true, kind: 'file' });
     session.updatedAt = nowIso();

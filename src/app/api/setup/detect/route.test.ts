@@ -32,10 +32,12 @@ vi.mock('@/lib/runtimes/shared/cli-locate', () => ({
 const fixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'o8-setup-claude-auth-'));
 const claudeConfigDir = path.join(fixtureRoot, 'claude-config');
 h.claudeBinary = path.join(fixtureRoot, 'claude');
+const claudeModePath = `${h.claudeBinary}.mode`;
 writeFileSync(h.claudeBinary, [
   '#!/bin/sh',
   'if [ "$1" = "--version" ]; then printf \'%s\\n\' \'Claude Code test\'; exit 0; fi',
-  'case "${O8_TEST_SETUP_CLAUDE_MODE:-logged_out}" in',
+  // Fixture-only environment names do not cross the provider allowlist (#4585).
+  'case "$(cat -- "$0.mode")" in',
   '  logged_in) printf \'%s\\n\' \'{"loggedIn":true}\' ;;',
   '  logged_out) printf \'%s\\n\' \'{"loggedIn":false}\' ;;',
   '  malformed) printf \'%s\\n\' \'unexpected probe output setup-probe-secret-marker\' ;;',
@@ -59,7 +61,7 @@ beforeEach(() => {
   h.scanAndLink.mockReset();
   h.scanAndLink.mockReturnValue(null);
   vi.stubEnv('CLAUDE_CONFIG_DIR', claudeConfigDir);
-  vi.stubEnv('O8_TEST_SETUP_CLAUDE_MODE', 'logged_out');
+  writeFileSync(claudeModePath, 'logged_out');
   rmSync(claudeConfigDir, { recursive: true, force: true });
 });
 
@@ -145,7 +147,7 @@ describe('GET /api/setup/detect', () => {
     h.scanAndLink.mockImplementation((binary) => binary === 'claude' ? h.claudeBinary : null);
     vi.stubEnv('ANTHROPIC_API_KEY', '');
     vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
-    vi.stubEnv('O8_TEST_SETUP_CLAUDE_MODE', 'logged_in');
+    writeFileSync(claudeModePath, 'logged_in');
     mkdirSync(path.join(claudeConfigDir, 'projects'), { recursive: true });
     writeFileSync(path.join(claudeConfigDir, 'projects', 'old-session.jsonl'), '{}');
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
@@ -192,7 +194,7 @@ describe('GET /api/setup/detect', () => {
     h.scanAndLink.mockImplementation((binary) => binary === 'claude' ? h.claudeBinary : null);
     vi.stubEnv('ANTHROPIC_API_KEY', '');
     vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
-    vi.stubEnv('O8_TEST_SETUP_CLAUDE_MODE', 'malformed');
+    writeFileSync(claudeModePath, 'malformed');
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
 
     const { GET } = await import('./route');

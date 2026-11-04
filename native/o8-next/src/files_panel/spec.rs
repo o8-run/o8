@@ -39,6 +39,7 @@ pub(super) struct Spec {
     server: String,
     hash: Option<String>,
     loading: bool,
+    load_task: Option<Task<()>>,
     saving: bool,
     pending: bool,
     saved: Option<Instant>,
@@ -98,6 +99,7 @@ impl Spec {
             server: String::new(),
             hash: None,
             loading: true,
+            load_task: None,
             saving: false,
             pending: false,
             saved: None,
@@ -176,6 +178,7 @@ impl Spec {
         if background
             && (!self.active
                 || self.loading
+                || self.load_task.is_some()
                 || self.pending
                 || self.saving
                 || self.reviewing
@@ -184,6 +187,7 @@ impl Spec {
         {
             return;
         }
+        self.load_task = None;
         if self.workspace.is_empty() {
             self.loading = false;
             self.error = Some("Select a repo to edit o8.md.".into());
@@ -206,9 +210,10 @@ impl Spec {
                 None,
             )
         });
-        cx.spawn(async move |this, cx| {
+        self.load_task = Some(cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
+                this.load_task = None;
                 if generation != this.generation {
                     return;
                 }
@@ -251,8 +256,7 @@ impl Spec {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        }));
         cx.notify();
     }
     fn persist(&mut self, force: bool, cx: &mut Context<Self>) {
@@ -377,8 +381,13 @@ impl Spec {
     pub(super) fn active(&mut self, active: bool, cx: &mut Context<Self>) {
         if self.active != active {
             self.active = active;
-            if active && self.started {
-                self.load(true, cx);
+            if !active {
+                // A pre-hide read must neither suppress nor overwrite the
+                // fresh read when this pane is shown again.
+                self.load_task = None;
+                self.loading = false;
+            } else if self.started {
+                self.load(self.loaded_once, cx);
                 self.prewarm(cx);
             }
         }

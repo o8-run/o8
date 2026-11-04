@@ -119,7 +119,7 @@ struct Editor {
 }
 pub(crate) struct Close;
 pub(crate) enum Action {
-    Appearance(&'static str),
+    Appearance(String),
     Shortcuts,
 }
 impl EventEmitter<Action> for Settings {}
@@ -166,6 +166,8 @@ pub(crate) struct Settings {
     requested_project: Option<String>,
     /// The layer each row edits when a person chose one.
     scopes: BTreeMap<&'static str, scope::Scope>,
+    /// Why the last VS Code theme import was refused.
+    pub theme_import_error: Option<String>,
 }
 impl EventEmitter<Close> for Settings {}
 impl Settings {
@@ -227,6 +229,7 @@ impl Settings {
             project,
             requested_project: None,
             scopes: BTreeMap::new(),
+            theme_import_error: None,
         };
         view.load(false, cx);
         view

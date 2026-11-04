@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -24,6 +24,8 @@ async function freePort(): Promise<number> {
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
 export async function startParityReference(options: {
   logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean;
+  inbox?: () => typeof fixtureInbox;
+  sync?: (body: Record<string, unknown>) => unknown | Promise<unknown>;
 } = {}) {
   const directory = options.directory ?? realpathSync(mkdtempSync(join(tmpdir(), 'o8-ws-parity-')));
   const token = 'ws-parity-fixture-credential';
@@ -43,9 +45,9 @@ export async function startParityReference(options: {
       historyVersion = body.version;
       result = {};
     } else if (url.pathname === '/api/mobile/inbox') {
-      result = fixtureInbox;
+      result = options.inbox?.() ?? fixtureInbox;
     } else if (url.pathname === '/api/mobile/sync') {
-      result = body.inbox ? { inbox: fixtureInbox, inboxEtag: 'fixture' } : {
+      result = options.sync ? await options.sync(body) : body.inbox ? { inbox: fixtureInbox, inboxEtag: 'fixture' } : {
         history: { sessionKey: body.history?.sessionKey, entries: [{
           id: `history-${historyVersion}`, role: 'assistant', text: `history ${historyVersion}`,
         }], replace: true },
@@ -68,13 +70,13 @@ export async function startParityReference(options: {
   if (!address || typeof address === 'string') throw new Error('missing fixture API port');
   const apiUrl = `http://127.0.0.1:${address.port}`;
   const port = await freePort();
-  const child = execFile(process.execPath, [
+  const child = spawn(process.execPath, [
     ...(options.preload ? ['--require', options.preload] : []),
     ...(options.stallFixture ? ['--import=./tests/fixtures/ws-stall-preload.mjs'] : []),
     ...(options.nativeHttp ? ['--require=./scripts/next/brain-runtime.cjs'] : []),
     ...(options.entry ? [options.entry] : ['--import=./scripts/register-server-only-stub.mjs',
       '--import=tsx', 'src/ws-server.ts'])], {
-    cwd: process.cwd(), env: { ...process.env, NODE_ENV: 'test',
+    cwd: process.cwd(), detached: process.platform !== 'win32', env: { ...process.env, NODE_ENV: 'test',
       HOME: directory, USERPROFILE: directory,
       O8_DATA_DIR: undefined, CORTEX_IDE_DATA_DIR: directory,
       CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'),
@@ -87,33 +89,58 @@ export async function startParityReference(options: {
       O8D_BINARY: options.binary ?? process.env.O8D_TEST_BINARY,
       O8_REALTIME_LOG_LIMIT: String(options.logLimit ?? 4), NEXT_ORIGIN: apiUrl },
   });
+  // spawn drains a long-lived process without execFile's cumulative maxBuffer.
+  let stopRequested = false;
+  const diagnostics = { stdoutBytes: 0, stderrBytes: 0, stderr: '', exitAfterStop: false,
+    code: null as number | null, signal: null as NodeJS.Signals | null, error: '' };
+  child.stdout.on('data', (chunk: Buffer) => { diagnostics.stdoutBytes += chunk.length; });
+  child.stderr.on('data', (chunk: Buffer) => {
+    diagnostics.stderrBytes += chunk.length;
+    diagnostics.stderr = (diagnostics.stderr + chunk.toString('utf8')).slice(-16_384);
+  });
+  child.on('error', error => { diagnostics.error = error.message; });
+  child.on('exit', (code, signal) => {
+    diagnostics.code = code;
+    diagnostics.signal = signal;
+    diagnostics.exitAfterStop = stopRequested;
+  });
+  const receipt = () => ({ ...diagnostics });
   const stop = async () => {
-    if (child && child.exitCode === null) {
-      child.kill('SIGTERM');
-      const exited = once(child, 'exit');
-      const timer = setTimeout(() => child?.kill('SIGKILL'), 5_000);
-      await exited;
+    const signalGroup = (value: NodeJS.Signals) => {
+      if (process.platform === 'win32' || !child.pid) return;
+      try { process.kill(-child.pid, value); } catch { /* The owned fixture group already exited. */ }
+    };
+    if (!diagnostics.error && child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close');
+      stopRequested = child.kill('SIGTERM');
+      signalGroup('SIGTERM');
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        signalGroup('SIGKILL');
+      }, 5_000);
+      await closed;
       clearTimeout(timer);
     }
+    // Stop helpers started by the long-lived WS fixture before the test exits.
+    signalGroup('SIGKILL');
     if (api.listening) await new Promise<void>((resolve) => api.close(() => resolve()));
     if (!options.directory) rmSync(directory, { recursive: true, force: true });
   };
-  // Consume output without exposing incidental background-service diagnostics.
-  child.stdout?.resume();
-  child.stderr?.resume();
   try {
     const deadline = Date.now() + (options.startupTimeoutMs ?? 60_000);
     while (Date.now() < deadline) {
-      if (child.exitCode !== null) throw new Error('reference WS process exited');
+      if (child.exitCode !== null || child.signalCode !== null || diagnostics.error) {
+        throw new Error(`reference WS process exited: ${JSON.stringify(receipt())}`);
+      }
       try {
         if ((await fetch(`http://127.0.0.1:${port}/health`)).ok) {
-          return { url: `ws://127.0.0.1:${port}/ws`, apiUrl, token, pid: child.pid!, directory, stop,
+          return { url: `ws://127.0.0.1:${port}/ws`, apiUrl, token, pid: child.pid!, directory, stop, diagnostics: receipt,
             stopNext: async () => { api.closeAllConnections(); await new Promise<void>(resolve => api.close(() => resolve())); } };
         }
       } catch { /* Wait for the real entry point. */ }
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    throw new Error('reference WS health timed out');
+    throw new Error(`reference WS health timed out: ${JSON.stringify(receipt())}`);
   } catch (error) {
     await stop();
     throw error;

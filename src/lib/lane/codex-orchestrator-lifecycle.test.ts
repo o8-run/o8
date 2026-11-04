@@ -1,10 +1,11 @@
-import { readFileSync, writeSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeSync } from 'node:fs';
 import { mutateProviderKey } from '@/lib/providers/key-store';
 import { saveRuntimeBillingMode } from '@/lib/providers/runtime-billing';
 import { listOrchestratorTurnsForThread } from './orchestrator-crash-survival';
 import { EventEmitter } from 'node:events';
 import { Writable } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
+import { cpus, loadavg } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.hoisted(() => vi.fn());
@@ -18,6 +19,11 @@ vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: s
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return { ...actual, spawn: spawnMock };
+});
+
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  return { ...actual, loadavg: vi.fn(), cpus: vi.fn() };
 });
 
 vi.mock('@/lib/runtimes/shared/cli-resolver', () => ({
@@ -52,6 +58,7 @@ vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({
 
 import {
   CODEX_FIRST_EVENT_TIMEOUT_MS,
+  CODEX_FIRST_EVENT_TIMEOUT_CAP_MS,
   ensureCodexOrchestratorSession,
   sendToCodexOrchestrator,
 } from './codex-orchestrator-session';
@@ -129,6 +136,10 @@ describe('Codex orchestrator process lifecycle', () => {
   });
   beforeEach(() => {
     process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = '0';
+    vi.mocked(loadavg).mockReset().mockReturnValue([0, 0, 0]);
+    vi.mocked(cpus).mockReturnValue(Array.from({ length: 10 }, () => ({
+      model: 'test', speed: 1, times: { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 },
+    })));
     backendSessions.clear();
     spawnMock.mockReset();
     speedCatalogue.mockClear();
@@ -160,6 +171,7 @@ describe('Codex orchestrator process lifecycle', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     delete process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR;
   });
 
@@ -459,6 +471,184 @@ describe('Codex orchestrator process lifecycle', () => {
     expect(events.at(-1)).toMatchObject({ type: 'done', terminalOutcome: 'unconfirmed' });
     expect(session.proc).toBeNull();
     expect(session.status).toBe('dead');
+  });
+
+  it('lets a loaded quiet child reach its first event at 90 seconds', async () => {
+    vi.useFakeTimers();
+    const log = vi.spyOn(console, 'log');
+    vi.mocked(loadavg).mockReturnValue([25, 0, 0]);
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-loaded-first-event-${Date.now()}`);
+    const proc = useFakeProc();
+    const events: OrchestratorEvent[] = [];
+
+    const turn = sendToCodexOrchestrator(session, 'hi', event => events.push(event));
+    await waitForSpawn();
+    await vi.advanceTimersByTimeAsync(CODEX_FIRST_EVENT_TIMEOUT_MS);
+    expect(proc.kill).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(45_000);
+    proc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"loaded-live"}\n'));
+    proc.stdout.emit('data', Buffer.from('{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}\n'));
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(proc.kill).not.toHaveBeenCalled();
+    proc.exitCode = 0;
+    proc.emit('close', 0);
+    await turn;
+
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: 'done', terminalOutcome: 'completed', sessionId: 'loaded-live' });
+    expect(session.status).toBe('ready');
+    expect(log.mock.calls.filter(([line]) => String(line).includes('First Codex event'))).toHaveLength(1);
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(
+      /\[codex-orchestrator-session\] First Codex event .*firstEventWaitMs=90\d+ budgetMs=135000 loadavg1m=25 spawnLoadavg1m=25 cores=10/,
+    ));
+  });
+
+  it('caps a loaded silent child at 180 seconds and escalates when TERM stalls', async () => {
+    vi.useFakeTimers();
+    vi.mocked(loadavg).mockReturnValue([100, 0, 0]);
+    const warn = vi.spyOn(console, 'warn');
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-loaded-cap-${Date.now()}`);
+    const proc = useFakeProc();
+    proc.kill.mockImplementation(() => true);
+    let spawnedAt = 0;
+    spawnMock.mockImplementationOnce(() => { spawnedAt = Date.now(); return proc; });
+    const events: OrchestratorEvent[] = [];
+
+    const turn = sendToCodexOrchestrator(session, 'hi', event => events.push(event));
+    await waitForSpawn();
+    await vi.advanceTimersByTimeAsync(CODEX_FIRST_EVENT_TIMEOUT_CAP_MS - (Date.now() - spawnedAt) - 1);
+    expect(proc.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await turn;
+
+    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(events).toContainEqual({
+      type: 'error', error: 'Codex produced no output for 180s — the turn was aborted; re-send to retry',
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(
+      'firstEventWaitMs=180000 budgetMs=180000 loadavg1m=100 spawnLoadavg1m=100 cores=10 outputBytes=0',
+    ));
+    expect(events.at(-1)?.type).toBe('done');
+    expect(session.proc).toBeNull();
+    expect(session.status).toBe('dead');
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(proc.kill).toHaveBeenCalledWith('SIGKILL');
+    proc.signalCode = 'SIGKILL';
+    proc.emit('close', null);
+  });
+
+  it('keeps the idle 45-second bound when stderr only contains partial output', async () => {
+    vi.useFakeTimers();
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-idle-stderr-${Date.now()}`);
+    const proc = useFakeProc();
+    const events: OrchestratorEvent[] = [];
+    const turn = sendToCodexOrchestrator(session, 'hi', event => events.push(event));
+    await waitForSpawn();
+    await vi.advanceTimersByTimeAsync(30_000);
+    proc.stderr.emit('data', Buffer.from('resuming thread...'));
+    await vi.advanceTimersByTimeAsync(15_000);
+    await turn;
+
+    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(events).toContainEqual({
+      type: 'error', error: 'Codex produced no output for 45s — the turn was aborted; re-send to retry',
+    });
+    expect(events.at(-1)?.type).toBe('done');
+  });
+
+  it.each(['spawn', '45-second check'])('extends for overload measured at the %s even if the other sample is idle', async when => {
+    vi.useFakeTimers();
+    vi.mocked(loadavg).mockReturnValueOnce(when === 'spawn' ? [25, 0, 0] : [0, 0, 0])
+      .mockReturnValue(when === 'spawn' ? [0, 0, 0] : [25, 0, 0]);
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-load-sample-${when}-${Date.now()}`);
+    const proc = useFakeProc();
+    const events: OrchestratorEvent[] = [];
+    const turn = sendToCodexOrchestrator(session, 'hi', event => events.push(event));
+    await waitForSpawn();
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(proc.kill).not.toHaveBeenCalled();
+    expect(loadavg).toHaveBeenCalledTimes(2);
+    proc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"sample-live"}\n'));
+    proc.exitCode = 0;
+    proc.emit('close', 0);
+    await turn;
+    expect(events.some(event => event.type === 'error')).toBe(false);
+  });
+
+  it.each(['stdout', 'stderr', 'durable stdout', 'durable stderr'])('extends raw %s progress within the cap without clearing the watchdog', async stream => {
+    vi.useFakeTimers();
+    vi.mocked(loadavg).mockReturnValue([15, 0, 0]);
+    const durable = stream.startsWith('durable');
+    if (durable) process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = '1';
+    const threadId = `thoughts-raw-progress-${stream}-${Date.now()}`;
+    const session = ensureCodexOrchestratorSession(process.cwd(), threadId);
+    const proc = useFakeProc();
+    const events: OrchestratorEvent[] = [];
+    let spawnedAt = 0;
+    spawnMock.mockImplementationOnce(() => { spawnedAt = Date.now(); return proc; });
+    const turn = sendToCodexOrchestrator(session, 'hi', event => events.push(event));
+    await waitForSpawn();
+    await vi.advanceTimersByTimeAsync(60_000 - (Date.now() - spawnedAt));
+    const writeRaw = () => {
+      if (durable) {
+        const record = listOrchestratorTurnsForThread(threadId)[0];
+        appendFileSync(stream.endsWith('stderr') ? record.stderrPath : record.stdoutPath, 'warming up...');
+      } else {
+        proc[stream === 'stdout' ? 'stdout' : 'stderr'].emit('data', Buffer.from('warming up...'));
+      }
+    };
+    writeRaw();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(proc.kill).not.toHaveBeenCalled();
+    writeRaw();
+    await vi.advanceTimersByTimeAsync(CODEX_FIRST_EVENT_TIMEOUT_CAP_MS - (Date.now() - spawnedAt) - 1);
+    expect(proc.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await turn;
+    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(events).toContainEqual({
+      type: 'error', error: 'Codex produced no output for 180s — the turn was aborted; re-send to retry',
+    });
+  });
+
+  it('logs the first durable event when close drains it before the file tail runs', async () => {
+    vi.useFakeTimers();
+    process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = '1';
+    const log = vi.spyOn(console, 'log');
+    const threadId = `thoughts-close-first-event-${Date.now()}`;
+    const session = ensureCodexOrchestratorSession(process.cwd(), threadId);
+    const proc = useFakeProc();
+    const events: OrchestratorEvent[] = [];
+    const turn = sendToCodexOrchestrator(session, 'hi', event => events.push(event));
+    await waitForSpawn();
+    const record = listOrchestratorTurnsForThread(threadId)[0];
+    appendFileSync(record.stdoutPath, '{"type":"thread.started","thread_id":"close-live"}\n');
+    proc.exitCode = 0;
+    proc.emit('close', 0);
+    await turn;
+
+    expect(log.mock.calls.filter(([line]) => String(line).includes('First Codex event'))).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ type: 'done', sessionId: 'close-live' });
+    await vi.advanceTimersByTimeAsync(CODEX_FIRST_EVENT_TIMEOUT_CAP_MS);
+    expect(proc.kill).not.toHaveBeenCalled();
+  });
+
+  it('leaves an exited child to close instead of the first-event watchdog', async () => {
+    vi.useFakeTimers();
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-exited-before-close-${Date.now()}`);
+    const proc = useFakeProc();
+    const events: OrchestratorEvent[] = [];
+    const turn = sendToCodexOrchestrator(session, 'hi', event => events.push(event));
+    await waitForSpawn();
+    proc.exitCode = 0;
+    await vi.advanceTimersByTimeAsync(CODEX_FIRST_EVENT_TIMEOUT_CAP_MS);
+    expect(proc.kill).not.toHaveBeenCalled();
+    expect(events.some(event => event.type === 'error' || event.type === 'done')).toBe(false);
+    proc.emit('close', 0);
+    await turn;
+    expect(events.at(-1)?.type).toBe('done');
+    expect(session.status).toBe('ready');
   });
 
   it('terminates the whole Single process group and escalates when TERM stalls', async () => {

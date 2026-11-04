@@ -4,6 +4,7 @@ import { delimiter, join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn() }));
@@ -51,6 +52,8 @@ function deferred() {
 }
 
 beforeAll(async () => {
+  // The Linux refill fixture performs a supervised dependency install.
+  if (process.platform === 'linux') buildPiWriteHelper();
   mkdirSync(repo);
   mkdirSync(bin);
   mkdirSync(join(root, 'worktrees'));
@@ -83,7 +86,7 @@ beforeAll(async () => {
   const registration = await addRepo(repo);
   await updateRepo(registration.id, { setup: { ...registration.setup,
     workspaceIsolationPreference: 'git-worktree', installOnCreateWorkspace: true, installCommand: 'npm ci --offline' } });
-});
+}, 600_000);
 
 async function packet(id: string, reserve: boolean) {
   const candidate = { id, referenceLabel: id, title: id, summary: 'Cancellation fixture', workspaceTargetPath: repo,

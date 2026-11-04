@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { splitIntegrationFiles } from './lib/integration-shards.mjs';
 import { classifyAgainstBaseline, loadRedBaseline } from './lib/red-baseline.mjs';
 
 const root = process.cwd();
@@ -23,13 +24,13 @@ const testPlan = process.env.O8_INTEGRATION_TEST_MODE === '1' && process.env.O8_
 const integrationConfig = testPlan?.config ?? 'config/vitest/vitest.integration.config.ts';
 const shard = /^(\d+)\/(\d+)$/.exec(process.env.O8_INTEGRATION_SHARD ?? '');
 const manifestFiles = testPlan?.files ?? classification.resourceOwning.map((entry) => entry.path);
-// O8_INTEGRATION_SHARD=k/n runs the k-th of n contiguous slices of the file
-// list, so the weekly CI lane fits two runner timeouts (#2391).
+// O8_INTEGRATION_SHARD=k/n packs longest-first by measured seconds so slow
+// files clustered in manifest order cannot overload the last weekly shard.
+// Test plans use the same packing with an optional fixture weights file.
 const allFiles = shard
-  ? manifestFiles.slice(
-    Math.ceil((manifestFiles.length * (Number(shard[1]) - 1)) / Number(shard[2])),
-    Math.ceil((manifestFiles.length * Number(shard[1])) / Number(shard[2])),
-  )
+  ? splitIntegrationFiles(manifestFiles, JSON.parse(readFileSync(
+    testPlan?.weightsPath ?? join(root, 'tests/integration-weights.json'), 'utf8',
+  )), Number(shard[2]))[Number(shard[1]) - 1].files
   : manifestFiles;
 const filters = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));
 const files = filters.length === 0

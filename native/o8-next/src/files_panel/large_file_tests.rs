@@ -7,6 +7,7 @@ pub(super) struct Receipt {
     pub highlight_ms: f64,
     pub scroll_middle_ms: f64,
     pub scroll_end_ms: f64,
+    pub colors_end_ms: f64,
     pub edit_open_ms: f64,
     pub edit_scroll_middle_ms: f64,
     pub edit_scroll_end_ms: f64,
@@ -31,6 +32,28 @@ fn frame(cx: &mut VisualTestContext) -> f64 {
         window.draw(cx).clear();
     });
     start.elapsed().as_secs_f64() * 1000.
+}
+
+/// Draws until the source viewer paints `text` with syntax spans, and
+/// returns how long that took after the scroll that brought it into view.
+fn colored(text: &str, cx: &mut VisualTestContext) -> f64 {
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        frame(cx);
+        let done = cx.update(|_, cx| {
+            cx.try_global::<source_tests::Painted>()
+                .is_some_and(|p| p.0.iter().any(|(t, s)| t == text && !s.is_empty()))
+        });
+        if done {
+            return start.elapsed().as_secs_f64() * 1000.;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the line in view must paint syntax colors: {text:?}"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn p95(mut samples: Vec<f64>) -> f64 {
@@ -96,6 +119,8 @@ pub(super) fn measure(lines: usize, cx: &mut TestAppContext) -> Receipt {
     };
     let scroll_middle_ms = scroll(cx, lines / 2);
     let scroll_end_ms = scroll(cx, lines - 1);
+    let last_line = content.rsplit('\n').next().unwrap().to_owned();
+    let colors_end_ms = colored(&last_line, cx);
     assert!(
         cx.debug_bounds(Box::leak(
             format!("files-source-line-1-{}", lines - 1).into_boxed_str()
@@ -143,6 +168,7 @@ pub(super) fn measure(lines: usize, cx: &mut TestAppContext) -> Receipt {
         highlight_ms,
         scroll_middle_ms,
         scroll_end_ms,
+        colors_end_ms,
         edit_open_ms,
         edit_scroll_middle_ms,
         edit_scroll_end_ms,
@@ -151,10 +177,47 @@ pub(super) fn measure(lines: usize, cx: &mut TestAppContext) -> Receipt {
     }
 }
 
+/// Edits line 999,999 of a 1M-line file through the panel's editor and reads
+/// it back through the editor's own line index.
+pub(super) fn edit_line_999_999(cx: &mut TestAppContext) {
+    let content = generate(1_000_000);
+    let (panel, cx) = cx.add_window_view(|_, cx| {
+        FilesPanel::new(
+            Client::new("http://127.0.0.1:9").unwrap(),
+            "/large-file-receipt".into(),
+            Mode::Files,
+            cx,
+        )
+    });
+    cx.simulate_resize(gpui::size(px(1200.), px(816.)));
+    panel.update(cx, |p, cx| {
+        p.selected = Some("large.rs".into());
+        p.file_generation += 1;
+        p.file = p.loaded_file(&content, false, None, None, cx);
+        p.watch_editor(cx);
+    });
+    frame(cx);
+    let editor = editor(&panel, cx);
+    panel.update_in(cx, |p, window, cx| p.toggle_edit(window, cx));
+    frame(cx);
+    let line = 999_998;
+    let (start, original) = editor.read_with(cx, |e, _| e.line(line));
+    editor.update(cx, |e, cx| e.place_cursor(start, cx));
+    frame(cx);
+    cx.simulate_input("edited ");
+    frame(cx);
+    editor.read_with(cx, |e, _| {
+        assert_eq!(e.line(line).1, format!("edited {original}"));
+        assert_eq!(e.line(line + 1).1, content.rsplit('\n').next().unwrap());
+        assert_eq!(e.line(line - 1).1, content.lines().nth(line - 1).unwrap());
+        assert_eq!(e.text.len(), content.len() + "edited ".len());
+    });
+}
+
 pub(super) fn read_only_above_the_cap(cx: &mut TestAppContext) {
     assert_eq!(source::Large::of(300_000, 1 << 20), source::Large::No);
-    assert_eq!(source::Large::of(300_001, 1 << 20), source::Large::Plain);
-    assert_eq!(source::Large::of(10, 21 << 20), source::Large::Plain);
+    assert_eq!(source::Large::of(300_001, 1 << 20), source::Large::Windowed);
+    assert_eq!(source::Large::of(10, 21 << 20), source::Large::Windowed);
     assert_eq!(
         source::Large::of(2_000_001, 1 << 20),
         source::Large::ReadOnly
@@ -276,12 +339,13 @@ pub(super) fn undo_steps_restore_each_state(cx: &mut TestAppContext) {
 pub(super) fn print(receipt: &Receipt) {
     println!(
         "large-file lines={} open={:.1}ms highlight={:.1}ms scroll_mid={:.1}ms scroll_end={:.1}ms \
-         edit_open={:.1}ms edit_scroll_mid={:.1}ms edit_scroll_end={:.1}ms key_p95={:.1}ms backspace_p95={:.1}ms",
+         colors_end={:.1}ms edit_open={:.1}ms edit_scroll_mid={:.1}ms edit_scroll_end={:.1}ms key_p95={:.1}ms backspace_p95={:.1}ms",
         receipt.lines,
         receipt.open_ms,
         receipt.highlight_ms,
         receipt.scroll_middle_ms,
         receipt.scroll_end_ms,
+        receipt.colors_end_ms,
         receipt.edit_open_ms,
         receipt.edit_scroll_middle_ms,
         receipt.edit_scroll_end_ms,

@@ -105,8 +105,10 @@ switch (process.argv[2]) {
     // Incremental objects do not help CARGO_INCREMENTAL=0. Keep .fingerprint,
     // deps, build and the ordinary app so both feature configurations survive.
     rmSync(path.join(target, 'debug/incremental'), { recursive: true, force: true });
-    // Do not count a previous manifest against the build-output budget.
-    rmSync(manifestPath, { force: true });
+    // Include the manifest that will actually be uploaded in the snapshot.
+    mkdirSync(target, { recursive: true });
+    writeFileSync(manifestPath, JSON.stringify({ ...cacheIdentity(),
+      sources: Object.fromEntries(sources().map(file => [file, hash(readFileSync(file))])) }));
     function measure() {
       let total = 0;
       // Shard 1 publishes this nested check target under its own cache budget.
@@ -129,7 +131,7 @@ switch (process.argv[2]) {
       // executables exceed the budget. Cargo rebuilds any removed outputs.
       console.log('[native-cache] oversized target: retaining dependency build/deps/fingerprint outputs');
       for (const entry of readdirSync(target)) {
-        if (!['debug', 'CACHEDIR.TAG', '.rustc_info.json', 'pull-request-registration-target'].includes(entry)) {
+        if (!['debug', 'CACHEDIR.TAG', '.rustc_info.json', 'pull-request-registration-target', '.o8-native-sources.json'].includes(entry)) {
           rmSync(path.join(target, entry), { recursive: true, force: true });
         }
       }
@@ -153,11 +155,6 @@ switch (process.argv[2]) {
     // keys within its repository quota; never upload a snapshot above 4 GiB.
     output('cacheable', total <= budget ? 'true' : 'false');
     if (total > budget) console.log('::warning::Dependency cache exceeds 4 GiB; skip saving this snapshot.');
-    // Write after measuring and pruning so the manifest survives fallback
-    // pruning without changing the key or build-output size decision.
-    mkdirSync(target, { recursive: true });
-    writeFileSync(manifestPath, JSON.stringify({ ...cacheIdentity(),
-      sources: Object.fromEntries(sources().map(file => [file, hash(readFileSync(file))])) }));
     break;
   }
   default: throw new Error('usage: native-test-cache.mjs key|restore|measure');

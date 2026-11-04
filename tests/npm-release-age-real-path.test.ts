@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { WorktreeManager } from '@/lib/worktree/manager';
 import { closeDb } from '@/lib/db';
 import type { RepoSetupConfig } from '@/lib/repos/types';
+import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
@@ -28,6 +29,9 @@ const requestedTarballs: string[] = [];
 const manifest = { name: 'release-age-consumer', version: '1.0.0', private: true,
   dependencies: { 'o8-age-fixture': '^1.0.0' } };
 
+// Supervised dependency installs run through the Pi write helper, a cold cargo build; build it
+// once per file, outside any test's own timeout.
+beforeAll(() => { if (process.platform !== 'win32') buildPiWriteHelper(); }, 600_000);
 beforeAll(async () => {
   const { stdout } = await run(process.execPath, [npmCli, '--version']);
   const [major, minor] = stdout.trim().split('.').map(Number);

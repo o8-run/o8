@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
@@ -27,9 +27,14 @@ import { repoSetupBoundRecipeKey, repoSetupCopyBindingRequirements } from '@/lib
 import { restoreWorkspace } from '@/lib/workspace/restorer';
 import { readDependencySeedImage } from '@/lib/workspace/dependency-seed-registry';
 import { scanWorkspaceStorageState } from '@/lib/workspace/storage-verifier';
+import { buildPiWriteHelper } from '../../../tests/helpers/pi-write-helper';
 import { WorktreeManager } from './manager';
 
 const roots: string[] = [];
+
+// Supervised dependency installs run through the Pi write helper, a cold cargo build; build it
+// once per file, outside any test's own timeout.
+beforeAll(() => { if (process.platform !== 'win32') buildPiWriteHelper(); }, 600_000);
 
 beforeEach(() => {
   process.env.O8_APFS_DEPENDENCY_IMAGES = '0';

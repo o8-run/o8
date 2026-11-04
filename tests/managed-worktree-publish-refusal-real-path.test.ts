@@ -126,8 +126,9 @@ it('refuses launch and retains authority when the final hook-settings publish is
   const { closeDb } = await import('@/lib/db');
   const { WorktreeManager } = await import('@/lib/worktree/manager');
   const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
-  const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+  const { resolveWorktreeRootLayout, WORKTREE_INDEX_EXCLUSION_SUFFIX } = await import('@/lib/worktree/root-layout');
   const id = 'hook-publish-refusal';
+  const worktreeId = `${id}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
 
   await expect(new WorktreeManager(repo).create({
     agentType: 'codex',
@@ -139,13 +140,13 @@ it('refuses launch and retains authority when the final hook-settings publish is
     isolationPreference: 'git-worktree',
   })).rejects.toThrow('target changed before direct write');
 
-  const workspace = path.join(resolveWorktreeRootLayout(repo).primaryBase, id);
+  const workspace = path.join(resolveWorktreeRootLayout(repo).primaryBase, worktreeId);
   expect(readFileSync(path.join(workspace, '.claude', 'settings.local.json'), 'utf8'))
     .toBe('{"attacker":true}\n');
   expect(existsSync(admitted)).toBe(true);
   await expect(withWorktreeMetaTransaction(
     repo,
-    async (transaction) => (await transaction.readAll())[id]?.materializationIdentity,
+    async (transaction) => (await transaction.readAll())[worktreeId]?.materializationIdentity,
   )).resolves.toBeDefined();
   closeDb();
   rmSync(root, { recursive: true, force: true });
@@ -163,8 +164,9 @@ it('refuses launch without mutating an existing hardlinked local hook-settings t
   const { closeDb } = await import('@/lib/db');
   const { WorktreeManager } = await import('@/lib/worktree/manager');
   const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
-  const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+  const { resolveWorktreeRootLayout, WORKTREE_INDEX_EXCLUSION_SUFFIX } = await import('@/lib/worktree/root-layout');
   const id = 'hook-hardlink-refusal';
+  const worktreeId = `${id}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
   const manager = new WorktreeManager(repo);
   Object.defineProperty(manager, 'bootstrapEnvFiles', {
     value: async (workspacePath: string) => {
@@ -184,10 +186,10 @@ it('refuses launch without mutating an existing hardlinked local hook-settings t
   })).rejects.toThrow(/refuses to replace existing \.claude\/settings\.local\.json/);
 
   expect(readFileSync(external, 'utf8')).toBe('external-sentinel');
-  expect(existsSync(path.join(resolveWorktreeRootLayout(repo).primaryBase, id))).toBe(false);
+  expect(existsSync(path.join(resolveWorktreeRootLayout(repo).primaryBase, worktreeId))).toBe(false);
   await expect(withWorktreeMetaTransaction(
     repo,
-    async (transaction) => (await transaction.readAll())[id]?.materializationIdentity,
+    async (transaction) => (await transaction.readAll())[worktreeId]?.materializationIdentity,
   )).resolves.toBeUndefined();
   closeDb();
   rmSync(root, { recursive: true, force: true });
@@ -223,8 +225,9 @@ it('refuses launch without copying env bytes into a replaced final target', asyn
   const { closeDb } = await import('@/lib/db');
   const { WorktreeManager } = await import('@/lib/worktree/manager');
   const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
-  const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+  const { resolveWorktreeRootLayout, WORKTREE_INDEX_EXCLUSION_SUFFIX } = await import('@/lib/worktree/root-layout');
   const id = 'env-target-refusal';
+  const worktreeId = `${id}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
 
   await expect(new WorktreeManager(repo).create({
     agentType: 'codex',
@@ -238,12 +241,12 @@ it('refuses launch without copying env bytes into a replaced final target', asyn
     isolationPreference: 'git-worktree',
   })).rejects.toThrow('copied target is not exclusively linked');
 
-  const workspace = path.join(resolveWorktreeRootLayout(repo).primaryBase, id);
+  const workspace = path.join(resolveWorktreeRootLayout(repo).primaryBase, worktreeId);
   expect(readFileSync(path.join(workspace, '.env'), 'utf8')).toBe('external-sentinel');
   expect(readFileSync(admitted, 'utf8')).toBe('');
   await expect(withWorktreeMetaTransaction(
     repo,
-    async (transaction) => (await transaction.readAll())[id]?.materializationIdentity,
+    async (transaction) => (await transaction.readAll())[worktreeId]?.materializationIdentity,
   )).resolves.toBeDefined();
   closeDb();
   rmSync(root, { recursive: true, force: true });
@@ -280,7 +283,9 @@ it('refuses launch when a bootstrapped env symlink is replaced before its receip
   const { closeDb } = await import('@/lib/db');
   const { WorktreeManager } = await import('@/lib/worktree/manager');
   const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
+  const { WORKTREE_INDEX_EXCLUSION_SUFFIX } = await import('@/lib/worktree/root-layout');
   const id = 'env-symlink-refusal';
+  const worktreeId = `${id}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
 
   await expect(new WorktreeManager(repo).create({
     agentType: 'codex',
@@ -298,7 +303,7 @@ it('refuses launch when a bootstrapped env symlink is replaced before its receip
   expect(readlinkSync(admitted)).toBe(source);
   await expect(withWorktreeMetaTransaction(
     repo,
-    async (transaction) => (await transaction.readAll())[id]?.materializationIdentity,
+    async (transaction) => (await transaction.readAll())[worktreeId]?.materializationIdentity,
   )).resolves.toBeDefined();
   closeDb();
   rmSync(root, { recursive: true, force: true });
@@ -348,8 +353,9 @@ it('refuses launch and retains authority when the final hydrated-cache publish i
   const { closeDb } = await import('@/lib/db');
   const { WorktreeManager } = await import('@/lib/worktree/manager');
   const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
-  const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+  const { resolveWorktreeRootLayout, WORKTREE_INDEX_EXCLUSION_SUFFIX } = await import('@/lib/worktree/root-layout');
   const id = 'cache-publish-refusal';
+  const worktreeId = `${id}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
 
   await expect(new WorktreeManager(repo).create({
     agentType: 'codex',
@@ -361,13 +367,13 @@ it('refuses launch and retains authority when the final hydrated-cache publish i
     isolationPreference: 'apfs-cow-clone',
   })).rejects.toThrow('hydration target changed before population');
 
-  const workspace = path.join(resolveWorktreeRootLayout(repo).primaryBase, id);
+  const workspace = path.join(resolveWorktreeRootLayout(repo).primaryBase, worktreeId);
   expect(readFileSync(path.join(workspace, '.next', 'cache', 'unrelated-sentinel'), 'utf8'))
     .toBe('preserve');
   expect(readdirSync(admitted)).toEqual([]);
   await expect(withWorktreeMetaTransaction(
     repo,
-    async (transaction) => (await transaction.readAll())[id]?.materializationIdentity,
+    async (transaction) => (await transaction.readAll())[worktreeId]?.materializationIdentity,
   )).resolves.toBeDefined();
   closeDb();
   rmSync(root, { recursive: true, force: true });
@@ -417,8 +423,9 @@ it('refuses launch and retains authority when direct cache hydration fails after
   const { closeDb } = await import('@/lib/db');
   const { WorktreeManager } = await import('@/lib/worktree/manager');
   const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
-  const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+  const { resolveWorktreeRootLayout, WORKTREE_INDEX_EXCLUSION_SUFFIX } = await import('@/lib/worktree/root-layout');
   const id = 'cache-partial-refusal';
+  const worktreeId = `${id}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
 
   await expect(new WorktreeManager(repo).create({
     agentType: 'codex',
@@ -430,12 +437,12 @@ it('refuses launch and retains authority when direct cache hydration fails after
     isolationPreference: 'apfs-cow-clone',
   })).rejects.toBeInstanceOf(Error);
 
-  const workspace = path.join(resolveWorktreeRootLayout(repo).primaryBase, id);
+  const workspace = path.join(resolveWorktreeRootLayout(repo).primaryBase, worktreeId);
   expect(readFileSync(path.join(workspace, '.next', 'cache', 'a-trusted'), 'utf8'))
     .toBe('trusted-cache');
   await expect(withWorktreeMetaTransaction(
     repo,
-    async (transaction) => (await transaction.readAll())[id]?.materializationIdentity,
+    async (transaction) => (await transaction.readAll())[worktreeId]?.materializationIdentity,
   )).resolves.toBeDefined();
   closeDb();
   rmSync(root, { recursive: true, force: true });
