@@ -26,7 +26,8 @@ while True:
     if not data:
         break
     if b"\x03" in data:
-        emit("CTRL-C\r\n~/fixture$ ")
+        # A shell with integration reports the interrupted status (OSC 133;D).
+        emit("CTRL-C\r\n\x1b]133;D;130\x07~/fixture$ ")
         pending = b""
         data = data.replace(b"\x03", b"")
     pending += data
@@ -35,6 +36,13 @@ while True:
         command, pending = pending[:end].decode(errors="replace"), pending[end + 1:]
         if command == "sleep 30":
             emit("~/fixture$ sleep 30\r\nsleeping\r\n")
+        elif command == "ticks":
+            # Streams on stdout and stderr, then reports exit 3 before the prompt.
+            emit("~/fixture$ ticks\r\ntick 1\r\n")
+            time.sleep(0.6)
+            os.write(sys.stderr.fileno(), b"tick 2 on stderr\r\n")
+            time.sleep(0.6)
+            emit("tick 3\r\n\x1b]133;D;3\x07~/fixture$ ")
         elif command == "\x0b":
             emit("CTRL-K\r\n")
         elif command == "size":

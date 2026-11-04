@@ -1,6 +1,8 @@
 //! A `!` line's completions (the command word, then paths in the project)
 //! and the block "Add to chat" puts in the draft.
+use crate::terminal_grid::{CommandOutput, Mark};
 use serde_json::Value;
+use std::time::{Duration, Instant};
 
 /// At most this many completions show at once.
 pub(crate) const RESULTS: usize = 12;
@@ -8,12 +10,94 @@ pub(crate) const RESULTS: usize = 12;
 pub(crate) const OUTPUT_LINES: usize = 200;
 pub(crate) const OUTPUT_CHARS: usize = 8_000;
 
+/// The card shows at most this many of the last output lines; Copy and
+/// Add to chat take more.
+pub(crate) const CARD_LINES: usize = 8;
+
 /// The `!` line the composer last ran, until it goes to the chat or away.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ShellRun {
     pub line: String,
     /// Esc already stopped it, so the next Esc stops the turn again.
     pub stopped: bool,
+    pub started: Instant,
+    /// The terminal just before the line went in: output and exit reports
+    /// count only after it.
+    pub before: Option<Mark>,
+    /// What it printed so far, stdout and stderr as the terminal shows them.
+    pub output: Vec<String>,
+    /// How long it ran, once its prompt came back.
+    pub took: Option<Duration>,
+    /// The exit status, when the shell reports one (OSC 133;D).
+    pub exit: Option<i32>,
+}
+
+impl ShellRun {
+    pub fn new(line: String, started: Instant) -> Self {
+        Self {
+            line,
+            stopped: false,
+            started,
+            before: None,
+            output: vec![],
+            took: None,
+            exit: None,
+        }
+    }
+    pub fn running(&self) -> bool {
+        self.took.is_none()
+    }
+    /// Takes a read of the terminal; true when the card changed.
+    pub fn read(&mut self, output: Option<CommandOutput>, mark: Mark, now: Instant) -> bool {
+        let Some(before) = self.before else {
+            return false;
+        };
+        // Until the terminal moves, an older echo of the same line is not this run.
+        let Some(output) = output.filter(|_| self.running() && mark.revision > before.revision)
+        else {
+            return false;
+        };
+        let changed = output.lines != self.output || output.finished;
+        self.output = output.lines;
+        if output.finished {
+            self.took = Some(now.saturating_duration_since(self.started));
+            self.exit = (mark.exits > before.exits).then_some(mark.exit).flatten();
+        }
+        changed
+    }
+    /// "running", "stopping", "finished" or "stopped".
+    pub fn state(&self) -> &'static str {
+        match (self.running(), self.stopped) {
+            (true, false) => "running",
+            (true, true) => "stopping",
+            (false, false) => "finished",
+            (false, true) => "stopped",
+        }
+    }
+    /// "Running 3s" while it runs (the clock ticks once a second), then
+    /// "Finished · 0.6s · exit 0".
+    pub fn status(&self, now: Instant) -> String {
+        let Some(took) = self.took else {
+            let label = if self.stopped { "Stopping" } else { "Running" };
+            let seconds = now.saturating_duration_since(self.started).as_secs();
+            return format!("{label} {seconds}s");
+        };
+        let label = if self.stopped { "Stopped" } else { "Finished" };
+        let mut status = format!("{label} · {:.1}s", took.as_secs_f64());
+        if let Some(code) = self.exit {
+            status.push_str(&format!(" · exit {code}"));
+        }
+        status
+    }
+    /// The command and all it printed, for the clipboard.
+    pub fn copy_text(&self) -> String {
+        let mut text = format!("$ {}", self.line);
+        for line in &self.output {
+            text.push('\n');
+            text.push_str(line);
+        }
+        text
+    }
 }
 
 /// The word the cursor ends in a `!` line: where it starts, the word, and
@@ -255,6 +339,81 @@ mod tests {
             "output fences never close the block"
         );
         assert!(chat_block("sleep 9", &[], false).ends_with("(Still running when added.)"));
+    }
+
+    fn mark(revision: u64, exits: u64, exit: Option<i32>) -> Mark {
+        Mark {
+            revision,
+            exits,
+            exit,
+        }
+    }
+    fn output(lines: &[&str], finished: bool) -> Option<CommandOutput> {
+        Some(CommandOutput {
+            lines: lines.iter().map(|line| (*line).to_owned()).collect(),
+            finished,
+        })
+    }
+
+    #[test]
+    fn a_card_follows_its_run_from_the_mark_to_the_exit() {
+        let start = Instant::now();
+        let at = |ms| start + Duration::from_millis(ms);
+        let mut run = ShellRun::new("make".into(), start);
+        assert!(
+            !run.read(output(&["old"], true), mark(4, 1, Some(0)), at(5)),
+            "nothing counts before the shell says where the terminal stood"
+        );
+        run.before = Some(mark(4, 1, Some(0)));
+        assert!(
+            !run.read(output(&["old"], true), mark(4, 1, Some(0)), at(5)),
+            "an older echo of the same line, before the terminal moved"
+        );
+        assert_eq!(
+            (run.state(), run.status(at(1_400))),
+            ("running", "Running 1s".into())
+        );
+        assert!(run.read(output(&["a"], false), mark(5, 1, Some(0)), at(100)));
+        assert!(run.read(output(&["a", "b"], false), mark(6, 1, Some(0)), at(200)));
+        assert!(!run.read(output(&["a", "b"], false), mark(7, 1, Some(0)), at(300)));
+        assert_eq!(run.output, ["a", "b"]);
+        assert!(run.read(output(&["a", "b"], true), mark(8, 2, Some(2)), at(600)));
+        assert_eq!(run.took, Some(Duration::from_millis(600)));
+        assert_eq!(run.exit, Some(2));
+        assert_eq!(
+            (run.state(), run.status(at(9_000))),
+            ("finished", "Finished · 0.6s · exit 2".into()),
+            "a finished clock stops"
+        );
+        assert!(
+            !run.read(
+                output(&["a", "b", "later"], true),
+                mark(9, 2, Some(2)),
+                at(700)
+            ),
+            "a finished card no longer changes"
+        );
+        assert_eq!(run.copy_text(), "$ make\na\nb");
+    }
+
+    #[test]
+    fn an_exit_counts_only_when_reported_after_the_run_began() {
+        let start = Instant::now();
+        let mut run = ShellRun::new("ls".into(), start);
+        run.before = Some(mark(10, 3, Some(1)));
+        run.read(output(&["x"], true), mark(11, 3, Some(1)), start);
+        assert_eq!(run.exit, None, "the shell reported nothing for this run");
+        assert_eq!(run.status(start), "Finished · 0.0s");
+        let mut stopped = ShellRun::new("sleep 30".into(), start);
+        stopped.before = Some(Mark::default());
+        stopped.stopped = true;
+        assert_eq!(stopped.status(start), "Stopping 0s");
+        assert_eq!(stopped.state(), "stopping");
+        stopped.read(output(&["CTRL-C"], true), mark(1, 1, Some(130)), start);
+        assert_eq!(
+            (stopped.state(), stopped.status(start)),
+            ("stopped", "Stopped · 0.0s · exit 130".into())
+        );
     }
 
     #[test]

@@ -456,3 +456,30 @@ fn a_command_s_output_is_what_follows_its_echo() {
     assert_eq!(grid.command_output("ls").unwrap().lines, ["old"]);
     assert!(grid.command_output("make").is_none());
 }
+
+#[test]
+fn exit_reports_count_live_and_whole_even_when_split() {
+    let mut grid = Grid::new(Size(20, 5));
+    assert_eq!(grid.mark().exits, 0);
+    grid.feed(b"$ ls\r\na\r\n\x1b]133;D;0\x07$ ", false);
+    assert_eq!((grid.mark().exits, grid.mark().exit), (1, Some(0)));
+    // A report split across reads, ended by ST, with an extra parameter.
+    grid.feed(b"$ false\r\n\x1b]13", false);
+    assert_eq!(grid.mark().exits, 1, "not whole yet");
+    grid.feed(b"3;D;1;aid=7\x1b\\$ ", false);
+    assert_eq!((grid.mark().exits, grid.mark().exit), (2, Some(1)));
+    grid.feed(b"\x1b]133;D\x07", false);
+    assert_eq!(
+        (grid.mark().exits, grid.mark().exit),
+        (3, None),
+        "no status given"
+    );
+    grid.feed(b"\x1b]133;D;5\x07", true);
+    assert_eq!(grid.mark().exits, 3, "a replay repeats old reports");
+    grid.feed(b"\x1b]133;A\x07\x1b[0m", false);
+    assert_eq!(grid.mark().exits, 3, "other marks are not exits");
+    assert!(
+        !grid.text().contains("133"),
+        "the parser still hides the report"
+    );
+}

@@ -88,15 +88,16 @@ impl Surface {
                 && let Some(window) = input.controls.slash.window
             {
                 let line = line.to_owned();
-                self.shell_run = Some(crate::composer::shell::ShellRun {
-                    line: line.clone(),
-                    stopped: false,
-                });
+                self.shell_run = Some(crate::composer::shell::ShellRun::new(
+                    line.clone(),
+                    std::time::Instant::now(),
+                ));
                 editor.update(cx, |i, cx| i.set_text("", cx));
+                let view = cx.entity().downgrade();
                 cx.defer(move |cx| {
                     let _ = window.update(cx, |_, window, cx| {
                         editor.read(cx).focus.focus(window);
-                        crate::ui::run_shell_line(line, window, cx);
+                        crate::ui::run_shell_line(line, view, window, cx);
                     });
                 });
                 return;
@@ -670,6 +671,7 @@ impl Surface {
             // Reserve the full card height so the transcript above yields space.
             .flex()
             .flex_col()
+            .children(self.shell_run_card(cx))
             .children(self.lineage_strip(cx))
             .child(self.composer_card(window, cx))
             .into_any_element()

@@ -55,6 +55,7 @@ impl ShellFeature for RightPanel {
                 move_inbox_tabs(s, window, cx);
                 resources::tick(s, cx);
                 subagents::tick(s, cx);
+                watch_shell_run(s, cx);
             },
         }]
     }
@@ -275,6 +276,8 @@ struct Panel {
     drag_from: Option<(f32, f32)>,
     /// The edge takes focus when pressed, so Left and Right resize by 16 px.
     edge: Option<gpui::FocusHandle>,
+    /// The composer `!` line still running, and the view whose card shows it.
+    shell_watch: Option<(String, gpui::WeakEntity<crate::ui::Surface>)>,
 }
 
 impl Default for Panel {
@@ -308,6 +311,7 @@ impl Default for Panel {
             resizing: false,
             drag_from: None,
             edge: None,
+            shell_watch: None,
         }
     }
 }
@@ -338,12 +342,19 @@ impl Shell {
     ) {
         open_file_at(self, path, line, window, cx);
     }
+    /// Runs a composer `!` line in this workspace's terminal. The view's card
+    /// learns where the terminal stood first, then follows it on each tick.
     pub(crate) fn run_shell_line(
         &mut self,
         line: String,
+        view: gpui::WeakEntity<crate::ui::Surface>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let mark =
+            terminal_pane(self, cx).map_or_else(Default::default, |pane| pane.read(cx).mark());
+        let _ = view.update(cx, |view, cx| view.shell_run_began(&line, mark, cx));
+        self.features.get::<Panel>().shell_watch = Some((line.clone(), view));
         run_in_terminal(self, line, window, cx);
     }
     /// Ctrl-C to a composer `!` line still running in this workspace's terminal.
@@ -785,6 +796,28 @@ pub(super) fn run_in_terminal(
     }
     if let Some(focus) = focus {
         focus.focus(window);
+    }
+}
+
+/// Brings a running composer `!` line's output and exit to its card, until
+/// its prompt comes back or the card goes away.
+fn watch_shell_run(s: &mut Shell, cx: &mut Context<Shell>) {
+    let Some((line, view)) = s
+        .features
+        .read::<Panel>()
+        .and_then(|p| p.shell_watch.clone())
+    else {
+        return;
+    };
+    let (output, mark) = terminal_pane(s, cx).map_or((None, None), |pane| {
+        let pane = pane.read(cx);
+        (pane.command_output(&line), Some(pane.mark()))
+    });
+    let running = view
+        .update(cx, |view, cx| view.shell_run_read(&line, output, mark, cx))
+        .unwrap_or(false);
+    if !running {
+        s.features.get::<Panel>().shell_watch = None;
     }
 }
 
