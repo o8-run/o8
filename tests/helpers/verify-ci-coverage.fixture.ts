@@ -29,13 +29,20 @@ export function createVerifierCoverageFixture(repo: string, parent: string): str
 
 /** Mutate the real native setup action for verifier refusal checks. */
 export function mutateNativeSetupFixture(setup: { runs: { steps: Array<{
-  id?: string; run?: string; with?: Record<string, string>;
+  id?: string; run?: string; if?: string; with?: Record<string, string>;
 }> } }, change: string): void {
   const cache = setup.runs.steps.find(step => step.id === 'native-cache');
   if (change === 'cache dependencies only' && cache?.with) cache.with.path = '.o8-next-cargo/registry';
   if (change === 'cache without source key' && cache?.with) cache.with.key = 'native-tests-lock-only';
   if (change === 'architecture') setup.runs.steps[0].with!.architecture = 'arm64';
   if (change === 'missing install') setup.runs.steps = setup.runs.steps.filter(step => step.run !== 'npm ci --prefer-offline');
+  const registration = setup.runs.steps.find(step => step.id === 'registration-cache');
+  if (change === 'registration without headless gate' && registration) registration.if = "inputs.registration-cache == 'true'";
+  if (change === 'registration without dependency key' && registration?.with) registration.with.key = 'native-registration-config-only';
+  if (change === 'registration restored before native' && registration) {
+    setup.runs.steps = setup.runs.steps.filter(step => step !== registration);
+    setup.runs.steps.splice(setup.runs.steps.findIndex(step => step.id === 'native-cache'), 0, registration);
+  }
 }
 
 export function writeListingCheckFixture(directory: string) {

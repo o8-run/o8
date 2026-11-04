@@ -601,7 +601,8 @@ describe('local CI verification through its command entry point', () => {
   it.each(['command', 'action', 'condition', 'native tolerance', 'native step tolerance',
     'aggregate tolerance', 'aggregate step tolerance', 'aggregate condition', 'checkout ref',
     'shard tolerance', 'shard step tolerance', 'missing native shard', 'native fail fast',
-    'timed phase command', 'timed phase condition', 'timings artifact path', 'timings artifact condition'])('rejects uncovered native execution changes: %s', change => {
+    'timed phase command', 'timed phase condition', 'timings artifact path', 'timings artifact condition',
+    'registration setup shard', 'registration save condition', 'registration save key'])('rejects uncovered native execution changes: %s', change => {
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
     const job = workflow.jobs['o8-next-tests'];
     if (change === 'command') job.steps.push({ run: 'cargo test --required-fixture' });
@@ -609,6 +610,10 @@ describe('local CI verification through its command entry point', () => {
     if (change === 'checkout ref') job.steps[0].with.ref = 'main';
     if (change === 'missing native shard') job.strategy.matrix.shard.pop();
     if (change === 'native fail fast') job.strategy['fail-fast'] = true;
+    if (change === 'registration setup shard') job.steps[2].with['registration-cache'] = '${{ matrix.shard == 8 }}';
+    const registrationSave = job.steps.find((step: { name?: string }) => step.name === 'Save the registration check target');
+    if (change === 'registration save condition') registrationSave.if = `${reuseGate} && steps.native.outputs.changed == 'true'`;
+    if (change === 'registration save key') registrationSave.with.key = '${{ steps.native-setup.outputs.native-cache-key }}';
     if (change === 'timed phase command') job.steps.find((step: { name?: string }) => step.name === 'Fixed-rate native terminal probes without sibling tests').run += '\necho unchecked';
     if (change === 'timed phase condition') job.steps.find((step: { name?: string }) => step.name === 'Fixed-rate native terminal probes without sibling tests').if = 'false';
     if (change === 'timings artifact path') job.steps.find((step: { with?: { name?: string } }) => step.with?.name === 'native-timings-${{ matrix.shard }}').with.path = 'missing.json';
@@ -626,7 +631,9 @@ describe('local CI verification through its command entry point', () => {
     expect(result.stderr).toContain('verify:ci');
   });
 
-  it.each(['architecture', 'missing install', 'cache dependencies only', 'cache without source key'])('rejects uncovered native prerequisite changes: %s', setupChange => {
+  it.each(['architecture', 'missing install', 'cache dependencies only', 'cache without source key',
+    'registration without headless gate', 'registration without dependency key',
+    'registration restored before native'])('rejects uncovered native prerequisite changes: %s', setupChange => {
     const result = executeFixture('tests/fixture.test.ts', false, { setupChange });
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(1);
