@@ -103,6 +103,38 @@ it.each([
   expect(response.headers.get('content-type')).toContain('application/json');
 });
 
+it('keeps Sidebar and saved history reachable after verbose Workers events', async () => {
+  const verbose = await startParityReference({ o8d: true, binary, nativeHttp: true,
+    preload: './tests/fixtures/ws-parity-output.cjs', startupTimeoutMs: 120_000 });
+  try {
+    await verbose.stopNext();
+    const base = verbose.url.replace('ws:', 'http:').replace('/ws', '');
+    const delivery = (await (await fetch(base + '/health')).json()).delivery;
+    expect(delivery.transport).toBe('o8d');
+    mkdirSync(join(verbose.directory, 'chat-history'), { recursive: true });
+    writeFileSync(join(verbose.directory, 'chat-history', 'thoughts-verbose.json'), JSON.stringify({
+      title: 'Verbose fixture', backend: 'pi', orchestratorVisible: true, repoPath: verbose.directory,
+      savedAt: new Date().toISOString(), messages: [{ role: 'assistant', content: 'Survived Workers events' }],
+    }));
+    for (const path of ['/api/lanes?active=true', '/api/orchestrator/lane-events?since=0&timeoutMs=0',
+      '/api/v2/chat-history/list?include=orchestrator', '/api/mobile/history?sessionKey=llm-chat:thoughts-verbose&limit=100']) {
+      const response = await fetch(base + path, { headers: { authorization: `Bearer ${verbose.token}` } });
+      expect(response.status, path).toBe(200);
+      const body = await response.text();
+      if (path.startsWith('/api/orchestrator/lane-events')) {
+        await expect.poll(() => verbose.diagnostics().stdoutBytes, { timeout: 10_000 }).toBeGreaterThan(1024 ** 2);
+        await expect.poll(() => verbose.diagnostics().stderrBytes, { timeout: 10_000 }).toBeGreaterThan(1024 ** 2);
+      }
+      if (path.startsWith('/api/mobile/history')) expect(body).toContain('Survived Workers events');
+    }
+    expect(verbose.diagnostics()).toMatchObject({ code: null, signal: null, error: '' });
+    expect(verbose.diagnostics().stderr.length).toBeLessThanOrEqual(16_384);
+    const health = await (await fetch(base + '/health')).json();
+    expect(health.delivery).toEqual(delivery);
+  } finally { await verbose.stop(); }
+  expect(verbose.diagnostics()).toMatchObject({ code: 0, signal: null, error: '' });
+}, 120_000);
+
 it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next stopped', async (surface, pattern, status) => {
   const { nativeSurfaceRoutes } = await import('@/lib/ws-server/native-http-registry');
   const routePath = pattern.split('?')[0];

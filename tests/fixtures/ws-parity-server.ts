@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -68,7 +68,7 @@ export async function startParityReference(options: {
   if (!address || typeof address === 'string') throw new Error('missing fixture API port');
   const apiUrl = `http://127.0.0.1:${address.port}`;
   const port = await freePort();
-  const child = execFile(process.execPath, [
+  const child = spawn(process.execPath, [
     ...(options.preload ? ['--require', options.preload] : []),
     ...(options.stallFixture ? ['--import=./tests/fixtures/ws-stall-preload.mjs'] : []),
     ...(options.nativeHttp ? ['--require=./scripts/next/brain-runtime.cjs'] : []),
@@ -87,8 +87,19 @@ export async function startParityReference(options: {
       O8D_BINARY: options.binary ?? process.env.O8D_TEST_BINARY,
       O8_REALTIME_LOG_LIMIT: String(options.logLimit ?? 4), NEXT_ORIGIN: apiUrl },
   });
+  // spawn drains a long-lived process without execFile's cumulative maxBuffer.
+  const diagnostics = { stdoutBytes: 0, stderrBytes: 0, stderr: '',
+    code: null as number | null, signal: null as NodeJS.Signals | null, error: '' };
+  child.stdout.on('data', (chunk: Buffer) => { diagnostics.stdoutBytes += chunk.length; });
+  child.stderr.on('data', (chunk: Buffer) => {
+    diagnostics.stderrBytes += chunk.length;
+    diagnostics.stderr = (diagnostics.stderr + chunk.toString('utf8')).slice(-16_384);
+  });
+  child.on('error', error => { diagnostics.error = error.message; });
+  child.on('exit', (code, signal) => { diagnostics.code = code; diagnostics.signal = signal; });
+  const receipt = () => ({ ...diagnostics });
   const stop = async () => {
-    if (child && child.exitCode === null) {
+    if (!diagnostics.error && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGTERM');
       const exited = once(child, 'exit');
       const timer = setTimeout(() => child?.kill('SIGKILL'), 5_000);
@@ -98,22 +109,21 @@ export async function startParityReference(options: {
     if (api.listening) await new Promise<void>((resolve) => api.close(() => resolve()));
     if (!options.directory) rmSync(directory, { recursive: true, force: true });
   };
-  // Consume output without exposing incidental background-service diagnostics.
-  child.stdout?.resume();
-  child.stderr?.resume();
   try {
     const deadline = Date.now() + (options.startupTimeoutMs ?? 60_000);
     while (Date.now() < deadline) {
-      if (child.exitCode !== null) throw new Error('reference WS process exited');
+      if (child.exitCode !== null || child.signalCode !== null || diagnostics.error) {
+        throw new Error(`reference WS process exited: ${JSON.stringify(receipt())}`);
+      }
       try {
         if ((await fetch(`http://127.0.0.1:${port}/health`)).ok) {
-          return { url: `ws://127.0.0.1:${port}/ws`, apiUrl, token, pid: child.pid!, directory, stop,
+          return { url: `ws://127.0.0.1:${port}/ws`, apiUrl, token, pid: child.pid!, directory, stop, diagnostics: receipt,
             stopNext: async () => { api.closeAllConnections(); await new Promise<void>(resolve => api.close(() => resolve())); } };
         }
       } catch { /* Wait for the real entry point. */ }
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    throw new Error('reference WS health timed out');
+    throw new Error(`reference WS health timed out: ${JSON.stringify(receipt())}`);
   } catch (error) {
     await stop();
     throw error;
