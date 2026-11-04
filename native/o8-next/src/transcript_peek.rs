@@ -1,6 +1,7 @@
 //! A file pill's peek: rest the pointer on one and the lines it names show
 //! beside it. The read goes through the Files panel's route, off the paint
-//! thread, and each file is kept by path and modified time.
+//! thread, and each file is kept by path and modified time. A sent mention's
+//! pill peeks the same way at the lines it was sent with.
 use crate::{client::Client, theme::current as theme};
 use gpui::{
     AnchoredPositionMode, AnyElement, App, Bounds, IntoElement, ParentElement, Pixels, Point, Size,
@@ -44,6 +45,8 @@ pub(crate) enum Snippet {
     },
     Missing,
     Unavailable(String),
+    /// A mention's own lines, with no file to read.
+    Preview(Vec<String>),
 }
 
 /// About eight lines with the named one near the middle, kept inside the file.
@@ -149,6 +152,8 @@ pub(crate) struct Target {
     pub root: String,
     pub path: String,
     pub line: Option<usize>,
+    /// A sent mention's title and lines, shown instead of a file.
+    pub preview: Option<(String, Vec<String>)>,
 }
 impl Target {
     fn file(&self) -> String {
@@ -254,6 +259,9 @@ impl Peeks {
     }
     /// Reads the file unless it was read lately or a read is on its way.
     fn read(&self, target: Target, window: &mut Window, cx: &mut App) {
+        if target.preview.is_some() {
+            return;
+        }
         let file = target.file();
         let client = {
             let mut state = self.0.borrow_mut();
@@ -301,9 +309,11 @@ impl Peeks {
             .as_ref()
             .filter(|hover| hover.open && hover.target.key == key)?;
         let target = &hover.target;
-        let snippet = match state.cache.lookup(&target.file(), Instant::now()) {
-            Lookup::Fresh(read) | Lookup::Stale(read) => Some(read.snippet(target.line)),
-            Lookup::Miss => None,
+        let lookup = state.cache.lookup(&target.file(), Instant::now());
+        let snippet = match (&target.preview, lookup) {
+            (Some((_, lines)), _) => Some(Snippet::Preview(lines.clone())),
+            (None, Lookup::Fresh(read) | Lookup::Stale(read)) => Some(read.snippet(target.line)),
+            (None, Lookup::Miss) => None,
         };
         let at = place(pill, size(px(WIDTH), height(&snippet)), viewport);
         let peeks = self.clone();
@@ -327,6 +337,7 @@ impl Peeks {
 fn height(snippet: &Option<Snippet>) -> Pixels {
     let body = match snippet {
         Some(Snippet::Lines { lines, .. }) => 12. + LINE * lines.len() as f32,
+        Some(Snippet::Preview(lines)) if !lines.is_empty() => 12. + LINE * lines.len() as f32,
         _ => NOTE,
     };
     px(2. + HEADER + body)
@@ -377,6 +388,24 @@ fn card(target: &Target, snippet: Option<Snippet>) -> gpui::Stateful<gpui::Div> 
         None => note("Loading…".into()).into_any_element(),
         Some(Snippet::Missing) => note("File not found".into()).into_any_element(),
         Some(Snippet::Unavailable(error)) => note(error).into_any_element(),
+        Some(Snippet::Preview(lines)) if lines.is_empty() => {
+            note("Nothing more to show.".into()).into_any_element()
+        }
+        Some(Snippet::Preview(lines)) => div()
+            .py(px(6.))
+            .text_size(px(12.))
+            .children(lines.into_iter().enumerate().map(|(index, text)| {
+                div()
+                    .debug_selector(move || format!("transcript-peek-preview-{index}"))
+                    .h(px(LINE))
+                    .px(px(10.))
+                    .whitespace_nowrap()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .text_color(theme().text)
+                    .child(text)
+            }))
+            .into_any_element(),
         Some(Snippet::Lines { first, lines }) => div()
             .py(px(6.))
             .font_family(theme().font_mono)
@@ -436,7 +465,10 @@ fn card(target: &Target, snippet: Option<Snippet>) -> gpui::Stateful<gpui::Div> 
                 .text_ellipsis()
                 .text_size(px(11.5))
                 .text_color(theme().text_secondary)
-                .child(format!("{}{at}", target.file())),
+                .child(match &target.preview {
+                    Some((title, _)) => title.clone(),
+                    None => format!("{}{at}", target.file()),
+                }),
         )
         .child(body)
 }

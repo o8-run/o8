@@ -1227,14 +1227,23 @@ impl Element for RetainedRow {
                 let name = SharedString::from(selector.clone());
                 let root = state.file_root.as_ref().map(|root| root.as_ref());
                 let tip = link_tip(root, &url).map(SharedString::from);
-                // A file pill peeks at its lines instead of naming its path.
-                let peek = state.peeks.clone().zip(root).and_then(|(peeks, root)| {
-                    let (path, line) = crate::text::file_ref(url.strip_prefix("file:")?)?;
+                // A file pill peeks at its lines instead of naming its path,
+                // and a sent mention at what it names.
+                let peek = state.peeks.clone().and_then(|peeks| {
+                    let mention = crate::composer::mention::groups::sent_preview(&url);
+                    let (root, path, line) = match &mention {
+                        Some(_) => (String::new(), String::new(), None),
+                        None => {
+                            let (path, line) = crate::text::file_ref(url.strip_prefix("file:")?)?;
+                            (root?.to_owned(), path.to_owned(), line)
+                        }
+                    };
                     let target = crate::transcript_peek::Target {
                         key: selector.clone(),
-                        root: root.to_owned(),
-                        path: path.to_owned(),
+                        root,
+                        path,
                         line,
+                        preview: mention,
                     };
                     Some((peeks, target))
                 });

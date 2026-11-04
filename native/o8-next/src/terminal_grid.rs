@@ -192,6 +192,14 @@ impl Grid {
     pub fn command_output(&self, command: &str) -> Option<CommandOutput> {
         output_after(&self.lines(LOOKBACK), command)
     }
+    /// The newest `count` lines up to the cursor, blank lines at the end left out.
+    pub fn tail(&self, count: usize) -> Vec<String> {
+        let mut lines = self.lines(LOOKBACK);
+        while lines.last().is_some_and(|line| line.is_empty()) {
+            lines.pop();
+        }
+        lines.split_off(lines.len().saturating_sub(count))
+    }
     /// The last `limit` rows up to the cursor, wrapped rows joined into the
     /// lines a program printed.
     fn lines(&self, limit: usize) -> Vec<String> {

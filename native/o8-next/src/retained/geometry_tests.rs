@@ -397,3 +397,74 @@ fn a_peek_near_the_transcripts_end_opens_above_its_pill(cx: &mut TestAppContext)
         assert!(row.bottom() <= pill.top(), "line {line} clear of the pill");
     }
 }
+
+#[gpui::test]
+fn a_sent_mention_pill_peeks_after_a_pause_and_a_click_opens_its_thread(cx: &mut TestAppContext) {
+    use crate::composer::mention::groups::{Sent, remember_sent, sent_link};
+    remember_sent(Sent::thread(
+        "Earlier work",
+        "thoughts-earlier",
+        "idle",
+        Some("topic"),
+    ));
+    let entry = serde_json::from_value(serde_json::json!({
+        "id": "sent", "role": "user", "text": "Read @Earlier work please"
+    }))
+    .unwrap();
+    let mut state = RowState::new(crate::model::render_tree(&[entry]).remove(0));
+    state.peeks = Some(crate::transcript_peek::Peeks::default());
+    let state = Rc::new(RefCell::new(state));
+    let (_, cx) = cx.add_window_view(|_, _| TranscriptRow(state.clone()));
+    cx.simulate_resize(size(px(900.), px(700.)));
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        })
+    };
+    draw(cx);
+    let text = state.borrow().rendered().1.join("\n");
+    assert!(text.contains("Read @Earlier work please"), "{text}");
+    let pill = cx
+        .debug_bounds("transcript-link-0-0")
+        .expect("mention pill");
+    assert!(
+        state
+            .borrow()
+            .cache
+            .as_ref()
+            .unwrap()
+            .backgrounds
+            .iter()
+            .any(|b| b.bounds.size.width > px(0.) && b.radius == px(6.)),
+        "the mention reads as a pill"
+    );
+    cx.simulate_mouse_move(pill.center(), None, gpui::Modifiers::default());
+    draw(cx);
+    cx.executor()
+        .advance_clock(crate::transcript_peek::OPEN_DELAY / 2);
+    cx.run_until_parked();
+    draw(cx);
+    assert!(cx.debug_bounds("transcript-peek").is_none(), "not yet");
+    cx.executor()
+        .advance_clock(crate::transcript_peek::OPEN_DELAY);
+    cx.run_until_parked();
+    draw(cx);
+    assert!(cx.debug_bounds("transcript-peek").is_some(), "peek opens");
+    assert!(cx.debug_bounds("transcript-peek-preview-0").is_some());
+    assert!(cx.debug_bounds("transcript-peek-preview-1").is_some());
+    assert!(cx.debug_bounds("transcript-peek-line-1").is_none());
+    let _ = crate::ui::take_pending_link();
+    cx.simulate_click(pill.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    let url = crate::ui::take_pending_link().expect("the click asks the shell to open it");
+    assert_eq!(
+        sent_link(&url).as_deref(),
+        Some("o8://thread/thoughts-earlier")
+    );
+    draw(cx);
+    assert!(
+        cx.debug_bounds("transcript-peek").is_none(),
+        "a click dismisses"
+    );
+}

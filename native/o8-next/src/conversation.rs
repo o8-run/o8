@@ -58,6 +58,56 @@ fn receipt_matches(method: &str, body: &Value, response: &Value) -> bool {
         && item["status"] != "cancelled"
 }
 impl Surface {
+    /// Picks as they stand at send: an agent's latest roster status and
+    /// activity, and a terminal's newest lines.
+    fn current_objects(
+        &self,
+        objects: Vec<crate::composer::mention::groups::Mentioned>,
+        cx: &App,
+    ) -> Vec<crate::composer::mention::groups::Mentioned> {
+        use crate::composer::mention::groups::{self, Mentioned};
+        let agents = self
+            .subagents
+            .as_ref()
+            .map(|view| view.read(cx).agents.clone())
+            .unwrap_or_default();
+        objects
+            .into_iter()
+            .map(|object| match object {
+                Mentioned::Agent { ref id, .. } => agents
+                    .iter()
+                    .find(|agent| &agent.id == id)
+                    .and_then(|agent| groups::agent_matches(std::slice::from_ref(agent), "").pop())
+                    .unwrap_or(object),
+                Mentioned::Terminal { session, .. } => Mentioned::Terminal {
+                    lines: crate::terminal::tail(&session, groups::TERMINAL_LINES)
+                        .unwrap_or_default(),
+                    session,
+                },
+                object => object,
+            })
+            .collect()
+    }
+    /// The sent message's pills preview and open what they name.
+    fn remember_sent_mentions(
+        &self,
+        picks: &[(String, String)],
+        objects: &[crate::composer::mention::groups::Mentioned],
+    ) {
+        use crate::composer::mention::groups::{Sent, remember_sent};
+        for (title, id) in picks {
+            let thread = self.sessions.iter().find(|s| &s.id == id);
+            remember_sent(Sent::thread(
+                title,
+                id,
+                thread.map_or("unknown", |s| s.status.as_str()),
+                thread.and_then(|s| s.branch.as_deref()),
+            ));
+        }
+        for object in objects {
+            remember_sent(Sent::object(object));
+        }
+    }
     fn retire_pending_send(&mut self, thread: &str, id: &Value) {
         if self
             .pending
@@ -447,20 +497,32 @@ impl Surface {
             .unwrap_or_default();
         let network_send = body["payload"]["routing"]["source"] == "bot-network";
         let request_identity = (session.id.clone(), body["id"].clone());
-        let picks = if method == "POST" && fresh {
-            self.composer.update(cx, |i, _| i.thread_mentions())
+        let (picks, objects) = if method == "POST" && fresh {
+            self.composer
+                .update(cx, |i, _| (i.thread_mentions(), i.object_mentions()))
         } else {
-            Vec::new()
+            Default::default()
         };
-        let context = if picks.is_empty() {
+        let objects = self.current_objects(objects, cx);
+        let context = if picks.is_empty() && objects.is_empty() {
             None
         } else {
             // A retry must wait until the initial read has frozen the wire prompt.
             self.pending.get_mut(&session.id).unwrap()["payload"]["wireMessage"] = Value::Null;
+            self.remember_sent_mentions(&picks, &objects);
             let (client, sessions, source) =
                 (client.clone(), self.sessions.clone(), session.clone());
             Some(cx.background_executor().spawn(async move {
-                crate::composer::mention::thread_context(&client, picks, sessions, source)
+                let threads = (!picks.is_empty()).then(|| {
+                    crate::composer::mention::thread_context(&client, picks, sessions, source)
+                });
+                let objects = (!objects.is_empty())
+                    .then(|| crate::composer::mention::groups::objects_context(&client, &objects));
+                threads
+                    .into_iter()
+                    .chain(objects)
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
             }))
         };
         cx.spawn(async move |this, cx| {

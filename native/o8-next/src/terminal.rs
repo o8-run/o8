@@ -24,6 +24,38 @@ use std::{
     time::{Duration, Instant},
 };
 
+thread_local! {
+    /// Open panes' sessions and screens, for the composer's `@` menu.
+    static OPEN: std::cell::RefCell<Vec<(String, std::sync::Weak<Mutex<Grid>>)>> =
+        std::cell::RefCell::default();
+}
+pub(crate) fn register(session: &str, grid: &Arc<Mutex<Grid>>) {
+    OPEN.with(|open| {
+        let mut open = open.borrow_mut();
+        open.retain(|(known, grid)| known != session && grid.strong_count() > 0);
+        open.push((session.to_owned(), Arc::downgrade(grid)));
+    });
+}
+/// The sessions of the terminal panes still open, oldest first.
+pub(crate) fn open_sessions() -> Vec<String> {
+    OPEN.with(|open| {
+        let mut open = open.borrow_mut();
+        open.retain(|(_, grid)| grid.strong_count() > 0);
+        open.iter().map(|(session, _)| session.clone()).collect()
+    })
+}
+/// An open terminal's newest `count` lines, if it is still open.
+pub(crate) fn tail(session: &str, count: usize) -> Option<Vec<String>> {
+    let grid = OPEN.with(|open| {
+        open.borrow()
+            .iter()
+            .find(|(known, _)| known == session)
+            .and_then(|(_, grid)| grid.upgrade())
+    })?;
+    let lines = grid.lock().unwrap().tail(count);
+    Some(lines)
+}
+
 const CELL_WIDTH: f32 = 8.;
 const CELL_HEIGHT: f32 = 18.;
 pub struct Pane {
@@ -58,6 +90,7 @@ impl Pane {
     pub fn attached(client: Client, session: String, cx: &mut Context<Self>) -> Self {
         let dimensions = Size(80, 24);
         let grid = Arc::new(Mutex::new(Grid::new(dimensions)));
+        register(&session, &grid);
         let focus = cx.focus_handle();
         Self {
             grid: grid.clone(),

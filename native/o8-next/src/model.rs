@@ -316,6 +316,9 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                 .and_then(Value::as_str)
                 .is_some_and(|t| t != "message");
             let mut nodes = crate::rich::nodes(entry);
+            if entry.role == "user" {
+                crate::composer::mention::groups::pill_nodes(&mut nodes);
+            }
             if (special && !receipt)
                 || entry
                     .extra

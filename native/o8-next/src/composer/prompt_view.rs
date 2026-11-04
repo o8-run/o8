@@ -1,6 +1,6 @@
 //! Native menu presentation, shared by the composer controls.
 use super::*;
-use crate::composer::mention::{MentionResult, thread_matches};
+use crate::composer::mention::{MentionResult, groups, thread_matches};
 use gpui::{AnyElement, FontWeight, SharedString, StatefulInteractiveElement};
 impl Surface {
     pub(super) fn slash_menu(
@@ -97,7 +97,8 @@ impl Surface {
                 .into_any_element(),
         )
     }
-    /// Threads and files matching the composer's `@` word, newest word wins.
+    /// Threads, agents, worktrees, scripts, terminals and files matching the
+    /// composer's `@` word, newest word wins.
     pub(crate) fn search_mentions(&mut self, cx: &mut Context<Self>) {
         let editor = self.composer.clone();
         let Some(query) = editor.read(cx).controls.mention.query.clone() else {
@@ -115,7 +116,7 @@ impl Surface {
             .as_ref()
             .and_then(|id| self.sessions.iter().find(|s| s.id == *id))
             .and_then(|s| s.repo_path.clone());
-        let threads = thread_matches(
+        let mut results: Vec<_> = thread_matches(
             &self.sessions,
             self.selected.as_deref().unwrap_or(""),
             &query,
@@ -127,9 +128,35 @@ impl Surface {
             status: s.status,
         })
         .collect();
+        // The lane roster the transcript's roster card reads.
+        let agents = self
+            .subagents
+            .as_ref()
+            .map(|view| view.read(cx).agents.clone())
+            .unwrap_or_default();
+        let terminals = crate::terminal::open_sessions();
+        let sources = editor
+            .read(cx)
+            .controls
+            .mention
+            .sources
+            .clone()
+            .filter(|(project, ..)| repo.as_ref() == Some(project));
+        results.extend(
+            groups::agent_matches(&agents, &query)
+                .into_iter()
+                .chain(sources.iter().flat_map(|(_, trees, package)| {
+                    groups::worktree_matches(trees, &query)
+                        .into_iter()
+                        .chain(groups::script_matches(package, &query))
+                }))
+                .chain(groups::terminal_matches(&terminals, &query))
+                .map(MentionResult::Object),
+        );
+        sort_mentions(&mut results);
         editor.update(cx, |i, cx| {
             i.controls.mention.search = None;
-            i.controls.mention.results = threads;
+            i.controls.mention.results = results;
             i.controls.mention.index = 0;
             cx.emit(crate::composer::commands::Changed(false));
             cx.notify();
@@ -143,30 +170,57 @@ impl Surface {
                 .timer(std::time::Duration::from_millis(80))
                 .await;
             let word = query.clone();
-            let body = cx
-                .background_executor()
-                .spawn(async move {
-                    let (key, value) = if word.is_empty() {
-                        ("directory", ".")
-                    } else {
-                        ("search", word.as_str())
-                    };
-                    client.get::<Value>(
-                        "/api/panel/files",
-                        &[("workspace", repo.as_str()), (key, value)],
-                    )
+            let (files, project) = (client.clone(), repo.clone());
+            let body = cx.background_executor().spawn(async move {
+                let (key, value) = if word.is_empty() {
+                    ("directory", ".")
+                } else {
+                    ("search", word.as_str())
+                };
+                files.get::<Value>(
+                    "/api/panel/files",
+                    &[("workspace", project.as_str()), (key, value)],
+                )
+            });
+            // Worktrees and scripts are read once while the menu is open.
+            let read = sources.is_none().then(|| {
+                cx.background_executor().spawn(async move {
+                    let trees = client
+                        .get::<Value>(
+                            "/api/review/workspace",
+                            &[("workspace", repo.as_str()), ("changesOnly", "1")],
+                        )
+                        .unwrap_or_default();
+                    let package = crate::files_panel::read_file(&client, &repo, "package.json")
+                        .unwrap_or_default();
+                    (repo, trees, package)
                 })
-                .await;
-            let results = mention_files(&body.unwrap_or_default(), &query);
+            });
+            let files = mention_files(&body.await.unwrap_or_default(), &query);
+            let read = match read {
+                Some(task) => Some(task.await),
+                None => None,
+            };
             let _ = editor.update(cx, |i, cx| {
-                if i.controls.mention.query.as_ref() == Some(&query) {
-                    i.controls
-                        .mention
-                        .results
-                        .extend(results.into_iter().map(MentionResult::File));
-                    cx.emit(crate::composer::commands::Changed(false));
-                    cx.notify();
+                if i.controls.mention.query.as_ref() != Some(&query) {
+                    return;
                 }
+                let results = &mut i.controls.mention.results;
+                if let Some((_, trees, package)) = &read {
+                    results.extend(
+                        groups::worktree_matches(trees, &query)
+                            .into_iter()
+                            .chain(groups::script_matches(package, &query))
+                            .map(MentionResult::Object),
+                    );
+                }
+                results.extend(files.into_iter().map(MentionResult::File));
+                sort_mentions(results);
+                if read.is_some() {
+                    i.controls.mention.sources = read;
+                }
+                cx.emit(crate::composer::commands::Changed(false));
+                cx.notify();
             });
         });
         self.composer
@@ -260,6 +314,9 @@ impl Surface {
             if previous != Some(group) {
                 let id = match group {
                     "Threads" => "mention-group-threads",
+                    "Agents" => "mention-group-agents",
+                    "Worktrees" => "mention-group-worktrees",
+                    "Scripts & terminals" => "mention-group-scripts",
                     "Commands" => "mention-group-commands",
                     "Paths" => "mention-group-paths",
                     _ => "mention-group-files",
@@ -273,13 +330,17 @@ impl Surface {
                 );
                 previous = Some(group);
             }
-            let thread = matches!(&target, MentionResult::Thread { .. });
+            let thread = matches!(
+                &target,
+                MentionResult::Thread { .. } | MentionResult::Object(_)
+            );
             let (name, detail) = match &target {
                 MentionResult::File(path) => (
                     path.rsplit('/').next().unwrap_or(path).to_owned(),
                     path.clone(),
                 ),
                 MentionResult::Thread { title, status, .. } => (title.clone(), status.clone()),
+                MentionResult::Object(object) => (object.label().to_owned(), object.detail()),
                 MentionResult::Command(name) => (name.clone(), String::new()),
                 MentionResult::Path { path, directory } => {
                     let name = path.rsplit('/').next().unwrap_or(path);
@@ -571,6 +632,17 @@ impl Surface {
         ))
         .into_any_element()
     }
+}
+/// Threads, then agents, worktrees, scripts and terminals, then files; each
+/// group keeps its own order.
+fn sort_mentions(results: &mut [MentionResult]) {
+    results.sort_by_key(|result| match result.group() {
+        "Threads" => 0,
+        "Agents" => 1,
+        "Worktrees" => 2,
+        "Scripts & terminals" => 3,
+        _ => 4,
+    });
 }
 /// The files in a listing: names starting with the word first, then the
 /// shortest paths, so `package.json` at the root beats one buried in a folder.
