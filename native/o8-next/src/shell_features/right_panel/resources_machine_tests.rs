@@ -98,6 +98,12 @@ fn sparkline_keeps_the_last_sixty_distinct_samples() {
     close(Some(view.spark[0]), 0.15);
     // Network scales against the recent peak (74000 B/s in plus 2048 out).
     close(meter(&view, "network").fraction, 39048. / 76048.);
+    history.push(&machine(json!({"sampledAt": 100., "cpuPercent": null})));
+    assert_eq!(
+        history.cpu.back(),
+        Some(&74.),
+        "an unread CPU is a gap, not an idle point"
+    );
     history.push(&machine(json!({"cpuPercent": 10})));
     assert_eq!(
         history.cpu.len(),

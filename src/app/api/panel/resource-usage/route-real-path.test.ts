@@ -109,6 +109,40 @@ describe('GET /api/panel/resource-usage machine block', () => {
     expect(next).toMatchObject({ sampledAt: 3100, windowMs: 2100, cpuPercent: 30, network: { inBytesPerSec: 0, outBytesPerSec: 0 } });
   });
 
+  it('answers with machine null when a host read stalls, then samples again', async () => {
+    vi.useFakeTimers();
+    try {
+      const linux = host('linux');
+      let stalled = true;
+      setMachineIoForTests({
+        ...linux.io,
+        statfs: (path) => (stalled ? new Promise(() => {}) : linux.io.statfs(path)),
+      });
+      const response = route.GET();
+      await vi.advanceTimersByTimeAsync(5_000);
+      const body = await (await response).json();
+      expect(body.machine).toBeNull();
+      expect(body.sessions).toEqual([]);
+      stalled = false;
+      linux.advance(3_000);
+      const next = route.GET();
+      await vi.advanceTimersByTimeAsync(0);
+      expect((await (await next).json()).machine).toMatchObject({ cpuPercent: 30 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not count container and bridge links on top of the physical interface', async () => {
+    const { parseLinuxNetDev } = await import('@/lib/lane/machine-resources');
+    const counters = (rx: number, tx: number) => `${rx} 1 0 0 0 0 0 0 ${tx} 1 0 0 0 0 0 0`;
+    expect(parseLinuxNetDev([
+      'Inter-|   Receive', ' face |bytes',
+      `  eth0: ${counters(1000, 500)}`, `docker0: ${counters(400, 300)}`, `vethab12: ${counters(400, 300)}`,
+      `br-1f2e: ${counters(400, 300)}`, `    lo: ${counters(9999, 9999)}`, `wlan0: ${counters(10, 5)}`,
+    ].join('\n'))).toEqual({ rx: 1010, tx: 505 });
+  });
+
   it('keeps the route answering with null fields when the host cannot be read', async () => {
     const linux = host('linux');
     setMachineIoForTests({

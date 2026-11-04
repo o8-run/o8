@@ -89,10 +89,10 @@ impl History {
         self.last = Some(at);
         let net = machine.network.in_bytes_per_sec.unwrap_or(0.)
             + machine.network.out_bytes_per_sec.unwrap_or(0.);
-        for (ring, value) in [
-            (&mut self.cpu, machine.cpu_percent.unwrap_or(0.)),
-            (&mut self.net, net),
-        ] {
+        // An unread CPU leaves a gap in the sparkline rather than an idle point.
+        let cpu = known(machine.cpu_percent);
+        for (ring, value) in [(&mut self.cpu, cpu), (&mut self.net, Some(net))] {
+            let Some(value) = value else { continue };
             if ring.len() == HISTORY {
                 ring.pop_front();
             }

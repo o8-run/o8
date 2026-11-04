@@ -23,6 +23,8 @@ const execFileAsync = promisify(execFile);
 export const MIN_INTERVAL_MS = 2_000;
 const CPU_WINDOW_MS = 1_000;
 const MAX_BASELINE_AGE_MS = 10_000;
+/** A stalled mount or pipe must not hold the route; the caller reports null instead. */
+export const SAMPLE_DEADLINE_MS = 5_000;
 
 export interface MachineVolume {
   usedBytes: number;
@@ -120,14 +122,17 @@ export function parseLinuxMeminfo(text: string) {
   };
 }
 
-/** Sums every interface except loopback. */
+/** Container and bridge links repeat traffic a physical interface already counted. */
+const VIRTUAL_LINUX_LINK = /^(lo|veth|docker|br-|virbr|cni|flannel|cali)/;
+
+/** Sums every interface except loopback and container or bridge links. */
 export function parseLinuxNetDev(text: string) {
   let rx = 0;
   let tx = 0;
   let seen = false;
   for (const line of text.split('\n')) {
     const match = line.match(/^\s*([^:\s]+):\s*(.*)$/);
-    if (!match || match[1] === 'lo') continue;
+    if (!match || VIRTUAL_LINUX_LINK.test(match[1]!)) continue;
     const fields = match[2]!.trim().split(/\s+/).map(Number);
     if (fields.length < 9 || !Number.isFinite(fields[0]) || !Number.isFinite(fields[8])) continue;
     rx += fields[0]!;
@@ -284,17 +289,22 @@ async function take(io: MachineIo, state: SamplerState): Promise<MachineResource
 }
 
 /** The cached machine sample; reads the host at most once per MIN_INTERVAL_MS. */
-export function sampleMachineResources(): Promise<MachineResources> {
+export async function sampleMachineResources(): Promise<MachineResources> {
   const { io, state } = sampler();
   if (state.pending) return state.pending;
-  if (state.value && io.now() - state.at < MIN_INTERVAL_MS) return Promise.resolve(state.value);
-  const pending = take(io, state)
+  if (state.value && io.now() - state.at < MIN_INTERVAL_MS) return state.value;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('Machine sample timed out.')), SAMPLE_DEADLINE_MS);
+  });
+  const pending = Promise.race([take(io, state), deadline])
     .then((value) => {
       state.value = value;
       state.at = io.now();
       return value;
     })
     .finally(() => {
+      clearTimeout(timer);
       if (state.pending === pending) state.pending = null;
     });
   state.pending = pending;
