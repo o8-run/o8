@@ -119,9 +119,13 @@ async function fixture(label: string, github = false) {
     githubFixture.sha = head;
   }
   await addRepo(repo);
-  if (github) git(repo, 'config', `url.${origin}.insteadOf`, `https://github.com/${githubFixture.repo}.git`);
   await updateOperatorDefaults({ workerRuntimes: ['claude-code'] });
   return { repo, origin, base, head };
+}
+// Registry reads adopt the checkout's effective origin (#4754), which insteadOf rewrites. Redirect
+// GitHub fetches to the bare origin only once repair preparation has found the registered slug.
+function redirectGitHubFetches(f: { repo: string; origin: string }) {
+  git(f.repo, 'config', `url.${f.origin}.insteadOf`, `https://github.com/${githubFixture.repo}.git`);
 }
 function request(repoPath: string, extra: Record<string, unknown> = {}) {
   return new NextRequest('http://localhost/api/orchestrator/delegate', { method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}` }, body: JSON.stringify({
@@ -144,6 +148,7 @@ describe('reviewer PR checkout through delegate dispatch', () => {
     expect(prepared.delegation.prompt).toContain('fixture failing assertion');
     expect(prepared.delegation.prompt).toContain('Source repository: fixture/fork');
     expect(prepared.delegation.baseBranch).toBe('main');
+    redirectGitHubFetches(f);
     const launchedResponse = await POST(request(f.repo, { reviewPullRequest: undefined, ...prepared.delegation }));
     const result = await launchedResponse.json();
     expect(launchedResponse.status, JSON.stringify(result)).toBe(200);
