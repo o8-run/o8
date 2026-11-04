@@ -125,6 +125,7 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
                     Row::PacketHeader { .. } => "PacketHeader",
                     Row::Message { .. } => "Message",
                     Row::Activity { .. } => "Activity",
+                    Row::Card { .. } => "Card",
                 })
                 .collect::<Vec<_>>(),
             s.painted_rows.borrow()

@@ -193,7 +193,10 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
   // underlying message state is untouched.
   const scrollRef = useRef<HTMLDivElement>(null);
   const steerItems = composerQueue?.items;
-  const displayMessages = useMemo(() => mergeAdjacentToolOnlyEntries(placeSteerTranscriptEntries(rawDisplayMessages, steerItems)), [rawDisplayMessages, steerItems]);
+  // #5468 — mission cards draw through the task artifact host below, which
+  // polls live; their history copies (for history-only readers) are dropped.
+  const displayMessages = useMemo(() => mergeAdjacentToolOnlyEntries(placeSteerTranscriptEntries(
+    rawDisplayMessages.filter(entry => entry.type !== 'card'), steerItems)), [rawDisplayMessages, steerItems]);
   const items = useMemo(() => buildMissionRenderItems(displayMessages), [displayMessages]);
   const visualizations = useTranscriptVisualizations({ repoPath, threadId, active, length: rawDisplayMessages.length });
   const anchors = useMemo(() => new Map<string, string>(), [repoPath, threadId]);

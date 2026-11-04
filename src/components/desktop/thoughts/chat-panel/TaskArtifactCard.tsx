@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { mintBridgeToken, validateFrameMessage, type HostToFrameMessage } from '@/lib/task-artifacts/bridge-protocol';
 import { buildTaskArtifactSrcdoc, type TaskArtifactSrcdocTheme } from '@/lib/task-artifacts/srcdoc';
 import type { TaskArtifactActionRecord, TaskArtifactView } from '@/lib/task-artifacts/types';
+import { MissionCard } from './MissionCard';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = 'var(--font-mono-system, ui-monospace, "SF Mono", Menlo, monospace)';
@@ -328,6 +329,14 @@ export function TaskArtifactCard({ artifactId, threadBusy, onDeliverToThread }: 
       {label}
     </span>
   );
+
+  // #5468 — a mission card has no HTML; it draws natively and decides once.
+  if (view?.card) {
+    return (
+      <MissionCard card={view.card} target={view.artifact.target} threadBusy={threadBusy}
+        onDeliverToThread={onDeliverToThread} onDecided={() => void load()} />
+    );
+  }
 
   let statusLine: React.ReactNode;
   if (loadError) statusLine = <span style={{ color: 'var(--t-danger)' }}>{loadError}</span>;

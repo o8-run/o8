@@ -533,6 +533,10 @@ impl Surface {
                         match (queue, routing) {
                             (Ok(queue), Ok(routing)) => {
                                 this.queue = queue;
+                                for row in this.rows.iter() {
+                                    row.borrow_mut()
+                                        .attach_mission_card(&this.client, Some(routing.clone()));
+                                }
                                 this.routing = Some(routing);
                                 this.queue_ready = true;
                                 if this.fork_send.is_some() && this.fork_send == this.selected {
@@ -597,7 +601,9 @@ impl Surface {
                 state.attach_visualizations(&self.client);
                 if let Some(previous) = indexed.get(state.row.id()).and_then(|c| c.first()) {
                     state.keep_disclosure(&previous.borrow());
+                    state.mission_card = previous.borrow().mission_card.clone();
                 }
+                state.attach_mission_card(&self.client, self.routing.clone());
                 Rc::new(RefCell::new(state))
             }));
         }

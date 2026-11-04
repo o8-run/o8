@@ -4543,6 +4543,14 @@
       ]
     },
     {
+      "path": "tests/mission-cards-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mission-cost-real-path.test.ts",
       "reasons": [
         "real-path"

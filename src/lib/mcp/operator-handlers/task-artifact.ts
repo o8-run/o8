@@ -14,6 +14,8 @@ export const TASK_ARTIFACT_TOOLS: McpTool[] = [
       + 'no o8 access, and exactly one capability: window.o8.submit(action, payload) / window.o8.onCollect(fn) returns a payload matching a declared action schema '
       + 'to the session that created the artifact. actions: [{ name, label?, schema: { fields: { <name>: { type: string|number|integer|boolean, required?, enum?, maxLength?, min?, max? } }, rows?: { fields, maxRows? } } }]. '
       + 'The operator edits the artifact and presses Send; the exact validated payload arrives as the next message on this thread (or as a steer on the packet) with a receipt id. '
+      + 'A mission card replaces html and actions with card: { kind: approve|choose, body?, actions?: [{ id, label, style?: primary|danger|default, confirm?: "hold" }], entityIds?: ["packet:<id>", "approval:<id>"], expiresAt? }. '
+      + 'An approve card defaults to a held Approve and a Deny; a choose card lists 2-8 options. The operator decides once inline; the decision arrives as a card.decision JSON block naming the action and entity ids. Treat it as context and re-check those entities before acting. '
       + 'verb=status: { artifactId } returns writability, last receipt, and accepted count. verb=receipts: { artifactId } lists every submission.',
     inputSchema: {
       type: 'object',
@@ -21,7 +23,8 @@ export const TASK_ARTIFACT_TOOLS: McpTool[] = [
         verb: { type: 'string', description: 'create | status | receipts' },
         artifactId: { type: 'string', description: 'For status/receipts: the artifact id (tart-…).' },
         title: { type: 'string', description: 'For create: short title shown on the card (max 120 chars).' },
-        html: { type: 'string', description: 'For create: the artifact document body. Inline styles/scripts only; no external resources load.' },
+        html: { type: 'string', description: 'For create: the artifact document body. Inline styles/scripts only; no external resources load. Omit for a card.' },
+        card: { type: 'object', description: 'For create: a native mission card instead of html and actions.' },
         actions: {
           type: 'array',
           description: 'For create: declared actions with payload schemas. The first is the card\'s Send action.',
@@ -44,11 +47,12 @@ export async function handleTaskArtifact(args: Record<string, unknown>): Promise
     const verb = requiredString(args, 'verb');
     if (verb === 'create') {
       const title = requiredString(args, 'title');
-      const html = requiredString(args, 'html');
-      if (!Array.isArray(args.actions) || args.actions.length === 0) {
+      const card = args.card && typeof args.card === 'object' ? args.card : null;
+      const html = card ? '' : requiredString(args, 'html');
+      if (!card && (!Array.isArray(args.actions) || args.actions.length === 0)) {
         return textResult('o8_task_artifact create: actions must be a non-empty array of { name, schema }.', true);
       }
-      const body: Record<string, unknown> = { title, html, actions: args.actions };
+      const body: Record<string, unknown> = card ? { title, card } : { title, html, actions: args.actions };
       for (const key of ['threadId', 'repoPath', 'packetId', 'headPolicy'] as const) {
         if (typeof args[key] === 'string' && args[key]) body[key] = args[key];
       }

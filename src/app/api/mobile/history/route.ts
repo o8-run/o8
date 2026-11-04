@@ -7,6 +7,7 @@ import { getOwnedCursorRuntimeTail } from '@/lib/cursor/owned';
 import { getOwnedGrokRuntimeTail } from '@/lib/grok/owned';
 import { readSubagentTranscript, subagentSessionId } from '@/lib/claude-code/subagent-transcript';
 import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
+import { withMissionCardEntries } from '@/lib/task-artifacts/card-transcript';
 import {
   mergeDurableMobileTranscriptEntries,
   parseMobileTranscriptTimestamp,
@@ -295,6 +296,8 @@ export async function GET(request: NextRequest) {
   const response = await readHistory(request, paged);
   if (!paged || !response.ok) return response;
   const payload = await response.json() as MobileHistoryResponse;
+  // #5468 — mission cards ride the paged read the native transcript uses.
+  payload.transcript = withMissionCardEntries(payload.sessionKey, payload.transcript);
   const revision = chatHistoryRevision({ messages: payload.transcript });
   const pageRequest = parseChatHistoryPageRequest(request.nextUrl.searchParams.get('limit') ?? '100',
     request.nextUrl.searchParams.get('before'))!;

@@ -22,6 +22,7 @@ mod lineage;
 mod input_reuse_tests;
 mod issues;
 mod merge;
+mod mission_card;
 mod model;
 mod motion;
 mod pane;
