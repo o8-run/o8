@@ -2,7 +2,7 @@
 use crate::client::{Client, Session};
 use crate::composer::mode_store::{self, PromptDraft};
 use base64::Engine;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 pub(in crate::ui) struct Saved {

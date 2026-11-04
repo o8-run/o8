@@ -290,13 +290,14 @@ fn prompt_toolbar_rewind_confirms_and_preserves_source_draft(cx: &mut TestAppCon
     );
     view.read_with(cx, |s, cx| {
         assert_eq!(s.composer.read(cx).text, "same **exact** prompt\nnext line");
-        assert!(!s
-            .composer
-            .read(cx)
-            .controls
-            .prompt
-            .prelude
-            .contains("Answer 1"));
+        assert!(
+            !s.composer
+                .read(cx)
+                .controls
+                .prompt
+                .prelude
+                .contains("Answer 1")
+        );
         assert!(s.queue["items"].as_array().unwrap().is_empty());
     });
 }
