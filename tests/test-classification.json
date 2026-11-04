@@ -4665,6 +4665,15 @@
       ]
     },
     {
+      "path": "tests/mobile-visualizations-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "network-listener",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
       "path": "tests/mock-module-transport-real-path.test.ts",
       "reasons": [
         "network-listener",
