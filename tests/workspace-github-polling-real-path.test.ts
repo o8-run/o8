@@ -53,8 +53,13 @@ vi.mock('node:child_process', () => ({
     },
   }),
 }));
-vi.mock('node:fs', () => ({ existsSync: () => true }));
-vi.mock('node:fs/promises', () => ({
+// The child-process store lock (#4280) and viewer redaction's ws-auth (#4773) need real fs in the isolated data dir.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, existsSync: (target: Parameters<typeof actual.existsSync>[0]) => String(target).startsWith('/fixture/') || actual.existsSync(target) };
+});
+vi.mock('node:fs/promises', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:fs/promises')>(),
   readFile: async () => replay.credential,
   stat: async () => ({ mtimeMs: replay.now, size: 1, isFile: () => true, isDirectory: () => true }),
 }));
