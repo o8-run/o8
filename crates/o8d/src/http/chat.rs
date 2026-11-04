@@ -1,5 +1,5 @@
 use super::*;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Local, SecondsFormat, Utc};
 use sha2::{Digest, Sha256};
 
@@ -24,9 +24,8 @@ fn backend(record: &Value) -> Value {
     }
     Value::Null
 }
-fn github(record: &Value) -> (Value, Value) {
-    let repo = text(record, "repoPath");
-    let remote = if repo.is_empty() {
+fn remote(repo: &str) -> Option<String> {
+    if repo.is_empty() {
         None
     } else {
         std::process::Command::new("git")
@@ -36,8 +35,10 @@ fn github(record: &Value) -> (Value, Value) {
             .ok()
             .filter(|o| o.status.success())
             .and_then(|o| String::from_utf8(o.stdout).ok())
-    };
-    for url in [remote.as_deref().unwrap_or(""), text(record, "remoteUrl")] {
+    }
+}
+fn github(remote: Option<&str>, saved_remote: &str) -> (Value, Value) {
+    for url in [remote.unwrap_or(""), saved_remote] {
         let lower = url.to_lowercase();
         if let Some(index) = lower
             .find("github.com")
@@ -74,7 +75,7 @@ fn clock(ms: i64) -> String {
         .unwrap_or_default()
 }
 
-pub(super) fn threads(store: &Store, params: &Params) -> ReadResult {
+pub(super) fn threads(store: &ReadContext<'_>, params: &Params) -> ReadResult {
     let filter = value(params, "backend").trim();
     let archived = value(params, "archived") == "1";
     if !archived && !filter.is_empty() && !BACKENDS.contains(&filter) {
@@ -90,7 +91,7 @@ pub(super) fn threads(store: &Store, params: &Params) -> ReadResult {
                 json!({"archivedIds":[]})
             } else {
                 json!({"threads":[]})
-            })
+            });
         }
     };
     files.sort();
@@ -131,23 +132,25 @@ pub(super) fn threads(store: &Store, params: &Params) -> ReadResult {
         } {
             continue;
         }
-        let messages = record["messages"].as_array().cloned().unwrap_or_default();
-        let last = messages.last().cloned().unwrap_or(Value::Null);
+        let messages = record["messages"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let last = messages.last().unwrap_or(&Value::Null);
         let timestamp = messages
             .iter()
             .filter_map(|m| m["timestamp"].as_i64())
             .max()
             .unwrap_or(0);
-        let modified = std::fs::metadata(&path)
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .map(DateTime::<Utc>::from)
-            .map(|d| d.to_rfc3339_opts(SecondsFormat::Millis, true))
-            .unwrap_or_default();
         let activity = if timestamp > 0 {
             iso(timestamp)
         } else if text(&record, "savedAt").is_empty() {
-            modified
+            std::fs::metadata(&path)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .map(DateTime::<Utc>::from)
+                .map(|d| d.to_rfc3339_opts(SecondsFormat::Millis, true))
+                .unwrap_or_default()
         } else {
             text(&record, "savedAt").to_owned()
         };
@@ -192,7 +195,6 @@ pub(super) fn threads(store: &Store, params: &Params) -> ReadResult {
         } else {
             "ready"
         };
-        let (owner, repo) = github(&record);
         let repo_name = if text(&record, "repoName").trim().is_empty() {
             record["repoPath"]
                 .as_str()
@@ -203,28 +205,42 @@ pub(super) fn threads(store: &Store, params: &Params) -> ReadResult {
         } else {
             record["repoName"].clone()
         };
-        threads.push(json!({"id":id,"title":title.chars().take(80).collect::<String>(),"lastMessageAt":activity,
+        threads.push((json!({"id":id,"title":title.chars().take(80).collect::<String>(),"lastMessageAt":activity,
             "runtime":runtime,"status":status,"messageCount":messages.len(),"projectId":record["projectId"].as_str().filter(|s|!s.trim().is_empty()).map(str::trim),
-            "repoPath":record["repoPath"],"repoName":repo_name,"repoBranch":record["repoBranch"],"githubOwner":owner,"githubRepo":repo,
-            "backend":backend,"agent":record["agent"].as_str().filter(|s|!s.trim().is_empty()).map(|s|s.trim().chars().take(128).collect::<String>()),"pinned":record["pinned"]==true}));
+            "repoPath":record["repoPath"],"repoName":repo_name,"repoBranch":record["repoBranch"],
+            "backend":backend,"agent":record["agent"].as_str().filter(|s|!s.trim().is_empty()).map(|s|s.trim().chars().take(128).collect::<String>()),"pinned":record["pinned"]==true}), text(&record, "remoteUrl").to_owned()));
     }
     if archived {
         return Ok(json!({"archivedIds":ids}));
     }
-    threads.sort_by(|a, b| text(b, "lastMessageAt").cmp(text(a, "lastMessageAt")));
+    threads.sort_by(|(a, _), (b, _)| text(b, "lastMessageAt").cmp(text(a, "lastMessageAt")));
     let offset = value(params, "offset")
         .parse::<usize>()
         .unwrap_or(0)
         .min(threads.len());
     threads.drain(..offset);
     threads.truncate(limit(params, 20, 500));
-    for thread in &mut threads {
-        thread_context::append(store, thread)?;
-    }
+    // Resolve only the returned page, and once per repository in this request.
+    // Keep each record's saved URL fallback private and never cache across reads.
+    let mut remotes = HashMap::new();
+    let mut threads: Vec<Value> = threads
+        .into_iter()
+        .map(|(mut thread, saved_remote)| {
+            let repo = text(&thread, "repoPath");
+            let remote = remotes
+                .entry(repo.to_owned())
+                .or_insert_with(|| remote(repo));
+            let (owner, repo) = github(remote.as_deref(), &saved_remote);
+            thread["githubOwner"] = owner;
+            thread["githubRepo"] = repo;
+            thread
+        })
+        .collect();
+    thread_context::append_all(store, &mut threads)?;
     Ok(json!({"threads":threads}))
 }
 
-pub(super) fn transcript(store: &Store, params: &Params) -> Response {
+pub(super) fn transcript(store: &ReadContext<'_>, params: &Params) -> Response {
     let key = value(params, "sessionKey").trim();
     if key.is_empty() {
         return problem("sessionKey is required");
@@ -337,7 +353,7 @@ pub(super) fn transcript(store: &Store, params: &Params) -> Response {
                 return reply(
                     StatusCode::CONFLICT,
                     json!({"ok":false,"error":"cursor_invalid","currentRevision":revision}),
-                )
+                );
             }
         }
     }
@@ -450,7 +466,7 @@ fn stable(messages: Vec<Value>) -> Vec<Value> {
         })
         .collect()
 }
-pub(super) fn context(store: &Store, params: &Params) -> Response {
+pub(super) fn context(store: &ReadContext<'_>, params: &Params) -> Response {
     let id = value(params, "tabId");
     if id.is_empty() {
         return problem("tabId required");
@@ -461,10 +477,12 @@ pub(super) fn context(store: &Store, params: &Params) -> Response {
     }
     let messages = stable(record["messages"].as_array().cloned().unwrap_or_default());
     record["messages"] = json!(messages);
-    record["projectId"] = json!(record["projectId"]
-        .as_str()
-        .filter(|s| !s.trim().is_empty())
-        .map(str::trim));
+    record["projectId"] = json!(
+        record["projectId"]
+            .as_str()
+            .filter(|s| !s.trim().is_empty())
+            .map(str::trim)
+    );
     if params.contains_key("limit") || params.contains_key("before") {
         let mut semantic = record.clone();
         semantic.as_object_mut().unwrap().remove("savedAt");
@@ -479,11 +497,14 @@ pub(super) fn context(store: &Store, params: &Params) -> Response {
                 return reply(
                     StatusCode::CONFLICT,
                     json!({"error":"cursor_invalid","currentRevision":revision}),
-                )
+                );
             }
         }
     }
-    let (owner, repo) = github(&record);
+    let (owner, repo) = github(
+        remote(text(&record, "repoPath")).as_deref(),
+        text(&record, "remoteUrl"),
+    );
     record["githubOwner"] = owner;
     record["githubRepo"] = repo;
     reply(StatusCode::OK, record)

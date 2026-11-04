@@ -17,7 +17,7 @@ beforeAll(async () => {
     { maxBuffer: 64 * 1024 * 1024 });
 }, 900_000);
 it('records TS session reads and replays them natively with zero differences and Next stopped', async () => {
-  expect(await runSessionParity(binary, false)).toMatchObject({ requests: 18, differences: 0 });
+  expect(await runSessionParity(binary, false)).toMatchObject({ requests: 20, differences: 0 });
 }, 180_000);
 
 it('preserves auth refusals, TS writes, other routes and flag-off behavior through the public socket', async () => {

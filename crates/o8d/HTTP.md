@@ -149,6 +149,20 @@ route/auth coverage, residual failures and bundle sizes; its
 [measurement report](evidence/session-reads-b1/metrics.json) retains the p50 and
 backend RSS figures.
 
+The [session follow-up receipt](evidence/session-reads-b2/verification.md) and
+[measurements](evidence/session-reads-b2/metrics.json) cover request-local batching
+and current checkout-field parity. Git lookups run only for the returned page,
+once per repository path. Native preflight and projection share one fresh,
+read-only SQLite connection; no connection or result survives the request.
+The corpus adds real linked checkouts and nested working directories, and the
+benchmark waits 20 idle seconds before recording backend RSS. The original
+admission and profile guards are unchanged. The flag remains default off.
+
+This does not complete the whole-server port. The
+[Phase B ownership audit](../../docs/operations/o8d-phase-b-ownership.md) records
+the shared writers and protected transport/security boundaries that keep the
+remaining domains on TypeScript.
+
 ## Standalone persisted-read mode
 
 This is a partial slice of [#4547](https://github.com/o8-run/o8/issues/4547).

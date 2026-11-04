@@ -47,12 +47,15 @@ export function sessionCorpus(directory: string) {
     `${SESSION_READ_PATHS[2]}?tabId=thoughts-long&limit=100`,
     `${SESSION_READ_PATHS[2]}?tabId=thoughts-long&before=invalid`,
     `${SESSION_READ_PATHS[2]}?tabId=thoughts-missing`, SESSION_READ_PATHS[2], queue, SESSION_READ_PATHS[3],
+    `${SESSION_READ_PATHS[2]}?tabId=thoughts-worktree-root`,
+    `${SESSION_READ_PATHS[1]}?sessionKey=llm-chat:thoughts-worktree-nested`,
   ];
 }
-export async function seedSessionFixture(directory: string) {
+export async function seedSessionFixture(directory: string, linkedCheckout = false) {
   writeFileSync(join(directory, 'fixture-owner'), 'o8d-native-read/v1');
   await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx',
-    'scripts/next/seed-o8d.ts', directory], { env: { ...process.env, O8_NEXT_API_TOKEN: 'ws-parity-fixture-credential' } });
+    'scripts/next/seed-o8d.ts', directory, ...(linkedCheckout ? ['--linked-checkout'] : [])],
+  { env: { ...process.env, O8_NEXT_API_TOKEN: 'ws-parity-fixture-credential' } });
 }
 export async function startSessionServer(directory: string, nativeSessionReads: boolean, binary: string) {
   const server = await startParityReference({ directory, nativeHttp: true, o8d: true, nativeSessionReads, binary, startupTimeoutMs: 60_000 });
@@ -60,6 +63,7 @@ export async function startSessionServer(directory: string, nativeSessionReads: 
   return { ...server, origin: server.url.replace('ws:', 'http:').replace('/ws', '') };
 }
 type Server = Awaited<ReturnType<typeof startSessionServer>>;
+const IDLE_SETTLE_MS = 20_000;
 export async function send(server: Server, path: string, headers: Record<string, string> = {}) {
   const response = await fetch(server.origin + path, { headers: { authorization: `Bearer ${server.token}`, ...headers } });
   return { status: response.status, body: await response.json() as unknown,
@@ -89,13 +93,14 @@ async function measure(server: Server, paths: string[], native: boolean) {
     samples.sort((a, b) => a - b);
     timings.push({ path: path.split('?')[0], p50Ms: samples[49] });
   }
+  await new Promise(resolve => setTimeout(resolve, IDLE_SETTLE_MS));
   return { timings, rss: await backendRss(server.pid) };
 }
 export async function runSessionParity(binary: string, benchmark = true, corpusFile?: string) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-session-parity-')));
   let server: Server | undefined;
   try {
-    await seedSessionFixture(directory);
+    await seedSessionFixture(directory, true);
     const paths = sessionCorpus(directory);
     const recorded: Array<{ path: string; response: unknown }> = [];
     server = await startSessionServer(directory, false, binary);
@@ -124,7 +129,7 @@ export async function runSessionParity(binary: string, benchmark = true, corpusF
       if (difference) throw new Error(`Session parity ${record.path.split('?')[0]}: ${difference}`);
     }
     const on = benchmark ? await measure(server, measuredPaths, true) : null;
-    return { requests: recorded.length, differences: 0, warmups: 10, samples: 100, off, on };
+    return { requests: recorded.length, differences: 0, warmups: 10, samples: 100, idleSettleMs: IDLE_SETTLE_MS, off, on };
   } finally { await server?.stop(); rmSync(directory, { recursive: true, force: true }); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

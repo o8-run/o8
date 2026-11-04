@@ -28,6 +28,20 @@ async function main() {
     ...seed, repoPath: repo, repoName: 'fixture-repo', backend: 'claude', model: 'claude-code',
     savedAt: '2026-10-01T00:00:00.000Z', orchestratorVisible: true,
   }));
+  if (process.argv.includes('--linked-checkout')) {
+    // Exercise live checkout identity, including a cwd below the checkout root.
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test',
+      '-c', 'core.hooksPath=/dev/null', 'commit', '--allow-empty', '--no-gpg-sign', '--quiet', '-m', 'Fixture base']);
+    const checkout = join(directory, 'fixture-worktree');
+    execFileSync('git', ['-C', repo, '-c', 'core.hooksPath=/dev/null', 'worktree', 'add', '--quiet', '-b', 'fixture-linked', checkout]);
+    mkdirSync(join(checkout, 'nested'));
+    for (const [suffix, repoPath] of [['root', checkout], ['nested', join(checkout, 'nested')]]) {
+      writeFileSync(join(directory, 'chat-history', `thoughts-worktree-${suffix}.json`), JSON.stringify({
+        title: `Linked checkout ${suffix}`, repoPath, repoName: 'fixture-worktree', backend: 'claude', model: 'claude-code',
+        messages: [], savedAt: '2026-09-01T00:00:00.000Z', orchestratorVisible: true,
+      }));
+    }
+  }
   const { enqueueComposerSend, holdComposerSends } = await import('../../src/lib/orchestrator/composer-queue');
   enqueueComposerSend({ repoPath: repo, threadId: 'thoughts-review', id: 'fixture-queue-item', intent: 'send-next', payload: {
     text: 'Fixture queued message', wireMessage: 'Fixture queued message', images: [],

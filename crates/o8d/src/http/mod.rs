@@ -1,18 +1,20 @@
 //! Opt-in persisted reads for the native client. No upstream, migration or writer.
 mod chat;
 mod queue;
+mod read_context;
 mod thread_context;
 
 use axum::{
+    Json, Router,
     body::Body,
     extract::State,
     http::{Request, StatusCode},
     response::{IntoResponse, Response},
     routing::any,
-    Json, Router,
 };
+use read_context::ReadContext;
 use rusqlite::{Connection, OpenFlags};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     io::Read,
@@ -183,12 +185,14 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
         params.entry(key).or_insert(value);
     }
     let work = store.clone();
-    match tokio::task::spawn_blocking(move || dispatch(&work, &path, &params)).await {
+    match tokio::task::spawn_blocking(move || dispatch(&ReadContext::new(&work), &path, &params))
+        .await
+    {
         Ok(response) => response,
         Err(_) => unavailable(),
     }
 }
-fn dispatch(store: &Store, path: &str, params: &Params) -> Response {
+fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params) -> Response {
     match path {
         "/api/runtime/inventory" => unavailable(),
         "/api/mobile/orchestrator/threads" => match chat::threads(store, params) {
@@ -206,9 +210,9 @@ fn dispatch(store: &Store, path: &str, params: &Params) -> Response {
                 let lanes: i64 = db
                     .query_row("SELECT COUNT(*) FROM lanes", [], |r| r.get(0))
                     .map_err(|_| ())?;
-                let mission = store.json(&store.directory.join("orchestrator-state.json"))?
-                    ["mission"]
-                    .clone();
+                let mission =
+                    store.json(&store.directory.join("orchestrator-state.json"))?["mission"]
+                        .clone();
                 if lanes != 0 || !mission["packets"].as_array().is_some_and(Vec::is_empty) {
                     return Err(());
                 }
@@ -255,6 +259,7 @@ pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &s
         directory,
         database,
     };
+    let store = ReadContext::new(&store);
     let mut params = Params::new();
     for (key, value) in form_urlencoded::parse(query.as_bytes()).into_owned() {
         params.entry(key).or_insert(value);

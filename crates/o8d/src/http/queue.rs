@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn read(store: &Store, params: &Params) -> Response {
+pub(super) fn read(store: &ReadContext<'_>, params: &Params) -> Response {
     let repo = value(params, "repoPath");
     let thread = value(params, "threadId");
     if !repo.starts_with('/')
