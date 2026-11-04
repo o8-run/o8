@@ -2671,6 +2671,14 @@
       ]
     },
     {
+      "path": "tests/comparison-diff-ref-guard-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/completion-ledger-model-real-path.test.ts",
       "reasons": [
         "child-process",

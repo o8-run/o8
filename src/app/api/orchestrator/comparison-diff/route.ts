@@ -25,8 +25,8 @@ export async function GET(request: Request) {
   const worktreeParam = searchParams.get('worktree') ?? searchParams.get('workspace');
   const base = (searchParams.get('base') || 'main').trim();
 
-  // A base beginning with '-' is read by git as an option (e.g. --output=FILE),
-  // turning this read into a file write; constrain it to a safe ref shape.
+  // Refuse option-shaped or non-ref bases before any git call: an unguarded
+  // base can otherwise be read as an option rather than a revision.
   if (base.startsWith('-') || base.length > 256 || !/^[\w./-]+$/.test(base)) {
     return NextResponse.json({ error: 'invalid base ref' }, { status: 400 });
   }
