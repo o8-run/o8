@@ -184,8 +184,8 @@ classification command were stopped.
 
 `listRepos()` now projects local origin changes without taking a mutation lock
 or writing the registry. It also avoids the Git subprocess on this read path:
-the shared process boundary can create `.provider-keys.lock`, even for a Git
-read. File-only metadata reads cover ordinary repositories and linked worktrees.
+the shared child-process boundary writes lock state in the data directory,
+even for a Git read. File-only metadata reads cover ordinary repositories and linked worktrees.
 Unreadable metadata and complex local Git config (includes, URL rewrites, worktree
 extensions, quoted or escaped URLs) retain the saved value until explicit repair.
 The bounded `worktreeMetadataReadLimit()` early return is preserved.
