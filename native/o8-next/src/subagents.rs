@@ -24,6 +24,8 @@ pub(crate) struct Inspector {
     client: Client,
     pub(crate) scope: Scope,
     pub(crate) agents: Vec<Agent>,
+    /// Packet lanes already read: their worktree, start and diff stat.
+    lanes: HashMap<String, model::Lane>,
     pub(crate) selected: Option<String>,
     /// Subagents opened in their own tab, in the order they opened.
     pub(crate) tabs: Vec<String>,
@@ -68,6 +70,7 @@ impl Inspector {
             client,
             scope,
             agents: vec![],
+            lanes: HashMap::new(),
             selected: None,
             tabs: vec![],
             parked: HashMap::new(),
@@ -233,9 +236,10 @@ impl Inspector {
         }
         self.pending = true;
         let (client, scope) = (self.client.clone(), self.scope.clone());
+        let known = self.lanes.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { model::load(&client, &scope) });
+            .spawn(async move { model::load(&client, &scope, &known) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -247,9 +251,14 @@ impl Inspector {
                     .and_then(|id| this.agents.iter().find(|a| &a.id == id))
                     .map(|a| (a.session.clone(), a.run.clone()));
                 let mut errors = Vec::new();
+                match result.lanes {
+                    Ok(lanes) => this.lanes.extend(lanes),
+                    Err(error) => errors.push(error),
+                }
                 for (shared, result) in [(false, result.packets), (true, result.shared)] {
                     match result {
-                        Ok(agents) => {
+                        Ok(mut agents) => {
+                            model::carry(&this.agents, &mut agents, &this.lanes);
                             this.agents.retain(|a| a.native || a.shared != shared);
                             this.agents.extend(agents);
                             this.loaded = true;

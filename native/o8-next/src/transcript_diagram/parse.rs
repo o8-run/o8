@@ -287,6 +287,10 @@ pub(super) fn parse(source: &str) -> Result<Diagram, ParseError> {
         "sequenceDiagram" => sequence(body),
         "stateDiagram" | "stateDiagram-v2" => super::state::parse(body),
         "classDiagram" | "classDiagram-v2" => super::class::parse(body),
+        "erDiagram" => super::er::parse(body),
+        "gantt" => super::gantt::parse(body),
+        "mindmap" => super::mindmap::parse(source),
+        _ if header.starts_with("gitGraph") => super::git::parse(header, body),
         _ if header.split_whitespace().next() == Some("pie") => super::pie::parse(header, body),
         _ => Err(ParseError::Unsupported),
     }

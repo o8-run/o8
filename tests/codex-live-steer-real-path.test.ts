@@ -196,6 +196,7 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
       const posted = await POST(fixture.request('POST', { ...fixture.target, id, intent: 'send-next', payload: fixture.payload }));
       expect(posted.status).toBe(200);
       expect((await PATCH(fixture.request('PATCH', { ...fixture.target, id }))).status).toBe(200);
+      expect(queue.readComposerSend(id)?.payload).toEqual(fixture.payload);
       expect((await fixture.capability()).steerableIds).toContain(id);
       heartbeat();
       const status = accepted ? 'applied' : ['refused', 'mismatched'].includes(outcome) ? 'queued' : 'held';
@@ -204,15 +205,18 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
       expect(fixture.steers()[0].params).toEqual({ threadId: 'native-thread', expectedTurnId: 'running-turn',
         input: [{ type: 'text', text: fixture.payload.wireMessage, text_elements: [] }], clientUserMessageId: id });
       const item = queue.readComposerSend(id)!;
-      expect(item.payload).toEqual(fixture.payload);
+      // Confirmed delivery compacts dispatch-only bytes (#5022). Unresolved
+      // sends must retain the complete original payload for operator recovery.
+      const savedPayload = accepted ? { ...fixture.payload, wireMessage: '' } : fixture.payload;
+      expect(item.payload).toEqual(savedPayload);
       expect(item.intent).toBe(['refused', 'mismatched'].includes(outcome) ? 'send-next' : 'steer-now');
       expect(item.admittedAt === null).toBe(['refused', 'mismatched'].includes(outcome));
       const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
-      const delivered = readPersistedLlmChat(fixture.target.threadId)!.history.messages?.some(message => message.id === `composer-steer-${id}`);
-      expect(Boolean(delivered)).toBe(accepted);
+      const delivered = readPersistedLlmChat(fixture.target.threadId)!.history.messages.filter(message => message.id === `composer-steer-${id}`);
+      expect(delivered).toEqual(accepted ? [expect.objectContaining({ role: 'user', content: fixture.payload.text })] : []);
       heartbeat(); await new Promise(resolve => setTimeout(resolve, 100)); expect(fixture.steers()).toHaveLength(1);
       closeDb(); ensureV71ComposerQueueSchema(getSqlite());
-      expect(queue.readComposerSend(id)?.status).toBe(status);
+      expect(queue.readComposerSend(id)).toMatchObject({ status, payload: savedPayload });
     } finally { await fixture.close(); }
   }, 60_000);
 

@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -12,9 +12,10 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { resolveTsxProcess } from '@/lib/testing/tsx-process';
+import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-create-crash-real-path-')));
 const dataDir = path.join(root, 'data');
@@ -64,7 +65,7 @@ function waitForFileText(
   });
 }
 
-function waitForExit(child: ChildProcessWithoutNullStreams): Promise<void> {
+function waitForExit(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
   return new Promise((resolve) => child.once('exit', () => resolve()));
 }
@@ -148,6 +149,10 @@ void (async () => {
 });
 `;
 
+beforeAll(() => {
+  if (process.platform !== 'win32') buildPiWriteHelper();
+}, 600_000);
+
 afterAll(async () => {
   const { closeDb } = await import('@/lib/db');
   closeDb();
@@ -175,6 +180,7 @@ describe('managed worktree creation crash recovery', () => {
       policy: { reserveRatio: 0, absoluteFloorBytes: 0 },
     });
     expect(reservation.decision).toBe('reserved');
+    const worktreeId = `packet-creation-crash-recovery${rootLayout.WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
     const command = resolveTsxProcess(['--eval', childScript]);
     const child = spawn(command.file, command.args, {
       cwd: process.cwd(),
@@ -195,16 +201,13 @@ describe('managed worktree creation crash recovery', () => {
     expect(Number.isInteger(installPid) && installPid > 0).toBe(true);
     const workspacePath = path.join(
       rootLayout.resolveWorktreeRootLayout(repoPath).primaryBase,
-      'packet-creation-crash-recovery',
+      worktreeId,
     );
     const meta = JSON.parse(readFileSync(
       path.join(rootLayout.resolveWorktreeRootLayout(repoPath).primaryBase, '.meta.json'),
       'utf8',
     )) as { worktrees: Record<string, { status: string; creationOwner: { pid: number; identity: unknown } }> };
-    const creationOwnerPid = meta.worktrees['packet-creation-crash-recovery']!.creationOwner.pid;
-    process.kill(creationOwnerPid, 'SIGKILL');
-    await waitForProcessExit(creationOwnerPid);
-    await waitForExit(child);
+    const creationOwnerPid = meta.worktrees[worktreeId]!.creationOwner.pid;
 
     const [
       { WorktreeManager },
@@ -218,24 +221,42 @@ describe('managed worktree creation crash recovery', () => {
       import('@/lib/runtime/process-cwd-snapshot'),
     ]);
     const manager = new WorktreeManager(repoPath);
-    const owner = meta.worktrees['packet-creation-crash-recovery']!.creationOwner as {
+    const owner = meta.worktrees[worktreeId]!.creationOwner as {
       pid: number;
       identity: Parameters<typeof sameMetadataLockProcessIdentity>[0];
     };
+    expect(await probeLiveProcessInside(workspacePath)).toMatchObject({ status: 'live' });
+    await expect(manager.prune(0)).resolves.not.toContain(worktreeId);
+    process.kill(creationOwnerPid, 'SIGKILL');
+    await waitForProcessExit(creationOwnerPid);
+    await waitForExit(child);
+    // The install supervisor tears down its children when the creation owner dies.
+    await waitForProcessExit(installPid);
     const ownerProbe = await probeMetadataLockProcessIdentity(owner.pid);
     expect(ownerProbe.state === 'absent'
       || (ownerProbe.state === 'live'
         && !sameMetadataLockProcessIdentity(ownerProbe.identity, owner.identity))).toBe(true);
-    expect(await probeLiveProcessInside(workspacePath)).toMatchObject({ status: 'live' });
-    await expect(manager.prune(0)).resolves.not.toContain('packet-creation-crash-recovery');
-    process.kill(installPid, 'SIGTERM');
-    await waitForProcessExit(installPid);
+    // A separate process must protect the orphan after its owner and install exit.
+    const liveProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      cwd: workspacePath,
+      stdio: 'ignore',
+      detached: true,
+    });
+    try {
+      invalidateProcessCwdSnapshot();
+      expect(await probeLiveProcessInside(workspacePath)).toMatchObject({ status: 'live' });
+      await expect(manager.prune(0)).resolves.not.toContain(worktreeId);
+      expect(existsSync(workspacePath)).toBe(true);
+    } finally {
+      liveProcess.kill('SIGKILL');
+      await waitForExit(liveProcess);
+    }
     // The machine cwd snapshot is cached for up to 15s, so a probe taken before
     // this exit still reports the pid as live. The process is confirmed gone —
     // drop the stale snapshot so the assertion reads the world, not the cache.
     invalidateProcessCwdSnapshot();
     expect(await probeLiveProcessInside(workspacePath)).toMatchObject({ status: 'clear' });
-    await expect(manager.prune(0)).resolves.toContain('packet-creation-crash-recovery');
+    await expect(manager.prune(0)).resolves.toContain(worktreeId);
     expect(existsSync(workspacePath)).toBe(false);
     expect(gitSucceeds(
       repoPath, 'show-ref', '--verify', '--quiet', 'refs/heads/inline/creation-crash-recovery',
@@ -259,7 +280,7 @@ describe('managed worktree creation crash recovery', () => {
       },
     });
     expect(retried).toMatchObject({
-      id: 'packet-creation-crash-recovery',
+      id: worktreeId,
       path: workspacePath,
       branch: 'inline/creation-crash-recovery',
       status: 'ready',

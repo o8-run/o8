@@ -18,7 +18,8 @@ const sdk = [
   'ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency',
 ];
 const isTimed = name => sdk.includes(name) || name.startsWith('terminal::tests::production_pty_')
-  || name === 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark';
+  || name === 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark'
+  || name === 'files_panel::tests::large_file_one_million_lines_stays_within_bounds';
 const directory = mkdtempSync(join(tmpdir(), 'o8-native-shards-'));
 const harness = join(directory, 'harness.mjs');
 const receipt = join(directory, 'receipt.json');

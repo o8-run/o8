@@ -164,6 +164,33 @@ pub(super) fn poll(cx: &mut TestAppContext) {
         "External while dirty\n"
     );
 }
+#[gpui::test]
+fn spec_show_during_load_refreshes_without_window_poll(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    fs::write(path(&f), "Before hiding\n").unwrap();
+    let (view, cx) = panel(&f, cx);
+    wait(cx, "spec-editor");
+    cx.deactivate_window();
+
+    // Finish the real HTTP read, but hold its foreground completion across
+    // hide/show. Resuming must not lose its refresh behind that old load.
+    let reads = || {
+        f.requests()
+            .iter()
+            .filter(|r| r.starts_with("GET /api/repo-spec?"))
+            .count()
+    };
+    let before = reads();
+    view.update(cx, |view, cx| view.load_spec(cx));
+    while cx.cx.dispatcher.tick(true) {}
+    assert_eq!(reads(), before + 1);
+    view.update(cx, |view, cx| view.set_spec_active(false, cx));
+    fs::write(path(&f), "Changed while hidden\n").unwrap();
+    view.update(cx, |view, cx| view.set_spec_active(true, cx));
+
+    until(cx, |cx| content(cx) == "Changed while hidden\n");
+    assert_eq!(puts(&f), 0);
+}
 pub(super) fn typography(cx: &mut TestAppContext) {
     let f = Fixture::new();
     fs::write(path(&f),"# Heading one\n## Heading two\n### Heading three\n\nBody **strong**, *emphasis* and `code`.\n").unwrap();

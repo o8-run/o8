@@ -130,9 +130,11 @@ impl RowState {
                     .or_insert_with(|| cx.focus_handle());
             }
             for item in crate::subagents::trace::items(steps, trace, &self.subagent_agents) {
-                self.subagent_focus
-                    .entry(format!("subagent-roster-open-{}", item.id))
-                    .or_insert_with(|| cx.focus_handle());
+                for control in ["open", "approve", "deny"] {
+                    self.subagent_focus
+                        .entry(format!("subagent-roster-{control}-{}", item.id))
+                        .or_insert_with(|| cx.focus_handle());
+                }
                 self.subagent_focus
                     .entry(item.id)
                     .or_insert_with(|| cx.focus_handle());

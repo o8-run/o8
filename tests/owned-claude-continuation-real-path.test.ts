@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -171,9 +171,16 @@ describe.skipIf(process.platform === 'win32')('owned Claude continuation through
       .toMatchObject({ ok: false, note: expect.stringContaining('not found') });
     const { repoPath, surfaceId } = await launch('invalid');
     const original = readSession(surfaceId);
-    writeFileSync(sessionPath(surfaceId), JSON.stringify({ ...original, threadId: undefined, recentRuns: [] }));
-    expect(await claudeCodeRuntime.resume(surfaceId, 'no saved identity'))
-      .toMatchObject({ ok: false, note: expect.stringContaining('thread id') });
+    // A missing thread can now continue from the saved task and transcript.
+    // Without the saved session itself, this owned target cannot be resolved.
+    const metadata = sessionPath(surfaceId);
+    renameSync(metadata, `${metadata}.unavailable`);
+    try {
+      expect(await claudeCodeRuntime.resume(surfaceId, 'no saved session'))
+        .toMatchObject({ ok: false, note: expect.stringContaining('not found') });
+    } finally {
+      renameSync(`${metadata}.unavailable`, metadata);
+    }
     for (const id of ['--continue', 'last-session', '../another.jsonl']) {
       writeFileSync(sessionPath(surfaceId), JSON.stringify({ ...original, threadId: id }));
       expect(await claudeCodeRuntime.resume(surfaceId, 'must not launch'))

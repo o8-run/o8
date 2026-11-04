@@ -9,7 +9,11 @@ use gpui::{
 use std::{cell::RefCell, collections::BTreeSet};
 
 mod class;
+mod er;
+mod gantt;
+mod git;
 mod layout;
+mod mindmap;
 mod parse;
 mod pie;
 mod state;
@@ -58,6 +62,11 @@ enum Marker {
     Diamond,
     FilledDiamond,
     Circle,
+    /// Entity relationship cardinalities, drawn as crow's feet.
+    ZeroOrOne,
+    OnlyOne,
+    ZeroOrMore,
+    OneOrMore,
 }
 #[derive(Clone, Debug, Default)]
 struct Vertex {
@@ -107,6 +116,15 @@ enum Diagram {
         show_data: bool,
         slices: Vec<(String, f64)>,
     },
+    Git {
+        branches: Vec<String>,
+        commits: Vec<git::Commit>,
+    },
+    Gantt(gantt::Chart),
+    Mindmap {
+        nodes: Vec<Vertex>,
+        parents: Vec<Option<usize>>,
+    },
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct BoxRect {
@@ -135,6 +153,8 @@ struct Stroke {
     marks: [Marker; 2],
     /// The label plate the line stops at, on either side.
     gap: Option<BoxRect>,
+    /// A series color, such as a git branch's, in place of the muted line.
+    color: Option<usize>,
 }
 /// A pie slice, clockwise from twelve o'clock in radians.
 #[derive(Clone, Copy, Debug)]
@@ -470,7 +490,7 @@ impl Placement {
                     }
                 }
                 if let Ok(path) = path.build() {
-                    window.paint_path(path, theme().text_muted);
+                    window.paint_path(path, stroke.color.map_or(theme().text_muted, series));
                 }
             }
             let ends = [
@@ -529,6 +549,15 @@ impl Placement {
             }
             let _ = label.line.paint(origin, px(label.height), window, cx);
         }
+    }
+    /// The drawn boxes, lines and pie or commit dots, for the rendering tests.
+    #[cfg(test)]
+    pub(crate) fn counts(&self) -> (usize, usize, usize) {
+        (
+            self.scene.boxes.len() + self.scene.swatches.len(),
+            self.scene.strokes.len(),
+            self.scene.wedges.len(),
+        )
     }
     pub(crate) fn controls(
         &self,
@@ -820,7 +849,13 @@ fn ink(fill: Rgba, light: Rgba, dark: Rgba) -> Rgba {
 /// How far a marker reaches back along its line, in marker lengths.
 fn marker_length(mark: Marker) -> f32 {
     match mark {
-        Marker::None | Marker::Arrow => 0.,
+        // Crow's feet sit on the line, which runs to the box.
+        Marker::None
+        | Marker::Arrow
+        | Marker::ZeroOrOne
+        | Marker::OnlyOne
+        | Marker::ZeroOrMore
+        | Marker::OneOrMore => 0.,
         Marker::Triangle | Marker::Circle => 2.,
         Marker::Diamond | Marker::FilledDiamond => 2.4,
     }
@@ -837,6 +872,10 @@ fn paint_marker(mark: Marker, tip: Point<Pixels>, angle: f32, length: f32, windo
     };
     let outline = match mark {
         Marker::None => return,
+        Marker::ZeroOrOne | Marker::OnlyOne | Marker::ZeroOrMore | Marker::OneOrMore => {
+            paint_crow_foot(mark, &at, length / 6., window);
+            return;
+        }
         Marker::Arrow => {
             let mut head = PathBuilder::stroke(px(1.));
             for sign in [-1., 1.] {
@@ -892,6 +931,74 @@ fn paint_marker(mark: Marker, tip: Point<Pixels>, angle: f32, length: f32, windo
         path.close();
         if let Ok(path) = path.build() {
             window.paint_path(path, if filled { color } else { theme().text_muted });
+        }
+    }
+}
+/// A cardinality over the end of a line, in upstream's units of `unit`:
+/// bars across it, a foot spreading to the box, and a ring for zero.
+fn paint_crow_foot(
+    mark: Marker,
+    at: &impl Fn(f32, f32) -> Point<Pixels>,
+    unit: f32,
+    window: &mut Window,
+) {
+    const BAR: f32 = 5.;
+    const FOOT: f32 = 6.;
+    const FOOT_LENGTH: f32 = 10.;
+    const RING: f32 = 3.5;
+    let mut lines = PathBuilder::stroke(px(1.));
+    let mut bar = |back: f32| {
+        lines.move_to(at(back * unit, -BAR * unit));
+        lines.line_to(at(back * unit, BAR * unit));
+    };
+    let (bars, foot, ring): (&[f32], bool, Option<f32>) = match mark {
+        Marker::OnlyOne => (&[6., 10.], false, None),
+        Marker::ZeroOrOne => (&[6.], false, Some(13.5)),
+        Marker::OneOrMore => (&[FOOT_LENGTH + 3.5], true, None),
+        Marker::ZeroOrMore => (&[], true, Some(FOOT_LENGTH + RING + 0.5)),
+        _ => return,
+    };
+    for &back in bars {
+        bar(back);
+    }
+    if foot {
+        lines.move_to(at(0., -FOOT * unit));
+        lines.line_to(at(FOOT_LENGTH * unit, 0.));
+        lines.line_to(at(0., FOOT * unit));
+    }
+    if let Ok(path) = lines.build() {
+        window.paint_path(path, theme().text_muted);
+    }
+    let Some(back) = ring else {
+        return;
+    };
+    let rim: Vec<_> = (0..16)
+        .map(|i| {
+            let turn = i as f32 * std::f32::consts::TAU / 16.;
+            at((back + RING * turn.cos()) * unit, RING * turn.sin() * unit)
+        })
+        .collect();
+    for filled in [true, false] {
+        let mut path = if filled {
+            PathBuilder::fill()
+        } else {
+            PathBuilder::stroke(px(1.))
+        };
+        for (index, &p) in rim.iter().enumerate() {
+            if index == 0 {
+                path.move_to(p);
+            } else {
+                path.line_to(p);
+            }
+        }
+        path.close();
+        if let Ok(path) = path.build() {
+            let color = if filled {
+                theme().code_background
+            } else {
+                theme().text_muted
+            };
+            window.paint_path(path, color);
         }
     }
 }

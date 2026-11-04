@@ -1,7 +1,17 @@
 //! SyntaxFileView's readable fallback and retry, over the bundled diff grammar.
+//! Very large files color only the blocks of lines that come into view.
 use super::*;
-use gpui::Rgba;
-use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
+use gpui::{App, Rgba, WeakEntity};
+use std::{
+    cell::RefCell,
+    ops::Range,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 type Rows = Vec<Vec<(Range<usize>, Rgba)>>;
 enum Phase {
     Idle,
@@ -55,6 +65,92 @@ fn split(source: &str, spans: Vec<(Range<usize>, Rgba)>) -> Rows {
             rows
         })
         .collect()
+}
+/// Lines parsed together when a file is too large to parse whole.
+pub(super) const BLOCK: usize = 2_048;
+/// Colored blocks kept; the one farthest from view is dropped first.
+const KEPT: usize = 8;
+/// A block with more bytes than this (very long lines) stays uncolored, so
+/// neither the UI thread nor the parser ever takes the whole file at once.
+const BLOCK_BYTES: usize = 1 << 20;
+type Block = (usize, Option<Rc<Rows>>, Arc<AtomicBool>);
+/// Colors for the blocks of a very large file that have come into view. Each
+/// block parses on its own off the UI thread, so a construct that crosses a
+/// block edge (a long comment or string) may color differently there.
+#[derive(Clone, Default)]
+pub(super) struct Blocks(Rc<RefCell<Vec<Block>>>);
+impl Blocks {
+    /// The line's spans; none until its block is colored, which starts here.
+    pub(super) fn line(
+        &self,
+        line: usize,
+        path: &str,
+        lines: &[SharedString],
+        panel: &WeakEntity<FilesPanel>,
+        cx: &mut App,
+    ) -> Vec<(Range<usize>, Rgba)> {
+        let block = line / BLOCK;
+        let found = self
+            .0
+            .borrow()
+            .iter()
+            .find(|(b, ..)| *b == block)
+            .map(|(_, rows, _)| rows.clone());
+        if let Some(rows) = found {
+            return rows
+                .and_then(|rows| rows.get(line % BLOCK).cloned())
+                .unwrap_or_default();
+        }
+        let start = block * BLOCK;
+        let lines = &lines[start..(start + BLOCK).min(lines.len())];
+        let dropped = Arc::new(AtomicBool::new(false));
+        {
+            let mut kept = self.0.borrow_mut();
+            if kept.len() >= KEPT {
+                let far = (0..kept.len())
+                    .max_by_key(|i| kept[*i].0.abs_diff(block))
+                    .unwrap_or(0);
+                // A parse still queued for a dropped block is skipped.
+                kept.swap_remove(far).2.store(true, Ordering::Relaxed);
+            }
+            let bytes: usize = lines.iter().map(|line| line.len() + 1).sum();
+            if bytes > BLOCK_BYTES {
+                kept.push((block, Some(Rc::new(vec![])), dropped));
+                return vec![];
+            }
+            kept.push((block, None, dropped.clone()));
+        }
+        let source = lines
+            .iter()
+            .map(|s| s.as_ref())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let path = language_path(path);
+        let work = cx.background_executor().spawn(async move {
+            if dropped.load(Ordering::Relaxed) {
+                return vec![];
+            }
+            // A block that fails to parse stays uncolored, like an unknown language.
+            crate::diff::highlight_source(&path, &source)
+                .map(|spans| split(&source, spans.unwrap_or_default()))
+                .unwrap_or_default()
+        });
+        let (state, panel) = (self.clone(), panel.clone());
+        cx.spawn(async move |cx| {
+            let rows = Rc::new(work.await);
+            if let Some(entry) = state
+                .0
+                .borrow_mut()
+                .iter_mut()
+                .find(|(b, rows, _)| *b == block && rows.is_none())
+            {
+                entry.1 = Some(rows);
+            }
+            let _ = panel.update(cx, |_, cx| cx.notify());
+        })
+        .detach();
+        vec![]
+    }
 }
 impl Colors {
     pub(super) fn failed(&self) -> bool {

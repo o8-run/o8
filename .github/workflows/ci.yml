@@ -229,7 +229,7 @@ jobs:
         if: needs.reuse.outputs.reuse != 'true'
         run: npm run test:classification:check
       - if: needs.reuse.outputs.reuse != 'true'
-        run: node --test scripts/ci/test-classification-listing.test.mjs
+        run: node --test scripts/ci/test-classification-listing.test.mjs scripts/ci/integration-weights.test.mjs scripts/ci/native-test-shard.test.mjs scripts/ci/pr-review-comment.test.mjs scripts/ci/native-test-cache.test.mjs
 
   test-shards:
     name: Hermetic Unit Tests (shard ${{ matrix.shard }}/4)
@@ -723,8 +723,10 @@ jobs:
         with:
           path: native/o8-next/target/pull-request-registration-target
           key: ${{ steps.native-setup.outputs.registration-cache-key }}
+      # Pull-request snapshots stay in GitHub's merge-ref cache scope; main
+      # cannot restore them. A source-matched rerun avoids recompiling the crate.
       - name: Save native test build outputs
-        if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true' && github.ref == 'refs/heads/main' && matrix.shard == 8 && steps.native-setup.outputs.native-cache-hit != 'true' && steps.native-cache-size.outputs.cacheable == 'true'
+        if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true' && !(github.ref != 'refs/heads/main' && github.event_name != 'pull_request') && matrix.shard == 8 && steps.native-setup.outputs.native-cache-hit != 'true' && steps.native-cache-size.outputs.cacheable == 'true'
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: |

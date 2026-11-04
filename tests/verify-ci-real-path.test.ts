@@ -181,7 +181,8 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   const integrationFiles = main ? Array.from({ length: 6 }, (_, index) => `tests/unchanged-integration-${index}.test.mjs`) : [browserFile];
   writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: integrationFiles.map(path => ({ path, ...(path === browserFile && browser && !staleBrowser ? { browser: true } : {}) })) }));
   if (main) {
-    for (const file of ['scripts/integration-test-gate.mjs', 'scripts/lib/red-baseline.mjs']) {
+    for (const file of ['scripts/integration-test-gate.mjs', 'scripts/lib/red-baseline.mjs',
+      'scripts/lib/integration-shards.mjs', 'tests/integration-weights.json']) {
       copyFileSync(path.join(repo, file), path.join(directory, file));
     }
     mkdirSync(path.join(directory, 'config/vitest'), { recursive: true });

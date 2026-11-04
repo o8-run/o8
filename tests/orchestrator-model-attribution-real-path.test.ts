@@ -218,18 +218,20 @@ async function submitComposerTurn(
       return false;
     }
   }, 'receipt-only assistant row before reply text');
+  // Streamed reply text can be saved before the turn ends; receipt.terminal is a later write, made
+  // when the codex child closes and the turn emits done. Read the turn only after that write.
   await waitFor(() => {
     try {
-      const history = JSON.parse(readFileSync(historyPath, 'utf8')) as { messages?: Array<{ role?: string; model?: string; content?: string; receipt?: unknown }> };
+      const history = JSON.parse(readFileSync(historyPath, 'utf8')) as { messages?: Array<{ role?: string; model?: string; content?: string; receipt?: { terminal?: unknown } }> };
       return history.messages?.some((entry) => (
         entry.role === 'assistant'
         && entry.content === 'deterministic assistant reply'
-        && (options.thinkingEffort === undefined || entry.receipt !== undefined)
+        && entry.receipt?.terminal !== undefined
       )) ?? false;
     } catch {
       return false;
     }
-  }, 'persisted assistant attribution', options.message === 'dispatch connected receipt worker' ? 90_000 : 20_000);
+  }, 'persisted assistant attribution at turn end', options.message === 'dispatch connected receipt worker' ? 90_000 : 20_000);
   const history = JSON.parse(readFileSync(historyPath, 'utf8')) as { messages: Array<{ id: string; role: string; model?: string }> };
   const assistant = history.messages.find((entry) => entry.role === 'assistant');
   const persisted = readPersistedLlmChat(threadId);

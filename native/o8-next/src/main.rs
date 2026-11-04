@@ -48,6 +48,7 @@ mod terminal_transport;
 mod text;
 mod thread_messages;
 mod theme;
+mod theme_import;
 #[cfg(test)]
 mod theme_tests;
 mod trace;

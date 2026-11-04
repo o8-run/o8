@@ -156,6 +156,7 @@ export type LaneCommand =
     }
   | {
       verb: 'launch_session';
+      instanceId?: string;
       promptMemoryRevision?: string;
       laneId: string;
       prompt: string;
