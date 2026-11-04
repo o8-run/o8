@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
+import { splitIntegrationFiles } from '../scripts/lib/integration-shards.mjs';
 
 const roots: string[] = [];
 const fixturePids = new Set<number>();
@@ -58,6 +59,76 @@ afterEach(async () => {
 });
 
 describe('split test gate real entry point', () => {
+  it.each(['measured', 'default'])('partitions a plan exactly once with a heavy file using %s weight and keeps manifest order', (source) => {
+    const fixture = mkdtempSync(join(tmpdir(), 'o8-integration-weighted-shards-'));
+    roots.push(fixture);
+    const orderLog = join(fixture, 'order.log');
+    const files = Array.from({ length: 12 }, (_, index) => join(fixture, `${String(index).padStart(2, '0')}.test.js`));
+    const configPath = join(fixture, 'integration.config.mjs');
+    writeFileSync(configPath, `
+export default {
+  test: {
+    root: ${JSON.stringify(fixture)}, globals: true, include: ['*.test.js'],
+    reporters: [['json', { outputFile: process.env.O8_TEST_GATE_REPORT_PATH }]],
+  },
+};
+`);
+    for (const file of files) {
+      writeFileSync(file, `
+import { appendFileSync } from 'node:fs';
+it('records its shard execution', () => {
+  appendFileSync(${JSON.stringify(orderLog)}, ${JSON.stringify(`${file}\n`)});
+  expect(true).toBe(true);
+});
+`);
+    }
+    const heavy = files[5];
+    const weightsPath = join(fixture, 'weights.json');
+    const measured = source === 'default' ? files.filter(file => file !== heavy) : files;
+    writeFileSync(weightsPath, JSON.stringify(Object.fromEntries(measured.map(file => [file, file === heavy ? 100 : 1]))));
+    if (source === 'default') expect(splitIntegrationFiles([heavy], {}, 3)[0].totalSeconds).toBe(60);
+    const planPath = join(fixture, 'plan.json');
+    writeFileSync(planPath, JSON.stringify({ config: configPath, files, weightsPath }));
+    const shards: string[][] = [];
+    for (const index of [1, 2, 3]) {
+      writeFileSync(orderLog, '');
+      const result = spawnSync(process.execPath, ['scripts/integration-test-gate.mjs'], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 30_000,
+        env: {
+          ...fixtureGateEnv(), O8_INTEGRATION_TEST_MODE: '1', O8_INTEGRATION_TEST_PLAN: planPath,
+          O8_INTEGRATION_SHARD: `${index}/3`, O8_TEST_GATE_HEARTBEAT_MS: '100000',
+        },
+      });
+      expect(result.status, result.stdout + result.stderr).toBe(0);
+      const selected = readFileSync(orderLog, 'utf8').trim().split('\n');
+      expect(selected).toEqual(files.filter(file => selected.includes(file)));
+      shards.push(selected);
+    }
+    expect(shards.flat().sort()).toEqual([...files].sort());
+    const heavyShard = shards.find(selected => selected.includes(heavy))!;
+    for (const selected of shards.filter(selected => selected !== heavyShard)) {
+      expect(heavyShard.length).toBeLessThan(selected.length);
+    }
+  }, 60_000);
+
+  it('balances the committed weights across six shards within five percent without losing or duplicating files', () => {
+    const weights = JSON.parse(readFileSync('tests/integration-weights.json', 'utf8')) as Record<string, number>;
+    const manifest = JSON.parse(readFileSync('tests/test-classification.json', 'utf8')) as { resourceOwning: Array<{ path: string }> };
+    const files = manifest.resourceOwning.map(entry => entry.path);
+    const shards = splitIntegrationFiles(files, weights, 6);
+    const totals = shards.map(shard => shard.totalSeconds);
+    expect(Math.max(...totals)).toBeLessThanOrEqual(Math.min(...totals) * 1.05);
+    expect(shards.flatMap(shard => shard.files).sort()).toEqual([...files].sort());
+    expect(Object.keys(weights)).toEqual(Object.keys(weights).sort());
+    expect(Object.values(weights).every(weight => Number.isInteger(weight) && weight >= 1)).toBe(true);
+  });
+
+  it('breaks equal weights by path and equal shard totals by index while retaining manifest order', () => {
+    expect(splitIntegrationFiles(['c', 'a', 'b'], { a: 1, b: 1, c: 1 }, 2)).toEqual([
+      { files: ['c', 'a'], totalSeconds: 2 }, { files: ['b'], totalSeconds: 1 },
+    ]);
+  });
+
   it('finishes the hermetic gate before an integration failure and reports the causal lane', () => {
     const fixture = mkdtempSync(join(tmpdir(), 'o8-test-gate-runner-'));
     roots.push(fixture);

@@ -56,7 +56,10 @@ const server = createServer(socket => {
           continue;
         }
         if (mode === 'drop') { socket.destroy(); continue; }
-        if (mode === 'timeout' || mode === 'landed') { respond(false, undefined, 'eval_and_await failed for type_into_focused: timed out after 10 seconds'); continue; }
+        if (mode === 'timeout' || mode === 'landed') {
+          // Match eval_and_await's production timeout, including its correlation id.
+          respond(false, undefined, `eval_and_await failed for type_into_focused: Timeout waiting for ${request.id} response (eval-based)`); continue;
+        }
         if (mode === 'hold' && writes.length === 1) { held = () => respond(true, { charsTyped: String(request.payload.text).length }); continue; }
         respond(true, { charsTyped: String(request.payload.text).length });
       } else {

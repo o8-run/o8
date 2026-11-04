@@ -485,6 +485,19 @@ impl Shell {
         cx.notify();
     }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // Shortcut overrides route first; handlers then see default chords.
+        let translated = match shortcuts::pre_key(self, event, window, cx) {
+            shortcuts::Pre::Pass => None,
+            shortcuts::Pre::Translate(event) => Some(event),
+            shortcuts::Pre::Release => return,
+            shortcuts::Pre::Handled => {
+                self.revision += 1;
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
+        };
+        let event = translated.as_ref().unwrap_or(event);
         if features::key(self, event, window, cx) == registry::KeyResult::Handled {
             self.revision += 1;
             cx.notify();

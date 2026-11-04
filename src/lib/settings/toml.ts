@@ -35,7 +35,7 @@ import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED
 import { isSubscriptionProfile } from '@/lib/operator/subscription-profile';
 import { isTargetingTier } from '@/lib/operator/targeting-tier';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
-import { isBotRailEnabledIds } from '@/lib/operator/presentation-defaults';
+import { isBotRailEnabledIds, isNativeKeybindings } from '@/lib/operator/presentation-defaults';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { AUTHENTICATED_ENDPOINT_GUIDANCE, credentialBearingUrlPart } from './credential-safe-url';
 import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
@@ -299,6 +299,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   botRailEnabledIds: { path: ['bots', 'rail_enabled'], parse: (value, key) => isBotRailEnabledIds(value) ? [...new Set(value)] : invalid(key, 'an array of non-empty bot ids') },
   presentationQuietMode: booleanField('presentation', 'quiet_mode'),
   composerEnterQueues: booleanField('chat', 'enter_queues'),
+  nativeKeybindings: { path: ['next', 'keybindings'], parse: (value, key) => isNativeKeybindings(value) ? [...value] : invalid(key, 'an array of unique "command=chord" strings') },
   notificationsReviewReady: enumField('notifications', 'review_ready', '"off" or "on"', (value): value is OperatorDefaults['notificationsReviewReady'] => value === 'off' || value === 'on'),
   apfsDependencyImages: booleanField('git', 'apfs_dependency_images'),
   thinkingEffort: enumField('models', 'thinking_effort', 'a valid thinking effort', isThinkingEffort),

@@ -14,6 +14,7 @@ export interface RuntimeLaunchRequest {
   automaticRecoverySurfaceId?: string;
   automaticRecoveryRunId?: string;
   runtime: RuntimeId;
+  instanceId?: string;
   prompt: string;
   model?: string;
   claudeCodeModel?: string;

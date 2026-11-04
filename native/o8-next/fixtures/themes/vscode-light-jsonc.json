@@ -1,0 +1,23 @@
+// A light theme as VS Code ships them: comments and trailing commas.
+{
+  "$schema": "vscode://schemas/color-theme",
+  "name": "Paper // Morning", // the slashes inside the name are not a comment
+  "type": "light",
+  /* Workbench colors */
+  "colors": {
+    "editor.background": "#fbfaf7",
+    "editor.foreground": "#2b2f36",
+    "sideBar.background": "#f1efe9", // trailing comma follows
+    "focusBorder": "#0b66c3",
+  },
+  "tokenColors": [
+    {
+      "scope": "string",
+      "settings": { "foreground": "#2f7d32", },
+    },
+    {
+      "scope": ["keyword"],
+      "settings": { "foreground": "#8e3fbf" },
+    },
+  ],
+}

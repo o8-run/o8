@@ -104,3 +104,22 @@ fn a_missing_family_falls_back_to_the_default_without_a_panic() {
         "nothing left to change"
     );
 }
+
+#[test]
+fn a_picked_font_applies_to_an_imported_theme_too() {
+    let _selection = theme::selection_test_guard();
+    let _fonts = font_test_guard();
+    let previous = theme::choice_name();
+    let source = include_str!("../fixtures/themes/vscode-dark.json");
+    let name = theme::import_theme(source, "harbor").unwrap();
+    theme::set_appearance(&name);
+    let background = current().background;
+    assert!(theme::set_font(true, "Iosevka", &installed()));
+    assert_eq!(current().font_mono, "Iosevka");
+    assert_eq!(
+        current().background,
+        background,
+        "still the imported colors"
+    );
+    theme::set_appearance(&previous);
+}

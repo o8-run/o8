@@ -56,7 +56,7 @@ describe('direct managed worktree admission', () => {
       'commit', '-q', '-m', 'base',
     ], { cwd: repo });
     const { WorktreeManager } = await import('@/lib/worktree/manager');
-    const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+    const { resolveWorktreeRootLayout, WORKTREE_INDEX_EXCLUSION_SUFFIX } = await import('@/lib/worktree/root-layout');
     const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
     const { retireExactManagedDirectory } = await import('@/lib/workspace/exact-managed-directory-retirement');
     const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspace-claim-state');
@@ -69,16 +69,17 @@ describe('direct managed worktree admission', () => {
       baseBranch: 'main',
       skipSetup: true,
     });
-    const pendingId = `pending-retirement-${Date.now()}`;
+    const taskName = `pending-retirement-${Date.now()}`;
     // Retirement authority requires exact manager ownership, so the claimed id
     // starts as a ready standalone workspace created through the manager.
     const pending = await manager.create({
       agentType: 'codex',
-      taskName: pendingId,
+      taskName,
       baseBranch: 'main',
       skipSetup: true,
     });
-    expect(pending.id).toBe(pendingId);
+    const pendingId = pending.id;
+    expect(pendingId).toBe(`${taskName}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`);
     const pendingPath = pending.path;
     const base = resolveWorktreeRootLayout(repo).primaryBase;
     await retireExactManagedDirectory({
@@ -96,7 +97,7 @@ describe('direct managed worktree admission', () => {
 
     const created = await manager.create({
       agentType: 'codex',
-      taskName: pendingId,
+      taskName,
       baseBranch: 'main',
       skipSetup: true,
     });

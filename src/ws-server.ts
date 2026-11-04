@@ -332,6 +332,7 @@ import { deviceE2eeFailureAction } from './lib/ws-server/device-e2ee-policy';
 import { isWorktreeNoise, shouldRunConflictScan } from './lib/ws-server/conflict-gate';
 import { withWsHealthHandler } from './lib/ws-server/handler-activity';
 import { WsWatchdog } from './lib/ws-server/health-watchdog';
+import { coalesceSafetyNetSync, SafetyNetPoll } from './lib/ws-server/safety-net-poll';
 import {
   sanitizePtyEnv,
   resolvePreferredShell,
@@ -3707,6 +3708,7 @@ async function handleClientMessage(client: ClientState, raw: string) {
       const sessionKey = typeof msg.sessionKey === 'string' ? msg.sessionKey : null;
       client.sessionKey = sessionKey;
       client.lastHistoryId = null;
+      historySafetyNet.forget(client);
       // Send immediate sync for the new session
       if (sessionKey) {
         void syncClientHistory(client);
@@ -6541,34 +6543,45 @@ async function handleOrchestratorStatus(client: ClientState, msg: Record<string,
   }
 }
 
-async function syncClientInbox(client: ClientState) {
+const inboxSafetyNet = new SafetyNetPoll();
+const historySafetyNet = new SafetyNetPoll();
+const fetchSafetyNetSync = coalesceSafetyNetSync(fetchSync);
+
+async function syncClientInbox(client: ClientState, fetch = fetchSync) {
   // Delta-capable clients receive revisioned inbox events from the realtime
   // log. Suppress the legacy full snapshot safety poll after negotiation; the
   // initial connection/bootstrap checkpoint still seeds canonical state.
   if (client.realtimeCapabilities.has(MOBILE_INBOX_DELTA_CAPABILITY)) return;
-  const data = await fetchSync({ inbox: { etag: client.inboxEtag ?? undefined } });
+  const revision = mobileInboxRevision || undefined;
+  const previousEtag = client.inboxEtag;
+  const data = await fetch({ inbox: { etag: previousEtag ?? undefined } });
   if (!data) return;
 
-  if (data.inboxEtag) client.inboxEtag = data.inboxEtag as string;
+  if (data.inboxEtag) {
+    client.inboxEtag = data.inboxEtag as string;
+    inboxSafetyNet.record(client, revision, previousEtag !== client.inboxEtag);
+  }
 
   if (data.inbox) {
     send(client, { channel: 'inbox', event: 'update', data: data.inbox });
   }
 }
 
-async function syncClientHistory(client: ClientState) {
+async function syncClientHistory(client: ClientState, fetch = fetchSync) {
   if (!client.sessionKey) return;
+  const sessionKey = client.sessionKey;
+  const previousId = client.lastHistoryId;
 
   const body: Record<string, unknown> = {
     history: {
-      sessionKey: client.sessionKey,
-      sinceId: client.lastHistoryId ?? undefined,
+      sessionKey,
+      sinceId: previousId ?? undefined,
       limit: 18,
     },
   };
 
-  const data = await fetchSync(body);
-  if (!data?.history) return;
+  const data = await fetch(body);
+  if (!data?.history || client.sessionKey !== sessionKey) return;
 
   const history = data.history as { entries: Array<{ id: string }>; sessionKey: string };
   if (history.entries.length > 0) {
@@ -6576,6 +6589,7 @@ async function syncClientHistory(client: ClientState) {
     client.lastHistoryId = history.entries[history.entries.length - 1].id;
     send(client, { channel: 'history', event: 'update', data: history });
   }
+  historySafetyNet.record(client, client.lastHistoryId ?? undefined, previousId !== client.lastHistoryId);
 }
 
 // ── Chat delta forwarding ──
@@ -6730,9 +6744,10 @@ function markConflictsDirty() {
 function startPollingLoops() {
   // Safety-net inbox poll — reduced frequency since event-driven push handles most updates
   setInterval(() => {
-    const activeClients = [...clients.values()].filter((c) => c.ws.readyState === WebSocket.OPEN);
+    const activeClients = [...clients.values()].filter((c) => c.ws.readyState === WebSocket.OPEN
+      && inboxSafetyNet.due(c, mobileInboxRevision || undefined));
     if (activeClients.length === 0) return;
-    void Promise.allSettled(activeClients.map((c) => syncClientInbox(c)));
+    void Promise.allSettled(activeClients.map((c) => syncClientInbox(c, fetchSafetyNetSync)));
   }, SAFETY_NET_INBOX_MS);
 
   // ActivityKit remote updates must keep flowing after the phone suspends and
@@ -6746,10 +6761,11 @@ function startPollingLoops() {
   // Safety-net history poll — reduced frequency since chat.done triggers immediate push
   setInterval(() => {
     const activeClients = [...clients.values()].filter(
-      (c) => c.ws.readyState === WebSocket.OPEN && c.sessionKey,
+      (c) => c.ws.readyState === WebSocket.OPEN && c.sessionKey
+        && historySafetyNet.due(c, lastRealtimeHistoryId.get(c.sessionKey)),
     );
     if (activeClients.length === 0) return;
-    void Promise.allSettled(activeClients.map((c) => syncClientHistory(c)));
+    void Promise.allSettled(activeClients.map((c) => syncClientHistory(c, fetchSafetyNetSync)));
   }, SAFETY_NET_HISTORY_MS);
 
   // Some runtime adapters persist transcript output without emitting ChatDelta.

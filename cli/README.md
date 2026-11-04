@@ -160,6 +160,26 @@ interactive terminal. Ctrl-] releases the attachment without ending the remote
 shell. A connection failure never changes the selected machine or routes input
 to Local. Native workspace switching is a separate app feature.
 
+## App and runtime updates
+
+Run `o8 update` (or `o8 update apply`) to update installed runtime CLIs through
+the server's detected original installers, then request the native app update.
+`--dry-run` reads versions and prints the plan without invoking installers or
+requesting an app update. `--runtimes a,b` filters the server's runtime inventory;
+the app is still included. `--check` requests a fresh app check before applying,
+and `--force` retains the app updater's existing live-work override.
+
+JSON `results` and `--human` rows include the machine, runtime name, before and
+after versions, and status. A failed runtime does not stop later updates.
+Unsupported or custom installations report `manual-update`. The app reports
+`requested` with an unknown after version until its asynchronous update finishes.
+`o8 update check` keeps its existing app-only check behavior.
+
+`--machines` reads the connected machine registry. An empty registry produces a
+`local-only` row. This server has no fleet execution route: registered remote
+machines produce `unavailable` rows and a nonzero exit status. Run the update on
+each remote machine until fleet execution is available.
+
 ## Exit codes
 
 | Code | Meaning |

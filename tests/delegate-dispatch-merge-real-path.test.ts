@@ -19,7 +19,7 @@
  * event-loop monitoring, and concurrent requests to the real health handler.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { Session } from 'node:inspector';
@@ -88,6 +88,7 @@ vi.mock('@/lib/operator/shipped-dark-scheduler', async (original) => ({
 const root = realpathSync(mkdtempSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'delegate-merge-')));
 const ownedRoot = join(root, 'owned-qoder');
 const fakeWorkerPath = join(root, 'qodercli');
+const instanceReceiptPrefix = join(root, 'instance-launch-');
 const priorEnv = new Map<string, string | undefined>();
 const envKeys = [
   'O8_OWNED_QODER_ROOT',
@@ -118,6 +119,7 @@ writeFileSync(fakeWorkerPath, [
   "  process.stdout.write('qodercli 1.0.0\\n');",
   '  process.exit(0);',
   '}',
+  `fs.writeFileSync(${JSON.stringify(instanceReceiptPrefix)} + require('node:path').basename(process.cwd()) + '.json', JSON.stringify({ binary: 'default', region: process.env.WORK_REGION ?? null, pid: process.pid }));`,
   "const feature = 'delegated-feature-' + require('node:path').basename(process.cwd()) + '.txt';",
   "fs.writeFileSync(feature, 'delegated work\\n');",
   "execFileSync('git', ['add', '-A'], { stdio: 'ignore' });",
@@ -405,4 +407,81 @@ describe('isolated dispatch event loop (#3565)', () => {
     expect.soft(delay.max / 1e6).toBeLessThan(100);
     expect.soft(maxHealthMs).toBeLessThan(200);
   }, 180_000);
+});
+
+describe('named provider instance through real worker dispatch', () => {
+  it('starts the named binary with its saved configuration', async () => {
+    const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+    const { createProviderInstance, saveInstanceEnvironment, updateProviderInstance } = await import('@/lib/providers/instances');
+    await updateOperatorDefaults({ workerRuntimes: ['codex', 'qoder'] });
+    const repoPath = join(root, 'instance-repo');
+    mkdirSync(repoPath);
+    git(repoPath, ['init', '-qb', 'main']);
+    git(repoPath, ['config', 'user.name', 'o8-test']);
+    git(repoPath, ['config', 'user.email', 'o8@example.test']);
+    writeFileSync(join(repoPath, 'base.txt'), 'base\n');
+    git(repoPath, ['add', '.']);
+    git(repoPath, ['commit', '-qm', 'base']);
+    const origin = join(root, 'instance-origin.git');
+    git(repoPath, ['clone', '--bare', repoPath, origin]);
+    git(repoPath, ['remote', 'add', 'origin', origin]);
+    await addRepo(repoPath);
+    holdAmbientMission(repoPath);
+
+    const instanceWorkerPath = join(root, 'instance-worker');
+    writeFileSync(instanceWorkerPath, readFileSync(fakeWorkerPath, 'utf8')
+      .replace("binary: 'default'", "binary: 'named-instance'")
+      .replace('fs.writeFileSync(feature,', 'fs.appendFileSync(feature,'));
+    chmodSync(instanceWorkerPath, 0o755);
+    const instance = createProviderInstance({ runtime: 'qoder', name: 'fixture', binaryPath: instanceWorkerPath });
+    saveInstanceEnvironment(instance.id, 0, [{ name: 'WORK_REGION', value: 'fixture-region', secret: false }]);
+    const response = await delegatePost(new NextRequest('http://127.0.0.1/api/orchestrator/delegate', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientMutationId: 'delegate-instance-worker', repoPath,
+        runtime: 'qoder', instanceId: instance.id, prompt: 'Add a fixture file and commit it.', taskName: 'instance fixture' }),
+    }));
+    const delegated = await response.json() as { ok: boolean; laneId: string; packetId: string };
+    expect(response.status, JSON.stringify(delegated)).toBe(200);
+    expect(delegated.ok).toBe(true);
+    const workspacePath = getLane(delegated.laneId)?.worktreePath;
+    expect(workspacePath).toBeTruthy();
+    const instanceReceiptPath = `${instanceReceiptPrefix}${basename(workspacePath!)}.json`;
+    const readReceipt = () => existsSync(instanceReceiptPath)
+      ? JSON.parse(readFileSync(instanceReceiptPath, 'utf8')) as { binary: string; region: string | null; pid: number } : null;
+    const receipt = await waitFor(readReceipt, 'worker executable configuration receipt');
+    await waitFor(() => git(workspacePath!, ['status', '--porcelain']) === ''
+      && git(workspacePath!, ['rev-parse', 'HEAD']) !== git(repoPath, ['rev-parse', 'HEAD']) ? true : null,
+    'named worker commit');
+    expect(receipt).toMatchObject({ binary: 'named-instance', region: 'fixture-region' });
+    expect(readOrchestratorControlPlaneState().packets.find(packet => packet.id === delegated.packetId)?.instanceId).toBe(instance.id);
+
+    // A commit can precede the worker's process exit. Wait for the executable
+    // to finish before launching another worker in the same checkout.
+    const waitForWorkerExit = (pid: number) => waitFor(() => {
+      try { process.kill(pid, 0); return null; }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
+        throw error;
+      }
+    }, 'fixture worker exit');
+    await waitForWorkerExit(receipt.pid);
+
+    // A fresh launch has only the durable packet identity, as on resume.
+    const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
+    rmSync(instanceReceiptPath, { force: true });
+    const relaunch = { runtime: 'qoder' as const, packetId: delegated.packetId,
+      existingLaneId: delegated.laneId, repoPath: workspacePath!, projectRepoPath: repoPath,
+      isolate: false, skipSetup: true, prompt: 'Continue the fixture task.', clientMutationId: 'instance-worker-relaunch' };
+    const resumed = await launchRuntimeSurface(relaunch);
+    expect(resumed.ok, resumed.note).toBe(true);
+    const resumedReceipt = await waitFor(readReceipt, 'resumed worker configuration receipt');
+    expect(resumedReceipt).toMatchObject({ binary: 'named-instance', region: 'fixture-region' });
+    expect(resumedReceipt.pid).not.toBe(receipt.pid);
+    await waitForWorkerExit(resumedReceipt.pid);
+
+    updateProviderInstance(instance.id, { enabled: false });
+    rmSync(instanceReceiptPath, { force: true });
+    await expect(launchRuntimeSurface({ ...relaunch, clientMutationId: 'disabled-instance-relaunch' })).rejects.toThrow(/disabled/);
+    expect(existsSync(instanceReceiptPath)).toBe(false);
+  }, 90_000);
 });

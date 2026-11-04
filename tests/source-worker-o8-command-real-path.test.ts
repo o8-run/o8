@@ -23,6 +23,12 @@ vi.mock('@/lib/runtimes/shared/owned-session/sandbox', async original => ({
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({
   ensureDispatchBackendReady: vi.fn(async () => { sandbox.beforeDispatch?.(); return { ready: true }; }),
 }));
+// #4899 admits a Codex effort only with model/list evidence from the selected account; the fixture
+// runtime cannot answer model/list, so advertise the launched model's effort here.
+vi.mock('@/lib/codex/service-tier-catalogue', async original => ({
+  ...await original<typeof import('@/lib/codex/service-tier-catalogue')>(),
+  getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-sol': [] }, reasoningEfforts: { 'gpt-5.6-sol': ['high'] } }),
+}));
 vi.mock('@clerk/nextjs/server', () => ({ clerkMiddleware: (handler: unknown) => handler }));
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-worker-cli-')));
@@ -84,9 +90,10 @@ beforeAll(async () => {
   const lanes = await import('@/app/api/lanes/route');
   const lane = await import('@/app/api/lanes/[id]/route');
   const scope = await import('@/app/api/lanes/[id]/scope/route');
+  let port = 0;
   http = createServer(async (req, res) => {
     try {
-      const request = new NextRequest(`http://127.0.0.1${req.url}`, { headers: req.headers as Record<string, string> });
+      const request = new NextRequest(`http://127.0.0.1:${port}${req.url}`, { headers: req.headers as Record<string, string> });
       const gate = panelGateMiddleware(request);
       let response: Response = gate;
       if (gate.headers.get('x-middleware-next') === '1') {
@@ -101,7 +108,7 @@ beforeAll(async () => {
     } catch { res.writeHead(500); res.end(); }
   });
   await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
-  const port = (http.address() as { port: number }).port;
+  port = (http.address() as { port: number }).port;
   vi.stubEnv('O8_API_PORT', String(port)); writeFileSync(join(data, 'api-port'), String(port));
   writeFileSync(runtime, `#!${process.execPath}
 import { execFileSync } from 'node:child_process';
@@ -415,8 +422,10 @@ else console.log(JSON.stringify({schema:'o8/cli/version/v1', cliVersion:${JSON.s
     const launched = await launchOwnedCodexSession({ cwd: worktree, prompt: 'Use o8 packet commands.', packetId, laneId, model: 'gpt-5.6-sol', effort: 'high' });
     expect(launched.ok).toBe(true); await finished(launched.surfaceId);
     const alternate = join(root, 'alternate'); mkdirSync(alternate);
+    // Launch stages record events on the request's lane in the launching database (#4755). The
+    // fixture lane exists only in the first database, so the second one launches without it.
     const script = `const loaded = await import('./src/lib/codex/owned.ts'); const { launchOwnedCodexSession } = loaded.default ?? loaded;
-try { console.log(JSON.stringify(await launchOwnedCodexSession({ cwd:${JSON.stringify(worktree)}, prompt:'Use o8 packet info.', packetId:${JSON.stringify(packetId)}, laneId:${JSON.stringify(laneId)}, model:'gpt-5.6-sol', effort:'high' }))); }
+try { console.log(JSON.stringify(await launchOwnedCodexSession({ cwd:${JSON.stringify(worktree)}, prompt:'Use o8 packet info.', packetId:${JSON.stringify(packetId)}, model:'gpt-5.6-sol', effort:'high' }))); }
 catch (error) { console.log(JSON.stringify({ok:false,note:error.message})); }`;
     const output = execFileSync(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx', '--input-type=module', '-e', script], {
       cwd: process.cwd(), encoding: 'utf8', timeout: 30000, env: { ...process.env,
