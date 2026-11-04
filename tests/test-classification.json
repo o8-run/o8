@@ -8465,6 +8465,12 @@
       ]
     },
     {
+      "path": "tests/ws-safety-net-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ws-work-soak-real-path.test.ts",
       "reasons": [
         "child-process",

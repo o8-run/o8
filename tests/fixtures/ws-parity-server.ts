@@ -24,6 +24,8 @@ async function freePort(): Promise<number> {
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
 export async function startParityReference(options: {
   logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean;
+  inbox?: () => typeof fixtureInbox;
+  sync?: (body: Record<string, unknown>) => unknown | Promise<unknown>;
 } = {}) {
   const directory = options.directory ?? realpathSync(mkdtempSync(join(tmpdir(), 'o8-ws-parity-')));
   const token = 'ws-parity-fixture-credential';
@@ -43,9 +45,9 @@ export async function startParityReference(options: {
       historyVersion = body.version;
       result = {};
     } else if (url.pathname === '/api/mobile/inbox') {
-      result = fixtureInbox;
+      result = options.inbox?.() ?? fixtureInbox;
     } else if (url.pathname === '/api/mobile/sync') {
-      result = body.inbox ? { inbox: fixtureInbox, inboxEtag: 'fixture' } : {
+      result = options.sync ? await options.sync(body) : body.inbox ? { inbox: fixtureInbox, inboxEtag: 'fixture' } : {
         history: { sessionKey: body.history?.sessionKey, entries: [{
           id: `history-${historyVersion}`, role: 'assistant', text: `history ${historyVersion}`,
         }], replace: true },
