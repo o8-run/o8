@@ -21,8 +21,10 @@ const { panelGateMiddleware } = await import('@/middleware');
 const { POST } = await import('@/app/api/runtime/acp-registry/prepare/route');
 const { GET } = await import('@/app/api/runtime/acp-registry/route');
 const selection = { id: 'fixture', fingerprint: 'a'.repeat(64) };
-const request = (method: string, token?: string, body: unknown = selection) => new NextRequest(`http://example.test/api/runtime/acp-registry${method === 'POST' ? '/prepare' : ''}`, {
-  method, headers: { host: 'example.test', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+// #4814: the middleware refuses a non-loopback Host (421) before the bearer gate, so the
+// token cases use a loopback Host to reach the principal decision this file asserts.
+const request = (method: string, token?: string, body: unknown = selection, host = '127.0.0.1') => new NextRequest(`http://${host}/api/runtime/acp-registry${method === 'POST' ? '/prepare' : ''}`, {
+  method, headers: { host, ...(token ? { authorization: `Bearer ${token}` } : {}) },
   ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
 });
 beforeEach(() => {
@@ -34,11 +36,15 @@ afterAll(() => { vi.unstubAllEnvs(); rmSync(state.dir, { recursive: true, force:
 
 it('denies non-operator access at the middleware and route boundaries without preparation', async () => {
   for (const token of [undefined, worker, device, spectator]) for (const method of ['GET', 'POST']) {
-    const req = request(method, token);
-    expect(panelGateMiddleware(req).status).toBe(token ? 403 : 401);
-    expect((await (method === 'POST' ? POST(req) : GET(req))).status).toBe(401);
+    expect(panelGateMiddleware(request(method, token)).status).toBe(token ? 403 : 401);
+    // The handlers' own check still refuses the remote request, behind the Host gate.
+    const remote = request(method, token, selection, 'example.test');
+    expect((await (method === 'POST' ? POST(remote) : GET(remote))).status).toBe(401);
   }
   expect(state.prepare).not.toHaveBeenCalled(); expect(state.read).not.toHaveBeenCalled();
+});
+it('refuses a non-loopback Host at the middleware Host gate even with the operator token', () => {
+  for (const method of ['GET', 'POST']) expect(panelGateMiddleware(request(method, operator, selection, 'example.test')).status).toBe(421);
 });
 it('prepares only a validated selection for an authenticated operator without saving it', async () => {
   const req = request('POST', operator);
