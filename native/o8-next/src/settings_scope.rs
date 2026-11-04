@@ -100,13 +100,14 @@ pub(crate) fn scope_row(
         .filter(|s| info.layer(*s).is_some())
         .collect();
     // Edit where the value comes from unless a person chose another layer.
-    let selected = selected
-        .filter(|s| choices.contains(s))
-        .unwrap_or(if effective == Scope::Default {
-            Scope::Global
-        } else {
-            effective
-        });
+    let selected =
+        selected
+            .filter(|s| choices.contains(s))
+            .unwrap_or(if effective == Scope::Default {
+                Scope::Global
+            } else {
+                effective
+            });
     let own = info.layer(selected).and_then(|l| l.get(id)).cloned();
     let indicator = (effective > selected).then(|| {
         format!(
@@ -165,11 +166,36 @@ mod tests {
     fn effective_scope_follows_machine_over_project_over_global_over_default() {
         let cases = [
             (json!({}), json!({}), json!({}), Scope::Default),
-            (json!({"parallelCap": 3}), json!({}), json!({}), Scope::Global),
-            (json!({"parallelCap": 3}), json!({"parallelCap": 4}), json!({}), Scope::Project),
-            (json!({}), json!({"parallelCap": 4}), json!({}), Scope::Project),
-            (json!({"parallelCap": 3}), json!({"parallelCap": 4}), json!({"parallelCap": 5}), Scope::Machine),
-            (json!({}), json!({}), json!({"parallelCap": 5}), Scope::Machine),
+            (
+                json!({"parallelCap": 3}),
+                json!({}),
+                json!({}),
+                Scope::Global,
+            ),
+            (
+                json!({"parallelCap": 3}),
+                json!({"parallelCap": 4}),
+                json!({}),
+                Scope::Project,
+            ),
+            (
+                json!({}),
+                json!({"parallelCap": 4}),
+                json!({}),
+                Scope::Project,
+            ),
+            (
+                json!({"parallelCap": 3}),
+                json!({"parallelCap": 4}),
+                json!({"parallelCap": 5}),
+                Scope::Machine,
+            ),
+            (
+                json!({}),
+                json!({}),
+                json!({"parallelCap": 5}),
+                Scope::Machine,
+            ),
         ];
         for (global, project, machine, expected) in cases {
             assert_eq!(
@@ -179,8 +205,13 @@ mod tests {
         }
         // Without an open project the project layer never applies.
         assert_eq!(
-            info(json!({"parallelCap": 3}), json!({"parallelCap": 4}), json!({}), None)
-                .effective("parallelCap"),
+            info(
+                json!({"parallelCap": 3}),
+                json!({"parallelCap": 4}),
+                json!({}),
+                None
+            )
+            .effective("parallelCap"),
             Scope::Global
         );
     }
@@ -195,7 +226,10 @@ mod tests {
         );
         let resolved = json!(5);
         let row = scope_row(Some(&info), "parallelCap", &resolved, None).unwrap();
-        assert_eq!((row.selected, row.effective), (Scope::Machine, Scope::Machine));
+        assert_eq!(
+            (row.selected, row.effective),
+            (Scope::Machine, Scope::Machine)
+        );
         assert_eq!(row.indicator, None);
         assert!(row.clearable);
 
@@ -212,8 +246,17 @@ mod tests {
         assert!(row.indicator.is_some());
 
         // An unset layer shows the value that falls through to it.
-        let row = scope_row(Some(&info), "branchPrefix", &json!("o8/"), Some(Scope::Machine)).unwrap();
-        assert_eq!((row.value, row.clearable, row.indicator), (json!("o8/"), false, None));
+        let row = scope_row(
+            Some(&info),
+            "branchPrefix",
+            &json!("o8/"),
+            Some(Scope::Machine),
+        )
+        .unwrap();
+        assert_eq!(
+            (row.value, row.clearable, row.indicator),
+            (json!("o8/"), false, None)
+        );
         assert_eq!(row.effective, Scope::Default);
     }
 
@@ -231,9 +274,15 @@ mod tests {
     fn paths_carry_the_scope_and_an_encoded_project() {
         let base = "/api/panel/operator-defaults?include=native";
         assert_eq!(read_path(base, None), base);
-        assert_eq!(read_path(base, Some("a b/c")), format!("{base}&project=a+b%2Fc"));
+        assert_eq!(
+            read_path(base, Some("a b/c")),
+            format!("{base}&project=a+b%2Fc")
+        );
         assert_eq!(write_path(base, Scope::Global, Some("p")), base);
-        assert_eq!(write_path(base, Scope::Machine, Some("p")), format!("{base}&scope=machine"));
+        assert_eq!(
+            write_path(base, Scope::Machine, Some("p")),
+            format!("{base}&scope=machine")
+        );
         assert_eq!(
             write_path(base, Scope::Project, Some("p")),
             format!("{base}&scope=project&project=p")

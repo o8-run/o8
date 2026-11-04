@@ -494,7 +494,13 @@ impl Settings {
                             window,
                             cx,
                             move |this, _, cx| {
-                                this.write("DELETE", true, scope::Scope::Global, json!({"provider":id}), cx)
+                                this.write(
+                                    "DELETE",
+                                    true,
+                                    scope::Scope::Global,
+                                    json!({"provider":id}),
+                                    cx,
+                                )
                             },
                         )
                         .text_color(theme().danger),

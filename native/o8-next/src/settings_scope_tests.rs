@@ -20,8 +20,14 @@ fn cap(view: &gpui::Entity<Settings>, cx: &mut gpui::VisualTestContext) -> Value
 #[gpui::test]
 fn settings_scope_row_edits_the_selected_layer_and_shows_the_override(cx: &mut TestAppContext) {
     let peer = Peer::new();
-    let layers = json!({"global":{"parallelCap":3},"project":{"parallelCap":4},"machine":{"parallelCap":5}});
-    peer.reply("GET", &format!("{BASE}&project=p1"), 200, snapshot(5, "p1", layers));
+    let layers =
+        json!({"global":{"parallelCap":3},"project":{"parallelCap":4},"machine":{"parallelCap":5}});
+    peer.reply(
+        "GET",
+        &format!("{BASE}&project=p1"),
+        200,
+        snapshot(5, "p1", layers),
+    );
     peer.reply("POST", BASE, 200, json!({"ok":true}));
     let project_path = format!("{BASE}&scope=project&project=p1");
     peer.reply("POST", &project_path, 200, json!({"ok":true}));
@@ -37,29 +43,41 @@ fn settings_scope_row_edits_the_selected_layer_and_shows_the_override(cx: &mut T
         assert!(cx.debug_bounds(selector).is_some(), "missing {selector}");
     }
     // The machine layer wins, so editing it shows no override.
-    assert!(cx.debug_bounds("settings-scope-indicator-parallelCap").is_none());
+    assert!(
+        cx.debug_bounds("settings-scope-indicator-parallelCap")
+            .is_none()
+    );
 
     click(cx, "setting-parallelCap-scope-global");
     wait(&view, cx, |_| true);
     assert!(
-        cx.debug_bounds("settings-scope-indicator-parallelCap").is_some(),
+        cx.debug_bounds("settings-scope-indicator-parallelCap")
+            .is_some(),
         "editing Global must say a higher layer overrides it"
     );
     click(cx, "setting-parallelCap-preset-8");
     wait(&view, cx, |_| true);
-    assert!(peer.calls().iter().any(|(method, path, body)| method == "POST"
-        && path == BASE
-        && body["parallelCap"] == 8
-        && body["settingsTomlRevision"] == "fixture-revision"));
+    assert!(
+        peer.calls()
+            .iter()
+            .any(|(method, path, body)| method == "POST"
+                && path == BASE
+                && body["parallelCap"] == 8
+                && body["settingsTomlRevision"] == "fixture-revision")
+    );
 
     click(cx, "setting-parallelCap-scope-project");
     wait(&view, cx, |_| true);
     click(cx, "setting-parallelCap-scope-clear");
     wait(&view, cx, |_| true);
-    assert!(peer.calls().iter().any(|(method, path, body)| method == "POST"
-        && path == &project_path
-        && body["parallelCap"].is_null()
-        && body.as_object().unwrap().contains_key("parallelCap")));
+    assert!(
+        peer.calls()
+            .iter()
+            .any(|(method, path, body)| method == "POST"
+                && path == &project_path
+                && body["parallelCap"].is_null()
+                && body.as_object().unwrap().contains_key("parallelCap"))
+    );
 }
 
 #[gpui::test]
@@ -69,7 +87,11 @@ fn settings_scope_project_switch_re_resolves(cx: &mut TestAppContext) {
         "GET",
         &format!("{BASE}&project=p1"),
         200,
-        snapshot(4, "p1", json!({"global":{"parallelCap":3},"project":{"parallelCap":4}})),
+        snapshot(
+            4,
+            "p1",
+            json!({"global":{"parallelCap":3},"project":{"parallelCap":4}}),
+        ),
     );
     peer.reply(
         "GET",
@@ -84,7 +106,15 @@ fn settings_scope_project_switch_re_resolves(cx: &mut TestAppContext) {
     assert_eq!(cap(&view, cx), json!(4));
     view.update(cx, |s, cx| s.set_project(Some("p2".into()), cx));
     wait(&view, cx, |s| {
-        s.snapshot.as_ref().unwrap().scope.as_ref().unwrap().project_id.as_deref() == Some("p2")
+        s.snapshot
+            .as_ref()
+            .unwrap()
+            .scope
+            .as_ref()
+            .unwrap()
+            .project_id
+            .as_deref()
+            == Some("p2")
     });
     assert_eq!(cap(&view, cx), json!(3));
 
@@ -95,8 +125,20 @@ fn settings_scope_project_switch_re_resolves(cx: &mut TestAppContext) {
         s.set_project(Some("p1".into()), cx);
     });
     wait(&view, cx, |s| {
-        s.snapshot.as_ref().unwrap().scope.as_ref().unwrap().project_id.as_deref() == Some("p1")
+        s.snapshot
+            .as_ref()
+            .unwrap()
+            .scope
+            .as_ref()
+            .unwrap()
+            .project_id
+            .as_deref()
+            == Some("p1")
     });
     assert_eq!(cap(&view, cx), json!(4));
-    assert!(peer.calls().iter().any(|(_, path, _)| path == &format!("{BASE}&project=p2")));
+    assert!(
+        peer.calls()
+            .iter()
+            .any(|(_, path, _)| path == &format!("{BASE}&project=p2"))
+    );
 }

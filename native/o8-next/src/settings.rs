@@ -26,7 +26,7 @@ pub(crate) struct Snapshot {
     #[serde(rename = "settingsToml")]
     pub toml: Option<Toml>,
     #[serde(default)]
-    pub scope: Option<scope::ScopeInfo>,
+    pub scope: Option<Box<scope::ScopeInfo>>,
 }
 #[derive(Clone, Deserialize)]
 pub(crate) struct BotSetupCandidate {
@@ -249,7 +249,7 @@ impl Settings {
         }
         let snapshot = self.snapshot.as_ref()?;
         scope::scope_row(
-            snapshot.scope.as_ref(),
+            snapshot.scope.as_deref(),
             field.id,
             snapshot.values.get(field.id)?,
             self.scopes.get(field.id).copied(),
