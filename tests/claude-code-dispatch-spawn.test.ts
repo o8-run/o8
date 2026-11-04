@@ -113,20 +113,37 @@ describe('Claude Code dispatch spawn', () => {
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
+  // Staged input reaches the CLI through a relay in the worker group:
+  // node -e <relay> <bytes> <delivery receipt> <launch command> ...<launch args>.
+  function workerLaunch(call: unknown[]): { command: string; args: string[]; stdinPath: string } {
+    const [command, args] = call as [string, string[]];
+    expect(command).toBe(process.execPath);
+    expect(args[0]).toBe('-e');
+    return { command: args[4]!, args: args.slice(5), stdinPath: args[3]!.replace(/\.delivery\.jsonl$/, '') };
+  }
+
+  // Launch steps journal into the lane, so each launch names a registered one.
+  async function registeredLane(): Promise<string> {
+    const { createLane } = await import('@/lib/lane/registry');
+    return createLane({ repoPath, branch: 'main', runtime: 'claude-code' }).id;
+  }
+
   it('launches a dispatched worker as stream-json without print flags in the packet worktree cwd', async () => {
     const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+    const laneId = await registeredLane();
     const result = await claudeCodeRuntime.launch({
       cwd: repoPath,
       prompt: 'implement the packet',
       model: 'claude-sonnet-4-5',
-      laneId: 'lane-claude',
+      laneId,
     });
 
     expect(result.ok, result.note).toBe(true);
-    expect(ensureDispatchBackendReadyMock).toHaveBeenCalledWith('claude-code', 'launch');
+    expect(ensureDispatchBackendReadyMock).toHaveBeenCalledWith('claude-code', 'launch', { laneId, packetId: undefined });
     expect(spawnMock).toHaveBeenCalledTimes(1);
 
-    const [command, args, options] = spawnMock.mock.calls[0]!;
+    const { command, args, stdinPath } = workerLaunch(spawnMock.mock.calls[0]!);
+    const [, , options] = spawnMock.mock.calls[0]!;
     expect(command).toBe(process.platform === 'win32' ? process.execPath : '/usr/bin/nice');
     const argv = process.platform === 'win32' ? args : args.slice(2);
     expect(argv).toEqual([
@@ -146,10 +163,7 @@ describe('Claude Code dispatch spawn', () => {
     expect(argv).not.toContain('-p');
     expect(argv).not.toContain('--print');
     expect(options.cwd).toBe(realpathSync(repoPath));
-    expect(spawnMock.mock.results[0]?.value.stdin.end).toHaveBeenCalledWith(
-      expect.stringContaining('implement the packet'),
-      'utf8',
-    );
+    expect(readFileSync(stdinPath, 'utf8')).toContain('implement the packet');
   }, 20_000);
 
   it('carries a non-empty environment credential through the actual native worker spawn', async () => {
@@ -158,7 +172,7 @@ describe('Claude Code dispatch spawn', () => {
     const result = await claudeCodeRuntime.launch({
       cwd: repoPath,
       prompt: 'launch with the inherited native credential',
-      laneId: 'lane-native-environment',
+      laneId: await registeredLane(),
       claudeCodeCarrier: 'native',
     });
 
@@ -182,14 +196,14 @@ describe('Claude Code dispatch spawn', () => {
       prompt: 'implement the packet',
       model: 'claude-opus-4-8',
       effort: 'high',
-      laneId: 'lane-claude',
+      laneId: await registeredLane(),
     });
 
     expect(result.ok, result.note).toBe(true);
     expect(resolveDefaultWorkerEffortSyncMock).toHaveBeenCalledWith('claude-code', 'high');
     expect(spawnMock).toHaveBeenCalledTimes(1);
 
-    const [, args] = spawnMock.mock.calls[0]!;
+    const { args } = workerLaunch(spawnMock.mock.calls[0]!);
     const argv = process.platform === 'win32' ? args : args.slice(2);
     expect(argv).toEqual([
       process.execPath,
@@ -218,13 +232,13 @@ describe('Claude Code dispatch spawn', () => {
       cwd: repoPath,
       prompt: 'implement the packet',
       model: 'claude-opus-4-8',
-      laneId: 'lane-claude',
+      laneId: await registeredLane(),
     });
 
     expect(result.ok).toBe(true);
     expect(resolveDefaultWorkerEffortSyncMock).toHaveBeenCalledWith('claude-code', undefined);
 
-    const [, args] = spawnMock.mock.calls[0]!;
+    const { args } = workerLaunch(spawnMock.mock.calls[0]!);
     const argv = process.platform === 'win32' ? args : args.slice(2);
     expect(argv).toContain('--effort');
     expect(argv).toContain('max');
@@ -237,13 +251,13 @@ describe('Claude Code dispatch spawn', () => {
       prompt: 'implement the packet',
       model: 'claude-opus-4-8',
       effort: 'adaptive',
-      laneId: 'lane-claude',
+      laneId: await registeredLane(),
     });
 
     expect(result.ok).toBe(true);
     expect(spawnMock).toHaveBeenCalledTimes(1);
 
-    const [, args] = spawnMock.mock.calls[0]!;
+    const { args } = workerLaunch(spawnMock.mock.calls[0]!);
     const argv = process.platform === 'win32' ? args : args.slice(2);
     expect(argv).toContain('--model');
     expect(argv).toContain('claude-opus-4-8');
@@ -265,12 +279,13 @@ describe('Claude Code dispatch spawn', () => {
       cwd: repoPath,
       prompt: 'implement through the Claude Code harness',
       model: 'claude-sonnet-4-5',
-      laneId: 'lane-gateway',
+      laneId: await registeredLane(),
       spendCap: { carrier: 'openrouter', costUsd: 1, inputTokens: 500_000 },
     });
 
     expect(result.ok, result.note).toBe(true);
-    const [, args, options] = spawnMock.mock.calls[0]!;
+    const { args } = workerLaunch(spawnMock.mock.calls[0]!);
+    const [, , options] = spawnMock.mock.calls[0]!;
     const argv = process.platform === 'win32' ? args : args.slice(2);
     expect(argv).toContain('deepseek/deepseek-v4-pro-0813');
     expect(options.env).toMatchObject({
@@ -297,7 +312,7 @@ describe('Claude Code dispatch spawn', () => {
     const result = await claudeCodeRuntime.launch({
       cwd: repoPath,
       prompt: 'do not start without credentials',
-      laneId: 'lane-no-key',
+      laneId: await registeredLane(),
     });
 
     expect(result).toMatchObject({ ok: false, sideEffect: 'none' });
@@ -317,12 +332,13 @@ describe('Claude Code dispatch spawn', () => {
       cwd: repoPath,
       prompt: 'use the Codex subscription through the Claude Code harness',
       model: 'claude-opus-4-8',
-      laneId: 'lane-codex-carrier',
+      laneId: await registeredLane(),
     });
 
     expect(result.ok).toBe(true);
     expect(ensureCodexSubscriptionProxyReadyMock).toHaveBeenCalled();
-    const [, args, options] = spawnMock.mock.calls[0]!;
+    const { args } = workerLaunch(spawnMock.mock.calls[0]!);
+    const [, , options] = spawnMock.mock.calls[0]!;
     const argv = process.platform === 'win32' ? args : args.slice(2);
     expect(argv).toContain('gpt-5.6-sol');
     expect(argv).not.toContain('claude-opus-4-8');
