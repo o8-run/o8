@@ -88,8 +88,28 @@ async function codexStateExists(codexHome: string): Promise<boolean> {
   }
 }
 
+/** Rows per sqlite3 read on an unbounded query. Text columns are capped to 512
+ *  characters, so a page stays under the 2 MiB stdout buffer; one read of a real
+ *  ~/.codex with 4,000+ threads overflowed it and returned no threads at all. */
+const CODEX_THREAD_PAGE_SIZE = 512;
+
+/** limit < 0 reads every unarchived thread, newest first, in pages. */
 export async function queryCodexThreadsFromHome(codexHome: string, limit = 6): Promise<CodexThreadRow[]> {
   if (!(await codexStateExists(codexHome))) return [];
+  const rows: CodexThreadRow[] = [];
+  if (limit >= 0) {
+    rows.push(...await queryCodexThreadPage(codexHome, limit, 0));
+  } else {
+    for (let offset = 0; ; offset += CODEX_THREAD_PAGE_SIZE) {
+      const page = await queryCodexThreadPage(codexHome, CODEX_THREAD_PAGE_SIZE, offset);
+      rows.push(...page);
+      if (page.length < CODEX_THREAD_PAGE_SIZE) break;
+    }
+  }
+  return rows.filter((row) => row.id && row.rollout_path && row.cwd);
+}
+
+async function queryCodexThreadPage(codexHome: string, limit: number, offset: number): Promise<CodexThreadRow[]> {
   const query = [
     'select',
     'id,',
@@ -105,14 +125,13 @@ export async function queryCodexThreadsFromHome(codexHome: string, limit = 6): P
     'from threads',
     'where archived = 0',
     'order by updated_at desc',
-    `limit ${limit};`,
+    `limit ${limit} offset ${offset};`,
   ].join(' ');
   const { stdout } = await execFileAsync('sqlite3', ['-readonly', '-json', codexStateDb(codexHome), query], {
     windowsHide: true,
     maxBuffer: 2 * 1024 * 1024,
   });
-  const parsed = JSON.parse(stdout || '[]') as CodexThreadRow[];
-  return parsed.filter((row) => row.id && row.rollout_path && row.cwd);
+  return JSON.parse(stdout || '[]') as CodexThreadRow[];
 }
 
 export async function queryCodexThreadByIdFromHome(

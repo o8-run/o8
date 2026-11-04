@@ -32,6 +32,13 @@ export async function prepare({ dataDir, repo }: SurfaceContext): Promise<Surfac
       db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)')
         .run(id, `Task ${id}`, repo, Math.floor(Date.now() / 1000) - (id.startsWith('2') ? 172_800 : 0), rollout, 'main', '', '', `Task ${id}`, 'codex');
     }
+    // More rows than one 2 MiB sqlite3 read holds: a real ~/.codex has thousands of threads.
+    const filler = 'x'.repeat(512);
+    const insert = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)');
+    for (let n = 0; n < 2048; n += 1) {
+      const id = `bulk-${String(n).padStart(4, '0')}`;
+      insert.run(id, filler, join(dataDir, 'bulk-repo'), 1_700_000_000 - n, join(rollouts, `rollout-${id}.jsonl`), 'main', '', '', filler, 'codex');
+    }
   } finally { db.close(); }
   const project = join(claudeHome, 'projects', repo.replace(/\//g, '-'));
   mkdirSync(project, { recursive: true });

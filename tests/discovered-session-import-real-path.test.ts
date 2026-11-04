@@ -41,8 +41,10 @@ afterAll(async () => {
   }
 });
 
-async function list() {
-  const response = await fetch(`${origin}/api/runtime/discovered-sessions`, { headers });
+/** Scoped to the fixture repo by default; null lists every workspace. */
+async function list(workspace: string | null = repo) {
+  const scope = workspace === null ? '' : `?workspace=${encodeURIComponent(workspace)}`;
+  const response = await fetch(`${origin}/api/runtime/discovered-sessions${scope}`, { headers });
   expect(response.status).toBe(200);
   return response.json();
 }
@@ -61,6 +63,9 @@ it('lists three real sessions, refuses an unknown selection atomically, imports 
   expect(pending.sessions.map((row: { sessionKey: string }) => row.sessionKey).sort()).toEqual([codex, otherCodex, claude].sort());
   expect(pending.projects).toEqual([{ repoPath: repo, repoName: 'fixture-repo', sessionKeys: expect.arrayContaining([codex, otherCodex, claude]) }]);
   expect(histories()).toEqual([]);
+  const everything = await list(null);
+  expect(everything.sessions.filter((row: { sessionKey: string }) => row.sessionKey.startsWith('codex:bulk-'))).toHaveLength(2048);
+  expect(everything.projects.map((project: { repoPath: string }) => project.repoPath).sort()).toEqual([join(dataDir, 'bulk-repo'), repo].sort());
   const unknown = await importSessions([codex, 'codex:unknown']);
   expect(unknown.status).toBe(404);
   expect(await unknown.json()).toMatchObject({ error: { code: 'unknown_discovered_session' } });
