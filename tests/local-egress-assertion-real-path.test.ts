@@ -97,7 +97,8 @@ process.env.O8_DATA_DIR = dataDir;
 process.env.O8_OWNED_QODER_ROOT = ownedRoot;
 process.env.O8_QODER_BIN = fakeWorkerPath;
 process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
-process.env.O8_PACKAGED_APP = '0';
+// Source mode: only O8_PACKAGED_APP=1 marks a packaged app, and the worker CLI (#4800) treats any value as packaged.
+delete process.env.O8_PACKAGED_APP;
 process.env.O8_APFS_DEPENDENCY_IMAGES = '0';
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 process.env.O8_TELEMETRY_OPT_IN = '0';
