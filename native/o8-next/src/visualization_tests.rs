@@ -174,12 +174,16 @@ fn visualization_at_its_message_and_reference_height(cx: &mut gpui::TestAppConte
     view.read_with(cx, |s, _| {
         let (_, lines) = s.rows[index].borrow().rendered();
         assert!(lines.iter().any(|line| line.contains("Weekly activity")));
-        assert!(lines
-            .iter()
-            .any(|line| line.contains(crate::visualizations::protocol::UNAVAILABLE)));
-        assert!(lines
-            .iter()
-            .any(|line| line.contains(crate::visualizations::protocol::RETRY)));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains(crate::visualizations::protocol::UNAVAILABLE))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains(crate::visualizations::protocol::RETRY))
+        );
     });
 }
 

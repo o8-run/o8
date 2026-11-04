@@ -1,11 +1,11 @@
 //! GTK lives exclusively in the private helper, never on GPUI's event loop.
 use super::{
     linux::{Request, Response, TIMEOUT, TIMEOUT_ERROR},
-    protocol::{message, Message, UNAVAILABLE},
+    protocol::{Message, UNAVAILABLE, message},
 };
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use gtk::{glib, prelude::*};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -74,7 +74,9 @@ fn send(web: &WebView, request: &Request, events: Rc<RefCell<Events>>) {
         json!({"type":"o8-visualization:theme", "nonce":request.nonce, "theme":request.theme});
     let state =
         json!({"type":"o8-visualization:state", "nonce":request.nonce, "value":request.state});
-    let script = format!("for (const data of [{theme},{state}]) dispatchEvent(new MessageEvent('message', {{source:window,data}}));");
+    let script = format!(
+        "for (const data of [{theme},{state}]) dispatchEvent(new MessageEvent('message', {{source:window,data}}));"
+    );
     web.evaluate_javascript(
         &script,
         None,

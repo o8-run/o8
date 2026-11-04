@@ -14,8 +14,8 @@ pub mod macos;
 pub mod protocol;
 pub mod transcript;
 use crate::client::{Client, LOAD_REQUEST_TIMEOUT};
-use protocol::{valid_state, Message, Reference, UNAVAILABLE};
-use serde_json::{json, Value};
+use protocol::{Message, Reference, UNAVAILABLE, valid_state};
+use serde_json::{Value, json};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -137,11 +137,7 @@ impl Card {
     }
     pub fn display_height(&self) -> f32 {
         if self.error.is_some() {
-            if cfg!(target_os = "macos") {
-                96.
-            } else {
-                114.
-            }
+            if cfg!(target_os = "macos") { 96. } else { 114. }
         } else {
             self.height as f32
         }
@@ -251,7 +247,9 @@ impl Card {
                 }
                 return;
             }
-            if let Some(source) = self.source.as_ref().filter(|_| self.host.is_none()) {
+            if self.host.is_none()
+                && let Some(source) = &self.source
+            {
                 let client = self.client.clone();
                 self.host =
                     macos::Host::new(source, &self.nonce, window, Rc::new(move || client.wake()))

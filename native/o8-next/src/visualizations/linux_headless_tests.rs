@@ -177,7 +177,9 @@ fn linux_visualizations_card_reaches_ready_with_renderer_picture(cx: &mut gpui::
     );
     std::fs::remove_file(state_file).unwrap();
     std::fs::remove_dir(directory).unwrap();
-    eprintln!("PASS Linux visualization card: real helper, PNG, height, saved state, theme and coalesced width refresh.");
+    eprintln!(
+        "PASS Linux visualization card: real helper, PNG, height, saved state, theme and coalesced width refresh."
+    );
 }
 fn wait(card: &Rc<RefCell<Card>>) {
     let deadline = Instant::now() + Duration::from_secs(15);

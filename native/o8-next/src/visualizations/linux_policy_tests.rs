@@ -1,9 +1,9 @@
 use super::*;
 use crate::visualizations::{
     linux::{Request, Response},
-    linux_renderer::{parse, Navigation},
+    linux_renderer::{Navigation, parse},
 };
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 
 #[test]
 fn linux_navigation_has_only_single_use_bootstrap_permits() {

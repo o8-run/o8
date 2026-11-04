@@ -6,9 +6,9 @@ use crate::{
     text::{Node, Run},
 };
 use gpui::{
-    point, px, size, App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, Pixels, Point, Size, Style, TextAlign, TextRun,
-    Window, WrappedLine,
+    App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId, InspectorElementId,
+    IntoElement, LayoutId, Pixels, Point, Size, Style, TextAlign, TextRun, Window, WrappedLine,
+    point, px, size,
 };
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
@@ -29,7 +29,7 @@ mod user_bubble;
 
 #[path = "retained/text.rs"]
 mod row_text;
-use row_text::{is_item, link_target, link_tip, pill_label, text_run, ICON_ROOM};
+use row_text::{ICON_ROOM, is_item, link_target, link_tip, pill_label, text_run};
 
 pub struct RowState {
     pub row: Row,
@@ -112,10 +112,11 @@ impl RowState {
             self.expanded = previous.expanded;
             self.chosen = previous.chosen;
         }
-        if let (Row::Activity { .. }, Row::Activity { trace, .. }) = (&self.row, &previous.row) {
-            if trace.live && !self.chosen {
-                self.expanded = Some(true);
-            }
+        if let (Row::Activity { .. }, Row::Activity { trace, .. }) = (&self.row, &previous.row)
+            && trace.live
+            && !self.chosen
+        {
+            self.expanded = Some(true);
         }
     }
     pub(crate) fn bind_subagent_focus(&mut self, cx: &App) {

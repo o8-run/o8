@@ -1,6 +1,6 @@
 //! Private, bounded snapshot transport. Only display data crosses these pipes.
-use super::protocol::{valid_state, MAX_HEIGHT, MIN_HEIGHT, UNAVAILABLE};
-use base64::{engine::general_purpose::STANDARD, Engine};
+use super::protocol::{MAX_HEIGHT, MIN_HEIGHT, UNAVAILABLE, valid_state};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -9,8 +9,9 @@ use std::{
     path::Path,
     process::{Child, Command, Stdio},
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc,
     },
     thread,
     time::{Duration, Instant},
@@ -242,7 +243,7 @@ fn supervise(
                     if error.kind() == std::io::ErrorKind::WouldBlock
                         || error.kind() == std::io::ErrorKind::Interrupted =>
                 {
-                    break
+                    break;
                 }
                 Err(_) => return Err(UNAVAILABLE.into()),
             }
@@ -283,19 +284,23 @@ mod tests {
         let direct = command_for_bus(executable, Some("unix:path=/fixture/bus".into()));
         assert_eq!(direct.get_program(), executable.as_os_str());
         assert_eq!(direct.get_args().collect::<Vec<_>>(), [ARG]);
-        assert!(direct
-            .get_envs()
-            .any(|(key, value)| key == "DBUS_SESSION_BUS_ADDRESS"
-                && value == Some(std::ffi::OsStr::new("unix:path=/fixture/bus"))));
+        assert!(
+            direct
+                .get_envs()
+                .any(|(key, value)| key == "DBUS_SESSION_BUS_ADDRESS"
+                    && value == Some(std::ffi::OsStr::new("unix:path=/fixture/bus")))
+        );
         let private = command_for_bus(executable, None);
         assert_eq!(private.get_program(), "dbus-run-session");
         assert_eq!(
             private.get_args().collect::<Vec<_>>(),
             ["--", "/fixture/o8-next", ARG]
         );
-        assert!(private
-            .get_envs()
-            .all(|(key, _)| key != "DBUS_SESSION_BUS_ADDRESS"));
+        assert!(
+            private
+                .get_envs()
+                .all(|(key, _)| key != "DBUS_SESSION_BUS_ADDRESS")
+        );
     }
     #[test]
     fn watchdog_bounds_stalled_stdin_and_reaps_the_process_group() {
