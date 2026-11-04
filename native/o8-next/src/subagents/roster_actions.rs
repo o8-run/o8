@@ -3,12 +3,44 @@ use super::*;
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
+/// How long the pointer rests on a row before its details card shows.
+pub(super) const HOVER_DELAY_MS: f64 = 300.;
+
 #[derive(Default)]
 pub(crate) struct Controls {
     busy: bool,
     cleaning: bool,
     error: Option<String>,
     cleaned: HashSet<String>,
+    /// The row under the pointer and when the pointer arrived, epoch ms.
+    pub(super) hover: Option<(String, f64)>,
+    /// Approvals being answered, then answered: hidden until a refresh drops them.
+    deciding: HashSet<String>,
+    decided: HashSet<String>,
+}
+impl Controls {
+    pub(super) fn hover(&mut self, id: &str, hovering: bool, now: f64) {
+        let current = self.hover.as_ref().is_some_and(|(row, _)| row == id);
+        if hovering && !current {
+            self.hover = Some((id.to_owned(), now));
+        } else if !hovering && current {
+            self.hover = None;
+        }
+    }
+    /// Whether the row's details card shows: the pointer has rested long enough.
+    pub(super) fn shown(&self, id: &str, now: f64) -> bool {
+        matches!(&self.hover, Some((row, since)) if row == id && now - since >= HOVER_DELAY_MS)
+    }
+    /// Whether a card is still waiting out its delay and needs another frame.
+    pub(super) fn waiting(&self, now: f64) -> bool {
+        matches!(&self.hover, Some((_, since)) if now - since < HOVER_DELAY_MS)
+    }
+    pub(super) fn answerable(&self, approval: &str) -> bool {
+        !self.decided.contains(approval)
+    }
+    pub(super) fn deciding(&self, approval: &str) -> bool {
+        self.deciding.contains(approval)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -204,6 +236,45 @@ fn start(
                     .unwrap_or_default()
                     .to_owned()
             });
+        }
+        let _ = this.update(cx, |i, cx| {
+            i.refresh(cx);
+            cx.notify();
+        });
+    })
+    .detach();
+    cx.notify();
+}
+
+/// Answers a worker's approval through the desktop's approval decision, the
+/// same request the Inbox makes, then re-reads the roster.
+pub(super) fn decide(
+    inspector: &mut Inspector,
+    controls: Rc<RefCell<Controls>>,
+    approval: String,
+    approve: bool,
+    cx: &mut Context<Inspector>,
+) {
+    if !controls.borrow_mut().deciding.insert(approval.clone()) {
+        return;
+    }
+    controls.borrow_mut().error = None;
+    let client = inspector.client.clone();
+    let id = approval.clone();
+    let task = cx
+        .background_executor()
+        .spawn(async move { client.inbox_decision(&id, approve) });
+    cx.spawn(async move |this, cx| {
+        let result = task.await;
+        {
+            let mut state = controls.borrow_mut();
+            state.deciding.remove(&approval);
+            match result {
+                Ok(_) => {
+                    state.decided.insert(approval);
+                }
+                Err(error) => state.error = Some(error.lines().next().unwrap_or_default().into()),
+            }
         }
         let _ = this.update(cx, |i, cx| {
             i.refresh(cx);
