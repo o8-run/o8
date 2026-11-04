@@ -616,7 +616,12 @@ impl Render for Composer {
             .rounded(px(crate::theme::GEOMETRY.row_radius))
             .p(px(8.))
             .when(!self.framed, |d| {
-                d.min_h(px(52.)).pt(px(11.)).px(px(14.)).pb(px(4.))
+                // Reserve two lines and their padding so the first wrap does not
+                // grow the card by 3px and invalidate the cached transcript.
+                d.min_h(px(2. * crate::theme::TYPE.body_line + 11. + 4.))
+                    .pt(px(11.))
+                    .px(px(14.))
+                    .pb(px(4.))
             })
             .when(self.inline, |d| {
                 d.min_h_0()
