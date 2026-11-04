@@ -29,7 +29,6 @@ import { join } from 'node:path';
 import { getSqlite } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
 import {
-  flushTimingBuffer,
   summarizeTimings,
   type RecallTimingSummary,
 } from '@/lib/cortex/diagnostics';
@@ -128,10 +127,8 @@ function classifyHealth(outcomes: number, p95Ms: number): { health: 'green' | 'a
 }
 
 export async function GET() {
-  // Best-effort flush so concurrent recall queries land on disk before we
-  // serialize the buffer. The endpoint never errors on flush failure.
-  try { flushTimingBuffer(); } catch { /* swallow */ }
-
+  // Summaries read the in-memory buffer, so the GET does not flush it;
+  // recordTiming persists every ten appends.
   const outcomesCount = countOutcomes();
   const directivesCount = countDirectives();
   const timing = summarizeTimings(DAY_MS);

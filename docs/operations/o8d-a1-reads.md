@@ -30,15 +30,34 @@ No peer header grants local authority.
 | `/api/orchestrator/status` | session | composer/command_client.rs | gate + panel |
 | `/api/setup/cli-updates` | setup, settings | shell_features/update.rs | gate |
 | `/api/cortex/proposals` | activity | surfaces/activity/proposals.rs | gate |
+| `/api/panel/problem-dossiers` | activity | surfaces/activity/decisions.rs | gate + panel |
+| `/api/cortex/diagnostics` | settings | settings_indexing.rs | gate |
 
 `[hash]` uses the production parameter name for the native commit path
 inventoried as `[id]`.
+
+## Database bootstrap on a cold data directory
+
+Opening the database on a cold data directory (schema creation, migrations,
+lazily created tables) is process bootstrap, not a GET side effect. The native
+transport runs in the same ws-server process that already opens and migrates
+SQLite for the registered session reads, so registering another GET adds no
+new migrator and no second writer. This holds only when:
+
+1. The open uses the shared migration code unchanged, with no route-specific DDL.
+2. It creates schema only, never rows the handler owns.
+3. Handler-level writes still block registration: caches, reconciliation,
+   flushes, ledger bootstraps, and creating user-visible directories.
+4. Identity is decided case by case: tokens, instance or boot IDs, and keys.
+
+`/api/panel/problem-dossiers` and `/api/cortex/diagnostics` are registered under
+this rule. Their GETs no longer reconcile or flush: heal-bot maintenance
+reconciles dossiers every tick, and `recordTiming` persists every ten samples.
 
 ## Held Next-only
 
 | Candidate | Reason |
 | --- | --- |
-| `/api/panel/problem-dossiers` | GET calls `reconcileProblemDossiers`, which persists dossier/remedy state. |
 | `/api/panel/devices` | Handler requires verified loopback in addition to operator authority. The adapter stamps `unverified-proxy`; a bearer cannot satisfy the local-peer condition. |
 | `/api/panel/o8-update-summary` | `getReleaseNotes` writes a disk cache on GET. |
 | `/api/tasks` | `getTaskPool` calls `getProjectsLedger`, which bootstraps and writes the project ledger when absent; project context reads share that bootstrap path. |
@@ -48,7 +67,6 @@ inventoried as `[id]`.
 | `/api/orchestrator/backend-models` | GET probes and writes model disk caches; key resolution also has side effects. |
 | `/api/orchestrator/pull-request-context` | GET accepts refresh queries that call `ensureGitHubPullRequest` and update the mirror. |
 | `/api/setup/identity` | `getInstanceIdentity` creates persisted instance/boot IDs when absent. Existing producer registration is preserved; no surface entry is added. |
-| `/api/cortex/diagnostics` | GET calls `flushTimingBuffer`, which writes timing data to disk. |
 | `/api/cortex/codebase-memory` | GET calls `ensureCodebaseMemoryBootIndex`, starting indexing and persistent writes. |
 
 Seven additional GETs remain held because `listRepos()` repairs and

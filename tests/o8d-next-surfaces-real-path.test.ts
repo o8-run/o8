@@ -26,6 +26,8 @@ const NATIVE_READS = [
   ['session', '/api/orchestrator/status', 404],
   ['setup', '/api/setup/cli-updates?runtime=fixture-unknown', 400],
   ['activity', '/api/cortex/proposals', 200],
+  ['activity', '/api/panel/problem-dossiers', 200],
+  ['settings', '/api/cortex/diagnostics', 200],
 ] as const;
 let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;

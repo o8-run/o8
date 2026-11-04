@@ -49,6 +49,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
     route('/api/cortex/proposals', 'GET POST', () => import('@/app/api/cortex/proposals/route')),
+    route('/api/panel/problem-dossiers', 'GET', () => import('@/app/api/panel/problem-dossiers/route')),
     route('/api/panel/commits', 'GET', () => import('@/app/api/panel/commits/route')),
     route('/api/panel/ci', 'GET', () => import('@/app/api/panel/ci/route')),
     route('/api/panel/ci/[id]', 'GET', () => import('@/app/api/panel/ci/[id]/route')),
@@ -104,6 +105,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/steer-packet', 'POST', () => import('@/app/api/orchestrator/steer-packet/route')),
   ],
   settings: [
+    route('/api/cortex/diagnostics', 'GET', () => import('@/app/api/cortex/diagnostics/route')),
     route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
     route('/api/runtime/capabilities', 'GET', () => import('@/app/api/runtime/capabilities/route')),
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
