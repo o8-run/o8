@@ -24,6 +24,10 @@ impl ShellFeature for Material {
                     }
                 });
                 shell.features.get::<SystemAppearance>().0 = Some(subscription);
+                // A saved font that is no longer installed runs in its default.
+                if crate::theme::check_installed_fonts(&cx.text_system().all_font_names()) {
+                    window.refresh();
+                }
             },
         }]
     }

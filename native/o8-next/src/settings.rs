@@ -161,6 +161,8 @@ pub(crate) struct Settings {
     about_error: Option<String>,
     /// Why the last VS Code theme import was refused.
     pub theme_import_error: Option<String>,
+    /// Installed font families, listed once for the font pickers.
+    font_families: Option<Vec<String>>,
 }
 impl EventEmitter<Close> for Settings {}
 impl Settings {
@@ -211,6 +213,7 @@ impl Settings {
             about_status: String::new(),
             about_error: None,
             theme_import_error: None,
+            font_families: None,
         };
         view.load(false, cx);
         view
