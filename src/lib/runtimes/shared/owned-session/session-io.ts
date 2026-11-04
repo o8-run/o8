@@ -53,7 +53,14 @@ export function createOwnedSessionIo({
   }
 
   async function listSessionDirs() {
-    const resolvedRoot = await ensureRoot();
+    // #5452: listing is a read and must never create the root. ensureRoot()
+    // materialized it, so a refresh tick or orphan sweep would resurrect a root a
+    // caller had just removed. Validate read-only instead: an absent root resolves
+    // to an empty fleet. A missing or redirected namespace parent is still refused
+    // by the guard (unchanged); in production the parent is the data dir and exists.
+    const resolvedRoot = path.resolve(root);
+    const rootStat = await assertOwnedSessionPath(root, root, { missing: true, kind: 'directory' });
+    if (!rootStat) return [];
     const entries = await readdir(resolvedRoot).catch(() => []);
     const directories: string[] = [];
     for (const name of entries) {
