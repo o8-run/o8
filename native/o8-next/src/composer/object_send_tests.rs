@@ -21,6 +21,7 @@ fn roster_agent(progress: &str) -> crate::subagents::model::Agent {
         result: None,
         started: Some(1.),
         finished: None,
+        facts: Default::default(),
     }
 }
 

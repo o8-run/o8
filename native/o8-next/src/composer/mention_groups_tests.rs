@@ -26,6 +26,7 @@ fn agent(id: &str, title: &str, group: Group, started: f64) -> Agent {
         result: None,
         started: Some(started),
         finished: None,
+        facts: Default::default(),
     }
 }
 
