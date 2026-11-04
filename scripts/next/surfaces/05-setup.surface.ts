@@ -1,4 +1,4 @@
-import { readdirSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
@@ -11,6 +11,27 @@ export default async function register({ dataDir, repo, seeds }: SurfaceContext)
   if (!process.argv.includes('--onboarding')) return {};
   for (const file of readdirSync(join(dataDir, 'chat-history'))) rmSync(join(dataDir, 'chat-history', file));
   seeds.splice(0);
+  if (process.argv.includes('--onboarding-new-project')) {
+    // New project's `gh repo create` runs a fake gh on PATH; HOME keeps its projects folder in the fixture.
+    const home = join(dataDir, 'home');
+    const bin = join(dataDir, 'bin');
+    mkdirSync(home, { recursive: true }); mkdirSync(bin, { recursive: true });
+    process.env.HOME = home;
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    writeFileSync(join(bin, 'gh'), `#!/usr/bin/env node
+const args = process.argv.slice(2);
+require('node:fs').appendFileSync(${JSON.stringify(join(dataDir, 'gh-argv.jsonl'))}, JSON.stringify({ args, cwd: process.cwd() }) + '\\n');
+if (args[2] === 'taken-name') { process.stderr.write('GraphQL: Name already exists on this account (createRepository)\\n'); process.exit(1); }
+const dest = require('node:path').join(process.cwd(), args[2]);
+require('node:fs').mkdirSync(dest);
+require('node:child_process').execFileSync('git', ['init', '-q'], { cwd: dest });
+`);
+    chmodSync(join(bin, 'gh'), 0o755);
+    writeFileSync(join(dataDir, 'ssh-machines.json'), JSON.stringify({ schema: 'o8/cli/machines/v1', machines: [{
+      id: '00000000-0000-4000-8000-000000000001', label: 'build-box', target: 'build-box', port: 22,
+      remoteCli: 'o8', sshConfig: null, enabled: true,
+    }] }));
+  }
   const { addRepo } = await import('../../../src/lib/repos/registry');
   await addRepo(repo);
   const defaults = await import('../../../src/app/api/panel/operator-defaults/route');
@@ -21,6 +42,7 @@ export default async function register({ dataDir, repo, seeds }: SurfaceContext)
   const context = await import('../../../src/app/api/v2/chat-history/route');
   const queue = await import('../../../src/app/api/orchestrator/composer-queue/route');
   const wsInfo = await import('../../../src/app/api/panel/ws-info/route');
+  const machines = await import('../../../src/app/api/panel/ssh-machines/route');
   const { getAllRuntimes } = await import('../../../src/lib/runtimes');
   for (const runtime of getAllRuntimes()) runtime.discoverSessions = async () => [];
   const { GET: sessions } = await import('../../../src/app/api/mobile/orchestrator/threads/route');
@@ -46,6 +68,6 @@ export default async function register({ dataDir, repo, seeds }: SurfaceContext)
     'POST /api/v2/chat-history': context.POST, 'GET /api/orchestrator/composer-queue': queue.GET,
     'POST /api/orchestrator/composer-queue': queue.POST, 'GET /api/panel/ws-info': wsInfo.GET,
     'GET /api/mobile/orchestrator/threads': sessions, 'GET /api/orchestrator/state': state,
-    'GET /api/runtime/inventory': inventory,
+    'GET /api/runtime/inventory': inventory, 'GET /api/panel/ssh-machines': machines.GET,
   } };
 }

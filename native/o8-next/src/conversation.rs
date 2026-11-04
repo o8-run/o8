@@ -49,6 +49,9 @@ fn receipt_matches(method: &str, body: &Value, response: &Value) -> bool {
                 _ => false,
             }
         }
+        // A chat with no project sends no repository; the server runs it in the
+        // chat's own scratch folder, which the matching thread id confirms.
+        (Some(_), None) => body["repoPath"].is_null(),
         _ => false,
     };
     item["id"] == body["id"]
@@ -347,9 +350,7 @@ impl Surface {
         else {
             return;
         };
-        let Some(repo) = session.repo_path.clone() else {
-            return;
-        };
+        let repo = session.repo_path.clone();
         let draft = self.composer.read(cx).text.clone();
         let files = self.composer.read(cx).controls.files.clone();
         // Match the default composer's attachment-only queue payload.
@@ -419,7 +420,7 @@ impl Surface {
                 let contextual = if advice.repo.is_some() || !advice.branch.is_empty() {
                     format!(
                         "Intent scope: repository {} · base branch {}.\n\n{contextual}",
-                        advice.repo.as_deref().unwrap_or(&repo),
+                        advice.repo.as_deref().or(repo.as_deref()).unwrap_or("none"),
                         if advice.branch.is_empty() {
                             "main"
                         } else {

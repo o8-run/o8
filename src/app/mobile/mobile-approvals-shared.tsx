@@ -52,6 +52,7 @@ export type MobileView =
   | 'settings'
   | 'agents'
   | 'issues'
+  | 'prs'
   | 'activity'
   | 'costs'
   | 'orchestrator';

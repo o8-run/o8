@@ -12,7 +12,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_OWNED_OPENCODE_ROOT = ownedRoot;
 
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-const { attachSession, createLane, findLaneByPacket, setLaneStatus } = await import('@/lib/lane/registry');
+const { attachSession, createLane, findLaneByPacket, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
 const { persistSessionCost } = await import('@/lib/orchestrator/cost-persistence');
@@ -195,6 +195,11 @@ describe('mission cost persisted-state path', () => {
     setLaneStatus(retryLane.id, 'completed', 'system', 'completed');
     expect(findLaneByPacket(packetId)).toBeNull();
 
+    // Mission status intentionally includes bound terminal lanes for diagnostics.
+    // Leave only open_lane history linking these archived attempts to the packet
+    // so the receipt still proves cost survives without restoring live bindings.
+    const archivedLanes = [lane, retryLane].map(({ id }) => updateLane(id, { packetId: null }));
+
     const packet = {
       id: packetId,
       referenceLabel: 'PKT-COST',
@@ -208,13 +213,7 @@ describe('mission cost persisted-state path', () => {
       queueState: 'held',
       releaseState: 'released',
       status: 'released',
-      lane: {
-        tileId: 'retry-tile',
-        tabId: 'retry-tab',
-        repoPath: dataDir,
-        runtime: 'opencode',
-        sessionKey: retrySessionKey,
-      },
+      lane: null,
     } satisfies OrchestratorPacket;
     writeOrchestratorControlPlaneState({
       ...createEmptyOrchestratorMissionState(),
@@ -229,6 +228,7 @@ describe('mission cost persisted-state path', () => {
     expect(status.agents).toEqual([]);
     expect(status.packets).toHaveLength(1);
     expect(status.packets[0]?.lane).toBeNull();
+    expect([getLane(lane.id), getLane(retryLane.id)]).toEqual(archivedLanes);
     expect('historical' in status).toBe(false);
     expect('cost' in status).toBe(true);
     if (!('cost' in status) || !status.cost) {

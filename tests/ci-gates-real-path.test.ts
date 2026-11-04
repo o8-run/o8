@@ -79,6 +79,70 @@ function condition(source: string, github: object, needs: object = {}): boolean 
   ));
 }
 
+describe('parity workflow lanes', () => {
+  const parity = parse(readFileSync(path.join(repo, '.github/workflows/next-parity.yml'), 'utf8'));
+
+  it('keeps parity path filters on PRs and main pushes, with manual captures available', () => {
+    const paths = [
+      'native/o8-next/**', 'scripts/next/**', 'scripts/parity/**',
+      'tests/next-parity-harness-real-path.test.ts', 'tests/next-parity-render-failure-real-path.test.ts',
+      'tests/next-parity-preflight-real-path.test.ts', 'tests/next-parity-route-ownership-real-path.test.ts',
+      'tests/fixtures/next-parity-route-ownership.mjs', '.github/actions/next-linux-setup/**',
+      '.github/workflows/next-parity.yml',
+    ];
+    expect(parity.on).toEqual({
+      pull_request: { branches: ['main'], paths },
+      push: { branches: ['main'], paths },
+      workflow_dispatch: null,
+    });
+    expect(parity.concurrency.group).toBe('next-parity-${{ github.ref }}');
+    expect(condition(parity.concurrency['cancel-in-progress'], { event_name: 'pull_request' })).toBe(true);
+    for (const event_name of ['push', 'workflow_dispatch']) {
+      expect(condition(parity.concurrency['cancel-in-progress'], { event_name })).toBe(false);
+    }
+  });
+
+  it('runs only the cheap parity inventory on pull requests and captures after landing or dispatch', () => {
+    expect(Object.keys(parity.jobs)).toEqual(['inventory', 'captures']);
+    const { inventory, captures } = parity.jobs;
+    for (const event_name of ['pull_request', 'push', 'workflow_dispatch']) {
+      expect(condition(inventory.if, { event_name })).toBe(event_name === 'pull_request');
+      expect(condition(captures.if, { event_name })).toBe(event_name !== 'pull_request');
+    }
+    expect(inventory['timeout-minutes']).toBe(10);
+    expect(captures['timeout-minutes']).toBe(30);
+    expect(inventory.steps.map((step: { uses?: string; run?: string }) => step.uses || step.run)).toEqual([
+      'actions/checkout@v4', 'actions/setup-node@v4',
+      `npm install -g "$(node -p 'require("./package.json").packageManager')"`,
+      'npm ci --prefer-offline',
+      'npx vitest run tests/next-parity-harness-real-path.test.ts tests/next-parity-preflight-real-path.test.ts tests/next-parity-render-failure-real-path.test.ts tests/next-parity-route-ownership-real-path.test.ts',
+    ]);
+    expect(inventory.steps[1].with).toEqual({ 'node-version': 22, cache: 'npm' });
+  });
+
+  it('warms a separate parity cache on main and fails an empty capture upload', () => {
+    const steps = parity.jobs.captures.steps;
+    const setup = steps.find((step: { uses?: string }) => step.uses === './.github/actions/next-linux-setup');
+    expect(setup.with).toEqual({ browser: 'true', 'cache-key': 'parity-captures' });
+    const action = parse(readFileSync(path.join(repo, '.github/actions/next-linux-setup/action.yml'), 'utf8'));
+    const cache = action.runs.steps.find((step: { uses?: string }) => step.uses?.startsWith('Swatinem/rust-cache@'));
+    expect(cache.with.key).toBe('${{ inputs.cache-key }}');
+    expect(condition(cache.with['save-if'], { ref: 'refs/heads/main' })).toBe(true);
+    expect(condition(cache.with['save-if'], { ref: 'refs/pull/5451/merge' })).toBe(false);
+    const build = steps.find((step: { name?: string }) => step.name === 'Build native renderer and test context');
+    expect(build.run).toContain('cargo build --locked --manifest-path native/o8-next/Cargo.toml');
+    expect(build.run).toContain('cargo test --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next --no-run');
+    const capture = steps.find((step: { name?: string }) => step.name === 'Capture every registered surface at both sizes');
+    expect(capture.run).toContain('xvfb-run');
+    expect(capture.run).toContain('node scripts/parity/next.mjs --output work/next-parity');
+    const upload = steps.find((step: { uses?: string }) => step.uses === 'actions/upload-artifact@v4');
+    expect(upload.if).toBe('always()');
+    expect(upload.with).toEqual({
+      name: 'o8-next-parity', path: 'work/next-parity/', 'if-no-files-found': 'error', 'retention-days': 7,
+    });
+  });
+});
+
 describe('required CI gates through workflow commands', () => {
   it('keeps the merge-group trigger and the eight required check names', () => {
     expect(workflow.on.merge_group).toEqual({ types: ['checks_requested'], branches: ['main'] });
@@ -183,6 +247,28 @@ describe('required CI gates through workflow commands', () => {
     expect(condition(shards.if, monday)).toBe(false);
     expect(condition(workflow.jobs.test.if, monday, { 'test-shards': { result: 'skipped' } })).toBe(false);
     expect(workflow.jobs['integration-weekly'].needs).toBe('test');
+  });
+
+  it('saves source-keyed native outputs for warm pull-request reruns within budget', () => {
+    const step = workflow.jobs['o8-next-tests'].steps.find((entry: { name?: string }) => entry.name === 'Save native test build outputs');
+    const expression = step.if.replaceAll('steps.native-setup', 'steps["native-setup"]')
+      .replaceAll('steps.native-cache-size', 'steps["native-cache-size"]')
+      .replaceAll('.outputs.native-cache-hit', '.outputs["native-cache-hit"]');
+    const evaluate = new Function('github', 'steps', 'matrix', 'needs', `return (${expression});`);
+    const saves = (event = 'pull_request', ref = 'refs/pull/42/merge', shard = 8, hit = 'false', cacheable = 'true', changed = 'true', reuse = 'false') => evaluate(
+      { event_name: event, ref }, { native: { outputs: { changed } },
+        'native-setup': { outputs: { 'native-cache-hit': hit } }, 'native-cache-size': { outputs: { cacheable } } },
+      { shard }, { reuse: { outputs: { reuse } } },
+    );
+    expect(saves(), 'the PR merge ref must retain its source-matched executable').toBe(true);
+    expect(saves('push', 'refs/heads/main')).toBe(true);
+    expect(saves('merge_group', 'refs/heads/gh-readonly-queue/main/fixture')).toBe(false);
+    expect(saves('workflow_dispatch', 'refs/heads/fixture')).toBe(false);
+    expect(saves('pull_request', 'refs/pull/42/merge', 1)).toBe(false);
+    expect(saves('pull_request', 'refs/pull/42/merge', 8, 'true')).toBe(false);
+    expect(saves('pull_request', 'refs/pull/42/merge', 8, 'false', 'false')).toBe(false);
+    expect(saves('pull_request', 'refs/pull/42/merge', 8, 'false', 'true', 'false')).toBe(false);
+    expect(saves('pull_request', 'refs/pull/42/merge', 8, 'false', 'true', 'true', 'true')).toBe(false);
   });
 
   it('restores lint and typecheck caches, refreshing them only on main', () => {

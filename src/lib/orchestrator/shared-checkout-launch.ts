@@ -18,6 +18,7 @@ export async function launchSharedCheckoutWorker(input: {
   prompt: string;
   taskName: string;
   runtime: OrchestratorRuntime;
+  instanceId?: string;
   model: string | null;
   effort?: ThinkingEffort | null;
   carrier?: ClaudeCodeModelSource | null;
@@ -58,6 +59,7 @@ export async function launchSharedCheckoutWorker(input: {
       note: 'Recovered the owned worker launch from its durable session record.',
     } : await launchRuntimeSurface({
       runtime: input.runtime,
+      instanceId: input.instanceId,
       prompt: `${contract}\n\n${input.prompt}`,
       repoPath: team.path,
       projectRepoPath: team.path,

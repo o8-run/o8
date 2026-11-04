@@ -1,0 +1,9 @@
+{"type":"system","subtype":"init","session_id":"background-agents-fixture"}
+{"type":"assistant","message":{"id":"launch-message","role":"assistant","content":[{"type":"tool_use","id":"date-agent","name":"Agent","input":{"description":"Run date","prompt":"Run sleep 20 then date","run_in_background":true}},{"type":"tool_use","id":"uname-agent","name":"Agent","input":{"description":"Run uname","prompt":"Run sleep 30 then uname -s","run_in_background":true}}]}}
+{"type":"system","subtype":"task_started","task_id":"date-task","tool_use_id":"date-agent","is_backgrounded":true,"task_type":"local_agent","description":"Run date"}
+{"type":"system","subtype":"task_started","task_id":"uname-task","tool_use_id":"uname-agent","is_backgrounded":true,"task_type":"local_agent","description":"Run uname"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"date-agent","content":"Async agent launched successfully. agentId: date-task"},{"type":"tool_result","tool_use_id":"uname-agent","content":"Async agent launched successfully. agentId: uname-task"}]}}
+{"type":"system","subtype":"task_notification","task_id":"date-task","tool_use_id":"date-agent","status":"completed","summary":"The date agent finished."}
+{"type":"system","subtype":"task_notification","task_id":"uname-task","tool_use_id":"uname-agent","status":"completed","summary":"The uname agent finished."}
+{"type":"system","subtype":"status","status":"requesting"}
+{"type":"result","subtype":"success","is_error":false,"session_id":"background-agents-fixture","result":"Both agents finished."}

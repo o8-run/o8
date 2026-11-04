@@ -11,7 +11,11 @@ export function install(): SurfaceRoutes {
       reads++;
       if (mode === 'failed') return Response.json({ error: 'Fixture process table unavailable' }, { status: 503 });
       if (mode === 'payload-error') return Response.json({ sessions: [], processes: [], total: { cpuPercent: 0, memBytes: 0, ramTotalBytes: 0 }, error: 'Fixture collector unavailable' });
-      return Response.json({ sessions: mode === 'empty' ? [] : [row('session-unknown', null, null, null), row('session-heavy', 2147483648, mode === 'changed' ? 72 : 41, 424242)], processes: mode === 'empty' ? [] : [{ ...row('process-small', 134217728, 3, null), kind: 'process' }], total: { cpuPercent: 44, memBytes: 2281701376, ramTotalBytes: 17179869184 } });
+      const machine = { name: 'local', platform: 'linux', sampledAt: 1000 * reads, windowMs: 2500, cpuPercent: mode === 'changed' ? 64 : 23, loadAverage: [2.5, 1.75, 1], cores: 8,
+        memory: { usedBytes: 8589934592, totalBytes: 17179869184 }, swap: { usedBytes: 0, totalBytes: 0 },
+        disks: { data: { usedBytes: 375809638400, freeBytes: 107374182400, totalBytes: 536870912000 }, projects: null },
+        network: { inBytesPerSec: 1572864, outBytesPerSec: 2048 } };
+      return Response.json({ machine, sessions: mode === 'empty' ? [] : [row('session-unknown', null, null, null), row('session-heavy', 2147483648, mode === 'changed' ? 72 : 41, 424242)], processes: mode === 'empty' ? [] : [{ ...row('process-small', 134217728, 3, null), kind: 'process' }], total: { cpuPercent: 44, memBytes: 2281701376, ramTotalBytes: 17179869184 } });
     },
     'POST /api/panel/resource-usage': async request => {
       stops.push(await request.json());

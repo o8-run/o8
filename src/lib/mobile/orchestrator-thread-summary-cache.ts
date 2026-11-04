@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { applyNetworkProjectionHealth } from '@/lib/bots/network-health';
 import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
+import type { OrchestratorTurnRecord } from '@/lib/lane/orchestrator-crash-survival';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 import type { MobileOrchestratorThread } from '@/lib/mobile/types';
-import { projectOrchestratorThread, type OrchestratorHistoryRecord } from './orchestrator-thread-projection';
+import { applyOrchestratorTurnStatus, projectOrchestratorThreadSummary, type OrchestratorHistoryRecord } from './orchestrator-thread-projection';
 
 interface HistoryStat {
   filePath: string;
@@ -40,7 +41,7 @@ class ThreadSummaryCache {
     this.bytes = 0;
   }
 
-  read(stat: HistoryStat): MobileOrchestratorThread | null {
+  read(stat: HistoryStat, turns: readonly OrchestratorTurnRecord[]): MobileOrchestratorThread | null {
     const cached = this.entries.get(stat.filePath);
     if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
       this.entries.delete(stat.filePath);
@@ -51,11 +52,11 @@ class ThreadSummaryCache {
       };
       // Git metadata can change independently of the history stat. Preserve the
       // previous per-list projection behavior, and return a fresh object.
-      return thread ? applyNetworkProjectionHealth({ ...thread, ...resolveRepoGithubIdentity(thread.repoPath, remoteUrl) }) : null;
+      return thread ? applyOrchestratorTurnStatus(applyNetworkProjectionHealth({ ...thread, ...resolveRepoGithubIdentity(thread.repoPath, remoteUrl) }), turns) : null;
     }
     this.delete(stat.filePath);
     const record = JSON.parse(readFileSync(stat.filePath, 'utf8')) as OrchestratorHistoryRecord;
-    const thread = record.archivedAt || isSavedConnectivityCheck(record) ? null : projectOrchestratorThread(stat.tabId, record, stat.modifiedAt);
+    const thread = record.archivedAt || isSavedConnectivityCheck(record) ? null : projectOrchestratorThreadSummary(stat.tabId, record, stat.modifiedAt);
     const remoteUrl = typeof record.remoteUrl === 'string' ? record.remoteUrl : null;
     // Serialization also detaches title/agent substrings from larger source
     // strings, so charged bytes bound the retained allocation itself.
@@ -71,7 +72,7 @@ class ThreadSummaryCache {
       this.entries.set(stat.filePath, { mtimeMs: stat.mtimeMs, size: stat.size, json, bytes });
       this.bytes += bytes;
     }
-    return thread ? { ...thread } : null;
+    return thread ? applyOrchestratorTurnStatus({ ...thread }, turns) : null;
   }
 }
 

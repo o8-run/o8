@@ -5,6 +5,7 @@ import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { persistCanonicalChatHistoryRecord, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
 import { decideAutoTitle, maybeQueueThreadAutoTitle } from '@/lib/llm/thread-auto-title';
+import { listOrchestratorTurnsByThread, listOrchestratorTurnsForThread } from '@/lib/lane/orchestrator-crash-survival';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { truncateBoundaryWithHandoff } from './orchestrator-handoff-history';
 import { appendUserHistoryMessage } from './orchestrator-thread-user-message';
@@ -13,6 +14,7 @@ import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-projec
 import { buildProjectBoundThreadRecord, type BindOrchestratorThreadProjectInput } from './orchestrator-thread-project-binding';
 import { nextOrchestratorThreadId } from './orchestrator-thread-id';
 import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
+import { isThreadScratchPath } from '@/lib/orchestrator/thread-scratch';
 import { repairComposerPreambleHistory, repairFlippedTranscriptHistory } from './orchestrator-thread-history-repair';
 import { consumePendingTurnWorkers, mergeMobileTurnReceipts } from './turn-receipt';
 import { threadSummaryCache } from './orchestrator-thread-summary-cache';
@@ -141,7 +143,9 @@ export function readOrchestratorThreadMessages(
   }
   return out;
 }
-function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
+function writeHistoryRecord(tabId: string, input: OrchestratorHistoryRecord) {
+  // A chat with no project runs in its scratch folder; that folder never becomes its project.
+  const record = isThreadScratchPath(input.repoPath) ? { ...input, repoPath: null, repoName: null } : input;
   ensureHistoryDir();
   const filePath = safeOrchestratorHistoryPath(tabId);
   persistCanonicalChatHistoryRecord(tabId, record);
@@ -176,11 +180,12 @@ export function readProjectedThread(tabId: string): MobileOrchestratorThread | n
   try { projectNetworkThread(tabId, undefined, { waitForLock: false }); } catch { /* Keep readable history and its projection health. */ }
   const record = readHistoryRecord(tabId);
   if (!record) return null;
+  const turns = listOrchestratorTurnsForThread(tabId);
   try {
     const stat = statSync(safeOrchestratorHistoryPath(tabId));
-    return projectThread(tabId, record, stat.mtime.toISOString());
+    return projectThread(tabId, record, stat.mtime.toISOString(), turns);
   } catch {
-    return projectThread(tabId, record, new Date().toISOString());
+    return projectThread(tabId, record, new Date().toISOString(), turns);
   }
 }
 
@@ -291,10 +296,11 @@ export function listMobileOrchestratorThreads(options: {
   const backendFilter = options.backend ?? null;
   const limit = options.limit ?? MAX_THREADS;
   const threads: MobileOrchestratorThread[] = [];
+  const turnsByThread = listOrchestratorTurnsByThread();
 
   for (const fileStat of listThoughtHistoryFileStats()) {
     try {
-      const thread = threadSummaryCache.read(fileStat);
+      const thread = threadSummaryCache.read(fileStat, turnsByThread.get(fileStat.tabId) ?? []);
       // Archived threads are off the active list — the operator archived them to
       // declutter; they must not reappear in the orchestrator history/past-thread
       // surfaces (which is where they were leaking back in).
@@ -397,7 +403,7 @@ export function createMobileOrchestratorThread(input: {
   };
 
   writeHistoryRecord(tabId, record);
-  return projectThread(tabId, record, now);
+  return projectThread(tabId, record, now, listOrchestratorTurnsForThread(tabId));
 }
 
 export function bindMobileOrchestratorThreadProject(
@@ -746,6 +752,7 @@ export function listMobileOrchestratorRevealRequests(since: string | null): Orch
   const requests: OrchestratorThreadRevealRequest[] = [];
   if (!existsSync(ORCHESTRATOR_HISTORY_DIR)) return requests;
   const files = readdirSync(ORCHESTRATOR_HISTORY_DIR).filter((file) => file.endsWith('.json'));
+  const turnsByThread = listOrchestratorTurnsByThread();
 
   for (const file of files) {
     const tabId = basename(file, '.json');
@@ -761,7 +768,7 @@ export function listMobileOrchestratorRevealRequests(since: string | null): Orch
       if (!Number.isFinite(requestedMs) || requestedMs <= sinceMs) continue;
       requests.push({
         requestedAt,
-        thread: projectThread(tabId, record, stat.mtime.toISOString()),
+        thread: projectThread(tabId, record, stat.mtime.toISOString(), turnsByThread.get(tabId) ?? []),
       });
     } catch {
       // skip unreadable files

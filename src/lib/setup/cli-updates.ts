@@ -1,6 +1,6 @@
 import { invalidateCliCache, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
-import { getRuntimeInstallInfo } from './runtime-install';
+import { getRuntimeInstallInfo, RUNTIME_INSTALL_INFO } from './runtime-install';
 import { compareUpdateVersions, parseUpdateVersion, CLI_UPDATE_VERSION_PATTERN } from './cli-update-progress';
 import { inspectCliInstallation } from './cli-installation';
 
@@ -71,16 +71,18 @@ const PROVIDER_UPDATE_SPECS: CliUpdateSpec[] = [
   },
 ];
 
-export const CLI_UPDATE_RUNTIME_IDS = Object.freeze([
+export const CLI_UPDATE_RUNTIME_IDS = Object.freeze([...new Set([
   ...PROVIDER_UPDATE_SPECS.map(spec => spec.runtimeId),
   ...Object.entries(ORCHESTRATOR_RUNTIMES).filter(([id, capability]) => capability.dispatchable && id !== 'pi-builtin'
     && !PROVIDER_UPDATE_SPECS.some(spec => spec.runtimeId === id)).map(([id]) => id),
-]);
+  ...Object.keys(RUNTIME_INSTALL_INFO),
+])]);
 const UPDATE_SPECS: CliUpdateSpec[] = CLI_UPDATE_RUNTIME_IDS.map(runtimeId => {
   const known = PROVIDER_UPDATE_SPECS.find(spec => spec.runtimeId === runtimeId);
   if (known) return known;
   const capability = ORCHESTRATOR_RUNTIMES[runtimeId as keyof typeof ORCHESTRATOR_RUNTIMES];
-  return { runtimeId, label: capability.label, binaryName: capability.binaryName,
+  return { runtimeId, label: capability?.label ?? getRuntimeInstallInfo(runtimeId)?.label ?? runtimeId,
+    binaryName: capability?.binaryName ?? runtimeId,
     envOverride: `O8_${runtimeId.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}_BIN`,
     release: { kind: 'manual' }, updateUrl: getRuntimeInstallInfo(runtimeId)?.link ?? '' };
 });

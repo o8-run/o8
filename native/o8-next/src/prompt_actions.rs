@@ -8,6 +8,9 @@ pub(super) mod continuation;
 #[path = "prompt_actions/metadata.rs"]
 mod metadata;
 
+const CONTROL_SIZE: f32 = 26.;
+const ROW_PADDING_BOTTOM: f32 = 6.;
+
 const COPY: &str = "M9 9h11v11H9z M15 5V3H3v12h2";
 const CHECK: &str = "M5 12.5 10 17.5 19 7";
 const DOUBLE_CHECK: &str = "M2 12.5 7 17.5 16 7 M12 17.5 21 7";
@@ -51,6 +54,8 @@ struct Attempt {
 
 #[derive(Default)]
 pub(super) struct State {
+    hovered: Option<String>,
+    keyboard: Option<(gpui::AnyWindowHandle, gpui::Subscription)>,
     confirm: Option<String>,
     busy: bool,
     copied: Option<(String, Instant)>,
@@ -62,7 +67,31 @@ pub(super) struct State {
 }
 
 impl State {
+    fn reveal_tab(
+        &self,
+        previous: Option<&FocusHandle>,
+        backwards: bool,
+        window: &mut Window,
+    ) -> bool {
+        let Some(id) = self.focus.iter().find_map(|(key, focus)| {
+            key.strip_prefix("copy-")
+                .filter(|_| focus.is_focused(window))
+        }) else {
+            return false;
+        };
+        // A hidden row exposes only copy. Enter it backwards at fork, while
+        // Shift+Tab from this row's rewind still reaches copy.
+        if !backwards || previous == self.focus.get(&format!("rewind-{id}")) {
+            return true;
+        }
+        if let Some(fork) = self.focus.get(&format!("fork-{id}")) {
+            fork.focus(window);
+        }
+        true
+    }
+
     pub(super) fn selection_changed(&mut self) {
+        self.hovered = None;
         self.confirm = None;
         self.copied = None;
         self.focus.clear();
@@ -76,6 +105,7 @@ pub(super) struct Prompt {
     time: Option<u64>,
     delivery: (bool, &'static str),
     copied: bool,
+    hovered: bool,
     confirm: bool,
     busy: bool,
     fork_reason: Option<String>,
@@ -112,7 +142,12 @@ impl Surface {
         }
     }
 
-    pub(super) fn prompt_action_rows(&mut self, cx: &mut Context<Self>) -> HashMap<usize, Prompt> {
+    pub(super) fn prompt_action_rows(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> HashMap<usize, Prompt> {
+        self.prompt_tabs(window, cx);
         let fork_reason = self.prompt_reason(false, cx);
         let rewind_reason = self.prompt_reason(true, cx);
         let Some(transcript) = &self.transcript else {
@@ -138,7 +173,7 @@ impl Surface {
                     self.prompt_actions
                         .focus
                         .entry(format!("{action}-{}", entry.id))
-                        .or_insert_with(|| cx.focus_handle())
+                        .or_insert_with(|| cx.focus_handle().tab_stop(true))
                         .clone()
                 })
                 .collect();
@@ -147,6 +182,7 @@ impl Surface {
                 Prompt {
                     source: self.selected.clone().unwrap_or_default(),
                     id: entry.id.clone(),
+                    hovered: self.prompt_actions.hovered.as_ref() == Some(&entry.id),
                     time: metadata::timestamp(entry),
                     delivery: metadata::delivery(entry),
                     copied: self.prompt_actions.copied.as_ref().is_some_and(|(id, at)| {
@@ -173,6 +209,64 @@ impl Surface {
             );
         }
         prompts
+    }
+
+    fn prompt_tabs(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let handle = window.window_handle();
+        if self
+            .prompt_actions
+            .keyboard
+            .as_ref()
+            .is_none_or(|(current, _)| *current != handle)
+        {
+            let view = cx.weak_entity();
+            let subscription = cx.intercept_keystrokes(move |event, window, cx| {
+                let key = &event.keystroke;
+                if window.window_handle() != handle
+                    || key.key != "tab"
+                    || key.modifiers.control
+                    || key.modifiers.platform
+                    || key.modifiers.alt
+                {
+                    return;
+                }
+                let backwards = key.modifiers.shift;
+                let previous = window.focused(cx);
+                let view = view.clone();
+                // Tab may enter from outside this surface, and its handler may
+                // stop propagation. Inspect the destination after dispatch.
+                window.defer(cx, move |window, cx| {
+                    if let Some(view) = view.upgrade() {
+                        view.update(cx, |s, cx| {
+                            if s.focus.contains_focused(window, cx)
+                                && s.prompt_actions
+                                    .reveal_tab(previous.as_ref(), backwards, window)
+                            {
+                                cx.notify();
+                            }
+                        });
+                    }
+                });
+            });
+            self.prompt_actions.keyboard = Some((handle, subscription));
+        }
+    }
+
+    fn prompt_hover(&mut self, source: &str, id: &str, hovered: bool, cx: &mut Context<Self>) {
+        if self.selected.as_deref() != Some(source) {
+            return;
+        }
+        if hovered {
+            if self.prompt_actions.hovered.as_deref() == Some(id) {
+                return;
+            }
+            self.prompt_actions.hovered = Some(id.into());
+        } else if self.prompt_actions.hovered.as_deref() == Some(id) {
+            self.prompt_actions.hovered = None;
+        } else {
+            return;
+        }
+        cx.notify();
     }
 
     fn remeasure_prompt(&self, id: &str) {
@@ -401,7 +495,7 @@ fn control(
         .debug_selector(move || id.to_string())
         .track_focus(focus)
         .tab_index(0)
-        .size(px(26.))
+        .size(px(CONTROL_SIZE))
         .flex_shrink_0()
         .rounded(px(7.))
         .border_1()
@@ -453,12 +547,32 @@ fn control(
         })
 }
 
+pub(super) fn container(view: Entity<Surface>, prompt: &Prompt) -> gpui::Stateful<gpui::Div> {
+    let (source, id) = (prompt.source.clone(), prompt.id.clone());
+    div()
+        .id(SharedString::from(format!("prompt-row-{source}-{id}")))
+        .group("prompt-row")
+        .on_hover(move |hovered, _, cx| {
+            view.update(cx, |s, cx| s.prompt_hover(&source, &id, *hovered, cx));
+        })
+}
+
 pub(super) fn row(view: &Entity<Surface>, prompt: &Prompt, window: &Window) -> AnyElement {
     let visible = prompt.confirm
         || prompt.busy
         || prompt.error.is_some()
         || prompt.copied
         || prompt.focus.iter().any(|f| f.is_focused(window));
+    if !visible && !prompt.hovered {
+        // Reserve the full action strip without building its layout or controls.
+        // The existing copy handle reveals the controls on the next frame.
+        return div()
+            .w_full()
+            .h(px(CONTROL_SIZE + ROW_PADDING_BOTTOM))
+            .track_focus(&prompt.focus[0])
+            .tab_index(0)
+            .into_any_element();
+    }
     let mut actions = div()
         .w_full()
         .flex()
@@ -513,7 +627,7 @@ pub(super) fn row(view: &Entity<Surface>, prompt: &Prompt, window: &Window) -> A
         .w_full()
         .max_w(px(crate::retained::reading_column()))
         .pr(px(18.))
-        .pb(px(6.))
+        .pb(px(ROW_PADDING_BOTTOM))
         .flex()
         .flex_col()
         .items_end()

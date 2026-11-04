@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolvePacketAttributionBase, type PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
+import { readLaneCreationBaseCommit } from '@/lib/lane/creation-base';
+import { isSafeGitRef } from '@/lib/git/refs';
 import { readHeadSha } from '@/lib/lane/head-sha-lock';
 import { resolveLaneReviewTarget } from '@/lib/lane/review-target';
 import type { Lane } from '@/lib/lane/types';
@@ -137,6 +139,46 @@ export function parseNameStatus(output: string): LaneFileChange[] {
   }
 
   return changes;
+}
+
+export interface LaneDiffStat {
+  files: number;
+  insertions: number;
+  deletions: number;
+}
+
+/**
+ * Files and lines a lane's worktree changed since its base, committed and
+ * uncommitted tracked edits together. Reads only: a lane without a creation
+ * receipt compares with its local base branch instead of fetching.
+ */
+export async function getLaneDiffStat(
+  lane: Pick<Lane, 'id' | 'baseBranch' | 'worktreePath' | 'repoPath'>,
+): Promise<LaneDiffStat> {
+  const cwd = lane.worktreePath;
+  if (!cwd) throw new Error('Lane has no worktree for a diff stat.');
+  const runGit = (args: string[]) => laneGit(cwd, lane.repoPath, args, {
+    timeout: 10_000,
+    maxBuffer: COMMAND_MAX_BUFFER,
+  });
+  const headSha = await readHeadSha(cwd, lane.repoPath);
+  const creationBase = readLaneCreationBaseCommit(lane.id);
+  const base = lane.baseBranch || 'main';
+  if (!creationBase && !isSafeGitRef(base)) throw new Error(`Unsafe base branch for diff: ${base}`);
+  const against = creationBase
+    ? (await resolvePacketAttributionBase(cwd, base, headSha, creationBase, runGit)).comparisonRef
+    : (await runGit(['merge-base', base, headSha])).stdout.trim();
+  const { stdout } = await runGit(['diff', '--numstat', against]);
+  const stat: LaneDiffStat = { files: 0, insertions: 0, deletions: 0 };
+  for (const line of stdout.split('\n')) {
+    const [added, removed] = line.split('\t');
+    if (removed === undefined) continue;
+    stat.files += 1;
+    // Binary files report "-" for both counts.
+    stat.insertions += Number(added) || 0;
+    stat.deletions += Number(removed) || 0;
+  }
+  return stat;
 }
 
 function readGitOutput(cwd: string, repoPath: string, args: string[]): string {

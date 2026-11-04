@@ -108,6 +108,10 @@ import { StorageAdmissionStore } from '@/lib/workspace/storage-admission';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { launchPacketWithStorageAdmission } from '@/lib/orchestrator/dispatch-packet-launch';
 import { updateOperatorDefaults } from '@/lib/operator/defaults';
+import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
+import { inboxSubject, mutateInboxSettlement } from '@/lib/inbox/store';
+import { assertInboxCanSettle } from '@/lib/inbox/subjects';
+import { waitForTerminalLaneWork } from '@/lib/lane/terminal-work';
 import {
   readOrchestratorControlPlaneState,
   writeOrchestratorControlPlaneState,
@@ -613,21 +617,35 @@ describe('dispatch scheduling caps and waves', () => {
       calls.push('commit');
       return { ...admissionLease.receipt, state: 'committed', reason: 'committed' };
     };
-    const reviewing = createLane({
-      repoPath: '/repos/review',
-      worktreePath: '/worktrees/review',
-      branch: 'inline/review',
+    const completed = createLane({
+      repoPath: '/repos/completed',
+      branch: 'inline/completed',
       runtime: 'codex',
-      packetId: 'review-candidate',
+      packetId: 'completed-candidate',
       ownership: 'managed',
-      sessionKey: 'codex-owned:review-candidate',
+      sessionKey: 'codex-owned:completed-candidate',
     });
-    setLaneStatus(reviewing.id, 'reviewing', 'system', 'review_ready');
+    setLaneStatus(completed.id, 'completed', 'system', 'read_only_completed');
+    await waitForTerminalLaneWork();
+    // Parking is injected below; retain its association after terminal cleanup drains.
+    updateLane(completed.id, { worktreePath: '/worktrees/completed' });
+    const completedPacket = packetFixture(completed.repoPath, completed.packetId!, {
+      branchTarget: completed.branch,
+      lane: {
+        tileId: completed.id, tabId: completed.sessionKey!, laneId: completed.id,
+        repoPath: completed.repoPath, worktreePath: '/worktrees/completed',
+        runtime: 'codex', sessionKey: completed.sessionKey,
+      },
+    });
+    markPacketReleased(completedPacket, { source: 'read_only_completed' });
+    writeOrchestratorControlPlaneState(missionFixture(completed.repoPath, [completedPacket]));
+    const subject = inboxSubject('runtime', completed.sessionKey!, completed.repoPath, completed.projectId);
+    mutateInboxSettlement(subject, 'settle', () => assertInboxCanSettle(subject, []));
     const pressureAdmission = createStoragePressureAdmissionCoordinator(base, {
       mode: () => 'pressure',
-      listLanes: () => [{ ...reviewing, status: 'reviewing' }],
+      listLanes: () => [getLane(completed.id)!],
       listRepos: async () => [{
-        id: 'repo-review', name: 'review', localPath: '/repos/review', remoteUrl: null,
+        id: 'repo-completed', name: 'completed', localPath: completed.repoPath, remoteUrl: null,
         defaultBranch: 'main', addedAt: new Date().toISOString(), lastOpenedAt: null,
         storagePressureParkingDisabled: false,
         setup: {
@@ -642,7 +660,11 @@ describe('dispatch scheduling caps and waves', () => {
         availableBytes: 1_000, freeBytes: 1_000, totalBytes: 2_000, observedAt: 100, error: null,
       }),
       measureAllocatedBytes: async () => 2_000_000_000,
-      parkWorkspace: async () => ({ status: 'parked', snapshot: {} as never }),
+      parkWorkspace: async (input) => {
+        await input.assertPolicyCurrent?.();
+        calls.push('park');
+        return { status: 'parked', snapshot: {} as never };
+      },
       readParkedReclaimedBytes: () => 1_000_000_000,
     });
 
@@ -651,13 +673,13 @@ describe('dispatch scheduling caps and waves', () => {
       storageAdmission: pressureAdmission,
     });
 
-    expect(calls).toEqual(['attempt:0', 'attempt:1', 'reserve', 'commit']);
+    expect(calls).toEqual(['attempt:0', 'park', 'attempt:1', 'reserve', 'commit']);
     expect(launchMock.calls.map((call) => call.packetId)).toEqual(['pressure-entry']);
     expect(next.packets[0]).toMatchObject({
       status: 'launching',
       storageAdmission: {
         state: 'committed',
-        pressure: { status: 'admitted_after_parking', candidates: [{ packetId: 'review-candidate' }] },
+        pressure: { status: 'admitted_after_parking', candidates: [{ packetId: 'completed-candidate' }] },
       },
     });
   }, 20_000);

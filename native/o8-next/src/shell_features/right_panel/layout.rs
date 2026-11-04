@@ -485,7 +485,9 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
         return launcher(s, cx);
     }
     // o8.md can target settings without a repository; these tools cannot.
-    if s.state.selected.is_none()
+    // Threads with no project open in the "Unassigned" workspace.
+    let no_project = s.state.selected.as_deref() == Some("Unassigned");
+    if (s.state.selected.is_none() || no_project)
         && matches!(
             tool,
             Tool::Files | Tool::Review | Tool::Activity | Tool::Prs | Tool::Issues | Tool::Terminal
@@ -500,12 +502,20 @@ pub(super) fn pane(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement
             .items_center()
             .gap(px(8.))
             .p(px(24.))
-            .child("No repository selected")
+            .child(if no_project {
+                "No project"
+            } else {
+                "No repository selected"
+            })
             .child(
                 div()
                     .text_size(px(11.))
                     .text_color(theme().text_muted)
-                    .child("Select a repository to use this panel view."),
+                    .child(if no_project {
+                        "This thread has no project. Create or open a project to use this panel view."
+                    } else {
+                        "Select a repository to use this panel view."
+                    }),
             )
             .into_any_element();
     }

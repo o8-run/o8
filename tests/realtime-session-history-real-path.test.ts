@@ -160,6 +160,13 @@ beforeAll(async () => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
 
+    // Stateful WS messages await the API readiness probe before subscribing.
+    if (url.pathname === '/api/panel/status') {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ ready: true }));
+      return;
+    }
+
     if (url.pathname === '/api/mobile/sync' && request.method === 'POST') {
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as {
         history?: { sessionKey?: string; sinceId?: string; limit?: number };

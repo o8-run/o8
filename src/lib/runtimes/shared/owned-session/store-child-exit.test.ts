@@ -41,6 +41,12 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
   };
 });
 vi.mock('@/lib/ws-server/next-fetch', () => ({ fetchRuntimeLaunch: fetchRuntimeLaunchMock }));
+// #4899 admits a Codex effort only with model/list evidence from the selected account; the Codex
+// children below are Node fixtures that cannot answer model/list, so advertise their effort here.
+vi.mock('@/lib/codex/service-tier-catalogue', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/codex/service-tier-catalogue')>(),
+  getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [] }, reasoningEfforts: { 'gpt-5.6-terra': ['low'] } }),
+}));
 vi.mock('./worker-failure', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./worker-failure')>();
   return { ...actual, createWorkerFailureHandler: (...args: Parameters<typeof actual.createWorkerFailureHandler>) => {

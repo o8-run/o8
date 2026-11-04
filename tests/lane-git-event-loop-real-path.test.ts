@@ -29,11 +29,12 @@ writeFileSync(join(worktreePath, 'notes.txt'), 'two\n');
 
 // Slow only the checks' reads, so the command itself stays fast.
 const bin = join(root, 'bin');
+const configFailure = join(root, 'fail-config');
 mkdirSync(bin);
 writeFileSync(join(bin, 'git'), `#!/bin/sh
 case " $* " in
   *" --git-common-dir "*|*" config "*)
-    [ -n "$O8_TEST_GIT_CONFIG_EXIT" ] && case " $* " in *" config "*) exit "$O8_TEST_GIT_CONFIG_EXIT" ;; esac
+    [ -f '${configFailure}' ] && case " $* " in *" config "*) exit 3 ;; esac
     sleep 0.3 ;;
 esac
 exec '${realGit}' "$@"
@@ -78,12 +79,13 @@ describe('lane Git checks off the event loop (#3565)', () => {
 
   it('fails the call when a check read fails, as laneGitSync does', async () => {
     // Exit 1 means "no matching config"; any other failure must stop the command.
-    process.env.O8_TEST_GIT_CONFIG_EXIT = '3';
+    // Control the shim on disk; ambient test variables are intentionally not inherited.
+    writeFileSync(configFailure, '');
     try {
       await expect(laneGit(worktreePath, repoPath, ['status', '--porcelain'])).rejects.toMatchObject({ status: 3 });
       expect(() => laneGitSync(worktreePath, repoPath, ['status', '--porcelain'])).toThrow(expect.objectContaining({ status: 3 }));
     } finally {
-      delete process.env.O8_TEST_GIT_CONFIG_EXIT;
+      rmSync(configFailure);
     }
   }, 30_000);
 

@@ -58,6 +58,7 @@ export function createCortexDelegationHandlers(config: {
           } : {}),
           runtime: args.runtime || undefined,
           model: args.model || undefined,
+          instanceId: args.instanceId,
           workerIntent: args.workerIntent || undefined,
           readOnly: args.readOnly === true,
           ...(args.reviewPullRequest !== undefined ? { reviewPullRequest: args.reviewPullRequest } : {}),

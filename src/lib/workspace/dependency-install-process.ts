@@ -9,6 +9,12 @@ export function dependencyInstallProcessesStopped(error: unknown): boolean {
   return error instanceof Error && 'installProcessesStopped' in error && error.installProcessesStopped === true;
 }
 
+/** Keep the package manager's own reason in the failure, as execFile's message did, bounded to its tail. */
+function installProcessFailure(code: number | null, signal: string | null | undefined, result: { stdout: string; stderr: string }): Error {
+  const reason = result.stderr.trim().slice(-4000);
+  return Object.assign(new Error(`Dependency install process failed.${reason ? `\n${reason}` : ''}`), { code, signal, ...result });
+}
+
 /** Supervise detached descendants as well as the install's original process group. */
 export function execDependencyInstallProcess(command: string, args: string[], options: ExecFileOptions): Promise<{ stdout: string; stderr: string }> {
   if (process.platform !== 'win32') return execSupervisedInstall(command, args, options);
@@ -46,7 +52,7 @@ export function execDependencyInstallProcess(command: string, args: string[], op
       clearTimeout(timer);
       signal.removeEventListener('abort', abort);
       const result = { stdout: Buffer.concat(output.stdout).toString(), stderr: Buffer.concat(output.stderr).toString() };
-      if (failure || code !== 0) reject(failure ?? Object.assign(new Error('Dependency install process failed.'), { code, signal: exitSignal, ...result }));
+      if (failure || code !== 0) reject(failure ?? installProcessFailure(code, exitSignal, result));
       else resolve(result);
     });
     signal.addEventListener('abort', abort, { once: true });
@@ -88,7 +94,7 @@ function execSupervisedInstall(command: string, args: string[], options: ExecFil
           code: 'dependency_install_cleanup_unconfirmed', cause: failure,
         }));
       } else if (failure || code !== 0) {
-        const error = failure ?? Object.assign(new Error('Dependency install process failed.'), { code, signal: exitSignal, ...result });
+        const error = failure ?? installProcessFailure(code, exitSignal, result);
         if (stopping) error.message += ' The install process group and its owned detached children were stopped.';
         reject(Object.assign(error, { installProcessesStopped: true }));
       } else resolve(result);

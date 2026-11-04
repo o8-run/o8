@@ -122,7 +122,10 @@ describe('repository storage-pressure parking policy', () => {
     });
   });
 
-  it('observes another process opt-out through the destructive pressure boundary despite a warm cache', async () => {
+  it('observes another process opt-out through the destructive pressure boundary despite a warm cache', async ({ onTestFinished }) => {
+    // Child startup must not age the parent's cached opt-in past its TTL.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    onTestFinished(() => clock.mockRestore());
     await post({ action: 'update', id: 'repo-pressure', storagePressureParkingDisabled: false });
     expect((await registry.listRepos())[0]?.storagePressureParkingDisabled).toBe(false);
     execFileSync(process.execPath, [
@@ -168,9 +171,9 @@ describe('repository storage-pressure parking policy', () => {
     const coordinator = createStoragePressureAdmissionCoordinator(base, {
       mode: () => 'pressure',
       listLanes: () => [{
-        id: 'lane-review', packetId: 'review', repoPath, worktreePath: repoPath,
-        branch: 'inline/review', baseBranch: 'main', runtime: 'codex', sessionKey: 'owned:review',
-        projectId: null, label: 'review', prNumber: null, status: 'reviewing', ownership: 'managed',
+        id: 'lane-completed', packetId: 'completed', repoPath, worktreePath: repoPath,
+        branch: 'inline/completed', baseBranch: 'main', runtime: 'codex', sessionKey: 'owned:completed',
+        projectId: null, label: 'completed', prNumber: null, status: 'completed', ownership: 'managed',
         writerToken: null, lastHeartbeatAt: null, createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z', lastEventAt: null, lastEventLabel: null,
       }],

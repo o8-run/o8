@@ -48,7 +48,8 @@ function fixture() {
     baseBranch: 'main', runtime: 'codex', packetId: id, sessionKey: `codex-owned:${id}` });
   updateLane(lane.id, { status: 'running' }, 'system');
   const packet: OrchestratorPacket = { id, referenceLabel: id, title: 'Source work', summary: 'fixture',
-    workspaceTargetPath: root, branchTarget: lane.branch, runtime: 'codex', status: 'running', queueState: 'held',
+    // A durable queue hold supersedes completion before preservation starts.
+    workspaceTargetPath: root, branchTarget: lane.branch, runtime: 'codex', status: 'running', queueState: 'queued',
     releaseState: 'pending', dependencyLabels: [], dependencyPacketIds: [], attemptCount: 1,
     lane: { laneId: lane.id, tileId: lane.id, tabId: lane.id, sessionKey: lane.sessionKey,
       repoPath: root, worktreePath: root, runtime: 'codex' } };
@@ -77,6 +78,7 @@ describe('forced review through the server production handler', () => {
     // The handler's own interrupt may emit an exit, but that is not a new turn.
     seams.interrupt.mockImplementationOnce(async () => { appendEvent(f.lane.id, 'runtime_process_exit', 'system', {}); });
     await f.run();
+    expect(seams.interrupt).toHaveBeenCalledOnce();
     expect(git(f.root, 'status', '--porcelain')).toBe('');
     expect(git(f.root, 'rev-parse', 'HEAD')).not.toBe(f.base);
     expect(git(f.root, 'rev-parse', 'main')).toBe(f.base);
@@ -92,6 +94,7 @@ describe('forced review through the server production handler', () => {
     const f = fixture();
     seams.interrupt.mockRejectedValueOnce(new Error('interrupt unavailable'));
     await f.run();
+    expect(seams.interrupt).toHaveBeenCalledOnce();
     expect(git(f.root, 'status', '--porcelain')).toBe('');
     expect(getLane(f.lane.id)).toMatchObject({ status: 'running', sessionKey: f.lane.sessionKey });
     expect(f.dependencies.unregister).not.toHaveBeenCalled();
@@ -106,8 +109,10 @@ describe('forced review through the server production handler', () => {
       appendEvent(f.lane.id, 'steered_packet', 'user', { message: 'new work' });
       return { ok: true, kind: 'typecheck', output: '' };
     };
-    ({ verify: seams.verify, context: seams.capture, interrupt: seams.interrupt })[stage].mockImplementationOnce(action);
+    const seam = ({ verify: seams.verify, context: seams.capture, interrupt: seams.interrupt })[stage];
+    seam.mockImplementationOnce(action);
     await f.run();
+    expect(seam).toHaveBeenCalledOnce();
     expect(getLane(f.lane.id)).toMatchObject({ status: 'running', sessionKey: f.lane.sessionKey });
     expect(f.dependencies.enqueueAutoReview).not.toHaveBeenCalled();
     expect(f.dependencies.triggerHeadlessSprintTick).not.toHaveBeenCalled();
@@ -120,6 +125,7 @@ describe('forced review through the server production handler', () => {
       return { ok: true, kind: 'typecheck', output: '' };
     });
     await f.run();
+    expect(seams.verify).toHaveBeenCalledOnce();
     expect(seams.interrupt).not.toHaveBeenCalled();
     expect(f.dependencies.enqueueAutoReview).not.toHaveBeenCalled();
     expect(control.readOrchestratorControlPlaneState().packets[0].operatorStopped).toBe(true);

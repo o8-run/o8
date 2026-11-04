@@ -32,7 +32,7 @@ import {
   isBroadcastVoiceClockTime,
   isBroadcastVoiceQuietHoursMode,
 } from '@/lib/operator/broadcast-commentary-defaults';
-import { botRailUpdate, isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
+import { botRailUpdate, isNativeKeybindings, isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
 import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/operator/judgment-default';
 import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED, JUDGMENT_BETA_END_DATE_EXPECTED } from '@/lib/operator/judgment-allowance-default';
 import { resolveJudgmentPath } from '@/lib/judgment/route';
@@ -293,6 +293,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('composerEnterQueues must be boolean.');
     }
     update.composerEnterQueues = body.composerEnterQueues;
+  }
+  if (body.nativeKeybindings !== undefined) {
+    if (!isNativeKeybindings(body.nativeKeybindings)) {
+      throw new Error('nativeKeybindings must be a list of unique "command=chord" entries.');
+    }
+    update.nativeKeybindings = [...body.nativeKeybindings];
   }
   if (body.presentationQuietMode !== undefined) {
     if (typeof body.presentationQuietMode !== 'boolean') {

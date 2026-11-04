@@ -726,21 +726,32 @@ fn editor_undo_and_redo_steps_restore_each_state(cx: &mut TestAppContext) {
     large_file_tests::undo_steps_restore_each_state(cx);
 }
 #[gpui::test]
+fn large_file_edit_on_line_999_999_reads_back(cx: &mut TestAppContext) {
+    large_file_tests::edit_line_999_999(cx);
+}
+#[gpui::test]
 fn large_file_above_the_cap_opens_read_only_with_a_banner(cx: &mut TestAppContext) {
     large_file_tests::read_only_above_the_cap(cx);
 }
-/// Regression bound for #5310. Debug builds measured about 0.7 s to open and
-/// 16 ms per middle keystroke; before virtualisation a keystroke took ~50 s.
-/// The bounds leave room for slower shared CI runners.
+/// Regression bound for #5310, from the receipt in a debug-profile test build:
+/// open about 0.7 s, edit open about 40 ms, scroll and keystroke p95 under
+/// 8 ms, colors for the last line 40-50 ms after it scrolls into view. Before virtualisation a keystroke
+/// took about 50 s. Scroll and keystrokes must stay within two 16 ms frames on
+/// shared CI runners; open and colors keep at least 3x headroom.
 #[gpui::test]
 fn large_file_one_million_lines_stays_within_bounds(cx: &mut TestAppContext) {
     let receipt = large_file_tests::measure(1_000_000, cx);
     large_file_tests::print(&receipt);
-    assert!(receipt.open_ms < 5_000., "open {:.0}ms", receipt.open_ms);
+    assert!(receipt.open_ms < 2_000., "open {:.0}ms", receipt.open_ms);
     assert!(
-        receipt.edit_open_ms < 2_000.,
+        receipt.edit_open_ms < 500.,
         "edit open {:.0}ms",
         receipt.edit_open_ms
+    );
+    assert!(
+        receipt.colors_end_ms < 250.,
+        "colors in view {:.0}ms",
+        receipt.colors_end_ms
     );
     for (name, ms) in [
         ("scroll middle", receipt.scroll_middle_ms),
@@ -750,6 +761,6 @@ fn large_file_one_million_lines_stays_within_bounds(cx: &mut TestAppContext) {
         ("middle keystroke p95", receipt.key_p95_ms),
         ("middle backspace p95", receipt.backspace_p95_ms),
     ] {
-        assert!(ms < 250., "{name} {ms:.0}ms");
+        assert!(ms < 32., "{name} {ms:.1}ms");
     }
 }
