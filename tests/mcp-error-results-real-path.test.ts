@@ -70,7 +70,7 @@ function toolCaller(child: ChildProcessWithoutNullStreams) {
   });
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 describe('MCP failure text through the server entrypoints', () => {
   for (const serverName of ['cortex', 'operator']) {
@@ -239,6 +239,9 @@ globalThis.fetch = (url, init) => new Promise((resolve, reject) => {
 
   it('hides webview and directory bridge exceptions through registered operator tools', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    // #4789 refuses to fall back to the installed app socket under an isolated data dir,
+    // so name a fixture socket; the bridge calls below are stubbed and never connect.
+    vi.stubEnv('O8_TAURI_MCP_SOCKET', join(tmpdir(), 'o8-mcp-error-results-fixture.sock'));
     vi.spyOn(O8WebviewClient.prototype, 'screenshot').mockRejectedValue(new Error(marker));
     vi.spyOn(O8WebviewClient.prototype, 'inspectDirectoryDialog').mockRejectedValue(new Error(marker));
     vi.spyOn(O8WebviewClient.prototype, 'evalJs').mockResolvedValue({ result: JSON.stringify({ ok: false, error: marker }) });

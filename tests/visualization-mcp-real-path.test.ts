@@ -23,11 +23,12 @@ function req(message: unknown, profile = 'visualizations') {
 describe('visualization tools use the actual MCP route and narrow profile', () => {
   it('advertises only visualization tools, refuses dispatch, and intersects the server profile', async () => {
     const list = async () => (await (await POST(req({ jsonrpc: '2.0', id: 1, method: 'tools/list' }))).json()).result.tools;
-    expect((await list()).map((tool: { name: string }) => tool.name)).toEqual(['o8_html_preview', 'o8_html_render', 'o8_visualization_read']);
+    expect((await list()).map((tool: { name: string }) => tool.name)).toEqual(['o8_html_preview', 'o8_html_render', 'o8_visualization_read', 'o8_result_page']);
     const denied = await (await POST(req({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'dispatch_mission', arguments: {} } }))).json();
     expect(denied.result.isError).toBe(true);
     vi.stubEnv('O8_OPERATOR_MCP_PROFILE', 'dogfood');
-    expect(await list()).toEqual([]);
+    // #4834: every profile carries the result-page reader, which reads only results of tools the profile allows.
+    expect((await list()).map((tool: { name: string }) => tool.name)).toEqual(['o8_result_page']);
     vi.stubEnv('O8_OPERATOR_MCP_PROFILE', 'typo');
     expect(await list()).toEqual([]);
   });

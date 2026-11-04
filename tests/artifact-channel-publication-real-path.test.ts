@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { afterEach, expect, it } from 'vitest';
+import { copyRuntimeArchive, runtimeFixtureUpdaterKey } from './helpers/signed-runtime-archive';
 const roots: string[] = [];
 const source = join(process.cwd(), 'tests/fixtures/build-channel');
 function fixture(channel: 'stable' | 'beta') {
@@ -23,8 +24,8 @@ function fixture(channel: 'stable' | 'beta') {
   );
   mkdirSync(mac, { recursive: true });
   const archive = join(mac, 'o8.app.tar.gz');
-  copyFileSync(join(source, `${channel}.tar.gz`), archive);
-  copyFileSync(join(source, `${channel}.tar.gz.sig`), archive + '.sig');
+  // #5034: add the packaged server inputs release verification requires, re-signed with the fixture key.
+  copyRuntimeArchive(join(source, `${channel}.tar.gz`), archive, archive + '.sig');
   const extract = spawnSync('tar', ['xzf', archive, '-C', mac]);
   expect(extract.status).toBe(0);
   mkdirSync(join(root, 'src-tauri/helpers'), { recursive: true });
@@ -46,7 +47,7 @@ function fixture(channel: 'stable' | 'beta') {
     JSON.stringify({
       plugins: {
         updater: {
-          pubkey: readFileSync(join(source, 'public-key.txt'), 'utf8'),
+          pubkey: runtimeFixtureUpdaterKey,
         },
       },
     }),

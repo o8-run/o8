@@ -4,13 +4,15 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import path from 'node:path';
-import { act, createElement, useState, type HTMLAttributes, type ReactNode } from 'react';
+import { act, createElement, Fragment, useState, type HTMLAttributes, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { ProjectsSwitcher } from '@/components/desktop/agent-panel/ProjectsSwitcher';
+import { AddRepoFlowHost } from '@/components/desktop/repo-registry/AddRepoFlowHost';
 import { useProjects } from '@/components/desktop/repo-registry/useProjects';
 import { GET as readLedger } from '@/app/api/panel/projects/route';
+import { PATCH as editLedgerProject } from '@/app/api/panel/projects/[id]/route';
 import { POST as activate } from '@/app/api/panel/projects/active/route';
 import { GET as listProjects, POST as createProject } from '@/app/api/projects/route';
 import { GET as readProject, PATCH as editProject } from '@/app/api/projects/[id]/route';
@@ -50,10 +52,8 @@ let project: ProjectWithRepos;
 let server: Server;
 let sourceUrl: string;
 let secondUrl: string;
-let staleUrl: string;
-let missingUrl: string;
 let clonePosts: number;
-let failLink: boolean;
+let failLink: number;
 let loseCloneResponse: boolean;
 let githubAuthenticated: boolean;
 
@@ -73,6 +73,10 @@ async function routedFetch(input: RequestInfo | URL, init?: RequestInit): Promis
   if (url.searchParams.get('source') === 'github') return Response.json({ repos: [{ full_name: 'fixture/library', clone_url: 'https://github.com/fixture/library.git', private: true }] });
   if (url.pathname === '/api/panel/projects') return readLedger();
   if (url.pathname === '/api/panel/projects/active') return activate(req);
+  if (url.pathname.startsWith('/api/panel/projects/')) {
+    if (failLink > 0) { failLink -= 1; return Response.json({ error: 'Project link unavailable' }, { status: 503 }); }
+    return editLedgerProject(req, { params: Promise.resolve({ id: decodeURIComponent(url.pathname.split('/')[4]) }) });
+  }
   if (url.pathname === '/api/panel/repos/init') return initRepository(req);
   if (url.pathname === '/api/panel/repos') {
     if (init?.method !== 'POST') return listRegistry(req);
@@ -85,7 +89,7 @@ async function routedFetch(input: RequestInfo | URL, init?: RequestInit): Promis
   if (url.pathname === '/api/projects') return init?.method === 'POST' ? createProject(req) : listProjects(req);
   const parts = url.pathname.split('/'); const context = { params: Promise.resolve({ id: parts[3] }) };
   if (parts[2] === 'projects' && parts[4] === 'repos') {
-    if (failLink) { failLink = false; return Response.json({ error: 'Project link unavailable' }, { status: 503 }); }
+    if (failLink > 0) { failLink -= 1; return Response.json({ error: 'Project link unavailable' }, { status: 503 }); }
     return linkRepo(req, context);
   }
   if (parts[2] === 'projects') return init?.method === 'PATCH' ? editProject(req, context) : readProject(req, context);
@@ -93,12 +97,15 @@ async function routedFetch(input: RequestInfo | URL, init?: RequestInit): Promis
 }
 function Harness() {
   const projects = useProjects(); const [inventory, setInventory] = useState(repos);
-  return createElement(ProjectsSwitcher, {
+  const refresh = async () => { setInventory(await listReposFresh()); };
+  // Add repository opens the dashboard's add flow the way AgentPanel does (#4845).
+  const addRepo = (localPath?: string) => { window.dispatchEvent(new CustomEvent('o8:open-add-repo-flow', { detail: { localPath } })); };
+  return createElement(Fragment, null, createElement(ProjectsSwitcher, {
     projects: projects.ledger?.projects ?? [], activeProjectId: projects.ledger?.activeProjectId ?? null,
     selectedRepoPath: null, registeredRepoByPath: new Map(inventory.map((repo) => [repo.localPath, repo])),
-    onProjectSelect: (selected) => projects.switchActive(selected.id), onRepoSelect: () => {}, onManageProjects: () => {}, onAddRepo: () => {},
-    onRepositoryConnected: async () => { setInventory(await listReposFresh()); },
-  });
+    onProjectSelect: (selected) => projects.switchActive(selected.id), onRepoSelect: () => {}, onManageProjects: () => {}, onAddRepo: addRepo,
+    onRepositoryConnected: refresh,
+  }), createElement(AddRepoFlowHost, { onRepoAdded: refresh }));
 }
 function button(label: string) {
   const scope = document.querySelector('[role="dialog"]') ?? document;
@@ -114,10 +121,16 @@ async function type(label: string, value: string) {
   const input = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!; expect(input).not.toBeNull();
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
 }
-async function openSource(label: string) {
-  await click('Add repository');
-  const item = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((node) => node.textContent?.startsWith(label))!;
-  expect(item).toBeDefined(); await act(async () => item.click());
+// #4845: the Connected repositories and New repository sources live in the Switch project popover.
+async function openSource(entry: 'Connected repositories' | 'New repository') {
+  await click('Switch project');
+  const item = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((node) => node.textContent?.trim() === entry);
+  expect(item, entry).toBeDefined(); await act(async () => item!.click());
+}
+// #4845 removed the Git URL source; a Git URL pasted on Add repository opens the add flow with it.
+async function pasteGitUrl(value: string) {
+  const paste = Object.assign(new Event('paste', { bubbles: true, cancelable: true }), { clipboardData: { getData: (type: string) => type === 'text/plain' ? value : '' } });
+  await act(async () => { button('Add repository').dispatchEvent(paste); });
 }
 async function savedProject() {
   closeDb(); return (await (await readProject(request(`/api/projects/${project.id}`), { params: Promise.resolve({ id: project.id }) })).json() as { project: ProjectWithRepos }).project;
@@ -130,7 +143,7 @@ beforeAll(async () => {
   project = (await (await createProject(request('/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Sources', repoIds: [repos[0].id], roles: ['backend'] }) }))).json()).project;
   await activate(request('/api/panel/projects/active', { method: 'POST', body: JSON.stringify({ projectId: project.id }) }));
   const served = path.join(fixture.home, 'served'); mkdirSync(served);
-  for (const name of ['source', 'another', 'stale', 'missing']) { const folder = makeRepo(name); const bare = path.join(served, `${name}.git`); git(['clone', '--bare', folder, bare], fixture.home); git(['update-server-info'], bare); }
+  for (const name of ['source', 'another']) { const folder = makeRepo(name); const bare = path.join(served, `${name}.git`); git(['clone', '--bare', folder, bare], fixture.home); git(['update-server-info'], bare); }
   server = createServer((req, response) => {
     const relative = new URL(req.url!, 'http://localhost').pathname;
     if (relative.includes('..')) { response.writeHead(400).end(); return; }
@@ -139,10 +152,9 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as { port: number }).port;
   sourceUrl = `http://127.0.0.1:${port}/source.git`; secondUrl = `http://127.0.0.1:${port}/another.git`;
-  staleUrl = `http://127.0.0.1:${port}/stale.git`; missingUrl = `http://127.0.0.1:${port}/missing.git`;
 });
 beforeEach(async () => {
-  clonePosts = 0; failLink = false; loseCloneResponse = false; githubAuthenticated = true;
+  clonePosts = 0; failLink = 0; loseCloneResponse = false; githubAuthenticated = true;
   repos = await listReposFresh(); invalidateFetchOnce('/api/panel/projects');
   vi.stubGlobal('fetch', routedFetch); vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -154,7 +166,7 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 afterAll(async () => { await new Promise<void>((resolve) => server.close(() => resolve())); closeDb(); rmSync(fixture.home, { recursive: true, force: true }); });
 
 it('browses GitHub and reuses the connected SSH checkout without cloning or resetting its role', async () => {
-  await openSource('GitHub repository'); await until(() => !![...document.querySelectorAll('button')].find((node) => node.textContent?.includes('fixture/library')));
+  await openSource('Connected repositories'); await until(() => !![...document.querySelectorAll('button')].find((node) => node.textContent?.includes('fixture/library')));
   await click('Choose fixture/library'); await click('Add repository');
   await until(() => !document.querySelector('[role="dialog"]'));
   expect(clonePosts).toBe(0); expect((await listReposFresh()).filter((repo) => repo.id === repos[0].id)).toHaveLength(1);
@@ -162,19 +174,24 @@ it('browses GitHub and reuses the connected SSH checkout without cloning or rese
 });
 
 it('clones a Git URL to disk and retries a failed project link without another clone', async () => {
-  await openSource('Git URL'); await type('Repository URL', sourceUrl); failLink = true;
-  await click('Add repository'); await until(() => document.querySelector('[role="alert"]')?.textContent === 'Project link unavailable');
+  // The add flow retries a failed link once by itself before it offers Retry (#4845).
+  failLink = 2; await pasteGitUrl(sourceUrl);
+  await until(() => [...document.querySelectorAll('[role="dialog"] [role="status"]')].some((node) => node.textContent === 'Cloned. Link pending.'));
+  expect(document.querySelector('[role="dialog"] [role="alert"]')).toBeNull();
   const clone = (await listReposFresh()).find((repo) => repo.remoteUrl === sourceUrl)!;
   expect(clone).toBeDefined(); expect(readFileSync(path.join(clone.localPath, 'README.md'), 'utf8')).toBe('# source\n');
   expect(existsSync(path.join(clone.localPath, '.git'))).toBe(true); expect((await savedProject()).repos.some((link) => link.repoId === clone.id)).toBe(false);
-  await click('Retry connection'); await until(() => !document.querySelector('[role="dialog"]'));
+  await click('Retry'); await until(() => !document.querySelector('[role="dialog"]'));
   expect(clonePosts).toBe(1); expect((await savedProject()).repos.find((link) => link.repoId === clone.id)?.role).toBeNull();
 });
 
 it('recovers a durable clone whose response was lost without duplicating the checkout', async () => {
-  await openSource('Git URL'); await type('Repository URL', secondUrl); loseCloneResponse = true; await click('Add repository');
+  // GitHub is unreachable from the fixture, so the checkout the clone writes is already at its destination; the clone route reuses and registers it.
+  const remote = 'https://github.com/fixture/another.git'; const checkout = path.join(fixture.home, 'Developer', 'another');
+  git(['clone', path.join(fixture.home, 'served', 'another.git'), checkout], fixture.home); git(['remote', 'set-url', 'origin', remote], checkout);
+  await openSource('Connected repositories'); await type('Repository URL', remote); loseCloneResponse = true; await click('Add repository');
   await until(() => !document.querySelector('[role="dialog"]'));
-  const matches = (await listReposFresh()).filter((repo) => repo.remoteUrl === secondUrl);
+  const matches = (await listReposFresh()).filter((repo) => repo.remoteUrl === remote);
   expect(matches).toHaveLength(1); expect(clonePosts).toBe(1); expect((await savedProject()).repos.some((link) => link.repoId === matches[0].id)).toBe(true);
 });
 
@@ -189,7 +206,7 @@ it('creates a local Git repository from the source dialog and persists its proje
 
 it('rejects malformed addresses before any clone and offers the real connections settings when GitHub is disconnected', async () => {
   githubAuthenticated = false; const settings = vi.fn(); window.addEventListener(OPEN_SETTINGS_TAB_EVENT, settings);
-  await openSource('GitHub repository'); await until(() => document.querySelector('[role="dialog"]')?.textContent?.includes('Connect GitHub to browse') === true);
+  await openSource('Connected repositories'); await until(() => document.querySelector('[role="dialog"]')?.textContent?.includes('Connect GitHub to browse') === true);
   await type('Repository URL', 'https://gitlab.com/team/app'); await click('Add repository');
   await until(() => document.querySelector('[role="alert"]')?.textContent?.includes('GitHub repository URL') === true);
   expect(clonePosts).toBe(0); await click('GitHub connections');
@@ -207,13 +224,15 @@ it('refuses a clone destination occupied by another repository and leaves its fi
 });
 
 it.each(['changed', 'missing'])('verifies the actual checkout before reusing a %s registry entry', async (kind) => {
-  const folder = kind === 'changed' ? makeRepo('changed-checkout') : path.join(fixture.home, 'missing-checkout');
-  const remote = kind === 'changed' ? staleUrl : missingUrl;
-  if (kind === 'changed') git(['remote', 'add', 'origin', sourceUrl], folder);
+  // Registry reads adopt a checkout's actual origin (#4754), so a changed entry that reaches the connect
+  // flow is a folder that no longer holds a Git checkout. Neither entry's remote is cloned.
+  const folder = path.join(fixture.home, `${kind}-checkout`);
+  if (kind === 'changed') { mkdirSync(folder); writeFileSync(path.join(folder, 'README.md'), '# replaced\n'); }
+  const remote = `https://github.com/fixture/${kind === 'changed' ? 'stale' : 'missing'}.git`;
   const before = await listReposFresh();
   writeFileSync(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'repos.json'), JSON.stringify({ version: 1, repos: [...before, { id: `stale-${kind}`, name: kind, localPath: folder, remoteUrl: remote }] }));
   await listReposFresh();
-  await openSource('Git URL'); await type('Repository URL', remote); await click('Add repository');
+  await openSource('Connected repositories'); await type('Repository URL', remote); await click('Add repository');
   await until(() => document.querySelector('[role="alert"]')?.textContent?.includes('Local folder') === true);
   expect(clonePosts).toBe(0); expect((await savedProject()).repos.some((link) => link.repoId === `stale-${kind}`)).toBe(false);
   expect(existsSync(path.join(fixture.home, 'Developer', kind === 'changed' ? 'stale' : 'missing'))).toBe(false);

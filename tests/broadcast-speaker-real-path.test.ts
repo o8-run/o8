@@ -80,7 +80,8 @@ describe('Broadcast speaker real path', () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const stop = startBroadcastSpeakerLoop();
     try {
-      await vi.advanceTimersByTimeAsync(3_500);
+      // #5326: with voice off (the default) the loop polls on every 15th tick.
+      await vi.advanceTimersByTimeAsync(15_500);
       const speakerWarnings = warning.mock.calls.filter(([message]) => (
         String(message).startsWith('[broadcast-speaker]')
       ));

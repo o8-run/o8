@@ -53,8 +53,13 @@ vi.mock('node:child_process', () => ({
     },
   }),
 }));
-vi.mock('node:fs', () => ({ existsSync: () => true }));
-vi.mock('node:fs/promises', () => ({
+// The child-process store lock (#4280) and viewer redaction's ws-auth (#4773) need real fs in the isolated data dir.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, existsSync: (target: Parameters<typeof actual.existsSync>[0]) => String(target).startsWith('/fixture/') || actual.existsSync(target) };
+});
+vi.mock('node:fs/promises', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:fs/promises')>(),
   readFile: async () => replay.credential,
   stat: async () => ({ mtimeMs: replay.now, size: 1, isFile: () => true, isDirectory: () => true }),
 }));
@@ -80,6 +85,8 @@ function ghReads(kind?: string) {
 
 beforeEach(() => {
   vi.resetModules();
+  // Children no longer inherit GH_TOKEN (#4585), so drop the process-wide read cache to isolate each case.
+  delete (globalThis as { __o8WorkspaceGitHubReadsV1?: unknown }).__o8WorkspaceGitHubReadsV1;
   // New process identity isolates each case without exposing or changing a real credential.
   vi.stubEnv('GH_TOKEN', `fixture-${++replay.caseId}`);
   vi.stubEnv('CORTEX_IDE_REVIEW_REPO_ROOT', '/fixture/review');
@@ -213,12 +220,12 @@ describe('fresh command-center reads through the real workspace review and comma
     replay.branch = 'second';
     await read('/fixture/a', 'example/one');
     expect(ghReads('pr').filter((entry) => entry.args.includes('second'))).toHaveLength(1);
-    replay.credential = 'fixture-account-b';
-    await read('/fixture/a', 'example/one');
-    expect(ghReads('issue')).toHaveLength(3); // The explicit token still identifies the same account.
     vi.stubEnv('GH_TOKEN', 'another-fixture-token');
     await read('/fixture/a', 'example/one');
-    expect(ghReads('issue')).toHaveLength(4);
+    expect(ghReads('issue')).toHaveLength(3); // o8's gh reads never inherit an ambient GH_TOKEN (#4585).
+    replay.credential = 'fixture-account-b';
+    await read('/fixture/a', 'example/one');
+    expect(ghReads('issue')).toHaveLength(4); // gh's stored credential identifies the account.
   });
 
   it('isolates keychain-only changes and pins reads across an in-flight account switch', async () => {

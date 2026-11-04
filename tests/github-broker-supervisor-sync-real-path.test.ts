@@ -13,11 +13,15 @@ vi.mock('@/lib/github-broker/auth', () => ({
 
 const previousDataDir = process.env.CORTEX_IDE_DATA_DIR;
 const previousO8DataDir = process.env.O8_DATA_DIR;
+const previousAppKey = process.env.GITHUB_APP_PRIVATE_KEY;
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-github-supervisor-sync-'));
 const repoPath = path.join(dataDir, 'widgets');
 mkdirSync(repoPath, { recursive: true });
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
+// #4754: anonymous reads are never fresh until public access is confirmed, so model a repo
+// covered by a configured GitHub App. Auth is mocked, so this key is never used.
+process.env.GITHUB_APP_PRIVATE_KEY = 'fixture-github-app-key';
 writeFileSync(path.join(dataDir, 'repos.json'), JSON.stringify({
   version: 1,
   repos: [{
@@ -109,6 +113,8 @@ afterAll(() => {
   else process.env.CORTEX_IDE_DATA_DIR = previousDataDir;
   if (previousO8DataDir === undefined) delete process.env.O8_DATA_DIR;
   else process.env.O8_DATA_DIR = previousO8DataDir;
+  if (previousAppKey === undefined) delete process.env.GITHUB_APP_PRIVATE_KEY;
+  else process.env.GITHUB_APP_PRIVATE_KEY = previousAppKey;
 });
 
 describe('supervisor GitHub broker sync cadence', () => {

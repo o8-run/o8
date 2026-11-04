@@ -117,7 +117,8 @@ registerOwnedSessionLifecycleHandler({
 });
 
 function request(worktreeId: string, action: 'pr' | 'merge' | 'discard'): NextRequest {
-  return new NextRequest('http://o8.remote/api/worktrees/merge', {
+  // A paired device reaches the loopback server through the relay; #4814 refuses a non-loopback Host.
+  return new NextRequest('http://127.0.0.1/api/worktrees/merge', {
     method: 'POST',
     headers: {
       authorization: `Bearer ${deviceToken}`,
