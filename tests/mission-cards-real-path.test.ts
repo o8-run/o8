@@ -62,7 +62,7 @@ const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token')
 const { writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
 const { listQueuedComposerSends } = await import('@/lib/orchestrator/composer-queue');
 const { markThreadActionDelivered } = await import('@/lib/task-artifacts/service');
-const { mergeDurableMobileTranscriptEntries } = await import('@/lib/mobile/history');
+const { withMissionCardEntries } = await import('@/lib/task-artifacts/card-transcript');
 const { closeDb } = await import('@/lib/db');
 
 const BASE = 'http://localhost:3001/api/task-artifacts';
@@ -136,6 +136,9 @@ describe('mission cards — real path', () => {
     const transcript = await readCards(`llm-chat:${threadId}`);
     expect(transcript.map((entry) => entry.id)).toEqual(['u1', 'a1', `card-${approveId}`]);
     expect(transcript[2]).toMatchObject({ type: 'card', card: { id: approveId, state: 'open', receipt: null } });
+    // Id-based delta readers (the unpaged tail mobile sync uses) never see cards.
+    const tail = await history.GET(req(`http://localhost:3001/api/mobile/history?sessionKey=llm-chat:${threadId}&limit=6`));
+    expect(((await tail.json()) as { transcript: CardEntry[] }).transcript.map((entry) => entry.id)).toEqual(['u1', 'a1']);
   });
 
   it('a decision reaches the lead as structured context exactly once, and dissolves into a receipt', async () => {
@@ -146,9 +149,10 @@ describe('mission cards — real path', () => {
 
     const res = await decide(approveId, { actionId: 'approve', entityIds: [`packet:${packetId}`], routing: ROUTING });
     expect(res.status).toBe(200);
-    const body = await res.json() as { result: { deliverVia: string; action: { id: string; delivery: string }; card: { state: string; summary: string } } };
+    const body = await res.json() as { result: { deliverVia: string; action: { id: string; delivery: string; deliveryNote: string }; card: { state: string; summary: string } } };
     expect(body.result.deliverVia).toBe('queue');
-    expect(body.result.action.delivery).toBe('delivered');
+    // Queued for the lead is not yet delivered; the receipt names the queue item.
+    expect(body.result.action).toMatchObject({ delivery: 'accepted', deliveryNote: `queued for the lead as ${body.result.action.id}` });
     expect(body.result.card.state).toBe('decided');
     expect(body.result.card.summary).toMatch(/^Approve · Merge cards packet\? · by operator at \d\d:\d\d UTC$/);
 
@@ -164,7 +168,7 @@ describe('mission cards — real path', () => {
     });
     expect(getLaneEvents(lane.id, 50)).toEqual(expect.arrayContaining([expect.objectContaining({
       verb: 'card.decision', actor: 'user',
-      payload: expect.objectContaining({ cardId: approveId, actionId: 'approve', receiptId: body.result.action.id, delivery: 'delivered' }),
+      payload: expect.objectContaining({ cardId: approveId, actionId: 'approve', receiptId: body.result.action.id, delivery: 'accepted' }),
     })]));
 
     const again = await decide(approveId, { actionId: 'deny', routing: ROUTING });
@@ -199,12 +203,27 @@ describe('mission cards — real path', () => {
     const chooseId = await createCard({ title: 'Pick a retry', card: { kind: 'choose', actions: [{ id: 'rerun', label: 'Re-run CI' }, { id: 'skip', label: 'Skip' }], entityIds: [`packet:${packetId}`] } }, mintPacketWorkerToken(packetId));
     // The history route merges this onto the packet session's runtime tail; the
     // fixture session has no runtime process, so read the merge step directly.
-    expect(mergeDurableMobileTranscriptEntries('codex-owned:card-fixture', []).map((entry) => entry.id)).toEqual([`card-${chooseId}`]);
+    expect(withMissionCardEntries('codex-owned:card-fixture', []).map((entry) => entry.id)).toEqual([`card-${chooseId}`]);
+    // A worker card names only its own packet.
+    const foreign = await create.POST(req(BASE, { method: 'POST', token: mintPacketWorkerToken(packetId), body: { title: 'x', card: { kind: 'approve', entityIds: ['packet:pkt-someone-else'] } } }));
+    expect(foreign.status).toBe(403);
+    // A failed steer does not decide the card; the operator may decide again.
+    steerPacketMock.mockRejectedValueOnce(new Error('worker session gone'));
+    const failed = await (await decide(chooseId, { actionId: 'skip' })).json() as { result: { action: { delivery: string }; card: { state: string } } };
+    expect(failed.result.action.delivery).toBe('failed');
+    expect(withMissionCardEntries('codex-owned:card-fixture', [])[0].card).toMatchObject({ state: 'open' });
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
     const res = await decide(chooseId, { actionId: 'rerun' });
     const body = await res.json() as { result: { deliverVia: string; action: { delivery: string } } };
     expect(body.result).toMatchObject({ deliverVia: 'packet', action: { delivery: 'delivered' } });
-    expect(steerPacketMock).toHaveBeenCalledTimes(1);
-    expect(steerPacketMock.mock.calls[0][0].message).toContain('"actionId": "rerun"');
+    expect(steerPacketMock).toHaveBeenCalledTimes(2);
+    expect(steerPacketMock.mock.calls[1][0].message).toContain('"actionId": "rerun"');
+  });
+
+  it('two concurrent decisions on one card: exactly one is accepted', async () => {
+    const cardId = await createCard({ title: 'Ship which?', threadId, repoPath: repo, card: { kind: 'choose', actions: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] } });
+    const replies = await Promise.all([decide(cardId, { actionId: 'a' }), decide(cardId, { actionId: 'b' })]);
+    expect(replies.map((reply) => reply.status).sort()).toEqual([200, 422]);
   });
 
   it('an expired card takes no decision and reads as an expiry receipt', async () => {

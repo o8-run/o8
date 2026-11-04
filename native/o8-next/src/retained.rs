@@ -191,7 +191,12 @@ impl RowState {
             return;
         }
         match &self.mission_card {
-            Some(card) => card.borrow_mut().set_routing(routing),
+            // A transcript without routing never clears one another view supplied.
+            Some(card) => {
+                if routing.is_some() {
+                    card.borrow_mut().set_routing(routing)
+                }
+            }
             None => {
                 self.mission_card = Some(Rc::new(RefCell::new(
                     crate::mission_card::CardState::new(client.clone(), routing),

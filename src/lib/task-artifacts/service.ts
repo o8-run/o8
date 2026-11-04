@@ -147,6 +147,12 @@ export async function createTaskArtifact(input: CreateTaskArtifactInput, ctx: Re
     if (!actions.ok) throw new TaskArtifactError('invalid_actions', 'Declared actions are invalid.', 400, actions.errors);
     declared = actions.actions;
   }
+  // A worker's card may name only its own packet, so it cannot speak on, or
+  // write events to, another packet's mission stream.
+  if (card && ctx.role === 'worker') {
+    const foreign = card.entityIds.find((id) => id.startsWith('packet:') && id !== `packet:${ctx.packetId}`);
+    if (foreign) throw new TaskArtifactError('forbidden', `A worker card may not name ${foreign}.`, 403);
+  }
   // A card is decided once or expires; it does not freeze when HEAD moves.
   const headPolicy: TaskArtifactHeadPolicy = card || input.headPolicy === 'any' ? 'any' : 'pinned';
 
@@ -540,10 +546,10 @@ export async function submitTaskArtifactAction(id: string, input: SubmitTaskArti
         intent: 'send-next',
         payload: { text: message.displayMessage, wireMessage: message.wireMessage, images: [], routing: input.routing },
       });
+      // Queued is not delivered: the receipt stays accepted, with the queue identity.
       const note = `queued for the lead as ${queued.id}`;
-      const deliveredAt = nowIso();
-      transitionTaskArtifactActionDelivery({ actionId: row.id, from: 'accepted', to: 'delivered', note, deliveredAt });
-      row.delivery = 'delivered'; row.deliveryNote = note; row.deliveredAt = deliveredAt;
+      transitionTaskArtifactActionDelivery({ actionId: row.id, from: 'accepted', to: 'accepted', note, deliveredAt: null });
+      row.deliveryNote = note;
       cardDecisionEvent();
       console.log(`${LOG} queued ${row.id} on ${record.id} → thread ${record.target.threadId}`);
       return { accepted: true, action: row, deliverVia: 'queue', ...message, ...(record.card ? { card: cardView() } : {}) };

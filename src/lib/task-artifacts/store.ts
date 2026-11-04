@@ -146,10 +146,13 @@ export function listMissionCardsByPacket(packetId: string, limit = 100): TaskArt
   return rows.map(rowToArtifact);
 }
 
-/** The one accepted decision a card took, if any. Rejected submissions never decide a card. */
+/**
+ * The one decision a card took, if any. Rejected submissions never decide a
+ * card, and a decision whose delivery failed may be made again.
+ */
 export function acceptedCardDecision(artifactId: string): TaskArtifactActionRecord | null {
   const row = getSqlite().prepare(
-    "SELECT * FROM task_artifact_actions WHERE artifact_id = ? AND delivery <> 'rejected' ORDER BY created_at ASC, id ASC LIMIT 1",
+    "SELECT * FROM task_artifact_actions WHERE artifact_id = ? AND delivery IN ('accepted', 'delivered') ORDER BY created_at ASC, id ASC LIMIT 1",
   ).get(artifactId) as ActionRow | undefined;
   return row ? rowToAction(row) : null;
 }

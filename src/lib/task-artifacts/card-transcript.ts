@@ -54,3 +54,19 @@ export function missionCardTranscriptEntries(sessionKey: string): MobileTranscri
   }
   return entries;
 }
+
+/**
+ * Place a session's cards in its full transcript by time. Only the paged
+ * history read (the native transcript) carries cards: their entry id is stable
+ * while their state changes, so id-based deltas such as mobile sync must not.
+ */
+export function withMissionCardEntries(sessionKey: string, transcript: MobileTranscriptEntry[]): MobileTranscriptEntry[] {
+  const cards = missionCardTranscriptEntries(sessionKey);
+  if (cards.length === 0) return transcript;
+  const at = (entry: MobileTranscriptEntry) => (typeof entry.timestamp === 'number' && Number.isFinite(entry.timestamp)
+    ? entry.timestamp : Number.NEGATIVE_INFINITY);
+  return [...transcript.filter((entry) => entry.type !== 'card'), ...cards]
+    .map((entry, index) => ({ entry, index }))
+    .sort((left, right) => at(left.entry) - at(right.entry) || left.index - right.index)
+    .map(({ entry }) => entry);
+}

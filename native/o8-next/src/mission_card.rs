@@ -120,9 +120,13 @@ impl CardState {
         }
         true
     }
-    /// The view to draw: the newest decision reply, else the server row.
+    /// The view to draw: a settled decision reply, else the server row, which
+    /// a reload refreshes (an open reply never hides a later server state).
     pub fn view(&self, row: &Value) -> Value {
-        self.latest.clone().unwrap_or_else(|| row.clone())
+        self.latest
+            .clone()
+            .filter(|card| card["state"] != "open")
+            .unwrap_or_else(|| row.clone())
     }
 }
 
