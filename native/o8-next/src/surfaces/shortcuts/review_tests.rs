@@ -68,14 +68,7 @@ fn terminal_shell_with_peer(
     cx: &mut TestAppContext,
     report_input: bool,
 ) -> (GridHost, Entity<Shell>, VisualTestContext) {
-    let root = std::env::temp_dir().join(format!(
-        "o8-shortcuts-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let root = crate::shell::test_support::scratch_path("o8-shortcuts");
     fs::create_dir(&root).unwrap();
     let root = fs::canonicalize(root).unwrap();
     let child = Process::new("node")

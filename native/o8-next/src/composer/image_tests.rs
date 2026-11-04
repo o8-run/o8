@@ -159,7 +159,7 @@ fn native_image_platform_drop_png_and_remove_before_queue(cx: &mut TestAppContex
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     image_session(cx, &surface);
-    let path = std::env::temp_dir().join(format!("o8-drop-{}.png", std::process::id()));
+    let path = crate::shell::test_support::scratch_path("o8-drop").with_extension("png");
     fs::write(&path, png()).unwrap();
     let position = cx.debug_bounds("composer-input").unwrap().center();
     cx.simulate_event(FileDropEvent::Entered {
@@ -370,7 +370,7 @@ fn native_video_drop_attaches_by_path_and_sends_the_path(cx: &mut TestAppContext
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     image_session(cx, &surface);
-    let dir = std::env::temp_dir().join(format!("o8-drop-files-{}", std::process::id()));
+    let dir = crate::shell::test_support::scratch_path("o8-drop-files");
     fs::create_dir_all(&dir).unwrap();
     let video = dir.join("screen recording.mov");
     let log = dir.join("build.log");
@@ -433,7 +433,7 @@ fn check_file_remove_press(key: &str, cx: &mut TestAppContext) {
     let (surface, cx) = open(cx, &fixture);
     image_session(cx, &surface);
     cx.simulate_input("Keep the file draft");
-    let dir = std::env::temp_dir().join(format!("o8-file-keys-{}-{key}", std::process::id()));
+    let dir = crate::shell::test_support::scratch_path(&format!("o8-file-keys-{key}"));
     fs::create_dir_all(&dir).unwrap();
     let files = vec![dir.join("recording.mov"), dir.join("notes.log")];
     for path in &files {
@@ -522,7 +522,7 @@ fn native_mixed_image_folder_drop_keeps_rejection_feedback(cx: &mut TestAppConte
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     image_session(cx, &surface);
-    let dir = std::env::temp_dir().join(format!("o8-mixed-folder-{}", std::process::id()));
+    let dir = crate::shell::test_support::scratch_path("o8-mixed-folder");
     fs::create_dir_all(&dir).unwrap();
     let picture = dir.join("picture.png");
     fs::write(&picture, png()).unwrap();

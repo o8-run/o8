@@ -3,10 +3,7 @@ use super::*;
 use std::{
     io::{BufRead, BufReader},
     process::{Child, Stdio},
-    sync::atomic::{AtomicU64, Ordering},
 };
-
-static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
 pub(super) struct Fixture {
     child: Child,
@@ -16,15 +13,7 @@ pub(super) struct Fixture {
 }
 impl Fixture {
     pub(super) fn new() -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "o8-files-{}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
-        ));
+        let root = crate::shell::test_support::scratch_path("o8-files");
         fs::create_dir_all(&root).unwrap();
         let root = fs::canonicalize(root).unwrap();
         let mut child = Command::new("node")

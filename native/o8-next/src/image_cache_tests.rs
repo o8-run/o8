@@ -59,7 +59,7 @@ fn grid_image_history_decodes_user_and_assistant_images(cx: &mut TestAppContext)
         .into_iter()
         .find(|s| s.id == "thoughts-image-fixture")
         .unwrap();
-    let file = std::env::temp_dir().join(format!("o8-image-grid-{}.json", fixture.0.id()));
+    let file = crate::shell::test_support::scratch_path("o8-image-grid").with_extension("json");
     let options = crate::pane_layout::Options {
         size: 1,
         workspace: session.repo_path.unwrap(),

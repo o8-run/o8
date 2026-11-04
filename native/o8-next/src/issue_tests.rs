@@ -22,14 +22,7 @@ impl Fixture {
         Self::with_flags(worker, &[])
     }
     fn with_flags(worker: bool, flags: &[&str]) -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "o8-issues-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = crate::shell::test_support::scratch_path("o8-issues");
         fs::create_dir(&root).unwrap();
         let root = fs::canonicalize(root).unwrap();
         let mut command = Process::new("node");

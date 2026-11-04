@@ -20,14 +20,7 @@ impl Fixture {
         Self::with_terminals(false)
     }
     fn with_terminals(terminals: bool) -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "o8-pane-grid-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = crate::shell::test_support::scratch_path("o8-pane-grid");
         fs::create_dir(&root).unwrap();
         let mut server = Command::new("node")
             .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))

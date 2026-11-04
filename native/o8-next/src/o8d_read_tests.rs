@@ -19,7 +19,7 @@ impl Drop for Fixture {
 #[gpui::test]
 fn saved_history_surface_with_only_o8d(cx: &mut TestAppContext) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let directory = std::env::temp_dir().join(format!("o8d-native-read-{}", std::process::id()));
+    let directory = crate::shell::test_support::scratch_path("o8d-native-read");
     std::fs::create_dir(&directory).unwrap();
     std::fs::write(directory.join("fixture-owner"), "o8d-native-read/v1").unwrap();
     let seeded = Command::new("node")

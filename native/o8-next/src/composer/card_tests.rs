@@ -420,7 +420,7 @@ fn native_composer_review_canonical_receipt_accepts_temp_directory_alias(cx: &mu
             .clone()
             .unwrap()
     });
-    let alias = std::env::temp_dir().join(format!("o8-composer-alias-{}", std::process::id()));
+    let alias = crate::shell::test_support::scratch_path("o8-composer-alias");
     std::os::unix::fs::symlink(&repo, &alias).unwrap();
     assert_eq!(
         fs::canonicalize(&alias).unwrap(),
