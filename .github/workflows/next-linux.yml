@@ -42,6 +42,22 @@ jobs:
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-run
       - name: Run native CLI assertions
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --test shell_cli --test pane_grid_cli --test terminal_cli --test diff_cli
+      # The helper requires WebKit's bubblewrap sandbox. Ubuntu 24.04 restricts
+      # unprivileged user namespaces and, unlike later releases, ships no
+      # AppArmor exception for bwrap. Lift the restriction on this runner only
+      # when bwrap cannot create a namespace; the app itself is unchanged.
+      - name: Allow the WebKit sandbox to create user namespaces
+        run: |
+          cargo build --release --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next-viz-render
+          test -x native/o8-next/target/release/o8-next-viz-render
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+          if bwrap --unshare-user --ro-bind / / true; then
+            echo "bwrap can create a user namespace"
+          else
+            echo "bwrap cannot create a user namespace; lifting the AppArmor restriction on this runner"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            bwrap --unshare-user --ro-bind / / true
+          fi
       - name: Render Linux visualization cards through the helper process
         env:
           O8_NEXT_NATIVE_BINARY: ${{ github.workspace }}/native/o8-next/target/release/o8-next-viz-render
