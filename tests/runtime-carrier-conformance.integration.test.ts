@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -179,7 +179,11 @@ describe('registered runtime carrier conformance', () => {
         'adapter unexpectedly accepted an impossible cwd during the pre-effect smoke');
       const nativeCredentialRefusal = runtime === 'claude-code' && launch.sideEffect === 'none'
         && launch.note.startsWith('worker_not_authenticated:');
-      requireContract(runtime, 'dispatch-adapter-pre-effect', nativeCredentialRefusal
+      // Built-in Pi resolves its cwd before it creates a session, so it refuses earlier than the readiness boundary.
+      const piSessions = process.env.O8_OWNED_PI_BUILTIN_ROOT || join(dataDir, 'owned-pi-builtin');
+      const piCwdRefusal = runtime === 'pi-builtin' && launch.sideEffect === 'none' && launch.note.includes(impossibleCwd)
+        && (!existsSync(piSessions) || readdirSync(piSessions).length === 0);
+      requireContract(runtime, 'dispatch-adapter-pre-effect', nativeCredentialRefusal || piCwdRefusal
         || launch.note.includes('Fixture reached the pre-spawn dispatch boundary.'),
         `impossible-cwd smoke could not prove it stayed pre-effect: ${launch.note}`);
     }, 30_000);
