@@ -29,6 +29,8 @@ export interface PresentationDefaults {
   notificationsReviewReady: ReviewReadyNotifications;
   /** Composer: Enter queues a follow-up while a thread runs (default: Enter steers). */
   composerEnterQueues: boolean;
+  /** o8 next global shortcut overrides as `command=chord`; this machine's overrides stay native. */
+  nativeKeybindings: string[];
 }
 
 export const PRESENTATION_FALLBACK: PresentationDefaults = {
@@ -36,6 +38,7 @@ export const PRESENTATION_FALLBACK: PresentationDefaults = {
   botRailEnabledIds: [],
   notificationsReviewReady: 'on',
   composerEnterQueues: false,
+  nativeKeybindings: [],
 };
 
 export function isReviewReadyNotifications(value: unknown): value is ReviewReadyNotifications {
@@ -44,6 +47,21 @@ export function isReviewReadyNotifications(value: unknown): value is ReviewReady
 
 export function isBotRailEnabledIds(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(id => typeof id === 'string' && id.length > 0);
+}
+
+/** Each entry is `command=chord`, one per command, such as `shell.palette=cmd-j`. */
+export function isNativeKeybindings(value: unknown): value is string[] {
+  if (!Array.isArray(value) || value.length > 200) return false;
+  const commands = new Set<string>();
+  return value.every(entry => {
+    if (typeof entry !== 'string' || entry.length > 200) return false;
+    const split = entry.indexOf('=');
+    if (split <= 0 || split === entry.length - 1) return false;
+    const command = entry.slice(0, split);
+    if (commands.has(command)) return false;
+    commands.add(command);
+    return true;
+  });
 }
 
 /** Shared normalization for the existing Settings mutation path. */
@@ -67,6 +85,7 @@ export function resolveStoredPresentation(
   if (typeof stored.composerEnterQueues === 'boolean') {
     result.composerEnterQueues = stored.composerEnterQueues;
   }
+  if (isNativeKeybindings(stored.nativeKeybindings)) result.nativeKeybindings = [...stored.nativeKeybindings];
   return result;
 }
 
@@ -84,6 +103,7 @@ export function presentationSettingSources(
     presentationQuietMode: stored.presentationQuietMode !== undefined ? 'file' : 'default',
     notificationsReviewReady: stored.notificationsReviewReady !== undefined ? 'file' : 'default',
     composerEnterQueues: stored.composerEnterQueues !== undefined ? 'file' : 'default',
+    nativeKeybindings: stored.nativeKeybindings !== undefined ? 'file' : 'default',
   };
 }
 
@@ -109,6 +129,12 @@ export function applyPresentationUpdate(
       throw new Error('composerEnterQueues must be boolean.');
     }
     stored.composerEnterQueues = update.composerEnterQueues;
+  }
+  if (update.nativeKeybindings !== undefined) {
+    if (!isNativeKeybindings(update.nativeKeybindings)) {
+      throw new Error('nativeKeybindings must be a list of unique "command=chord" entries.');
+    }
+    stored.nativeKeybindings = [...update.nativeKeybindings];
   }
 }
 

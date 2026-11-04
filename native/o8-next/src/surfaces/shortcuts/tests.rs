@@ -6,6 +6,8 @@ use crate::shell::*;
 mod bindings;
 #[path = "modal_tests.rs"]
 mod modal;
+#[path = "editor_tests.rs"]
+mod editor_tests;
 
 fn shortcuts_draw(cx: &mut VisualTestContext) {
     cx.run_until_parked();
