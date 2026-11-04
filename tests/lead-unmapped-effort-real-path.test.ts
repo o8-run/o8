@@ -85,11 +85,11 @@ afterEach(async () => {
 });
 afterAll(async () => { (await import('@/lib/db')).closeDb(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
-it.each(['acp', 'sdk', 'built-in'] as const)('refuses every independent concrete pin before %s submits a turn', async kind => {
+it('refuses every independent concrete pin before ACP submits a turn', async () => {
   for (const thinkingEffort of MANUAL_THINKING_EFFORTS) {
-    const backend = kind === 'acp' ? acp() : kind === 'sdk' ? pi() : textOnly();
+    const backend = acp();
     const events: OrchestratorEvent[] = [];
-    await backend.sendTurn(repo, 'Fixture task', event => events.push(event), { thinkingEffort, threadId: `refuse-${kind}-${thinkingEffort}` });
+    await backend.sendTurn(repo, 'Fixture task', event => events.push(event), { thinkingEffort, threadId: `refuse-acp-${thinkingEffort}` });
     expect(events).toContainEqual(expect.objectContaining({ type: 'error', code: 'effort_unsupported_runtime',
       error: expect.stringMatching(/independent.*effort/i) }));
     expect(events.some(event => event.type === 'turn_receipt')).toBe(false);
@@ -108,7 +108,7 @@ it('preserves a model-encoded ACP variant unchanged without claiming an independ
   expect(calls().find(call => call.method === 'session/set_config_option').params.value).toBe('fixture/model/high');
   expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', leadModel: 'fixture/model/high', effort: 'adaptive', effortSource: 'runtime-default' }));
 });
-it.each([undefined, 'adaptive'] as const)('keeps %s at the SDK default and captures the actual request without reasoning fields', async thinkingEffort => {
+it.each([undefined, 'adaptive', ...MANUAL_THINKING_EFFORTS] as const)('keeps %s at the SDK default and captures the actual request without reasoning fields', async thinkingEffort => {
   const events: OrchestratorEvent[] = [];
   await pi().sendTurn(repo, 'Fixture task', event => events.push(event), { thinkingEffort, threadId: `default-sdk-${thinkingEffort}` });
   expect(events.filter(event => event.type === 'error')).toEqual([]); expect(requests).toHaveLength(1);
@@ -145,9 +145,10 @@ it.each(['pi', 'o8'] as const)('holds a queued high steer on an active %s lead b
     inferenceHold = undefined; release(); await turn;
   }
 }, 90_000);
-it('labels a managed text-only service tier separately from provider reasoning', async () => {
+it.each([undefined, ...MANUAL_THINKING_EFFORTS])('labels a managed text-only service tier separately from provider reasoning with effort %s', async thinkingEffort => {
   const events: OrchestratorEvent[] = [];
-  await textOnly().sendTurn(repo, 'Fixture task', event => events.push(event), { threadId: 'managed-default' });
+  await textOnly().sendTurn(repo, 'Fixture task', event => events.push(event), { threadId: 'managed-default', thinkingEffort });
+  expect(events.filter(event => event.type === 'error')).toEqual([]);
   expect(requests[0].thinkingEffort).toBe('low');
   expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default', serviceTier: 'low' }));
 });

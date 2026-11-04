@@ -14,6 +14,7 @@ import { entriesForSurface } from '@/lib/mcp/tool-spine/registry';
 import { StdioJsonRpcPeer } from '@/lib/runtimes/shared/stdio-json-rpc';
 import { createPiOrchestratorBackend, PI_ORCHESTRATOR_LIMITS } from '@/lib/lane/orchestrator-backends/pi';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
+import { sendOrchestratorBackendTurn } from '@/lib/lane/orchestrator-send-entry';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { createO8CommandTools, listO8Commands } from '@/lib/pi/orchestrator/o8-commands';
 import { openO8Servers } from '@/lib/pi/orchestrator/o8-servers';
@@ -50,7 +51,6 @@ let mcpHoldMs = 0;
 let heldReplyCount = 0;
 const saved = { NEXT_ORIGIN: process.env.NEXT_ORIGIN, O8_API_PORT: process.env.O8_API_PORT };
 beforeAll(async () => {
-  buildPiWriteHelper();
   getOrCreateWsToken();
   const { panelGateMiddleware } = await import('@/middleware');
   const routes: Record<string, Record<string, (request: Request) => Promise<Response>>> = {
@@ -157,6 +157,23 @@ async function turn(backend: ReturnType<typeof createPiOrchestratorBackend>, rep
 }
 
 describe('Pi orchestrator (#3258)', () => {
+  it('drops a leftover high effort pin and runs at the Pi runtime default (#5466)', async () => {
+    const { repo, stateRoot } = await fixture();
+    const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot,
+      transport: script([message([{ type: 'text', text: 'Ran at the runtime default.' }])]) });
+    backends.push(backend);
+    const out: OrchestratorEvent[] = [];
+    await sendOrchestratorBackendTurn(backend, repo, 'Reply at the runtime default', event => out.push(event),
+      { threadId: 'thoughts-pi-leftover-effort', thinkingEffort: 'high' }, 'fleet');
+
+    expect(out.filter(event => event.type === 'error')).toEqual([]);
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'turn_receipt', leadModel: 'pi', effort: 'adaptive', effortSource: 'runtime-default',
+    }));
+    expect(out).toContainEqual({ type: 'text', text: 'Ran at the runtime default.' });
+    expect(out.at(-1)).toMatchObject({ type: 'done' });
+  }, 120_000);
+
   it('reaches exactly the o8 commands the Claude orchestrator gets from its built-in servers', async () => {
     const { repo } = await fixture();
     const registry = buildToolRegistry(repo, { profile: 'full', threadId: 'thoughts-pi-test' });
@@ -244,6 +261,7 @@ describe('Pi orchestrator (#3258)', () => {
   }, 120_000);
 
   it('runs o8 commands through the operator server, keeps approval on repo writes, and resumes after a restart', async () => {
+    buildPiWriteHelper();
     const { repo, stateRoot } = await fixture();
     const seen: Array<{ messages: unknown[]; tools: string[]; system?: string }> = [];
     const approvals: string[] = [];
@@ -578,6 +596,7 @@ describe('Pi orchestrator (#3258)', () => {
   }, 180_000);
 
   it('reports a command the operator stopped as stopped, not as a host failure (#3659)', async () => {
+    buildPiWriteHelper();
     const { repo, stateRoot } = await fixture();
     const stop = new AbortController();
     const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot,
@@ -642,6 +661,7 @@ describe('Pi orchestrator (#3258)', () => {
   }, 180_000);
 
   it('writes and runs without asking in Full access, as the Claude orchestrator does, and still refuses blocked commands (#3555)', async () => {
+    buildPiWriteHelper();
     const { repo, stateRoot } = await fixture();
     inboxCalls.length = 0;
     const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot,
@@ -666,6 +686,7 @@ describe('Pi orchestrator (#3258)', () => {
   }, 180_000);
 
   it('keeps Full access command writes in the workspace and a private temp dir, and keeps git and network (#3658)', async () => {
+    buildPiWriteHelper();
     const { repo, stateRoot } = await fixture();
     const outside = join(repo, '..', 'outside.txt');
     const { port } = api.address() as AddressInfo;

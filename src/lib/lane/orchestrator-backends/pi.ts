@@ -332,11 +332,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
 
   function sendTurn(repoPath: string, message: string, onEvent: (event: OrchestratorEvent) => void,
     options: OrchestratorTurnOptions = {}): Promise<void> {
-    const effortError = unmappedEffortError(options.thinkingEffort);
-    if (effortError) {
-      onEvent(effortError); onEvent({ type: 'done', sessionId: null, cost: null });
-      return Promise.resolve();
-    }
+    // Pi has no independent effort transport; stale client pins use its default (#5466).
+    options = { ...options, thinkingEffort: undefined };
     try {
       assertOrchestratorPermissionMode('pi', options.permissionMode, options.toolProfile);
     } catch (error) {

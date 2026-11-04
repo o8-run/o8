@@ -202,14 +202,15 @@ describe('o8 backend event mapping', () => {
 });
 
 describe('o8 backend runs the built-in Pi agent', () => {
-  it('hands the turn, session lookups and options to Pi untouched, and never calls the proxy', async () => {
+  it('hands the turn and session options to Pi with leftover effort cleared, and never calls the proxy', async () => {
     const backend = createO8Backend({ pi: fakePi, blocker: () => null });
     const { onEvent } = collect();
-    const options = { threadId: 'thoughts-1', permissionMode: 'plan' as const, thinkingEffort: 'adaptive' as const };
+    const options = { threadId: 'thoughts-1', permissionMode: 'plan' as const, thinkingEffort: 'high' as const };
 
     await backend.sendTurn('/repo', 'list the repos', onEvent, options);
 
-    expect(piSendTurn).toHaveBeenCalledWith('/repo', 'list the repos', expect.any(Function), options);
+    expect(piSendTurn).toHaveBeenCalledWith('/repo', 'list the repos', expect.any(Function), { ...options, thinkingEffort: undefined });
+    expect(options.thinkingEffort).toBe('high');
     expect(mockFetch).not.toHaveBeenCalled();
     expect(backend.id).toBe('o8');
     expect(backend.peekSession('/repo', undefined, 'thoughts-1')).toEqual({ sessionName: 'pi-session', status: 'busy' });
@@ -265,7 +266,7 @@ describe('o8 text-only fallback where Pi cannot start', () => {
     (['free', 'pro', 'team', 'founder'] as const).flatMap((plan) => (
       [undefined, 'low', 'high'].map((thinkingEffort) => ({ plan, thinkingEffort }))
     )),
-  )('$plan plan, effort $thinkingEffort → labels a default service tier or refuses an independent pin', async ({ plan, thinkingEffort }) => {
+  )('$plan plan, effort $thinkingEffort → uses the default service tier', async ({ plan, thinkingEffort }) => {
     mockEntitlement.mockReturnValue({ plan });
     mockFetch.mockResolvedValue(sseResponse([contentFrame('ok'), 'data: [DONE]\n\n']));
     const { events, onEvent } = collect();
@@ -275,13 +276,8 @@ describe('o8 text-only fallback where Pi cannot start', () => {
       ...(thinkingEffort ? { thinkingEffort: thinkingEffort as 'low' | 'high' } : {}),
     });
 
-    if (thinkingEffort) {
-      expect(mockFetch).not.toHaveBeenCalled();
-      expect(events[0]).toMatchObject({ type: 'error', code: 'effort_unsupported_runtime' });
-    } else {
-      expect((bodyOf() as { thinkingEffort?: string }).thinkingEffort).toBe('low');
-      expect(events[0]).toMatchObject({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default', serviceTier: 'low' });
-    }
+    expect((bodyOf() as { thinkingEffort?: string }).thinkingEffort).toBe('low');
+    expect(events[0]).toMatchObject({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default', serviceTier: 'low' });
   });
 
   it('ignores tool frames: the fallback renders text only', async () => {

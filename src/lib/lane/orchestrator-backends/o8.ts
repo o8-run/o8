@@ -18,7 +18,6 @@
  * the gate authorizes by token — the loopback heuristic alone intermittently 401'd.
  */
 
-import { unmappedEffortError } from './unmapped-effort';
 import { resolveBackendTurnModel } from '@/lib/orchestrator/turn-model-selection';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
 import { readFile } from 'node:fs/promises';
@@ -416,11 +415,8 @@ export function createO8Backend(deps: O8BackendDeps = {}): OrchestratorBackend {
       return { sessionName, status: 'ready' };
     },
     sendTurn(repoPath, message, onEvent, options) {
-      const effortError = unmappedEffortError(options?.thinkingEffort);
-      if (effortError) {
-        onEvent(effortError); onEvent({ type: 'done', sessionId: null, cost: null });
-        return Promise.resolve();
-      }
+      // A backend switch can leave another lead's effort on the wire (#5466).
+      options = { ...options, thinkingEffort: undefined };
       const reason = blocker();
       // The composer's access mode reaches Pi: Full access writes and runs without asking, Plan only is read-only.
       if (!reason) {
