@@ -423,9 +423,14 @@ impl ThreadList {
             folders::View::Chronological => {
                 folders::chronological(sessions, query, matches, expanded, branches)
             }
-            folders::View::Inbox => {
-                inbox::rows(sessions, query, matches, expanded, branches, &self.snoozes)
-            }
+            folders::View::Inbox => inbox::rows(
+                sessions,
+                query,
+                matches,
+                expanded,
+                branches,
+                &self.snoozes,
+            ),
             folders::View::Repo => {
                 let keys = self.scope_keys();
                 let repos: Vec<_> = self
@@ -501,10 +506,7 @@ impl ThreadList {
                             this.header = header;
                         }
                         sessions.extend(
-                            this.sessions
-                                .iter()
-                                .filter(|s| s.machine.is_some())
-                                .cloned(),
+                            this.sessions.iter().filter(|s| s.machine.is_some()).cloned(),
                         );
                         let previous: HashMap<_, _> =
                             this.sessions.iter().map(|s| (s.id.as_str(), s)).collect();
@@ -1201,26 +1203,26 @@ pub(crate) mod folders;
 #[path = "archive_controls.rs"]
 mod archive_controls;
 
-#[path = "auto_settle_toggle.rs"]
-mod auto_settle_toggle;
-#[path = "bulk.rs"]
-mod bulk;
-#[path = "detailed.rs"]
-pub(crate) mod detailed;
 #[path = "inbox.rs"]
 mod inbox;
-#[path = "open_editor.rs"]
-mod open_editor;
-#[path = "pins.rs"]
-pub(crate) mod pins;
-#[path = "pr_links.rs"]
-pub(crate) mod pr_links;
+#[path = "auto_settle_toggle.rs"]
+mod auto_settle_toggle;
 #[path = "snooze.rs"]
 mod snooze;
-#[path = "status_mark.rs"]
-pub(crate) mod status_mark;
+#[path = "bulk.rs"]
+mod bulk;
+#[path = "open_editor.rs"]
+mod open_editor;
+#[path = "pr_links.rs"]
+pub(crate) mod pr_links;
 #[path = "thread_hover.rs"]
 mod thread_hover;
+#[path = "detailed.rs"]
+pub(crate) mod detailed;
+#[path = "pins.rs"]
+pub(crate) mod pins;
+#[path = "status_mark.rs"]
+pub(crate) mod status_mark;
 
 impl ThreadList {
     /// Scroll either list to a row; detailed mode reveals it in its list.
@@ -1231,10 +1233,7 @@ impl ThreadList {
             self.scroll.scroll_to_item(index, strategy);
         }
         if self.detailed {
-            self.detailed_list.scroll_to(gpui::ListOffset {
-                item_ix: index,
-                offset_in_item: gpui::px(0.),
-            });
+            self.detailed_list.scroll_to(gpui::ListOffset { item_ix: index, offset_in_item: gpui::px(0.) });
         }
     }
 }

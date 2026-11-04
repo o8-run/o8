@@ -283,7 +283,9 @@ impl ShellExtension for Connection {
     fn tick(&self, s: &mut Shell, refresh: bool, window: &mut Window, cx: &mut Context<Shell>) {
         self.prepare(s, window, cx);
         if refresh {
-            let connected = usable(s);
+            // A retained window has lost its event stream too, so it keeps
+            // the disconnected cadence until a read succeeds.
+            let connected = s.connected;
             let runtime = s.features.get::<Runtime>();
             runtime.idle_ticks += 1;
             if !connected || runtime.idle_ticks >= CONNECTED_LOAD_TICKS {
