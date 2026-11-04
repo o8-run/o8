@@ -42,18 +42,23 @@ function freePort(): Promise<number> {
   });
 }
 
-async function waitForHealth(port: number): Promise<void> {
-  const deadline = Date.now() + 25_000;
+async function waitForServerReady(port: number): Promise<void> {
+  const deadline = Date.now() + 35_000;
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/health`);
-      if (response.ok) return;
+      if (response.ok) {
+        // Health proves listener liveness. Stateful routes and Symon messages
+        // also wait for startup recovery, including the Next readiness probe.
+        const ready = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1_000) });
+        if (ready.status === 404) return;
+      }
     } catch {
       // still booting
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error('ws-server did not become healthy');
+  throw new Error('ws-server did not finish startup');
 }
 
 wsPort = await freePort();
@@ -70,7 +75,7 @@ const { listAutomationFires } = await import('@/lib/automations/fire-store');
 const { runAutomationSchedulerTick } = await import('@/lib/automations/scheduler');
 const { drainParkedSymonWatches, listSymonWatches } = await import('@/lib/automations/symon-watch');
 const { readSymonWatchLedger, closeSymonWatchLedger } = await import('@/lib/automations/symon-watch-ledger');
-const { persistSymonScopeGrant, SYMON_SCOPE_VERSION } = await import('@/lib/mobile/symon-agent-registry');
+const { loadPersistedAgentSession, persistSymonScopeGrant, SYMON_SCOPE_VERSION } = await import('@/lib/mobile/symon-agent-registry');
 
 type SymonFrame = Record<string, unknown>;
 
@@ -105,25 +110,17 @@ async function openSymonSession(sessionId: string): Promise<LiveSession> {
     frames.push(frame);
     if (frame.type === 'symon-task-complete') taskCompletes.push(frame);
   });
-  const registered = new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('symon session never acknowledged')), 10_000);
-    socket.on('message', (raw) => {
-      const frame = JSON.parse(String(raw)) as SymonFrame;
-      if (frame.channel === 'symon' && frame.type === 'symon-agent-status' && frame.sessionId === sessionId) {
-        clearTimeout(timer);
-        resolve();
-      }
-    });
-  });
   socket.send(JSON.stringify({
     channel: 'symon',
     type: 'symon-agent-status',
     sessionId,
     status: 'live',
   }));
-  // The server answers registration on the same channel; if it stays silent the
-  // session is not owned and no push would ever reach this client.
-  await Promise.race([registered, new Promise((resolve) => setTimeout(resolve, 1_500))]);
+  // Registration has no status echo. The server persists this mirror after
+  // installing the session's delivery route, so wait for that real receipt.
+  await vi.waitFor(() => {
+    expect(loadPersistedAgentSession()).toMatchObject({ sessionId, lastStatus: 'live' });
+  }, { timeout: 10_000, interval: 50 });
   return {
     socket,
     frames,
@@ -221,7 +218,7 @@ beforeAll(async () => {
       O8_DISABLE_AUTOMATIONS: '1',
     },
   });
-  await waitForHealth(wsPort);
+  await waitForServerReady(wsPort);
 }, 40_000);
 
 afterAll(async () => {
