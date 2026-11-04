@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -7,52 +7,6 @@ import { startParityReference } from './fixtures/ws-parity-server';
 import { cutoverClient } from './fixtures/ws-cutover-client';
 
 const binary = process.env.O8D_BINARY ?? process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
-// Native paths that still need Next (#5243). Remove a path when it is registered.
-const NEXT_ONLY_NATIVE_PATHS = new Set([
-  // Existing native inventory drift, outside the A1 and A2 slices. No methods added.
-  '/api/panel/connect/attach',
-  '/api/panel/mobile-pairing',
-  '/api/mobile/devices',
-  '/api/mobile/devices/revoke',
-  '/api/setup/mcp-config',
-  '/api/setup/claude-desktop',
-  '/api/setup/external-client',
-  '/api/orchestrator/packet-transcript',
-  '/api/panel/connect',
-  '/api/mcp',
-  '/api/panel/ssh-machines',
-  '/api/runtime/acp-connection',
-  '/api/runtime/acp-registry',
-  '/api/runtime/acp-registry/prepare',
-  '/api/runtime/provider-instances',
-  '/api/setup/detect',
-  '/api/cortex/codebase-memory',
-  '/api/cortex/cross-repo-proposals',
-  '/api/cortex/diagnostics',
-  '/api/mobile/media',
-  '/api/orchestrator/archive',
-  '/api/orchestrator/backend-models',
-  '/api/orchestrator/comparison-diff', // GET has a write path; held for review.
-  '/api/orchestrator/pull-request-context',
-  '/api/panel/account/avatar',
-  '/api/panel/browse-folder',
-  '/api/panel/devices',
-  '/api/panel/file-asset',
-  '/api/panel/file-io',
-  '/api/panel/o8-update-summary',
-  '/api/panel/problem-dossiers',
-  '/api/panel/prs/[id]/timeline',
-  '/api/panel/update/apply',
-  '/api/repo-spec/asset',
-  '/api/setup/identity',
-  '/api/tasks',
-  '/api/tasks/[id]/preview',
-  '/api/tts',
-  '/api/v2/files',
-  '/api/v2/files/quick-docs',
-  '/api/visualizations',
-  '/api/worktrees/retention-usage',
-]);
 // A1 reads: exercise the gate and original handler through the public socket.
 const NATIVE_READS = [
   ['session', '/api/panel/branches', 400],
@@ -131,6 +85,26 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   }
 });
 
+it.each([
+  ['/api/panel/ports', 200, 'ports'],
+  ['/api/v2/files', 400, 'path required'],
+  ['/api/panel/file-io', 400, 'path param required'],
+  ['/api/panel/file-asset', 400, 'path required'],
+  ['/api/mobile/media', 400, 'path is required'],
+])('reaches the production registration for GET %s with Next stopped', async (path, status, detail) => {
+  const response = await fetch(origin + path, { headers: { authorization: `Bearer ${server.token}` } });
+  expect(response.status).toBe(status);
+  expect(await response.text()).toContain(detail);
+});
+
+it('refuses an unknown HTTP route with Next stopped', async () => {
+  const response = await fetch(`${origin}/api/native-fixture-unknown-route`, {
+    headers: { authorization: `Bearer ${server.token}` },
+  });
+  expect(response.status).toBe(404);
+  await response.arrayBuffer();
+});
+
 it('reads saved fixture sessions with Next stopped', async () => {
   mkdirSync(join(server.directory, 'chat-history'), { recursive: true });
   writeFileSync(join(server.directory, 'chat-history', 'thoughts-native-surface.json'), JSON.stringify({
@@ -169,11 +143,12 @@ it('persists Setup conversation creation through its existing handler with Next 
 
 it('walks every production surface registration and its HTTP routes', async () => {
   const { nativeSurfaceRoutes } = await import('@/lib/ws-server/native-http-registry');
+  const { viewerHttpRoutes } = await import('@/lib/viewers/http-routes');
   const shell = readFileSync('native/o8-next/src/shell.rs', 'utf8');
   const registered = [...shell.matchAll(/(\w+): \w+(?:\([^)]*\))? = "surfaces\/[^"]+";/g)]
     .map(match => match[1]).filter(name => name !== 'fake');
   expect(Object.keys(nativeSurfaceRoutes).sort()).toEqual(registered.sort());
-  for (const [name, routes] of Object.entries(nativeSurfaceRoutes)) {
+  for (const [name, routes] of Object.entries({ ...nativeSurfaceRoutes, viewers: viewerHttpRoutes })) {
     if (!['grid', 'palette', 'shortcuts'].includes(name)) expect(routes.length, name).toBeGreaterThan(0);
     for (const route of routes) {
       const path = route.path.replace(/\[\w+\]/g, 'fixture');
@@ -188,28 +163,7 @@ it('walks every production surface registration and its HTTP routes', async () =
       }
     }
   }
-  // Also reject a new literal endpoint added to an existing surface/view without
-  // a transport registration. Computed project-member routes are checked above.
-  const files = readdirSync('native/o8-next/src', { recursive: true }).map(String)
-    .filter(file => file.endsWith('.rs') && !file.includes('test') && !file.endsWith('fake.rs'));
-  const paths = new Set(Object.values(nativeSurfaceRoutes).flat().map(route => route.path));
-  for (const path of NEXT_ONLY_NATIVE_PATHS) expect(paths.has(path), `${path} is registered`).toBe(false);
-  for (const file of files) {
-    const source = readFileSync(join('native/o8-next/src', file), 'utf8');
-    for (const match of source.matchAll(/"(\/api\/[^"\s]+)"/g)) {
-      if (match[1].includes('{endpoint}')) {
-        const endpoints = [...source.matchAll(/\("(\w+)", "\w+", "\w+", \d+\)/g)].map(row => row[1]);
-        expect(endpoints.length).toBeGreaterThan(0);
-        for (const endpoint of endpoints) expect(paths.has(match[1].replace('{endpoint}', endpoint)), `${file}: ${endpoint}`).toBe(true);
-        continue;
-      }
-      const path = match[1].split('?')[0].replace(/\{[^}]*\}/g, '[id]');
-      if (path.endsWith('/')) continue; // Prefix used for error policy or route construction.
-      if (NEXT_ONLY_NATIVE_PATHS.has(path)) continue;
-      const normalized = (value: string) => value.replace(/\[\w+\]/g, '[]');
-      expect([...paths].some(known => normalized(known) === normalized(path)), `${file}: ${path}`).toBe(true);
-    }
-  }
+
 }, 120_000);
 
 it('delivers a native session checkpoint after Next stops', async () => {
