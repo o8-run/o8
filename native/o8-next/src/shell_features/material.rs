@@ -1,7 +1,32 @@
 use super::*;
 struct Material;
 register_shell_feature!(Material);
+/// Keeps the System appearance choice following the window's appearance.
+#[derive(Default)]
+struct SystemAppearance(Option<gpui::Subscription>);
+fn system_light(window: &Window) -> bool {
+    matches!(
+        window.appearance(),
+        gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight
+    )
+}
 impl ShellFeature for Material {
+    fn observers(&self) -> &'static [PreferenceObserver] {
+        &[PreferenceObserver {
+            order: 0,
+            install: |shell, window, cx| {
+                crate::theme::set_system_light(system_light(window));
+                let subscription = cx.observe_window_appearance(window, |s, window, cx| {
+                    if crate::theme::set_system_light(system_light(window)) {
+                        s.system_glass = crate::shell::material::switch(window, s.offscreen);
+                        window.refresh();
+                        cx.notify();
+                    }
+                });
+                shell.features.get::<SystemAppearance>().0 = Some(subscription);
+            },
+        }]
+    }
     fn slots(&self) -> &'static [RenderSlot] {
         &[
             RenderSlot {

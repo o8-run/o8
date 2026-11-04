@@ -117,7 +117,7 @@ struct Editor {
 }
 pub(crate) struct Close;
 pub(crate) enum Action {
-    Appearance(&'static str),
+    Appearance(String),
     Shortcuts,
 }
 impl EventEmitter<Action> for Settings {}
@@ -158,6 +158,8 @@ pub(crate) struct Settings {
     about_busy: bool,
     about_status: String,
     about_error: Option<String>,
+    /// Why the last VS Code theme import was refused.
+    pub theme_import_error: Option<String>,
 }
 impl EventEmitter<Close> for Settings {}
 impl Settings {
@@ -207,6 +209,7 @@ impl Settings {
             about_busy: false,
             about_status: String::new(),
             about_error: None,
+            theme_import_error: None,
         };
         view.load(false, cx);
         view
