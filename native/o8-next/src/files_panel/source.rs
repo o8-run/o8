@@ -3,7 +3,7 @@ use super::*;
 use gpui::{ListAlignment, ListState, Pixels, TextRun, font, list};
 use std::{cell::Cell, rc::Rc};
 
-/// Whole-file syntax colors stop here; the file still opens and edits.
+/// Whole-file syntax colors stop here; larger files color the lines in view.
 const PLAIN_LINES: usize = 300_000;
 const PLAIN_BYTES: usize = 20 << 20;
 /// Above this the file opens read-only.
@@ -13,9 +13,9 @@ const READ_ONLY_BYTES: usize = 128 << 20;
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) enum Large {
     No,
-    /// No syntax colors.
-    Plain,
-    /// No syntax colors and no editing.
+    /// Syntax colors for the lines in view only.
+    Windowed,
+    /// Colors for the lines in view, and no editing.
     ReadOnly,
 }
 impl Large {
@@ -23,7 +23,7 @@ impl Large {
         if lines > READ_ONLY_LINES || bytes > READ_ONLY_BYTES {
             Self::ReadOnly
         } else if lines > PLAIN_LINES || bytes > PLAIN_BYTES {
-            Self::Plain
+            Self::Windowed
         } else {
             Self::No
         }
@@ -31,8 +31,8 @@ impl Large {
     pub(super) fn banner(self) -> Option<&'static str> {
         match self {
             Self::No => None,
-            Self::Plain => Some("Large file · syntax colors are off to keep it smooth."),
-            Self::ReadOnly => Some("Large file · read-only, without syntax colors."),
+            Self::Windowed => Some("Large file · syntax colors follow the lines in view."),
+            Self::ReadOnly => Some("Large file · read-only."),
         }
     }
 }
@@ -89,18 +89,20 @@ pub(super) struct Source {
     list: ListState,
     width: Cell<Option<Pixels>>,
     colors: super::syntax::Colors,
+    blocks: super::syntax::Blocks,
     selection: super::selection::Selection,
     focus: FocusHandle,
     horizontal: gpui::ScrollHandle,
-    plain: bool,
+    windowed: bool,
 }
 impl Source {
     pub(super) fn new(count: usize, large: Large, cx: &mut Context<FilesPanel>) -> Self {
         Self {
-            plain: large != Large::No,
+            windowed: large != Large::No,
             list: ListState::new(count, ListAlignment::Top, px(300.)),
             width: Cell::new(None),
             colors: super::syntax::Colors::default(),
+            blocks: super::syntax::Blocks::default(),
             selection: super::selection::Selection::default(),
             focus: cx.focus_handle(),
             horizontal: gpui::ScrollHandle::new(),
@@ -124,7 +126,7 @@ impl Source {
         cx: &mut Context<FilesPanel>,
     ) -> gpui::AnyElement {
         let gutter = ((lines.len().max(1).to_string().len() as f32) * 7.5 + 16.).max(36.);
-        let colors = if self.plain {
+        let colors = if self.windowed {
             Rc::new(vec![])
         } else {
             self.colors.rows(path, lines, cx)
@@ -178,6 +180,13 @@ impl Source {
         let horizontal = self.horizontal.clone();
         let count = lines.len();
         let lines = lines.clone();
+        let windowed = self.windowed.then(|| {
+            (
+                self.blocks.clone(),
+                path.to_owned(),
+                cx.entity().downgrade(),
+            )
+        });
         div()
             .id("files-source")
             .debug_selector(move || format!("files-source-{generation}"))
@@ -262,7 +271,10 @@ impl Source {
             })
             .child(
                 list(self.list.clone(), move |i, _, cx| {
-                    let spans = colors.get(i).cloned().unwrap_or_default();
+                    let spans = match &windowed {
+                        Some((blocks, path, panel)) => blocks.line(i, path, &lines, panel, cx),
+                        None => colors.get(i).cloned().unwrap_or_default(),
+                    };
                     #[cfg(test)]
                     cx.global_mut::<super::tests::source_tests::Painted>()
                         .0
