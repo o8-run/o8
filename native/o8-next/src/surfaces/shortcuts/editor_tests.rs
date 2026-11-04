@@ -225,3 +225,39 @@ fn shortcuts_editor_global_persists_in_settings_and_machine_wins(cx: &mut TestAp
         "This machine"
     );
 }
+
+#[gpui::test]
+fn shortcuts_rebound_palette_command_runs_only_outside_typing_and_overlays(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::new();
+    let mut state = State::default();
+    state
+        .keybindings
+        .insert("surface:Open settings".into(), "alt-o".into());
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("keymap-run.json"),
+        state,
+        cx,
+    );
+    ready(&shell, &mut visual);
+    let settings =
+        |cx: &VisualTestContext| shell.read_with(cx, |s, _| s.surfaces.settings.view.is_some());
+    // With the palette open the key stays with the palette.
+    visual.simulate_keystrokes("ctrl-k");
+    shortcuts_draw(&mut visual);
+    visual.simulate_keystrokes("alt-o");
+    shortcuts_draw(&mut visual);
+    assert!(!settings(&visual), "an open palette keeps the key");
+    visual.simulate_keystrokes("escape");
+    shortcuts_draw(&mut visual);
+    // From the shell the override runs the palette command.
+    shell.update_in(&mut visual, |s, window, cx| {
+        s.focus.focus(window);
+        cx.notify();
+    });
+    visual.simulate_keystrokes("alt-o");
+    shortcuts_draw(&mut visual);
+    assert!(settings(&visual), "the rebound palette command runs");
+}

@@ -21,6 +21,8 @@ pub(super) struct Runtime {
     editor_subscription: Option<gpui::Subscription>,
     /// Bumped by each global change, so an older server answer cannot undo it.
     global_generation: u64,
+    /// The current key is a rebound chord shown to handlers as its default.
+    translated: bool,
     /// One global save at a time; a change made meanwhile saves after it.
     saving: bool,
     dirty: bool,
@@ -202,7 +204,9 @@ fn keys(s: &mut Shell, event: &KeyDownEvent, window: &mut Window, cx: &mut Conte
         }
     }
     let terminal = s.surfaces.shortcuts.inputs.terminal(window, cx);
-    if let Some(terminal) = terminal
+    // A translated chord is not terminal input: the key pressed was another.
+    if !s.surfaces.shortcuts.translated
+        && let Some(terminal) = terminal
         && input::core_chord(event)
     {
         input::deliver_core_chord(&terminal, event, window, cx);
@@ -325,6 +329,16 @@ fn save_global(s: &mut Shell, cx: &mut Context<Shell>) {
         )?;
         read_global(&client)
     });
+    // On failure, install what the server still has rather than the unsaved change.
+    let task = cx.background_executor().spawn({
+        let client = s.client.clone();
+        async move {
+            match task.await {
+                Ok(global) => (Ok(global), None),
+                Err(error) => (read_global(&client), Some(error.message)),
+            }
+        }
+    });
     cx.spawn(async move |this, cx| {
         let result = task.await;
         let _ = this.update(cx, |s, cx| {
@@ -337,14 +351,13 @@ fn save_global(s: &mut Shell, cx: &mut Context<Shell>) {
             if s.surfaces.shortcuts.global_generation != generation {
                 return;
             }
-            match result {
-                Ok(global) => s.surfaces.shortcuts.bindings.set_global(global),
-                Err(error) => {
-                    s.surfaces.shortcuts.bindings.notice = Some(format!(
-                        "Global shortcuts were not saved: {}",
-                        error.message
-                    ));
-                }
+            let (global, error) = result;
+            if let Ok(global) = global {
+                s.surfaces.shortcuts.bindings.set_global(global);
+            }
+            if let Some(error) = error {
+                s.surfaces.shortcuts.bindings.notice =
+                    Some(format!("Global shortcuts were not saved: {error}"));
             }
             refresh_editor(s, cx);
             s.revision += 1;
@@ -474,13 +487,26 @@ pub(super) fn pre_key(
         }
         return Pre::Handled;
     }
+    s.surfaces.shortcuts.translated = false;
     match s.surfaces.shortcuts.bindings.keymap.route(event) {
         keymap::Route::Pass => Pre::Pass,
         keymap::Route::Release => Pre::Release,
-        keymap::Route::Translate(keystroke) => Pre::Translate(KeyDownEvent {
-            keystroke,
-            is_held: event.is_held,
-        }),
+        keymap::Route::Translate(keystroke) => {
+            s.surfaces.shortcuts.translated = true;
+            Pre::Translate(KeyDownEvent {
+                keystroke,
+                is_held: event.is_held,
+            })
+        }
+        // Palette commands have no handler of their own to check focus, so
+        // typing, the palette and open overlays keep the key.
+        keymap::Route::Run(_)
+            if s.palette
+                || editing(s, window, cx)
+                || registrations().iter().any(|r| (r.overlay_open)(s)) =>
+        {
+            Pre::Pass
+        }
         keymap::Route::Run(id) => {
             if let Some(command) = features::commands(s)
                 .into_iter()
