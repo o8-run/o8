@@ -768,22 +768,13 @@ export function MobileApprovalsClient({
             </Suspense>
           ) : null}
 
-          {activeView === 'issues' ? (
+          {activeView === 'issues' || activeView === 'prs' ? (
             <MobileViewShell themeId={themeId}>
-              <Suspense fallback={renderSnapshotPlaceholder('Loading issues…')}>
-                <IssuesPage onBack={handleBackToChats} hideHeader refreshSignal={issuesRefreshSignal} />
+              <Suspense fallback={renderSnapshotPlaceholder(activeView === 'prs' ? 'Loading pull requests…' : 'Loading issues…')}>
+                <IssuesPage onBack={handleBackToChats} activeRepoPath={activeView === 'prs' ? selectedRepoPath : undefined} hideHeader refreshSignal={issuesRefreshSignal} />
               </Suspense>
             </MobileViewShell>
           ) : null}
-
-          {activeView === 'prs' ? (
-            <MobileViewShell themeId={themeId}>
-              <Suspense fallback={renderSnapshotPlaceholder('Loading pull requests…')}>
-                <IssuesPage onBack={handleBackToChats} activeRepoPath={selectedRepoPath} hideHeader refreshSignal={issuesRefreshSignal} />
-              </Suspense>
-            </MobileViewShell>
-          ) : null}
-
           {activeView === 'activity' ? (
             <MobileViewShell themeId={themeId}>
               <Suspense fallback={renderSnapshotPlaceholder('Loading activity…')}>
