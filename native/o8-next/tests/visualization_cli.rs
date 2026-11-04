@@ -1,4 +1,8 @@
 #[cfg(target_os = "macos")]
+#[path = "../test-support/scratch.rs"]
+mod support;
+
+#[cfg(target_os = "macos")]
 #[test]
 fn webkit_sandbox_theme_and_restored_state_through_the_visualization_route() {
     use std::{
@@ -15,7 +19,7 @@ fn webkit_sandbox_theme_and_restored_state_through_the_visualization_route() {
         }
     }
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let dir = std::env::temp_dir().join(format!("o8-visualization-sandbox-{}", std::process::id()));
+    let dir = support::scratch_path("o8-visualization-sandbox");
     std::fs::create_dir_all(&dir).unwrap();
     let requests = dir.join("requests.json");
     let child = Command::new("node")

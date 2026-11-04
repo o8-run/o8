@@ -188,7 +188,7 @@ fn first_load_probe(cx: &mut gpui::TestAppContext) {
         },
         route,
     );
-    let root = std::env::temp_dir().join(format!("o8-startup-probe-{}", std::process::id()));
+    let root = crate::shell::test_support::scratch_path("o8-startup-probe");
     std::fs::create_dir(&root).unwrap();
     let started = Instant::now();
     let (shell, mut visual) = open(

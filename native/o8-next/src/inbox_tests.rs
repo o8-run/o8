@@ -24,14 +24,7 @@ impl Fixture {
         Self::start_mode(empty, false)
     }
     fn start_mode(empty: bool, plan: bool) -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "o8-inbox-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = crate::shell::test_support::scratch_path("o8-inbox");
         fs::create_dir(&root).unwrap();
         #[cfg(unix)]
         let alias = {

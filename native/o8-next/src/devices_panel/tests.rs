@@ -58,11 +58,7 @@ impl Fixture {
                 }
             }
         });
-        let root = std::env::temp_dir().join(format!(
-            "o8-device-test-{}-{}",
-            std::process::id(),
-            origin.rsplit(':').next().unwrap()
-        ));
+        let root = crate::shell::test_support::scratch_path("o8-device-test");
         std::fs::create_dir_all(&root).unwrap();
         Self {
             client: Client::authenticated(&origin, Some("fixture-device-operator".into())).unwrap(),

@@ -265,7 +265,7 @@ fn ignored_flat_listing_matches_all_terms_and_ranks_exact_basename_first() {
 
 #[test]
 fn native_pins_persist_in_shell_state_with_repo_isolation_and_limit() {
-    let root = std::env::temp_dir().join(format!("o8-native-pins-{}", std::process::id()));
+    let root = crate::shell::test_support::scratch_path("o8-native-pins");
     fs::create_dir_all(&root).unwrap();
     let file = root.join("shell.json");
     let mut state = crate::shell_state::State::default();
