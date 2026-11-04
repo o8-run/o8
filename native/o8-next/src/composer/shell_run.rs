@@ -3,7 +3,7 @@
 //! to chat, which puts the command and its output's tail in the draft. The
 //! line runs in the workspace's terminal, which the card reads.
 use super::*;
-use crate::composer::shell::{CARD_LINES, ShellRun, chat_block, with_block};
+use crate::composer::shell::{CARD_LINES, chat_block, with_block};
 use crate::terminal_grid::{CommandOutput, Mark};
 use gpui::AnyElement;
 
@@ -187,7 +187,7 @@ impl Surface {
         run.running()
     }
     #[cfg(test)]
-    pub(crate) fn shell_run(&self) -> Option<&ShellRun> {
+    pub(crate) fn shell_run(&self) -> Option<&crate::composer::shell::ShellRun> {
         self.shell_run.as_ref()
     }
     /// The command and its output's tail go above the draft, for the next send.
