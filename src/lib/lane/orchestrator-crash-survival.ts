@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, sta
 import { join, resolve } from 'node:path';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
 import { getDataDir } from '@/lib/data-dir-migration';
+import type { PersistedLlmChatHistory } from '@/lib/llm/chat-history-store';
 
 export type CrashSurvivableOrchestratorBackend = 'claude' | 'codex';
 
@@ -194,8 +195,75 @@ function readAllTurnRecords(): OrchestratorTurnRecord[] {
     });
 }
 
+function liveSubagentIds(records: OrchestratorTurnRecord[]): Set<string> | null {
+  const ids = new Set<string>();
+  const threads = new Set<string>();
+  for (const record of records) {
+    if (record.settledAt) continue;
+    // The stream covers children not yet checkpointed into chat history.
+    try {
+      for (const line of readFileSync(record.stdoutPath, 'utf8').split('\n')) {
+        let event;
+        try { event = JSON.parse(line); } catch { continue; }
+        if (typeof event?.parent_tool_use_id === 'string') ids.add(event.parent_tool_use_id);
+        const content = event?.message?.content;
+        if (!Array.isArray(content)) continue;
+        for (const block of content) {
+          if (block?.type === 'tool_use' && typeof block.id === 'string') ids.add(block.id);
+        }
+      }
+    } catch (error) {
+      console.warn(`[orchestrator-retention] Failed to read live turn ${record.id}; keeping subagent transcripts`, error);
+      return null;
+    }
+    if (record.threadId) threads.add(record.threadId);
+  }
+  // A live thread also owns children from its earlier, settled turns.
+  for (const threadId of threads) {
+    const safe = threadId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    try {
+      const history = JSON.parse(readFileSync(join(getDataDir(), 'chat-history', `${safe}.json`), 'utf8')) as PersistedLlmChatHistory;
+      for (const message of history.messages) {
+        for (const tool of message.toolCalls ?? []) {
+          if (typeof tool.id === 'string') ids.add(tool.id);
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      console.warn(`[orchestrator-retention] Failed to read live thread ${threadId}; keeping subagent transcripts`, error);
+      return null;
+    }
+  }
+  return ids;
+}
+
+function pruneSubagentTranscripts(records: OrchestratorTurnRecord[], cutoff: number): void {
+  const dir = join(getDataDir(), 'subagent-transcripts');
+  let files;
+  try {
+    files = readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn('[orchestrator-retention] Failed to list subagent transcripts', error);
+    }
+    return;
+  }
+  const live = liveSubagentIds(records);
+  if (!live) return;
+  for (const file of files) {
+    if (!file.isFile() || !file.name.endsWith('.jsonl') || live.has(file.name.slice(0, -6))) continue;
+    const filePath = join(dir, file.name);
+    try {
+      if (statSync(filePath).mtimeMs < cutoff) rmSync(filePath, { force: true });
+    } catch (error) {
+      console.warn(`[orchestrator-retention] Failed to prune ${filePath}`, error);
+    }
+  }
+}
+
 function pruneSettledTurns(records: OrchestratorTurnRecord[]): void {
   const cutoff = Date.now() - TURN_LEDGER_RETENTION_MS;
+  pruneSubagentTranscripts(records, cutoff);
   for (const record of records) {
     if (!record.settledAt || record.settledAt >= cutoff) continue;
     rmSync(recordPath(record.id), { force: true });
