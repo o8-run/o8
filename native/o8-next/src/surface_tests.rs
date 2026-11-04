@@ -553,6 +553,13 @@ fn settled_tool_runs_collapse_to_a_trace_header_and_expand_on_click(cx: &mut Tes
         cx.debug_bounds(first).is_some(),
         "the header opens the steps"
     );
+    // Each new step's height opens over trace::APPEAR by wall clock from the
+    // frame that first drew it, and the headless window drives no later
+    // frames. Let that animation finish and draw again, so the measurement does
+    // not depend on how much time passed between the click and the draws.
+    std::thread::sleep(crate::trace::APPEAR + std::time::Duration::from_millis(40));
+    draw(cx);
+    draw(cx);
     let expanded = surface.read_with(cx, |s, _| {
         s.list.bounds_for_item(index).unwrap().size.height
     });
