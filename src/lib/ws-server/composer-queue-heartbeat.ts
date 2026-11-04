@@ -65,7 +65,7 @@ export async function runQueuedComposerSteer(item: QueuedComposerSendRecord): Pr
   let admittedAt: number | undefined;
   const result = await backend.liveSteer(item.repoPath, item.payload.wireMessage, {
     ...item.payload.routing, threadId: item.threadId, clientUserMessageId: item.id, attachments: item.payload.images, orchestrationMode: item.payload.routing.mode,
-    thinkingEffort: item.payload.routing.effort,
+    thinkingEffort: backend.id === 'o8' || backend.id === 'pi' ? undefined : item.payload.routing.effort,
     beforeAdmit: () => { checkComposerQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Message admission was cancelled.');
       steerAnchor = readSteerTranscriptAnchor(item.repoPath, item.threadId); admittedAt = Date.now(); },
   });

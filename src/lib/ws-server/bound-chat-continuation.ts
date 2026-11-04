@@ -1,6 +1,5 @@
-import { isUnmappedEffortLead, unmappedEffortError } from '@/lib/lane/orchestrator-backends/unmapped-effort';
+import { isUnmappedEffortLead } from '@/lib/lane/orchestrator-backends/unmapped-effort';
 import { assertLlmThread } from '@/lib/bots/network-kind';
-import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
 import { sendOrchestratorBackendTurn, resolveTurnReceiptMode } from '@/lib/lane/orchestrator-send-entry';
 import type { OrchestratorTurnOptions } from '@/lib/lane/orchestrator-backends/types';
@@ -42,9 +41,7 @@ export async function runBoundChatContinuation(
   const permissionMode = input.permissionMode ?? expected.permissionMode;
   input.check();
   const unmapped = isUnmappedEffortLead(expected.backend);
-  const thinkingEffort = unmapped && input.source !== 'user' ? undefined : expected.effort;
-  const effortError = unmapped ? unmappedEffortError(thinkingEffort) : null;
-  if (effortError?.type === 'error') throw new EffortPinRejectionError('effort_unsupported_runtime', effortError.error);
+  const thinkingEffort = unmapped ? undefined : expected.effort;
   const backend = getOrchestratorBackend(expected.backend);
   const controller = new AbortController();
   const release = hooks.registerAbort(input.repoPath, expected, controller);
