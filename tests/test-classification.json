@@ -3913,6 +3913,14 @@
       ]
     },
     {
+      "path": "tests/lead-background-agents-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lead-effort-pins-real-path.test.ts",
       "reasons": [
         "child-process",
