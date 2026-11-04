@@ -1,6 +1,6 @@
 # o8 roadmap
 
-o8 lets one operator run several coding agents at once. Work becomes missions and packets. Each packet runs in its own worktree, the operator stays in the approval path, and every step leaves evidence. o8 is free and open source: no paid plans, and you bring the coding-agent subscriptions or API keys you already have.
+o8 lets one operator run several coding agents at once. Work becomes missions and packets. Each packet runs in its own worktree, the operator stays in the approval path, and every step leaves evidence. o8 is free and open source. You bring the coding-agent subscriptions or API keys you already have.
 
 Last updated 2026-11-04. If this date is more than 14 days old, treat every number below as stale and recompute it with the commands in [Live status](#live-status).
 
@@ -35,7 +35,7 @@ Snapshot from 2026-11-04. Rerun the command for the current value.
 | Commits on `main` since stable | 193 | `git rev-list --count v0.1.815..origin/main` |
 | o8 next parity set closed | 31 of 65 (issues #5246–#5310) | `gh issue list --repo o8-run/o8 --state closed --limit 400 --json number -q '[.[].number\|select(.>=5246 and .<=5310)]\|length'` |
 | API paths still needing the Next server | 34 | count `NEXT_ONLY_NATIVE_PATHS` in `tests/o8d-native-route-inventory-real-path.test.ts` on `main` |
-| Open issues | 369 | `gh issue list --repo o8-run/o8 --state open --limit 1000 --json number -q length` |
+| Open issues | about 370 | `gh issue list --repo o8-run/o8 --state open --limit 1000 --json number -q length` |
 | Tracking issues and checklist progress | see command | `node scripts/roadmap-status.mjs` |
 
 ## Now
@@ -44,7 +44,7 @@ Ranked. Work on a lower item does not delay a higher one.
 
 1. **Next release: a complete upgrade over 0.1.815.** Everything merged since 0.1.815 goes out together, once the [release gate](#release-gate) passes. The integration suite on `main` must be green first ([#5317](https://github.com/o8-run/o8/issues/5317)). The classic UI's files leave the packaged app ([#5161](https://github.com/o8-run/o8/issues/5161)). Release goes through the beta channel, then stable ([#2205](https://github.com/o8-run/o8/issues/2205)).
 2. **Every classic tool works in o8 next.** Review, Activity, Side chat, Targeting and Inbox reach classic parity in the right panel. Threads stays hidden for now. Tracked in [#5576](https://github.com/o8-run/o8/issues/5576); Settings parity is [#5358](https://github.com/o8-run/o8/issues/5358), and the parity inventory refresh is [#5563](https://github.com/o8-run/o8/issues/5563).
-3. **o8 next backend in Rust.** o8 next runs with the Next server stopped by default, and idle memory is measured on Mac and Linux. Phase A moves the remaining API paths to the native transport, and the count in Live status goes to 0. Plan and slice map: [#5422](https://github.com/o8-run/o8/issues/5422); path list: [#5243](https://github.com/o8-run/o8/issues/5243).
+3. **o8 next backend in Rust.** Target: o8 next runs with the Next server stopped by default, and idle memory is measured on Mac and Linux. Phase A moves the remaining API paths to the native transport, and the count in Live status goes to 0. Plan and slice map: [#5422](https://github.com/o8-run/o8/issues/5422); path list: [#5243](https://github.com/o8-run/o8/issues/5243).
 4. **o8 next parity set.** These are the 65 issues #5246–#5310: thread, composer, sidebar, pull request and settings behaviors. An issue counts as done only when a merged PR closes it with `Fixes #n`. [Open items](https://github.com/o8-run/o8/issues?q=is%3Aissue+is%3Aopen+label%3Ao8-next+sort%3Acreated-asc).
 5. **Linux as a first-class platform.** A fresh Ubuntu machine goes from install to a merged packet ([#1672](https://github.com/o8-run/o8/issues/1672)).
 6. **Your machines, one window.** Per-session machine choice over SSH, Tailscale or Cloudflare, with load-aware routing and remote tools ([#5091](https://github.com/o8-run/o8/issues/5091)).
@@ -112,7 +112,7 @@ These pillars are what o8 is. They don't change month to month. Each open arc li
 
 | Platform | State | Detail |
 | --- | --- | --- |
-| macOS (Apple Silicon and Intel) | supported | Signed, notarized universal app; o8 next is the only window since 0.1.815 |
+| macOS (Apple Silicon) | supported | Signed and notarized; o8 next is the only window since 0.1.815. An installed run on physical Apple Silicon is still unverified. Intel delivery stays off until Intel acceptance passes |
 | Linux (Ubuntu) | active | The o8 next GPUI app and packages are in progress; install-to-merge proof is open in [#1672](https://github.com/o8-run/o8/issues/1672) |
 | Windows | parked, help wanted | Port audit with file-and-line evidence in `docs/internals/port-audit-windows.md`; tracked in [#2204](https://github.com/o8-run/o8/issues/2204) |
 
