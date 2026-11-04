@@ -5,7 +5,7 @@ import { lstat, mkdir, open, opendir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
-import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import { withPacketLifecycleMutationLock, withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { WorkspaceLifecycleLeaseUnavailableError } from '@/lib/orchestrator/workspace-lifecycle-lease';
 import { workerO8CliRoot } from './worker-o8-cli-paths';
 
@@ -129,22 +129,25 @@ async function measureArtifacts(root: string): Promise<void> {
 }
 
 /** Short admission/rename lock only; never held for a provider's lifetime. */
-export async function withOwnedArtifactRootLock<T>(root: string, operation: () => Promise<T>): Promise<T> {
+export async function withOwnedArtifactRootLock<T>(root: string, operation: () => Promise<T>, options: { wait?: boolean } = {}): Promise<T> {
   let canonical: string;
   try { canonical = await canonicalRoot(root); }
   catch { throw new OwnedArtifactAdmissionError('the runtime root could not be resolved'); }
   const existing = heldRoots.getStore()?.get(canonical);
   if (existing?.active) return operation();
+  // Metadata persistence must wait for validation/rename to finish. Admission
+  // still refuses a competing lifecycle owner without waiting.
+  const lock = options.wait ? withPacketLifecycleMutationLock : withPacketLifecycleSpawnLock;
   let operationStarted = false;
   try {
-    return await withPacketLifecycleSpawnLock(`owned-artifacts:${createHash('sha256').update(canonical).digest('hex')}`, async () => {
+    return await lock(`owned-artifacts:${createHash('sha256').update(canonical).digest('hex')}`, async () => {
       try { await bindStore(canonical); }
       catch (error) {
         if (error instanceof OwnedArtifactAdmissionError) throw error;
         throw new OwnedArtifactAdmissionError('the lifecycle store binding could not be verified');
       }
       const cliNamespace = path.join(await realpath(path.dirname(workerO8CliRoot())), 'worker-cli');
-      return withPacketLifecycleSpawnLock(`owned-cli-artifacts:${createHash('sha256').update(cliNamespace).digest('hex')}`, async () => {
+      return lock(`owned-cli-artifacts:${createHash('sha256').update(cliNamespace).digest('hex')}`, async () => {
         await bindStore(cliNamespace);
         const authority = { active: true, admitted: false };
         try {
