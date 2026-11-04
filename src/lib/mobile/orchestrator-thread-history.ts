@@ -13,6 +13,7 @@ import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-projec
 import { buildProjectBoundThreadRecord, type BindOrchestratorThreadProjectInput } from './orchestrator-thread-project-binding';
 import { nextOrchestratorThreadId } from './orchestrator-thread-id';
 import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
+import { isThreadScratchPath } from '@/lib/orchestrator/thread-scratch';
 import { repairComposerPreambleHistory, repairFlippedTranscriptHistory } from './orchestrator-thread-history-repair';
 import { consumePendingTurnWorkers, mergeMobileTurnReceipts } from './turn-receipt';
 import { threadSummaryCache } from './orchestrator-thread-summary-cache';
@@ -141,7 +142,9 @@ export function readOrchestratorThreadMessages(
   }
   return out;
 }
-function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
+function writeHistoryRecord(tabId: string, input: OrchestratorHistoryRecord) {
+  // A chat with no project runs in its scratch folder; that folder never becomes its project.
+  const record = isThreadScratchPath(input.repoPath) ? { ...input, repoPath: null, repoName: null } : input;
   ensureHistoryDir();
   const filePath = safeOrchestratorHistoryPath(tabId);
   persistCanonicalChatHistoryRecord(tabId, record);

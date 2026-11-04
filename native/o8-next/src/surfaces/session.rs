@@ -336,20 +336,15 @@ impl Client {
         Ok(routing)
     }
     pub fn queue(&self, session: &Session) -> Result<Value, String> {
-        self.get(
-            "/api/orchestrator/composer-queue",
-            &[
-                (
-                    "repoPath",
-                    session
-                        .repo_path
-                        .as_deref()
-                        .ok_or("Session has no repository")?,
-                ),
-                ("threadId", &session.id),
-                ("backend", session.backend.as_deref().unwrap_or("")),
-            ],
-        )
+        // A chat with no project omits its repository; the server resolves its scratch folder.
+        let mut query = vec![
+            ("threadId", session.id.as_str()),
+            ("backend", session.backend.as_deref().unwrap_or("")),
+        ];
+        if let Some(repo) = session.repo_path.as_deref() {
+            query.insert(0, ("repoPath", repo));
+        }
+        self.get("/api/orchestrator/composer-queue", &query)
     }
     pub fn mutate_queue(
         &self,
