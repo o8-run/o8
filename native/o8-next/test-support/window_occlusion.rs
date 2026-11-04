@@ -4,6 +4,8 @@
 mod material;
 #[path = "../src/theme.rs"]
 mod theme;
+#[path = "../src/theme_import.rs"]
+mod theme_import;
 use gpui::{
     App, Bounds, Context, IntoElement, Pixels, Render, Window, WindowBounds, WindowHandle,
     WindowOptions, canvas, div, fill, point, prelude::*, px, rgb, size,

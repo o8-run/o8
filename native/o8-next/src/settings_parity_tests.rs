@@ -83,6 +83,7 @@ fn settings_parity_general_groups_and_global_search(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn settings_parity_appearance_drives_the_running_shell(cx: &mut TestAppContext) {
+    let _guard = crate::theme::selection_test_guard();
     let (_fixture, shell, mut visual, _) = start(cx);
     let previous = crate::theme::appearance_name();
     click(&mut visual, "settings-nav-appearance");
@@ -97,6 +98,7 @@ fn settings_parity_appearance_drives_the_running_shell(cx: &mut TestAppContext) 
 
 #[gpui::test]
 fn settings_parity_appearance_imports_a_vscode_theme_and_applies_it(cx: &mut TestAppContext) {
+    let _guard = crate::theme::selection_test_guard();
     let (fixture, shell, mut visual, _) = start(cx);
     let previous = crate::theme::choice_name();
     let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/themes");

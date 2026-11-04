@@ -201,6 +201,15 @@ pub fn import_theme(source: &str, fallback_name: &str) -> Result<String, String>
     GENERATION.fetch_add(1, Ordering::Relaxed);
     Ok(name)
 }
+/// Tests that switch the process-wide theme choice hold this so they do not
+/// see each other's switches.
+#[cfg(test)]
+pub(crate) fn selection_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 fn themes_path() -> Option<std::path::PathBuf> {
     Some(saved_path()?.with_file_name("next-themes.json"))
 }

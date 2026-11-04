@@ -166,6 +166,7 @@ fn saved_themes_round_trip_through_the_store_and_replace_by_id() {
 
 #[test]
 fn selecting_an_imported_theme_applies_it_to_the_live_theme_handle() {
+    let _guard = theme::selection_test_guard();
     let previous = theme::choice_name();
     let before = theme::imported_themes();
     assert!(theme::import_theme(MALFORMED, "broken").is_err());
