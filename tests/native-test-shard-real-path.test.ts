@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, expect, it } from 'vitest';
@@ -67,6 +68,88 @@ it('checks native shard assignment and cache contracts through Node fixtures', (
     encoding: 'utf8', timeout: 30_000,
   });
   expect(result.status, result.stderr + result.stdout).toBe(0);
+}, 30_000);
+
+it.skipIf(process.platform !== 'linux')('backdates only unchanged sources and safe directories on a prefix cache hit, and every source on an exact hit', () => {
+  const directory = mkdtempSync(path.join(root, 'cache-checkout-'));
+  const files = {
+    'native/o8-next/Cargo.toml': '[package]\nname="cache-fixture"\n',
+    'native/o8-next/Cargo.lock': 'version=4\n',
+    'native/o8-next/src/main.rs': 'const SPEC: &str = include_str!("../../../docs/spec.md");',
+    'native/o8-next/vendor/gpui/src/lib.rs': 'fn unchanged() {}',
+    'native/o8-next/vendor/taffy/src/lib.rs': 'fn unchanged() {}',
+    'native/o8-next/tests/deleted.rs': 'fn removed() {}',
+    'docs/spec.md': 'embedded fixture',
+    '.cargo/config.toml': '[build]\n',
+  };
+  const write = (file: string, content: string) => {
+    mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
+    writeFileSync(path.join(directory, file), content);
+  };
+  for (const [file, content] of Object.entries(files)) write(file, content);
+  const git = (...args: string[]) => {
+    const result = spawnSync('git', args, { cwd: directory, encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
+  };
+  git('init', '-q');
+  git('add', '.');
+  const target = path.join(directory, 'native/o8-next/target');
+  const runCache = (mode: string, hit = '') => {
+    const result = spawnSync(process.execPath, [path.resolve('scripts/ci/native-test-cache.mjs'), mode], {
+      cwd: directory, encoding: 'utf8', timeout: 30_000,
+      env: { ...process.env, CARGO_TARGET_DIR: target, CARGO_HOME: path.join(directory, 'cargo'),
+        GITHUB_OUTPUT: '', O8_NATIVE_CACHE_HIT: hit || undefined },
+    });
+    expect(result.status, result.stderr + result.stdout).toBe(0);
+    return result.stdout;
+  };
+  write('native/o8-next/target/debug/incremental/disposable', 'unused');
+  const initialKey = runCache('key');
+  runCache('measure');
+  expect(existsSync(path.join(target, 'debug/incremental'))).toBe(false);
+  expect(runCache('key')).toBe(initialKey);
+  const changed = 'native/o8-next/src/main.rs';
+  const added = 'native/o8-next/vendor/taffy/src/new.rs';
+  const removed = 'native/o8-next/tests/deleted.rs';
+  write(changed, `${files[changed]}\nfn changed() {}`);
+  write(added, 'fn added() {}');
+  git('add', added);
+  rmSync(path.join(directory, removed));
+  const present = [...Object.keys(files).filter(file => file !== removed), added];
+  const safeDirectories = ['native/o8-next/vendor/gpui', 'native/o8-next/vendor/gpui/src'];
+  const changedDirectories = ['native/o8-next', 'native/o8-next/src', 'native/o8-next/vendor',
+    'native/o8-next/vendor/taffy', 'native/o8-next/vendor/taffy/src'];
+  const directories = [...safeDirectories, ...changedDirectories];
+  const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+  const stamp = Date.parse('2000-01-01T00:00:00Z');
+  for (const file of [...present, ...directories]) utimesSync(path.join(directory, file), now, now);
+  const restored = runCache('restore');
+  for (const file of present) {
+    expect(statSync(path.join(directory, file)).mtimeMs, file).toBe(file === changed || file === added ? now.getTime() : stamp);
+  }
+  for (const dir of directories) {
+    expect(statSync(path.join(directory, dir)).mtimeMs, dir).toBe(changedDirectories.includes(dir) ? now.getTime() : stamp);
+  }
+  expect(restored).toContain('backdated=6 changed=1 new=1 missing=1');
+  const manifest = JSON.parse(readFileSync(path.join(target, '.o8-native-sources.json'), 'utf8'));
+  expect(manifest.sources).toEqual(Object.fromEntries(Object.entries(files)
+    .map(([file, content]) => [file, createHash('sha256').update(content).digest('hex')])));
+  expect(initialKey).toContain(`native-tests-v1-${manifest.configuration}-${manifest.lockfile}-`);
+  for (const field of ['configuration', 'lockfile']) {
+    writeFileSync(path.join(target, '.o8-native-sources.json'), JSON.stringify({ ...manifest, [field]: 'mismatch' }));
+    for (const file of [...present, ...directories]) utimesSync(path.join(directory, file), now, now);
+    expect(runCache('restore', 'false')).toContain('configuration or lockfile mismatch');
+    for (const file of [...present, ...directories]) {
+      expect(statSync(path.join(directory, file)).mtimeMs, file).toBe(now.getTime());
+    }
+  }
+  // Restore the deleted input so the exact-hit case matches a complete checkout.
+  write(removed, files[removed]);
+  for (const file of [...present, removed, ...directories]) utimesSync(path.join(directory, file), now, now);
+  expect(runCache('restore', 'true')).toContain('exact hit');
+  for (const file of [...present, removed, ...directories]) {
+    expect(statSync(path.join(directory, file)).mtimeMs, file).toBe(stamp);
+  }
 }, 30_000);
 
 it.skipIf(process.platform !== 'linux' || process.arch !== 'x64')('runs every real test exactly once across shards, retains ignored cases and propagates assertion failures', () => {
