@@ -21,6 +21,8 @@ import { GitHubRequestDeferredError } from '@/lib/github-broker/request-budget';
 import { beginPrWatchRead, recordPrWatchSnapshot } from '@/lib/github-broker/pr-watch';
 import { waitForPrRemarkWrites } from '@/lib/github-broker/pr-watch-writes';
 import { assessPrMergeGate, assertPrMergeAllowed, PrMergeRefused } from '@/lib/github-broker/pr-merge-gate';
+import { resolveGitLabProject } from '@/lib/git-providers/detect';
+import { gitlabProvider, readGitLabPanelDetail } from '@/lib/git-providers/gitlab';
 
 function normalizeRepoSlug(remoteUrl: string | null | undefined) {
   if (!remoteUrl) return null;
@@ -42,6 +44,15 @@ export async function GET(
 
   if (isNaN(prNum) || prNum < 1) {
     return viewerJson({ error: 'Invalid PR number' }, { status: 400 });
+  }
+
+  const gitlab = resolveGitLabProject(searchParams.get('repo'));
+  if (gitlab) {
+    try {
+      return viewerJson({ pr: await readGitLabPanelDetail(gitlab.slug, prNum) });
+    } catch {
+      return viewerJson({ error: 'Merge request could not be read. Check the connection or GitLab access and retry.' }, { status: 502 });
+    }
   }
 
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
@@ -130,6 +141,9 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid action body' }, { status: 400 });
   }
 
+  const gitlab = resolveGitLabProject(body.repo);
+  if (gitlab) return writeGitLabMergeRequest(gitlab.slug, prNum, body);
+
   const repo = await resolveRepoSlug(body.repo ?? null, DEFAULT_GITHUB_REPO);
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
     return NextResponse.json({ error: 'Invalid repo format' }, { status: 400 });
@@ -203,6 +217,28 @@ export async function POST(
     }
 
     return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
+  } catch (err) {
+    if (err instanceof PrMergeRefused) return NextResponse.json({ ok: false, mergeRefused: true, error: err.message, mergeGate: err.gate }, { status: 409 });
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+async function writeGitLabMergeRequest(repo: string, iid: number, body: { action: string; comment?: string; mergeMethod?: 'squash' | 'merge' | 'rebase'; commitSha?: string; expectedMergeGate?: string }) {
+  if (body.expectedMergeGate !== undefined && (typeof body.expectedMergeGate !== 'string' || !/^[a-f0-9]{64}$/.test(body.expectedMergeGate))) return NextResponse.json({ error: 'Invalid merge gate snapshot' }, { status: 400 });
+  const comment = body.comment?.trim();
+  try {
+    if (body.action === 'comment') {
+      if (!comment) return NextResponse.json({ error: 'Comment body required' }, { status: 400 });
+      await gitlabProvider.comment(repo, iid, comment);
+      return NextResponse.json({ ok: true, action: 'commented' });
+    }
+    if (body.action === 'merge') {
+      if (!body.commitSha || !['merge', 'squash', 'rebase'].includes(body.mergeMethod || '')) return NextResponse.json({ error: 'A reviewed commit and merge method are required' }, { status: 400 });
+      await gitlabProvider.merge(repo, iid, { mergeMethod: body.mergeMethod!, expectedHeadSha: body.commitSha, expectedMergeGate: body.expectedMergeGate });
+      return NextResponse.json({ ok: true, action: 'merged' });
+    }
+    return NextResponse.json({ error: `${body.action} is not available for GitLab merge requests yet.` }, { status: 400 });
   } catch (err) {
     if (err instanceof PrMergeRefused) return NextResponse.json({ ok: false, mergeRefused: true, error: err.message, mergeGate: err.gate }, { status: 409 });
     const message = err instanceof Error ? err.message : 'Unknown error';
