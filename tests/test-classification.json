@@ -4659,6 +4659,13 @@
       ]
     },
     {
+      "path": "tests/mobile-pr-tab-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mobile-ripple-device-real-path.test.ts",
       "reasons": [
         "real-path"

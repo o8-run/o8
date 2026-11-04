@@ -387,7 +387,7 @@ export function MobileApprovalsClient({
   const isFullScreenView = NEW_VIEWS.has(activeView);
   const newViewTitle: Record<string, string> = {
     agents: 'Agents',
-    issues: 'Issues',
+    issues: 'PRs',
     activity: 'Activity',
     costs: 'Costs',
     orchestrator: 'Orchestrator',
@@ -769,8 +769,8 @@ export function MobileApprovalsClient({
 
           {activeView === 'issues' ? (
             <MobileViewShell themeId={themeId}>
-              <Suspense fallback={renderSnapshotPlaceholder('Loading issues…')}>
-                <IssuesPage onBack={handleBackToChats} hideHeader refreshSignal={issuesRefreshSignal} />
+              <Suspense fallback={renderSnapshotPlaceholder('Loading pull requests…')}>
+                <IssuesPage onBack={handleBackToChats} activeRepoPath={selectedRepoPath} hideHeader refreshSignal={issuesRefreshSignal} />
               </Suspense>
             </MobileViewShell>
           ) : null}
