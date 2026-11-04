@@ -5267,6 +5267,7 @@
       "path": "tests/o8d-next-surfaces-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
         "native-build",
         "process-signal",
         "real-path"
