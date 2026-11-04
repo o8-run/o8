@@ -5530,6 +5530,12 @@
       ]
     },
     {
+      "path": "tests/owned-session-validation-save-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/owned-stdin-survival-real-path.test.ts",
       "reasons": [
         "child-process",
