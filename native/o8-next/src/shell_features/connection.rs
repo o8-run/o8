@@ -132,6 +132,7 @@ impl ShellExtension for Connection {
                     .filter_map(|s| s.repo_path.clone())
                     .collect(),
                 active_project: None,
+                active_project_id: None,
             };
             for registration in registrations() {
                 (registration.workspaces)(&client, &mut load);
@@ -144,6 +145,7 @@ impl ShellExtension for Connection {
                 s.loading = false;
                 match result {
                     Ok((sessions, load)) => {
+                        s.settings_project(load.active_project_id.clone(), cx);
                         let bootstrap = !s.features.get::<Runtime>().bootstrapped;
                         s.features.get::<Runtime>().bootstrapped = true;
                         let recovering = !s.connected;
