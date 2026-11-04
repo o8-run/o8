@@ -3503,6 +3503,7 @@
         "git-cli",
         "process-signal",
         "real-path",
+        "terminal-tool",
         "worktree-api"
       ]
     },

@@ -182,6 +182,8 @@ it('cold-replays source and disposable-copy interruptions while refusing changed
     const executable = await realpath(findmnt.stdout.trim());
     await symlink(executable, path.join(noProcessScanner, 'findmnt'));
   }
+  // A missing lsof can enter the Linux /proc fallback; fail the probe explicitly.
+  await writeFile(path.join(noProcessScanner, 'lsof'), `#!${process.execPath}\nprocess.stderr.write('fixture cwd scanner unavailable');process.exit(2);\n`, { mode: 0o700 });
   const unavailableCwdEnv = { ...input.env, PATH: noProcessScanner };
   const unavailableCwd = await input.cold(`
     const identityNs = await import(${url('src/lib/worktree/materialization-identity.ts')});
@@ -195,7 +197,7 @@ it('cold-replays source and disposable-copy interruptions while refusing changed
     snapshot: { status: string; rows: unknown[]; reason: string } };
   expect(unavailableCwd.identity).toEqual(recovery.parent);
   expect(unavailableCwd.snapshot).toMatchObject({ status: 'unavailable', rows: [] });
-  expect(unavailableCwd.snapshot.reason).toContain('ENOENT');
+  expect(unavailableCwd.snapshot.reason).toContain('fixture cwd scanner unavailable');
   // The actual CLI must reach the unknown-consumer guard after volume identity remains valid.
   await expect(input.invoke([path.join(source, 'scripts/generated-output.mjs'), 'retire-verification', '--resource', id],
     unavailableCwdEnv)).rejects.toThrow('live or unknown consumer');
