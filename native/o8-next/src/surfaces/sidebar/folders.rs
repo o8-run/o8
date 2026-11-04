@@ -138,7 +138,7 @@ pub(super) fn by_repo(
             Some(folder) => folder.2.push(session),
             None => {
                 let name = if path.is_empty() {
-                    "Unassigned".into()
+                    "No project".into()
                 } else {
                     label(&path)
                 };

@@ -3,6 +3,7 @@ import { execFileSync } from '@/lib/providers/child-process';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isOrchestratorHomePath } from '@/lib/orchestrator/repo-path';
+import { isThreadScratchPath } from '@/lib/orchestrator/thread-scratch';
 
 function couldContainGitWorkTree(repoPath: string): boolean {
   // Explicit Git environment may locate metadata outside the cwd ancestry.
@@ -93,7 +94,7 @@ export function getRepoDispatchAdmission(repoPath: string): RepoDispatchAdmissio
         : `Repository path is missing. ${correctiveAction}`,
     };
   }
-  if (isOrchestratorHomePath(normalized)) return { ok: true, repoPath: normalized };
+  if (isOrchestratorHomePath(normalized) || isThreadScratchPath(normalized)) return { ok: true, repoPath: normalized };
   if (!isGitWorkTreeSync(normalized)) {
     const correctiveAction = `Run "git init" in ${normalized}, create an initial commit, or select an existing Git repository.`;
     return {
