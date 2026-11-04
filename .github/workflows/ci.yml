@@ -30,7 +30,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}-${{ inputs.integration_base }}
+  # Main pushes get their own group per commit: GitHub keeps one pending run per
+  # group, so a shared group held each main run behind the previous run's weekly
+  # shards and then cancelled it when the next merge arrived (#5458).
+  group: ci-${{ github.ref }}-${{ inputs.integration_base }}-${{ github.ref == 'refs/heads/main' && github.sha || 'ref' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -360,6 +363,10 @@ jobs:
     needs: test
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.schedule == '17 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.integration_base == '')
     timeout-minutes: 60
+    # A newer main push supersedes an older full-suite shard; the Sunday run is never cancelled.
+    concurrency:
+      group: integration-weekly-${{ github.event_name }}-${{ matrix.shard }}
+      cancel-in-progress: ${{ github.event_name == 'push' }}
     strategy:
       fail-fast: false
       matrix:
