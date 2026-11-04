@@ -31,7 +31,9 @@ permissions:
   contents: read
 concurrency:
   group: next-parity-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer pull request push supersedes its inventory; a main capture run is
+  # never cancelled, or a busy landing day would never seed its cache.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   inventory:
     name: Parity inventory and capture guards

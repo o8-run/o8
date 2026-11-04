@@ -95,7 +95,11 @@ describe('parity workflow lanes', () => {
       push: { branches: ['main'], paths },
       workflow_dispatch: null,
     });
-    expect(parity.concurrency).toEqual({ group: 'next-parity-${{ github.ref }}', 'cancel-in-progress': true });
+    expect(parity.concurrency.group).toBe('next-parity-${{ github.ref }}');
+    expect(condition(parity.concurrency['cancel-in-progress'], { event_name: 'pull_request' })).toBe(true);
+    for (const event_name of ['push', 'workflow_dispatch']) {
+      expect(condition(parity.concurrency['cancel-in-progress'], { event_name })).toBe(false);
+    }
   });
 
   it('runs only the cheap parity inventory on pull requests and captures after landing or dispatch', () => {
