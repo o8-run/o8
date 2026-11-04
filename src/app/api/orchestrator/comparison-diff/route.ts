@@ -25,6 +25,12 @@ export async function GET(request: Request) {
   const worktreeParam = searchParams.get('worktree') ?? searchParams.get('workspace');
   const base = (searchParams.get('base') || 'main').trim();
 
+  // Refuse option-shaped or non-ref bases before any git call: an unguarded
+  // base can otherwise be read as an option rather than a revision.
+  if (base.startsWith('-') || base.length > 256 || !/^[\w./-]+$/.test(base)) {
+    return NextResponse.json({ error: 'invalid base ref' }, { status: 400 });
+  }
+
   if (!worktreeParam) {
     return NextResponse.json({ error: 'worktree param required' }, { status: 400 });
   }
