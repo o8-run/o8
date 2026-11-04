@@ -3023,6 +3023,12 @@
       ]
     },
     {
+      "path": "tests/delegate-instance-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dependency-directory-clone-real-path.test.ts",
       "reasons": [
         "apfs-tool",

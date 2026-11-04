@@ -298,7 +298,7 @@ export interface OrchestratorPacket {
   origin?: 'design-mode';
   workspaceTargetPath: string | null;
   branchTarget: string;
-  runtime: OrchestratorRuntime;
+  runtime: OrchestratorRuntime; instanceId?: string;
   /** Resolved model that actually launched, after routing guards and defaults. */
   model?: string | null;
   dependencyLabels: string[];

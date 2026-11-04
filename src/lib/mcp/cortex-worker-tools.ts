@@ -84,6 +84,7 @@ export const CORTEX_WORKER_TOOLS = [
           description: 'Optional worker runtime id; omit it to use the operator\'s saved dispatch default. '
             + '"pi-builtin" is the built-in Pi worker that ships with o8. "pi" is the operator\'s own Pi CLI and runs only when it is installed.',
         },
+        instanceId: { type: 'string', minLength: 1, description: 'Saved provider instance id. Pins its configuration; unknown or disabled instances are refused.' },
         model: { type: 'string', description: 'Exact model id from cortex_worker_catalog. A supplied pin is never silently replaced.' },
         requestedEffort: { type: 'string', enum: THINKING_EFFORTS, description: 'Optional task effort. Use a tier listed for this runtime/model. Unsupported or coerced tiers are refused.' },
         thinkingEffort: { type: 'string', enum: THINKING_EFFORTS, description: 'Alias for requestedEffort; when both are present they must match.' },
