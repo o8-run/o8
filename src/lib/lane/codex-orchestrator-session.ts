@@ -46,6 +46,8 @@ import { serviceTierForTurn, type OrchestratorServiceTier } from '@/lib/orchestr
 import { recoverRuntimeSessionMessage, SESSION_CONTEXT_UNAVAILABLE } from './runtime-session-recovery';
 import { readRuntimeSessionHandoff, persistRuntimeSessionHandoff, noteRuntimeSessionHandoff, clearRuntimeSessionHandoff, type RuntimeSessionHandoff } from './runtime-session-handoff';
 import { selectedOrchestratorModel } from './orchestrator-model-guard';
+import { startCodexFirstEventWatchdog } from './codex-first-event-watchdog';
+export { CODEX_FIRST_EVENT_TIMEOUT_MS, CODEX_FIRST_EVENT_TIMEOUT_CAP_MS } from './codex-first-event-watchdog';
 import {
   ensureRegisteredSession,
   getRegisteredSession,
@@ -104,8 +106,6 @@ export interface SendToCodexOrchestratorOptions {
   signal?: AbortSignal;
   crashSurvival?: OrchestratorCrashSurvivalMeta;
 }
-// ── Constants ────────────────────────────────────────────────────────────────
-export const CODEX_FIRST_EVENT_TIMEOUT_MS = 45_000;
 // ── Registry ─────────────────────────────────────────────────────────────────
 const sessions = new Map<string, CodexOrchestratorSession>();
 
@@ -550,6 +550,7 @@ async function sendToCodexOrchestratorAttempt(
     }
     let proc: ChildProcess;
     const singleProcessGroup = options.orchestrationMode === 'single';
+    const spawnedAt = Date.now();
     try {
       const launch = cliInvocation(spawnBinary, spawnArgs);
       const createChild = options.orchestrationMode === 'single' ? spawnSolo : spawn;
@@ -596,8 +597,14 @@ async function sendToCodexOrchestratorAttempt(
     let crashTailOffset = 0;
     let settled = false;
     let processTimeout: ReturnType<typeof setTimeout> | null = null;
-    let firstEventTimeout: ReturnType<typeof setTimeout> | null = null;
-    let sawFirstEvent = false;
+    let outputBytes = 0;
+    const firstEventWatchdog = startCodexFirstEventWatchdog({
+      spawnedAt, sessionName: session.sessionName,
+      isAlive: () => proc.exitCode == null && proc.signalCode == null,
+      readOutputBytes: () => crashRecord
+        ? fileSize(crashRecord.stdoutPath) + fileSize(crashRecord.stderrPath) : outputBytes,
+      onTimeout: note => { settle('dead', note); terminate(2_000); },
+    });
     let bridgeErrorMessage: string | undefined;
     const handleCodexLine = (line: string) => {
       if (codexApp) noteCodexAppTurnLine(line, { tabId: session.historyThreadId, repoPath: session.repoPath });
@@ -607,13 +614,7 @@ async function sendToCodexOrchestratorAttempt(
       }, { isLocalModel, model, onActivity,
         onInputAccepted: recovery ? () => noteRuntimeSessionHandoff(session.historyThreadId, recovery, lineState.threadId, true) : undefined });
       noteRuntimeSessionHandoff(session.historyThreadId, recovery, lineState.threadId);
-      if (parsed) {
-        sawFirstEvent = true;
-        if (firstEventTimeout) {
-          clearTimeout(firstEventTimeout);
-          firstEventTimeout = null;
-        }
-      }
+      if (parsed) firstEventWatchdog.firstEvent();
     };
 
     const drainCrashOutput = () => {
@@ -630,9 +631,9 @@ async function sendToCodexOrchestratorAttempt(
       settled = true;
       stopSteer();
       if (processTimeout) clearTimeout(processTimeout);
-      if (firstEventTimeout) clearTimeout(firstEventTimeout);
       if (drain) drainCrashOutput();
       else stopCrashTail?.();
+      firstEventWatchdog.stop();
       finishOrchestratorTurn(crashRecord, error ? 'failed' : 'completed');
       if (proc.exitCode == null && proc.signalCode == null) proc.once('close', cleanupSingleLaunch);
       else cleanupSingleLaunch();
@@ -682,6 +683,7 @@ async function sendToCodexOrchestratorAttempt(
     }
 
     proc.stdout?.on('data', (chunk: Buffer) => {
+      outputBytes += chunk.length;
       lineBuffer += chunk.toString('utf-8');
       const lines = lineBuffer.split('\n');
       lineBuffer = lines.pop() ?? '';
@@ -693,6 +695,7 @@ async function sendToCodexOrchestratorAttempt(
 
     let stderr = '';
     proc.stderr?.on('data', (chunk: Buffer) => {
+      outputBytes += chunk.length;
       stderr += chunk.toString('utf-8');
     });
 
@@ -723,15 +726,6 @@ async function sendToCodexOrchestratorAttempt(
       if (code !== 0) lineState.terminalOutcome = 'failed';
       settle(code === 0 ? 'ready' : 'dead', error, true);
     });
-
-    if (!sawFirstEvent) {
-      firstEventTimeout = setTimeout(() => {
-        const note = 'Codex produced no output for 45s — the turn was aborted; re-send to retry';
-        console.warn(`[codex-orchestrator-session] ${note} (${session.sessionName})`);
-        settle('dead', note);
-        terminate(2_000);
-      }, CODEX_FIRST_EVENT_TIMEOUT_MS);
-    }
 
     processTimeout = setTimeout(() => {
       const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
