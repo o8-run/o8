@@ -137,6 +137,12 @@
       ]
     },
     {
+      "path": "src/app/api/panel/resource-usage/route-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/panel/status/route.test.ts",
       "reasons": [
         "terminal-tool"

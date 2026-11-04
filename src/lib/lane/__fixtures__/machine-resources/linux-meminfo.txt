@@ -1,0 +1,16 @@
+MemTotal:       16477348 kB
+MemFree:         9090420 kB
+MemAvailable:   13269900 kB
+Buffers:          170376 kB
+Cached:          3966828 kB
+SwapCached:            0 kB
+Active:           643460 kB
+Inactive:        6142516 kB
+Active(anon):        208 kB
+Inactive(anon):  2664764 kB
+Active(file):     643252 kB
+Inactive(file):  3477752 kB
+Unevictable:        9792 kB
+Mlocked:            9792 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
