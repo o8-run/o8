@@ -42,21 +42,34 @@ jobs:
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-run
       - name: Run native CLI assertions
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --test shell_cli --test pane_grid_cli --test terminal_cli --test diff_cli
-      # The helper requires WebKit's bubblewrap sandbox. Ubuntu 24.04 restricts
-      # unprivileged user namespaces and, unlike later releases, ships no
-      # AppArmor exception for bwrap. Lift the restriction on this runner only
-      # when bwrap cannot create a namespace; the app itself is unchanged.
+      # The helper requires WebKit's bubblewrap sandbox and never renders
+      # without it. Ubuntu 24.04 restricts unprivileged user namespaces and
+      # does not enable an AppArmor exception for bwrap by default. Enable the
+      # distribution's optional bwrap-userns-restrict profile, which later
+      # Ubuntu releases enable by default. Lift the restriction on this runner
+      # only if the profile cannot be loaded. A green run therefore does not
+      # show that a default Ubuntu 24.04 install can render. The app is unchanged.
       - name: Allow the WebKit sandbox to create user namespaces
         run: |
           cargo build --release --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next-viz-render
           test -x native/o8-next/target/release/o8-next-viz-render
           sysctl kernel.apparmor_restrict_unprivileged_userns || true
-          if bwrap --unshare-user --ro-bind / / true; then
-            echo "bwrap can create a user namespace"
+          probe() { bwrap --unshare-user --ro-bind / / true; }
+          if probe; then
+            echo "sandbox: bwrap can already create a user namespace"
+            exit 0
+          fi
+          profile=/usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+          if sudo apt-get install -y --no-install-recommends apparmor-profiles \
+            && test -f "$profile" \
+            && sudo install -m 0644 "$profile" /etc/apparmor.d/bwrap-userns-restrict \
+            && sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict \
+            && probe; then
+            echo "sandbox: loaded the distribution bwrap-userns-restrict AppArmor profile"
           else
-            echo "bwrap cannot create a user namespace; lifting the AppArmor restriction on this runner"
+            echo "sandbox: the bwrap profile did not load; lifting the AppArmor restriction on this runner"
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-            bwrap --unshare-user --ro-bind / / true
+            probe
           fi
       - name: Render Linux visualization cards through the helper process
         env:
