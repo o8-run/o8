@@ -23,6 +23,7 @@ impl Scene {
             arrow,
             marks,
             gap: None,
+            color: None,
         });
     }
     fn fit(mut self, width: f32) -> Self {
@@ -825,6 +826,9 @@ pub(super) fn layout(diagram: &Diagram, width: f32) -> Scene {
             show_data,
             slices,
         } => super::pie::layout(title, *show_data, slices, width),
+        Diagram::Git { branches, commits } => super::git::layout(branches, commits),
+        Diagram::Gantt(chart) => super::gantt::layout(chart, width),
+        Diagram::Mindmap { nodes, parents } => super::mindmap::layout(nodes, parents),
     }
     .fit(width)
 }
