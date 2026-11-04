@@ -122,9 +122,7 @@ fn symon(s: &mut Shell, data: &Value, window: &mut Window, cx: &mut Context<Shel
                 view.update(cx, |settings, cx| settings.show_pairing(cx));
             }
         }
-        "automations" => {
-            toasts::info("Automations are not in o8 next yet.", cx);
-        }
+        "automations" => s.execute(Command::Scheduled, window, cx),
         _ => {
             if !super::right_panel::open_surface(s, surface, data["url"].as_str(), window, cx) {
                 toasts::info(format!("I don't know the o8 surface \"{surface}\"."), cx);
