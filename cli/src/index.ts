@@ -277,7 +277,7 @@ commands:
   ci [--config path]   run the versioned o8/ci/v1 local check contract
   app restart [--if-update-pending]  request an app restart; optionally no-op unless an update is pending
   update check          request a fresh native update check without installing
-  update apply [--check] [--force]  apply an available update; --check checks first, --force overrides live-work refusal
+  update [apply] [--dry-run] [--runtimes a,b] [--machines] [--check] [--force]  update installed runtime CLIs, then the app
   browser open [url]   open a page — localhost rides o8's embedded browser, external URLs auto-route to headless Chrome (engine)
   browser read         page text + interactive elements (selectors)
   browser click <sel>  click an element (ghost cursor paints in the o8 UI)
@@ -480,8 +480,16 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runCi(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'app':
       return runApp(args.mode, secondary, args.rest);
-    case 'update':
+    case 'update': {
+      // With no subcommand, the shared parser captures the first valued flag's
+      // value as `secondary`, even when boolean flags precede --runtimes.
+      if (secondary && !args.secondaryBeforeRest && args.rest.includes('--runtimes')) {
+        const rest = [...args.rest];
+        rest.splice(rest.indexOf('--runtimes') + 1, 0, secondary);
+        return runUpdate(args.mode, undefined, rest);
+      }
       return runUpdate(args.mode, secondary, args.rest);
+    }
     case 'browser':
       return runBrowser(args.mode, secondary, args.rest);
     case 'broadcast':

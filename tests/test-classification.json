@@ -2309,6 +2309,15 @@
       ]
     },
     {
+      "path": "tests/cli-runtime-update-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cli-slow-route-timeouts.test.ts",
       "reasons": [
         "worktree-api"
