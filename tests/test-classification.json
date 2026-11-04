@@ -1428,7 +1428,6 @@
         "child-process",
         "executable-fixture",
         "git-cli",
-        "native-build",
         "process-signal",
         "real-path",
         "worktree-api"
@@ -5060,7 +5059,6 @@
       "reasons": [
         "child-process",
         "git-cli",
-        "native-build",
         "network-listener",
         "real-path",
         "worktree-api"

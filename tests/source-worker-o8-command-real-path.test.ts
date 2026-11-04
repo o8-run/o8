@@ -23,12 +23,6 @@ vi.mock('@/lib/runtimes/shared/owned-session/sandbox', async original => ({
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({
   ensureDispatchBackendReady: vi.fn(async () => { sandbox.beforeDispatch?.(); return { ready: true }; }),
 }));
-// #4899 admits a Codex effort only with model/list evidence from the selected account; the fixture
-// runtime cannot answer model/list, so advertise the launched model's effort here.
-vi.mock('@/lib/codex/service-tier-catalogue', async original => ({
-  ...await original<typeof import('@/lib/codex/service-tier-catalogue')>(),
-  getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-sol': [] }, reasoningEfforts: { 'gpt-5.6-sol': ['high'] } }),
-}));
 vi.mock('@clerk/nextjs/server', () => ({ clerkMiddleware: (handler: unknown) => handler }));
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-worker-cli-')));
