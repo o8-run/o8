@@ -72,16 +72,20 @@ pub struct Grid {
     size: Arc<Mutex<Size>>,
     pub revision: u64,
     pub bytes: u64,
+    /// Live feeds, not replays: what a command typed now can have printed.
+    live: u64,
     /// Exit statuses the shell reported live (OSC 133;D), and the last one.
     exits: u64,
     last_exit: Option<i32>,
     /// The end of the last feed when it may begin an exit report.
     osc_tail: Vec<u8>,
 }
-/// Where a terminal stands: its revision and the exit reports seen so far.
+/// Where a terminal stands for one command line: its live feeds, the echoes
+/// of that line still in reach, and the exit reports seen so far.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Mark {
-    pub revision: u64,
+    pub live: u64,
+    pub echoes: usize,
     pub exits: u64,
     pub exit: Option<i32>,
 }
@@ -113,6 +117,7 @@ impl Grid {
             size,
             revision: 0,
             bytes: 0,
+            live: 0,
             exits: 0,
             last_exit: None,
             osc_tail: vec![],
@@ -135,7 +140,10 @@ impl Grid {
         self.parser.advance(&mut self.term, bytes);
         self.historical.store(false, Ordering::Relaxed);
         // A replay repeats old reports; only live ones count.
-        if !historical {
+        if historical {
+            self.osc_tail.clear();
+        } else {
+            self.live += 1;
             self.read_exits(bytes);
         }
         self.bytes += bytes.len() as u64;
@@ -143,14 +151,20 @@ impl Grid {
         self.replies.lock().unwrap().drain(..).collect()
     }
     pub fn reset(&mut self) {
-        let (revision, exits) = (self.revision, self.exits);
+        let (revision, live, exits) = (self.revision, self.live, self.exits);
         *self = Self::new(self.size());
         self.revision = revision + 1;
+        self.live = live;
         self.exits = exits;
     }
-    pub fn mark(&self) -> Mark {
+    pub fn mark(&self, command: &str) -> Mark {
         Mark {
-            revision: self.revision,
+            live: self.live,
+            echoes: self
+                .lines(LOOKBACK)
+                .iter()
+                .filter(|line| line.ends_with(command))
+                .count(),
             exits: self.exits,
             exit: self.last_exit,
         }

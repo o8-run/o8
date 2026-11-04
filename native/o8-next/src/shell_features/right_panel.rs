@@ -352,7 +352,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let mark =
-            terminal_pane(self, cx).map_or_else(Default::default, |pane| pane.read(cx).mark());
+            terminal_pane(self, cx).map_or_else(Default::default, |pane| pane.read(cx).mark(&line));
         let _ = view.update(cx, |view, cx| view.shell_run_began(&line, mark, cx));
         self.features.get::<Panel>().shell_watch = Some((line.clone(), view));
         run_in_terminal(self, line, window, cx);
@@ -811,7 +811,7 @@ fn watch_shell_run(s: &mut Shell, cx: &mut Context<Shell>) {
     };
     let (output, mark) = terminal_pane(s, cx).map_or((None, None), |pane| {
         let pane = pane.read(cx);
-        (pane.command_output(&line), Some(pane.mark()))
+        (pane.command_output(&line), Some(pane.mark(&line)))
     });
     let running = view
         .update(cx, |view, cx| view.shell_run_read(&line, output, mark, cx))

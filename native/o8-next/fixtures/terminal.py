@@ -39,9 +39,9 @@ while True:
         elif command == "ticks":
             # Streams on stdout and stderr, then reports exit 3 before the prompt.
             emit("~/fixture$ ticks\r\ntick 1\r\n")
-            time.sleep(0.6)
+            time.sleep(1.0)
             os.write(sys.stderr.fileno(), b"tick 2 on stderr\r\n")
-            time.sleep(0.6)
+            time.sleep(1.0)
             emit("tick 3\r\n\x1b]133;D;3\x07~/fixture$ ")
         elif command == "\x0b":
             emit("CTRL-K\r\n")

@@ -30,6 +30,11 @@ pub(crate) struct ShellRun {
     pub took: Option<Duration>,
     /// The exit status, when the shell reports one (OSC 133;D).
     pub exit: Option<i32>,
+    /// Its own echo reached the terminal, so the output read is this run's.
+    pub seen: bool,
+    /// Its echo or terminal went away before its prompt came back; the card
+    /// keeps what it last read and stops following.
+    pub lost: bool,
 }
 
 impl ShellRun {
@@ -42,21 +47,42 @@ impl ShellRun {
             output: vec![],
             took: None,
             exit: None,
+            seen: false,
+            lost: false,
         }
     }
     pub fn running(&self) -> bool {
         self.took.is_none()
     }
-    /// Takes a read of the terminal; true when the card changed.
-    pub fn read(&mut self, output: Option<CommandOutput>, mark: Mark, now: Instant) -> bool {
-        let Some(before) = self.before else {
+    /// Takes a read of the terminal (none when its pane is gone); true when
+    /// the card changed.
+    pub fn read(
+        &mut self,
+        output: Option<CommandOutput>,
+        mark: Option<Mark>,
+        now: Instant,
+    ) -> bool {
+        let Some(before) = self.before.filter(|_| self.running()) else {
             return false;
         };
-        // Until the terminal moves, an older echo of the same line is not this run.
-        let Some(output) = output.filter(|_| self.running() && mark.revision > before.revision)
-        else {
+        let (Some(output), Some(mark)) = (output, mark) else {
+            // A cleared or scrolled-away echo, or a closed terminal, ends the
+            // card where it is rather than leaving it running.
+            if self.seen || mark.is_none() {
+                self.took = Some(now.saturating_duration_since(self.started));
+                self.lost = true;
+                return true;
+            }
             return false;
         };
+        // Only a new live echo of the line is this run: a replayed or older
+        // echo of the same line is not.
+        if !self.seen {
+            if mark.live <= before.live || mark.echoes <= before.echoes {
+                return false;
+            }
+            self.seen = true;
+        }
         let changed = output.lines != self.output || output.finished;
         self.output = output.lines;
         if output.finished {
@@ -65,8 +91,11 @@ impl ShellRun {
         }
         changed
     }
-    /// "running", "stopping", "finished" or "stopped".
+    /// "running", "stopping", "finished", "stopped" or "lost".
     pub fn state(&self) -> &'static str {
+        if self.lost {
+            return "lost";
+        }
         match (self.running(), self.stopped) {
             (true, false) => "running",
             (true, true) => "stopping",
@@ -82,7 +111,13 @@ impl ShellRun {
             let seconds = now.saturating_duration_since(self.started).as_secs();
             return format!("{label} {seconds}s");
         };
-        let label = if self.stopped { "Stopped" } else { "Finished" };
+        let label = if self.lost {
+            "Left the terminal"
+        } else if self.stopped {
+            "Stopped"
+        } else {
+            "Finished"
+        };
         let mut status = format!("{label} · {:.1}s", took.as_secs_f64());
         if let Some(code) = self.exit {
             status.push_str(&format!(" · exit {code}"));
@@ -341,12 +376,13 @@ mod tests {
         assert!(chat_block("sleep 9", &[], false).ends_with("(Still running when added.)"));
     }
 
-    fn mark(revision: u64, exits: u64, exit: Option<i32>) -> Mark {
-        Mark {
-            revision,
+    fn mark(live: u64, echoes: usize, exits: u64, exit: Option<i32>) -> Option<Mark> {
+        Some(Mark {
+            live,
+            echoes,
             exits,
             exit,
-        }
+        })
     }
     fn output(lines: &[&str], finished: bool) -> Option<CommandOutput> {
         Some(CommandOutput {
@@ -361,23 +397,28 @@ mod tests {
         let at = |ms| start + Duration::from_millis(ms);
         let mut run = ShellRun::new("make".into(), start);
         assert!(
-            !run.read(output(&["old"], true), mark(4, 1, Some(0)), at(5)),
+            !run.read(output(&["old"], true), mark(5, 2, 1, Some(0)), at(5)),
             "nothing counts before the shell says where the terminal stood"
         );
-        run.before = Some(mark(4, 1, Some(0)));
+        // An earlier `make` is still on screen when this one is typed.
+        run.before = mark(4, 1, 1, Some(0));
         assert!(
-            !run.read(output(&["old"], true), mark(4, 1, Some(0)), at(5)),
-            "an older echo of the same line, before the terminal moved"
+            !run.read(output(&["old"], true), mark(9, 1, 1, Some(0)), at(5)),
+            "a prompt redraw or replay before the new echo shows the old run"
+        );
+        assert!(
+            !run.read(output(&["old"], true), mark(4, 2, 1, Some(0)), at(5)),
+            "an echo that only a replay brought back is not this run"
         );
         assert_eq!(
             (run.state(), run.status(at(1_400))),
             ("running", "Running 1s".into())
         );
-        assert!(run.read(output(&["a"], false), mark(5, 1, Some(0)), at(100)));
-        assert!(run.read(output(&["a", "b"], false), mark(6, 1, Some(0)), at(200)));
-        assert!(!run.read(output(&["a", "b"], false), mark(7, 1, Some(0)), at(300)));
+        assert!(run.read(output(&["a"], false), mark(10, 2, 1, Some(0)), at(100)));
+        assert!(run.read(output(&["a", "b"], false), mark(11, 2, 1, Some(0)), at(200)));
+        assert!(!run.read(output(&["a", "b"], false), mark(12, 2, 1, Some(0)), at(300)));
         assert_eq!(run.output, ["a", "b"]);
-        assert!(run.read(output(&["a", "b"], true), mark(8, 2, Some(2)), at(600)));
+        assert!(run.read(output(&["a", "b"], true), mark(13, 2, 2, Some(2)), at(600)));
         assert_eq!(run.took, Some(Duration::from_millis(600)));
         assert_eq!(run.exit, Some(2));
         assert_eq!(
@@ -386,11 +427,7 @@ mod tests {
             "a finished clock stops"
         );
         assert!(
-            !run.read(
-                output(&["a", "b", "later"], true),
-                mark(9, 2, Some(2)),
-                at(700)
-            ),
+            !run.read(output(&["later"], true), mark(14, 2, 2, Some(2)), at(700)),
             "a finished card no longer changes"
         );
         assert_eq!(run.copy_text(), "$ make\na\nb");
@@ -400,8 +437,8 @@ mod tests {
     fn an_exit_counts_only_when_reported_after_the_run_began() {
         let start = Instant::now();
         let mut run = ShellRun::new("ls".into(), start);
-        run.before = Some(mark(10, 3, Some(1)));
-        run.read(output(&["x"], true), mark(11, 3, Some(1)), start);
+        run.before = mark(10, 0, 3, Some(1));
+        run.read(output(&["x"], true), mark(11, 1, 3, Some(1)), start);
         assert_eq!(run.exit, None, "the shell reported nothing for this run");
         assert_eq!(run.status(start), "Finished · 0.0s");
         let mut stopped = ShellRun::new("sleep 30".into(), start);
@@ -409,11 +446,35 @@ mod tests {
         stopped.stopped = true;
         assert_eq!(stopped.status(start), "Stopping 0s");
         assert_eq!(stopped.state(), "stopping");
-        stopped.read(output(&["CTRL-C"], true), mark(1, 1, Some(130)), start);
+        stopped.read(output(&["CTRL-C"], true), mark(1, 1, 1, Some(130)), start);
         assert_eq!(
             (stopped.state(), stopped.status(start)),
             ("stopped", "Stopped · 0.0s · exit 130".into())
         );
+    }
+
+    #[test]
+    fn a_run_whose_echo_or_terminal_goes_away_stops_running() {
+        let start = Instant::now();
+        let at = |ms| start + Duration::from_millis(ms);
+        let mut run = ShellRun::new("yes".into(), start);
+        run.before = Some(Mark::default());
+        assert!(
+            !run.read(None, mark(1, 0, 0, None), at(10)),
+            "no echo yet is still running"
+        );
+        assert!(run.read(output(&["y"], false), mark(2, 1, 0, None), at(20)));
+        // The echo scrolled past the lookback, or `clear` erased it.
+        assert!(run.read(None, mark(3, 0, 0, None), at(2_000)));
+        assert_eq!(
+            (run.state(), run.status(at(9_000))),
+            ("lost", "Left the terminal · 2.0s".into())
+        );
+        assert_eq!(run.output, ["y"], "the card keeps what it last read");
+        let mut closed = ShellRun::new("ls".into(), start);
+        closed.before = Some(Mark::default());
+        assert!(closed.read(None, None, at(50)), "the terminal pane closed");
+        assert_eq!(closed.state(), "lost");
     }
 
     #[test]

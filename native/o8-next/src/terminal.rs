@@ -101,8 +101,8 @@ impl Pane {
     pub fn command_output(&self, line: &str) -> Option<crate::terminal_grid::CommandOutput> {
         self.grid.lock().unwrap().command_output(line)
     }
-    pub fn mark(&self) -> crate::terminal_grid::Mark {
-        self.grid.lock().unwrap().mark()
+    pub fn mark(&self, line: &str) -> crate::terminal_grid::Mark {
+        self.grid.lock().unwrap().mark(line)
     }
     pub fn focus_handle(&self) -> FocusHandle {
         self.focus.clone()

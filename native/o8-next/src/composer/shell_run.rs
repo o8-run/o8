@@ -179,9 +179,7 @@ impl Surface {
         let Some(run) = self.shell_run.as_mut().filter(|run| run.line == line) else {
             return false;
         };
-        if let Some(mark) = mark {
-            run.read(output, mark, std::time::Instant::now());
-        }
+        run.read(output, mark, std::time::Instant::now());
         // The elapsed clock moves on every read while the line runs.
         cx.notify();
         run.running()
