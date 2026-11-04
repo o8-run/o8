@@ -194,10 +194,11 @@ it('keeps a deleted organize target unavailable and reserves creation for explic
 
 it('saves the named grouping before opening repository sources so an unfinished draft is retained', async () => {
   await newGroup('More repositories'); await click('Create & add repo');
-  await until(() => !!document.querySelector('[role="menu"][aria-label="Add to workspace"]'));
+  // #4845: the add entry opens the add-repository flow directly, once the grouping is saved.
+  await until(() => addRepo.mock.calls.length > 0);
   expect(await saved('More repositories')).toHaveLength(1);
   expect(button('Switch project').textContent).toContain('More repositories');
-  expect(addRepo).not.toHaveBeenCalled();
+  expect(addRepo).toHaveBeenCalledTimes(1);
 });
 
 it('removes only a membership and preserves the connected repo, files and another project', async () => {

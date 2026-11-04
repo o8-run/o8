@@ -114,9 +114,11 @@ async function type(label: string, value: string) {
   const input = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!; expect(input).not.toBeNull();
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
 }
+// #4845: Add repository opens the folder flow directly; GitHub and New sources moved to the Switch project popover.
+const SOURCE_ENTRY: Record<string, string> = { 'GitHub repository': 'Connected repositories', 'New repository': 'New repository' };
 async function openSource(label: string) {
-  await click('Add repository');
-  const item = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((node) => node.textContent?.startsWith(label))!;
+  await click('Switch project');
+  const item = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((node) => node.textContent?.startsWith(SOURCE_ENTRY[label] ?? label))!;
   expect(item).toBeDefined(); await act(async () => item.click());
 }
 async function savedProject() {
