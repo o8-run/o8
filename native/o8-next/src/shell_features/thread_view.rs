@@ -157,16 +157,18 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
     };
     s.features.get::<Views>().menu = false;
     let views = s.features.get::<Views>();
+    // Leaving always returns to chat; entering reuses a live shell.
     let reuse = views.threads.get(&key).is_some_and(|t| {
         t.id == session.id
-            && match &t.state {
-                State::Open(pane) => {
-                    let pane = pane.read(cx);
-                    pane.ready || pane.notice != "Terminal exited"
-                }
-                State::Opening => true,
-                State::Unavailable(_) => false,
-            }
+            && (t.terminal
+                || match &t.state {
+                    State::Open(pane) => {
+                        let pane = pane.read(cx);
+                        pane.ready || pane.notice != "Terminal exited"
+                    }
+                    State::Opening => true,
+                    State::Unavailable(_) => false,
+                })
     });
     if let Some(thread) = views.threads.get_mut(&key).filter(|_| reuse) {
         thread.terminal = !thread.terminal;
@@ -178,7 +180,8 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
         match pane.filter(|_| terminal) {
             Some(pane) => pane.read(cx).focus_handle().focus(window),
             None if !terminal => s.restore_focus(window, cx),
-            None => {}
+            // Nothing to type into yet: the shell keeps keys, so ⌃⌥V still works.
+            None => s.focus.focus(window),
         }
         cx.notify();
         return true;
@@ -192,6 +195,7 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
             launch: None,
         },
     );
+    s.focus.focus(window);
     cx.notify();
     let workspace = session.workspace();
     let client = s.panel_client(&workspace);

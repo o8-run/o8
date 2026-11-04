@@ -70,6 +70,10 @@ fn thread_view_resume_line_per_provider_and_no_session() {
 fn settle(v: &mut VisualTestContext) {
     let until = Instant::now() + Duration::from_millis(200);
     while Instant::now() < until {
+        // The shell's pump, which a test window's clock does not advance.
+        if let Some(shell) = v.update(|window, _| window.root::<Shell>().flatten()) {
+            shell.update_in(v, |s, window, cx| s.tick(false, window, cx));
+        }
         v.run_until_parked();
         draw(v);
         std::thread::sleep(Duration::from_millis(10));
@@ -135,8 +139,8 @@ fn thread_view_switches_to_the_resumed_cli_in_the_workspace_terminal_and_back(
     assert!(s.read_with(&v, |s, cx| thread(s, cx).unwrap().launch.is_none()));
     v.simulate_keystrokes("ctrl-alt-v");
     settle(&mut v);
-    assert!(v.debug_bounds("thread-terminal-notice").is_none());
     assert!(s.read_with(&v, |s, cx| !thread(s, cx).unwrap().terminal));
+    assert!(v.debug_bounds("thread-terminal-notice").is_none());
 
     // Bind a Codex session the way classic stores it.
     let record: Value = f
