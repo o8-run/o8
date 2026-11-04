@@ -344,11 +344,13 @@ describe('bounded automatic worktree reconciliation', () => {
     getSqlite().prepare("UPDATE lanes SET status = 'idle' WHERE id = ?").run(source.laneId);
     getSqlite().prepare("UPDATE lanes SET status = 'archived', worktree_path = NULL WHERE id = ?").run(second.id);
     expect(coldRead('status').schema).toBe('o8/worktree-maintenance/v1');
-    const cursor = { after: `${source.metadataRoot}\0${source.workspace.id}`, upper: `${source.metadataRoot}\0${collision.id}` };
+    // The collision suffix sorts before the original leaf's index-exclusion suffix.
+    const cursor = { after: `${source.metadataRoot}\0`, upper: `${source.metadataRoot}\0${collision.id}` };
     writeFileSync(path.join(sessionDir, 'session.json'), JSON.stringify({ ...session,
       workspaceBinding: { ...session.workspaceBinding, cwd: source.workspace.path, version: 2 } }));
     writeMaintenanceState('next-phase', 3);
     writeMaintenanceState('cursor:metadata', cursor);
+    expect(nextMaintenanceCandidate('metadata')?.worktreeId).toBe(collision.id);
     const refused = await runBoundedWorktreeMaintenance(async () => {}, { primaryRepoPath: source.repoPath, maxCandidates: 1 });
     expect(refused.removed).toBe(0);
     expect(existsSync(collision.path)).toBe(true);
