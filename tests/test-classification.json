@@ -7046,6 +7046,14 @@
       ]
     },
     {
+      "path": "tests/settings-scope-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/setup-config-project-hooks-real-path.test.ts",
       "reasons": [
         "child-process",

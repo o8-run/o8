@@ -187,6 +187,7 @@ impl Shell {
                     .filter_map(|s| s.repo_path.clone())
                     .collect(),
                 active_project: None,
+                active_project_id: None,
             };
             for registration in registrations() {
                 (registration.workspaces)(&client, &mut load);
@@ -199,6 +200,7 @@ impl Shell {
                 this.loading = false;
                 match result {
                     Ok((sessions, load)) => {
+                        this.settings_project(load.active_project_id.clone(), cx);
                         this.sessions = sessions;
                         this.workspaces = load.paths.into_iter().collect();
                         this.connected = true;

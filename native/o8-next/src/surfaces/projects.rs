@@ -41,6 +41,11 @@ pub(super) const REGISTRATION: Registration = Registration {
         if let Ok(ledger) = client.get::<Ledger>("/api/panel/projects", &[]) {
             load.paths
                 .extend(ledger.projects.iter().flat_map(|p| p.repo_paths.clone()));
+            load.active_project_id = ledger
+                .projects
+                .iter()
+                .find(|p| p.id == ledger.active_project_id && p.id != "default")
+                .map(|p| p.id.clone());
             load.active_project = ledger
                 .projects
                 .iter()

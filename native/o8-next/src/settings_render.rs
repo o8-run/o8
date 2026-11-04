@@ -21,10 +21,11 @@ impl Render for Settings {
         if !self.busy {
             if let Some(field) = self.open_field.take() {
                 if !self.locked(field) {
+                    let shown = self.scope_row(field).map(|row| row.value);
                     if let Some(snapshot) = &self.snapshot {
                         if let Some(toml) = &snapshot.toml {
                             let revision = toml.revision.clone();
-                            let value = &snapshot.values[field.id];
+                            let value = shown.as_ref().unwrap_or(&snapshot.values[field.id]);
                             let text = match field.kind {
                                 Kind::Number(scale, _) => {
                                     (value.as_f64().unwrap_or(0.) * scale).to_string()
