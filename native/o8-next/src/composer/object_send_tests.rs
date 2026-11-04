@@ -37,8 +37,31 @@ fn groups(s: &Surface, cx: &App) -> Vec<&'static str> {
     groups
 }
 
+/// The project's listings as the review and files routes return them. The
+/// composer fixture serves neither route, and the menu reads them afresh
+/// each time it opens, so each opening starts from these.
+fn seed_listings(surface: &gpui::Entity<Surface>, cx: &mut VisualTestContext) {
+    surface.update(cx, |s, cx| {
+        let repo = s
+            .sessions
+            .iter()
+            .find(|t| Some(&t.id) == s.selected.as_ref())
+            .and_then(|t| t.repo_path.clone())
+            .unwrap();
+        let trees = json!({"worktrees": [
+            {"absolutePath": repo, "branch": "main", "isCurrent": true},
+            {"absolutePath": "/missing/feature", "branch": "align-spacing"},
+        ]});
+        let package = json!({"content": r#"{"scripts":{"test:unit":"vitest run"}}"#});
+        s.composer.update(cx, |i, _| {
+            i.controls.mention.sources = Some((repo, trees, package));
+        });
+    });
+}
+
 /// Type `@word` and take the first result with Enter, as a person would.
 fn pick(surface: &gpui::Entity<Surface>, cx: &mut VisualTestContext, word: &str, label: &str) {
+    seed_listings(surface, cx);
     cx.simulate_input(&format!("@{word}"));
     wait(surface, cx, |s, cx| {
         s.composer
@@ -67,22 +90,8 @@ fn workspace_mentions_group_the_menu_and_send_a_context_block_per_pick(cx: &mut 
             v.agents.push(roster_agent("Editing auth.rs"));
             cx.notify();
         });
-        let repo = s
-            .sessions
-            .iter()
-            .find(|t| Some(&t.id) == s.selected.as_ref())
-            .and_then(|t| t.repo_path.clone())
-            .unwrap();
-        // The project's listings as the review and files routes return them.
-        let trees = json!({"worktrees": [
-            {"absolutePath": repo, "branch": "main", "isCurrent": true},
-            {"absolutePath": "/missing/feature", "branch": "align-spacing"},
-        ]});
-        let package = json!({"content": r#"{"scripts":{"test:unit":"vitest run"}}"#});
-        s.composer.update(cx, |i, _| {
-            i.controls.mention.sources = Some((repo, trees, package));
-        });
     });
+    seed_listings(&surface, cx);
     focus(&surface, cx);
     cx.simulate_input("Check @");
     wait(&surface, cx, |s, cx| {
@@ -98,7 +107,7 @@ fn workspace_mentions_group_the_menu_and_send_a_context_block_per_pick(cx: &mut 
     cx.simulate_keystrokes("backspace");
     pick(&surface, cx, "fix", "Fix login");
     cx.simulate_input("and ");
-    pick(&surface, cx, "test", "test:unit");
+    pick(&surface, cx, "unit", "test:unit");
     cx.simulate_input("on ");
     pick(&surface, cx, "spacing", "align-spacing");
     cx.simulate_input("after ");
