@@ -1,7 +1,7 @@
-//! GTK lives exclusively in the private helper, never on GPUI's event loop.
+//! GTK is linked exclusively into the visualization helper binary.
 use super::{
-    linux::{Request, Response, TIMEOUT, TIMEOUT_ERROR},
-    protocol::{Message, UNAVAILABLE, message},
+    linux_protocol::{Navigation, Request, Response, TIMEOUT, TIMEOUT_ERROR, parse},
+    protocol::{Message, UNAVAILABLE},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use gtk::{glib, prelude::*};
@@ -15,48 +15,6 @@ use webkit2gtk::{SettingsExt as WebKitSettingsExt, *};
 
 const WORLD: &str = "o8-visualization";
 
-#[derive(Default)]
-pub(super) struct Navigation {
-    initial: bool,
-    bootstrap: bool,
-    inner: bool,
-}
-impl Navigation {
-    pub(super) fn new() -> Self {
-        Self {
-            initial: true,
-            bootstrap: true,
-            inner: true,
-        }
-    }
-    pub(super) fn allow(&mut self, uri: &str, other: bool, redirect: bool) -> bool {
-        if !other || redirect {
-            return false;
-        }
-        if self.initial && uri == "about:blank" {
-            self.initial = false;
-            true
-        } else if !self.initial && self.bootstrap && self.inner && uri == "about:blank" {
-            self.bootstrap = false;
-            true
-        } else if !self.initial && self.inner && uri == "about:srcdoc" {
-            self.inner = false;
-            self.bootstrap = false;
-            true
-        } else {
-            false
-        }
-    }
-    pub(super) fn close(&mut self) {
-        *self = Self::default();
-    }
-}
-pub(super) fn parse(input: &str, nonce: &str) -> Option<Message> {
-    if input.len() > 24 * 1024 {
-        return None;
-    }
-    message(&serde_json::from_str::<Value>(input).ok()?, nonce)
-}
 #[derive(Default)]
 struct Events {
     height: Option<f64>,

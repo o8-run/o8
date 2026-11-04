@@ -23,9 +23,11 @@ load failures and the 12 second readiness timeout show an error and a Retry
 visualization control. Windows shows the card title and this error and retry row
 without loading a browser engine.
 
-On Linux, the same executable's private `--render-visualization` entry point
-hosts the sealed document in an offscreen WebKitGTK view. The card passes the
-document, width, theme and saved state over stdin. The helper returns a PNG,
+On Linux, the sibling `o8-next-viz-render` executable hosts the sealed document
+in an offscreen WebKitGTK view. Only this helper links GTK, WebKitGTK and Cairo;
+the main app loads no browser engine at startup. Linux packages ship both
+executables in the same directory. A missing helper shows the card's error row.
+The card passes the document, width, theme and saved state over stdin. The helper returns a PNG,
 reported height and any bounded presentation state over stdout. No document is
 written to disk. GPUI paints the PNG inside the retained row's existing clip.
 Width changes over four pixels and theme changes schedule a render after a
@@ -79,4 +81,5 @@ builds exclude the macOS host. Linux-only tests in `visualizations/linux_tests.r
 exercise policy and parsing without a display and drive a card through the real
 helper under Xvfb, including saved state, theme and width refresh. They print a
 skip reason when no display or WebKitGTK is available. CI's Linux shell job
-provides a display and the built production binary for this test.
+provides a display and the built production helper via `O8_NEXT_NATIVE_BINARY`
+for this test.

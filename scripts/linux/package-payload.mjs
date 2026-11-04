@@ -45,7 +45,7 @@ function main() {
   const payloadFiles = files(stage);
   let payloadBytes = payloadFiles.reduce((sum, file) => sum + file.bytes, 0);
   if (payloadBytes > PAYLOAD_BUDGET) throw new Error(`Exceeded payload size budget: ${payloadBytes} > ${PAYLOAD_BUDGET}`);
-  for (const name of ['usr/bin/o8', 'usr/lib/o8/node', 'usr/lib/o8/o8-next', 'usr/lib/o8/server/cli/desktop.mjs']) {
+  for (const name of ['usr/bin/o8', 'usr/lib/o8/node', 'usr/lib/o8/o8-next', 'usr/lib/o8/o8-next-viz-render', 'usr/lib/o8/server/cli/desktop.mjs']) {
     if (!existsSync(join(stage, name))) throw new Error(`Incomplete stage: ${name}`);
   }
   const channel = JSON.parse(readFileSync(join(stage, 'usr/lib/o8/server/o8-build-channel.json'), 'utf8'));

@@ -68,10 +68,6 @@ use std::{env, fs, process::ExitCode, time::Instant};
 fn run() -> Result<(), String> {
     let started = Instant::now();
     let mut args: Vec<String> = env::args().skip(1).collect();
-    #[cfg(target_os = "linux")]
-    if args == [visualizations::linux::ARG] {
-        return visualizations::linux::entry();
-    }
     if args == ["--help"] {
         println!(
             "o8-next --enable-next --server http://127.0.0.1:PORT [--offscreen] [--terminal SESSION_ID | --benchmark FILE | --composer-benchmark FILE]\nSaved sessions, composer and opt-in terminal. Set O8_NEXT_API_TOKEN for the selected server. No data-directory discovery.\no8-next --render-tree HISTORY.json\no8-next --sidebar-tree SESSIONS.json SELECTED_ID"

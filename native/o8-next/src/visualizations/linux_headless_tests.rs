@@ -60,7 +60,7 @@ fn linux_visualizations_card_reaches_ready_with_renderer_picture(cx: &mut gpui::
         return;
     }
     let binary = std::env::var_os("O8_NEXT_NATIVE_BINARY")
-        .expect("set O8_NEXT_NATIVE_BINARY to the built o8-next binary");
+        .expect("set O8_NEXT_NATIVE_BINARY to the built o8-next-viz-render helper");
     assert!(
         std::path::Path::new(&binary).is_file(),
         "build the real helper binary first"

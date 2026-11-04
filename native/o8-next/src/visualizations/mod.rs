@@ -4,7 +4,8 @@ pub mod linux;
 #[cfg(target_os = "linux")]
 mod linux_card;
 #[cfg(target_os = "linux")]
-mod linux_renderer;
+#[allow(dead_code)]
+mod linux_protocol;
 #[cfg(all(test, target_os = "linux"))]
 mod linux_tests;
 #[cfg(test)]

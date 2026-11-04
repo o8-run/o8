@@ -1,7 +1,7 @@
 use super::*;
 use crate::visualizations::{
     linux::{Request, Response},
-    linux_renderer::{Navigation, parse},
+    linux_protocol::{Navigation, parse},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 
@@ -88,24 +88,23 @@ fn linux_pipe_inputs_and_pictures_are_bounded() {
     request.state = json!({});
     request.height = f64::INFINITY;
     assert!(!request.valid());
-    let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 728, 176).unwrap();
-    let mut png = Vec::new();
-    surface.write_to_png(&mut png).unwrap();
+    // A complete 1 x 80 transparent PNG; this grammar test needs no Cairo.
+    let png = STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAABQCAYAAADYxx/bAAAADklEQVR4nGNgGAWDCQAAAZAAAdO7EP4AAAAASUVORK5CYII=").unwrap();
     let mut response = Response {
-        height: 176.,
+        height: 80.,
         state: Some(json!({"week":2})),
         png: STANDARD.encode(&png),
     };
-    assert_eq!(response.picture(728).unwrap(), png);
+    assert_eq!(response.picture(1).unwrap(), png);
     assert!(response.picture(480).is_err());
-    response.height = 177.;
-    assert!(response.picture(728).is_err());
-    response.height = 176.2;
-    assert!(response.picture(728).is_err());
-    response.height = 176.;
+    response.height = 81.;
+    assert!(response.picture(1).is_err());
+    response.height = 80.2;
+    assert!(response.picture(1).is_err());
+    response.height = 80.;
     response.state = Some(json!([]));
-    assert!(response.picture(728).is_err());
+    assert!(response.picture(1).is_err());
     response.state = None;
     response.png = "invalid".into();
-    assert!(response.picture(728).is_err());
+    assert!(response.picture(1).is_err());
 }
