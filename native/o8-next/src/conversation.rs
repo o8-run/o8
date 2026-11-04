@@ -95,6 +95,7 @@ impl Surface {
                 editor.update(cx, |i, cx| i.set_text("", cx));
                 cx.defer(move |cx| {
                     let _ = window.update(cx, |_, window, cx| {
+                        editor.read(cx).focus.focus(window);
                         crate::ui::run_shell_line(line, window, cx);
                     });
                 });

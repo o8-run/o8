@@ -227,3 +227,171 @@ fn panel_chrome_missing_repository_opens_explanation_and_context_destinations(
     );
     bounds(&mut v, "panel-pr-example/project-12");
 }
+
+fn bang_run(
+    cx: &mut TestAppContext,
+) -> (
+    Fixture,
+    Entity<Shell>,
+    Entity<crate::ui::Surface>,
+    Entity<crate::terminal::Pane>,
+    VisualTestContext,
+) {
+    let f = Fixture::start_mode(false, "--terminal");
+    let (s, mut v) = open(
+        f.client.clone(),
+        f.root.join("shell-focus.json"),
+        crate::shell_state::State::default(),
+        cx,
+    );
+    v.simulate_resize(size(px(1600.), px(1000.)));
+    ready(&s, &mut v);
+    let composer = s.read_with(&v, |s, _| match &s.content[&s.key(&s.active().unwrap())] {
+        Content::Session(view) => view.clone(),
+        _ => panic!("selected chat"),
+    });
+    s.update(&mut v, |s, _| {
+        s.state
+            .workspaces
+            .get_mut(s.state.selected.as_ref().unwrap())
+            .unwrap()
+            .surfaces
+            .terminal
+            .terminal_session = Some("cortex-next-terminal-fixture".into());
+    });
+    click(&mut v, "composer-input");
+    v.simulate_input("!sleep 30");
+    // No completion menu can consume Return: the trailing argument has no match.
+    settle(&mut v);
+    v.simulate_keystrokes("enter");
+    let until = Instant::now() + Duration::from_secs(30);
+    let pane = loop {
+        v.run_until_parked();
+        s.update_in(&mut v, |s, w, cx| s.tick(true, w, cx));
+        draw(&mut v);
+        let pane = s.read_with(&v, |s, cx| {
+            let key = format!("panel|{}|Terminal", s.state.selected.as_deref().unwrap());
+            match s.content.get(&key) {
+                Some(Content::Terminal(view)) => view.read(cx).child.clone(),
+                _ => None,
+            }
+        });
+        if let Some(pane) = pane
+            && pane.read_with(&v, |p, _| p.command_output("sleep 30").is_some())
+        {
+            break pane;
+        }
+        assert!(Instant::now() < until, "terminal must receive the ! line");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    (f, s, composer, pane, v)
+}
+
+fn composer_focused(view: &Entity<crate::ui::Surface>, v: &mut VisualTestContext) -> bool {
+    view.update_in(v, |s, w, cx| s.shell_selection(w, cx).1)
+}
+
+#[gpui::test]
+fn panel_chrome_bang_line_keeps_composer_focus_and_escape_stops_terminal(cx: &mut TestAppContext) {
+    let (_f, s, composer, pane, mut v) = bang_run(cx);
+    assert!(
+        composer_focused(&composer, &mut v),
+        "Return must keep the composer focused after the terminal attaches"
+    );
+    bounds(&mut v, "composer-shell-status-Esc stops");
+    v.simulate_keystrokes("escape");
+    settle(&mut v);
+    assert_eq!(
+        composer.read_with(&v, |s, cx| s.shell_issue_state(cx)["shellStopped"].clone()),
+        true
+    );
+    bounds(&mut v, "composer-shell-status-Stopped");
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        s.update_in(&mut v, |s, w, cx| s.tick(true, w, cx));
+        v.run_until_parked();
+        if pane.read_with(&v, |p, _| {
+            p.command_output("sleep 30")
+                .unwrap()
+                .lines
+                .iter()
+                .any(|line| line == "CTRL-C")
+        }) {
+            break;
+        }
+        assert!(
+            Instant::now() < until,
+            "Esc must deliver \x03 through the terminal transport to the PTY"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(composer_focused(&composer, &mut v));
+    // Reusing an attached terminal via Send must also return to the composer.
+    v.simulate_input("!sleep 30");
+    settle(&mut v);
+    click(&mut v, "send");
+    settle(&mut v);
+    assert!(composer_focused(&composer, &mut v));
+    // An explicit terminal click keeps keyboard ownership there on later paints.
+    click(&mut v, "panel-content");
+    let terminal = pane.read_with(&v, |p, _| p.focus_handle());
+    v.update(|w, _| assert!(terminal.is_focused(w)));
+    v.simulate_keystrokes("escape");
+    settle(&mut v);
+    v.update(|w, _| assert!(terminal.is_focused(w)));
+    assert_eq!(
+        composer.read_with(&v, |s, cx| s.shell_issue_state(cx)["shellStopped"].clone()),
+        false
+    );
+}
+
+fn shell_button(
+    composer: &Entity<crate::ui::Surface>,
+    v: &mut VisualTestContext,
+    id: &'static str,
+) {
+    let center = bounds(v, id).center();
+    v.simulate_mouse_down(center, gpui::MouseButton::Left, Modifiers::default());
+    assert!(
+        composer_focused(composer, v),
+        "{id} mouse-down must keep the composer focused"
+    );
+    v.simulate_mouse_up(center, gpui::MouseButton::Left, Modifiers::default());
+    settle(v);
+}
+
+#[gpui::test]
+fn panel_chrome_shell_add_returns_focus_to_composer(cx: &mut TestAppContext) {
+    let (_f, _s, composer, _pane, mut v) = bang_run(cx);
+    shell_button(&composer, &mut v, "composer-shell-add");
+    assert!(
+        composer_focused(&composer, &mut v),
+        "Add to chat must return keyboard input to the draft"
+    );
+    v.simulate_input("next");
+    let draft = composer.read_with(&v, |s, cx| {
+        s.shell_issue_state(cx)["draft"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    });
+    assert!(draft.starts_with("```console\n$ sleep 30\nsleeping\n```"));
+    assert!(draft.ends_with("next"));
+    assert!(v.debug_bounds("composer-shell-run").is_none());
+}
+
+#[gpui::test]
+fn panel_chrome_shell_dismiss_returns_focus_to_composer(cx: &mut TestAppContext) {
+    let (_f, _s, composer, _pane, mut v) = bang_run(cx);
+    shell_button(&composer, &mut v, "composer-shell-dismiss");
+    assert!(
+        composer_focused(&composer, &mut v),
+        "Dismiss must return keyboard input to the draft"
+    );
+    v.simulate_input("next");
+    assert_eq!(
+        composer.read_with(&v, |s, cx| s.shell_issue_state(cx)["draft"].clone()),
+        "next"
+    );
+    assert!(v.debug_bounds("composer-shell-run").is_none());
+}

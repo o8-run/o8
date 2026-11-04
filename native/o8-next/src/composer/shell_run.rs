@@ -7,14 +7,33 @@ use crate::terminal_grid::CommandOutput;
 use gpui::AnyElement;
 
 impl Surface {
+    fn shell_run_button(
+        &mut self,
+        id: &str,
+        label: &str,
+        cx: &mut Context<Self>,
+        action: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) -> gpui::Stateful<gpui::Div> {
+        self.composer_button(id, label, true, cx, move |s, window, cx| {
+            s.composer.read(cx).focus.focus(window);
+            action(s, window, cx);
+        })
+        .on_mouse_down(
+            gpui::MouseButton::Left,
+            cx.listener(|s, _, window, cx| {
+                s.composer.read(cx).focus.focus(window);
+                window.prevent_default();
+                // Override the shared button's own mouse focus listener too.
+                cx.stop_propagation();
+            }),
+        )
+    }
+
     pub(super) fn shell_run_strip(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let ShellRun { line, stopped } = self.shell_run.clone()?;
-        let add = self.composer_button(
-            "composer-shell-add",
-            "Add to chat",
-            true,
-            cx,
-            |s, window, cx| {
+        let status = if stopped { "Stopped" } else { "Esc stops" };
+        let add =
+            self.shell_run_button("composer-shell-add", "Add to chat", cx, |s, window, cx| {
                 if let Some(run) = &s.shell_run {
                     crate::ui::add_shell_output(
                         run.line.clone(),
@@ -23,13 +42,11 @@ impl Surface {
                         cx,
                     );
                 }
-            },
-        );
-        let dismiss =
-            self.composer_button("composer-shell-dismiss", "Dismiss", true, cx, |s, _, cx| {
-                s.shell_run = None;
-                cx.notify();
             });
+        let dismiss = self.shell_run_button("composer-shell-dismiss", "Dismiss", cx, |s, _, cx| {
+            s.shell_run = None;
+            cx.notify();
+        });
         Some(
             div()
                 .debug_selector(|| "composer-shell-run".into())
@@ -50,10 +67,11 @@ impl Surface {
                 )
                 .child(
                     div()
+                        .debug_selector(move || format!("composer-shell-status-{status}"))
                         .flex_shrink_0()
                         .text_size(px(11.))
                         .text_color(theme().text_muted)
-                        .child(if stopped { "Stopped" } else { "Esc stops" }),
+                        .child(status),
                 )
                 .child(add)
                 .child(dismiss)
