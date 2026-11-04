@@ -349,6 +349,12 @@ export type LaneEventVerb =
   // receipt: { receiptId, provider, model, ok, questions, answers, inputTokens,
   // outputTokens, latencyMs, attempts, truncated, error, packetId, approvalId, surface }
   | 'judgment'
+  // Mission cards (#5468), on the target lane and the lane of each packet the
+  // card names. card payload: { cardId, kind, title, body, actions, entityIds,
+  // expiresAt, target }. card.decision payload: { cardId, receiptId, actionId,
+  // entityIds, decidedBy, decidedAt, delivery, note }.
+  | 'card'
+  | 'card.decision'
   // Reserved Broadcast event kind for future agent-to-agent communication.
   // No producer exists yet; this keeps the ledger schema forward-compatible.
   | 'message'

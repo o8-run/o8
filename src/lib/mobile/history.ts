@@ -4,6 +4,7 @@ import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { readSessionHuddleTranscriptEvents, readSessionSteerTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
 import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
+import { missionCardTranscriptEntries } from '@/lib/task-artifacts/card-transcript';
 import '@/lib/runtimes';
 import { getRuntime } from '@/lib/runtimes/registry';
 import type { RuntimeTranscriptEntry } from '@/lib/runtimes/types';
@@ -76,10 +77,11 @@ export function mergeDurableMobileTranscriptEntries(
       timestampLabel,
     };
   });
-  if (huddleEntries.length === 0 && steerEntries.length === 0) return transcript;
+  const cardEntries = missionCardTranscriptEntries(sessionKey);
+  if (huddleEntries.length === 0 && steerEntries.length === 0 && cardEntries.length === 0) return transcript;
 
   const uniqueById = new Map<string, MobileTranscriptEntry>();
-  for (const entry of [...transcript, ...huddleEntries, ...steerEntries]) {
+  for (const entry of [...transcript, ...huddleEntries, ...steerEntries, ...cardEntries]) {
     uniqueById.set(entry.id, entry);
   }
   return [...uniqueById.values()]

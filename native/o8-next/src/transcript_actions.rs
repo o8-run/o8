@@ -47,6 +47,8 @@ pub(crate) fn turn_ends(rows: &[Rc<RefCell<RowState>>]) -> HashMap<usize, (Strin
                 live = false;
             }
             Row::Activity { trace, .. } => live = trace.live,
+            // A card is not prose; it neither ends nor joins the turn's text.
+            Row::Card { .. } => {}
         }
     }
     // The latest turn shows its actions once it has stopped working.
