@@ -4,6 +4,9 @@ mod pills;
 #[cfg(test)]
 #[path = "header/worktree_badge_tests.rs"]
 mod worktree_badge_tests;
+#[cfg(test)]
+#[path = "header/open_in_editor_tests.rs"]
+mod open_in_editor_tests;
 struct Header;
 register_shell_feature!(Header);
 impl ShellFeature for Header {
@@ -83,6 +86,7 @@ fn render(
                 .items_center()
                 .gap(px(4.))
                 .mt(px(1.3))
+                .children(open_in_editor_button(s, cx))
                 .child(super::right_panel::subagent_button(s, cx))
                 .child(super::activity_dock::toggle_button(s, cx))
                 .when(!panel_open, |row| {
@@ -460,6 +464,64 @@ fn tab_label(s: &Shell, t: &Tab) -> String {
         }
         _ => t.label().into(),
     })
+}
+
+/// Lucide external-link.
+const OPEN_IN_EDITOR: &str =
+    "M15 3h6v6 M10 14 21 3 M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6";
+
+/// The open thread's project folder and the saved machine it lives on.
+fn editor_target(s: &Shell) -> Option<(Option<String>, String)> {
+    let Some(Tab::Session(id)) = s.active() else {
+        return None;
+    };
+    let selected = s
+        .current()
+        .and_then(|w| w.selections.get(&id))
+        .unwrap_or(&id);
+    let session = s.sessions.iter().find(|s| &s.id == selected)?;
+    let path = session
+        .worktree_path
+        .as_deref()
+        .or(session.repo_path.as_deref())?;
+    Some((session.machine.clone(), path.to_owned()))
+}
+
+/// Open in editor: the thread's project in the saved editor, over SSH when the
+/// thread lives on another machine. A failure shows as an error toast.
+fn open_in_editor_button(s: &Shell, cx: &mut Context<Shell>) -> Option<gpui::Stateful<gpui::Div>> {
+    let (machine, path) = editor_target(s)?;
+    Some(
+        icon_button(
+            "thread-header-open-in-editor",
+            OPEN_IN_EDITOR,
+            14.,
+            1.7,
+            "Open in editor",
+            true,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            let client = this.client.clone();
+            let (machine, path) = (machine.clone(), path.clone());
+            let task = cx.background_executor().spawn(async move {
+                crate::editor_command::open(&client, machine.as_deref(), &path)
+            });
+            cx.spawn(async move |_, cx| {
+                if let Err(error) = task.await {
+                    let _ = cx.update(|cx| {
+                        crate::shell::toasts::show(
+                            crate::shell::toasts::Kind::Error { detail: "".into() },
+                            error,
+                            vec![],
+                            Some(crate::shell::toasts::ERROR_TIMEOUT),
+                            cx,
+                        );
+                    });
+                }
+            })
+            .detach();
+        })),
+    )
 }
 
 fn thread_worktree_badge(s: &Shell, tab: &Tab) -> Option<gpui::Stateful<gpui::Div>> {
