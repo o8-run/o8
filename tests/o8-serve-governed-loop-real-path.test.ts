@@ -196,6 +196,8 @@ function cliEnv(fixture: Pick<GovernedLoopFixture, 'dataDir' | 'runtimeHome' | '
     O8_WORKER_SANDBOX: '0',
     O8_WORKER_TOKEN: '',
     O8_WORKER_PACKET_ID: '',
+    // #4585: owned workers inherit only allowlisted names; the fake qodercli writes its receipt here.
+    O8_WORKER_ENV_ALLOW: 'O8_FAKE_QODER_CAPTURE',
   };
   delete env.NODE_OPTIONS;
   return env;

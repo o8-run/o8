@@ -418,6 +418,10 @@ console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, o
       O8_TEST_CONNECTED_WORKER_HELPER: connectedWorkerHelper,
       O8_TEST_SOURCE_ROOT: process.cwd(),
       O8_TEST_TARGET_REPO: repoPath,
+      // Children inherit only allowlisted names (#4585); the fake codex and its connected-worker
+      // helper read these fixture knobs. No provider credential is listed.
+      O8_WORKER_ENV_ALLOW: ['O8_TEST_TURN_PROMPT_FILE', 'O8_TEST_CONTINUATION_CAPTURE', 'O8_TEST_CONNECTED_WORKER_FILE',
+        'O8_TEST_CONNECTED_WORKER_HELPER', 'O8_TEST_SOURCE_ROOT', 'O8_TEST_TARGET_REPO'].join(','),
       O8_DEFAULT_DISPATCH_RUNTIME: 'codex',
       O8_SUBSCRIPTION_PROFILE: 'both',
       O8_SKIP_PRELAUNCH_TYPECHECK: '1',

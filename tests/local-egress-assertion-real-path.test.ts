@@ -87,6 +87,7 @@ const envKeys = [
   'O8_EGRESS_SURFACE',
   'O8_EGRESS_PRELOAD_PID',
   'NODE_OPTIONS',
+  'O8_WORKER_ENV_ALLOW',
 ] as const;
 const priorEnv = new Map<string, string | undefined>();
 for (const key of envKeys) priorEnv.set(key, process.env[key]);
@@ -104,6 +105,10 @@ process.env.O8_CRASH_REPORTS = '0';
 delete process.env.O8_TELEMETRY_INGEST_URL;
 process.env.O8_EGRESS_REPORT_PATH = reportPath;
 process.env.O8_EGRESS_BLOCK_UNEXPECTED = '1';
+// Worker children inherit only allowlisted names (#4585): the egress preload and the fake
+// worker's local-provider knobs. No provider credential is listed.
+process.env.O8_WORKER_ENV_ALLOW = ['NODE_OPTIONS', 'O8_EGRESS_REPORT_PATH', 'O8_EGRESS_BLOCK_UNEXPECTED',
+  'O8_EGRESS_ALLOWED_ENDPOINTS', 'O8_LOCAL_INFERENCE_BASE_URL', 'O8_LOCAL_CHAT_MODEL'].join(',');
 
 const preloadArg = preloadPath.includes(' ')
   ? '--import="' + preloadPath + '"'

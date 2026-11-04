@@ -99,7 +99,10 @@ for (const [key, value] of Object.entries({ O8_DATA_DIR: dataDir, CORTEX_IDE_DAT
   O8_SKIP_PRELAUNCH_TYPECHECK: '1', O8_APFS_DEPENDENCY_IMAGES: '0', O8_WORKER_SANDBOX: '0',
   O8_CRASH_SURVIVABLE_WORKERS: '0', O8_CODEX_BIN: join(root, 'codex'),
   CORTEX_IDE_OWNED_CODEX_ROOT: join(dataDir, 'owned-codex'), O8_TEST_PROVIDER_CAPTURE: join(root, 'starts.jsonl'),
-  O8_TEST_PROVIDER_FINISH: join(root, 'finish') })) vi.stubEnv(key, value);
+  O8_TEST_PROVIDER_FINISH: join(root, 'finish'),
+  // Children inherit only allowlisted names (#4585); the fake codex and its managed `o8 run` read these knobs.
+  O8_WORKER_ENV_ALLOW: 'O8_TEST_PROVIDER_CAPTURE,O8_TEST_PROVIDER_FINISH,O8_TEST_MANAGED_RUN_CAPTURE,O8_TEST_SOURCE_ROOT,O8_TEST_MANAGED_COMMAND',
+})) vi.stubEnv(key, value);
 writeFileSync(join(root, 'codex'), `#!/usr/bin/env node
 const fs = require('node:fs');
 if (process.argv.includes('--version')) { console.log('codex-cli 1.0.0'); process.exit(0); }
