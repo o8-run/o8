@@ -778,9 +778,13 @@ pub(super) fn run_in_terminal(
     window: &mut Window,
     cx: &mut Context<Shell>,
 ) {
+    let focus = window.focused(cx);
     show(s, Tool::Terminal, window, cx);
     if let Some(Content::Terminal(view)) = s.content.get(&key(s, Tool::Terminal)) {
         view.clone().update(cx, |view, cx| view.run(line, cx));
+    }
+    if let Some(focus) = focus {
+        focus.focus(window);
     }
 }
 

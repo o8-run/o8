@@ -25,11 +25,17 @@ while True:
     data = os.read(sys.stdin.fileno(), 4096)
     if not data:
         break
+    if b"\x03" in data:
+        emit("CTRL-C\r\n~/fixture$ ")
+        pending = b""
+        data = data.replace(b"\x03", b"")
     pending += data
     while b"\r" in pending or b"\n" in pending:
         end = min(i for i, value in enumerate(pending) if value in (10, 13))
         command, pending = pending[:end].decode(errors="replace"), pending[end + 1:]
-        if command == "\x0b":
+        if command == "sleep 30":
+            emit("~/fixture$ sleep 30\r\nsleeping\r\n")
+        elif command == "\x0b":
             emit("CTRL-K\r\n")
         elif command == "size":
             rows, cols, _, _ = struct.unpack("HHHH", fcntl.ioctl(0, termios.TIOCGWINSZ, b"\0" * 8))

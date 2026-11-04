@@ -57,7 +57,7 @@ impl Surface {
     #[cfg(test)]
     pub(crate) fn shell_issue_state(&self, cx: &App) -> Value {
         let brain = self.selected.as_ref().and_then(|id| self.brains.get(id));
-        json!({"notice":self.notice,"ready":self.queue_ready,"canSteer":self.queue["canSteer"],"saving":self.saving,"draft":self.composer.read(cx).text,"selected":self.selected,"brainDraft":brain.map(|brain| brain.read(cx).composer.read(cx).text.clone())})
+        json!({"shellStopped":self.shell_run.as_ref().map(|run| run.stopped),"notice":self.notice,"ready":self.queue_ready,"canSteer":self.queue["canSteer"],"saving":self.saving,"draft":self.composer.read(cx).text,"selected":self.selected,"brainDraft":brain.map(|brain| brain.read(cx).composer.read(cx).text.clone())})
     }
     pub(crate) fn shell_link_issue(
         &mut self,

@@ -229,6 +229,14 @@ impl<P: Port> Picker<P> {
         }
         self.open_own = false;
         self.requested = None;
+        // A composer command can attach after the panel opens. Keep focus
+        // outside this picker unless the user has entered it in the meantime.
+        let restore_focus =
+            if self.waiting_line.is_some() && !self.focus.contains_focused(window, cx) {
+                window.focused(cx)
+            } else {
+                None
+            };
         let client = self.client.clone();
         let child = cx.new(|cx| P::create(client, id.clone(), window, cx));
         if let Some(line) = self.waiting_line.take() {
@@ -236,6 +244,9 @@ impl<P: Port> Picker<P> {
         }
         self.child = Some(child);
         self.child_focus = window.focused(cx);
+        if let Some(focus) = restore_focus {
+            focus.focus(window);
+        }
         self.selected = Some(id);
         cx.notify();
     }
