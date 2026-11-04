@@ -174,6 +174,42 @@ fn ui_command_frames_reach_settings_panel_tools_and_the_draft(cx: &mut TestAppCo
 }
 
 #[gpui::test]
+fn ui_command_automations_opens_the_registered_scheduled_surface(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--scheduled");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("ui-command-automations.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    shell.update_in(&mut visual, |s, window, cx| {
+        s.ui_command(
+            &json!({"kind":"symon-ui","payload":{"data":{"surface":"automations"}}}),
+            window,
+            cx,
+        );
+    });
+    ready(&shell, &mut visual);
+    assert_eq!(
+        shell.read_with(&visual, |s, _| s.active()),
+        Some(Tab::Scheduled)
+    );
+    assert!(
+        visual
+            .debug_bounds("scheduled-connected-fixture-nightly")
+            .is_some()
+    );
+    let saved = State::load(&fixture.root.join("ui-command-automations.json")).unwrap();
+    assert!(
+        saved
+            .workspaces
+            .values()
+            .any(|workspace| workspace.tabs.contains(&Tab::Scheduled))
+    );
+}
+
+#[gpui::test]
 fn voice_pins_live_to_the_chat_and_posts_each_delegation_once(cx: &mut TestAppContext) {
     use crate::ui::VoiceState;
     let fixture = Fixture::start_mode(false, "--voice-host");

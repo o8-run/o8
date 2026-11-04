@@ -12,8 +12,8 @@ const rollout = join(root, 'rollout.jsonl');
 const turnsFile = join(root, 'turns.json');
 writeFileSync(rollout, '{}\n');
 vi.stubEnv('O8_CODEX_BIN', binary);
-vi.stubEnv('O8_FAKE_ROLLOUT', rollout);
-vi.stubEnv('O8_FAKE_TURNS', turnsFile);
+// Provider children inherit only allowlisted environment names. Keep these
+// fixture-owned paths in the generated CLI rather than its ambient environment.
 writeFileSync(binary, `#!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 const args = process.argv.slice(2);
@@ -28,9 +28,9 @@ process.stdin.on('data', (chunk) => {
     const message = JSON.parse(buffer.slice(0, at));
     buffer = buffer.slice(at + 1);
     if (message.method === 'initialize') send({ id: message.id, result: {} });
-    if (message.method === 'thread/read') send({ id: message.id, result: { thread: { id: message.params.threadId, path: process.env.O8_FAKE_ROLLOUT } } });
+    if (message.method === 'thread/read') send({ id: message.id, result: { thread: { id: message.params.threadId, path: ${JSON.stringify(rollout)} } } });
     if (message.method === 'thread/turns/list') {
-      send({ id: message.id, result: { data: JSON.parse(readFileSync(process.env.O8_FAKE_TURNS, 'utf8')), nextCursor: null } });
+      send({ id: message.id, result: { data: JSON.parse(readFileSync(${JSON.stringify(turnsFile)}, 'utf8')), nextCursor: null } });
     }
   }
 });

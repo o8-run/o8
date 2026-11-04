@@ -319,7 +319,10 @@ echo '[]'
       });
     const listed = messages.find((message) => message.id === 2)?.result?.tools?.map((tool) => tool.name) ?? [];
     expect(listed).toContain('o8_view_type');
-    expect(listed.every((name) => name.startsWith('o8_view_'))).toBe(true);
+    // Dogfood exposes only view tools, plus the read-only result pager that #4834
+    // appends to every profile. Any other tool name must fail this check.
+    expect(listed).toContain('o8_result_page');
+    expect(listed.filter((name) => !name.startsWith('o8_view_') && name !== 'o8_result_page')).toEqual([]);
     expect(messages.find((message) => message.id === 3)?.result).toMatchObject({ isError: true });
     expect(messages.find((message) => message.id === 3)?.result?.content?.[0]?.text)
       .toContain('Tool unavailable in operator MCP profile dogfood');

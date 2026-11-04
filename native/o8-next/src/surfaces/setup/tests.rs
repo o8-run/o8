@@ -7,6 +7,9 @@ mod correction_2;
 #[path = "final_tests.rs"]
 mod final_round;
 
+#[path = "new_project_tests.rs"]
+mod new_project;
+
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
     let bounds = cx

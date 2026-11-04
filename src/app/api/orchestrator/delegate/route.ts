@@ -1,3 +1,4 @@
+import { delegationInstance, withDelegationInstance } from '@/lib/orchestrator/delegation-instance';
 import { findPrRepairOwner, PrRepairOwnerError, repairPacketStillOwned, samePrRepairRepo } from '@/lib/orchestrator/pr-repair-owner';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { withWsHealthHandler } from '@/lib/ws-server/handler-activity';
@@ -59,7 +60,7 @@ export const dynamic = 'force-dynamic';
  * deferred — track them in a follow-up issue. Option A ships here as
  * the quickest unlock for medium (5–50-edit) fix dispatches.
  */
-async function performDelegate(request: NextRequest, clientMutationId: string) {
+async function performDelegate(request: NextRequest, clientMutationId: string, instanceRuntime?: string) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body) {
     return NextResponse.json({ ok: false, error: 'Invalid request body' }, { status: 400 });
@@ -115,7 +116,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
     const packetId = `pkt-delegate-${createHash('sha256').update(clientMutationId).digest('hex').slice(0, 16)}`;
     const now = new Date().toISOString();
     const defaults = getOperatorDefaultsSync().values;
-    const { routing: workerRouting, carrier, launchEffort, executionCarrier } = await resolveDelegationSelection(body, repoPath);
+    const { routing: workerRouting, carrier, launchEffort, executionCarrier } = await resolveDelegationSelection({ ...body, runtime: body.runtime == null || body.runtime === '' ? instanceRuntime : body.runtime }, repoPath);
     const reviewPullRequest = validateReviewPullRequest(body);
     const reviewSource = reviewPullRequest === undefined ? undefined : await resolveReviewerPrSource({
       repoPath, packetId, pullRequest: reviewPullRequest,
@@ -185,6 +186,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
         effort: launchEffort,
         carrier,
         executionCarrier,
+        instanceId: typeof body.instanceId === 'string' ? body.instanceId.trim() : undefined,
         workerRouting,
         readOnly,
         clientMutationId,
@@ -251,6 +253,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       review: null,
       lane: null,
       assignedModel: workerRouting.selectedModel,
+      instanceId: typeof body.instanceId === 'string' ? body.instanceId.trim() : undefined,
       predictedFiles: predictedFiles.length > 0 ? predictedFiles : undefined,
       readBudget,
       edgeCaseSites,
@@ -321,6 +324,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
     // Step 3: Launch a session in the lane
     const launchResult = await dispatch({
       verb: 'launch_session',
+      instanceId: typeof body.instanceId === 'string' ? body.instanceId.trim() : undefined,
       laneId,
       prompt: governedLaunchPrompt,
       model: workerRouting.selectedModel ?? undefined,
@@ -411,6 +415,10 @@ export function POST(request: NextRequest) {
 
 async function postDelegate(request: NextRequest) {
   const body = await request.clone().json().catch(() => null) as Record<string, unknown> | null;
+  let instance;
+  try { instance = delegationInstance(body ?? {}); } catch (error) {
+    return NextResponse.json({ ok: false, code: 'invalid_instance', error: error instanceof Error ? error.message : 'Invalid provider instance.' }, { status: 400 });
+  }
   if (body?.repairPullRequest !== undefined && resolveRequestPrincipal(request) !== 'operator') return NextResponse.json({ ok: false, error: 'Operator authority is required to start a PR repair.' }, { status: 403 });
   try { if (body) { validateReviewPullRequest(body); validateRepairPullRequest(body); } } catch (error) {
     if (error instanceof DelegationSelectionError || error instanceof ReviewerPrInputError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: 400 });
@@ -449,6 +457,7 @@ async function postDelegate(request: NextRequest) {
     baseBranch: typeof body?.baseBranch === 'string' ? body.baseBranch.trim() : '',
     runtime: body?.runtime ?? null,
     model: body?.model ?? null,
+    instanceId: instance?.id ?? null,
     requestedEffort: body?.requestedEffort ?? null,
     thinkingEffort: body?.thinkingEffort ?? null,
     workerIntent: body?.workerIntent ?? null,
@@ -472,7 +481,7 @@ async function postDelegate(request: NextRequest) {
   }
   const packetId = `pkt-delegate-${createHash('sha256').update(clientMutationId).digest('hex').slice(0, 16)}`;
   const responseReceipt = async () => {
-    const response = await performDelegate(new NextRequest(request.clone()), clientMutationId);
+    const response = await withDelegationInstance(instance, () => performDelegate(new NextRequest(request.clone()), clientMutationId, instance?.runtime));
     return { status: response.status, payload: await response.json() as Record<string, unknown> };
   };
   const outcome = await withIdempotency({

@@ -1,3 +1,4 @@
+import { withLaunchProviderInstance } from './provider-instance-launch';
 import { getRuntimeLaunchIdentitySync } from './identity-catalog';
 import { assertLaunchEffortPin } from '@/lib/runtime/launch-effort';
 import type { RuntimeLaunchRequest } from './launch-request';
@@ -115,6 +116,10 @@ function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): v
 }
 
 export async function launchRuntimeSurface(payload: RuntimeLaunchRequest, resolvedIdentity?: RuntimeLaunchIdentity): Promise<RuntimeLaunchResult> {
+  return withLaunchProviderInstance(payload, () => launchRuntimeSurfaceUnpinned(payload, resolvedIdentity));
+}
+
+async function launchRuntimeSurfaceUnpinned(payload: RuntimeLaunchRequest, resolvedIdentity?: RuntimeLaunchIdentity): Promise<RuntimeLaunchResult> {
   assertNotKnowledgeSource(payload.repoPath); assertNotKnowledgeSource(payload.cwd);
   if (payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId) {
     if (!payload.automaticRecoverySurfaceId?.startsWith(`${payload.runtime}-owned:`) || !payload.automaticRecoveryRunId) {

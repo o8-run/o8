@@ -65,7 +65,7 @@ const AgentTranscriptSheet = lazy(async () => ({
   default: (await import('@/components/mobile/AgentTranscriptSheet')).AgentTranscriptSheet,
 }));
 
-const NEW_VIEWS: ReadonlySet<MobileView> = new Set(['agents', 'issues', 'activity', 'costs', 'orchestrator']);
+const NEW_VIEWS: ReadonlySet<MobileView> = new Set(['agents', 'issues', 'prs', 'activity', 'costs', 'orchestrator']);
 const SNAPSHOT_VIEWS: ReadonlySet<MobileView> = new Set(['agents', 'activity', 'costs']);
 
 function MobileViewShell({ children, themeId }: { children: ReactNode; themeId: string }) {
@@ -388,6 +388,7 @@ export function MobileApprovalsClient({
   const newViewTitle: Record<string, string> = {
     agents: 'Agents',
     issues: 'Issues',
+    prs: 'PRs',
     activity: 'Activity',
     costs: 'Costs',
     orchestrator: 'Orchestrator',
@@ -409,7 +410,7 @@ export function MobileApprovalsClient({
       void loadInboxSnapshot();
       return;
     }
-    if (activeView === 'issues') {
+    if (activeView === 'issues' || activeView === 'prs') {
       setIssuesRefreshSignal((value) => value + 1);
       return;
     }
@@ -767,14 +768,13 @@ export function MobileApprovalsClient({
             </Suspense>
           ) : null}
 
-          {activeView === 'issues' ? (
+          {activeView === 'issues' || activeView === 'prs' ? (
             <MobileViewShell themeId={themeId}>
-              <Suspense fallback={renderSnapshotPlaceholder('Loading issues…')}>
-                <IssuesPage onBack={handleBackToChats} hideHeader refreshSignal={issuesRefreshSignal} />
+              <Suspense fallback={renderSnapshotPlaceholder(activeView === 'prs' ? 'Loading pull requests…' : 'Loading issues…')}>
+                <IssuesPage onBack={handleBackToChats} activeRepoPath={activeView === 'prs' ? selectedRepoPath : undefined} hideHeader refreshSignal={issuesRefreshSignal} />
               </Suspense>
             </MobileViewShell>
           ) : null}
-
           {activeView === 'activity' ? (
             <MobileViewShell themeId={themeId}>
               <Suspense fallback={renderSnapshotPlaceholder('Loading activity…')}>

@@ -1,0 +1,7 @@
+{
+  "name": "Broken",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#101010"
+    "editor.foreground": "#eeeeee"
+  }

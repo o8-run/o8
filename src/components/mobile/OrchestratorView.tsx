@@ -55,6 +55,7 @@ import type {
 } from '@/app/mobile/mobile-approvals-shared';
 import type { MobileRepoOption } from '@/app/mobile/mobile-chat-repos';
 import { ConversationPullRequests } from '@/components/conversation-prs/ConversationPullRequests';
+import { ThreadVisualizations } from './ThreadVisualizations';
 import { FirstConversationCard } from './orchestrator/FirstConversationCard';
 
 interface OrchestratorViewProps {
@@ -683,6 +684,8 @@ export function OrchestratorView({
           </div>
         ) : null}
 
+        {activeThread ? <ThreadVisualizations key={activeThread.id} repoPath={activeThread.repoPath ?? null}
+          threadId={activeThread.id} length={transcript.length} /> : null}
         {errorNote ? <p style={noteStyle}>{errorNote}</p> : null}
       </div>
 

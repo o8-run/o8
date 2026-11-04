@@ -87,6 +87,7 @@ fn render(
                 .gap(px(4.))
                 .mt(px(1.3))
                 .children(open_in_editor_button(s, cx))
+                .children(super::thread_view::button(s, cx))
                 .child(super::right_panel::subagent_button(s, cx))
                 .child(super::activity_dock::toggle_button(s, cx))
                 .when(!panel_open, |row| {

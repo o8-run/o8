@@ -23,6 +23,7 @@
  * `normalizeCodexEvents`).
  */
 
+import { createBackgroundAgents } from '@/lib/claude-code/background-agents';
 import type { TranscriptEvent } from './transcript-normalizer';
 
 const MAX_SUMMARY = 240;
@@ -274,6 +275,7 @@ export function normalizeClaudeCodeEvents(rawJsonl: string): TranscriptEvent[] {
 
   const out: TranscriptEvent[] = [];
   const pending = new Map<string, { tool: string }>();
+  const backgroundAgents = createBackgroundAgents();
   const fallbackTs = new Date().toISOString();
   let seq = 0;
   const nextSeq = () => (seq += 1);
@@ -322,6 +324,8 @@ export function normalizeClaudeCodeEvents(rawJsonl: string): TranscriptEvent[] {
     if (type === 'user' && message) {
       for (const block of extractClaudeToolResults(content)) {
         const callId = block.tool_use_id ?? '';
+        // As on the live lead, a background launch is still a pending call.
+        if (backgroundAgents.isRunning(callId)) continue;
         const pendingCall = callId ? pending.get(callId) : undefined;
         if (callId) pending.delete(callId);
         const tool = pendingCall?.tool ?? 'tool';
@@ -339,8 +343,22 @@ export function normalizeClaudeCodeEvents(rawJsonl: string): TranscriptEvent[] {
       continue;
     }
 
-    // ── system errors ─────────────────────────────────────────────────────────
+    // ── system task lifecycle and errors ──────────────────────────────────────
     if (type === 'system') {
+      const answer = backgroundAgents.observe(parsed);
+      if (answer) {
+        const pendingCall = pending.get(answer.id);
+        pending.delete(answer.id);
+        out.push({
+          seq: nextSeq(),
+          ts,
+          type: 'tool_result',
+          callId: answer.id,
+          tool: pendingCall?.tool ?? 'tool',
+          ok: !answer.isError,
+          summary: clip(answer.output, MAX_SUMMARY) || 'ok',
+        });
+      }
       const text = typeof message?.content === 'string' ? message.content : '';
       const lower = text.toLowerCase();
       if (text && (lower.includes('error') || lower.includes('crash') || lower.includes('fatal'))) {

@@ -282,6 +282,22 @@ async function main() {
       || canonicalPath !== expectedPath) {
       throw new Error('Pinned install runtime changed during capture.');
     }
+    // Git sees the runtime as ignored rebuildable output before any file exists
+    // in it, so an install killed before its own retirement leaves no source
+    // change for workspace cleanup, park or retirement capture to retain.
+    const ignore = Buffer.from('*\n');
+    const ignoreFd = fs.openSync('.gitignore', fs.constants.O_WRONLY | fs.constants.O_CREAT
+      | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    try {
+      fs.writeSync(ignoreFd, ignore, 0, ignore.length, 0);
+      fs.fsyncSync(ignoreFd);
+      const written = fs.fstatSync(ignoreFd);
+      const named = fs.lstatSync('.gitignore');
+      if (!written.isFile() || written.nlink !== 1 || written.size !== ignore.length
+        || !named.isFile() || named.isSymbolicLink() || named.dev !== written.dev || named.ino !== written.ino) {
+        throw new Error('Pinned install runtime ignore file changed during creation.');
+      }
+    } finally { fs.closeSync(ignoreFd); }
     // The captured cwd keeps all child creation in this private inode even if
     // the workspace namespace is renamed while the operation is in flight.
     for (const name of ['home', 'config', 'xdg-cache', 'tmp', 'corepack']) {

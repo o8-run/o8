@@ -71,11 +71,11 @@ impl Shell {
         let setup = cx.new(|cx| view::Setup::new(self.client.clone(), cx));
         self.subscriptions
             .push(cx.subscribe(&setup, |s, _, opened: &view::Opened, cx| {
-                if let Some(session) = &opened.0
-                    && let Some(path) = &session.repo_path
-                {
+                if let Some(session) = &opened.0 {
+                    // A thread with no project opens in the "Unassigned" workspace.
+                    let path = session.workspace();
                     s.state.selected = Some(path.clone());
-                    if !s.workspaces.contains(path) {
+                    if session.repo_path.is_some() && !s.workspaces.contains(&path) {
                         s.workspaces.push(path.clone());
                     }
                     if !s.sessions.iter().any(|v| v.id == session.id) {

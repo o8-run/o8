@@ -258,6 +258,90 @@ fn mermaid_retained_stream_copy_toggle_and_fallback(cx: &mut TestAppContext) {
     }
 }
 
+/// Renders one closed fence and checks it is a native card with the given
+/// drawn boxes or bars, lines and commit dots, and that Copy source works.
+fn assert_native_card(cx: &mut TestAppContext, source: &str, counts: (usize, usize, usize)) {
+    let message = |text: &str| {
+        crate::model::render_tree(&[serde_json::from_value(serde_json::json!({
+            "id":"diagram", "role":"assistant", "text":text,
+        }))
+        .unwrap()])
+        .remove(0)
+    };
+    let state = Rc::new(RefCell::new(RowState::new(message(&format!(
+        "```mermaid\n{source}\n```"
+    )))));
+    let (_, cx) = cx.add_window_view(|_, _| TranscriptRow(state.clone()));
+    let header = source.lines().next().unwrap();
+    for width in [360., 900.] {
+        cx.simulate_resize(size(px(width), px(1050.)));
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let copy = cx
+            .debug_bounds("mermaid-0-0-copy")
+            .unwrap_or_else(|| panic!("{header} gets a native card"));
+        assert!(copy.right() <= px(width));
+        let state = state.borrow();
+        let diagrams = &state.cache.as_ref().unwrap().diagrams;
+        assert_eq!(diagrams.len(), 1, "{header}");
+        assert_eq!(diagrams[0].counts(), counts, "{header}");
+        assert!(
+            !state.rendered().1.iter().any(|s| s.contains(header)),
+            "{header} source stays hidden until asked for"
+        );
+    }
+    let copy = cx.debug_bounds("mermaid-0-0-copy").unwrap();
+    cx.simulate_click(copy.center(), gpui::Modifiers::default());
+    cx.update(|_, cx| {
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some(source)
+        )
+    });
+}
+
+#[gpui::test]
+fn mermaid_er_diagram_renders_as_a_native_card(cx: &mut TestAppContext) {
+    // Four entities, three relationships.
+    assert_native_card(
+        cx,
+        "erDiagram\nCUSTOMER ||--o{ ORDER : places\nORDER ||--|{ LINE-ITEM : contains\nCUSTOMER }|..|{ ADDRESS : uses\nCUSTOMER {\n  string name\n  string id PK\n}",
+        (4, 3, 0),
+    );
+}
+
+#[gpui::test]
+fn mermaid_git_graph_renders_as_a_native_card(cx: &mut TestAppContext) {
+    // Six commit dots joined by six parent lines, one of them a merge.
+    assert_native_card(
+        cx,
+        "gitGraph\ncommit\ncommit id: \"base\"\nbranch develop\ncheckout develop\ncommit\ncommit tag: \"v1\"\ncheckout main\nmerge develop\ncommit",
+        (0, 6, 6),
+    );
+}
+
+#[gpui::test]
+fn mermaid_gantt_chart_renders_as_a_native_card(cx: &mut TestAppContext) {
+    // Three bars and a milestone.
+    assert_native_card(
+        cx,
+        "gantt\ntitle Demo day\ndateFormat YYYY-MM-DD\nsection Build\nDesign :a1, 2026-11-02, 3d\nCode :after a1, 5d\nsection Ship\nReview :crit, 2026-11-10, 2026-11-12\nDemo :milestone, 2026-11-12, 0d",
+        (4, 0, 0),
+    );
+}
+
+#[gpui::test]
+fn mermaid_mindmap_renders_as_a_native_card(cx: &mut TestAppContext) {
+    // Seven nodes, six branches.
+    assert_native_card(
+        cx,
+        "mindmap\n  root((o8))\n    Native\n      GPUI\n      Mermaid\n    Web\n      React\n    [Docs]",
+        (7, 6, 0),
+    );
+}
+
 #[gpui::test]
 fn a_file_pill_peeks_at_its_lines_after_a_pause(cx: &mut TestAppContext) {
     let mut state = RowState::new(Row::Message {

@@ -18,12 +18,14 @@ import { StorageAdmissionStore } from '@/lib/workspace/storage-admission';
 import { repoActionLeaseMaxWaitMsForTests } from '@/lib/lane/lane-route-test-seams';
 import { resolveLaneTranscriptHealth } from '@/lib/lane/transcript-health';
 import { readTerminalWorktreeStorage } from '@/lib/lane/terminal-worktree-storage';
+import { getLaneDiffStat } from '@/lib/lane/lane-diff-facts';
 import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
 import type { LaneCommand } from '@/lib/lane/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const DIFF_STAT_LANE_LIMIT = 16;
 const ROUTE_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 let lastRouteReconcileAt = 0;
 
@@ -79,6 +81,10 @@ export async function GET(req: NextRequest) {
   // task = one entry" — the same view the history sidebar renders. Active lanes
   // pass through untouched; only retired (archived/completed) lanes collapse.
   const collapse = url.searchParams.get('collapse') === 'true';
+  // A roster names the finished lanes whose diff stat it shows; ordinary
+  // polling runs no Git. Bounded so one request cannot walk every worktree.
+  const diffStatLaneIds = new Set((url.searchParams.get('diffStat') ?? '')
+    .split(',').map((id) => id.trim()).filter(Boolean).slice(0, DIFF_STAT_LANE_LIMIT));
 
   const visibleLanes = activeOnly ? listActiveLanes() : listLanes();
   const baseLanes = principal.role === 'worker'
@@ -117,6 +123,9 @@ export async function GET(req: NextRequest) {
       // headless loop's auto-archive: the first clears the row, the second
       // keeps its 24h outcome chip.
       archivedByOperator: lane.status === 'archived' && wasArchivedByOperator(archiveEvents),
+      ...(diffStatLaneIds.has(lane.id)
+        ? { diffStat: lane.worktreePath ? await getLaneDiffStat(lane).catch(() => null) : null }
+        : {}),
     };
   }));
 
