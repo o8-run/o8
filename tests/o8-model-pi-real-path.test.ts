@@ -101,7 +101,8 @@ beforeAll(async () => {
     '/api/v2/proxy/llm': await import('@/app/api/v2/proxy/llm/route') as never,
   };
   api = createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    // The loopback Host gate compares the Host header with the URL's port.
+    const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     const handler = routes[url.pathname]?.[req.method ?? 'GET'];
     if (!handler) { res.writeHead(404).end(); return; }
     const chunks: Buffer[] = [];
@@ -144,7 +145,8 @@ afterAll(async () => {
 async function composerO8Turn(repo: string, text: string, threadId: string, turnId?: string) {
   const option = COMPOSER_MODEL_GROUPS.flatMap(group => group.options).find(entry => entry.label === 'o8');
   if (!option || option.backend === 'auto') throw new Error('The composer offers no o8 choice');
-  const turn = prepareOrchestratorTurn(text, { backend: option.backend, model: option.model, thinkingEffort: 'low' });
+  // The o8 choice shows no effort control and its lead refuses an effort pin (#4858), so none is sent.
+  const turn = prepareOrchestratorTurn(text, { backend: option.backend, model: option.model, thinkingEffort: 'adaptive' });
   const wire = JSON.parse(buildOrchestratorSendPayload({
     repoPath: repo, threadId, clientMessageId: `${threadId}-client`, wireMessage: turn.wireMessage,
     displayMessage: turn.displayMessage, permissionMode: turn.permissionMode, orchestrationMode: turn.orchestrationMode,
@@ -157,14 +159,15 @@ async function composerO8Turn(repo: string, text: string, threadId: string, turn
   const message = turnId ? withOrchestratorTurnReceiptContext({ message: String(wire.message), threadId, turnId }) : String(wire.message);
   if (turnId) appendMobileOrchestratorUserMessage({ tabId: threadId, repoPath: repo, message: text, backend: backend.id });
   await sendOrchestratorBackendTurn(backend, String(wire.repoPath), message, event => events.push(event), {
-    permissionMode: wire.permissionMode as 'full', thinkingEffort: wire.thinkingEffort as 'low',
+    permissionMode: wire.permissionMode as 'full', thinkingEffort: wire.thinkingEffort as 'low' | undefined,
     model: String(wire.model), threadId,
   }, wire.orchestrationMode);
   const receipt = events.find((event): event is Extract<OrchestratorEvent, { type: 'turn_receipt' }> => event.type === 'turn_receipt');
   if (turnId && receipt) {
     upsertMobileOrchestratorAssistantMessage({ tabId: threadId, repoPath: repo, messageId: turnId, backend: backend.id,
       model: String(wire.model), content: events.filter(event => event.type === 'text').map(event => (event as { text: string }).text).join(''),
-      receipt: { leadModel: receipt.leadModel, effort: receipt.effort, mode: resolveTurnReceiptMode(backend.id, wire.orchestrationMode) } });
+      receipt: { permissionMode: wire.permissionMode as 'full', leadModel: receipt.leadModel, effort: receipt.effort,
+        effortSource: receipt.effortSource, serviceTier: receipt.serviceTier, mode: resolveTurnReceiptMode(backend.id, wire.orchestrationMode) } });
   }
   return { backend, events };
 }
@@ -307,7 +310,7 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
     setLaneStatus(row.id, 'reviewing');
     const lane = { id: row.id, label: row.label, repoPath: repo, packetId };
     const resolution = resolveReviewChatOrigin(lane);
-    expect(resolution).toEqual({ kind: 'bound', origin: { threadId, turnId, backend: 'o8', model: 'o8-free', effort: 'low', mode: 'fleet' } });
+    expect(resolution).toEqual({ kind: 'bound', origin: { threadId, turnId, backend: 'o8', model: 'o8-free', effort: 'adaptive', permissionMode: 'full', mode: 'fleet' } });
     if (resolution.kind !== 'bound') return;
 
     relay.answers.push(callTool('r1', 'write_file', { path: 'review.md', content: 'reviewed' }), say('Reviewed the packet.'));
@@ -322,7 +325,7 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
     const messages = readPersistedLlmChat(threadId)!.history.messages;
     expect(messages.at(-2)).toMatchObject({ role: 'user', content: '[FLEET] Lane reached review-ready' });
     expect(messages.at(-1)).toMatchObject({ role: 'assistant', backend: 'o8', model: 'o8-free', content: 'Reviewed the packet.',
-      receipt: { leadModel: 'o8-free', effort: 'low', mode: 'multitask' } });
+      receipt: { leadModel: 'o8-free', effort: 'adaptive', effortSource: 'runtime-default', mode: 'multitask' } });
     expect(getLaneEvents(lane.id).filter(event => event.payload.event === 'chat_review_continuation_claimed')).toHaveLength(1);
     // The thread stays bound for the packet's next review transition.
     expect(resolveReviewChatOrigin(lane)).toEqual(resolution);

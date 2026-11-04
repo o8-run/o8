@@ -20,6 +20,8 @@ else { console.error('Sign in required: private-fixture-marker'); process.exit(1
 `);
 chmodSync(binary, 0o755);
 vi.stubEnv('O8_ANTIGRAVITY_BIN', binary);
+// Worker children inherit only allowlisted names; the stand-in CLI reads this test knob.
+vi.stubEnv('O8_WORKER_ENV_ALLOW', 'O8_TEST_AGY_SIGNED_IN');
 const { assertRuntimeDispatchable, detectRuntimeAuthStatus, invalidateRuntimeAuthCache } = await import('./auth-detect');
 const { invalidateCliCache } = await import('./cli-resolver');
 afterAll(() => {

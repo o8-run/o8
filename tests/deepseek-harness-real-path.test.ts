@@ -41,6 +41,8 @@ beforeAll(() => {
   process.env.O8_DEEPSEEK_HARNESS_PID_LOG = pidLog;
   process.env.O8_DEEPSEEK_HARNESS_PERMISSION_LOG = permissionLog;
   process.env.DEEPSEEK_API_KEY = 'fixture-key';
+  // Worker children inherit only allowlisted names; the fixture reads these test knobs.
+  process.env.O8_WORKER_ENV_ALLOW = 'O8_DEEPSEEK_HARNESS_PID_LOG,O8_DEEPSEEK_HARNESS_PERMISSION_LOG';
 });
 
 afterAll(() => {
@@ -50,6 +52,7 @@ afterAll(() => {
   delete process.env.O8_DEEPSEEK_HARNESS_PID_LOG;
   delete process.env.O8_DEEPSEEK_HARNESS_PERMISSION_LOG;
   delete process.env.DEEPSEEK_API_KEY;
+  delete process.env.O8_WORKER_ENV_ALLOW;
   rmSync(root, { recursive: true, force: true });
 });
 

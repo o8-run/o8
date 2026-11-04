@@ -2,7 +2,8 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
-import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn() }));
@@ -51,6 +52,9 @@ function fileEvent(file: string, child?: ChildProcess): Promise<void> {
     if (existsSync(file)) { cleanup(); resolve(); }
   });
 }
+
+// Supervised dependency installs run through the native write helper.
+beforeAll(() => { if (process.platform !== 'win32') buildPiWriteHelper(); }, 600_000);
 
 beforeEach(async context => {
   vi.resetModules();

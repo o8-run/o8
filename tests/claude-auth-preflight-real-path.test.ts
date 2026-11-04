@@ -28,6 +28,7 @@ const controlledEnvKeys = [
   'O8_DATA_DIR',
   'O8_TEST_CLAUDE_MODE',
   'O8_TEST_CLAUDE_RETRY_COUNT',
+  'O8_WORKER_ENV_ALLOW',
   'PATH',
 ] as const;
 const priorEnv = Object.fromEntries(
@@ -81,6 +82,8 @@ beforeAll(async () => {
   process.env.ANTHROPIC_API_KEY = '';
   process.env.CLAUDE_CODE_OAUTH_TOKEN = '';
   process.env.O8_TEST_CLAUDE_RETRY_COUNT = retryCountPath;
+  // Worker children inherit only allowlisted names; the stand-in CLI reads these test knobs.
+  process.env.O8_WORKER_ENV_ALLOW = 'O8_TEST_CLAUDE_MODE,O8_TEST_CLAUDE_RETRY_COUNT';
 
   authDetect = await import('@/lib/runtimes/shared/auth-detect');
 });

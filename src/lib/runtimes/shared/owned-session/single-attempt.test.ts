@@ -28,9 +28,9 @@ describe('durable single-attempt owned workers', () => {
   let sessions: string;
   let counter: string;
   let prior: Record<string, string | undefined>;
-  const keys = ['CORTEX_IDE_OWNED_CODEX_ROOT', 'O8_SINGLE_ATTEMPT_BIN', 'O8_CRASH_SURVIVABLE_WORKERS'];
+  const keys = ['CORTEX_IDE_OWNED_CODEX_ROOT', 'O8_SINGLE_ATTEMPT_BIN', 'O8_CRASH_SURVIVABLE_WORKERS', 'O8_CODEX_BIN'];
 
-  beforeEach(() => {
+  beforeEach(async () => {
     root = mkdtempSync(path.join(getDataDir(), 'single-attempt-'));
     repo = path.join(root, 'repo');
     sessions = path.join(root, 'sessions');
@@ -40,6 +40,28 @@ describe('durable single-attempt owned workers', () => {
     process.env.CORTEX_IDE_OWNED_CODEX_ROOT = sessions;
     process.env.O8_SINGLE_ATTEMPT_BIN = process.execPath;
     process.env.O8_CRASH_SURVIVABLE_WORKERS = '0';
+    // Codex effort admission reads model/list from the codex CLI, and the resolver caches one
+    // binary per runtime id. This offline stand-in advertises the fixture models' effort and
+    // otherwise runs the fixture worker with node, whichever resolution fills the cache first.
+    const codex = path.join(root, 'codex');
+    writeFileSync(codex, `#!/usr/bin/env node
+const { spawnSync } = require('node:child_process');
+if (process.argv[2] === 'app-server') {
+  require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+    const message = JSON.parse(line); if (!message.id) return;
+    const data = ['gpt-6.1-sol', 'fallback-model', 'quota-model'].map((model, index) => ({ model, isDefault: index === 0,
+      supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }));
+    const result = message.method === 'model/list' ? { data } : message.method === 'config/read' ? { config: {} } : {};
+    process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
+  }).on('close', () => process.exit(0));
+} else if (process.argv[2] === '--version') {
+  process.stdout.write('codex-cli 1.0.0\\n');
+} else {
+  process.exit(spawnSync(process.execPath, process.argv.slice(2), { stdio: 'inherit' }).status ?? 1);
+}
+`, { mode: 0o700 });
+    process.env.O8_CODEX_BIN = codex;
+    (await import('@/lib/runtimes/shared/cli-resolver')).invalidateCliCache('codex');
     bridge.mockRejectedValue(new Error('ambiguous bridge response'));
     ready.mockReset().mockResolvedValue(undefined);
     sync.mockClear();
@@ -149,7 +171,8 @@ describe('durable single-attempt owned workers', () => {
       let release!: () => void;
       ready.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
       const launched = createOwnedSessionStore(adapter()).launch(request());
-      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce());
+      // Effort admission starts the catalogue stand-in before readiness.
+      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce(), { timeout: 5_000 });
       const changed = saved();
       if (kind === 'model') changed.model = 'fallback-model';
       if (kind === 'effort') changed.effort = 'low';
