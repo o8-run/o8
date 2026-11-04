@@ -29,7 +29,7 @@ mod user_bubble;
 
 #[path = "retained/text.rs"]
 mod row_text;
-use row_text::{file_tip, is_item, link_target, text_run};
+use row_text::{ICON_ROOM, is_item, link_target, link_tip, pill_label, text_run};
 
 pub struct RowState {
     pub row: Row,
@@ -49,6 +49,8 @@ pub struct RowState {
     /// The workspace a transcript row belongs to, so its file pills can say
     /// where they point.
     pub(crate) file_root: Option<gpui::SharedString>,
+    /// The transcript's file peeks, when it can read its files.
+    pub(crate) peeks: Option<crate::transcript_peek::Peeks>,
     pub(crate) subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
     pub(crate) subagent_agents: Rc<Vec<crate::subagents::model::Agent>>,
     pub(crate) subagent_focus: std::collections::HashMap<String, gpui::FocusHandle>,
@@ -91,6 +93,7 @@ impl RowState {
             images: Default::default(),
             cards: Default::default(),
             file_root: None,
+            peeks: None,
             subagents: None,
             subagent_agents: Default::default(),
             subagent_focus: Default::default(),
@@ -207,6 +210,8 @@ struct Thumbnail {
 struct LinkSpot {
     bounds: Bounds<Pixels>,
     url: String,
+    /// A pill's icon and the room its label left for it, on its first piece.
+    icon: Option<(&'static str, Pixels)>,
 }
 struct Layout {
     size: Size<Pixels>,
@@ -399,11 +404,18 @@ impl Builder {
         offset: usize,
         span: &std::ops::Range<usize>,
         url: &str,
+        icon: Option<&'static str>,
         (inset, line_height): (Pixels, f32),
     ) {
         let start = span.start.max(offset) - offset;
         let end = span.end.min(offset + line.len()).saturating_sub(offset);
-        let pill = is_item(url);
+        let pill = is_item(url) || icon.is_some();
+        // The icon sits in the room its label left, where the label begins.
+        let mut icon = icon.filter(|_| span.start >= offset).and_then(|icon| {
+            let at = |index| line.position_for_index(index, px(line_height));
+            let (from, to) = (at(start)?, at(start + ICON_ROOM.len())?);
+            (from.y == to.y).then_some((icon, from.y, to.x - from.x))
+        });
         let mut pieces: Vec<(Pixels, Pixels, Pixels)> = vec![];
         for (index, _) in line.text.char_indices().chain([(line.len(), ' ')]) {
             if index < start || index > end {
@@ -432,6 +444,9 @@ impl Builder {
             self.links.push(LinkSpot {
                 bounds,
                 url: url.to_owned(),
+                icon: icon
+                    .take_if(|(_, at, _)| *at == y)
+                    .map(|(icon, _, room)| (icon, room)),
             });
         }
     }
@@ -443,6 +458,18 @@ impl Builder {
         inset: f32,
         window: &Window,
     ) {
+        let runs: Vec<Run> = runs
+            .iter()
+            .map(|run| {
+                pill_label(run).map_or_else(
+                    || run.clone(),
+                    |text| Run {
+                        style: run.style.clone(),
+                        text,
+                    },
+                )
+            })
+            .collect();
         let text: String = runs.iter().map(|r| r.text.as_str()).collect();
         let styled: Vec<TextRun> = runs.iter().map(text_run).collect();
         let width = (self.width - px(48. + inset * 2.)).max(px(1.));
@@ -467,7 +494,15 @@ impl Builder {
             let height = line.size(px(line_height)).height;
             for (run, span) in runs.iter().zip(&spans) {
                 if let Some(url) = link_target(run) {
-                    self.link(&line, offset, span, url, (origin, line_height));
+                    let icon =
+                        run.text
+                            .starts_with(ICON_ROOM)
+                            .then_some(if url.starts_with("file:") {
+                                crate::transcript_peek::FILE_ICON
+                            } else {
+                                crate::transcript_peek::LINK_ICON
+                            });
+                    self.link(&line, offset, span, url, icon, (origin, line_height));
                 }
             }
             offset += line.len() + 1;
@@ -1191,20 +1226,61 @@ impl Element for RetainedRow {
                 let selector = format!("transcript-link-{}-{index}", self.index);
                 let name = SharedString::from(selector.clone());
                 let root = state.file_root.as_ref().map(|root| root.as_ref());
-                let tip = file_tip(root, &url).map(SharedString::from);
+                let tip = link_tip(root, &url).map(SharedString::from);
+                // A file pill peeks at its lines instead of naming its path.
+                let peek = state.peeks.clone().zip(root).and_then(|(peeks, root)| {
+                    let (path, line) = crate::text::file_ref(url.strip_prefix("file:")?)?;
+                    let target = crate::transcript_peek::Target {
+                        key: selector.clone(),
+                        root: root.to_owned(),
+                        path: path.to_owned(),
+                        line,
+                    };
+                    Some((peeks, target))
+                });
+                // The list clips rows to the transcript, so its mask is the
+                // room a card has.
+                let pill = Bounds::new(origin + link.bounds.origin, link.bounds.size);
+                let viewport = window.content_mask().bounds;
+                let card = peek
+                    .as_ref()
+                    .and_then(|(peeks, _)| peeks.card(&selector, pill, viewport));
                 let mut child = div()
                     .id(name)
                     .debug_selector(move || selector.clone())
                     .w(link.bounds.size.width)
                     .h(link.bounds.size.height)
                     .cursor_pointer()
-                    .on_click(move |_, window, cx| crate::ui::open_link(&url, window, cx))
-                    .when_some(tip, |link, tip| {
-                        link.tooltip(move |_, cx| {
-                            cx.new(|_| crate::icon::Tip(tip.clone())).into()
-                        })
-                    })
-                    .into_any_element();
+                    .children(link.icon.map(|(icon, room)| {
+                        div()
+                            .absolute()
+                            .left(px(4.))
+                            .top_0()
+                            .w(room)
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(crate::icon::stroke(icon, theme().accent, 12., 1.8))
+                    }))
+                    .children(card)
+                    .on_click(move |_, window, cx| crate::ui::open_link(&url, window, cx));
+                child = match peek {
+                    Some((peeks, target)) => {
+                        let dismiss = peeks.clone();
+                        child
+                            .on_hover(move |hovering, window, cx| {
+                                peeks.hover(target.clone(), *hovering, window, cx)
+                            })
+                            .on_mouse_down(gpui::MouseButton::Left, move |_, _, _| {
+                                dismiss.dismiss()
+                            })
+                    }
+                    None => child.when_some(tip, |link, tip| {
+                        link.tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.clone())).into())
+                    }),
+                };
+                let mut child = child.into_any_element();
                 child.layout_as_root(link.bounds.size.map(AvailableSpace::Definite), window, cx);
                 child.prepaint_at(origin + link.bounds.origin, window, cx);
                 child

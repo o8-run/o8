@@ -133,6 +133,12 @@ fn inside_workspace<'a>(workspace: &str, path: &'a str) -> Option<&'a str> {
             .all(|part| !part.is_empty() && part != "..");
     inside.then_some(relative)
 }
+/// Reads a file a reply named, through the route the viewer reads with. Call
+/// it off the paint thread.
+pub(crate) fn read_file(client: &Client, workspace: &str, path: &str) -> Result<Value, String> {
+    let path = inside_workspace(workspace, path).ok_or("Path outside the workspace")?;
+    io::read(client, workspace, path)
+}
 #[cfg(test)]
 #[test]
 fn reply_paths_stay_inside_the_workspace() {

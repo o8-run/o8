@@ -257,3 +257,143 @@ fn mermaid_retained_stream_copy_toggle_and_fallback(cx: &mut TestAppContext) {
         );
     }
 }
+
+#[gpui::test]
+fn a_file_pill_peeks_at_its_lines_after_a_pause(cx: &mut TestAppContext) {
+    let mut state = RowState::new(Row::Message {
+        id: "pill".into(),
+        role: "assistant".into(),
+        author: None,
+        nodes: crate::text::markdown("See `src/deep/a.rs:5` and https://example.com/x/y now."),
+    });
+    let peeks = crate::transcript_peek::Peeks::default();
+    let file: String = (1..=20).map(|n| format!("fn line_{n}() {{}}\n")).collect();
+    // Read lately, so the peek shows it with no server to ask.
+    peeks.remember("/repo/src/deep/a.rs", &file);
+    state.file_root = Some("/repo".into());
+    state.peeks = Some(peeks);
+    let state = Rc::new(RefCell::new(state));
+    let (_, cx) = cx.add_window_view(|_, _| TranscriptRow(state.clone()));
+    cx.simulate_resize(size(px(900.), px(700.)));
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        })
+    };
+    draw(cx);
+    let text = state.borrow().rendered().1.join("\n");
+    assert!(text.contains(&format!("{ICON_ROOM}a.rs:5")), "{text}");
+    assert!(text.contains(&format!("{ICON_ROOM}example.com")), "{text}");
+    assert!(
+        !text.contains("src/deep") && !text.contains("/x/y"),
+        "{text}"
+    );
+    let pill = cx.debug_bounds("transcript-link-0-0").expect("file pill");
+    cx.simulate_mouse_move(pill.center(), None, gpui::Modifiers::default());
+    draw(cx);
+    cx.executor()
+        .advance_clock(crate::transcript_peek::OPEN_DELAY / 2);
+    cx.run_until_parked();
+    draw(cx);
+    assert!(cx.debug_bounds("transcript-peek").is_none(), "not yet");
+    cx.executor()
+        .advance_clock(crate::transcript_peek::OPEN_DELAY);
+    cx.run_until_parked();
+    draw(cx);
+    let card = cx.debug_bounds("transcript-peek").expect("peek opens");
+    assert!(card.top() >= pill.bottom(), "{card:?} below {pill:?}");
+    for line in 2..=9 {
+        let selector = format!("transcript-peek-line-{line}").leak();
+        assert!(cx.debug_bounds(selector).is_some(), "line {line}");
+    }
+    assert!(cx.debug_bounds("transcript-peek-line-10").is_none());
+    cx.simulate_mouse_move(point(px(5.), px(650.)), None, gpui::Modifiers::default());
+    cx.executor()
+        .advance_clock(crate::transcript_peek::OPEN_DELAY);
+    cx.run_until_parked();
+    draw(cx);
+    assert!(
+        cx.debug_bounds("transcript-peek").is_none(),
+        "closes on leave"
+    );
+}
+
+/// A row in a transcript that ends above the window's bottom, as the list
+/// ends above the composer.
+struct ClippedRow(Rc<RefCell<RowState>>, Rc<std::cell::Cell<f32>>);
+impl Render for ClippedRow {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(
+            div()
+                .w(px(600.))
+                .h(px(self.1.get()))
+                .overflow_hidden()
+                .child(RetainedRow {
+                    state: self.0.clone(),
+                    index: 0,
+                    painted: Default::default(),
+                }),
+        )
+    }
+}
+
+#[gpui::test]
+fn a_peek_near_the_transcripts_end_opens_above_its_pill(cx: &mut TestAppContext) {
+    let text = format!("{}See `src/a.rs:5` now.", "A paragraph.\n\n".repeat(8));
+    let mut state = RowState::new(Row::Message {
+        id: "pill".into(),
+        role: "assistant".into(),
+        author: None,
+        nodes: crate::text::markdown(&text),
+    });
+    let peeks = crate::transcript_peek::Peeks::default();
+    let file: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+    peeks.remember("/repo/src/a.rs", &file);
+    state.file_root = Some("/repo".into());
+    state.peeks = Some(peeks);
+    let state = Rc::new(RefCell::new(state));
+    let height = Rc::new(std::cell::Cell::new(1000.));
+    let (_, cx) = cx.add_window_view(|_, _| ClippedRow(state.clone(), height.clone()));
+    cx.simulate_resize(size(px(900.), px(1000.)));
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        })
+    };
+    let open = |cx: &mut gpui::VisualTestContext| {
+        let pill = cx.debug_bounds("transcript-link-0-0").expect("file pill");
+        cx.simulate_mouse_move(pill.center(), None, gpui::Modifiers::default());
+        cx.executor()
+            .advance_clock(crate::transcript_peek::OPEN_DELAY * 2);
+        cx.run_until_parked();
+        draw(cx);
+        let card = cx.debug_bounds("transcript-peek").expect("peek opens");
+        (pill, card)
+    };
+    draw(cx);
+    let (pill, card) = open(cx);
+    assert!(card.top() > pill.bottom(), "room below: {card:?} {pill:?}");
+    assert!(card.size.height > px(150.), "eight lines: {card:?}");
+    // The transcript now ends a little under the pill, as at the composer.
+    cx.simulate_mouse_move(point(px(890.), px(990.)), None, gpui::Modifiers::default());
+    cx.executor()
+        .advance_clock(crate::transcript_peek::OPEN_DELAY * 2);
+    cx.run_until_parked();
+    height.set(f32::from(pill.bottom()) + 40.);
+    draw(cx);
+    assert!(cx.debug_bounds("transcript-peek").is_none());
+    let (pill, card) = open(cx);
+    assert!(
+        card.bottom() < pill.top(),
+        "flipped above: {card:?} {pill:?}"
+    );
+    assert!(card.top() >= px(0.), "{card:?}");
+    assert!(card.right() <= px(600.), "inside across: {card:?}");
+    for line in 2..=9 {
+        let selector = format!("transcript-peek-line-{line}").leak();
+        let row = cx.debug_bounds(selector).expect("every line");
+        assert!(row.bottom() <= pill.top(), "line {line} clear of the pill");
+    }
+}
