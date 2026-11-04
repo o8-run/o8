@@ -786,7 +786,8 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
     const agentHistory = {repoPath, backend, messages: [turn]};
     writePersistedLlmChat(agentThreadId, agentHistory, {replace: true});
     agentRoute(); expect(origin).toHaveBeenCalledOnce();
-    expect(origin.mock.calls[0][1]).toEqual({threadId: agentThreadId, turnId: 'origin-turn', backend, model, effort: 'medium', mode: 'fleet'});
+    // #4858: o8 and Pi leads carry no independent effort pin, so the origin binds with adaptive effort.
+    expect(origin.mock.calls[0][1]).toEqual({threadId: agentThreadId, turnId: 'origin-turn', backend, model, effort: 'adaptive', mode: 'fleet'});
     origin.mockClear();
     for (const invalid of [
       {...agentHistory, repoPath: seedPath},
