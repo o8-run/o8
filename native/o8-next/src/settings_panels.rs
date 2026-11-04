@@ -124,6 +124,62 @@ impl Settings {
                 cx,
                 |_, _, cx| cx.emit(Action::Shortcuts),
             ))
+            .child(self.snapshot_hotkey_view(window, cx))
+            .into_any_element()
+    }
+    fn snapshot_hotkey_view(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        use crate::snapshot_hotkey::{self as hotkey, Mode};
+        let mut choices = div().flex().flex_wrap().gap(px(12.));
+        for (mode, id, label) in [
+            (Mode::Off, "off", "Off"),
+            (Mode::Screen, "screen", "Screen"),
+            (Mode::Window, "window", "Frontmost window"),
+        ] {
+            let active = hotkey::mode() == mode;
+            choices = choices.child(
+                self.button(
+                    format!("setting-snapshot-hotkey-{id}"),
+                    label.into(),
+                    !self.busy,
+                    active,
+                    window,
+                    cx,
+                    move |this, _, cx| {
+                        hotkey::set_mode(mode);
+                        cx.emit(Action::SnapshotHotkey);
+                        this.changed(cx);
+                    },
+                )
+                .border_1()
+                .border_color(if active {
+                    theme().accent
+                } else {
+                    theme().border
+                }),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(div().mt(px(8.)).child("Snapshot hotkey"))
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child("Press both Shift keys together to capture into a new chat in the open project, ready to type. Off by default and saved on this Mac."),
+            )
+            .child(choices)
+            .child(
+                div()
+                    .debug_selector(|| "setting-snapshot-hotkey-permission".into())
+                    .text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child(format!(
+                        "macOS only. Needs Input Monitoring or Accessibility permission to see Shift in other apps, and Screen Recording to capture them. If it is missing, macOS shows its prompt and the hotkey stays off until you allow o8 under {}.",
+                        hotkey::PERMISSION_PATH
+                    )),
+            )
             .into_any_element()
     }
 }

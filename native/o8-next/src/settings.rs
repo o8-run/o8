@@ -119,6 +119,7 @@ pub(crate) struct Close;
 pub(crate) enum Action {
     Appearance(&'static str),
     Shortcuts,
+    SnapshotHotkey,
 }
 impl EventEmitter<Action> for Settings {}
 pub(crate) struct Settings {
