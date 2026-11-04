@@ -29,7 +29,8 @@ async function main() {
       yield { type: 'start', partial: message } as AssistantMessageEvent;
       yield { type: 'done', reason: message.stopReason, message } as AssistantMessageEvent;
     } });
-  Object.assign(piBackend, backend);
+  // Copy descriptors: liveSteer is a getter, which plain assignment cannot replace.
+  Object.defineProperties(piBackend, Object.getOwnPropertyDescriptors(backend));
   await import('../../src/ws-server');
 }
 
