@@ -173,6 +173,12 @@ impl Editor {
         self.selection = byte..byte;
         self.changed(cx);
     }
+    /// A line's first byte and text, from the editor's own line index.
+    #[cfg(test)]
+    pub(in crate::files_panel) fn line(&self, line: usize) -> (usize, String) {
+        let range = self.lines.range(line, self.text.len());
+        (range.start, self.text[range].to_owned())
+    }
     #[cfg(test)]
     pub(in crate::files_panel) fn scroll_to_y(&self, y: Pixels) {
         self.scroll.set_offset(point(px(0.), -y));
