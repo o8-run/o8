@@ -1,6 +1,9 @@
 use super::*;
 #[path = "header/pills.rs"]
 mod pills;
+#[cfg(test)]
+#[path = "header/worktree_badge_tests.rs"]
+mod worktree_badge_tests;
 struct Header;
 register_shell_feature!(Header);
 impl ShellFeature for Header {
@@ -99,6 +102,7 @@ fn render(
         });
     Some(
         div()
+            .debug_selector(|| "thread-header".into())
             .relative()
             .flex()
             .items_center()
@@ -458,6 +462,40 @@ fn tab_label(s: &Shell, t: &Tab) -> String {
     })
 }
 
+fn thread_worktree_badge(s: &Shell, tab: &Tab) -> Option<gpui::Stateful<gpui::Div>> {
+    let Tab::Session(id) = tab else { return None };
+    let selected = s.current().and_then(|w| w.selections.get(id)).unwrap_or(id);
+    s.sessions
+        .iter()
+        .find(|s| &s.id == selected)
+        .filter(|s| {
+            s.is_worktree.unwrap_or_else(|| {
+                s.branch.as_deref().is_some_and(|branch| {
+                    !branch.is_empty() && !matches!(branch, "main" | "master")
+                })
+            })
+        })
+        .map(|s| {
+            let path = s.worktree_path.as_deref().or(s.repo_path.as_deref());
+            let tip = path.map_or_else(|| "Worktree".into(), |path| format!("Worktree: {path}"));
+            let geometry = crate::theme::GEOMETRY;
+            div()
+                .id("thread-header-worktree-badge")
+                .debug_selector(|| "thread-header-worktree-badge".into())
+                .h(px(geometry.tab_height))
+                .px(px(10.))
+                .flex()
+                .flex_shrink_0()
+                .items_center()
+                .rounded(px(geometry.tab_radius))
+                .font_weight(gpui::FontWeight::LIGHT)
+                .text_color(theme().text_muted)
+                .bg(theme().surface_raised)
+                .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.clone().into())).into())
+                .child("Worktree")
+        })
+}
+
 fn pill_list(s: &Shell) -> Vec<pills::Shown> {
     let active = s.active();
     s.current()
@@ -590,7 +628,6 @@ fn strip(
                         })
                         .map(|pill| crate::motion::fade_hover(pill, group.clone(), 120))
                         .children(motion.and_then(|m| m.probe(&key)))
-                        .when(selected, |pill| pill.child(scroll.probe()))
                         .child(
                             div()
                                 .relative()
@@ -712,6 +749,18 @@ fn strip(
                                     .when(after, |line| line.right(px(-1.)))
                                     .when(!after, |line| line.left(px(-1.))),
                             )
+                        });
+                    let pill = div()
+                        .relative()
+                        .flex()
+                        .flex_shrink_0()
+                        .items_center()
+                        .gap(px(2.))
+                        .child(pill)
+                        .when(selected, |group| {
+                            group
+                                .child(scroll.probe())
+                                .children(thread_worktree_badge(s, &t))
                         });
                     match motion {
                         Some(m) => m.wrap(&key, pill).into_any_element(),
