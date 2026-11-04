@@ -105,18 +105,31 @@ impl Chord {
 pub(crate) const PERMISSION_PATH: &str =
     "System Settings › Privacy & Security › Input Monitoring (or Accessibility)";
 
+// tree-sitter-rust 0.24 (theme_tests) cannot parse `unsafe extern "C"` blocks,
+// so the declarations reach the parser only as macro token trees.
+#[cfg(target_os = "macos")]
+macro_rules! hotkey_abi {
+    ($(#[$meta:meta])* { $($declaration:tt)* }) => {
+        $(#[$meta])* unsafe extern "C" { $($declaration)* }
+    };
+}
+
 /// Whether this process may observe Shift in other apps. `prompt` asks macOS
 /// to show its permission prompt when the answer is no.
 #[cfg(target_os = "macos")]
 pub(crate) fn permitted(prompt: bool) -> bool {
-    #[link(name = "ApplicationServices", kind = "framework")]
-    unsafe extern "C" {
-        fn AXIsProcessTrusted() -> bool;
+    hotkey_abi! {
+        #[link(name = "ApplicationServices", kind = "framework")]
+        {
+            fn AXIsProcessTrusted() -> bool;
+        }
     }
-    #[link(name = "IOKit", kind = "framework")]
-    unsafe extern "C" {
-        fn IOHIDCheckAccess(request: u32) -> u32;
-        fn IOHIDRequestAccess(request: u32) -> bool;
+    hotkey_abi! {
+        #[link(name = "IOKit", kind = "framework")]
+        {
+            fn IOHIDCheckAccess(request: u32) -> u32;
+            fn IOHIDRequestAccess(request: u32) -> bool;
+        }
     }
     // kIOHIDRequestTypeListenEvent = 1; kIOHIDAccessTypeGranted = 0.
     let granted = unsafe { AXIsProcessTrusted() || IOHIDCheckAccess(1) == 0 };
@@ -250,9 +263,11 @@ pub(crate) fn capture(mode: Mode, path: &Path) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn frontmost_window() -> Option<i64> {
     use objc::{class, msg_send, runtime::Object, sel, sel_impl};
-    #[link(name = "CoreGraphics", kind = "framework")]
-    unsafe extern "C" {
-        fn CGWindowListCopyWindowInfo(option: u32, relative: u32) -> *mut Object;
+    hotkey_abi! {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        {
+            fn CGWindowListCopyWindowInfo(option: u32, relative: u32) -> *mut Object;
+        }
     }
     // kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements.
     const ON_SCREEN: u32 = 1 | 16;
