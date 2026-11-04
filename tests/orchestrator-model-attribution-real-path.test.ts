@@ -599,7 +599,7 @@ describe('orchestrator model attribution through the real WebSocket turn handler
     );
 
     expect(turn.receipt).toEqual({
-      permissionMode: 'full', terminal: { userMessageId: `orch-user-${turn.threadId}-client-message`, outcome: 'completed' },
+      permissionMode: 'full', terminal: { userMessageId: `orch-user-${turn.threadId}-client-message`, outcome: 'completed', completedAt: expect.any(Number) },
       leadModel: 'gpt-5.6-sol',
       effort: 'high',
       mode: 'multitask',
@@ -624,7 +624,7 @@ describe('orchestrator model attribution through the real WebSocket turn handler
     );
 
     expect(turn.receipt).toEqual({
-      permissionMode: 'full', terminal: { userMessageId: `orch-user-${turn.threadId}-client-message`, outcome: 'completed' },
+      permissionMode: 'full', terminal: { userMessageId: `orch-user-${turn.threadId}-client-message`, outcome: 'completed', completedAt: expect.any(Number) },
       leadModel: 'gpt-5.6-sol',
       effort: 'high',
       mode: 'fusion',
