@@ -25,7 +25,7 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/runtime/provider-instances',
   '/api/setup/detect',
   '/api/cortex/codebase-memory',
-  '/api/cortex/cross-repo-proposals',
+  '/api/cortex/cross-repo-proposals', // Legacy readOrComputeSignatures writes the signature cache.
   '/api/cortex/diagnostics',
   '/api/orchestrator/archive',
   '/api/orchestrator/backend-models',
@@ -36,15 +36,12 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/devices',
   '/api/panel/o8-update-summary',
   '/api/panel/problem-dossiers',
-  '/api/panel/prs/[id]/timeline',
   '/api/panel/update/apply',
   '/api/repo-spec/asset',
   '/api/tasks',
   '/api/tasks/[id]/preview',
   '/api/tts',
-  '/api/v2/files/quick-docs',
-  '/api/visualizations',
-  '/api/worktrees/retention-usage',
+  '/api/worktrees/retention-usage', // resolveManagedWorktreeStorageTarget creates the default root.
 ]);
 function checkInventory(directory: string) {
   const files = readdirSync(directory, { recursive: true }).map(String)

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -26,6 +26,11 @@ const NATIVE_READS = [
   ['session', '/api/orchestrator/status', 404],
   ['setup', '/api/setup/cli-updates?runtime=fixture-unknown', 400],
   ['activity', '/api/cortex/proposals', 200],
+  ['session', '/api/panel/file-asset', 400],
+  ['session', '/api/v2/files', 400],
+  ['session', '/api/v2/files/quick-docs', 200],
+  ['session', '/api/visualizations', 400],
+  ['pull_requests', '/api/panel/prs/[number]/timeline', 400],
 ] as const;
 let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;
@@ -129,6 +134,43 @@ it.each([
   const response = await fetch(origin + path, { headers: { authorization: `Bearer ${server.token}` } });
   expect(response.status).toBe(status);
   expect(await response.text()).toContain(detail);
+});
+
+it('reads R1 scoped files and visualization metadata without changing the registry', async () => {
+  const registryPath = join(server.directory, 'repos.json');
+  const repoPath = join(server.directory, 'r1-read-repo');
+  await promisify(execFile)('git', ['init', '-q', '-b', 'main', repoPath]);
+  await promisify(execFile)('git', ['-C', repoPath, 'remote', 'add', 'origin', 'https://github.com/organization/native-read.git']);
+  writeFileSync(join(repoPath, 'o8.md'), 'Scoped native read fixture');
+  writeFileSync(join(repoPath, 'AGENTS.md'), 'Scoped quick document fixture');
+  writeFileSync(join(repoPath, 'image.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><text>Scoped asset</text></svg>');
+  const saved = existsSync(registryPath) ? readFileSync(registryPath, 'utf8') : null;
+  const store = saved ? JSON.parse(saved) : { version: 1, repos: [] };
+  store.repos.push({ id: 'r1-read', name: 'r1-read-repo', localPath: repoPath,
+    isGitRepo: true, remoteUrl: 'https://github.com/previous/native-read.git' });
+  writeFileSync(registryPath, JSON.stringify(store));
+  const before = readFileSync(registryPath);
+  const mtime = statSync(registryPath, { bigint: true }).mtimeNs;
+  try {
+    // Earlier requests may have cached the empty registry.
+    await new Promise(resolve => setTimeout(resolve, 5_100));
+    const query = new URLSearchParams({ workspace: repoPath });
+    for (const path of [`/api/v2/files?${query}&path=o8.md`, `/api/v2/files?${query}&path=o8.md&preview=1`,
+      `/api/v2/files/quick-docs?${query}`, `/api/panel/file-asset?${query}&path=image.svg`,
+      `/api/visualizations?${new URLSearchParams({ repoPath, threadId: 'thoughts-r1-read' })}`]) {
+      const response = await fetch(origin + path, { headers: { authorization: `Bearer ${server.token}` } });
+      expect(response.status, path).toBe(200);
+      const body = await response.text();
+      if (path.startsWith('/api/v2/files?')) expect(body).toContain('Scoped native read fixture');
+      if (path.startsWith('/api/v2/files/quick-docs')) expect(body).toContain('AGENTS.md');
+      if (path.startsWith('/api/visualizations?')) expect(JSON.parse(body).result.visualizations).toEqual([]);
+    }
+    expect(readFileSync(registryPath)).toEqual(before);
+    expect(statSync(registryPath, { bigint: true }).mtimeNs).toBe(mtime);
+  } finally {
+    if (saved === null) rmSync(registryPath);
+    else writeFileSync(registryPath, saved);
+  }
 });
 
 it('refuses an unknown HTTP route with Next stopped', async () => {
@@ -345,6 +387,16 @@ it('preserves packet-worker lane diff and visualization ownership through o8d', 
   });
   expect(visualization.status).toBe(200);
   expect((await visualization.json()).result.visualization.html).toBe('<p>Persisted native read</p>');
+  const ownList = await fetch(`${origin}/api/visualizations?packetId=fixture-native-worker`, {
+    headers: { authorization: `Bearer ${fixture.token}` },
+  });
+  expect(ownList.status).toBe(200);
+  expect((await ownList.json()).result.visualizations).toEqual([expect.objectContaining({ id: fixture.visualizationId })]);
+  const foreignList = await fetch(`${origin}/api/visualizations?packetId=fixture-native-foreign`, {
+    headers: { authorization: `Bearer ${fixture.token}` },
+  });
+  expect(foreignList.status).toBe(403);
+  expect(await foreignList.text()).not.toContain(fixture.visualizationId);
   const foreignVisualization = await fetch(`${origin}/api/visualizations/${fixture.visualizationId}`, {
     headers: { authorization: `Bearer ${fixture.foreignToken}` },
   });

@@ -1,5 +1,5 @@
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
-import { listTranscriptVisualizations, publishVisualization } from '@/lib/visualizations/service';
+import { publishVisualization } from '@/lib/visualizations/service';
 import { visualizationBody, visualizationFailure, visualizationResponse } from '@/lib/visualizations/http';
 import { visualizationReference } from '@/lib/visualizations/types';
 
@@ -13,10 +13,5 @@ export async function POST(request: Request) {
   } catch (error) { return visualizationFailure(error); }
 }
 
-export async function GET(request: Request) {
-  try {
-    const url = new URL(request.url);
-    const visualizations = await listTranscriptVisualizations(Object.fromEntries(url.searchParams), resolveRequestPrincipalContext(request));
-    return visualizationResponse({ visualizations });
-  } catch (error) { return visualizationFailure(error); }
-}
+// The native transport imports the same GET without loading publication tooling.
+export { GET } from '@/lib/visualizations/read';

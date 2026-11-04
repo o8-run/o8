@@ -1,6 +1,7 @@
 # o8d A1 read registrations
 
-Scope: #5243 and #5422. Seventeen paths gain GET surface registrations using production handlers. No new
+Scope: #5243 and #5422. The initial A1 slice registered seventeen GET paths.
+R1 adds five GET surface registrations using the same production handlers. No new
 POST, PATCH, PUT or DELETE registration is included. Shared shell tools are
 assigned to `session`; duplicate entries name additional registered callers.
 The native source paths below are relative to `native/o8-next/src`.
@@ -30,9 +31,15 @@ No peer header grants local authority.
 | `/api/orchestrator/status` | session | composer/command_client.rs | gate + panel |
 | `/api/setup/cli-updates` | setup, settings | shell_features/update.rs | gate |
 | `/api/cortex/proposals` | activity | surfaces/activity/proposals.rs | gate |
+| `/api/panel/file-asset` | session | files_panel/media.rs | gate |
+| `/api/v2/files` | session | files_panel/io.rs | gate |
+| `/api/v2/files/quick-docs` | session | files_panel/quick_docs.rs | gate |
+| `/api/visualizations` | session | transcript_visualizations.rs | gate + visualization |
+| `/api/panel/prs/[number]/timeline` | pull_requests | surfaces/pull_requests/model.rs | gate |
 
 `[hash]` uses the production parameter name for the native commit path
-inventoried as `[id]`.
+inventoried as `[id]`. The timeline similarly uses production `[number]` for
+the native path inventoried as `[id]`.
 
 ## Held Next-only
 
@@ -51,19 +58,13 @@ inventoried as `[id]`.
 | `/api/cortex/diagnostics` | GET calls `flushTimingBuffer`, which writes timing data to disk. |
 | `/api/cortex/codebase-memory` | GET calls `ensureCodebaseMemoryBootIndex`, starting indexing and persistent writes. |
 
-Seven additional GETs remain held because `listRepos()` repairs and
-persists changed remote metadata (`src/lib/repos/registry.ts`). This applies
-transitively to scoped workspace reads, even when the route body only reads files:
+Two of the seven R1 candidates remain held after removing registry repair from
+`listRepos()`. These independent write paths are unchanged:
 
-| Candidate | GET call chain |
-| --- | --- |
-| `/api/panel/file-asset` | `resolveRoot` -> `resolveRegisteredRepoScope` -> `findRepoByLocalPath` -> `listRepos` |
-| `/api/v2/files` | `resolveFileTarget` -> `resolveRegisteredRepoScope` -> `findRepoByLocalPath` -> `listRepos` |
-| `/api/v2/files/quick-docs` | `resolveRoot` -> `resolveRegisteredRepoScope` -> `findRepoByLocalPath` -> `listRepos` |
-| `/api/visualizations` | `listTranscriptVisualizations` -> `resolveVisualizationTarget` -> `resolveRegisteredRepoScope` -> `listRepos` |
-| `/api/worktrees/retention-usage` | `listRepos` |
-| `/api/cortex/cross-repo-proposals` | `readCachedCrossRepoProposals` -> `proposeAcrossRepos` -> `listRepos` |
-| `/api/panel/prs/[id]/timeline` | `resolveRepoSlug` -> `listRepos` for non-slug repository queries |
+| Candidate | Auth basis | GET call chain that writes |
+| --- | --- | --- |
+| `/api/worktrees/retention-usage` | gate + panel | `GET` -> `resolveManagedWorktreeStorageTarget` -> `mkdirSync(layout.configuredRoot, { recursive: true })` when `O8_WORKTREE_ROOT` is unset. |
+| `/api/cortex/cross-repo-proposals` | gate | `readCachedCrossRepoProposals` -> `runTick` -> `proposeAcrossRepos` -> `readOrComputeSignatures` -> `computeAllSignatures` -> `writeSignatureStore` -> `writeFileSync(stack-signatures.json)` on an empty cache with `O8_LEGACY_JACCARD_PROPOSER` enabled. |
 
 No eligible handler needs `next/headers`, cookie context or edge runtime.
 In-memory read caches and bounded observation processes remain in the production
@@ -178,3 +179,92 @@ Classification is verified with
 `node scripts/classify-tests.mjs --check-manifest`. This slice introduces no
 fixed-date fixtures; optional dated-fixture probes from the initial broader
 classification command were stopped.
+
+## R1 follow-up
+
+`listRepos()` now projects local origin changes without taking a mutation lock
+or writing the registry. It also avoids the Git subprocess on this read path:
+the shared process boundary can create `.provider-keys.lock`, even for a Git
+read. File-only metadata reads cover ordinary repositories and linked worktrees.
+Unreadable metadata and complex local Git config (includes, URL rewrites, worktree
+extensions, quoted or escaped URLs) retain the saved value until explicit repair.
+The bounded `worktreeMetadataReadLimit()` early return is preserved.
+
+`repairRepoRemotes()` retains the existing Git resolution, mutation lock and
+compare-before-merge rule. Only a matching repository id/path whose stored
+`remoteUrl` still equals the pre-lock value is repaired. It runs at the start
+of `scheduleRepoMaintenance()`, the existing asynchronous add/repoint spec-write
+path. This gives both writers one repair call site, adds no timer, and still
+repairs if the subsequent spec ingest fails. Repair failure does not prevent
+spec ingest.
+
+The visualization listing GET and target-resolution bodies moved unchanged
+into `src/lib/visualizations/read.ts`. The Next route re-exports that same GET,
+and the native transport loads it directly. Publication and browser preview
+imports stay on the write path. The moved GET and authorization bodies were
+compared byte-for-byte with `origin/main`; the socket test also checks owned
+and foreign packet listings. No new mutation method is registered.
+
+The R1 socket fixture uses its existing `O8D_TEST_BINARY` override pointed at
+`$CARGO_TARGET_DIR/debug/o8d` on hosts with an external Cargo target directory.
+The default worktree-relative binary path does not locate that build.
+
+R1 regression receipt, using the integration config and `--maxWorkers=2`:
+
+```text
+origin/main 9e41bfbc78a9d48a81ee675d883fc945394f93c5, new test copied into an isolated snapshot:
+FAIL returns the moved origin on a GET-path listRepos without changing registry bytes or mtime
+AssertionError: expected Buffer[...] to deeply equal Buffer[...]
+Tests 1 failed | 3 skipped (4)
+
+branch:
+PASS returns the moved origin on a GET-path listRepos without changing registry bytes or mtime
+PASS persists a changed origin through explicit remote repair
+PASS repairs moved remotes during the existing add maintenance writes
+PASS projects a linked worktree origin without creating state or erasing an offline remote
+Tests 4 passed (4)
+```
+
+The red invocation filters to `-t 'GET-path listRepos'`; no test is disabled in
+source. The branch runs the whole file. The test compares registry bytes,
+nanosecond mtime and directory entries, so a registry rewrite or newly created
+provider/registry lock file is observable.
+
+Completed related file counts:
+
+| Test file | Passed |
+| --- | ---: |
+| `tests/repo-remote-refresh-real-path.test.ts` | 4 |
+| `tests/o8d-native-route-inventory-real-path.test.ts` | 3 |
+| `tests/o8d-next-surfaces-real-path.test.ts` | 83 |
+| `tests/repo-repoint-contract.test.ts` | 3 |
+| `tests/repo-package-manager-contract-real-path.test.ts` | 3 |
+| `tests/repo-storage-pressure-policy-real-path.test.ts` | 4 |
+| `tests/workspace-manifest-registry-real-path.test.ts` | 2 |
+| `tests/transcript-visualizations-real-path.test.ts` | 8 |
+| `src/lib/repos/thread-git-context.test.ts` | 2 |
+| `tests/panel-repos-add-response.test.ts` | 3 |
+| `tests/panel-repos-readiness-scope.test.ts` | 8 |
+
+The completed focused runs total 110 integration tests and 13 related unit
+tests. The surface file passes alone with Next stopped, including authenticated
+scoped file/preview/quick-docs/visualization reads with unchanged registry bytes
+and mtime, plus owned and foreign packet visualization listings.
+
+Global verification limits in the supplied shared dependency installation:
+`npm run typecheck:fast` completes with 116 diagnostics outside touched files,
+including missing dependency types and the existing Next configuration type
+mismatch. The server bundle check fails on the same three unresolved module
+paths in both the branch and an isolated `origin/main` snapshot. No dependency
+or build-budget change is included. An optional broad maintenance run was
+interrupted after three timeouts (one case passed); it is not a completed
+suite. The full unit attempt was also interrupted after repeated file-load
+failures and is not claimed as a passing completion gate.
+
+The representative hermetic unit load failure is
+`src/components/desktop/thoughts/use-orchestrator-stream/fresh-turn-options.test.ts`:
+zero tests execute because an SDK import cannot resolve. The identical import
+failure reproduces on the isolated `origin/main` snapshot. That snapshot probe
+disables the filesystem module cache to avoid a separate shared-symlink cache
+`ENOENT`. Touched-file ESLint and `rule-check --base=origin/main` pass.
+The classification manifest check and final diff whitespace check also pass.
