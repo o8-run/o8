@@ -57,7 +57,7 @@ describe.skipIf(!executablePath)('persisted worker draft workspace in a browser'
     await page.route('http://localhost/**', async route => {
       const request = route.request();
       if (request.isNavigationRequest()) {
-        await route.fulfill({ contentType: 'text/html', body: '<div id="root"></div><script src="/bundle.js"></script>' });
+        await route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<div id="root"></div><script src="/bundle.js"></script>' });
       } else if (request.url().endsWith('/bundle.js')) {
         await route.fulfill({ contentType: 'text/javascript', body: result.outputFiles[0].text });
       } else {
