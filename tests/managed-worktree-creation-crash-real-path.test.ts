@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -65,7 +65,7 @@ function waitForFileText(
   });
 }
 
-function waitForExit(child: ChildProcessWithoutNullStreams): Promise<void> {
+function waitForExit(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
   return new Promise((resolve) => child.once('exit', () => resolve()));
 }
@@ -236,6 +236,21 @@ describe('managed worktree creation crash recovery', () => {
     expect(ownerProbe.state === 'absent'
       || (ownerProbe.state === 'live'
         && !sameMetadataLockProcessIdentity(ownerProbe.identity, owner.identity))).toBe(true);
+    // A separate process must protect the orphan after its owner and install exit.
+    const liveProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      cwd: workspacePath,
+      stdio: 'ignore',
+      detached: true,
+    });
+    try {
+      invalidateProcessCwdSnapshot();
+      expect(await probeLiveProcessInside(workspacePath)).toMatchObject({ status: 'live' });
+      await expect(manager.prune(0)).resolves.not.toContain(worktreeId);
+      expect(existsSync(workspacePath)).toBe(true);
+    } finally {
+      liveProcess.kill('SIGKILL');
+      await waitForExit(liveProcess);
+    }
     // The machine cwd snapshot is cached for up to 15s, so a probe taken before
     // this exit still reports the pid as live. The process is confirmed gone —
     // drop the stale snapshot so the assertion reads the world, not the cache.
