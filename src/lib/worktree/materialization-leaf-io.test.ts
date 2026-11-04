@@ -268,6 +268,9 @@ it('creates the private installer scaffold once and refuses an occupied root', a
       expect(lstatSync(path.join(runtime, name)).nlink).toBe(1);
       expect(lstatSync(path.join(runtime, name)).mode & 0o777).toBe(0o600);
     }
+    expect(readFileSync(path.join(runtime, '.gitignore'), 'utf8')).toBe('*\n');
+    expect(lstatSync(path.join(runtime, '.gitignore')).nlink).toBe(1);
+    expect(lstatSync(path.join(runtime, '.gitignore')).mode & 0o777).toBe(0o600);
     await expect(createPinnedInstallRuntime(workspace, identity, '.o8-install-runtime/attempt')).rejects.toThrow(/EEXIST/);
     expect(lstatSync(runtime).ino).toBe(created.inode);
   } finally { rmSync(workspace, { recursive: true, force: true }); }
