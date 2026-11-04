@@ -7,6 +7,7 @@ import path from 'node:path';
 
 const crate = 'native/o8-next';
 const target = path.resolve(process.env.CARGO_TARGET_DIR || `${crate}/target`);
+const registrationTarget = path.join(target, 'pull-request-registration-target');
 const manifestPath = path.join(target, '.o8-native-sources.json');
 const cargoHome = path.resolve(process.env.CARGO_HOME || '.o8-next-cargo');
 function command(name, args) {
@@ -52,6 +53,8 @@ switch (process.argv[2]) {
     const prefix = `native-tests-v1-${configuration}-${lockfile}-`;
     output('key', `${prefix}${source.digest('hex')}`);
     output('restore-key', prefix);
+    output('registration-key', `native-registration-v1-${configuration}-${lockfile}`);
+    output('registration-restore-key', `native-registration-v1-${configuration}-`);
     break;
   }
   case 'restore': {
@@ -106,9 +109,14 @@ switch (process.argv[2]) {
     rmSync(manifestPath, { force: true });
     function measure() {
       let total = 0;
+      // Shard 1 publishes this nested check target under its own cache budget.
+      const registrationBytes = existsSync(registrationTarget)
+        ? Number(command('du', ['-sb', registrationTarget]).split(/\s/)[0]) : 0;
+      output('registration-bytes', registrationBytes);
       for (const [label, directory] of [['target', target], ['registry', path.join(cargoHome, 'registry')],
         ['git', path.join(cargoHome, 'git')]]) {
-        const bytes = existsSync(directory) ? Number(command('du', ['-sb', directory]).split(/\s/)[0]) : 0;
+        const bytes = (existsSync(directory) ? Number(command('du', ['-sb', directory]).split(/\s/)[0]) : 0)
+          - (label === 'target' ? registrationBytes : 0);
         output(`${label}-bytes`, bytes);
         total += bytes;
       }
@@ -121,7 +129,7 @@ switch (process.argv[2]) {
       // executables exceed the budget. Cargo rebuilds any removed outputs.
       console.log('[native-cache] oversized target: retaining dependency build/deps/fingerprint outputs');
       for (const entry of readdirSync(target)) {
-        if (!['debug', 'CACHEDIR.TAG', '.rustc_info.json'].includes(entry)) {
+        if (!['debug', 'CACHEDIR.TAG', '.rustc_info.json', 'pull-request-registration-target'].includes(entry)) {
           rmSync(path.join(target, entry), { recursive: true, force: true });
         }
       }

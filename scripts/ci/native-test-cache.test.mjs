@@ -94,6 +94,13 @@ test('measurement logs target bytes, prunes incremental objects and keeps both a
 });
 
 test('an oversized target falls back to dependency outputs within the cache budget', () => {
+  const registration = join(target, 'pull-request-registration-target/debug/deps/libregistration.rmeta');
+  write(registration, 'registration');
+  truncateSync(registration, 5 * 1024 ** 3); // Separate budget; no large allocation.
+  const registrationOnly = run('measure');
+  assert.ok(Number(registrationOnly['registration-bytes']) >= 5 * 1024 ** 3);
+  assert.ok(Number(registrationOnly['target-bytes']) < 1024 ** 2);
+  assert.equal(registrationOnly.cacheable, 'true');
   const binary = join(target, 'debug/deps/o8_next-test');
   truncateSync(binary, 5 * 1024 ** 3); // Sparse fixture: no large allocation.
   chmodSync(binary, 0o755);
@@ -105,4 +112,6 @@ test('an oversized target falls back to dependency outputs within the cache budg
   assert.equal(existsSync(join(target, 'debug/o8-next')), false);
   assert.equal(readFileSync(join(target, 'debug/deps/libdependency.rlib'), 'utf8'), 'dependency');
   assert.equal(readFileSync(join(target, 'debug/build/dependency/output'), 'utf8'), 'build result');
+  assert.ok(Number(result['registration-bytes']) >= 5 * 1024 ** 3);
+  assert.equal(statSync(registration).size, 5 * 1024 ** 3);
 });

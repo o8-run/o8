@@ -692,6 +692,7 @@ jobs:
         if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'
         with:
           headless-tests: 'true'
+          registration-cache: ${{ matrix.shard == 1 }}
       - name: Build the persisted-history fixture daemon
         if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'
         run: cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-http --bin o8d
@@ -716,6 +717,12 @@ jobs:
         id: native-cache-size
         if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'
         run: node scripts/ci/native-test-cache.mjs measure
+      - name: Save the registration check target
+        if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true' && github.ref == 'refs/heads/main' && matrix.shard == 1 && steps.native-setup.outputs.registration-cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: native/o8-next/target/pull-request-registration-target
+          key: ${{ steps.native-setup.outputs.registration-cache-key }}
       - name: Save native test build outputs
         if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true' && github.ref == 'refs/heads/main' && matrix.shard == 8 && steps.native-setup.outputs.native-cache-hit != 'true' && steps.native-cache-size.outputs.cacheable == 'true'
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3

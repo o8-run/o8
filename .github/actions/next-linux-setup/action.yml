@@ -10,6 +10,9 @@ inputs:
   headless-tests:
     description: Install compile prerequisites without graphical capture tools or driver upgrades.
     default: 'false'
+  registration-cache:
+    description: Restore the separate pull request registration check target.
+    default: 'false'
 outputs:
   native-cache-key:
     description: Compiler, native lockfile and source key shared by all test shards.
@@ -17,6 +20,12 @@ outputs:
   native-cache-hit:
     description: Whether all native build inputs matched the restored cache.
     value: ${{ steps.native-cache.outputs.cache-hit }}
+  registration-cache-key:
+    description: Compiler and native lockfile key for the registration check target.
+    value: ${{ steps.native-cache-key.outputs.registration-key }}
+  registration-cache-hit:
+    description: Whether the registration check target matched the restored cache.
+    value: ${{ steps.registration-cache.outputs.cache-hit }}
 runs:
   using: composite
   steps:
@@ -51,6 +60,13 @@ runs:
           .o8-next-cargo/git
         key: ${{ steps.native-cache-key.outputs.key }}
         restore-keys: ${{ steps.native-cache-key.outputs.restore-key }}
+    - id: registration-cache
+      if: inputs.registration-cache == 'true' && inputs.headless-tests == 'true'
+      uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: native/o8-next/target/pull-request-registration-target
+        key: ${{ steps.native-cache-key.outputs.registration-key }}
+        restore-keys: ${{ steps.native-cache-key.outputs.registration-restore-key }}
     - if: inputs.headless-tests == 'true'
       shell: bash
       env:
