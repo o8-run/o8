@@ -221,8 +221,8 @@ function expandHome(value: string): string {
  * sessions behave exactly as before. Throws when the bound instance is gone
  * or disabled, rather than silently running on another account.
  */
-export function resolveProviderInstanceLaunch(threadId: string | null | undefined, runtime: string): ActiveProviderInstance | null {
-  const id = threadProviderInstance(threadId);
+export function resolveProviderInstanceLaunch(threadId: string | null | undefined, runtime: string, instanceId?: string): ActiveProviderInstance | null {
+  const id = instanceId ?? threadProviderInstance(threadId);
   if (!id) return null;
   const instance = readProviderInstance(id);
   if (!instance) throw new Error('This chat\'s provider instance was deleted. Pick another runtime to continue.');

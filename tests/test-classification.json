@@ -3024,11 +3024,18 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "process-signal",
         "real-path"
       ]
     },
     {
       "path": "tests/delegate-effort-correction-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/delegate-instance-real-path.test.ts",
       "reasons": [
         "real-path"
       ]

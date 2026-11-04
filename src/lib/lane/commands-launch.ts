@@ -245,6 +245,7 @@ async function launchSessionInner(
     const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
     const result = await launchRuntimeSurface({
       runtime: lane.runtime,
+      instanceId: command.instanceId,
       prompt: command.prompt,
       promptMemoryRevision: command.promptMemoryRevision,
       repoPath: lane.worktreePath ?? lane.repoPath,

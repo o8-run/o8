@@ -247,6 +247,7 @@ function fullPacketFixture() {
       error: null,
     },
     recovery: null,
+    instanceId: 'fixture-instance',
   } satisfies Required<OrchestratorPacket>;
 
   return packet;
