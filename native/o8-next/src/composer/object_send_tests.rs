@@ -163,3 +163,34 @@ fn workspace_mentions_group_the_menu_and_send_a_context_block_per_pick(cx: &mut 
     );
     drop(grid);
 }
+
+#[gpui::test]
+fn workspace_mentions_stay_out_of_another_machines_thread(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    let grid = std::sync::Arc::new(std::sync::Mutex::new(crate::terminal_grid::Grid::new(
+        crate::terminal_grid::Size(80, 24),
+    )));
+    crate::terminal::register("o8-shell-local", &grid);
+    surface.update(cx, |s, cx| {
+        let roster = s.subagents.clone().expect("the selected thread's roster");
+        roster.update(cx, |v, cx| {
+            v.agents.push(roster_agent("Editing auth.rs"));
+            cx.notify();
+        });
+        let selected = s.selected.clone();
+        s.sessions
+            .iter_mut()
+            .find(|t| t.id == selected.clone().unwrap())
+            .unwrap()
+            .machine = Some("far".into());
+    });
+    seed_listings(&surface, cx);
+    focus(&surface, cx);
+    cx.simulate_input("Check @");
+    wait(&surface, cx, |s, cx| groups(s, cx).first() == Some(&"Threads"));
+    surface.read_with(cx, |s, cx| {
+        assert_eq!(groups(s, cx), ["Threads"], "only threads for a far thread");
+    });
+    drop(grid);
+}

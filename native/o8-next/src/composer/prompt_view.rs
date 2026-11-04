@@ -111,11 +111,14 @@ impl Surface {
         if let Some(command) = shell {
             return self.search_shell(query, command, cx);
         }
-        let repo = self
+        let selected = self
             .selected
             .as_ref()
-            .and_then(|id| self.sessions.iter().find(|s| s.id == *id))
-            .and_then(|s| s.repo_path.clone());
+            .and_then(|id| self.sessions.iter().find(|s| s.id == *id));
+        let repo = selected.and_then(|s| s.repo_path.clone());
+        // Agents, worktrees, scripts and terminals are this machine's; another
+        // machine's thread is not offered them until reads route to its owner.
+        let local = selected.is_none_or(|s| s.machine.is_none());
         let mut results: Vec<_> = thread_matches(
             &self.sessions,
             self.selected.as_deref().unwrap_or(""),
@@ -132,16 +135,21 @@ impl Surface {
         let agents = self
             .subagents
             .as_ref()
+            .filter(|_| local)
             .map(|view| view.read(cx).agents.clone())
             .unwrap_or_default();
-        let terminals = crate::terminal::open_sessions();
+        let terminals = if local {
+            crate::terminal::open_sessions()
+        } else {
+            vec![]
+        };
         let sources = editor
             .read(cx)
             .controls
             .mention
             .sources
             .clone()
-            .filter(|(project, ..)| repo.as_ref() == Some(project));
+            .filter(|(project, ..)| local && repo.as_ref() == Some(project));
         results.extend(
             groups::agent_matches(&agents, &query)
                 .into_iter()
@@ -165,12 +173,13 @@ impl Surface {
             return;
         };
         let client = self.client.clone();
-        let task = cx.spawn(async move |_, cx| {
+        let task = cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(80))
                 .await;
             let word = query.clone();
-            let (files, project) = (client.clone(), repo.clone());
+            let (files, workspace) = (client.clone(), repo.clone());
+            let project = Some(repo.clone());
             let body = cx.background_executor().spawn(async move {
                 let (key, value) = if word.is_empty() {
                     ("directory", ".")
@@ -179,11 +188,11 @@ impl Surface {
                 };
                 files.get::<Value>(
                     "/api/panel/files",
-                    &[("workspace", project.as_str()), (key, value)],
+                    &[("workspace", workspace.as_str()), (key, value)],
                 )
             });
             // Worktrees and scripts are read once while the menu is open.
-            let read = sources.is_none().then(|| {
+            let read = (local && sources.is_none()).then(|| {
                 cx.background_executor().spawn(async move {
                     let trees = client
                         .get::<Value>(
@@ -201,8 +210,18 @@ impl Surface {
                 Some(task) => Some(task.await),
                 None => None,
             };
+            let current = this
+                .read_with(cx, |s, _| {
+                    s.selected
+                        .as_ref()
+                        .and_then(|id| s.sessions.iter().find(|t| t.id == *id))
+                        .and_then(|t| t.repo_path.clone())
+                })
+                .ok()
+                .flatten();
             let _ = editor.update(cx, |i, cx| {
-                if i.controls.mention.query.as_ref() != Some(&query) {
+                // An older word's results, or another thread's project, are dropped.
+                if i.controls.mention.query.as_ref() != Some(&query) || current != project {
                     return;
                 }
                 let results = &mut i.controls.mention.results;

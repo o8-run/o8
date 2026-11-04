@@ -32,7 +32,7 @@ thread_local! {
 pub(crate) fn register(session: &str, grid: &Arc<Mutex<Grid>>) {
     OPEN.with(|open| {
         let mut open = open.borrow_mut();
-        open.retain(|(known, grid)| known != session && grid.strong_count() > 0);
+        open.retain(|(_, grid)| grid.strong_count() > 0);
         open.push((session.to_owned(), Arc::downgrade(grid)));
     });
 }
@@ -41,7 +41,13 @@ pub(crate) fn open_sessions() -> Vec<String> {
     OPEN.with(|open| {
         let mut open = open.borrow_mut();
         open.retain(|(_, grid)| grid.strong_count() > 0);
-        open.iter().map(|(session, _)| session.clone()).collect()
+        let mut sessions: Vec<String> = vec![];
+        for (session, _) in open.iter() {
+            if !sessions.contains(session) {
+                sessions.push(session.clone());
+            }
+        }
+        sessions
     })
 }
 /// An open terminal's newest `count` lines, if it is still open.
@@ -49,8 +55,9 @@ pub(crate) fn tail(session: &str, count: usize) -> Option<Vec<String>> {
     let grid = OPEN.with(|open| {
         open.borrow()
             .iter()
-            .find(|(known, _)| known == session)
-            .and_then(|(_, grid)| grid.upgrade())
+            .rev()
+            .filter(|(known, _)| known == session)
+            .find_map(|(_, grid)| grid.upgrade())
     })?;
     let lines = grid.lock().unwrap().tail(count);
     Some(lines)

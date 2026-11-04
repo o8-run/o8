@@ -183,7 +183,9 @@ pub(crate) fn terminal_matches(sessions: &[String], query: &str) -> Vec<Mentione
 /// A tail keeps its newest lines whole and drops the oldest; other bodies
 /// are cut short at the end.
 fn fit(header: String, body: Vec<String>, footer: &str, tail: bool) -> String {
-    let room = BLOCK_BUDGET - header.chars().count() - footer.chars().count();
+    let room = BLOCK_BUDGET
+        .saturating_sub(header.chars().count())
+        .saturating_sub(footer.chars().count());
     let length = |lines: &[String]| {
         lines.iter().map(|l| l.chars().count()).sum::<usize>() + lines.len().saturating_sub(1)
     };
@@ -362,13 +364,17 @@ impl Sent {
 const PREVIEW_LINES: usize = 6;
 pub(crate) const PILL_SCHEME: &str = "o8://mention/";
 thread_local! {
-    /// Mentions sent from this window, newest pick of a label kept.
+    /// Mentions sent from this window, the newest of each kept.
     static SENT: RefCell<Vec<Sent>> = RefCell::default();
 }
 pub(crate) fn remember_sent(sent: Sent) {
     SENT.with(|all| {
         let mut all = all.borrow_mut();
-        match all.iter_mut().find(|known| known.label == sent.label) {
+        // A label names one thing; a thread and a worktree may share it.
+        match all
+            .iter_mut()
+            .find(|known| known.label == sent.label && known.title == sent.title)
+        {
             Some(known) => *known = sent,
             None => all.push(sent),
         }
