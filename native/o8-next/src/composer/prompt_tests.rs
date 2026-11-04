@@ -257,5 +257,7 @@ fn native_composer_controls_save_prompt_and_create_branch_persist_without_send(
     });
 }
 
+#[path = "object_send_tests.rs"]
+mod object_send_tests;
 #[path = "thread_send_tests.rs"]
 mod thread_send_tests;

@@ -419,6 +419,9 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A sent mention's pill opens its thread or agent the same way.
+        let mention = crate::composer::mention::groups::sent_link(url);
+        let url = mention.as_deref().unwrap_or(url);
         if let Some(id) = crate::lineage::parse_link(url) {
             self.open_thread_by_id(id.to_owned(), window, cx);
         } else if let Some(number) = url.strip_prefix('#').and_then(|n| n.parse().ok()) {
