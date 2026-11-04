@@ -185,6 +185,28 @@ describe('required CI gates through workflow commands', () => {
     expect(workflow.jobs['integration-weekly'].needs).toBe('test');
   });
 
+  it('saves source-keyed native outputs for warm pull-request reruns within budget', () => {
+    const step = workflow.jobs['o8-next-tests'].steps.find((entry: { name?: string }) => entry.name === 'Save native test build outputs');
+    const expression = step.if.replaceAll('steps.native-setup', 'steps["native-setup"]')
+      .replaceAll('steps.native-cache-size', 'steps["native-cache-size"]')
+      .replaceAll('.outputs.native-cache-hit', '.outputs["native-cache-hit"]');
+    const evaluate = new Function('github', 'steps', 'matrix', 'needs', `return (${expression});`);
+    const saves = (event = 'pull_request', ref = 'refs/pull/42/merge', shard = 8, hit = 'false', cacheable = 'true', changed = 'true', reuse = 'false') => evaluate(
+      { event_name: event, ref }, { native: { outputs: { changed } },
+        'native-setup': { outputs: { 'native-cache-hit': hit } }, 'native-cache-size': { outputs: { cacheable } } },
+      { shard }, { reuse: { outputs: { reuse } } },
+    );
+    expect(saves(), 'the PR merge ref must retain its source-matched executable').toBe(true);
+    expect(saves('push', 'refs/heads/main')).toBe(true);
+    expect(saves('merge_group', 'refs/heads/gh-readonly-queue/main/fixture')).toBe(false);
+    expect(saves('workflow_dispatch', 'refs/heads/fixture')).toBe(false);
+    expect(saves('pull_request', 'refs/pull/42/merge', 1)).toBe(false);
+    expect(saves('pull_request', 'refs/pull/42/merge', 8, 'true')).toBe(false);
+    expect(saves('pull_request', 'refs/pull/42/merge', 8, 'false', 'false')).toBe(false);
+    expect(saves('pull_request', 'refs/pull/42/merge', 8, 'false', 'true', 'false')).toBe(false);
+    expect(saves('pull_request', 'refs/pull/42/merge', 8, 'false', 'true', 'true', 'true')).toBe(false);
+  });
+
   it('restores lint and typecheck caches, refreshing them only on main', () => {
     for (const id of ['lint', 'typecheck']) {
       const steps = workflow.jobs[id].steps;
