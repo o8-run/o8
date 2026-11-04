@@ -280,9 +280,10 @@ describe.sequential('o8 serve real CLI path', () => {
     });
     expect(gatedResponse.status, await gatedResponse.text()).toBe(200);
 
-    const statusResult = await runCli(['serve', 'status'], dataDir);
-    expect(statusResult.code, statusResult.stderr).toBe(0);
-    expect(JSON.parse(statusResult.stdout)).toMatchObject({
+    // Since #4416 the dev API compiles routes and runs deferred boot work after readiness, so a
+    // single 500 ms identity probe can land in that window. Poll status the way restarts do.
+    const healthyStatus = await waitForHealthyServe(dataDir);
+    expect(healthyStatus).toMatchObject({
       running: true,
       healthy: true,
       pid: startStatus.pid,
@@ -301,9 +302,8 @@ describe.sequential('o8 serve real CLI path', () => {
     const persistedState = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>;
     expect(persistedState.version).toBe(startStatus.cliVersion);
     writeFileSync(statePath, `${JSON.stringify({ ...persistedState, version: '0.0.0-stale' }, null, 2)}\n`, { mode: 0o600 });
-    const mismatchedStatus = await runCli(['serve', 'status'], dataDir);
-    expect(mismatchedStatus.code, mismatchedStatus.stderr).toBe(0);
-    expect(JSON.parse(mismatchedStatus.stdout)).toMatchObject({
+    const mismatchedStatus = await waitForHealthyServe(dataDir, (status) => status.versionMismatch === true);
+    expect(mismatchedStatus).toMatchObject({
       cliVersion: startStatus.cliVersion,
       daemonVersion: '0.0.0-stale',
       versionMismatch: true,
