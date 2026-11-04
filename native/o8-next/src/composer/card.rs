@@ -666,21 +666,38 @@ impl Surface {
             window.viewport_size().width,
             cx,
         );
+        let keep_end = self.pinned && crate::retained::at_end(&self.list);
         let mut card = div()
             .id("composer-card")
             .debug_selector(|| "composer-card".into())
             .relative()
             .flex()
             .flex_col()
+            .flex_shrink_0()
             .border_1()
             .border_color(theme().border)
             .rounded(px(crate::theme::GEOMETRY.composer_radius))
             .bg(theme().surface_raised)
             .child({
                 let card = self.composer_card.clone();
-                gpui::canvas(move |bounds, _, _| card.set(Some(bounds)), |_, _, _, _| {})
-                    .absolute()
-                    .size_full()
+                let list = self.list.clone();
+                let owner = cx.entity().downgrade();
+                gpui::canvas(
+                    move |bounds, _, cx| {
+                        let previous = card.replace(Some(bounds));
+                        if keep_end
+                            && previous.is_some_and(|old| old.size.height != bounds.size.height)
+                        {
+                            // The retained list has just received its resized viewport.
+                            // Keep a reader at the end there on the next scene.
+                            crate::retained::pin_end(&list);
+                            let _ = owner.update(cx, |_, cx| cx.notify());
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full()
             })
             .when(
                 crate::composer::commands::shell_line(self.composer.read(cx).text.trim()).is_some(),
