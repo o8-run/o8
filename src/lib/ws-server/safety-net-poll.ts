@@ -14,8 +14,10 @@ export class SafetyNetPoll {
   due(client: object, revision: Revision, now = Date.now()): boolean {
     const checkpoint = this.checkpoints.get(client);
     if (!checkpoint) return true;
-    // A known revision is authoritative; an unobserved revision bypasses idle backoff.
-    if (revision !== undefined) return revision !== checkpoint.revision;
+    // New revisions bypass backoff; unchanged revisions still need a periodic repair.
+    if (revision !== undefined) {
+      return revision !== checkpoint.revision || now - checkpoint.syncedAt >= IDLE_MS;
+    }
     return now - checkpoint.idleSince < IDLE_MS || now - checkpoint.syncedAt >= IDLE_MS;
   }
 
