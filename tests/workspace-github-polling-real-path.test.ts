@@ -85,6 +85,8 @@ function ghReads(kind?: string) {
 
 beforeEach(() => {
   vi.resetModules();
+  // Children no longer inherit GH_TOKEN (#4585), so drop the process-wide read cache to isolate each case.
+  delete (globalThis as { __o8WorkspaceGitHubReadsV1?: unknown }).__o8WorkspaceGitHubReadsV1;
   // New process identity isolates each case without exposing or changing a real credential.
   vi.stubEnv('GH_TOKEN', `fixture-${++replay.caseId}`);
   vi.stubEnv('CORTEX_IDE_REVIEW_REPO_ROOT', '/fixture/review');

@@ -14,6 +14,10 @@ it('reads a saved machine through the HTTP entry point, real probe process and p
   try {
     for (const name of ['O8_DATA_DIR', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'GROK_HOME', 'OPENCODE_DATA_DIR', 'ANTIGRAVITY_DATA_DIR']) vi.stubEnv(name, root);
     vi.stubEnv('PATH', `${root}:${process.env.PATH}`); vi.stubEnv('O8_TEST_NODE', process.execPath); vi.stubEnv('O8_TEST_SSH_ARGS', args);
+    // Children inherit only allowlisted names (#4585). The fake ssh runs the probe locally, so it needs
+    // its knobs and the fixture's store homes, never the host's own provider stores.
+    vi.stubEnv('O8_WORKER_ENV_ALLOW', ['O8_TEST_NODE', 'O8_TEST_SSH_ARGS', 'O8_DATA_DIR', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR',
+      'GROK_HOME', 'OPENCODE_DATA_DIR', 'ANTIGRAVITY_DATA_DIR'].join(','));
     await mkdir(join(root, 'projects'));
     const { DatabaseSync } = await import('node:sqlite');
     const database = new DatabaseSync(join(root, 'opencode.db'));
