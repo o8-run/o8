@@ -17,17 +17,17 @@ mod files_panel;
 mod grid_sessions;
 mod icon;
 mod inbox;
-mod lineage;
 #[cfg(test)]
 mod input_reuse_tests;
 mod issues;
+mod lineage;
 mod merge;
 mod model;
 mod motion;
 mod pane;
-mod pane_tree;
 mod pane_grid;
 mod pane_layout;
+mod pane_tree;
 mod project_icon;
 mod projects;
 mod projects_model;
@@ -40,17 +40,17 @@ mod shell;
 mod shell_state;
 mod sidebar;
 mod stream;
+mod subagents;
 mod switch_receipt;
 mod terminal;
 mod terminal_grid;
 mod terminal_transport;
 mod text;
-mod thread_messages;
 mod theme;
 #[cfg(test)]
 mod theme_tests;
+mod thread_messages;
 mod trace;
-mod subagents;
 mod transcript_actions;
 mod transcript_diagram;
 mod transcript_peek;
@@ -60,7 +60,7 @@ mod visualizations;
 mod wake;
 use crate::{
     client::Client,
-    model::{History, render_tree},
+    model::{render_tree, History},
 };
 use serde_json::json;
 use std::{env, fs, process::ExitCode, time::Instant};
@@ -68,6 +68,10 @@ use std::{env, fs, process::ExitCode, time::Instant};
 fn run() -> Result<(), String> {
     let started = Instant::now();
     let mut args: Vec<String> = env::args().skip(1).collect();
+    #[cfg(target_os = "linux")]
+    if args == [visualizations::linux::ARG] {
+        return visualizations::linux::entry();
+    }
     if args == ["--help"] {
         println!(
             "o8-next --enable-next --server http://127.0.0.1:PORT [--offscreen] [--terminal SESSION_ID | --benchmark FILE | --composer-benchmark FILE]\nSaved sessions, composer and opt-in terminal. Set O8_NEXT_API_TOKEN for the selected server. No data-directory discovery.\no8-next --render-tree HISTORY.json\no8-next --sidebar-tree SESSIONS.json SELECTED_ID"

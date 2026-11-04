@@ -41,6 +41,9 @@ libc = "=0.2.183"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "x11"] }
+gtk = "=0.18.2"
+webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
+cairo-rs = { version = "=0.18.5", features = ["png"] }
 
 [dev-dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "test-support"] }

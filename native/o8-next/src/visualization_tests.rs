@@ -168,22 +168,18 @@ fn visualization_at_its_message_and_reference_height(cx: &mut gpui::TestAppConte
         window.refresh();
         window.draw(cx).clear();
     });
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     assert!(view.read_with(cx, |s, _| s.rows[index].borrow().rendered().0) >= px(320.));
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     view.read_with(cx, |s, _| {
         let (_, lines) = s.rows[index].borrow().rendered();
         assert!(lines.iter().any(|line| line.contains("Weekly activity")));
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.contains(crate::visualizations::protocol::UNAVAILABLE))
-        );
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.contains(crate::visualizations::protocol::RETRY))
-        );
+        assert!(lines
+            .iter()
+            .any(|line| line.contains(crate::visualizations::protocol::UNAVAILABLE)));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains(crate::visualizations::protocol::RETRY)));
     });
 }
 
@@ -236,7 +232,7 @@ fn missing_visualization_shows_error_and_retries_from_transcript(cx: &mut gpui::
         window.refresh();
         window.draw(cx).clear();
     });
-    let expected = if cfg!(target_os = "macos") {
+    let expected = if cfg!(any(target_os = "macos", target_os = "linux")) {
         "Visualization not found."
     } else {
         crate::visualizations::protocol::UNAVAILABLE

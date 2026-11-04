@@ -6,9 +6,9 @@ use crate::{
     text::{Node, Run},
 };
 use gpui::{
-    App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId, InspectorElementId,
-    IntoElement, LayoutId, Pixels, Point, Size, Style, TextAlign, TextRun, Window, WrappedLine,
-    point, px, size,
+    point, px, size, App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId,
+    InspectorElementId, IntoElement, LayoutId, Pixels, Point, Size, Style, TextAlign, TextRun,
+    Window, WrappedLine,
 };
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
@@ -29,7 +29,7 @@ mod user_bubble;
 
 #[path = "retained/text.rs"]
 mod row_text;
-use row_text::{ICON_ROOM, is_item, link_target, link_tip, pill_label, text_run};
+use row_text::{is_item, link_target, link_tip, pill_label, text_run, ICON_ROOM};
 
 pub struct RowState {
     pub row: Row,
@@ -112,11 +112,10 @@ impl RowState {
             self.expanded = previous.expanded;
             self.chosen = previous.chosen;
         }
-        if let (Row::Activity { .. }, Row::Activity { trace, .. }) = (&self.row, &previous.row)
-            && trace.live
-            && !self.chosen
-        {
-            self.expanded = Some(true);
+        if let (Row::Activity { .. }, Row::Activity { trace, .. }) = (&self.row, &previous.row) {
+            if trace.live && !self.chosen {
+                self.expanded = Some(true);
+            }
         }
     }
     pub(crate) fn bind_subagent_focus(&mut self, cx: &App) {
@@ -1178,6 +1177,34 @@ impl Element for RetainedRow {
                 )
             })
             .collect();
+        let pictures: Vec<gpui::AnyElement> = {
+            #[cfg(target_os = "linux")]
+            {
+                cache
+                    .cards
+                    .iter()
+                    .filter_map(|(id, placement)| {
+                        let picture = state.cards.get(id)?.borrow().picture()?;
+                        let mut picture = img(picture)
+                            .w(placement.size.width)
+                            .h(placement.size.height)
+                            .object_fit(ObjectFit::Fill)
+                            .into_any_element();
+                        picture.layout_as_root(
+                            placement.size.map(AvailableSpace::Definite),
+                            window,
+                            cx,
+                        );
+                        picture.prepaint_at(origin + placement.origin, window, cx);
+                        Some(picture)
+                    })
+                    .collect()
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                Vec::new()
+            }
+        };
         let elements = cache
             .images
             .iter()
@@ -1219,6 +1246,7 @@ impl Element for RetainedRow {
             })
             .collect::<Vec<_>>()
             .into_iter()
+            .chain(pictures)
             .chain(cache.links.iter().enumerate().map(|(index, link)| {
                 let url = link.url.clone();
                 // Unique across rows: elements sharing an id share click state,

@@ -80,7 +80,7 @@ jobs:
       - name: Graphical proof prerequisites
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends xvfb xauth x11-xserver-utils imagemagick mesa-vulkan-drivers fonts-dejavu-core
+          sudo apt-get install -y --no-install-recommends xvfb xauth x11-xserver-utils imagemagick mesa-vulkan-drivers fonts-dejavu-core libwebkit2gtk-4.1-0 libgtk-3-0t64 dbus-daemon
           chmod +x work/linux-downloads/*.AppImage
       - name: Install DEB, fresh-server and terminal-daemon launch, then uninstall
         if: matrix.format == 'deb'

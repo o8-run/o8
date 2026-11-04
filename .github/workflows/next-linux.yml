@@ -42,6 +42,11 @@ jobs:
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-run
       - name: Run native CLI assertions
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --test shell_cli --test pane_grid_cli --test terminal_cli --test diff_cli
+      - name: Render Linux visualization cards through the helper process
+        env:
+          O8_NEXT_NATIVE_BINARY: ${{ github.workspace }}/native/o8-next/target/release/o8-next
+        # Exercise the private-bus fallback, independent of the runner's desktop bus.
+        run: xvfb-run -a -s '-screen 0 1440x1024x24 -nolisten tcp -noreset -br' env -u DBUS_SESSION_BUS_ADDRESS cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next visualizations:: -- --nocapture --test-threads=1
       - name: Save fixture screenshots and measurements
         if: always()
         uses: actions/upload-artifact@v4

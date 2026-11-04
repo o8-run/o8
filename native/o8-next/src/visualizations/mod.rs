@@ -1,4 +1,12 @@
 //! Inline transcript documents. The host never exposes application requests to HTML.
+#[cfg(target_os = "linux")]
+pub mod linux;
+#[cfg(target_os = "linux")]
+mod linux_card;
+#[cfg(target_os = "linux")]
+mod linux_renderer;
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests;
 #[cfg(test)]
 mod load_tests;
 #[cfg(target_os = "macos")]
@@ -6,8 +14,8 @@ pub mod macos;
 pub mod protocol;
 pub mod transcript;
 use crate::client::{Client, LOAD_REQUEST_TIMEOUT};
-use protocol::{Message, Reference, UNAVAILABLE, valid_state};
-use serde_json::{Value, json};
+use protocol::{valid_state, Message, Reference, UNAVAILABLE};
+use serde_json::{json, Value};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -36,6 +44,8 @@ pub struct Card {
     state_file: Option<PathBuf>,
     dirty: bool,
     leases: usize,
+    #[cfg(target_os = "linux")]
+    snapshot: linux_card::Snapshot,
     #[cfg(target_os = "macos")]
     host: Option<Rc<macos::Host>>,
     #[cfg(target_os = "macos")]
@@ -108,7 +118,8 @@ impl Card {
             state_file,
             state,
             nonce: random.iter().map(|b| format!("{b:02x}")).collect(),
-            error: (!entropy || !cfg!(target_os = "macos")).then(|| UNAVAILABLE.into()),
+            error: (!entropy || !cfg!(any(target_os = "macos", target_os = "linux")))
+                .then(|| UNAVAILABLE.into()),
             ready: false,
             loading: None,
             started: None,
@@ -116,6 +127,8 @@ impl Card {
             bounds: None,
             dirty: false,
             leases: 0,
+            #[cfg(target_os = "linux")]
+            snapshot: linux_card::Snapshot::default(),
             #[cfg(target_os = "macos")]
             host: None,
             #[cfg(target_os = "macos")]
@@ -124,7 +137,11 @@ impl Card {
     }
     pub fn display_height(&self) -> f32 {
         if self.error.is_some() {
-            if cfg!(target_os = "macos") { 96. } else { 114. }
+            if cfg!(target_os = "macos") {
+                96.
+            } else {
+                114.
+            }
         } else {
             self.height as f32
         }
@@ -165,6 +182,10 @@ impl Card {
                 Err(error) => self.error = Some(error),
             }
             changed = true;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            changed |= self.poll_picture();
         }
         #[cfg(target_os = "macos")]
         if let Some(host) = &self.host {
@@ -216,6 +237,12 @@ impl Card {
     ) {
         self.bounds = Some(bounds);
         self.start();
+        #[cfg(target_os = "linux")]
+        self.prepare_picture(
+            f32::from(bounds.size.width),
+            crate::theme::visualization(),
+            Instant::now(),
+        );
         #[cfg(target_os = "macos")]
         {
             if self.error.is_some() {
@@ -224,9 +251,7 @@ impl Card {
                 }
                 return;
             }
-            if self.host.is_none()
-                && let Some(source) = &self.source
-            {
+            if let Some(source) = self.source.as_ref().filter(|_| self.host.is_none()) {
                 let client = self.client.clone();
                 self.host =
                     macos::Host::new(source, &self.nonce, window, Rc::new(move || client.wake()))
@@ -260,6 +285,13 @@ impl Card {
         if let Some(host) = &self.host {
             host.hide();
         }
+    }
+    #[cfg(target_os = "linux")]
+    pub fn picture(&self) -> Option<std::sync::Arc<gpui::Image>> {
+        self.snapshot
+            .picture
+            .clone()
+            .filter(|_| self.ready && self.error.is_none())
     }
 }
 fn document(client: &Client, reference: &Reference, nonce: &str) -> Result<String, String> {
