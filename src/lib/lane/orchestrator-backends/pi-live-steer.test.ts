@@ -4,7 +4,7 @@ import * as platform from '@/lib/pi/sdk/platform';
 import { O8_MANAGED_PI_MODEL } from '@/lib/pi/sdk/live-contract';
 import { MANUAL_THINKING_EFFORTS } from '@/lib/orchestrator/thinking-effort';
 
-const sdk = vi.hoisted(() => ({ prompt: vi.fn(), steer: vi.fn(async () => ({ accepted: true })) }));
+const sdk = vi.hoisted(() => ({ prompt: vi.fn(), steer: vi.fn(async (_message: string) => ({ accepted: true })) }));
 vi.mock('@/lib/pi/sdk/session', () => ({ createPiSdkSession: async () => ({
   sessionId: 'native-session', running: true, prompt: sdk.prompt, steer: sdk.steer, close: async () => {}, abort: async () => {},
 }) }));
@@ -42,17 +42,19 @@ it('refuses a changed model or permission surface without admitting into the pre
   } finally { await fixture.close(); }
 });
 
-it('refuses every concrete live pin before model lookup, admission or native input', async () => {
+it('admits every leftover concrete live pin at the runtime default', async () => {
   const fixture = await runningBackend(); const beforeAdmit = vi.fn();
   fixture.resolveRoute.mockClear();
   try {
     for (const thinkingEffort of MANUAL_THINKING_EFFORTS) {
       await expect(fixture.backend.liveSteer!('/fixture/repo', 'Pinned follow-up', {
         threadId: 'thoughts-live', model: 'original', permissionMode: 'full', thinkingEffort, beforeAdmit,
-      })).rejects.toThrow(`independent thinking effort "${thinkingEffort}"`);
+      })).resolves.toEqual({ accepted: true });
     }
-    expect(beforeAdmit).not.toHaveBeenCalled(); expect(sdk.steer).not.toHaveBeenCalled();
-    expect(fixture.resolveRoute).not.toHaveBeenCalled();
+    expect(beforeAdmit).toHaveBeenCalledTimes(MANUAL_THINKING_EFFORTS.length);
+    expect(sdk.steer).toHaveBeenCalledTimes(MANUAL_THINKING_EFFORTS.length);
+    expect(sdk.steer.mock.calls.every(args => args.length === 1)).toBe(true);
+    expect(fixture.resolveRoute).toHaveBeenCalledTimes(MANUAL_THINKING_EFFORTS.length);
   } finally { await fixture.close(); }
 });
 

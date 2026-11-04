@@ -1,4 +1,4 @@
-import { isUnmappedEffortLead, unmappedEffortError } from '@/lib/lane/orchestrator-backends/unmapped-effort';
+import { dropsStaleEffortPin, isUnmappedEffortLead, unmappedEffortError } from '@/lib/lane/orchestrator-backends/unmapped-effort';
 import { assertLlmThread } from '@/lib/bots/network-kind';
 import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
@@ -42,7 +42,9 @@ export async function runBoundChatContinuation(
   const permissionMode = input.permissionMode ?? expected.permissionMode;
   input.check();
   const unmapped = isUnmappedEffortLead(expected.backend);
-  const thinkingEffort = unmapped && input.source !== 'user' ? undefined : expected.effort;
+  // o8 and Pi run a leftover pin at the runtime default (#5466); the other unmapped leads drop it only
+  // for an automatic continuation and keep #4858's refusal for a user-sourced one.
+  const thinkingEffort = dropsStaleEffortPin(expected.backend) || (unmapped && input.source !== 'user') ? undefined : expected.effort;
   const effortError = unmapped ? unmappedEffortError(thinkingEffort) : null;
   if (effortError?.type === 'error') throw new EffortPinRejectionError('effort_unsupported_runtime', effortError.error);
   const backend = getOrchestratorBackend(expected.backend);

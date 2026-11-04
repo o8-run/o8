@@ -45,7 +45,7 @@ const { createSharedWorkerHeartbeat } = await import('@/lib/ws-server/shared-wor
 const { listSharedWorkerReturns } = await import('@/lib/orchestrator/shared-worker-returns');
 const { finishSharedCheckoutTeam } = await import('@/lib/orchestrator/shared-checkout-team');
 const { getSqlite, closeDb } = await import('@/lib/db');
-const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+const { readPersistedLlmChat, writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
 let busy = true;
 const hooks = { readTranscript: async (surface: string, limit: number) => {
   const response = await transcriptRoute(new NextRequest(`http://localhost/api/runtime/transcript?sessionKey=${encodeURIComponent(surface)}&limit=${limit}`));
@@ -76,8 +76,9 @@ async function launch(id: string) {
   }, { timeout: 15_000, interval: 50 });
   return surface;
 }
+// The Pi write helper is a cold cargo build; build it once per file, outside any test's own timeout.
+beforeAll(() => { buildPiWriteHelper(); }, 600_000);
 beforeAll(async () => {
-  buildPiWriteHelper();
   const { addRepo } = await import('@/lib/repos/registry'); await addRepo(repo);
   const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
   await updateOperatorDefaults({ reviewContinuation: true, workerRuntimes: ['codex'], defaultDispatchRuntime: 'codex' });
@@ -193,6 +194,39 @@ it.each([false, true])('confines shared-worker return after an outside-workspace
   busy = false; heartbeat();
   await vi.waitFor(() => expect(listSharedWorkerReturns(parent).map(row => row.status)).toEqual(['delivered']), { timeout: 30_000 });
   expectConfined();
+}, 90_000);
+it('runs a user-sourced o8 continuation with a leftover manual effort at the runtime default', async () => {
+  const { createO8Backend } = await import('@/lib/lane/orchestrator-backends/o8');
+  const requests: Record<string, unknown>[] = [];
+  const sdk = createPiOrchestratorBackend({ stateRoot: () => join(root, 'user-effort-state'),
+    openServers: async () => ({ servers: [], close: async () => {} }), managedInference: {
+      resolveRoute: async () => ({ via: 'proxy', url: 'https://example.invalid/inference', headers: {} }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body)); requests.push(body);
+        return new Response(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1,
+          model: body.model, choices: [{ index: 0, delta: { content: 'Continued at the runtime default.' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`,
+        { headers: { 'Content-Type': 'text/event-stream' } });
+      },
+    } });
+  state.backend = createO8Backend({ pi: sdk, blocker: () => null });
+  const threadId = 'thoughts-user-effort-continuation';
+  writePersistedLlmChat(threadId, { repoPath: repo, messages: [{ id: 'original-o8', role: 'assistant',
+    backend: 'o8', model: 'o8', content: 'Original task', timestamp: 1,
+    receipt: { leadModel: 'o8', effort: 'high', mode: 'solo', permissionMode: 'full' },
+  }] });
+  const admit = vi.fn(() => true);
+  try {
+    await runBoundChatContinuation({ repoPath: repo, source: 'user', origin: {
+      threadId, turnId: 'original-o8', backend: 'o8', model: 'o8', effort: 'high', mode: 'single', permissionMode: 'full',
+    }, assistantMessageId: 'continued-o8', message: 'Continue the task', check: () => {}, admit }, chatHooks);
+    expect(admit).toHaveBeenCalledOnce();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).not.toHaveProperty('reasoning_effort'); expect(requests[0]).not.toHaveProperty('reasoning');
+    const messages = readPersistedLlmChat(threadId)!.history.messages;
+    expect(messages[0].receipt?.effort).toBe('high');
+    expect(messages.at(-1)).toMatchObject({ id: 'continued-o8', content: 'Continued at the runtime default.',
+      receipt: { effort: 'adaptive', effortSource: 'runtime-default', permissionMode: 'full' } });
+  } finally { state.backend = pi; await sdk.closeAll(); }
 }, 90_000);
 it('retains a deliberately queued operator Outside workspace choice after a confined turn', async () => {
   const expected = await origin('queued');

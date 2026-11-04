@@ -9,6 +9,7 @@ import { resolveBackendTurnModel } from '@/lib/orchestrator/turn-model-selection
 import { findLeadThreadBinding, sendLeadThreadMessage } from '@/lib/orchestrator/lead-lifecycle';
 import { validateLeadAttachments } from '@/lib/orchestrator/lead-contract';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import { dropsStaleEffortPin } from '@/lib/lane/orchestrator-backends/unmapped-effort';
 import { runBoundChatContinuation, type BoundChatContinuationHooks } from './bound-chat-continuation';
 import { createSharedWorkerHeartbeat, type SharedWorkerHeartbeatHooks } from './shared-worker-heartbeat';
 import { immediateComposerSendPending } from './composer-send-admission';
@@ -65,7 +66,7 @@ export async function runQueuedComposerSteer(item: QueuedComposerSendRecord): Pr
   let admittedAt: number | undefined;
   const result = await backend.liveSteer(item.repoPath, item.payload.wireMessage, {
     ...item.payload.routing, threadId: item.threadId, clientUserMessageId: item.id, attachments: item.payload.images, orchestrationMode: item.payload.routing.mode,
-    thinkingEffort: item.payload.routing.effort,
+    thinkingEffort: dropsStaleEffortPin(backend.id) ? undefined : item.payload.routing.effort,
     beforeAdmit: () => { checkComposerQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Message admission was cancelled.');
       steerAnchor = readSteerTranscriptAnchor(item.repoPath, item.threadId); admittedAt = Date.now(); },
   });

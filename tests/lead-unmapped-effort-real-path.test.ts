@@ -85,11 +85,11 @@ afterEach(async () => {
 });
 afterAll(async () => { (await import('@/lib/db')).closeDb(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
-it.each(['acp', 'sdk', 'built-in'] as const)('refuses every independent concrete pin before %s submits a turn', async kind => {
+it('refuses every independent concrete pin before ACP submits a turn', async () => {
   for (const thinkingEffort of MANUAL_THINKING_EFFORTS) {
-    const backend = kind === 'acp' ? acp() : kind === 'sdk' ? pi() : textOnly();
+    const backend = acp();
     const events: OrchestratorEvent[] = [];
-    await backend.sendTurn(repo, 'Fixture task', event => events.push(event), { thinkingEffort, threadId: `refuse-${kind}-${thinkingEffort}` });
+    await backend.sendTurn(repo, 'Fixture task', event => events.push(event), { thinkingEffort, threadId: `refuse-acp-${thinkingEffort}` });
     expect(events).toContainEqual(expect.objectContaining({ type: 'error', code: 'effort_unsupported_runtime',
       error: expect.stringMatching(/independent.*effort/i) }));
     expect(events.some(event => event.type === 'turn_receipt')).toBe(false);
@@ -108,14 +108,14 @@ it('preserves a model-encoded ACP variant unchanged without claiming an independ
   expect(calls().find(call => call.method === 'session/set_config_option').params.value).toBe('fixture/model/high');
   expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', leadModel: 'fixture/model/high', effort: 'adaptive', effortSource: 'runtime-default' }));
 });
-it.each([undefined, 'adaptive'] as const)('keeps %s at the SDK default and captures the actual request without reasoning fields', async thinkingEffort => {
+it.each([undefined, 'adaptive', ...MANUAL_THINKING_EFFORTS] as const)('keeps %s at the SDK default and captures the actual request without reasoning fields', async thinkingEffort => {
   const events: OrchestratorEvent[] = [];
   await pi().sendTurn(repo, 'Fixture task', event => events.push(event), { thinkingEffort, threadId: `default-sdk-${thinkingEffort}` });
   expect(events.filter(event => event.type === 'error')).toEqual([]); expect(requests).toHaveLength(1);
   expect(requests[0]).not.toHaveProperty('reasoning_effort'); expect(requests[0]).not.toHaveProperty('reasoning');
   expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default' }));
 });
-it.each(['pi', 'o8'] as const)('holds a queued high steer on an active %s lead before admission with a visible reason', async kind => {
+it.each(['pi', 'o8'] as const)('admits a queued high steer on an active %s lead at the runtime default', async kind => {
   const sdk = pi();
   const backend = kind === 'pi' ? sdk : createO8Backend({ pi: sdk, blocker: () => null });
   queuedBackend.current = backend;
@@ -126,7 +126,8 @@ it.each(['pi', 'o8'] as const)('holds a queued high steer on an active %s lead b
   writePersistedLlmChat(threadId, { repoPath: repo, messages: [] });
   let release!: () => void;
   inferenceHold = new Promise<void>(resolve => { release = resolve; });
-  const turn = backend.sendTurn(repo, 'Start at the runtime default', () => {}, { threadId });
+  const events: OrchestratorEvent[] = [];
+  const turn = backend.sendTurn(repo, 'Start at the runtime default', event => events.push(event), { threadId });
   try {
     await vi.waitFor(() => expect(requests).toHaveLength(1), { timeout: 30_000 });
     const id = `queued-high-${kind}`;
@@ -137,17 +138,48 @@ it.each(['pi', 'o8'] as const)('holds a queued high steer on an active %s lead b
     createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [],
       registerAbort: () => () => {}, publish: () => {} })();
     await vi.waitFor(() => expect(queue.readComposerSend(id)?.status).not.toBe('dispatching'), { timeout: 10_000 });
-    expect(queue.readComposerSend(id)).toMatchObject({ status: 'held', admittedAt: null,
-      reason: expect.stringMatching(/cannot apply.*independent thinking effort "high".*no verified mapping/i) });
-    expect(readPersistedLlmChat(threadId)?.history.messages).toEqual([]);
-    expect(requests).toHaveLength(1);
+    expect(queue.readComposerSend(id)).toMatchObject({ status: 'applied', admittedAt: expect.any(Number), reason: null });
+    expect(readPersistedLlmChat(threadId)?.history.messages).toContainEqual(expect.objectContaining({
+      id: `composer-steer-${id}`, role: 'user', content: 'Do this with high effort',
+    }));
+    inferenceHold = undefined; release(); await turn;
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).not.toHaveProperty('reasoning_effort'); expect(requests[1]).not.toHaveProperty('reasoning');
+    expect(JSON.stringify(requests[1].messages)).toContain('Do this with high effort');
+    expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default' }));
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
   } finally {
     inferenceHold = undefined; release(); await turn;
   }
 }, 90_000);
-it('labels a managed text-only service tier separately from provider reasoning', async () => {
+it('runs a live steer with a manual effort on an active Pi lead at the runtime default', async () => {
+  const backend = pi();
   const events: OrchestratorEvent[] = [];
-  await textOnly().sendTurn(repo, 'Fixture task', event => events.push(event), { threadId: 'managed-default' });
+  const threadId = 'thoughts-live-manual-effort';
+  let release!: () => void;
+  inferenceHold = new Promise<void>(resolve => { release = resolve; });
+  const turn = backend.sendTurn(repo, 'Start the task', event => events.push(event), { threadId });
+  const beforeAdmit = vi.fn();
+  try {
+    await vi.waitFor(() => expect(requests).toHaveLength(1), { timeout: 30_000 });
+    expect(await backend.liveSteer!(repo, 'Follow the correction', {
+      threadId, thinkingEffort: 'high', beforeAdmit,
+    })).toEqual({ accepted: true });
+    expect(beforeAdmit).toHaveBeenCalledOnce();
+    inferenceHold = undefined; release(); await turn;
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).not.toHaveProperty('reasoning_effort'); expect(requests[1]).not.toHaveProperty('reasoning');
+    expect(JSON.stringify(requests[1].messages)).toContain('Follow the correction');
+    expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default' }));
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+  } finally {
+    inferenceHold = undefined; release(); await turn;
+  }
+}, 90_000);
+it.each([undefined, ...MANUAL_THINKING_EFFORTS])('labels a managed text-only service tier separately from provider reasoning with effort %s', async thinkingEffort => {
+  const events: OrchestratorEvent[] = [];
+  await textOnly().sendTurn(repo, 'Fixture task', event => events.push(event), { threadId: 'managed-default', thinkingEffort });
+  expect(events.filter(event => event.type === 'error')).toEqual([]);
   expect(requests[0].thinkingEffort).toBe('low');
   expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default', serviceTier: 'low' }));
 });
@@ -243,7 +275,7 @@ it.each(['acp', 'hermes', 'opencode', 'pi', 'o8'] as const)(
   }, 90_000,
 );
 
-it('refuses a queued user send with an explicit medium pin on Pi before admission', async () => {
+it('admits a queued user send with a leftover medium pin on Pi at the runtime default', async () => {
   queuedBackend.current = pi();
   const { writePersistedLlmChat, readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
   const queue = await import('@/lib/orchestrator/composer-queue');
@@ -257,9 +289,11 @@ it('refuses a queued user send with an explicit medium pin on Pi before admissio
   } });
   createComposerQueueHeartbeat({ isBusy: () => false, readTranscript: async () => [],
     registerAbort: () => () => {}, publish: () => {} })();
-  await vi.waitFor(() => expect(queue.readComposerSend('explicit-medium-user')?.status).toBe('held'));
-  expect(queue.readComposerSend('explicit-medium-user')).toMatchObject({ admittedAt: null,
-    reason: expect.stringMatching(/cannot apply.*independent thinking effort "medium".*no verified mapping/i) });
-  expect(readPersistedLlmChat(threadId)?.history.messages).toEqual([]);
-  expect(requests).toEqual([]);
-});
+  await vi.waitFor(() => expect(queue.readComposerSend('explicit-medium-user')?.status).toBe('applied'), { timeout: 30_000 });
+  expect(queue.readComposerSend('explicit-medium-user')).toMatchObject({ admittedAt: expect.any(Number), reason: null });
+  expect(readPersistedLlmChat(threadId)?.history.messages.at(-1)).toMatchObject({
+    receipt: { effort: 'adaptive', effortSource: 'runtime-default' },
+  });
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).not.toHaveProperty('reasoning_effort'); expect(requests[0]).not.toHaveProperty('reasoning');
+}, 90_000);

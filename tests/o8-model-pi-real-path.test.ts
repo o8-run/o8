@@ -49,6 +49,7 @@ const { resolveReviewChatOrigin } = await import('@/lib/orchestrator/review-cont
 const { runReviewChatContinuation } = await import('@/lib/ws-server/review-chat-continuation');
 const { prepareOrchestratorTurn } = await import('@/components/desktop/thoughts/use-orchestrator-stream/turn-option-resolution');
 type OrchestratorEvent = import('@/lib/lane/orchestrator-stream-events').OrchestratorEvent;
+type ThinkingEffort = import('@/lib/orchestrator/thinking-effort').ThinkingEffort;
 
 const RELAY = 'https://relay.test';
 const saved = Object.fromEntries(['NEXT_ORIGIN', 'O8_API_PORT', 'O8_PROXY_URL', 'O8_PLAN', 'GOOGLE_AI_API_KEY',
@@ -70,8 +71,9 @@ const callTool = (id: string, name: string, args: Record<string, unknown>) => ()
 const say = (text: string) => () => sse([{ choices: [{ delta: { content: text }, finish_reason: 'stop' }],
   usage: { prompt_tokens: 5, completion_tokens: 2 } }]);
 
+// The Pi write helper is a cold cargo build; build it once per file, outside any test's own timeout.
+beforeAll(() => { buildPiWriteHelper(); }, 600_000);
 beforeAll(async () => {
-  buildPiWriteHelper();
   root = await realpath(await mkdtemp(join(tmpdir(), 'o8-model-pi-')));
   // A paid install: the managed route resolves from this entitlement file to the relay.
   const { privateKey, publicKey } = await generateKeyPair('EdDSA');
@@ -142,11 +144,10 @@ afterAll(async () => {
  * The composer's o8 choice, sent the way the composer and ws-server send it. With a turn id the
  * turn also carries its receipt context and is persisted to the thread the way ws-server persists it.
  */
-async function composerO8Turn(repo: string, text: string, threadId: string, turnId?: string) {
+async function composerO8Turn(repo: string, text: string, threadId: string, turnId?: string, thinkingEffort: ThinkingEffort = 'adaptive') {
   const option = COMPOSER_MODEL_GROUPS.flatMap(group => group.options).find(entry => entry.label === 'o8');
   if (!option || option.backend === 'auto') throw new Error('The composer offers no o8 choice');
-  // The o8 choice shows no effort control and its lead refuses an effort pin (#4858), so none is sent.
-  const turn = prepareOrchestratorTurn(text, { backend: option.backend, model: option.model, thinkingEffort: 'adaptive' });
+  const turn = prepareOrchestratorTurn(text, { backend: option.backend, model: option.model, thinkingEffort });
   const wire = JSON.parse(buildOrchestratorSendPayload({
     repoPath: repo, threadId, clientMessageId: `${threadId}-client`, wireMessage: turn.wireMessage,
     displayMessage: turn.displayMessage, permissionMode: turn.permissionMode, orchestrationMode: turn.orchestrationMode,
@@ -159,7 +160,7 @@ async function composerO8Turn(repo: string, text: string, threadId: string, turn
   const message = turnId ? withOrchestratorTurnReceiptContext({ message: String(wire.message), threadId, turnId }) : String(wire.message);
   if (turnId) appendMobileOrchestratorUserMessage({ tabId: threadId, repoPath: repo, message: text, backend: backend.id });
   await sendOrchestratorBackendTurn(backend, String(wire.repoPath), message, event => events.push(event), {
-    permissionMode: wire.permissionMode as 'full', thinkingEffort: wire.thinkingEffort as 'low' | undefined,
+    permissionMode: wire.permissionMode as 'full', thinkingEffort: wire.thinkingEffort as ThinkingEffort | undefined,
     model: String(wire.model), threadId,
   }, wire.orchestrationMode);
   const receipt = events.find((event): event is Extract<OrchestratorEvent, { type: 'turn_receipt' }> => event.type === 'turn_receipt');
@@ -196,6 +197,25 @@ function inbox(decide: (approval: { toolName?: string; command?: string }) => 'a
 }
 
 describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => {
+  it('drops a leftover high effort pin and runs at the o8 runtime default (#5466)', async () => {
+    const repo = join(root, 'repo-leftover-effort');
+    await mkdir(repo);
+    relay.requests.length = 0;
+    relay.answers.push(say('Ran at the runtime default.'));
+    const { events } = await composerO8Turn(repo, 'Reply at the runtime default',
+      'thoughts-o8-leftover-effort', undefined, 'high');
+
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn_receipt', leadModel: 'o8-free', effort: 'adaptive', effortSource: 'runtime-default',
+    }));
+    expect(events).toContainEqual({ type: 'text', text: 'Ran at the runtime default.' });
+    expect(relay.requests).toHaveLength(1);
+    expect(relay.requests[0].body).not.toHaveProperty('reasoning_effort');
+    expect(relay.requests[0].body).not.toHaveProperty('reasoning');
+    expect(events.at(-1)).toMatchObject({ type: 'done' });
+  }, 120_000);
+
   it('runs an o8 Full access turn on Pi without redundant command or edit approvals', async () => {
     const repo = join(root, 'repo');
     await mkdir(repo);
