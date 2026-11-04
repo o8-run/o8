@@ -90,6 +90,12 @@ export function Sidebar({
     },
     {
       id: 'issues',
+      label: 'Issues',
+      description: 'Backlog and open tickets',
+      icon: <IconIssues fill={palette.iconFill} />,
+    },
+    {
+      id: 'prs',
       label: 'PRs',
       description: 'Review and merge project pull requests',
       icon: <IconIssues fill={palette.iconFill} />,

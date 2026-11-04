@@ -110,6 +110,11 @@ it('reaches active-project PRs from the client mounted by the mobile page', asyn
     initialApprovals: [], appVersion: 'test', initialView: 'issues',
   })));
   await settle();
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Menu"]')!.click());
+  expect(host.textContent).toContain('Backlog and open tickets');
+  const navigation = [...host.querySelectorAll('button')].find(node => node.textContent?.includes('Review and merge project pull requests'));
+  expect(navigation).toBeTruthy();
+  await act(async () => navigation!.click()); await settle();
   expect(calls.some(call => call.path.includes('repoPath=%2Fworkspace%2Fproject'))).toBe(true);
   await click('#7 Review the mobile change');
   expect(host.textContent).toContain('3 files changed');
