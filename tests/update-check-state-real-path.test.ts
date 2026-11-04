@@ -101,6 +101,16 @@ const __filename = __o8_fileURLToPath(import.meta.url); const __dirname = __o8_d
     },
   });
   server = createServer(async (request, response) => {
+    if (request.method === 'GET' && request.url === '/api/setup/cli-updates?refresh=1') {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ tools: [] }));
+      return;
+    }
+    if (request.method === 'GET' && request.url === '/api/panel/update/apply') {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ currentVersion: '0.1.1' }));
+      return;
+    }
     if (request.url !== '/api/panel/update/apply' || request.method !== 'POST') {
       response.writeHead(404, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ error: 'missing fixture route' }));
