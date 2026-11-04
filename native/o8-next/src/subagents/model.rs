@@ -16,6 +16,45 @@ pub(crate) struct Worktree {
     pub lane: String,
     pub path: String,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct DiffStat {
+    pub files: u64,
+    pub insertions: u64,
+    pub deletions: u64,
+}
+/// A pending approval the worker waits on, from the packet's status evidence.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Approval {
+    pub id: String,
+    pub text: String,
+}
+/// What a roster row shows beyond its state: the lane's worktree, what it
+/// changed, what it waits on and what it last reported.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Facts {
+    pub lane: Option<String>,
+    pub branch: Option<String>,
+    pub worktree: Option<String>,
+    pub diff: Option<DiffStat>,
+    pub approval: Option<Approval>,
+    pub last_event: Option<String>,
+    pub last_event_at: Option<f64>,
+    /// The worker's last few distinct reports, oldest first.
+    pub recent: Vec<String>,
+}
+const RECENT: usize = 3;
+/// The server reads at most this many diff stats per request.
+const STAT_LIMIT: usize = 16;
+/// One lane as GET /api/lanes reports it; branch, path and start never change.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Lane {
+    pub branch: Option<String>,
+    pub path: Option<String>,
+    pub created: Option<f64>,
+    pub diff: Option<DiffStat>,
+    /// Whether the diff stat was asked for, so a lane without one isn't re-read.
+    pub stat_read: bool,
+}
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Agent {
     pub shared: bool,
@@ -37,6 +76,7 @@ pub(crate) struct Agent {
     pub result: Option<String>,
     pub started: Option<f64>,
     pub finished: Option<f64>,
+    pub facts: Facts,
 }
 fn text(value: &Value) -> Option<String> {
     value
@@ -133,20 +173,147 @@ pub(crate) fn agents(state: &Value, scope: &Scope) -> Result<Vec<Agent>, String>
                         .or_else(|| timestamp(&packet["lastEventAt"]))
                 })
                 .flatten(),
+            facts: Facts {
+                lane: text(&packet["lane"]["laneId"]),
+                worktree: text(&packet["lane"]["worktreePath"]),
+                approval: approval(&packet["statusEvidence"]),
+                last_event: text(&packet["lane"]["lastEventLabel"])
+                    .or_else(|| text(&packet["lastEventLabel"])),
+                last_event_at: timestamp(&packet["lane"]["lastEventAt"])
+                    .or_else(|| timestamp(&packet["lastEventAt"])),
+                ..Default::default()
+            },
         });
     }
     agents.sort_by(|a, b| a.title.cmp(&b.title).then_with(|| a.id.cmp(&b.id)));
     Ok(agents)
 }
+/// The approval a packet waits on: the server lists each pending one as
+/// `approval:<id>` with `pending · <summary>`.
+fn approval(evidence: &Value) -> Option<Approval> {
+    evidence["evidence"].as_array()?.iter().find_map(|item| {
+        let id = item["source"].as_str()?.strip_prefix("approval:")?;
+        let text = item["value"].as_str()?.strip_prefix("pending")?;
+        let text = text.trim_start_matches([' ', '·']);
+        (!id.is_empty()).then(|| Approval {
+            id: id.into(),
+            text: crate::text::sanitize(if text.is_empty() {
+                evidence["summary"].as_str().unwrap_or("Approval pending")
+            } else {
+                text
+            }),
+        })
+    })
+}
+/// The lanes GET /api/lanes returned, by id.
+pub(crate) fn lanes(response: &Value, asked: &[String]) -> Result<Vec<(String, Lane)>, String> {
+    let lanes = response["lanes"]
+        .as_array()
+        .ok_or("Lane state is unavailable. Retry to read the worktrees.")?;
+    Ok(lanes
+        .iter()
+        .filter_map(|lane| {
+            let id = text(&lane["id"])?;
+            let stat = &lane["diffStat"];
+            let count = |key: &str| stat[key].as_u64();
+            let diff = (|| {
+                Some(DiffStat {
+                    files: count("files")?,
+                    insertions: count("insertions")?,
+                    deletions: count("deletions")?,
+                })
+            })();
+            Some((
+                id.clone(),
+                Lane {
+                    branch: text(&lane["branch"]),
+                    path: text(&lane["worktreePath"]),
+                    created: timestamp(&lane["createdAt"]),
+                    diff,
+                    stat_read: asked.contains(&id),
+                },
+            ))
+        })
+        .collect())
+}
+/// Carries what earlier reads knew onto a fresh one: each lane's worktree,
+/// start and diff stat, and the worker's last few reports.
+pub(crate) fn carry(
+    old: &[Agent],
+    agents: &mut [Agent],
+    lanes: &std::collections::HashMap<String, Lane>,
+) {
+    for agent in agents {
+        let before = old.iter().find(|a| a.id == agent.id);
+        let mut recent = before.map(|a| a.facts.recent.clone()).unwrap_or_default();
+        if let Some(progress) = agent.progress.as_ref().and_then(|p| p.lines().next())
+            && recent.last().map(String::as_str) != Some(progress)
+        {
+            recent.push(progress.to_owned());
+        }
+        let skip = recent.len().saturating_sub(RECENT);
+        recent.drain(..skip);
+        agent.facts.recent = recent;
+        let Some(lane) = agent.facts.lane.as_ref().and_then(|id| lanes.get(id)) else {
+            continue;
+        };
+        agent.facts.branch = lane.branch.clone();
+        if agent.facts.worktree.is_none() {
+            agent.facts.worktree = lane.path.clone();
+        }
+        agent.facts.diff = lane.diff;
+        agent.started = agent.started.or(lane.created);
+    }
+}
 
 pub(crate) struct Snapshot {
     pub packets: Result<Vec<Agent>, String>,
     pub shared: Result<Vec<Agent>, String>,
+    /// Lanes read this time; none when every packet's lane was already known.
+    pub lanes: Result<Vec<(String, Lane)>, String>,
 }
-pub(crate) fn load(client: &crate::client::Client, scope: &Scope) -> Snapshot {
+/// Which packet lanes still need a read: unknown ones, and finished ones whose
+/// diff stat hasn't been asked for. The second list names those finished lanes.
+pub(crate) fn unread(
+    agents: &[Agent],
+    known: &std::collections::HashMap<String, Lane>,
+) -> (bool, Vec<String>) {
+    let mut any = false;
+    let mut stats = Vec::new();
+    for agent in agents {
+        let Some(id) = &agent.facts.lane else {
+            continue;
+        };
+        let done = agent.group == Group::Done;
+        match known.get(id) {
+            Some(lane) if lane.stat_read || !done => continue,
+            _ => any = true,
+        }
+        if done && !stats.contains(id) && stats.len() < STAT_LIMIT {
+            stats.push(id.clone());
+        }
+    }
+    (any, stats)
+}
+pub(crate) fn load(
+    client: &crate::client::Client,
+    scope: &Scope,
+    known: &std::collections::HashMap<String, Lane>,
+) -> Snapshot {
     let packets = client
         .get::<Value>("/api/orchestrator/state", &[])
         .and_then(|state| agents(&state, scope));
+    // The same lane read the roster's Clean up makes, asked for the finished
+    // lanes' diff stats; once known, a lane is not read again.
+    let lanes = match packets.as_ref().map(|agents| unread(agents, known)) {
+        Ok((true, stats)) => client
+            .get::<Value>(
+                "/api/lanes",
+                &[("active", "false"), ("diffStat", &stats.join(","))],
+            )
+            .and_then(|response| lanes(&response, &stats)),
+        _ => Ok(vec![]),
+    };
     let shared = (|| {
         let route = "/api/orchestrator/shared-team/active";
         let parent = if let Some(parent) = &scope.parent {
@@ -166,7 +333,11 @@ pub(crate) fn load(client: &crate::client::Client, scope: &Scope) -> Snapshot {
             client.get(route, &[("repoPath", &scope.repo), ("threadId", &parent)])?;
         shared_agents(&response, &parent)
     })();
-    Snapshot { packets, shared }
+    Snapshot {
+        packets,
+        shared,
+        lanes,
+    }
 }
 fn shared_agents(response: &Value, parent: &str) -> Result<Vec<Agent>, String> {
     if response["threadId"] != parent {
@@ -210,6 +381,7 @@ fn shared_agents(response: &Value, parent: &str) -> Result<Vec<Agent>, String> {
                 result: None,
                 started: None,
                 finished: None,
+                facts: Facts::default(),
             }))
         })
         .collect()

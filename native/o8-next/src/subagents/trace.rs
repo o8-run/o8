@@ -35,6 +35,9 @@ pub(crate) struct Item {
     pub activity: Option<String>,
     pub started: Option<f64>,
     pub finished: Option<f64>,
+    pub runtime: String,
+    pub model: Option<String>,
+    pub facts: model::Facts,
     stop: Option<actions::Stop>,
     cleanup: Option<model::Worktree>,
 }
@@ -86,6 +89,7 @@ pub(crate) fn native_agents(rows: &[Rc<RefCell<RowState>>]) -> Vec<model::Agent>
                 result: step.delegate_result.clone(),
                 started: step.started,
                 finished: step.finished,
+                facts: model::Facts::default(),
             });
         }
     }
@@ -138,6 +142,9 @@ pub(crate) fn items(steps: &[Step], trace: &Trace, agents: &[model::Agent]) -> V
                 finished: known
                     .map_or(step.finished, |a| a.finished)
                     .filter(|_| group != Group::Working),
+                runtime: known.map(|a| a.runtime.clone()).unwrap_or_default(),
+                model: known.and_then(|a| a.model.clone()),
+                facts: known.map(|a| a.facts.clone()).unwrap_or_default(),
                 stop: known
                     .map(|a| {
                         if a.native {
@@ -293,7 +300,8 @@ pub(crate) fn element(
     }
     let inspector = state.subagents.clone();
     let settled = !trace.live;
-    let mut animating = items.iter().any(|i| i.group == Group::Working);
+    let mut animating = items.iter().any(|i| i.group == Group::Working)
+        || state.subagent_roster.borrow().waiting(now);
     // Two or more agents read as a roster, one row each with what it is
     // doing and how long it has taken; one agent stays a single card.
     let roster = items.len() > 1;
@@ -347,7 +355,7 @@ pub(crate) fn element(
                 })
             });
         line = line.child(if roster {
-            roster_row(item, card, open, arrive)
+            roster_row(&state, item, card, open, inspector.as_ref(), arrive, now)
         } else {
             card
         });
@@ -420,16 +428,103 @@ fn watch(key: &str, mut item: Item, live: bool, now: f64) -> Item {
     item
 }
 
-/// A roster row: the agent's card, what it is doing now, and its time.
-fn roster_row(item: &Item, card: AnyElement, open: Option<AnyElement>, arrive: f32) -> AnyElement {
+/// A roster row: the agent's card, what it is doing now or waits on, the
+/// worktree and diff it left once done, and its time. Resting the pointer on
+/// it shows the agent's details.
+fn roster_row(
+    state: &RowState,
+    item: &Item,
+    card: AnyElement,
+    open: Option<AnyElement>,
+    inspector: Option<&Entity<Inspector>>,
+    arrive: f32,
+    now: f64,
+) -> AnyElement {
     let selector = format!("subagent-roster-{}", item.id);
+    let controls = state.subagent_roster.clone();
+    let shown = controls.borrow().shown(&item.id, now);
+    let approval = item
+        .facts
+        .approval
+        .clone()
+        .filter(|a| item.group != Group::Done && controls.borrow().answerable(&a.id));
+    let done = item.group == Group::Done;
+    let small = |selector: String, text: String| {
+        div()
+            .debug_selector(move || selector.clone())
+            .flex_none()
+            .text_size(px(11.))
+            .text_color(theme().text_muted)
+            .child(text)
+    };
+    let worktree = chip(&item.facts).filter(|_| done).map(|name| {
+        small(format!("subagent-roster-worktree-{}", item.id), name)
+            .px(px(6.))
+            .rounded(px(6.))
+            .border_1()
+            .border_color(theme().border)
+    });
+    let diff = item
+        .facts
+        .diff
+        .filter(|_| done)
+        .map(|d| small(format!("subagent-roster-diff-{}", item.id), diff_stat(d)));
+    let answers = approval
+        .as_ref()
+        .zip(inspector)
+        .map(|(approval, inspector)| {
+            [true, false].map(|approve| {
+                let selector = format!(
+                    "subagent-roster-{}-{}",
+                    if approve { "approve" } else { "deny" },
+                    item.id
+                );
+                let inspector = inspector.clone();
+                let enabled = !controls.borrow().deciding(&approval.id);
+                let controls = controls.clone();
+                let id = approval.id.clone();
+                actions::button(
+                    state,
+                    selector,
+                    if approve { "Approve" } else { "Deny" },
+                    enabled,
+                    move |_, cx| {
+                        inspector.update(cx, |i, cx| {
+                            actions::decide(i, controls.clone(), id.clone(), approve, cx)
+                        })
+                    },
+                )
+            })
+        })
+        .into_iter()
+        .flatten();
+    let middle = match &approval {
+        Some(approval) => {
+            let selector = format!("subagent-roster-approval-{}", item.id);
+            div()
+                .debug_selector(move || selector.clone())
+                .text_color(theme().text)
+                .child(approval.text.clone())
+                .into_any_element()
+        }
+        None => div().children(activity(item)).into_any_element(),
+    };
+    let hovered = item.id.clone();
     div()
+        .id(SharedString::from(selector.clone()))
         .debug_selector(move || selector.clone())
+        .relative()
         .flex()
         .items_center()
         .gap(px(8.))
         .min_w_0()
         .opacity(arrive)
+        .on_hover(move |hovering, window, _| {
+            controls
+                .borrow_mut()
+                .hover(&hovered, *hovering, crate::lineage::now_ms());
+            window.refresh();
+        })
         .child(div().flex_none().child(card))
         .child(
             div()
@@ -438,16 +533,115 @@ fn roster_row(item: &Item, card: AnyElement, open: Option<AnyElement>, arrive: f
                 .truncate()
                 .text_size(px(11.5))
                 .text_color(theme().text_muted)
-                .children(activity(item)),
+                .child(middle),
         )
-        .children(elapsed(item, crate::lineage::now_ms()).map(|time| {
+        .children(worktree)
+        .children(diff)
+        .children(elapsed(item, now).map(|time| {
             div()
                 .flex_none()
                 .text_size(px(11.))
                 .text_color(theme().text_muted)
                 .child(time)
         }))
+        .children(answers)
         .children(open)
+        .when(shown, |v| v.child(details_card(item, now)))
+        .into_any_element()
+}
+
+/// The worktree chip: its branch, or the folder's name when it has none.
+fn chip(facts: &model::Facts) -> Option<String> {
+    facts.branch.clone().or_else(|| {
+        let path = facts.worktree.as_deref()?.trim_end_matches(['/', '\\']);
+        path.rsplit(['/', '\\'])
+            .next()
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+/// "3 files +40 -2".
+fn diff_stat(diff: model::DiffStat) -> String {
+    format!(
+        "{} file{} +{} -{}",
+        diff.files,
+        if diff.files == 1 { "" } else { "s" },
+        diff.insertions,
+        diff.deletions
+    )
+}
+
+/// What the details card says, one line each, skipping what isn't known.
+fn details(item: &Item, now: f64) -> Vec<String> {
+    let ago = |ms: f64| {
+        let age = crate::clock::age(Some((ms / 1000.) as u64), (now / 1000.) as u64);
+        if age == "now" {
+            "just now".to_owned()
+        } else {
+            format!("{age} ago")
+        }
+    };
+    let runtime = if item.runtime.is_empty() {
+        "Unknown"
+    } else {
+        &item.runtime
+    };
+    let mut lines = vec![format!("Provider: {runtime}")];
+    lines.extend(item.model.as_ref().map(|m| format!("Model: {m}")));
+    lines.extend(item.started.map(|at| format!("Started: {}", ago(at))));
+    lines.extend(
+        item.facts
+            .last_event
+            .as_ref()
+            .map(|event| match item.facts.last_event_at {
+                Some(at) => format!("Last event: {event} · {}", ago(at)),
+                None => format!("Last event: {event}"),
+            }),
+    );
+    lines.extend(
+        item.facts
+            .worktree
+            .as_ref()
+            .map(|path| format!("Worktree: {path}")),
+    );
+    lines.extend(item.facts.recent.iter().map(|line| format!("· {line}")));
+    lines
+}
+
+fn details_card(item: &Item, now: f64) -> AnyElement {
+    let selector = format!("subagent-roster-details-{}", item.id);
+    div()
+        .absolute()
+        .top_full()
+        .left(px(0.))
+        .child(
+            gpui::deferred(
+                gpui::anchored().snap_to_window_with_margin(px(8.)).child(
+                    div()
+                        .debug_selector(move || selector.clone())
+                        .occlude()
+                        .w(px(340.))
+                        .p(px(10.))
+                        .flex()
+                        .flex_col()
+                        .gap(px(3.))
+                        .rounded(px(10.))
+                        .bg(crate::theme::popover_background())
+                        .border_1()
+                        .border_color(theme().border)
+                        .text_size(px(11.5))
+                        .text_color(theme().text_muted)
+                        .child(div().text_color(theme().text).child(item.title.clone()))
+                        .children(
+                            details(item, now)
+                                .into_iter()
+                                .map(|line| div().truncate().child(line)),
+                        ),
+                ),
+            )
+            .with_priority(1),
+        )
         .into_any_element()
 }
 
@@ -498,6 +692,9 @@ mod roster_tests {
             activity: Some("Searching the worktree\nmore".into()),
             started: Some(1_000.),
             finished: None,
+            runtime: String::new(),
+            model: None,
+            facts: model::Facts::default(),
             stop: None,
             cleanup: None,
         }

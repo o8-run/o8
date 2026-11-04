@@ -3824,6 +3824,14 @@
       ]
     },
     {
+      "path": "tests/lane-diff-stat-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-git-event-loop-real-path.test.ts",
       "reasons": [
         "child-process",
