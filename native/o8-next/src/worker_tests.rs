@@ -67,6 +67,19 @@ fn worker_text(surface: &Surface) -> String {
         .unwrap_or_default()
 }
 
+fn worker_reply_row(surface: &Surface) -> Option<usize> {
+    let reply = surface
+        .transcript
+        .as_ref()?
+        .entries
+        .iter()
+        .find(|e| e.role == "assistant" && e.text.contains("Worker streaming"))?;
+    surface.rows.iter().position(|state| {
+        matches!(&state.borrow().row, Row::Message { id, role, .. }
+            if id == &reply.id && role == "assistant")
+    })
+}
+
 #[gpui::test]
 fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestAppContext) {
     let (mut server, client) = fixture_mode(true);
@@ -96,13 +109,25 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
     let start = Instant::now();
     cx.simulate_keystrokes("enter");
     wait(&mut server, &surface, cx, "first worker transcript", |s| {
-        contains(s, "Worker streaming")
+        worker_reply_row(s).is_some()
     });
     let send_ms = start.elapsed().as_secs_f64() * 1000.;
     surface.read_with(cx, |s, _| {
+        // A running turn ends in an Activity indicator rendered by the trace
+        // element. The worker reply is the Message row for its transcript id.
+        let reply_row = worker_reply_row(s).expect("worker reply must have a Message row");
         assert!(
-            s.painted_rows.borrow().contains(&(s.rows.len() - 1)),
-            "worker reply must paint before timing ends"
+            s.painted_rows.borrow().contains(&reply_row),
+            "worker reply row {reply_row} must paint before timing ends; rows={:?} painted={:?}",
+            s.rows
+                .iter()
+                .map(|state| match &state.borrow().row {
+                    Row::PacketHeader { .. } => "PacketHeader",
+                    Row::Message { .. } => "Message",
+                    Row::Activity { .. } => "Activity",
+                })
+                .collect::<Vec<_>>(),
+            s.painted_rows.borrow()
         );
     });
     let first = surface.read_with(cx, |s, _| worker_text(s).len());
