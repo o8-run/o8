@@ -76,7 +76,7 @@ export async function startParityReference(options: {
     ...(options.nativeHttp ? ['--require=./scripts/next/brain-runtime.cjs'] : []),
     ...(options.entry ? [options.entry] : ['--import=./scripts/register-server-only-stub.mjs',
       '--import=tsx', 'src/ws-server.ts'])], {
-    cwd: process.cwd(), env: { ...process.env, NODE_ENV: 'test',
+    cwd: process.cwd(), detached: process.platform !== 'win32', env: { ...process.env, NODE_ENV: 'test',
       HOME: directory, USERPROFILE: directory,
       O8_DATA_DIR: undefined, CORTEX_IDE_DATA_DIR: directory,
       CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'),
@@ -106,13 +106,23 @@ export async function startParityReference(options: {
   });
   const receipt = () => ({ ...diagnostics });
   const stop = async () => {
+    const signalGroup = (value: NodeJS.Signals) => {
+      if (process.platform === 'win32' || !child.pid) return;
+      try { process.kill(-child.pid, value); } catch { /* The owned fixture group already exited. */ }
+    };
     if (!diagnostics.error && child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close');
       stopRequested = child.kill('SIGTERM');
-      const exited = once(child, 'exit');
-      const timer = setTimeout(() => child?.kill('SIGKILL'), 5_000);
-      await exited;
+      signalGroup('SIGTERM');
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        signalGroup('SIGKILL');
+      }, 5_000);
+      await closed;
       clearTimeout(timer);
     }
+    // Stop helpers started by the long-lived WS fixture before the test exits.
+    signalGroup('SIGKILL');
     if (api.listening) await new Promise<void>((resolve) => api.close(() => resolve()));
     if (!options.directory) rmSync(directory, { recursive: true, force: true });
   };
