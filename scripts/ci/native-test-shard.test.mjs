@@ -11,6 +11,7 @@ import { after, test } from 'node:test';
 // auxiliary harnesses. Discovery and execution below use only a Node fixture.
 const listing = readFileSync(new URL('./fixtures/native-test-listing.txt', import.meta.url), 'utf8');
 const names = listing.trim().split('\n').map(line => line.replace(/: test$/, ''));
+const terminal = 'terminal_own_shell_creates_once_reuses_and_accepts_input';
 const registration = 'shell::pull_requests::registration_tests::pull_requests_single_registration_owns_the_request_adapter';
 const sdk = [
   'shell::issues::tests::issues_worker_receives_linked_context_through_stream',
@@ -62,17 +63,19 @@ test('the real runner assigns the listing exactly once across eight nonempty sha
   assert.deepEqual([...owners.keys()].sort(), [...names].sort());
   assert.equal(owners.get(registration), 1);
   assert.deepEqual([...owners].filter(([, shard]) => shard === 1).map(([name]) => name), [registration]);
+  assert.equal(owners.get(terminal), 8);
+  assert.deepEqual([...owners].filter(([, shard]) => shard === 8).map(([name]) => name), [terminal]);
   // The four largest explicit entries have separate owners. There are more
-  // heavy cases than shards; the rest share shards 2–8 evenly, never shard 1.
+  // heavy cases than shards; the rest share shards 2–7 evenly, never shard 1.
   assert.equal(new Set([registration, ...sdk].map(name => owners.get(name))).size, 4);
   const heavyCounts = Array(8).fill(0);
   for (const name of heavy) heavyCounts[owners.get(name) - 1]++;
   assert.equal(heavyCounts[0], 1);
-  assert.ok(Math.max(...heavyCounts.slice(1)) - Math.min(...heavyCounts.slice(1)) <= 1, heavyCounts.join('/'));
-  for (const name of names.filter(name => !heavy.includes(name))) {
+  assert.ok(Math.max(...heavyCounts.slice(1, 7)) - Math.min(...heavyCounts.slice(1, 7)) <= 1, heavyCounts.join('/'));
+  for (const name of names.filter(name => !heavy.includes(name) && name !== terminal)) {
     const hashed = createHash('sha256').update(name).digest().readUInt32BE(0) % 8 + 1;
-    if (hashed !== 1) assert.equal(owners.get(name), hashed, name);
-    else assert.ok(owners.get(name) >= 2 && owners.get(name) <= 8, name);
+    if (hashed !== 1 && hashed !== 8) assert.equal(owners.get(name), hashed, name);
+    else assert.ok(owners.get(name) >= 2 && owners.get(name) <= 7, name);
   }
 });
 

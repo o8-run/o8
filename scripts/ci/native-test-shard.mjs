@@ -63,10 +63,14 @@ const sdk = new Set([
 const timed = name => name.startsWith('terminal::tests::production_pty_')
   || name === 'shell::session::image_loaded_shell_tests::native_composer_loaded_shell_images_typing_benchmark'
   || sdk.has(name);
-// Give the compile-contract test its own shard.
-// There are more heavy tests than eight shards: reserve the first shard for
-// registration, then round-robin the rest across the remaining shards. Sorting
-// makes the assignment independent of libtest's discovery order.
+// The own-shell test needs the ordinary app without GPUI's dev-only
+// test-support feature. Its nested build cannot reuse Cargo's test binary.
+// Reserve shard 1 for registration and the last shard for that build; distribute
+// the remaining heavy cases over the shared shards in discovery-independent order.
+const terminal = 'terminal_own_shell_creates_once_reuses_and_accepts_input';
+const terminalShard = count >= 3 ? count - 1 : 0;
+const shared = Array.from({ length: Math.max(1, count - (count >= 3 ? 2 : 1)) },
+  (_, index) => count === 1 ? 0 : index + 1);
 const heavy = [
   'shell::pull_requests::registration_tests::pull_requests_single_registration_owns_the_request_adapter',
   ...sdk,
@@ -74,14 +78,15 @@ const heavy = [
     || name.startsWith('shell::sidebar::thread_list::races::final_round::')).sort(),
 ];
 const heavyShards = new Map(heavy.map((name, ordinal) => [name,
-  ordinal === 0 || count === 1 ? 0 : 1 + (ordinal - 1) % (count - 1)]));
+  ordinal === 0 ? 0 : shared[(ordinal - 1) % shared.length]]));
 const shardFor = name => {
+  if (name === terminal) return terminalShard;
   if (heavyShards.has(name)) return heavyShards.get(name);
   const hash = createHash('sha256').update(name).digest().readUInt32BE(0);
   const bucket = hash % count;
-  // Keep the other hash buckets intact. Redistribute only shard 1's ordinary
-  // tests, using higher hash bits so they do not all land on the same shard.
-  return count > 1 && bucket === 0 ? 1 + Math.floor(hash / count) % (count - 1) : bucket;
+  // Preserve shared hash buckets; redistribute only the reserved buckets.
+  return bucket === 0 || (count >= 3 && bucket === terminalShard)
+    ? shared[Math.floor(hash / count) % shared.length] : bucket;
 };
 const selected = names.filter(name =>
   shardFor(name) === index - 1
