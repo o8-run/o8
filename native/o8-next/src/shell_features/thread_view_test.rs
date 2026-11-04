@@ -206,7 +206,11 @@ fn thread_view_switches_to_the_resumed_cli_in_the_workspace_terminal_and_back(
 
     // Closing the thread drops its pane; the shell, and its CLI, keep running.
     // Opening it again adopts that shell and types nothing into it.
-    s.update(&mut v, |s, _| s.features.get::<Views>().threads.clear());
+    s.update_in(&mut v, |s, window, cx| {
+        s.features.get::<Views>().threads.clear();
+        // As closing a tab does, the shell hands focus back.
+        s.restore_focus(window, cx);
+    });
     drop(pane);
     settle(&mut v);
     v.simulate_keystrokes("ctrl-alt-v");
