@@ -88,7 +88,8 @@ export async function startParityReference(options: {
       O8_REALTIME_LOG_LIMIT: String(options.logLimit ?? 4), NEXT_ORIGIN: apiUrl },
   });
   // spawn drains a long-lived process without execFile's cumulative maxBuffer.
-  const diagnostics = { stdoutBytes: 0, stderrBytes: 0, stderr: '',
+  let stopRequested = false;
+  const diagnostics = { stdoutBytes: 0, stderrBytes: 0, stderr: '', exitAfterStop: false,
     code: null as number | null, signal: null as NodeJS.Signals | null, error: '' };
   child.stdout.on('data', (chunk: Buffer) => { diagnostics.stdoutBytes += chunk.length; });
   child.stderr.on('data', (chunk: Buffer) => {
@@ -96,11 +97,15 @@ export async function startParityReference(options: {
     diagnostics.stderr = (diagnostics.stderr + chunk.toString('utf8')).slice(-16_384);
   });
   child.on('error', error => { diagnostics.error = error.message; });
-  child.on('exit', (code, signal) => { diagnostics.code = code; diagnostics.signal = signal; });
+  child.on('exit', (code, signal) => {
+    diagnostics.code = code;
+    diagnostics.signal = signal;
+    diagnostics.exitAfterStop = stopRequested;
+  });
   const receipt = () => ({ ...diagnostics });
   const stop = async () => {
     if (!diagnostics.error && child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGTERM');
+      stopRequested = child.kill('SIGTERM');
       const exited = once(child, 'exit');
       const timer = setTimeout(() => child?.kill('SIGKILL'), 5_000);
       await exited;

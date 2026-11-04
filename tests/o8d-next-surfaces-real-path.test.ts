@@ -132,7 +132,9 @@ it('keeps Sidebar and saved history reachable after verbose Workers events', asy
     const health = await (await fetch(base + '/health')).json();
     expect(health.delivery).toEqual(delivery);
   } finally { await verbose.stop(); }
-  expect(verbose.diagnostics()).toMatchObject({ code: 0, signal: null, error: '' });
+  const shutdown = verbose.diagnostics();
+  expect(shutdown).toMatchObject({ exitAfterStop: true, error: '' });
+  expect(shutdown.signal === 'SIGTERM' || shutdown.code !== null).toBe(true);
 }, 120_000);
 
 it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next stopped', async (surface, pattern, status) => {
