@@ -4771,6 +4771,7 @@
       "path": "tests/native-test-shard-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
         "native-build",
         "real-path"
       ]
