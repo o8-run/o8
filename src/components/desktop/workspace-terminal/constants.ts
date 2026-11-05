@@ -54,7 +54,9 @@ export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
   { id: MODEL_IDS.raw.anthropicClaudeOpus5, label: 'Opus 5', color: '#8b5cf6' },
   { id: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8 (1M)', color: '#8b5cf6' },
   { id: MODEL_IDS.raw.anthropicClaudeOpus47, label: 'Opus 4.7 (1M)', color: '#8b5cf6' },
+  { id: MODEL_IDS.raw.anthropicClaudeSonnet55, label: 'Sonnet 5.5', color: '#8b5cf6' },
   { id: MODEL_IDS.raw.anthropicClaudeSonnet5, label: 'Sonnet 5', color: '#8b5cf6' },
+  { id: MODEL_IDS.raw.anthropicClaudeHaiku55, label: 'Haiku 5.5', color: '#8b5cf6' },
   { id: MODEL_IDS.raw.anthropicClaudeHaiku45, label: 'Haiku 4.5', color: '#8b5cf6' },
 ];
 

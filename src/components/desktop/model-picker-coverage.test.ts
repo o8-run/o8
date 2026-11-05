@@ -19,6 +19,8 @@ const CURRENT_CLAUDE_FLAGSHIPS = [
   'claude-fable-5-1',
   MODEL_IDS.raw.anthropicClaudeOpus5,
   MODEL_IDS.raw.anthropicClaudeSonnet5,
+  'claude-sonnet-5-5',
+  'claude-haiku-5-5',
 ] as const;
 
 const CURRENT_CODEX_FLAGSHIPS = [
@@ -38,6 +40,12 @@ describe('Claude model picker coverage', () => {
   it('offers every current Claude flagship in the workspace CLI picker', () => {
     const ids = CLAUDE_CLI_MODELS.map((option) => option.id);
     for (const id of CURRENT_CLAUDE_FLAGSHIPS) expect(ids).toContain(id);
+  });
+
+  it('offers Sonnet 5.5 and Haiku 5.5 in the composer with real labels', () => {
+    const claude = COMPOSER_MODEL_GROUPS.find((group) => group.key === 'claude')?.options ?? [];
+    expect(claude).toContainEqual(expect.objectContaining({ value: 'claude-sonnet-5-5', label: 'Sonnet 5.5', backend: 'claude', model: 'claude-sonnet-5-5' }));
+    expect(claude).toContainEqual(expect.objectContaining({ value: 'claude-haiku-5-5', label: 'Haiku 5.5', backend: 'claude', model: 'claude-haiku-5-5' }));
   });
 
   it('has a real label for each of them, never the bare id', () => {
@@ -77,6 +85,10 @@ describe('Codex model picker coverage', () => {
 it('formats current model IDs without dropping their minor versions', () => {
   expect(formatModelLabel('anthropic/claude-opus-5-5')).toBe('Opus 5.5');
   expect(formatModelLabel('claude-fable-5-1')).toBe('Fable 5.1');
+  expect(formatModelLabel('claude-sonnet-5-5')).toBe('Sonnet 5.5');
+  expect(formatModelLabel('anthropic/claude-sonnet-5-5')).toBe('Sonnet 5.5');
+  expect(formatModelLabel('claude-haiku-5-5')).toBe('Haiku 5.5');
+  expect(formatModelLabel('claude-sonnet-5')).toBe('Sonnet 5');
   expect(formatModelLabel('gpt-6-sol')).toBe('GPT-6 Sol');
   expect(formatModelLabel('gpt-6.1-sol')).toBe('GPT-6.1 Sol');
   expect(formatModelLabel('openai-codex/gpt-6.1-sol')).toBe('Codex GPT-6.1 Sol');
