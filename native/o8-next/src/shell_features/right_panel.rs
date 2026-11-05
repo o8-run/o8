@@ -35,11 +35,6 @@ mod subagents_tests;
 // apps/web/src/components/ui/panel-tab-close-button.tsx at
 // 5b4f2aa1532730d4dd51d2cb48a57ff74a0f54eb.
 struct RightPanel;
-/// Keeps the header's subagent inspector loaded, so the Activity dock can
-/// list this chat's agents.
-pub(super) fn track_subagents(s: &mut Shell, cx: &mut Context<Shell>) {
-    let _ = subagents::current(s, cx);
-}
 /// The agents the Subagents panel lists for the active chat or workspace.
 pub(super) fn subagent_list(s: &Shell, cx: &App) -> Vec<crate::subagents::model::Agent> {
     subagents::existing(s, cx).map_or_else(Vec::new, |view| view.read(cx).agents.clone())

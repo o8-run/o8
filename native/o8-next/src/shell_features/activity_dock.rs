@@ -1160,7 +1160,7 @@ fn step_tasks(turn: &Turn) -> &[(String, String, f64, Option<f64>)] {
     }
 }
 
-/// Rows the Agents pane shows before "View all" in the Subagents panel.
+/// Rows the Agents pane shows; its title opens every agent in the Subagents panel.
 const MAX_AGENTS: usize = 6;
 
 /// What an agent row says it is doing: its latest progress while it works,
@@ -1172,19 +1172,28 @@ fn agent_status(agent: &Agent) -> String {
             .clone()
             .filter(|text| !text.trim().is_empty())
             .unwrap_or_else(|| "Working".into()),
-        Group::Attention => "Needs you".into(),
+        // Attention holds failed and blocked work but also idle and archived
+        // agents, so the row says which.
+        Group::Attention => agent.status.clone(),
         Group::Done => "Done".into(),
     }
 }
 
-/// This chat's agents, working first. A row opens that agent in the
-/// Subagents panel; "View all" opens the whole list there.
+/// An agent that is stuck until someone acts, as opposed to one resting.
+fn needs_you(agent: &Agent) -> bool {
+    agent.group == Group::Attention
+        && matches!(agent.status.as_str(), "Failed" | "Blocked" | "Needs review")
+}
+
+/// This chat's agents: stuck ones first, then working, then the rest. A row
+/// opens that agent in the Subagents panel; the title opens the whole list.
 fn agents(turn: &Turn, cx: &mut Context<Shell>) -> impl IntoElement {
     let mut agents: Vec<&Agent> = turn.agents.iter().collect();
     agents.sort_by_key(|agent| match agent.group {
-        Group::Attention => 0,
+        _ if needs_you(agent) => 0,
         Group::Working => 1,
-        Group::Done => 2,
+        Group::Attention => 2,
+        Group::Done => 3,
     });
     div()
         .child(title(
@@ -1210,9 +1219,10 @@ fn agents(turn: &Turn, cx: &mut Context<Shell>) -> impl IntoElement {
                 .children(agents.into_iter().take(MAX_AGENTS).map(|agent| {
                     let id = agent.id.clone();
                     // The color the agent keeps on its transcript card and panel tab.
-                    let color = match agent.group {
-                        Group::Attention => theme().danger,
-                        _ => crate::subagents::trace::agent_color(&agent.id),
+                    let color = if needs_you(agent) {
+                        theme().danger
+                    } else {
+                        crate::subagents::trace::agent_color(&agent.id)
                     };
                     row(SharedString::from(format!("activity-agent-{}", agent.id)))
                         .cursor_pointer()
@@ -1676,3 +1686,38 @@ const REFRESH: &str =
 const COMMENT: &str = "M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z";
 const INBOX: &str = "M5 4h14l3 9v7H2v-7l3-9Z M2 13h6l2 3h4l2-3h6";
 const SPEC: &str = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5 M14 3l5 5v3 M8 9h6 M8 13h4 M18.4 13.6a1.4 1.4 0 0 1 2 2L16 20l-3 1 1-3Z";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_stuck_agents_read_as_needing_you() {
+        let agent = |group, status: &str| Agent {
+            shared: false,
+            native: true,
+            cleanup: None,
+            prompt: None,
+            run: "run".into(),
+            id: "a".into(),
+            title: "Agent".into(),
+            runtime: "claude".into(),
+            model: None,
+            effort: None,
+            parent: None,
+            session: None,
+            group,
+            status: status.into(),
+            progress: None,
+            result: None,
+            started: None,
+            finished: None,
+            facts: Default::default(),
+        };
+        assert!(needs_you(&agent(Group::Attention, "Failed")));
+        assert!(needs_you(&agent(Group::Attention, "Needs review")));
+        assert!(!needs_you(&agent(Group::Attention, "Archived")));
+        assert_eq!(agent_status(&agent(Group::Attention, "Idle")), "Idle");
+        assert_eq!(agent_status(&agent(Group::Done, "Released")), "Done");
+    }
+}

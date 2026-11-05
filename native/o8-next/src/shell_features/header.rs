@@ -44,8 +44,6 @@ fn render(
     if moving {
         window.request_animation_frame();
     }
-    // The Activity dock lists this chat's agents; keep them loading.
-    super::right_panel::track_subagents(s, cx);
     let panel = super::right_panel::width(s, window);
     let panel_open = super::right_panel::is_open(s);
     let shown = pill_list(s);
