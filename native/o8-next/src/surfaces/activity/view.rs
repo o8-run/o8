@@ -108,14 +108,18 @@ impl ActivityPane {
             .filter(|d| d["status"] != "verified_closed" && d["status"] != "suppressed")
             .count();
         let rows = self.proposals.rows();
+        // "New" means not yet seen with the row open; the saved list survives
+        // restarts and grows as soon as the user opens the row.
         let unread = rows
             .iter()
-            .filter(|p| !self.proposals.snapshot.contains(&text(p, "id")))
+            .filter(|p| !self.proposals.seen.iter().any(|id| *id == text(p, "id")))
             .count();
         let loading = self.decisions.loading || self.proposals.loading;
         let failed = self.decisions.error.is_some() || !self.proposals.errors.is_empty();
-        let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
-        let summary = if problems == 0 && rows.is_empty() && !failed {
+        let empty = problems == 0 && rows.is_empty() && !failed;
+        let plural =
+            |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        let summary = if empty {
             if loading {
                 "Checking problems and directives…".to_owned()
             } else {
@@ -123,8 +127,16 @@ impl ActivityPane {
             }
         } else {
             let mut parts = vec![
-                plural(problems, "recurring problem", "recurring problems"),
-                plural(rows.len(), "proposed directive", "proposed directives"),
+                if self.decisions.loading && problems == 0 {
+                    "Checking problems…".to_owned()
+                } else {
+                    plural(problems, "recurring problem", "recurring problems")
+                },
+                if self.proposals.loading && rows.is_empty() {
+                    "checking directives…".to_owned()
+                } else {
+                    plural(rows.len(), "proposed directive", "proposed directives")
+                },
             ];
             if failed {
                 parts.push("some could not load".into());
@@ -132,35 +144,49 @@ impl ActivityPane {
             parts.join(" · ")
         };
         let hot = problems > 0 || unread > 0;
-        let open = self.attention_open;
-        let mut row = self
-            .control("activity-attention", Action::Attention, cx)
+        // With nothing to show, the row is a plain status line.
+        let open = self.attention_open && !empty;
+        let base = if empty {
+            div()
+                .id("activity-attention")
+                .debug_selector(|| "activity-attention".into())
+        } else {
+            self.control("activity-attention", Action::Attention, cx)
+                .hover(|v| v.bg(theme().hover))
+        };
+        let mut row = base
             .flex()
             .items_center()
             .gap(px(8.))
             .h(px(28.))
             .px(px(8.))
             .rounded(px(8.))
-            .hover(|v| v.bg(theme().hover))
             .child(icon::stroke(
                 if open { "m6 9 6 6 6-6" } else { "m9 6 6 6-6 6" },
-                theme().text_faint,
+                if empty {
+                    theme().border
+                } else {
+                    theme().text_faint
+                },
                 10.,
                 1.5,
             ))
-            .child(
-                div()
-                    .size(px(6.))
-                    .rounded_full()
-                    .bg(if hot { theme().accent } else { theme().border }),
-            )
+            .child(div().size(px(6.)).rounded_full().bg(if hot {
+                theme().accent
+            } else {
+                theme().border
+            }))
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
                     .truncate()
                     .text_size(px(11.))
-                    .text_color(if hot { theme().text } else { theme().text_muted })
+                    .text_color(if hot {
+                        theme().text
+                    } else {
+                        theme().text_muted
+                    })
                     .child(summary),
             );
         if unread > 0 {
@@ -1009,7 +1035,7 @@ impl ActivityPane {
                         if date.is_empty() { &row.date } else { &date },
                         now,
                     ));
-                match &row.ci {
+                match row.ci.first() {
                     Some(ci) => {
                         let outcome = marks::conclusion(&ci.data);
                         let hue = marks::outcome(&outcome);
@@ -1234,11 +1260,16 @@ impl Render for ActivityPane {
             ("ci", "CI", marks::CHECK),
             ("packet", "Packets", marks::ZAP),
         ] {
+            // CI counts every run, including runs grouped onto a commit.
             let count = self
                 .rows
                 .iter()
-                .filter(|r| filter == "all" || r.kind == filter || filter == "ci" && r.ci.is_some())
-                .count();
+                .map(|r| match filter {
+                    "all" => 1,
+                    "ci" => usize::from(r.kind == "ci") + r.ci.len(),
+                    _ => usize::from(r.kind == filter),
+                })
+                .sum::<usize>();
             let id = format!("activity-filter-{filter}");
             let active = self.filter == filter;
             let selected = self.keyboard.as_ref() == Some(&id);
@@ -1355,11 +1386,11 @@ impl Render for ActivityPane {
         let rows = self
             .rows
             .iter()
-            .filter_map(|r| match (self.filter, &r.ci) {
-                ("all", _) => Some(r.clone()),
-                ("ci", Some(ci)) if r.kind == "commit" => Some((**ci).clone()),
-                (filter, _) if r.kind == filter => Some(r.clone()),
-                _ => None,
+            .flat_map(|r| match self.filter {
+                "all" => vec![r.clone()],
+                "ci" if r.kind == "commit" => r.ci.clone(),
+                filter if r.kind == filter => vec![r.clone()],
+                _ => vec![],
             })
             .collect::<Vec<_>>();
         let quiet = || {

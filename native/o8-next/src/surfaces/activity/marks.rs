@@ -131,7 +131,7 @@ mod tests {
             title: "t".into(),
             date: String::new(),
             data,
-            ci: None,
+            ci: vec![],
         };
         let ci = |conclusion: &str| row("ci", serde_json::json!({"conclusion": conclusion}));
         assert_eq!(feed_icon(&ci("success")), (CHECK, SUCCESS));

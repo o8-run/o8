@@ -94,8 +94,10 @@ impl ActivityPane {
                 .set_offset(gpui::point(gpui::px(0.), gpui::px(y)));
         }
     }
+    /// Directives count as seen only while the user can see them: the
+    /// attention row and its directives section are both open.
     pub(super) fn mark_proposals_seen(&mut self, cx: &mut Context<Self>) {
-        if !self.proposals.open {
+        if !self.attention_open || !self.proposals.open {
             return;
         }
         let mut changed = false;

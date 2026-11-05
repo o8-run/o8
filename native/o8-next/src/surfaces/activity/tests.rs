@@ -475,16 +475,38 @@ fn activity_loading_error_and_keyboard_controls(cx: &mut TestAppContext) {
 #[gpui::test]
 fn activity_short_commit_prefix_keeps_ci_detail_reachable(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--activity");
-    let (_, mut visual, _) = activity_open(&fixture, cx);
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
     let cx = &mut visual;
     let _: Value = fixture
         .client
         .get("/api/activity-fixture", &[("mode", "prefix")])
         .unwrap();
     activity_click(cx, "activity-refresh");
-    activity_click(cx, "activity-filter-ci");
     // A seven-character commit prefix groups with its forty-character CI run
-    // (#5106); the CI filter still lists the run, so its detail stays reachable.
+    // (#5106): in All the run is the commit's chip, not a row of its own.
+    let view = activity_view(&shell, cx);
+    let (chips, ci_rows) = view.read_with(cx, |v, _| {
+        let chips = v
+            .rows
+            .iter()
+            .filter(|row| row.kind == "commit" && row.id.starts_with("ddddddd"))
+            .map(|row| row.ci.iter().map(|ci| ci.id.clone()).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let ci_rows = v.rows.iter().filter(|row| row.kind == "ci").count();
+        (chips, ci_rows)
+    });
+    assert_eq!(
+        chips,
+        [vec!["91".to_owned()]],
+        "the run is the commit's chip"
+    );
+    assert_eq!(ci_rows, 0, "the grouped run has no row of its own in All");
+    assert!(
+        cx.debug_bounds("activity-row-ci-example/activity-91")
+            .is_none()
+    );
+    // The CI filter still lists the run, so its detail stays reachable.
+    activity_click(cx, "activity-filter-ci");
     activity_click(cx, "activity-row-ci-example/activity-91");
     assert!(cx.debug_bounds("activity-ci-job-0").is_some());
 }
@@ -509,7 +531,7 @@ fn activity_fork_commits_keep_their_own_ci_badges(cx: &mut TestAppContext) {
                 (
                     row.repo.clone().unwrap(),
                     row.ci
-                        .as_ref()
+                        .first()
                         .map(|ci| ci.data["conclusion"].as_str().unwrap().to_owned()),
                 )
             })

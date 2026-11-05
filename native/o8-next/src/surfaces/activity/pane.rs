@@ -224,7 +224,7 @@ impl ActivityPane {
                 // A CI run grouped onto its commit retries from there.
                 self.rows
                     .iter()
-                    .flat_map(|row| std::iter::once(row).chain(row.ci.as_deref()))
+                    .flat_map(|row| std::iter::once(row).chain(&row.ci))
                     .find(|row| row.key() == *key)
                     .cloned()
             })
@@ -528,7 +528,10 @@ impl ActivityPane {
                 self.packet.reads.clear(); self.packet.editor = None; self.rows.clear(); self.errors.clear(); self.details.clear(); self.keyboard = None; self.load(cx);
             }
             Action::Refresh => { self.packet.reads.clear(); self.refresh_feed(true,true,cx); self.load_dossiers(cx); self.load_proposals(cx); },
-            Action::Attention => self.attention_open = !self.attention_open,
+            Action::Attention => {
+                self.attention_open = !self.attention_open;
+                self.mark_proposals_seen(cx);
+            }
             Action::Dossiers => self.decisions.open = !self.decisions.open,
             Action::DossierHistory(id) => self.decisions.expanded = if self.decisions.expanded.as_ref() == Some(&id) { None } else { Some(id) },
             Action::DossierDecision(id, action) => self.dossier_decision(id, action, cx),
@@ -673,3 +676,11 @@ pub(super) mod preferences;
 mod proposals;
 #[path = "updates.rs"]
 mod updates;
+
+#[cfg(test)]
+impl ActivityPane {
+    /// Proposed directives loaded, and directive ids saved as seen.
+    pub(super) fn proposal_counts(&self) -> (usize, usize) {
+        (self.proposals.rows().len(), self.proposals.seen.len())
+    }
+}

@@ -69,7 +69,8 @@ pub struct Row {
     pub title: String,
     pub date: String,
     pub data: Value,
-    pub ci: Option<Box<Row>>,
+    /// CI runs grouped onto this commit, newest first.
+    pub ci: Vec<Row>,
 }
 impl Row {
     pub fn key(&self) -> String {
@@ -156,7 +157,7 @@ fn rows(
                 title,
                 date,
                 data: v.clone(),
-                ci: None,
+                ci: vec![],
             })
         })
         .collect()
@@ -319,7 +320,7 @@ pub fn load(
             .unwrap_or(&options.packet_fallback)
             .into(),
             data: packet.clone(),
-            ci: None,
+            ci: vec![],
         });
     }
     let mut grouped = group(&out.rows);
@@ -335,12 +336,15 @@ pub fn load(
 fn same_sha(a: &str, b: &str) -> bool {
     let (a, b) = (a.to_lowercase(), b.to_lowercase());
     let shorter = a.len().min(b.len());
-    shorter >= 7 && a[..shorter] == b[..shorter]
+    shorter >= 7
+        && a.get(..shorter)
+            .is_some_and(|a| b.get(..shorter) == Some(a))
 }
 
 /// Folds each CI run into its commit row: same repository identity and the
-/// same SHA, short or full, whichever order the rows arrive in. Duplicate
-/// commit rows collapse into the first.
+/// same SHA, short or full, whichever order the rows arrive in. A commit keeps
+/// every run, newest first, and takes the newest run's date when it is later.
+/// Duplicate commit rows collapse into the first.
 fn group(rows: &[Row]) -> Vec<Row> {
     let mut grouped: Vec<Row> = vec![];
     for row in rows.iter().filter(|row| row.kind != "ci") {
@@ -365,10 +369,15 @@ fn group(rows: &[Row]) -> Vec<Row> {
                 if crate::clock::timestamp(&row.date) > crate::clock::timestamp(&commit.date) {
                     commit.date = row.date.clone();
                 }
-                commit.ci = Some(Box::new(row.clone()));
+                commit.ci.push(row.clone());
             }
             None => grouped.push(row.clone()),
         }
+    }
+    for commit in &mut grouped {
+        commit
+            .ci
+            .sort_by_key(|run| std::cmp::Reverse(crate::clock::timestamp(&run.date).unwrap_or(0)));
     }
     grouped
 }
@@ -387,7 +396,7 @@ mod group_tests {
             title: format!("{kind} {id}"),
             date: date.into(),
             data,
-            ci: None,
+            ci: vec![],
         }
     }
 
@@ -411,7 +420,7 @@ mod group_tests {
         let grouped = group(&rows);
         assert_eq!(grouped.len(), 1, "the CI run folds into the commit");
         assert_eq!(grouped[0].kind, "commit");
-        assert_eq!(grouped[0].ci.as_ref().map(|ci| ci.id.as_str()), Some("901"));
+        assert_eq!(grouped[0].ci.first().map(|ci| ci.id.as_str()), Some("901"));
         assert_eq!(grouped[0].date, "2026-11-04T12:05:00Z");
     }
 
@@ -438,7 +447,32 @@ mod group_tests {
         ];
         let grouped = group(&rows);
         assert_eq!(grouped.len(), 4);
-        assert!(grouped.iter().all(|row| row.ci.is_none()));
+        assert!(grouped.iter().all(|row| row.ci.is_empty()));
+    }
+
+    #[test]
+    fn a_commit_keeps_every_run_and_shows_the_newest() {
+        let sha = "a1b2c3d4e5f6";
+        // Runs arrive newest first, as the feed sends them.
+        let rows = [
+            row("commit", "a1b2c3d", "2026-11-04T12:00:00Z", json!({})),
+            row("ci", "912", "2026-11-04T12:20:00Z", json!({"headSha": sha})),
+            row("ci", "911", "2026-11-04T12:10:00Z", json!({"headSha": sha})),
+            row("ci", "913", "2026-11-04T12:15:00Z", json!({"headSha": sha})),
+        ];
+        let grouped = group(&rows);
+        assert_eq!(grouped.len(), 1);
+        let runs: Vec<_> = grouped[0].ci.iter().map(|ci| ci.id.as_str()).collect();
+        assert_eq!(runs, ["912", "913", "911"], "every run, newest first");
+        assert_eq!(grouped[0].date, "2026-11-04T12:20:00Z");
+    }
+
+    #[test]
+    fn a_multibyte_id_never_matches_and_never_panics() {
+        // The eighth byte falls inside "é", so a byte slice there would panic.
+        assert!(!same_sha("a1b2c3d4", "a1b2c3dé0"));
+        assert!(!same_sha("a1b2c3dé0", "a1b2c3d4"));
+        assert!(same_sha("A1B2C3D", "a1b2c3d4e5"));
     }
 }
 

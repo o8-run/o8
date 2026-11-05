@@ -168,6 +168,30 @@ fn activity_proposal_failed_write_keeps_row_and_busy_accept_is_single(cx: &mut T
     assert!(after["origins"].is_object());
 }
 #[gpui::test]
+fn activity_new_directives_stay_unseen_until_the_row_opens(cx: &mut TestAppContext) {
+    let f = Fixture::start_mode(false, "--activity --activity-dossiers");
+    let (s, mut v, _) = activity_open(&f, cx);
+    let view = activity_view(&s, &mut v);
+    let seen = |v: &mut VisualTestContext| view.read_with(v, |a, _| a.proposal_counts().1);
+    assert!(
+        view.read_with(&v, |a, _| a.proposal_counts().0 > 0),
+        "directives loaded"
+    );
+    assert!(
+        v.debug_bounds("activity-attention-new").is_some(),
+        "the closed row says there is something new"
+    );
+    assert_eq!(seen(&mut v), 0, "nothing is seen behind a closed row");
+    activity_click(&mut v, "activity-attention");
+    assert!(v.debug_bounds("activity-proposals").is_some());
+    assert!(seen(&mut v) >= 3, "opening the row marks them seen");
+    assert!(
+        v.debug_bounds("activity-attention-new").is_none(),
+        "the badge clears once the row is open"
+    );
+}
+
+#[gpui::test]
 fn activity_preferences_seen_and_visibility_survive_shell_reload(cx: &mut TestAppContext) {
     let f = Fixture::start_mode(false, "--activity --activity-dossiers");
     let (s1, mut v) = start(&f, cx);
