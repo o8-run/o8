@@ -48,6 +48,18 @@ fn home_works_without_a_project_and_stays_selected(cx: &mut TestAppContext) {
         std::thread::sleep(Duration::from_millis(50));
     }
 
+    // The sidebar's own catalog refresh, which re-picks a missing
+    // workspace, keeps Home as well.
+    let list = shell
+        .read_with(cx, |s, _| s.surfaces.sidebar.view.clone())
+        .expect("sidebar list");
+    for _ in 0..3 {
+        list.update(cx, |list, cx| list.load(cx));
+        for _ in 0..20 {
+            settled(&shell, cx);
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
     shell.update_in(cx, |s, window, cx| s.tick(true, window, cx));
     settled(&shell, cx);
     assert_eq!(
