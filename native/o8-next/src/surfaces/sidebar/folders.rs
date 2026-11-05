@@ -457,9 +457,15 @@ impl ThreadList {
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(unconnected) => {
+                        // A thread notice sits above the composer, where the
+                        // user is about to type; the top-right stack would
+                        // cover a split pane's header controls.
                         if unconnected {
-                            crate::shell::toasts::info(
+                            crate::shell::toasts::show(
+                                crate::shell::toasts::Kind::Chat,
                                 "No coding tool is connected. Connect Claude Code or Codex in Settings › Providers before you send.",
+                                vec![],
+                                Some(crate::shell::toasts::CHAT_TIMEOUT),
                                 cx,
                             );
                         }
