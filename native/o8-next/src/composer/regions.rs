@@ -91,6 +91,8 @@ impl Surface {
         // Play and Copy under each finished turn's answer; a row that gains or
         // loses them is measured again.
         let ends = Rc::new(crate::transcript_actions::turn_ends(&rows));
+        let turn_files = Rc::new(crate::turn_files::by_turn(&rows, &ends));
+        let turn_files_open = self.turn_files_open.clone();
         let prompts = Rc::new(self.prompt_action_rows(window, cx));
         let marked: BTreeSet<usize> = ends.keys().chain(prompts.keys()).copied().collect();
         for index in marked.symmetric_difference(&self.action_rows) {
@@ -163,6 +165,15 @@ impl Surface {
                                 .flex()
                                 .flex_col()
                                 .child(row)
+                                .children(turn_files.get(&index).map(|files| {
+                                    crate::turn_files::card(
+                                        view.clone(),
+                                        index,
+                                        files,
+                                        file_root.as_ref().map(|root| root.as_ref()),
+                                        turn_files_open.contains(&index),
+                                    )
+                                }))
                                 .child(crate::transcript_actions::row(
                                     view.clone(),
                                     client.clone(),
@@ -185,6 +196,12 @@ impl Surface {
             .child(self.history_control(cx))
             .when(self.away_from_end, |d| d.child(self.jump_to_end(cx)))
             .into_any_element()
+    }
+    /// "Show N more" on a turn's files card; the row grows, so it is measured again.
+    pub(crate) fn expand_turn_files(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.turn_files_open.insert(index);
+        self.remeasure_action_row(index);
+        cx.notify();
     }
     /// Classic's round jump-to-latest button, centred over the transcript's
     /// bottom edge while the reader is scrolled up.

@@ -55,6 +55,9 @@ pub struct Step {
     pub messages: Vec<crate::thread_messages::Bubble>,
     #[serde(skip)]
     pub(crate) delegations: Vec<crate::subagents::model::Reference>,
+    /// Files a write-kind call edited, for the turn's "Edited N files" card.
+    #[serde(skip)]
+    pub(crate) edits: Vec<crate::turn_files::Edit>,
     #[serde(skip)]
     rollup_kind: RollupKind,
 }
@@ -764,6 +767,11 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
         reason,
         group: 0,
         group_key: key,
+        edits: if rollup_kind(&name, args) == RollupKind::Write {
+            crate::turn_files::edits(&name, args)
+        } else {
+            vec![]
+        },
         rollup_kind: rollup_kind(&name, args),
         subject: parts[0].subject.clone().or(subject),
         parts,
@@ -918,6 +926,7 @@ mod tests {
             subject: None,
             parts: vec![],
             delegations: vec![],
+            edits: vec![],
             found: vec![],
             links: vec![],
             batch: None,

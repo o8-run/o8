@@ -182,6 +182,8 @@ pub(crate) struct Surface {
     queue: Value,
     queue_ready: bool,
     changes_pill: conversation::ChangesPill,
+    /// Turns whose files card shows every file.
+    turn_files_open: std::collections::HashSet<usize>,
     saving: bool,
     /// After a send from this view, the row count it started at; the view
     /// follows that turn to its reply.
@@ -273,6 +275,7 @@ impl Surface {
             queue: Value::Null,
             queue_ready: false,
             changes_pill: Default::default(),
+            turn_files_open: Default::default(),
             saving: false,
             following: None,
             send_next: false,
