@@ -27,6 +27,7 @@ const NATIVE_READS = [
   ['setup', '/api/setup/cli-updates?runtime=fixture-unknown', 400],
   ['settings', '/api/panel/o8-update-summary?version=invalid', 400],
   ['activity', '/api/cortex/proposals', 200],
+  ['activity', '/api/panel/problem-dossiers', 200],
   ['session', '/api/panel/file-asset', 400],
   ['session', '/api/v2/files', 400],
   ['session', '/api/v2/files/quick-docs', 200],

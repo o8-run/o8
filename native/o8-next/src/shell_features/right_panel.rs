@@ -125,6 +125,8 @@ enum Tool {
     Review,
     Inbox,
     Spec,
+    /// Not ready: kept so it can return to the groups once built.
+    #[allow(dead_code)]
     Threads,
     Activity,
     Issues,
@@ -137,7 +139,8 @@ enum Tool {
 }
 
 impl Tool {
-    /// PANEL_TOOLS, in the desktop's groups and order.
+    /// PANEL_TOOLS, in the desktop's groups and order. Threads stays out
+    /// until it is built.
     const GROUPS: [(&'static str, &'static [Tool]); 3] = [
         (
             "Tools",
@@ -151,7 +154,7 @@ impl Tool {
                 Tool::Spec,
             ],
         ),
-        ("More", &[Tool::Threads, Tool::Activity, Tool::SideChat]),
+        ("More", &[Tool::Activity, Tool::SideChat]),
         ("Diagnostics", &[Tool::Resources, Tool::Targeting]),
     ];
     fn tab(self) -> Option<Tab> {

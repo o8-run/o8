@@ -17,27 +17,22 @@ function gh(path) {
   return JSON.parse(`[${out.trim().replace(/^\[/, '').replace(/\]$/, '').replace(/\]\s*\[/g, ',')}]`);
 }
 
-// The last `## Checklist` section wins, so a converted epic's comment beats its body.
-function countChecklist(texts) {
-  let checked = 0;
-  let total = 0;
+// The last `## Checklist` section with boxes wins, so a converted epic's comment
+// beats its body. The count and the --check items both read this one section.
+export function lastChecklist(texts) {
+  let lines = [];
   for (const text of texts) {
     if (!text || !/^##\s+Checklist\s*$/m.test(text)) continue;
     const section = text.split(/^##\s+Checklist\s*$/m).pop().split(/^##\s+/m)[0];
-    let c = 0;
-    let t = 0;
-    for (const line of section.split('\n')) {
-      const m = /^\s*-\s*\[([ xX])\]/.exec(line);
-      if (!m) continue;
-      t += 1;
-      if (m[1] !== ' ') c += 1;
-    }
-    if (t > 0) {
-      checked = c;
-      total = t;
-    }
+    const boxes = section.split('\n').filter((line) => /^\s*-\s*\[([ xX])\]/.test(line));
+    if (boxes.length > 0) lines = boxes;
   }
-  return { checked, total };
+  return lines;
+}
+export function countChecklist(texts) {
+  const lines = lastChecklist(texts);
+  const checked = lines.filter((line) => !/^\s*-\s*\[ \]/.test(line)).length;
+  return { checked, total: lines.length };
 }
 
 // --check: a checked child must be closed, and every issue linked from the Now
@@ -48,15 +43,11 @@ function issueState(num) {
   const out = execFileSync('gh', ['api', `repos/${REPO}/issues/${num}`], { encoding: 'utf8' });
   return JSON.parse(out).state;
 }
-function checklistItems(texts) {
+export function checklistItems(texts) {
   const items = [];
-  for (const text of texts) {
-    if (!text || !/^##\s+Checklist\s*$/m.test(text)) continue;
-    const section = text.split(/^##\s+Checklist\s*$/m).pop().split(/^##\s+/m)[0];
-    for (const line of section.split('\n')) {
-      const m = /^\s*-\s*\[([ xX])\]\s*#(\d+)/.exec(line);
-      if (m) items.push({ checked: m[1] !== ' ', num: Number(m[2]) });
-    }
+  for (const line of lastChecklist(texts)) {
+    const m = /^\s*-\s*\[([ xX])\]\s*#(\d+)/.exec(line);
+    if (m) items.push({ checked: m[1] !== ' ', num: Number(m[2]) });
   }
   return items;
 }
@@ -72,58 +63,62 @@ function pad(s, n) {
   return s.length >= n ? s.slice(0, n - 1) + ' ' : s + ' '.repeat(n - s.length);
 }
 
-const issues = gh(`repos/${REPO}/issues?state=open&labels=tracking&per_page=100`).filter((i) => !i.pull_request);
-if (issues.length === 0) {
-  console.log('No open issues labeled `tracking`.');
-  process.exit(0);
-}
-
-const rows = [];
-const problems = [];
-const awaiting = [];
-for (const issue of issues) {
-  const texts = [issue.body || ''];
-  if (issue.comments > 0) {
-    for (const c of gh(`repos/${REPO}/issues/${issue.number}/comments?per_page=100`)) texts.push(c.body || '');
+function main() {
+  const issues = gh(`repos/${REPO}/issues?state=open&labels=tracking&per_page=100`).filter((i) => !i.pull_request);
+  if (issues.length === 0) {
+    console.log('No open issues labeled `tracking`.');
+    process.exit(0);
   }
-  const { checked, total } = countChecklist(texts);
-  if (CHECK) {
-    for (const item of checklistItems(texts)) {
-      const state = issueState(item.num);
-      if (item.checked && state !== 'closed') problems.push(`#${issue.number}: checked #${item.num} is ${state}`);
-      if (!item.checked && state !== 'open') awaiting.push(`#${issue.number}: #${item.num} is closed, box stays open until it ships`);
+
+  const rows = [];
+  const problems = [];
+  const awaiting = [];
+  for (const issue of issues) {
+    const texts = [issue.body || ''];
+    if (issue.comments > 0) {
+      for (const c of gh(`repos/${REPO}/issues/${issue.number}/comments?per_page=100`)) texts.push(c.body || '');
     }
+    const { checked, total } = countChecklist(texts);
+    if (CHECK) {
+      for (const item of checklistItems(texts)) {
+        const state = issueState(item.num);
+        if (item.checked && state !== 'closed') problems.push(`#${issue.number}: checked #${item.num} is ${state}`);
+        if (!item.checked && state !== 'open') awaiting.push(`#${issue.number}: #${item.num} is closed, box stays open until it ships`);
+      }
+    }
+    const pct = total > 0 ? Math.round((checked / total) * 20) * 5 : null;
+    rows.push({ number: issue.number, title: issue.title, checked, total, pct });
   }
-  const pct = total > 0 ? Math.round((checked / total) * 20) * 5 : null;
-  rows.push({ number: issue.number, title: issue.title, checked, total, pct });
-}
-rows.sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.number - b.number);
+  rows.sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.number - b.number);
 
-console.log(`${pad('ISSUE', 7)}${pad('TITLE', 52)}${pad('SHIPPED', 10)}PERCENT`);
-console.log('-'.repeat(76));
-for (const r of rows) {
-  const shipped = r.total > 0 ? `${r.checked}/${r.total}` : 'none';
-  const pct = r.pct === null ? 'no checklist' : `${r.pct}%`;
-  console.log(`${pad('#' + r.number, 7)}${pad(r.title, 52)}${pad(shipped, 10)}${pct}`);
-}
-const done = rows.reduce((a, r) => a + r.checked, 0);
-const all = rows.reduce((a, r) => a + r.total, 0);
-console.log('-'.repeat(76));
-console.log(`${rows.length} tracking issues, ${done} of ${all} children shipped.`);
+  console.log(`${pad('ISSUE', 7)}${pad('TITLE', 52)}${pad('SHIPPED', 10)}PERCENT`);
+  console.log('-'.repeat(76));
+  for (const r of rows) {
+    const shipped = r.total > 0 ? `${r.checked}/${r.total}` : 'none';
+    const pct = r.pct === null ? 'no checklist' : `${r.pct}%`;
+    console.log(`${pad('#' + r.number, 7)}${pad(r.title, 52)}${pad(shipped, 10)}${pct}`);
+  }
+  const done = rows.reduce((a, r) => a + r.checked, 0);
+  const all = rows.reduce((a, r) => a + r.total, 0);
+  console.log('-'.repeat(76));
+  console.log(`${rows.length} tracking issues, ${done} of ${all} children shipped.`);
 
-if (CHECK) {
-  if (awaiting.length) {
-    console.log('\nawaiting release:');
-    for (const a of awaiting) console.log(`  ${a}`);
+  if (CHECK) {
+    if (awaiting.length) {
+      console.log('\nawaiting release:');
+      for (const a of awaiting) console.log(`  ${a}`);
+    }
+    for (const num of nowLinks()) {
+      const state = issueState(num);
+      if (state !== 'open') problems.push(`ROADMAP.md Now links #${num}, which is ${state}`);
+    }
+    if (problems.length) {
+      console.error('\nroadmap drift:');
+      for (const p of problems) console.error(`  ${p}`);
+      process.exit(1);
+    }
+    console.log('roadmap check: no drift.');
   }
-  for (const num of nowLinks()) {
-    const state = issueState(num);
-    if (state !== 'open') problems.push(`ROADMAP.md Now links #${num}, which is ${state}`);
-  }
-  if (problems.length) {
-    console.error('\nroadmap drift:');
-    for (const p of problems) console.error(`  ${p}`);
-    process.exit(1);
-  }
-  console.log('roadmap check: no drift.');
 }
+
+if (import.meta.url === `file://${process.argv[1]}`) main();

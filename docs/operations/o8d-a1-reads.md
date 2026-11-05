@@ -32,6 +32,7 @@ No peer header grants local authority.
 | `/api/setup/cli-updates` | setup, settings | shell_features/update.rs | gate |
 | `/api/panel/o8-update-summary` | settings | shell_features/update.rs | gate |
 | `/api/cortex/proposals` | activity | surfaces/activity/proposals.rs | gate |
+| `/api/panel/problem-dossiers` | activity | surfaces/activity/decisions.rs | gate + panel |
 | `/api/panel/file-asset` | session | files_panel/media.rs | gate |
 | `/api/v2/files` | session | files_panel/io.rs | gate |
 | `/api/v2/files/quick-docs` | session | files_panel/quick_docs.rs | gate |
@@ -42,11 +43,28 @@ No peer header grants local authority.
 inventoried as `[id]`. The timeline similarly uses production `[number]` for
 the native path inventoried as `[id]`.
 
+## Database bootstrap on a cold data directory
+
+Opening the database on a cold data directory (schema creation, migrations,
+lazily created tables) is process bootstrap, not a GET side effect. The native
+transport runs in the same ws-server process that already opens and migrates
+SQLite for the registered session reads, so registering another GET adds no
+new migrator and no second writer. This holds only when:
+
+1. The open uses the shared migration code unchanged, with no route-specific DDL.
+2. It creates schema only, never rows the handler owns.
+3. Handler-level writes still block registration: caches, reconciliation,
+   flushes, ledger bootstraps, and creating user-visible directories.
+4. Identity is decided case by case: tokens, instance or boot IDs, and keys.
+
+`/api/panel/problem-dossiers` is registered under this rule. Its GET no longer
+reconciles: a dossier reconcile interval runs in the ws-server whether or not
+the heal-bot is on, and skips the ticks the running heal-bot already covers.
+
 ## Held Next-only
 
 | Candidate | Reason |
 | --- | --- |
-| `/api/panel/problem-dossiers` | GET initializes auth and database state on a cold data directory, and `reconcileProblemDossiers` persists dossier/remedy state. Held with the security lane. |
 | `/api/panel/devices` | Handler requires verified loopback in addition to operator authority. The adapter stamps `unverified-proxy`; a bearer cannot satisfy the local-peer condition. |
 | `/api/tasks` | `getTaskPool` calls `getProjectsLedger`, which bootstraps and writes the project ledger when absent; project context reads share that bootstrap path. |
 | `/api/tasks/[id]/preview` | Native client uses POST/DELETE; production route has no GET. |
@@ -55,7 +73,7 @@ the native path inventoried as `[id]`.
 | `/api/orchestrator/backend-models` | GET probes and writes model disk caches; key resolution also has side effects. |
 | `/api/orchestrator/pull-request-context` | GET accepts refresh queries that call `ensureGitHubPullRequest` and update the mirror. |
 | `/api/setup/identity` | `getInstanceIdentity` creates persisted instance/boot IDs when absent. Existing producer registration is preserved; no surface entry is added. |
-| `/api/cortex/diagnostics` | GET initializes database and auth storage on a cold data directory, in addition to `flushTimingBuffer`. Held with the security lane. |
+| `/api/cortex/diagnostics` | Timings are recorded in the Next process; the native process loads the disk snapshot once, so a native GET would omit them. |
 | `/api/cortex/codebase-memory` | GET calls `ensureCodebaseMemoryBootIndex`, starting indexing and persistent writes. |
 
 Two of the seven R1 candidates remain held after removing registry repair from

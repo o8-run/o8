@@ -34,7 +34,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/account/avatar',
   '/api/panel/browse-folder',
   '/api/panel/devices',
-  '/api/panel/problem-dossiers',
   '/api/panel/update/apply',
   '/api/repo-spec/asset',
   '/api/tasks',

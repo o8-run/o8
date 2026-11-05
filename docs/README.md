@@ -35,7 +35,6 @@ For operators who want to understand the product and run governed agent work wit
 | [Persistent terminals](user/persistent-terminals.md) | How terminal sessions survive restarts and recover their scrollback. |
 | [Telemetry privacy](user/product-telemetry-privacy.md) | What optional product telemetry can contain and how consent is enforced. |
 | [Vocabulary](user/vocabulary.md) | The precise meanings of runtime, agent, session, packet, lane, mission, review, and approval. |
-| [Honest benchmark (2026-08)](user/honest-benchmark-2026-08.md) | What o8 measurably does and does not do, including the tracks where it loses. |
 
 ## Internals
 

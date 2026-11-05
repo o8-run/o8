@@ -524,6 +524,27 @@ impl ThreadList {
                             cx.notify();
                         })),
                 );
+                if let Some(path) = self.workspace.clone() {
+                    menu = menu.child(
+                        div()
+                            .id("sidebar-open-in-editor")
+                            .debug_selector(|| "sidebar-open-in-editor".into())
+                            .h(px(34.))
+                            .px(px(9.))
+                            .flex()
+                            .items_center()
+                            .rounded(px(9.))
+                            .text_size(px(12.))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(theme().hover))
+                            .child("Open in editor")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.header_menu = None;
+                                this.open_project_in_editor(path.clone(), cx);
+                                cx.notify();
+                            })),
+                    );
+                }
             } else {
                 for (index, repo) in repos.iter().enumerate().skip(count) {
                     let id = repo.id.clone();

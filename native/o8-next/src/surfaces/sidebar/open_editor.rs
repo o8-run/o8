@@ -35,6 +35,24 @@ pub(super) fn command(
 }
 
 impl ThreadList {
+    /// The project menu's Open in editor: the saved editor command on this
+    /// computer's folder; a failure shows in the sidebar's notice line.
+    pub(super) fn open_project_in_editor(&mut self, path: String, cx: &mut Context<Self>) {
+        let client = self.client.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { crate::editor_command::open(&client, None, &path) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            if let Err(error) = result {
+                let _ = this.update(cx, |this, cx| {
+                    this.notice = error;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
     fn open_in_editor(
         &mut self,
         editor: (&'static str, &'static str, &'static str),
