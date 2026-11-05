@@ -632,3 +632,82 @@ fn review_opens_a_requested_packet_and_never_swaps_an_unlisted_one(cx: &mut Test
         }
     }
 }
+
+#[gpui::test]
+fn review_stacks_every_changed_file_with_a_files_drawer(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--review");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("stacked-changes.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    let workspace = shell.read_with(cx, |s, _| s.state.selected.clone().unwrap());
+    let path = std::path::PathBuf::from(crate::shell::session::workspace_path(&workspace));
+    for name in ["stack-a.txt", "stack-b.txt"] {
+        fs::write(path.join(name), format!("{name}\nsecond line\n")).unwrap();
+    }
+    let long: String = (0..2_100).map(|n| format!("line {n}\n")).collect();
+    fs::write(path.join("stack-large.txt"), long).unwrap();
+    run(cx, "d i f f");
+    let started = Instant::now();
+    loop {
+        settled(&shell, cx);
+        let (_, target) = review_target(&shell, cx);
+        if matches!(target, Some(crate::diff::Target::Worktree { .. }))
+            && cx.debug_bounds("diff-stack").is_some()
+        {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10), "no stack");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let (view, _) = review_target(&shell, cx);
+    let child = view.read_with(cx, |v, _| v.child.clone().unwrap());
+    let files = child.read_with(cx, |d, _| {
+        d.document
+            .files
+            .iter()
+            .map(|f| f.path.clone())
+            .collect::<Vec<_>>()
+    });
+    let a = files.iter().position(|f| f == "stack-a.txt").unwrap();
+    let b = files.iter().position(|f| f == "stack-b.txt").unwrap();
+    let large = files.iter().position(|f| f == "stack-large.txt").unwrap();
+    let card =
+        |i: usize| -> &'static str { Box::leak(format!("diff-stack-file-{i}").into_boxed_str()) };
+    let body = |i: usize| -> &'static str {
+        Box::leak(format!("review-file-{i}-diff-unified").into_boxed_str())
+    };
+    // Every file is a card with its diff rows open, one after another.
+    let (card_a, card_b) = (cx.debug_bounds(card(a)), cx.debug_bounds(card(b)));
+    assert!(card_a.is_some() && card_b.is_some(), "{files:?}");
+    assert!(cx.debug_bounds(body(a)).is_some(), "file a's rows show");
+    assert!(
+        cx.debug_bounds("diff-viewport").is_none(),
+        "no one-file viewer"
+    );
+    assert!(
+        cx.debug_bounds(card(large)).is_some() && cx.debug_bounds(body(large)).is_none(),
+        "a file over the row limit starts collapsed"
+    );
+    // A header collapses its file and only its file.
+    cx.simulate_click(card_a.unwrap().center(), gpui::Modifiers::default());
+    settled(&shell, cx);
+    assert!(cx.debug_bounds(body(a)).is_none(), "collapsed");
+    assert!(child.read_with(cx, |d, _| d.closed.contains(&a)));
+    // The drawer lists the files; picking one opens it again.
+    let row: &'static str = Box::leak(format!("diff-file-{a}").into_boxed_str());
+    let entry = cx.debug_bounds(row).expect("the files drawer");
+    cx.simulate_click(entry.center(), gpui::Modifiers::default());
+    settled(&shell, cx);
+    assert!(cx.debug_bounds(body(a)).is_some(), "a jump opens the file");
+    // The drawer hides and shows from the toolbar.
+    let drawer = cx.debug_bounds("diff-drawer").unwrap();
+    cx.simulate_click(drawer.center(), gpui::Modifiers::default());
+    settled(&shell, cx);
+    assert!(cx.debug_bounds(row).is_none(), "drawer hidden");
+    assert!(cx.debug_bounds(card(b)).is_some(), "the stack stays");
+}

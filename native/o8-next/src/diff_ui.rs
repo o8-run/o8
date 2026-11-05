@@ -12,6 +12,9 @@ use gpui::{
 use serde_json::Value;
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
+#[path = "diff_ui_stack.rs"]
+mod stack;
+
 pub(crate) struct DiffSurface {
     client: Client,
     pub(crate) target: Target,
@@ -20,6 +23,7 @@ pub(crate) struct DiffSurface {
     pub(crate) split: bool,
     pub(crate) ready: bool,
     /// The last read failed and its error is the notice.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) failed: bool,
     busy: bool,
     generation: u64,
@@ -29,6 +33,13 @@ pub(crate) struct DiffSurface {
     focus: FocusHandle,
     scroll: UniformListScrollHandle,
     pub(crate) painted: Rc<RefCell<BTreeSet<usize>>>,
+    /// Working changes: each file's shared diff rows, stacked.
+    stack: Rc<Vec<Vec<crate::files_panel::file_diff::Line>>>,
+    /// Stacked files the reader collapsed.
+    pub(crate) closed: BTreeSet<usize>,
+    /// The files list beside the stack.
+    pub(crate) drawer: bool,
+    stack_scroll: gpui::ScrollHandle,
 }
 impl DiffSurface {
     pub(crate) fn new(
@@ -55,6 +66,10 @@ impl DiffSurface {
             focus,
             scroll: UniformListScrollHandle::new(),
             painted: Rc::new(RefCell::new(BTreeSet::new())),
+            stack: Rc::new(vec![]),
+            closed: BTreeSet::new(),
+            drawer: true,
+            stack_scroll: gpui::ScrollHandle::new(),
         };
         surface.load(cx);
         surface
@@ -81,9 +96,31 @@ impl DiffSurface {
                 match result {
                     Ok((document, state)) => {
                         this.document = Rc::new(document);
+                        if this.stacked() {
+                            // Large files start collapsed on the first read
+                            // only; a refresh keeps what the reader opened.
+                            let first = this.stack.is_empty();
+                            this.stack = Rc::new(stack::parse(&this.document));
+                            this.closed.retain(|i| *i < this.document.files.len());
+                            if first {
+                                let large: Vec<usize> = this
+                                    .stack
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, lines)| lines.len() > stack::LARGE)
+                                    .map(|(i, _)| i)
+                                    .collect();
+                                this.closed.extend(large);
+                            }
+                        }
                         this.state = state;
                         this.ready = true;
-                        this.select_file(0, cx);
+                        if this.stacked() {
+                            // A refresh keeps the reader's place in the stack.
+                            this.painted.borrow_mut().clear();
+                        } else {
+                            this.select_file(0, cx);
+                        }
                         this.notice = if this.document.truncated {
                             "Diff truncated by server. Approval disabled; inspect a smaller worktree diff.".into()
                         } else if this.document.unsupported {
@@ -121,6 +158,11 @@ impl DiffSurface {
     }
     pub(crate) fn select_file(&mut self, index: usize, cx: &mut Context<Self>) {
         self.selected = index.min(self.document.files.len().saturating_sub(1));
+        if self.stacked() {
+            let selected = self.selected;
+            self.reveal(selected, cx);
+            return;
+        }
         self.scroll = UniformListScrollHandle::new();
         self.painted.borrow_mut().clear();
         cx.notify();
@@ -290,6 +332,108 @@ impl Render for DiffSurface {
             && !doc.unsupported
             && !doc.files.is_empty()
             && matches!(self.target, Target::Packet(_));
+        let stacked = self.stacked();
+        let all_open = self.closed.is_empty();
+        let files = uniform_list(
+            "diff-files",
+            doc.files.len(),
+            cx.processor(|s, range: std::ops::Range<usize>, _, cx| {
+                range
+                    .map(|i| {
+                        let f = &s.document.files[i];
+                        div()
+                            .id(i)
+                            .debug_selector(move || format!("diff-file-{i}").into())
+                            .px(px(12.))
+                            .py(px(5.))
+                            .h(px(58.))
+                            .overflow_hidden()
+                            .cursor_pointer()
+                            .bg(if i == s.selected {
+                                theme().selection
+                            } else {
+                                theme().background
+                            })
+                            .child(div().text_size(px(13.5)).child(f.path.clone()))
+                            .child(
+                                div()
+                                    .mt(px(4.))
+                                    .text_size(px(9.5))
+                                    .text_color(theme().text_muted)
+                                    .child(format!(
+                                        "{} · +{} −{}{}",
+                                        if f.status == "deleted" {
+                                            "removed"
+                                        } else {
+                                            &f.status
+                                        },
+                                        f.additions,
+                                        f.deletions,
+                                        if f.status == "renamed" {
+                                            format!(" · from {}", f.old_path)
+                                        } else {
+                                            String::new()
+                                        }
+                                    )),
+                            )
+                            .on_click(cx.listener(move |s, _, _, cx| s.select_file(i, cx)))
+                    })
+                    .collect::<Vec<_>>()
+            }),
+        )
+        .w(px(240.))
+        .flex_shrink_0()
+        .h_full();
+        let rows = div().flex_1().min_w_0().h_full().child(
+            uniform_list("diff-rows", self.row_count(), move |range, _, _| {
+                range
+                    .map(|i| {
+                        let f = &doc.files[selected];
+                        let (left, right) = if split { f.split[i] } else { (Some(i), None) };
+                        let painted = painted.clone();
+                        div()
+                            .h(px(20.))
+                            .min_w(px(content_width))
+                            .flex()
+                            .font_family(theme().font_mono)
+                            .text_size(px(12.))
+                            .line_height(px(20.))
+                            .whitespace_nowrap()
+                            .child(cell(
+                                left.map(|i| &f.lines[i]),
+                                split || left.is_some_and(|i| f.lines[i].new.is_none()),
+                            ))
+                            .when(split, |row| {
+                                row.child(cell(right.map(|i| &f.lines[i]), false))
+                            })
+                            .child(
+                                canvas(
+                                    |_, _, _| (),
+                                    move |_, _, _, _| {
+                                        painted.borrow_mut().insert(i);
+                                    },
+                                )
+                                .size(px(1.)),
+                            )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .debug_selector(|| "diff-viewport".into())
+            .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
+            .track_scroll(self.scroll.clone())
+            .size_full(),
+        );
+        let body = if stacked {
+            self.stack_view(files.into_any_element(), cx)
+        } else {
+            div()
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .child(files)
+                .child(rows)
+                .into_any_element()
+        };
         div()
             .size_full()
             .flex()
@@ -302,6 +446,10 @@ impl Render for DiffSurface {
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 match event.keystroke.key.as_str() {
+                    "home" if this.stacked() => this.select_file(0, cx),
+                    "end" if this.stacked() => {
+                        this.select_file(this.document.files.len().saturating_sub(1), cx)
+                    }
                     "home" => this.scroll_to(0, cx),
                     "end" => this.scroll_to(this.row_count().saturating_sub(1), cx),
                     "up" | "down" if event.keystroke.modifiers.alt => {
@@ -340,6 +488,35 @@ impl Render for DiffSurface {
                         button("diff-refresh", "Refresh", false)
                             .on_click(cx.listener(|s, _, _, cx| s.load(cx))),
                     )
+                    .when(stacked, |bar| {
+                        bar.child(button("diff-drawer", "Files", self.drawer).on_click(
+                            cx.listener(|s, _, _, cx| {
+                                s.drawer = !s.drawer;
+                                cx.notify();
+                            }),
+                        ))
+                        .child(
+                            button(
+                                "diff-collapse",
+                                if all_open {
+                                    "Collapse all"
+                                } else {
+                                    "Expand all"
+                                },
+                                false,
+                            )
+                            .on_click(cx.listener(
+                                move |s, _, _, cx| {
+                                    if all_open {
+                                        s.closed = (0..s.document.files.len()).collect();
+                                    } else {
+                                        s.closed.clear();
+                                    }
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                    })
                     .when(can_review, |bar| {
                         bar.child(
                             button("diff-approve", "Approve", false)
@@ -365,114 +542,7 @@ impl Render for DiffSurface {
                     .text_color(theme().text_muted)
                     .child(self.notice.clone()),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(
-                        uniform_list(
-                            "diff-files",
-                            doc.files.len(),
-                            cx.processor(|s, range: std::ops::Range<usize>, _, cx| {
-                                range
-                                    .map(|i| {
-                                        let f = &s.document.files[i];
-                                        div()
-                                            .id(i)
-                                            .debug_selector(move || format!("diff-file-{i}").into())
-                                            .px(px(12.))
-                                            .py(px(5.))
-                                            .h(px(58.))
-                                            .overflow_hidden()
-                                            .cursor_pointer()
-                                            .bg(if i == s.selected {
-                                                theme().selection
-                                            } else {
-                                                theme().background
-                                            })
-                                            .child(div().text_size(px(13.5)).child(f.path.clone()))
-                                            .child(
-                                                div()
-                                                    .mt(px(4.))
-                                                    .text_size(px(9.5))
-                                                    .text_color(theme().text_muted)
-                                                    .child(format!(
-                                                        "{} · +{} −{}{}",
-                                                        if f.status == "deleted" {
-                                                            "removed"
-                                                        } else {
-                                                            &f.status
-                                                        },
-                                                        f.additions,
-                                                        f.deletions,
-                                                        if f.status == "renamed" {
-                                                            format!(" · from {}", f.old_path)
-                                                        } else {
-                                                            String::new()
-                                                        }
-                                                    )),
-                                            )
-                                            .on_click(
-                                                cx.listener(move |s, _, _, cx| {
-                                                    s.select_file(i, cx)
-                                                }),
-                                            )
-                                    })
-                                    .collect::<Vec<_>>()
-                            }),
-                        )
-                        .w(px(240.))
-                        .flex_shrink_0()
-                        .h_full(),
-                    )
-                    .child(
-                        div().flex_1().min_w_0().h_full().child(
-                            uniform_list("diff-rows", self.row_count(), move |range, _, _| {
-                                range
-                                    .map(|i| {
-                                        let f = &doc.files[selected];
-                                        let (left, right) =
-                                            if split { f.split[i] } else { (Some(i), None) };
-                                        let painted = painted.clone();
-                                        div()
-                                            .h(px(20.))
-                                            .min_w(px(content_width))
-                                            .flex()
-                                            .font_family(theme().font_mono)
-                                            .text_size(px(12.))
-                                            .line_height(px(20.))
-                                            .whitespace_nowrap()
-                                            .child(cell(
-                                                left.map(|i| &f.lines[i]),
-                                                split
-                                                    || left
-                                                        .is_some_and(|i| f.lines[i].new.is_none()),
-                                            ))
-                                            .when(split, |row| {
-                                                row.child(cell(right.map(|i| &f.lines[i]), false))
-                                            })
-                                            .child(
-                                                canvas(
-                                                    |_, _, _| (),
-                                                    move |_, _, _, _| {
-                                                        painted.borrow_mut().insert(i);
-                                                    },
-                                                )
-                                                .size(px(1.)),
-                                            )
-                                    })
-                                    .collect::<Vec<_>>()
-                            })
-                            .debug_selector(|| "diff-viewport".into())
-                            .with_horizontal_sizing_behavior(
-                                ListHorizontalSizingBehavior::Unconstrained,
-                            )
-                            .track_scroll(self.scroll.clone())
-                            .size_full(),
-                        ),
-                    ),
-            )
+            .child(body)
     }
 }
 pub fn launch(client: Client, target: Target, offscreen: bool) {
