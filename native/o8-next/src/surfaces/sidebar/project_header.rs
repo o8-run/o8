@@ -605,6 +605,14 @@ impl ThreadList {
                 }
             }
             view = view.child(menu);
+            // A press anywhere outside the header and its menu closes the
+            // menu; the switcher and the add button stay inside, so they
+            // still toggle it.
+            view = view.on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                if this.header_menu.take().is_some() {
+                    cx.notify();
+                }
+            }));
         }
         view.opacity(if self.header_busy { 0.6 } else { 1. })
             .into_any_element()

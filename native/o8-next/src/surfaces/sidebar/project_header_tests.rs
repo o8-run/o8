@@ -108,6 +108,47 @@ fn sidebar_project_header_switches_repos_and_projects(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn sidebar_project_menu_closes_on_a_press_outside(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(true, "--shell --composer");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("project-outside.json"),
+        State::default(),
+        cx,
+    );
+    wait_for(&shell, &mut visual, |s, _| s.connected);
+    let cx = &mut visual;
+    let press = |cx: &mut VisualTestContext, at: gpui::Point<gpui::Pixels>| {
+        cx.simulate_click(at, gpui::Modifiers::default());
+        cx.run_until_parked();
+        draw(cx);
+    };
+    let switcher = cx
+        .debug_bounds("sidebar-project-switcher")
+        .unwrap()
+        .center();
+    press(cx, switcher);
+    assert!(cx.debug_bounds("sidebar-header-menu").is_some(), "opens");
+    press(cx, switcher);
+    assert!(
+        cx.debug_bounds("sidebar-header-menu").is_none(),
+        "the switcher still toggles it closed"
+    );
+    press(cx, switcher);
+    assert!(cx.debug_bounds("sidebar-header-menu").is_some());
+    let header = cx.debug_bounds("sidebar-project-header").unwrap();
+    // A press in the main pane, well right of the sidebar.
+    press(
+        cx,
+        gpui::point(header.right() + px(300.), header.bottom() + px(200.)),
+    );
+    assert!(
+        cx.debug_bounds("sidebar-header-menu").is_none(),
+        "a press outside closes it"
+    );
+}
+
+#[gpui::test]
 fn sidebar_project_row_sits_level_with_the_home_mark(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(true, "--shell --composer");
     let (shell, mut visual) = open(
