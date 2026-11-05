@@ -35,6 +35,9 @@ mod network_tests;
 #[path = "composer/changes_pill.rs"]
 mod changes_pill;
 pub(crate) use changes_pill::ChangesPill;
+#[path = "composer/project_bar.rs"]
+mod project_bar;
+pub(crate) use project_bar::ProjectBar;
 #[path = "composer/queue_tail.rs"]
 mod queue_rows;
 pub(super) use queue_rows::queue_tail;
@@ -750,6 +753,7 @@ impl Surface {
             .children(self.shell_run_card(cx))
             .children(self.lineage_strip(cx))
             .children(self.changes_pill(cx))
+            .children(self.project_bar(cx))
             .child(self.composer_card(window, cx))
             .into_any_element()
     }
