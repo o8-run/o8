@@ -1,7 +1,7 @@
 //! The legacy workspace DiffViewer's raw rows, unified wrapping and side pairing.
 use super::*;
 use std::sync::LazyLock;
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum Kind {
     Add,
     Del,
@@ -17,31 +17,48 @@ pub(crate) struct Line {
     pub new: Option<usize>,
 }
 pub(crate) fn parse(source: &str) -> Vec<Line> {
-    static HUNK: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@").unwrap());
+    static HUNK: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@").unwrap()
+    });
     let mut old = 0;
     let mut new = 0;
+    // Lines the current hunk still owns on each side. Inside a hunk, a removed
+    // `-- comment` reads as `--- comment` and is still a removal, not a header.
+    let mut old_left = 0usize;
+    let mut new_left = 0usize;
     source
         .split('\n')
         .map(|text| {
-            let (kind, left, right) = if let Some(c) = HUNK.captures(text) {
+            let in_hunk = old_left > 0 || new_left > 0;
+            let count = |c: &regex::Captures, i: usize| {
+                c.get(i).map_or(1, |m| m.as_str().parse().unwrap_or(0))
+            };
+            let (kind, left, right) = if let Some(c) = HUNK.captures(text).filter(|_| !in_hunk) {
                 old = c[1].parse().unwrap_or(0);
-                new = c[2].parse().unwrap_or(0);
+                new = c[3].parse().unwrap_or(0);
+                old_left = count(&c, 2);
+                new_left = count(&c, 4);
                 (Kind::Hunk, None, None)
-            } else if ["diff --git", "index ", "--- ", "+++ ", "\\ "]
-                .iter()
-                .any(|prefix| text.starts_with(prefix))
+            } else if text.starts_with("\\ ")
+                || !in_hunk
+                    && ["diff --git", "index ", "--- ", "+++ "]
+                        .iter()
+                        .any(|prefix| text.starts_with(prefix))
             {
                 (Kind::Meta, None, None)
             } else if text.starts_with('+') {
                 let n = new;
                 new += 1;
+                new_left = new_left.saturating_sub(1);
                 (Kind::Add, None, Some(n))
             } else if text.starts_with('-') {
                 let n = old;
                 old += 1;
+                old_left = old_left.saturating_sub(1);
                 (Kind::Del, Some(n), None)
             } else {
+                old_left = old_left.saturating_sub(1);
+                new_left = new_left.saturating_sub(1);
                 let left = (old > 0).then_some(old);
                 let right = (new > 0).then_some(new);
                 if old > 0 {
@@ -221,6 +238,39 @@ pub(crate) fn rows(lines: &[Line], split: bool, key: &str) -> gpui::AnyElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_removed_dash_comment_inside_a_hunk_stays_a_removal() {
+        let lines = parse(concat!(
+            "diff --git a/q.sql b/q.sql\n",
+            "--- a/q.sql\n",
+            "+++ b/q.sql\n",
+            "@@ -1,3 +1,3 @@\n",
+            "--- old note\n",
+            "+++ new note\n",
+            " select 1;\n",
+            "-select 2;\n",
+            "+select 3;\n",
+            "diff --git a/r.sql b/r.sql\n",
+            "--- a/r.sql\n",
+            "+++ b/r.sql\n",
+            "@@ -7 +7 @@\n",
+            "-a\n",
+            "+b"
+        ));
+        let kinds: Vec<Kind> = lines.iter().map(|line| line.kind).collect();
+        use Kind::*;
+        assert_eq!(
+            kinds,
+            [
+                Meta, Meta, Meta, Hunk, Del, Add, Context, Del, Add, Meta, Meta, Meta, Hunk, Del,
+                Add
+            ]
+        );
+        assert_eq!((lines[6].old, lines[6].new), (Some(2), Some(2)));
+        assert_eq!((lines[7].old, lines[8].new), (Some(3), Some(3)));
+        assert_eq!((lines[13].old, lines[14].new), (Some(7), Some(7)));
+    }
 
     #[test]
     fn split_pairs_each_removal_with_its_replacement() {
