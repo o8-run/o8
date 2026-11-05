@@ -35,8 +35,25 @@ mod subagents_tests;
 // apps/web/src/components/ui/panel-tab-close-button.tsx at
 // 5b4f2aa1532730d4dd51d2cb48a57ff74a0f54eb.
 struct RightPanel;
-pub(super) fn subagent_button(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
-    subagents::summary_button(s, cx)
+/// Keeps the header's subagent inspector loaded, so the Activity dock can
+/// list this chat's agents.
+pub(super) fn track_subagents(s: &mut Shell, cx: &mut Context<Shell>) {
+    let _ = subagents::current(s, cx);
+}
+/// The agents the Subagents panel lists for the active chat or workspace.
+pub(super) fn subagent_list(s: &Shell, cx: &App) -> Vec<crate::subagents::model::Agent> {
+    subagents::existing(s, cx).map_or_else(Vec::new, |view| view.read(cx).agents.clone())
+}
+/// Opens one agent, or every agent with `None`, in the Subagents panel.
+pub(super) fn inspect_subagent(
+    s: &mut Shell,
+    id: Option<String>,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    if let Some(view) = subagents::current(s, cx) {
+        view.update(cx, |view, cx| view.inspect(id, window, cx));
+    }
 }
 register_shell_feature!(RightPanel);
 impl ShellFeature for RightPanel {

@@ -1,6 +1,7 @@
 use super::*;
 use crate::activity::Step;
 use crate::motion::Transition;
+use crate::subagents::model::{Agent, Group};
 use gpui::SharedString;
 use serde_json::Value;
 use std::time::Instant;
@@ -39,6 +40,7 @@ impl ShellFeature for ActivityDock {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Pane {
     Plan,
+    Agents,
     Changes,
     Tasks,
     Branch,
@@ -47,8 +49,9 @@ enum Pane {
 }
 
 impl Pane {
-    const ALL: [Pane; 6] = [
+    const ALL: [Pane; 7] = [
         Pane::Plan,
+        Pane::Agents,
         Pane::Changes,
         Pane::Tasks,
         Pane::Branch,
@@ -58,6 +61,7 @@ impl Pane {
     fn name(self) -> &'static str {
         match self {
             Pane::Plan => "plan",
+            Pane::Agents => "agents",
             Pane::Changes => "changes",
             Pane::Tasks => "tasks",
             Pane::Branch => "branch",
@@ -68,6 +72,7 @@ impl Pane {
     fn tip(self) -> &'static str {
         match self {
             Pane::Plan => "Plan",
+            Pane::Agents => "Agents",
             Pane::Changes => "Changes",
             Pane::Tasks => "Tasks",
             Pane::Branch => "Branch",
@@ -180,6 +185,9 @@ fn now_ms() -> f64 {
 struct Turn {
     todos: Vec<(String, String)>,
     tasks: Vec<(String, String, f64, Option<f64>)>,
+    /// Every agent this chat or workspace started, as the Subagents panel
+    /// lists them.
+    agents: Vec<Agent>,
 }
 
 fn turn(s: &Shell, cx: &App) -> Turn {
@@ -222,7 +230,12 @@ fn turn(s: &Shell, cx: &App) -> Turn {
         .into_iter()
         .rev()
         .collect();
-    Turn { todos, tasks }
+    let agents = super::right_panel::subagent_list(s, cx);
+    Turn {
+        todos,
+        tasks,
+        agents,
+    }
 }
 
 fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
@@ -556,8 +569,11 @@ fn panes(s: &Shell, turn: &Turn) -> Vec<Pane> {
         .into_iter()
         .filter(|pane| match pane {
             Pane::Plan => !turn.todos.is_empty(),
+            Pane::Agents => !turn.agents.is_empty(),
             Pane::Changes => !data.files.is_empty(),
-            Pane::Tasks => !turn.tasks.is_empty() || !data.packets.is_empty() || data.inbox > 0,
+            Pane::Tasks => {
+                !step_tasks(turn).is_empty() || !data.packets.is_empty() || data.inbox > 0
+            }
             Pane::Branch => data.branch.is_some(),
             Pane::Files => s.state.selected.is_some(),
             Pane::Ports => !data.ports.is_empty(),
@@ -671,6 +687,7 @@ fn pane_height(pane: Pane, data: &Data, turn: &Turn) -> f32 {
         + 10.
         + match pane {
             Pane::Plan => rows(turn.todos.len()),
+            Pane::Agents => rows(turn.agents.len().min(MAX_AGENTS)),
             Pane::Changes => {
                 let more = data.files.len() > MAX_FILES;
                 54. + 26.
@@ -680,7 +697,8 @@ fn pane_height(pane: Pane, data: &Data, turn: &Turn) -> f32 {
                     + 44.
             }
             Pane::Tasks => {
-                rows(turn.tasks.len() + data.packets.len() + usize::from(data.inbox > 0)).max(ROW)
+                rows(step_tasks(turn).len() + data.packets.len() + usize::from(data.inbox > 0))
+                    .max(ROW)
             }
             Pane::Branch => {
                 ROW + if data.pull_request.is_some() { 98. } else { 0. }
@@ -731,6 +749,11 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
     let width = pill_w + (CARD_W - pill_w) * open;
     let height = PILL_H + (body_h + 1.) * open;
     let spin = dock.spin.elapsed().as_secs_f32() * std::f32::consts::TAU * 0.8;
+    let working = turn
+        .agents
+        .iter()
+        .filter(|agent| agent.group == Group::Working)
+        .count();
     let remaining = turn
         .todos
         .iter()
@@ -754,6 +777,7 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
             };
             let icon = match each {
                 Pane::Plan => PLAN,
+                Pane::Agents => AGENTS,
                 Pane::Changes => CHANGES,
                 Pane::Tasks => TASKS,
                 Pane::Branch if dock.data.pull_request.is_some() => PULL,
@@ -763,6 +787,7 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
             };
             let badge = match each {
                 Pane::Plan if remaining > 0 => Some(remaining as u64),
+                Pane::Agents if working > 0 => Some(working as u64),
                 Pane::Tasks if dock.data.inbox > 0 => Some(dock.data.inbox),
                 _ => None,
             };
@@ -827,6 +852,7 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
                     .px(px(14.))
                     .child(match pane {
                         Pane::Plan => plan(&turn, spin).into_any_element(),
+                        Pane::Agents => agents(&turn, cx).into_any_element(),
                         Pane::Changes => changes(&dock.data, cx).into_any_element(),
                         Pane::Tasks => tasks(&turn, &dock.data, cx).into_any_element(),
                         Pane::Branch => branch(&dock.data, cx).into_any_element(),
@@ -1124,8 +1150,106 @@ fn changes(data: &Data, cx: &mut Context<Shell>) -> impl IntoElement {
         )
 }
 
+/// Delegate steps read from the transcript, for a chat whose agents the
+/// Subagents panel doesn't list; otherwise the Agents pane shows them.
+fn step_tasks(turn: &Turn) -> &[(String, String, f64, Option<f64>)] {
+    if turn.agents.is_empty() {
+        &turn.tasks
+    } else {
+        &[]
+    }
+}
+
+/// Rows the Agents pane shows before "View all" in the Subagents panel.
+const MAX_AGENTS: usize = 6;
+
+/// What an agent row says it is doing: its latest progress while it works,
+/// otherwise its state.
+fn agent_status(agent: &Agent) -> String {
+    match agent.group {
+        Group::Working => agent
+            .progress
+            .clone()
+            .filter(|text| !text.trim().is_empty())
+            .unwrap_or_else(|| "Working".into()),
+        Group::Attention => "Needs you".into(),
+        Group::Done => "Done".into(),
+    }
+}
+
+/// This chat's agents, working first. A row opens that agent in the
+/// Subagents panel; "View all" opens the whole list there.
+fn agents(turn: &Turn, cx: &mut Context<Shell>) -> impl IntoElement {
+    let mut agents: Vec<&Agent> = turn.agents.iter().collect();
+    agents.sort_by_key(|agent| match agent.group {
+        Group::Attention => 0,
+        Group::Working => 1,
+        Group::Done => 2,
+    });
+    div()
+        .child(title(
+            "Agents",
+            div()
+                .id("activity-agents-all")
+                .debug_selector(|| "activity-agents-all".into())
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .cursor_pointer()
+                .hover(|link| link.text_color(theme().text))
+                .child(crate::subagents::model::summary(&turn.agents))
+                .child(crate::icon::stroke(CHEVRON, theme().text_muted, 11., 1.8))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.capture(window, cx);
+                    super::right_panel::inspect_subagent(this, None, window, cx);
+                })),
+        ))
+        .child(
+            div()
+                .pt(px(6.))
+                .children(agents.into_iter().take(MAX_AGENTS).map(|agent| {
+                    let id = agent.id.clone();
+                    // The color the agent keeps on its transcript card and panel tab.
+                    let color = match agent.group {
+                        Group::Attention => theme().danger,
+                        _ => crate::subagents::trace::agent_color(&agent.id),
+                    };
+                    row(SharedString::from(format!("activity-agent-{}", agent.id)))
+                        .cursor_pointer()
+                        .hover(|row| row.bg(theme().hover))
+                        .child(crate::icon::stroke(AGENTS, color, 14., 1.7))
+                        .child(ellipsis(agent.title.clone()).text_color(theme().text_secondary))
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .max_w(px(120.))
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(px(12.5))
+                                .text_color(theme().text_muted)
+                                .child(agent_status(agent)),
+                        )
+                        .child(crate::icon::stroke(CHEVRON, theme().text_muted, 11., 1.8))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.capture(window, cx);
+                            super::right_panel::inspect_subagent(
+                                this,
+                                Some(id.clone()),
+                                window,
+                                cx,
+                            );
+                        }))
+                })),
+        )
+}
+
 fn tasks(turn: &Turn, data: &Data, cx: &mut Context<Shell>) -> impl IntoElement {
-    let running = turn.tasks.iter().filter(|task| task.3.is_none()).count() + data.packets.len();
+    let running = step_tasks(turn)
+        .iter()
+        .filter(|task| task.3.is_none())
+        .count()
+        + data.packets.len();
     div()
         .child(title(
             "Tasks",
@@ -1138,27 +1262,31 @@ fn tasks(turn: &Turn, data: &Data, cx: &mut Context<Shell>) -> impl IntoElement 
         .child(
             div()
                 .pt(px(6.))
-                .children(turn.tasks.iter().map(|(id, text, started, finished)| {
-                    row(SharedString::from(format!("activity-task-{id}")))
-                        .child(crate::icon::stroke(
-                            TASKS,
-                            if finished.is_none() {
-                                theme().accent
-                            } else {
-                                theme().text_muted
-                            },
-                            14.,
-                            1.7,
-                        ))
-                        .child(ellipsis(text.clone()).text_color(theme().text_secondary))
-                        .child(
-                            div()
-                                .flex_shrink_0()
-                                .text_size(px(12.5))
-                                .text_color(theme().text_muted)
-                                .child(elapsed(*started, *finished)),
-                        )
-                }))
+                .children(
+                    step_tasks(turn)
+                        .iter()
+                        .map(|(id, text, started, finished)| {
+                            row(SharedString::from(format!("activity-task-{id}")))
+                                .child(crate::icon::stroke(
+                                    TASKS,
+                                    if finished.is_none() {
+                                        theme().accent
+                                    } else {
+                                        theme().text_muted
+                                    },
+                                    14.,
+                                    1.7,
+                                ))
+                                .child(ellipsis(text.clone()).text_color(theme().text_secondary))
+                                .child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .text_size(px(12.5))
+                                        .text_color(theme().text_muted)
+                                        .child(elapsed(*started, *finished)),
+                                )
+                        }),
+                )
                 .children(data.packets.iter().enumerate().map(|(index, packet)| {
                     row(SharedString::from(format!("activity-worker-{index}")))
                         .cursor_pointer()
@@ -1529,6 +1657,8 @@ const ACTIVITY: &str = "M22 12h-4l-3 9L9 3l-3 9H2";
 const PLAN: &str =
     "M3 5l1.5 1.5L7 4 M3 12l1.5 1.5L7 11 M3 19l1.5 1.5L7 18 M11 6h10 M11 13h10 M11 20h10";
 const CHANGES: &str = "M7 3v8 M3 7h8 M14 17h7 M17 4L7 20";
+/// Two people, for the agents a chat started.
+const AGENTS: &str = "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75";
 const TASKS: &str = "M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4Z M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8Z";
 const BRANCH: &str = "M6 3v12 M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M18 9a9 9 0 0 1-9 9";
 const PULL: &str = "M6 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z M6 9v12 M18 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z M13 6h3a2 2 0 0 1 2 2v7";
