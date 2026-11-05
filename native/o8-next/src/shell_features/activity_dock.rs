@@ -472,7 +472,13 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
             |data, body, _| read_inbox(data, body),
         ),
     ];
+    // Home is no repository: skip its review reads rather than run git
+    // status over the whole home folder.
+    let home = crate::shell::session::is_home(&workspace);
     for (route, query, apply) in side {
+        if home && route == "/api/review/workspace" {
+            continue;
+        }
         let client = client.clone();
         let task = cx.background_executor().spawn(async move {
             let query: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
