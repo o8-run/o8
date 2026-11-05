@@ -7,11 +7,14 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
   const worktreeDiff = await import('../../../src/app/api/worktrees/diff/route');
   const reviewState = await import('../../../src/app/api/orchestrator/review-state/route');
   const decision = await import('../../../src/app/api/orchestrator/review/route');
+  const workspaceChanges = await import('../../../src/app/api/review/workspace/route');
+  const lastTurn = await import('../../../src/app/api/review/last-turn/route');
   let responseLost = false;
   return {
     routes: review ? {
       'GET /api/worktrees/diff': worktreeDiff.GET, 'GET /api/orchestrator/review-state': reviewState.GET,
       'POST /api/orchestrator/review': decision.POST,
+      'GET /api/review/workspace': workspaceChanges.GET, 'GET /api/review/last-turn': lastTurn.GET,
       ...Object.fromEntries(['next-review-approve', 'next-review-reject'].map(id => [
         `GET /api/lanes/${id}/diff`, request => packetDiff.GET(request, { params: Promise.resolve({ id }) }),
       ])),

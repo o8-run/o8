@@ -146,44 +146,53 @@ impl DiffSurface {
         matches!(self.target, Target::Worktree { file: None, .. })
     }
 
-    fn rows(&self) -> Vec<usize> {
-        (0..self.document.files.len())
-            .map(|i| self.stack.get(i).map_or(0, Vec::len))
+    /// Each shown file's rows, in the order `shown` lists them.
+    fn rows(&self, shown: &[usize]) -> Vec<usize> {
+        shown
+            .iter()
+            .map(|i| self.stack.get(*i).map_or(0, Vec::len))
             .collect()
     }
 
-    /// Which stacked files are open, in document order.
+    /// Which files are open, by document index; a file the scope hides is
+    /// closed and spends none of the budget.
     pub(crate) fn open_files(&self) -> Vec<bool> {
-        let chosen: Vec<Option<bool>> = self
-            .document
-            .files
+        let shown = self.shown();
+        let chosen: Vec<Option<bool>> = shown
             .iter()
-            .map(|file| self.chosen.get(&file.path).copied())
+            .map(|i| self.chosen.get(&self.document.files[*i].path).copied())
             .collect();
-        openness(&self.rows(), &chosen)
+        let mut open = vec![false; self.document.files.len()];
+        for (i, is_open) in shown.iter().zip(openness(&self.rows(&shown), &chosen)) {
+            open[*i] = is_open;
+        }
+        open
     }
 
-    /// Every file Expand all would open is open.
+    /// Every shown file Expand all would open is open.
     pub(crate) fn all_open(&self) -> bool {
-        let open = self.open_files();
-        fits(&self.rows())
+        let (shown, open) = (self.shown(), self.open_files());
+        fits(&self.rows(&shown))
             .iter()
-            .zip(open)
-            .all(|(fits, open)| !fits || open)
+            .zip(&shown)
+            .all(|(fits, i)| !fits || open[*i])
     }
 
     pub(super) fn collapse_all(&mut self) {
-        for file in self.document.files.iter() {
-            self.chosen.insert(file.path.clone(), false);
+        for i in self.shown() {
+            self.chosen
+                .insert(self.document.files[i].path.clone(), false);
         }
         self.limit_note = None;
     }
 
-    /// Opens every file that fits the row budget and closes the rest.
+    /// Opens every shown file that fits the row budget and closes the rest.
     pub(super) fn expand_all(&mut self) {
-        let fits = fits(&self.rows());
-        for (file, fits) in self.document.files.iter().zip(&fits) {
-            self.chosen.insert(file.path.clone(), *fits);
+        let shown = self.shown();
+        let fits = fits(&self.rows(&shown));
+        for (i, fits) in shown.iter().zip(&fits) {
+            self.chosen
+                .insert(self.document.files[*i].path.clone(), *fits);
         }
         let (opened, total) = (fits.iter().filter(|f| **f).count(), fits.len());
         self.limit_note = (opened < total).then(|| {
@@ -207,14 +216,19 @@ impl DiffSurface {
         self.drawer.unwrap_or(!self.narrow())
     }
 
-    /// Jumps the stack to a file's header; `open` also opens it. Walking the
-    /// list with the keyboard moves without opening.
+    /// Jumps the stack to a shown file's header; `open` also opens it.
+    /// Walking the list with the keyboard moves without opening.
     pub(super) fn reveal(&mut self, index: usize, open: bool, cx: &mut Context<Self>) {
-        if open && let Some(file) = self.document.files.get(index) {
-            self.chosen.insert(file.path.clone(), true);
+        let Some(position) = self.shown().iter().position(|i| *i == index) else {
+            return;
+        };
+        if open {
+            self.chosen
+                .insert(self.document.files[index].path.clone(), true);
             self.limit_note = None;
         }
-        self.stack_scroll.scroll_to_top_of_item(index);
+        // Cards are the stack's children in `shown` order.
+        self.stack_scroll.scroll_to_top_of_item(position);
         cx.notify();
     }
 
@@ -264,6 +278,7 @@ impl DiffSurface {
         let painted = self.painted.clone();
         let opens = self.open_files();
         let (narrow, drawer) = (self.narrow(), self.drawer_shown());
+        let shown = self.shown();
         let mut cards = div()
             .id("diff-stack")
             .debug_selector(|| "diff-stack".into())
@@ -279,7 +294,15 @@ impl DiffSurface {
             .gap(px(6.))
             .px(px(12.))
             .pb(px(18.));
-        for (i, file) in doc.files.iter().enumerate() {
+        if shown.is_empty() && self.scope != Scope::All {
+            cards = cards.child(note(
+                ("diff-scope-empty", 0),
+                "diff-scope-empty".into(),
+                self.scope_note(),
+            ));
+        }
+        for &i in &shown {
+            let file = &doc.files[i];
             let open = opens[i];
             let lines = stack.get(i).map_or(&[][..], Vec::as_slice);
             let header = div()
@@ -413,7 +436,7 @@ impl DiffSurface {
             }
             cards = cards.child(card);
         }
-        // Last, so each file card keeps its index for jumps.
+        // Last, so each card's position matches `shown` for jumps.
         cards = cards.child(
             canvas(
                 |_, _, _| (),
