@@ -495,6 +495,8 @@ impl Render for DiffSurface {
                             ("up", Some(at)) => at.checked_sub(1).map(|at| shown[at]),
                             ("down", Some(at)) if shown[at] > this.selected => Some(shown[at]),
                             ("down", Some(at)) => shown.get(at + 1).copied(),
+                            // Nothing shown follows a hidden selection: stay.
+                            ("down", None) => None,
                             _ => shown.last().copied(),
                         };
                         if let Some(index) = next {
@@ -549,27 +551,30 @@ impl Render for DiffSurface {
                                 }),
                             ),
                         )
-                        .child(
-                            button(
-                                "diff-collapse",
-                                if all_open {
-                                    "Collapse all"
-                                } else {
-                                    "Expand all"
-                                },
-                                false,
-                            )
-                            .on_click(cx.listener(
-                                move |s, _, _, cx| {
+                        // An empty scope has nothing to open or close.
+                        .when(!shown.is_empty(), |bar| {
+                            bar.child(
+                                button(
+                                    "diff-collapse",
                                     if all_open {
-                                        s.collapse_all();
+                                        "Collapse all"
                                     } else {
-                                        s.expand_all();
-                                    }
-                                    cx.notify();
-                                },
-                            )),
-                        )
+                                        "Expand all"
+                                    },
+                                    false,
+                                )
+                                .on_click(cx.listener(
+                                    move |s, _, _, cx| {
+                                        if all_open {
+                                            s.collapse_all();
+                                        } else {
+                                            s.expand_all();
+                                        }
+                                        cx.notify();
+                                    },
+                                )),
+                            )
+                        })
                         .children(Scope::ORDER.map(|scope| {
                             button(scope.id(), scope.label(), self.scope == scope)
                                 .on_click(cx.listener(move |s, _, _, cx| s.set_scope(scope, cx)))
@@ -607,7 +612,18 @@ impl Render for DiffSurface {
                     .child(match &self.limit_note {
                         Some(note) => format!("{} · {note}", self.notice),
                         None => self.notice.clone(),
-                    }),
+                    })
+                    .when_some(
+                        stacked.then(|| self.scope_stale()).flatten(),
+                        |row, stale| {
+                            row.child(
+                                div()
+                                    .debug_selector(|| "diff-scope-stale".into())
+                                    .text_color(theme().danger)
+                                    .child(stale),
+                            )
+                        },
+                    ),
             )
             .child(body)
     }

@@ -936,13 +936,20 @@ fn review_scopes_the_stack_to_staged_unstaged_or_the_last_turn(cx: &mut TestAppC
     let path = std::path::PathBuf::from(crate::shell::session::workspace_path(&workspace));
     fs::write(path.join("scope-staged.txt"), "staged\n").unwrap();
     fs::write(path.join("scope-unstaged.txt"), "unstaged\n").unwrap();
-    let added = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&path)
-        .args(["add", "scope-staged.txt"])
-        .status()
-        .unwrap();
-    assert!(added.success());
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&path)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["add", "scope-staged.txt"]);
+    // A staged rename, then an unstaged edit to its new path.
+    git(&["mv", "changed.rs", "scope-moved.rs"]);
+    let moved = fs::read_to_string(path.join("scope-moved.rs")).unwrap();
+    fs::write(path.join("scope-moved.rs"), format!("{moved}// moved\n")).unwrap();
     run(cx, "d i f f");
     let wait =
         |cx: &mut VisualTestContext, what: &str, done: &dyn Fn(&mut VisualTestContext) -> bool| {
@@ -978,9 +985,14 @@ fn review_scopes_the_stack_to_staged_unstaged_or_the_last_turn(cx: &mut TestAppC
                 .unwrap()
         })
     };
-    let (staged, unstaged) = (
+    let (staged, unstaged, moved) = (
         index(cx, "scope-staged.txt"),
         index(cx, "scope-unstaged.txt"),
+        index(cx, "scope-moved.rs"),
+    );
+    assert_eq!(
+        child.read_with(cx, |d, _| d.document.files[moved].status.clone()),
+        "renamed"
     );
     let card = |i: usize| format!("diff-stack-file-{i}");
     let row = |i: usize| format!("diff-file-{i}");
@@ -993,18 +1005,34 @@ fn review_scopes_the_stack_to_staged_unstaged_or_the_last_turn(cx: &mut TestAppC
     });
     assert!(shows(cx, row(staged)) && !shows(cx, row(unstaged)));
     assert_eq!(child.read_with(cx, |d, _| d.scope), Scope::Staged);
+    assert!(shows(cx, card(moved)), "the staged rename, by its new path");
+    // Alt+Down from a hidden file after every shown one stays on it.
+    let last_shown = child.read_with(cx, |d, _| *d.shown().last().unwrap());
+    assert!(unstaged > last_shown, "{unstaged} after {last_shown}");
+    child.update(cx, |d, _| d.selected = unstaged);
+    cx.simulate_keystrokes("alt-down");
+    settled(&shell, cx);
+    assert_eq!(child.read_with(cx, |d, _| d.selected), unstaged);
     // Unstaged keeps only the file Git has not staged; untracked counts.
     click(cx, "diff-scope-unstaged");
     wait(cx, "unstaged scope", &|cx| {
         shows(cx, card(unstaged)) && !shows(cx, card(staged))
     });
     assert!(shows(cx, row(unstaged)) && !shows(cx, row(staged)));
+    assert!(
+        shows(cx, card(moved)),
+        "the edit after the rename is unstaged"
+    );
     // This workspace records no turn, so Last turn says so instead of cards.
     click(cx, "diff-scope-last-turn");
     wait(cx, "last turn scope", &|cx| {
         shows(cx, "diff-scope-empty".into()) && child.read_with(cx, |d, _| d.shown().is_empty())
     });
     assert!(!shows(cx, card(staged)) && !shows(cx, card(unstaged)));
+    assert!(
+        !shows(cx, "diff-collapse".into()),
+        "nothing to open or close"
+    );
     // All changes brings every file back.
     click(cx, "diff-scope-all");
     wait(cx, "all scope", &|cx| {

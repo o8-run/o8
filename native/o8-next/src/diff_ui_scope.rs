@@ -40,15 +40,36 @@ impl Scope {
     }
 }
 
+/// Both sides of a rename as the route names it: `old → new`, or Git's
+/// `old => new` and `dir/{old => new}.rs`. Any other path is itself.
+fn sides(path: &str) -> Vec<String> {
+    for arrow in [" → ", " => "] {
+        let Some((before, after)) = path.split_once(arrow) else {
+            continue;
+        };
+        if let (Some(open), Some(close)) = (before.rfind('{'), after.find('}')) {
+            let (prefix, suffix) = (&before[..open], &after[close + 1..]);
+            return [&before[open + 1..], &after[..close]]
+                .iter()
+                .map(|part| format!("{prefix}{part}{suffix}").replace("//", "/"))
+                .collect();
+        }
+        return vec![before.to_owned(), after.to_owned()];
+    }
+    vec![path.to_owned()]
+}
+
 /// The changed files whose `flag` (`staged` or `unstaged`) is set, from a
-/// `/api/review/workspace` body.
+/// `/api/review/workspace` body. A rename keeps both its paths, so the diff's
+/// new path matches.
 fn flagged(body: &Value, flag: &str) -> BTreeSet<String> {
     body["changedFiles"]
         .as_array()
         .into_iter()
         .flatten()
         .filter(|file| file[flag].as_bool() == Some(true))
-        .filter_map(|file| file["path"].as_str().map(str::to_owned))
+        .filter_map(|file| file["path"].as_str())
+        .flat_map(sides)
         .collect()
 }
 
@@ -60,7 +81,11 @@ fn read(client: &Client, workspace: &str, scope: Scope) -> Result<BTreeSet<Strin
         Scope::Staged | Scope::Unstaged => client.get(
             "/api/review/workspace",
             // Fresh, so the scope agrees with the diff it filters.
-            &[("workspace", workspace), ("changesOnly", "1"), ("fresh", "1")],
+            &[
+                ("workspace", workspace),
+                ("changesOnly", "1"),
+                ("fresh", "1"),
+            ],
         )?,
     };
     if let Some(error) = body["error"].as_str() {
@@ -134,8 +159,24 @@ impl DiffSurface {
         let Some(paths) = &self.scope_paths else {
             return vec![];
         };
-        all.filter(|i| paths.contains(&self.document.files[*i].path))
-            .collect()
+        all.filter(|i| {
+            let file = &self.document.files[*i];
+            paths.contains(&file.path)
+                || !file.old_path.is_empty() && paths.contains(&file.old_path)
+        })
+        .collect()
+    }
+
+    /// Said over a stack that still shows the last paths after a read failed,
+    /// so a stale filter does not pass for a current one.
+    pub(super) fn scope_stale(&self) -> Option<String> {
+        let error = self.scope_error.as_ref()?;
+        (self.scope != Scope::All && self.scope_paths.is_some()).then(|| {
+            format!(
+                "Could not refresh {}: {error}. Showing the last result.",
+                self.scope.label()
+            )
+        })
     }
 
     /// Said in the stack when the scope keeps no file.
@@ -170,5 +211,24 @@ mod tests {
             flagged(&body, "unstaged").into_iter().collect::<Vec<_>>(),
             ["both.rs", "new.txt"]
         );
+    }
+
+    #[test]
+    fn a_rename_matches_by_either_path() {
+        let body = serde_json::json!({"changedFiles": [
+            {"path": "old.txt → new.txt", "staged": true, "unstaged": true},
+            {"path": "src/{a => b}/lib.rs", "staged": true},
+            {"path": "x.rs => y.rs", "unstaged": true}
+        ]});
+        assert_eq!(
+            flagged(&body, "staged").into_iter().collect::<Vec<_>>(),
+            ["new.txt", "old.txt", "src/a/lib.rs", "src/b/lib.rs"]
+        );
+        assert_eq!(
+            flagged(&body, "unstaged").into_iter().collect::<Vec<_>>(),
+            ["new.txt", "old.txt", "x.rs", "y.rs"]
+        );
+        assert_eq!(sides("{old => new}/x.rs"), ["old/x.rs", "new/x.rs"]);
+        assert_eq!(sides("dir/{ => sub}/x.rs"), ["dir/x.rs", "dir/sub/x.rs"]);
     }
 }

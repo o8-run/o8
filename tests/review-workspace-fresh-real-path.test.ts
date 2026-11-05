@@ -36,3 +36,17 @@ it('fresh=1 reads the staged and unstaged files Git has now, not the cached snap
     { path: 'unstaged.txt', staged: false, unstaged: true },
   ]);
 });
+
+it('a renamed file is staged by its rename and unstaged by a later edit to its new path', async () => {
+  folder = mkdtempSync(join(tmpdir(), 'o8-review-fresh-'));
+  execFileSync('git', ['init', '-q', folder]);
+  writeFileSync(join(folder, 'old.txt'), 'one\ntwo\nthree\nfour\n');
+  execFileSync('git', ['-C', folder, 'add', '.']);
+  execFileSync('git', ['-C', folder, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@invalid', 'commit', '-qm', 'fixture']);
+  execFileSync('git', ['-C', folder, 'mv', 'old.txt', 'new.txt']);
+  expect((await changes(folder, true)).find(file => file.path === 'old.txt → new.txt'))
+    .toEqual({ path: 'old.txt → new.txt', staged: true, unstaged: false });
+  writeFileSync(join(folder, 'new.txt'), 'one\ntwo\nthree\nfour\nfive\n');
+  expect((await changes(folder, true)).find(file => file.path === 'old.txt → new.txt'))
+    .toEqual({ path: 'old.txt → new.txt', staged: true, unstaged: true });
+});

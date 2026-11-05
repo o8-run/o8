@@ -297,8 +297,14 @@ export function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, unt
         entry.staged = false;
         entry.unstaged = true;
       } else {
-        entry.staged = stagedPaths?.has(entry.path) ?? false;
-        entry.unstaged = unstagedPaths?.has(entry.path) ?? false;
+        // A rename is keyed `old → new` against HEAD, but an edit made after
+        // `git mv` is listed under the new path only (and a split rename under
+        // the old one), so either side counts.
+        const { originalPath, currentPath } = parseReviewPath(entry.path);
+        const listed = (paths?: Set<string>) => Boolean(paths && (paths.has(entry.path)
+          || paths.has(currentPath) || (originalPath !== undefined && paths.has(originalPath))));
+        entry.staged = listed(stagedPaths);
+        entry.unstaged = listed(unstagedPaths);
       }
     }
   }
