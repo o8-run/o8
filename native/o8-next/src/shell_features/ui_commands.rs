@@ -105,7 +105,10 @@ fn symon(s: &mut Shell, data: &Value, window: &mut Window, cx: &mut Context<Shel
             window,
             cx,
         ),
-        "prs" => s.execute(Command::PullRequests, window, cx),
+        // The Pull requests surface stays removable, so open it through its registration.
+        "prs" => {
+            s.open_registered("Pull requests", window, cx);
+        }
         "orchestrator_draft" => {
             if let Some(text) = data["text"].as_str() {
                 draft(s, text, window, cx);
