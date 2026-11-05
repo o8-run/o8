@@ -87,6 +87,7 @@ impl Field {
                 "Conversations"
             }
             "presentationQuietMode" | "notificationsReviewReady" => "Presentation",
+            "editorCommand" => "Editor",
             "productTelemetryEnabled" | "crashReportsEnabled" | "telemetryOptIn" => "Privacy",
             "parallelCap" | "overlapGate" => "Fleet",
             "healBotEnabled"
@@ -326,6 +327,13 @@ pub const FIELDS: &[Field] = &[
         "Title model",
         "general",
         "OpenRouter model tried first for thread titles ([text_generation] title_model). Empty uses the free chain.",
+        Kind::Text,
+    ),
+    field(
+        "editorCommand",
+        "Editor command",
+        "general",
+        "Program Open in editor runs with the project folder ([editor] command). code is VS Code; a project on another machine opens over SSH.",
         Kind::Text,
     ),
     field(

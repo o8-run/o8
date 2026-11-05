@@ -193,6 +193,8 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   /** [text_generation] title_model: OpenRouter model tried first for thread titles.
    *  Empty = the free title chain only. */
   textGenerationTitleModel: string;
+  /** [editor] command: the editor CLI "Open in editor" runs (`code` = VS Code). */
+  editorCommand: string;
   experimentalOpencode: boolean;
   experimentalGemini: boolean;
   /**
@@ -368,6 +370,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   localEmbedModel: '',
   localChatModel: '',
   textGenerationTitleModel: '',
+  editorCommand: 'code',
   experimentalOpencode: false,
   experimentalGemini: false,
   experimentalChat: false,
@@ -502,6 +505,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.textGenerationTitleModel === 'string') {
     result.textGenerationTitleModel = stored.textGenerationTitleModel.trim();
+  }
+  if (typeof stored.editorCommand === 'string' && stored.editorCommand.trim()) {
+    result.editorCommand = stored.editorCommand.trim();
   }
   if (typeof stored.experimentalOpencode === 'boolean') {
     result.experimentalOpencode = stored.experimentalOpencode;
@@ -698,6 +704,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     localEmbedModel: envLocalEmbed ?? fileValues.localEmbedModel ?? OPERATOR_DEFAULTS_FALLBACK.localEmbedModel,
     localChatModel: envLocalChat ?? fileValues.localChatModel ?? OPERATOR_DEFAULTS_FALLBACK.localChatModel,
     textGenerationTitleModel: fileValues.textGenerationTitleModel ?? OPERATOR_DEFAULTS_FALLBACK.textGenerationTitleModel,
+    editorCommand: fileValues.editorCommand || OPERATOR_DEFAULTS_FALLBACK.editorCommand,
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
@@ -778,6 +785,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     localEmbedModel: envLocalEmbed !== null ? 'env' : fileValues.localEmbedModel !== undefined ? 'file' : 'default',
     localChatModel: envLocalChat !== null ? 'env' : fileValues.localChatModel !== undefined ? 'file' : 'default',
     textGenerationTitleModel: fileValues.textGenerationTitleModel !== undefined ? 'file' : 'default',
+    editorCommand: fileValues.editorCommand ? 'file' : 'default',
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
@@ -975,6 +983,12 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
       throw new Error('textGenerationTitleModel must be a string.');
     }
     stored.textGenerationTitleModel = update.textGenerationTitleModel.trim();
+  }
+  if (update.editorCommand !== undefined) {
+    if (typeof update.editorCommand !== 'string') {
+      throw new Error('editorCommand must be a string.');
+    }
+    stored.editorCommand = update.editorCommand.trim();
   }
   if (update.experimentalOpencode !== undefined) {
     stored.experimentalOpencode = Boolean(update.experimentalOpencode);

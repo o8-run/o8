@@ -327,6 +327,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   localEmbedModel: stringField('local_models', 'embed_model'),
   localChatModel: stringField('local_models', 'chat_model'),
   textGenerationTitleModel: stringField('text_generation', 'title_model'),
+  editorCommand: stringField('editor', 'command'),
   experimentalOpencode: booleanField('experimental', 'opencode_enabled'),
   experimentalGemini: booleanField('experimental', 'gemini_enabled'),
   experimentalChat: booleanField('experimental', 'chat_enabled'),

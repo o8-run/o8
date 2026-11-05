@@ -129,3 +129,74 @@ fn sidebar_project_row_sits_level_with_the_home_mark(cx: &mut TestAppContext) {
     assert_eq!(home, 70.);
     assert_eq!(row, 69.);
 }
+
+#[gpui::test]
+fn sidebar_project_menu_opens_the_project_in_the_editor(cx: &mut TestAppContext) {
+    let (_code, log) = crate::editor_command::fake_code::install();
+    let fixture = Fixture::start_mode(true, "--shell --composer");
+    let project = fixture
+        .client
+        .project_request(
+            "POST",
+            "/api/projects",
+            &json!({"name":"Editor project", "slug":"editor-project"}),
+        )
+        .unwrap();
+    let id = project["project"]["id"].as_str().unwrap();
+    // A folder name with a space stays one argument.
+    let path = std::path::Path::new(&fixture.folders[0])
+        .parent()
+        .unwrap()
+        .join("my project");
+    fs::create_dir(&path).unwrap();
+    Process::new("git")
+        .args(["init", "--quiet"])
+        .arg(&path)
+        .status()
+        .unwrap();
+    let path = path.to_string_lossy().into_owned();
+    let repo = fixture
+        .client
+        .project_request(
+            "POST",
+            "/api/panel/repos",
+            &json!({"action":"add", "localPath":path}),
+        )
+        .unwrap();
+    fixture
+        .client
+        .project_request(
+            "POST",
+            &format!("/api/projects/{id}/repos"),
+            &json!({"repoId":repo["repo"]["id"]}),
+        )
+        .unwrap();
+    fixture
+        .client
+        .project_request(
+            "POST",
+            "/api/panel/projects/active",
+            &json!({"projectId":id}),
+        )
+        .unwrap();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("editor.json"),
+        State::default(),
+        cx,
+    );
+    wait_for(&shell, &mut visual, |s, _| {
+        s.state.selected.as_ref() == Some(&path)
+    });
+    click(&mut visual, "sidebar-project-switcher");
+    draw(&mut visual);
+    click(&mut visual, "sidebar-open-in-editor");
+    wait_for(&shell, &mut visual, |_, _| {
+        !crate::editor_command::fake_code::args(&log).is_empty()
+    });
+    assert_eq!(crate::editor_command::fake_code::args(&log), [path]);
+    assert!(
+        visual.debug_bounds("sidebar-header-menu").is_none(),
+        "the action closes the menu"
+    );
+}
