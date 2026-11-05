@@ -62,8 +62,8 @@ impl Render for Shell {
             )
             .on_action(
                 cx.listener(|this, _: &crate::ui::RunShellLine, window, cx| {
-                    if let Some(line) = crate::ui::take_pending_shell_line() {
-                        this.run_shell_line(line, window, cx);
+                    if let Some((line, view)) = crate::ui::take_pending_shell_line() {
+                        this.run_shell_line(line, view, window, cx);
                     }
                 }),
             )

@@ -15,6 +15,8 @@ pub(super) enum NavPosition {
 pub(super) struct WorkspaceLoad {
     pub paths: BTreeSet<String>,
     pub active_project: Option<Vec<String>>,
+    /// The active project's id, which Settings resolves its project layer by.
+    pub active_project_id: Option<String>,
 }
 
 type OpenSurface = fn(&mut Shell, Command, &mut Window, &mut Context<Shell>) -> Option<(Tab, bool)>;

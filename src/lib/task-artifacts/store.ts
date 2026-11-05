@@ -3,6 +3,7 @@ import { getSqlite } from '@/lib/db';
 import type {
   TaskArtifactActionDelivery,
   TaskArtifactActionRecord,
+  MissionCardSpec,
   TaskArtifactDeclaredAction,
   TaskArtifactRecord,
   TaskArtifactState,
@@ -23,6 +24,7 @@ interface ArtifactRow {
   origin_head: string | null;
   head_policy: 'pinned' | 'any';
   actions_json: string;
+  card_json: string | null;
   state: TaskArtifactState;
   state_reason: string | null;
   created_by: TaskArtifactRecord['createdBy'];
@@ -66,6 +68,7 @@ function rowToArtifact(row: ArtifactRow): TaskArtifactRecord {
     originHead: row.origin_head,
     headPolicy: row.head_policy,
     actions: parseJson<TaskArtifactDeclaredAction[]>(row.actions_json, []),
+    card: row.card_json ? parseJson<MissionCardSpec | null>(row.card_json, null) : null,
     state: row.state,
     stateReason: row.state_reason,
     createdBy: row.created_by,
@@ -97,13 +100,14 @@ export function insertTaskArtifact(record: TaskArtifactRecord): void {
   getSqlite().prepare(`
     INSERT INTO task_artifacts (
       id, schema_version, title, html, target_kind, repo_path, thread_id, packet_id, lane_id, session_key,
-      origin_head, head_policy, actions_json, state, state_reason, created_by, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      origin_head, head_policy, actions_json, card_json, state, state_reason, created_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     record.id, record.schemaVersion, record.title, record.html,
     record.target.kind, record.target.repoPath, record.target.threadId, record.target.packetId,
     record.target.laneId, record.target.sessionKey,
     record.originHead, record.headPolicy, JSON.stringify(record.actions),
+    record.card ? JSON.stringify(record.card) : null,
     record.state, record.stateReason, record.createdBy, record.createdAt, record.updatedAt,
   );
 }
@@ -125,6 +129,32 @@ export function listTaskArtifactsByPacket(packetId: string, limit = 50): TaskArt
     'SELECT * FROM task_artifacts WHERE packet_id = ? ORDER BY created_at ASC, id ASC LIMIT ?',
   ).all(packetId, limit) as ArtifactRow[];
   return rows.map(rowToArtifact);
+}
+
+/** Mission cards on one orchestrator thread, oldest first, for the transcript. */
+export function listMissionCardsByThread(threadId: string, limit = 100): TaskArtifactRecord[] {
+  const rows = getSqlite().prepare(
+    'SELECT * FROM task_artifacts WHERE thread_id = ? AND card_json IS NOT NULL ORDER BY created_at ASC, id ASC LIMIT ?',
+  ).all(threadId, limit) as ArtifactRow[];
+  return rows.map(rowToArtifact);
+}
+
+export function listMissionCardsByPacket(packetId: string, limit = 100): TaskArtifactRecord[] {
+  const rows = getSqlite().prepare(
+    'SELECT * FROM task_artifacts WHERE packet_id = ? AND card_json IS NOT NULL ORDER BY created_at ASC, id ASC LIMIT ?',
+  ).all(packetId, limit) as ArtifactRow[];
+  return rows.map(rowToArtifact);
+}
+
+/**
+ * The one decision a card took, if any. Rejected submissions never decide a
+ * card, and a decision whose delivery failed may be made again.
+ */
+export function acceptedCardDecision(artifactId: string): TaskArtifactActionRecord | null {
+  const row = getSqlite().prepare(
+    "SELECT * FROM task_artifact_actions WHERE artifact_id = ? AND delivery IN ('accepted', 'delivered') ORDER BY created_at ASC, id ASC LIMIT 1",
+  ).get(artifactId) as ActionRow | undefined;
+  return row ? rowToAction(row) : null;
 }
 
 export function updateTaskArtifactState(id: string, state: TaskArtifactState, reason: string | null, updatedAt: string): void {

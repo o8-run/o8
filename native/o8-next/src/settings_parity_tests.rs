@@ -97,6 +97,36 @@ fn settings_parity_appearance_drives_the_running_shell(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn settings_parity_appearance_font_pickers_apply_live(cx: &mut TestAppContext) {
+    let _guard = crate::theme_font_tests::font_test_guard();
+    let (_fixture, shell, mut visual, _) = start(cx);
+    let before = crate::theme::fonts();
+    let default = crate::theme::DEFAULT_FONTS;
+    click(&mut visual, "settings-nav-appearance");
+    frame(&shell, &mut visual);
+    for kind in ["ui", "mono"] {
+        assert!(
+            visual
+                .debug_bounds(format!("setting-font-{kind}-list").leak())
+                .is_some(),
+            "{kind} font picker"
+        );
+    }
+    // The text system's families, here GPUI's fallback stack.
+    click(&mut visual, "setting-font-mono-Helvetica");
+    frame(&shell, &mut visual);
+    assert_eq!(crate::theme::current().font_mono, "Helvetica");
+    assert_eq!(crate::theme::current().font_ui, before.ui);
+    click(&mut visual, "setting-font-ui-Helvetica");
+    frame(&shell, &mut visual);
+    assert_eq!(crate::theme::current().font_ui, "Helvetica");
+    click(&mut visual, &format!("setting-font-mono-{}", default.mono));
+    click(&mut visual, &format!("setting-font-ui-{}", default.ui));
+    frame(&shell, &mut visual);
+    assert_eq!(crate::theme::fonts(), default);
+}
+
+#[gpui::test]
 fn settings_parity_appearance_imports_a_vscode_theme_and_applies_it(cx: &mut TestAppContext) {
     let _guard = crate::theme::selection_test_guard();
     let (fixture, shell, mut visual, _) = start(cx);

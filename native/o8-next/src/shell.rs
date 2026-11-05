@@ -187,6 +187,7 @@ impl Shell {
                     .filter_map(|s| s.repo_path.clone())
                     .collect(),
                 active_project: None,
+                active_project_id: None,
             };
             for registration in registrations() {
                 (registration.workspaces)(&client, &mut load);
@@ -199,6 +200,7 @@ impl Shell {
                 this.loading = false;
                 match result {
                     Ok((sessions, load)) => {
+                        this.settings_project(load.active_project_id.clone(), cx);
                         this.sessions = sessions;
                         this.workspaces = load.paths.into_iter().collect();
                         this.connected = true;
@@ -417,6 +419,9 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A sent mention's pill opens its thread or agent the same way.
+        let mention = crate::composer::mention::groups::sent_link(url);
+        let url = mention.as_deref().unwrap_or(url);
         if let Some(id) = crate::lineage::parse_link(url) {
             self.open_thread_by_id(id.to_owned(), window, cx);
         } else if let Some(number) = url.strip_prefix('#').and_then(|n| n.parse().ok()) {

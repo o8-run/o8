@@ -2677,6 +2677,14 @@
       ]
     },
     {
+      "path": "tests/comparison-diff-ref-guard-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/completion-ledger-model-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4531,6 +4539,14 @@
       "path": "tests/metrics-daily-real-path.test.ts",
       "reasons": [
         "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mission-cards-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
@@ -7137,6 +7153,15 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/settings-scope-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
         "real-path"
       ]
     },

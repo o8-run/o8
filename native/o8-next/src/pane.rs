@@ -230,10 +230,12 @@ impl Pane {
                         {
                             let previous = previous.borrow();
                             state.cards = previous.cards.clone();
+                            state.mission_card = previous.mission_card.clone();
                             state.keep_disclosure(&previous);
                         }
                         if let Some(client) = &self.client {
                             state.attach_visualizations(client);
+                            state.attach_mission_card(client, None);
                         }
                         Rc::new(RefCell::new(state))
                     })

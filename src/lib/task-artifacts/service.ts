@@ -7,9 +7,20 @@ import { isLaneTerminal } from '@/lib/lane/terminal-states';
 import { git } from '@/lib/lane/worktree-merge-git';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { steerPacket } from '@/lib/orchestrator/operator-mission-service';
+import { enqueueComposerSend } from '@/lib/orchestrator/composer-queue';
+import {
+  composeCardDecisionMessage,
+  decodeCardEntityIds,
+  encodeCardEntityIds,
+  missionCardExpired,
+  missionCardView,
+  normalizeMissionCard,
+  resolveDecisionEntityIds,
+} from './card';
 import { normalizeDeclaredActions, validateActionPayload } from './schema-validate';
 import {
   acceptedActionStats,
+  acceptedCardDecision,
   acceptedNonceExists,
   getTaskArtifactActionById,
   getTaskArtifactById,
@@ -31,6 +42,9 @@ import {
   type TaskArtifactActionRecord,
   type TaskArtifactActionStamp,
   type TaskArtifactCreator,
+  type MissionCardSpec,
+  type MissionCardView,
+  type TaskArtifactDeclaredAction,
   type TaskArtifactHeadPolicy,
   type TaskArtifactRecord,
   type TaskArtifactTarget,
@@ -101,6 +115,8 @@ export interface CreateTaskArtifactInput {
   title: unknown;
   html: unknown;
   actions: unknown;
+  /** A mission card (#5468) replaces html and actions with a native card spec. */
+  card?: unknown;
   headPolicy?: unknown;
   /** Operator-created artifacts name one of these; workers are pinned to their packet. */
   threadId?: unknown;
@@ -113,14 +129,32 @@ export async function createTaskArtifact(input: CreateTaskArtifactInput, ctx: Re
   if (!title || title.length > TASK_ARTIFACT_LIMITS.titleMaxChars) {
     throw new TaskArtifactError('invalid_request', `title is required (max ${TASK_ARTIFACT_LIMITS.titleMaxChars} chars).`, 400);
   }
-  const html = typeof input.html === 'string' ? input.html : '';
-  if (!html.trim()) throw new TaskArtifactError('invalid_request', 'html is required.', 400);
-  if (utf8Bytes(html) > TASK_ARTIFACT_LIMITS.htmlMaxBytes) {
-    throw new TaskArtifactError('html_too_large', `html exceeds ${TASK_ARTIFACT_LIMITS.htmlMaxBytes} bytes.`, 413);
+  let html = '';
+  let card: MissionCardSpec | null = null;
+  let declared: TaskArtifactDeclaredAction[];
+  if (input.card !== undefined && input.card !== null) {
+    const normalized = normalizeMissionCard(input.card);
+    if (!normalized.ok) throw new TaskArtifactError('invalid_card', 'The card is invalid.', 400, normalized.errors);
+    card = normalized.card;
+    declared = normalized.actions;
+  } else {
+    html = typeof input.html === 'string' ? input.html : '';
+    if (!html.trim()) throw new TaskArtifactError('invalid_request', 'html is required.', 400);
+    if (utf8Bytes(html) > TASK_ARTIFACT_LIMITS.htmlMaxBytes) {
+      throw new TaskArtifactError('html_too_large', `html exceeds ${TASK_ARTIFACT_LIMITS.htmlMaxBytes} bytes.`, 413);
+    }
+    const actions = normalizeDeclaredActions(input.actions);
+    if (!actions.ok) throw new TaskArtifactError('invalid_actions', 'Declared actions are invalid.', 400, actions.errors);
+    declared = actions.actions;
   }
-  const actions = normalizeDeclaredActions(input.actions);
-  if (!actions.ok) throw new TaskArtifactError('invalid_actions', 'Declared actions are invalid.', 400, actions.errors);
-  const headPolicy: TaskArtifactHeadPolicy = input.headPolicy === 'any' ? 'any' : 'pinned';
+  // A worker's card may name only its own packet, so it cannot speak on, or
+  // write events to, another packet's mission stream.
+  if (card && ctx.role === 'worker') {
+    const foreign = card.entityIds.find((id) => id.startsWith('packet:') && id !== `packet:${ctx.packetId}`);
+    if (foreign) throw new TaskArtifactError('forbidden', `A worker card may not name ${foreign}.`, 403);
+  }
+  // A card is decided once or expires; it does not freeze when HEAD moves.
+  const headPolicy: TaskArtifactHeadPolicy = card || input.headPolicy === 'any' ? 'any' : 'pinned';
 
   let target: TaskArtifactTarget;
   let createdBy: TaskArtifactCreator;
@@ -173,7 +207,8 @@ export async function createTaskArtifact(input: CreateTaskArtifactInput, ctx: Re
     target,
     originHead,
     headPolicy,
-    actions: actions.actions,
+    actions: declared,
+    card,
     state: 'live',
     stateReason: null,
     createdBy,
@@ -181,11 +216,22 @@ export async function createTaskArtifact(input: CreateTaskArtifactInput, ctx: Re
     updatedAt: createdAt,
   };
   insertTaskArtifact(record);
-  if (target.laneId) {
+  if (card) {
+    recordCardLaneEvents(record, 'card', createdBy === 'worker' ? 'system' : 'orchestrator', {
+      cardId: record.id,
+      kind: card.kind,
+      title,
+      body: card.body,
+      actions: card.actions,
+      entityIds: card.entityIds,
+      expiresAt: card.expiresAt,
+      target: { kind: target.kind, threadId: target.threadId, packetId: target.packetId },
+    });
+  } else if (target.laneId) {
     recordLaneEvent(target.laneId, 'task_artifact_created', createdBy === 'worker' ? 'system' : 'orchestrator', {
       artifactId: record.id,
       title,
-      actions: actions.actions.map((a) => a.name),
+      actions: declared.map((a) => a.name),
       originHead,
       headPolicy,
     });
@@ -196,10 +242,41 @@ export async function createTaskArtifact(input: CreateTaskArtifactInput, ctx: Re
 
 // ── Reads + writability ─────────────────────────────────────────────────────
 
+/**
+ * A card is visible on the mission stream (its target lane, or the lane of a
+ * packet it names) as `card` and `card.decision` events.
+ */
+function recordCardLaneEvents(record: TaskArtifactRecord, verb: 'card' | 'card.decision', actor: 'user' | 'orchestrator' | 'system', payload: Record<string, unknown>): void {
+  const lanes = new Set<string>();
+  if (record.target.laneId) lanes.add(record.target.laneId);
+  for (const id of record.card?.entityIds ?? []) {
+    if (!id.startsWith('packet:')) continue;
+    const lane = findLaneByPacket(id.slice('packet:'.length));
+    if (lane) lanes.add(lane.id);
+  }
+  for (const laneId of lanes) {
+    try {
+      recordLaneEvent(laneId, verb, actor, payload);
+    } catch (error) {
+      console.warn(`${LOG} ${verb} lane event for ${record.id} on ${laneId} failed:`, error);
+    }
+  }
+}
+
+/** Why a card no longer takes a decision, from durable state only. */
+function cardReadOnlyReason(record: TaskArtifactRecord): string | null {
+  if (!record.card) return null;
+  if (acceptedCardDecision(record.id)) return 'The card was already decided.';
+  if (missionCardExpired(record.card)) return 'The card expired without a decision.';
+  return null;
+}
+
 async function evaluateWritability(record: TaskArtifactRecord): Promise<TaskArtifactWritability> {
   if (record.state !== 'live') {
     return { writable: false, reason: record.stateReason ?? `artifact is ${record.state}`, currentHead: null };
   }
+  const cardReason = cardReadOnlyReason(record);
+  if (cardReason) return { writable: false, reason: cardReason, currentHead: null };
   let headCwd = record.target.repoPath;
   if (record.target.kind === 'packet') {
     const lane = record.target.laneId ? getLane(record.target.laneId) : null;
@@ -234,6 +311,7 @@ async function toView(record: TaskArtifactRecord, includeHtml: boolean): Promise
     writability,
     lastAction: lastTaskArtifactAction(record.id),
     acceptedActionCount: stats.count,
+    ...(record.card ? { card: missionCardView(record, acceptedCardDecision(record.id), writability.reason) } : {}),
   };
 }
 
@@ -262,6 +340,12 @@ export interface SubmitTaskArtifactActionInput {
   nonce: unknown;
   target: unknown;
   actor: string;
+  /**
+   * Thread targets only: the chat's routing snapshot. With it the server
+   * queues the decision as the lead's next turn on the composer queue; without
+   * it the host rides the operator's own turn (`deliverVia: 'thread'`).
+   */
+  routing?: unknown;
 }
 
 export type SubmitTaskArtifactActionResult =
@@ -269,9 +353,10 @@ export type SubmitTaskArtifactActionResult =
       accepted: true;
       action: TaskArtifactActionRecord;
       /** Packet targets are delivered here; thread targets ride the operator's own turn. */
-      deliverVia: 'packet' | 'thread';
+      deliverVia: 'packet' | 'thread' | 'queue';
       wireMessage: string;
       displayMessage: string;
+      card?: MissionCardView | null;
     }
   | { accepted: false; code: string; reason: string; action: TaskArtifactActionRecord | null };
 
@@ -388,6 +473,11 @@ export async function submitTaskArtifactAction(id: string, input: SubmitTaskArti
     return reject(record, base, 'rate_limited', `Wait ${TASK_ARTIFACT_LIMITS.minActionIntervalMs / 1000}s between submissions.`);
   }
 
+  // The awaits above can interleave two submissions; a card takes one decision,
+  // so re-check synchronously right before the insert.
+  if (record.card && acceptedCardDecision(record.id)) {
+    return reject(record, base, 'read_only', 'The card was already decided.');
+  }
   const createdAt = nowIso();
   const row: TaskArtifactActionRecord = {
     id: `tact-${randomUUID()}`,
@@ -411,7 +501,17 @@ export async function submitTaskArtifactAction(id: string, input: SubmitTaskArti
     }
     throw error;
   }
-  const message = composeActionMessage(record, action, input.payload, row.id);
+  const message = record.card
+    ? composeCardDecisionMessage(record, action, decodeCardEntityIds(input.payload), row.actor, row.id, row.createdAt)
+    : composeActionMessage(record, action, input.payload, row.id);
+  const cardView = () => missionCardView(record, row, null);
+  const cardDecisionEvent = () => {
+    if (!record.card) return;
+    recordCardLaneEvents(record, 'card.decision', 'user', {
+      cardId: record.id, receiptId: row.id, actionId: action, entityIds: decodeCardEntityIds(input.payload),
+      decidedBy: row.actor, decidedAt: row.createdAt, delivery: row.delivery, note: row.deliveryNote,
+    });
+  };
 
   if (record.target.kind === 'packet' && record.target.packetId) {
     try {
@@ -424,17 +524,45 @@ export async function submitTaskArtifactAction(id: string, input: SubmitTaskArti
       transitionTaskArtifactActionDelivery({ actionId: row.id, from: 'accepted', to: 'failed', note, deliveredAt: null });
       row.delivery = 'failed'; row.deliveryNote = note;
     }
-    if (record.target.laneId) {
+    if (record.card) {
+      cardDecisionEvent();
+    } else if (record.target.laneId) {
       recordLaneEvent(record.target.laneId, 'task_artifact_action', 'user', {
         artifactId: record.id, actionId: row.id, action, payloadHash: row.payloadHash, actor: row.actor, delivery: row.delivery, note: row.deliveryNote,
       });
     }
     console.log(`${LOG} ${row.delivery} ${row.id} on ${record.id} → packet ${record.target.packetId}`);
-    return { accepted: true, action: row, deliverVia: 'packet', ...message };
+    return { accepted: true, action: row, deliverVia: 'packet', ...message, ...(record.card ? { card: cardView() } : {}) };
   }
 
+  if (input.routing !== undefined && record.target.threadId) {
+    // The composer queue is the existing durable path to the lead's next turn;
+    // the action id is its queue identity, so a retry cannot queue it twice.
+    try {
+      const queued = enqueueComposerSend({
+        repoPath: record.target.repoPath,
+        threadId: record.target.threadId,
+        id: row.id,
+        intent: 'send-next',
+        payload: { text: message.displayMessage, wireMessage: message.wireMessage, images: [], routing: input.routing },
+      });
+      // Queued is not delivered: the receipt stays accepted, with the queue identity.
+      const note = `queued for the lead as ${queued.id}`;
+      transitionTaskArtifactActionDelivery({ actionId: row.id, from: 'accepted', to: 'accepted', note, deliveredAt: null });
+      row.deliveryNote = note;
+      cardDecisionEvent();
+      console.log(`${LOG} queued ${row.id} on ${record.id} → thread ${record.target.threadId}`);
+      return { accepted: true, action: row, deliverVia: 'queue', ...message, ...(record.card ? { card: cardView() } : {}) };
+    } catch (error) {
+      // The receipt stays accepted, so the host can still ride the operator's own turn.
+      row.deliveryNote = error instanceof Error ? error.message : String(error);
+      console.warn(`${LOG} queue delivery of ${row.id} failed: ${row.deliveryNote}`);
+    }
+  }
+
+  cardDecisionEvent();
   console.log(`${LOG} accepted ${row.id} on ${record.id} → thread ${record.target.threadId} (client delivers)`);
-  return { accepted: true, action: row, deliverVia: 'thread', ...message };
+  return { accepted: true, action: row, deliverVia: 'thread', ...message, ...(record.card ? { card: cardView() } : {}) };
 }
 
 // ── Thread delivery mark (called by the realtime server) ────────────────────
@@ -457,4 +585,45 @@ export function markThreadActionDelivered(stamp: TaskArtifactActionStamp, turn: 
   if (action.delivery !== 'accepted') return { ok: false, reason: `action is already ${action.delivery}` };
   const moved = transitionTaskArtifactActionDelivery({ actionId: action.id, from: 'accepted', to: 'delivered', note: `thread ${turn.threadId}`, deliveredAt: nowIso() });
   return moved ? { ok: true } : { ok: false, reason: 'action was delivered concurrently' };
+}
+
+// ── Mission card decisions (#5468) ──────────────────────────────────────────
+
+export interface CardDecisionInput {
+  actionId: unknown;
+  entityIds?: unknown;
+  nonce: unknown;
+  actor: string;
+  routing?: unknown;
+}
+
+/**
+ * `card.decision`: the client names the card, one declared action, and the
+ * entity ids it decides on. It becomes an ordinary task artifact action, so
+ * identity, liveness, replay, receipts, and delivery are the artifact's own.
+ */
+export async function submitCardDecision(id: string, input: CardDecisionInput): Promise<SubmitTaskArtifactActionResult> {
+  const record = getTaskArtifactById(id);
+  if (!record) throw new TaskArtifactError('not_found', `Card ${id} not found.`, 404);
+  if (!record.card) throw new TaskArtifactError('not_a_card', `Task artifact ${id} is not a card.`, 400);
+  const actionId = typeof input.actionId === 'string' ? input.actionId : '';
+  const entityIds = resolveDecisionEntityIds(record.card, input.entityIds);
+  if (!entityIds.ok) {
+    const nonce = typeof input.nonce === 'string' ? input.nonce : '';
+    return reject(record, { action: actionId, nonce, payload: { entityIds: input.entityIds ?? null }, target: record.target, actor: input.actor }, 'invalid_entities', entityIds.reason);
+  }
+  return submitTaskArtifactAction(id, {
+    action: actionId,
+    payload: { entityIds: encodeCardEntityIds(entityIds.ids) },
+    nonce: input.nonce,
+    target: record.target,
+    actor: input.actor,
+    routing: input.routing,
+  });
+}
+
+export async function getMissionCardView(id: string): Promise<MissionCardView | null> {
+  const record = getTaskArtifactById(id);
+  if (!record?.card) return null;
+  return (await toView(record, false)).card ?? null;
 }
