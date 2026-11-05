@@ -11,6 +11,10 @@ use crate::{
 use gpui::{Entity, SharedString};
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+/// How long a failed transcript read waits before the pane tries again.
+const RETRY: Duration = Duration::from_secs(5);
 
 pub(super) struct WorkerPane {
     client: Client,
@@ -20,6 +24,8 @@ pub(super) struct WorkerPane {
     detail: Option<crate::pane::Pane>,
     reading: bool,
     error: Option<String>,
+    /// When the last transcript read failed; it is retried after `RETRY`.
+    failed_at: Option<Instant>,
     composer: Entity<Composer>,
     pending: Option<Value>,
     busy: bool,
@@ -43,6 +49,7 @@ impl WorkerPane {
             detail: None,
             reading: false,
             error: None,
+            failed_at: None,
             composer,
             pending: None,
             busy: false,
@@ -78,7 +85,7 @@ impl WorkerPane {
             return;
         };
         if self.reading
-            || self.error.is_some()
+            || self.failed_at.is_some_and(|at| at.elapsed() < RETRY)
             || self
                 .detail
                 .as_ref()
@@ -98,12 +105,17 @@ impl WorkerPane {
                 this.reading = false;
                 match result {
                     Ok(history) => {
+                        this.error = None;
+                        this.failed_at = None;
                         let mut detail = crate::pane::Pane::new(Some(key));
                         detail.install(history, this.client.clone());
                         this.detail = Some(detail);
                         this.images(cx);
                     }
-                    Err(error) => this.error = Some(error),
+                    Err(error) => {
+                        this.error = Some(error);
+                        this.failed_at = Some(Instant::now());
+                    }
                 }
                 cx.notify();
             });
@@ -136,6 +148,8 @@ impl WorkerPane {
     fn closed(&self) -> Option<&'static str> {
         if self.agent.native {
             Some("This agent runs inside its chat. Steer it from there.")
+        } else if self.agent.shared {
+            Some("A teammate's agent. Steer it from its chat.")
         } else if self.gone {
             Some("This worker is no longer listed.")
         } else if self.agent.group == Group::Done {
@@ -372,7 +386,6 @@ mod tests {
     use crate::pane_tree::{Leaf, MAIN, Node, Zone};
     use crate::shell::test_support::*;
     use gpui::Modifiers;
-    use std::time::{Duration, Instant};
 
     fn setup(
         cx: &mut TestAppContext,

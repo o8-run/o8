@@ -262,6 +262,7 @@ fn join(s: &mut Shell, cx: &mut Context<Shell>) {
         .filter(|agent| {
             agent.group == crate::subagents::model::Group::Working
                 && !agent.native
+                && !agent.shared
                 && agent.session.is_some()
                 && !shown.contains(&agent.id)
                 && !dismissed.contains(&agent.id)

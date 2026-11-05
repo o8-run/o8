@@ -5,7 +5,6 @@
 // listed as an agent; ending the preview puts the workspace's own panes back.
 use super::*;
 use crate::pane_tree::{Leaf, Node, Zone};
-use gpui::SharedString;
 use std::time::Duration;
 
 /// Classic's simulated workers: name, task, status and latest note.
