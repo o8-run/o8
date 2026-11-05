@@ -181,6 +181,7 @@ pub(crate) struct Surface {
     routing: Option<Value>,
     queue: Value,
     queue_ready: bool,
+    changes_pill: conversation::ChangesPill,
     saving: bool,
     /// After a send from this view, the row count it started at; the view
     /// follows that turn to its reply.
@@ -271,6 +272,7 @@ impl Surface {
             routing: None,
             queue: Value::Null,
             queue_ready: false,
+            changes_pill: Default::default(),
             saving: false,
             following: None,
             send_next: false,

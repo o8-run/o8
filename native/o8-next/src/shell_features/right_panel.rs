@@ -345,6 +345,20 @@ impl Shell {
     ) {
         open_file_at(self, path, line, window, cx);
     }
+    /// Opens a changed file's diff in this workspace's Files › Changes.
+    pub(crate) fn open_change_link(
+        &mut self,
+        path: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        show(self, Tool::Files, window, cx);
+        let key = key(self, Tool::Files);
+        let view = self.features.get::<Panel>().files.get(&key).cloned();
+        if let Some(view) = view {
+            view.update(cx, |view, cx| view.open_change(&path, window, cx));
+        }
+    }
     /// Runs a composer `!` line in this workspace's terminal. The view's card
     /// learns where the terminal stood first, then follows it on each tick.
     pub(crate) fn run_shell_line(
