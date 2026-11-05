@@ -30,7 +30,7 @@ jobs:
     name: ${{ github.event_name == 'pull_request_target' && 'o8 next surface boundary' || 'o8 next surface boundary (bootstrap)' }}
     if: github.event_name == 'pull_request_target' || github.event.pull_request.base.sha == '417586b6b00e55f4759fc95a68091ffad7596213'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       BASE_REF: origin/main
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
