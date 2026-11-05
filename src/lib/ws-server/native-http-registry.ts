@@ -53,6 +53,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
     route('/api/cortex/proposals', 'GET POST', () => import('@/app/api/cortex/proposals/route')),
+    route('/api/panel/problem-dossiers', 'GET', () => import('@/app/api/panel/problem-dossiers/route')),
     route('/api/panel/commits', 'GET', () => import('@/app/api/panel/commits/route')),
     route('/api/panel/ci', 'GET', () => import('@/app/api/panel/ci/route')),
     route('/api/panel/ci/[id]', 'GET', () => import('@/app/api/panel/ci/[id]/route')),

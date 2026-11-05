@@ -35,11 +35,11 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/browse-folder',
   '/api/panel/devices',
   '/api/panel/o8-update-summary',
-  '/api/panel/problem-dossiers',
   '/api/panel/update/apply',
   '/api/repo-spec/asset',
   '/api/tasks',
   '/api/tasks/[id]/preview',
+  '/api/task-artifacts/[id]/decision', // Mission card decision (#5516): a POST, outside the Phase A reads.
   '/api/tts',
   '/api/worktrees/retention-usage', // resolveManagedWorktreeStorageTarget creates the default root.
 ]);
