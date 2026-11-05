@@ -22,6 +22,12 @@ the next send. Refused updates retain the previous selection and the draft.
 An asynchronous completion belongs to its originating composer; changing sessions
 cannot apply it to another draft or take that draft's focus.
 
+While a chat that New chat made is still empty, a project chip sits above the
+card (`src/composer/project_bar.rs`). It opens a "Work in" list read once from
+`/api/panel/repos`, with a check on the current project. Choosing another
+project starts, or reuses, that project's empty chat through the sidebar's New
+thread path. The chip leaves after the first message is sent.
+
 ## Shortcuts reference
 
 Command means Cmd on macOS or Ctrl on Linux. Ctrl aliases for clipboard and undo
