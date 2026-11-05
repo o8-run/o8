@@ -102,8 +102,10 @@ impl Port for PacketDiff {
     #[cfg(test)]
     fn ready(view: &Entity<Self::View>, cx: &App) -> bool {
         let view = view.read(cx);
-        // A clean working tree has no rows to paint.
-        view.ready && (!view.painted.borrow().is_empty() || view.document.files.is_empty())
+        // A clean working tree has no rows to paint, and a failed read
+        // settles on its error notice.
+        view.failed
+            || view.ready && (!view.painted.borrow().is_empty() || view.document.files.is_empty())
     }
 }
 impl Client {

@@ -58,6 +58,9 @@ fn palette_keyboard_opens_all_surfaces_and_switches_workspaces(cx: &mut TestAppC
         shell.read_with(cx, |s, _| s.active().unwrap().label()),
         "Diff"
     );
+    // Review opens on the working changes; the targets list (ctrl-alt-O, or
+    // the switch control) is where a packet is picked by name.
+    cx.simulate_keystrokes("ctrl-alt-o");
     cx.simulate_keystrokes("r e j e c t enter");
     settled(&shell, cx);
     shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
