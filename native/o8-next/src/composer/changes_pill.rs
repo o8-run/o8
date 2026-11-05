@@ -64,13 +64,22 @@ impl Surface {
 
     pub(super) fn sync_changes_pill(&mut self, cx: &mut Context<Self>) {
         let Some(workspace) = self.changes_workspace() else {
-            self.changes_pill.key = None;
-            self.changes_pill.files.clear();
+            self.changes_pill = ChangesPill {
+                generation: self.changes_pill.generation,
+                ..Default::default()
+            };
             return;
         };
         let key = (workspace.clone(), self.turn_running());
         if self.changes_pill.key.as_ref() == Some(&key) {
             return;
+        }
+        // Another workspace's files never show over this one, even while its
+        // own read is in flight or after it fails.
+        if self.changes_pill.key.as_ref().map(|k| &k.0) != Some(&workspace) {
+            self.changes_pill.files.clear();
+            self.changes_pill.over_pill = false;
+            self.changes_pill.over_list = false;
         }
         self.changes_pill.key = Some(key);
         self.changes_pill.generation += 1;
@@ -88,7 +97,8 @@ impl Surface {
                 if generation != this.changes_pill.generation {
                     return;
                 }
-                // A failed read keeps the last list rather than flashing empty.
+                // A failed read keeps this workspace's last list rather than
+                // flashing empty.
                 let Ok(body) = result else { return };
                 if !body["error"].is_null() {
                     return;
