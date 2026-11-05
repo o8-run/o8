@@ -379,6 +379,10 @@ impl ThreadList {
     pub(crate) fn new_thread(&mut self, repo: String, cx: &mut Context<Self>) {
         self.start_thread(repo, true, cx);
     }
+    /// Whether `path` is a repository this machine has registered.
+    pub(crate) fn knows_repo(&self, path: &str) -> bool {
+        self.header.repos.iter().any(|r| r.local_path == path)
+    }
     /// Starts a conversation without opening it in the main pane when `open`
     /// is false (a split pane shows it); returns its id.
     pub(crate) fn start_thread(&mut self, repo: String, open: bool, cx: &mut Context<Self>) -> String {

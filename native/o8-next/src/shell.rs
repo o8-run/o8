@@ -436,8 +436,11 @@ impl Shell {
             self.open_change_link(path.to_owned(), window, cx);
         } else if let Some(repo) = url.strip_prefix("o8-new-thread:") {
             // An empty chat's project bar: start (or reuse) the empty chat in
-            // that project, as the sidebar's New thread menu does.
-            if let Some(list) = self.surfaces.sidebar.view.clone() {
+            // that project, as the sidebar's New thread menu does. Only a
+            // registered project, since a transcript link can name any path.
+            if let Some(list) = self.surfaces.sidebar.view.clone()
+                && (self.workspaces.iter().any(|w| w == repo) || list.read(cx).knows_repo(repo))
+            {
                 let repo = repo.to_owned();
                 list.update(cx, |list, cx| list.new_thread(repo, cx));
             }
