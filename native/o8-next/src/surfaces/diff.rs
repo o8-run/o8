@@ -2,6 +2,9 @@ use super::palette::target::{Choice, Picker, Port};
 use super::*;
 use serde_json::Value;
 
+#[path = "diff_git.rs"]
+pub(super) mod git;
+
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Slice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -83,6 +86,20 @@ impl Port for PacketDiff {
     /// A packet asked for by name (restored, or opened from Activity) that
     /// is not listed shows the list, never the working changes instead.
     const OWN_REPLACES_UNLISTED: bool = false;
+    /// The working changes get Commit, Push and Open pull request.
+    fn bar(
+        client: &Client,
+        id: &str,
+        child: &Entity<Self::View>,
+        cx: &mut App,
+    ) -> Option<gpui::AnyView> {
+        let workspace = id.strip_prefix(WORKING)?.to_owned();
+        let (client, diff) = (client.clone(), child.downgrade());
+        Some(
+            cx.new(|cx| git::GitActions::new(client, workspace, diff, cx))
+                .into(),
+        )
+    }
     fn create(
         client: Client,
         id: String,
