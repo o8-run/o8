@@ -19,6 +19,8 @@ pub enum Leaf {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<String>,
     },
+    /// One worker's card in the automatic grid.
+    Worker { agent: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -212,9 +214,86 @@ impl Node {
             }
         }
     }
+    /// rebalanceAutomaticSessionTiles: the main pane keeps one full-height
+    /// column and the workers fill the rest in even rows, two columns up to
+    /// four workers, three up to eight, then four, and never more than
+    /// `max_columns` fit beside the main pane.
+    pub fn worker_grid(main: Node, workers: Vec<Node>, max_columns: usize) -> Node {
+        let count = workers.len();
+        if count == 0 {
+            return main;
+        }
+        let columns = match count {
+            ..=4 => 2,
+            ..=8 => 3,
+            _ => 4,
+        }
+        .min(max_columns.max(1));
+        let rows = count.div_ceil(columns);
+        let (base, extra) = (count / rows, count % rows);
+        let mut workers = workers.into_iter();
+        let rows = (0..rows)
+            .map(|row| {
+                let size = base + usize::from(row < extra);
+                even(workers.by_ref().take(size).collect(), true)
+            })
+            .collect();
+        Node::Split {
+            id: "grid".into(),
+            vertical: true,
+            ratio: grid_main_ratio(count),
+            children: Box::new([main, even(rows, false)]),
+        }
+    }
+    /// How many rows a stack of rows holds; anything else is one row.
+    pub fn rows(&self) -> usize {
+        match self {
+            Node::Split {
+                vertical: false,
+                children,
+                ..
+            } => children[0].rows() + children[1].rows(),
+            _ => 1,
+        }
+    }
     /// Only the main pane left: the workspace has no splits.
     pub fn is_single(&self) -> bool {
         matches!(self, Node::Leaf { .. })
+    }
+}
+
+/// automaticChatRatio: the main pane narrows as workers arrive.
+fn grid_main_ratio(workers: usize) -> f32 {
+    match workers {
+        ..=1 => 0.5,
+        ..=3 => 0.4,
+        4 => 0.38,
+        ..=6 => 0.32,
+        ..=8 => 0.28,
+        _ => 0.24,
+    }
+}
+
+/// equalSplit: halves that keep every node the same size. A split is named
+/// for the nodes it holds, so a rebuilt grid keeps its dividers' ids.
+fn even(mut nodes: Vec<Node>, vertical: bool) -> Node {
+    if nodes.len() == 1 {
+        return nodes.remove(0);
+    }
+    let first = nodes.len() / 2;
+    let id = format!(
+        "grid-{}-{}-{}",
+        if vertical { "row" } else { "rows" },
+        nodes[0].id(),
+        nodes[nodes.len() - 1].id()
+    );
+    let ratio = first as f32 / nodes.len() as f32;
+    let second = nodes.split_off(first);
+    Node::Split {
+        id,
+        vertical,
+        ratio,
+        children: Box::new([even(nodes, vertical), even(second, vertical)]),
     }
 }
 
@@ -236,6 +315,97 @@ mod tests {
         unique.dedup();
         assert_eq!(ids.len(), unique.len(), "{ids:?}");
         assert!(ids.contains(&"split-a-2".to_owned()), "{ids:?}");
+    }
+    fn worker(n: usize) -> Node {
+        Node::Leaf {
+            id: format!("w{n}"),
+            content: Leaf::Worker {
+                agent: format!("agent {n}"),
+            },
+        }
+    }
+    /// Each row's worker ids, top to bottom.
+    fn rows(node: &Node) -> Vec<Vec<String>> {
+        match node {
+            Node::Split {
+                vertical: false,
+                children,
+                ..
+            } => {
+                let mut all = rows(&children[0]);
+                all.extend(rows(&children[1]));
+                all
+            }
+            row => vec![row.leaves().iter().map(|(id, _)| id.to_string()).collect()],
+        }
+    }
+    fn grid(count: usize) -> (f32, Vec<Vec<String>>) {
+        let Node::Split {
+            id,
+            vertical: true,
+            ratio,
+            children,
+        } = Node::worker_grid(Node::main(), (1..=count).map(worker).collect(), 4)
+        else {
+            panic!("a grid beside main")
+        };
+        assert_eq!((id.as_str(), children[0].id()), ("grid", MAIN));
+        (ratio, rows(&children[1]))
+    }
+    #[test]
+    fn workers_fill_even_rows_beside_a_narrowing_main_pane() {
+        let (ratio, shape) = grid(1);
+        assert_eq!((ratio, shape), (0.5, vec![vec!["w1".to_string()]]));
+        let (ratio, shape) = grid(4);
+        assert_eq!(ratio, 0.38);
+        assert_eq!(shape.iter().map(Vec::len).collect::<Vec<_>>(), [2, 2]);
+        let (ratio, shape) = grid(7);
+        assert_eq!(ratio, 0.28);
+        assert_eq!(shape.iter().map(Vec::len).collect::<Vec<_>>(), [3, 2, 2]);
+        let (ratio, shape) = grid(10);
+        assert_eq!(ratio, 0.24);
+        assert_eq!(shape.iter().map(Vec::len).collect::<Vec<_>>(), [4, 3, 3]);
+        assert_eq!(shape[0], ["w1", "w2", "w3", "w4"]);
+        assert_eq!(shape[2], ["w8", "w9", "w10"]);
+        let Node::Split { children, .. } =
+            Node::worker_grid(Node::main(), (1..=10).map(worker).collect(), 4)
+        else {
+            panic!("a grid beside main")
+        };
+        assert_eq!(children[1].rows(), 3);
+        assert!(Node::worker_grid(Node::main(), vec![], 4).is_single());
+        // A narrow pane keeps two columns and adds rows instead.
+        let Node::Split { children, .. } =
+            Node::worker_grid(Node::main(), (1..=10).map(worker).collect(), 2)
+        else {
+            panic!("a grid beside main")
+        };
+        let narrow = rows(&children[1]);
+        assert_eq!(
+            narrow.iter().map(Vec::len).collect::<Vec<_>>(),
+            [2, 2, 2, 2, 2]
+        );
+    }
+    #[test]
+    fn a_rebuilt_grid_keeps_its_divider_ids_and_closing_reflows() {
+        let ten = Node::worker_grid(Node::main(), (1..=10).map(worker).collect(), 4);
+        let mut again = vec![];
+        Node::worker_grid(Node::main(), (1..=10).map(worker).collect(), 4).ids(&mut again);
+        let mut first = vec![];
+        ten.ids(&mut first);
+        assert_eq!(first, again);
+        let mut unique = first.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(
+            unique.len(),
+            first.len(),
+            "every pane and divider has its own id"
+        );
+        let mut closed = ten;
+        assert!(closed.close("w5"));
+        assert_eq!(closed.leaves().len(), 10, "main and nine workers");
+        assert!(!closed.close(MAIN));
     }
     fn chat(id: &str) -> Leaf {
         Leaf::Chat {

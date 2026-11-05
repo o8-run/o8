@@ -2,6 +2,8 @@ use super::*;
 use crate::pane_tree::{Leaf, MAIN, Node, Zone};
 use gpui::{DragMoveEvent, SharedString};
 use std::collections::{HashMap, HashSet};
+#[path = "panes/preview.rs"]
+mod preview;
 // The workspace's split panes, as classic's TileContainer: drag the rail's
 // Run orchestrator or Run terminal onto any pane and let go near an edge to
 // split it there, as many times as you like. Each pane after the first holds
@@ -16,6 +18,12 @@ impl ShellFeature for Panes {
             run: |s, _, window, cx| ensure(s, window, cx),
         }]
     }
+    fn commands(&self) -> &'static [PaletteCommands] {
+        &[PaletteCommands {
+            order: 80,
+            collect: preview::commands,
+        }]
+    }
 }
 
 #[derive(Default)]
@@ -26,6 +34,10 @@ struct State {
     starting: HashSet<String>,
     failed: HashMap<String, String>,
     resizing: bool,
+    /// The worker grid's layout preview, shown instead of the saved panes.
+    preview: Option<preview::Preview>,
+    /// Bumped by each preview start or end, so an older run stops adding.
+    preview_run: u64,
 }
 
 /// A dragged divider, by its split's id.
@@ -37,18 +49,49 @@ impl Render for Divider {
     }
 }
 
+/// The main pane never gets narrower than this beside a worker grid.
+const MAIN_MIN: f32 = 400.;
+/// The shortest a row of worker cards gets before the grid scrolls.
+const WORKER_ROW_MIN: f32 = 150.;
+
 fn workspace(s: &Shell) -> String {
     s.state.selected.clone().unwrap_or_default()
 }
 fn key(s: &Shell, leaf: &str) -> String {
     format!("pane|{}|{leaf}", workspace(s))
 }
+/// The worker preview this workspace shows, if any.
+fn previewing(s: &Shell) -> Option<&preview::Preview> {
+    let ws = workspace(s);
+    s.features
+        .read::<State>()?
+        .preview
+        .as_ref()
+        .filter(|preview| preview.workspace == ws)
+}
 fn tree(s: &Shell) -> Node {
+    match previewing(s) {
+        Some(preview) => preview.tree.clone(),
+        None => saved(s),
+    }
+}
+/// The workspace's own panes, under any preview.
+fn saved(s: &Shell) -> Node {
     s.current()
         .and_then(|w| w.panes.clone())
         .unwrap_or_else(Node::main)
 }
 fn save_tree(s: &mut Shell, tree: Node) {
+    // A preview's panes are never saved.
+    if previewing(s).is_some() {
+        if let Some(preview) = s.features.get::<State>().preview.as_mut() {
+            preview.tree = tree;
+        }
+        return;
+    }
+    save_saved(s, tree);
+}
+fn save_saved(s: &mut Shell, tree: Node) {
     let Some(w) = s
         .state
         .selected
@@ -63,6 +106,11 @@ fn save_tree(s: &mut Shell, tree: Node) {
 
 /// Creates each pane's content once its chat is listed or its shell exists.
 fn ensure(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    // A preview belongs to the workspace it started in.
+    let state = s.features.get::<State>();
+    if state.preview.is_some() && previewing(s).is_none() {
+        preview::end(s, cx);
+    }
     let Some(panes) = s.current().and_then(|w| w.panes.clone()) else {
         return;
     };
@@ -114,6 +162,8 @@ fn ensure(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                 s.content.insert(key, Content::Terminal(view));
             }
             Leaf::Terminal { session: None } => start_terminal(s, id.to_owned(), cx),
+            // Workers draw from their agent, with no view of their own.
+            Leaf::Worker { .. } => {}
         }
     }
 }
@@ -136,10 +186,12 @@ fn start_terminal(s: &mut Shell, leaf: String, cx: &mut Context<Shell>) {
             s.features.get::<State>().starting.remove(&leaf);
             match result {
                 Ok(session) => {
-                    let mut tree = tree(s);
+                    // The shell belongs to the workspace's own panes, even
+                    // while a preview shows.
+                    let mut tree = saved(s);
                     if let Some(Leaf::Terminal { session: slot }) = tree.leaf_mut(&leaf) {
                         *slot = Some(session);
-                        save_tree(s, tree);
+                        save_saved(s, tree);
                     }
                 }
                 Err(error) => {
@@ -154,6 +206,10 @@ fn start_terminal(s: &mut Shell, leaf: String, cx: &mut Context<Shell>) {
 
 /// Splits `target` with a new chat or terminal pane where it was dropped.
 fn split(s: &mut Shell, target: &str, zone: Zone, pane: super::RailPane, cx: &mut Context<Shell>) {
+    // Simulated workers take no real chat or shell beside them.
+    if previewing(s).is_some() {
+        return;
+    }
     let leaf = match pane {
         super::RailPane::Chat => match s.start_thread(false, cx) {
             Some(session) => Leaf::Chat { session },
@@ -200,6 +256,9 @@ fn split(s: &mut Shell, target: &str, zone: Zone, pane: super::RailPane, cx: &mu
 
 /// Moves a pane beside `target`, keeping its id so its chat or terminal view stays.
 fn move_pane(s: &mut Shell, leaf: &str, target: &str, zone: Zone, cx: &mut Context<Shell>) {
+    if previewing(s).is_some() {
+        return;
+    }
     let mut tree = tree(s);
     let Some(content) = tree
         .leaves()
@@ -219,6 +278,10 @@ fn move_pane(s: &mut Shell, leaf: &str, target: &str, zone: Zone, cx: &mut Conte
 }
 
 fn close(s: &mut Shell, leaf: &str, cx: &mut Context<Shell>) {
+    if let Some(preview) = s.features.get::<State>().preview.as_mut() {
+        preview.close(leaf);
+        return cx.notify();
+    }
     let mut tree = tree(s);
     if tree.close(leaf) {
         let key = key(s, leaf);
@@ -241,7 +304,8 @@ pub(super) fn element(s: &mut Shell, main: AnyElement, cx: &mut Context<Shell>) 
     }
     let tree = tree(s);
     let mut main = Some(main);
-    node(s, &tree, &mut main, cx)
+    let panes = node(s, &tree, &mut main, cx);
+    preview::wrap(s, panes, cx)
 }
 
 fn node(
@@ -287,7 +351,15 @@ fn node(
                             )
                         };
                         let mut tree = tree(s);
-                        if tree.resize(&split, f32::from(at) / f32::from(size).max(1.)) {
+                        let size = f32::from(size).max(1.);
+                        // The main pane's floor beside a worker grid.
+                        let floor = if split == "grid" { MAIN_MIN / size } else { 0. };
+                        if tree.resize(&split, (f32::from(at) / size).max(floor)) {
+                            if let Some(preview) = s.features.get::<State>().preview.as_mut() {
+                                preview.tree = tree;
+                                preview.manual = true;
+                                return cx.notify();
+                            }
                             if let Some(w) = s
                                 .state
                                 .selected
@@ -309,19 +381,39 @@ fn node(
                         .min_h_0()
                         .overflow_hidden()
                         .when(vertical, |d| d.h_full().w(gpui::relative(ratio)))
+                        .when(id == "grid", |d| d.min_w(px(MAIN_MIN)))
                         .when(!vertical, |d| d.w_full().h(gpui::relative(ratio)))
                         .child(first),
                 )
                 .child(divider(id, vertical))
-                .child(
+                .child(if id == "grid" {
+                    // compactWorkerScrollRows: rows keep a readable height
+                    // and the workers scroll beside the full-height main pane.
+                    let rows = children[1].rows() as f32;
+                    div()
+                        .id("pane-grid-workers")
+                        .flex_1()
+                        .min_w_0()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .child(
+                            div()
+                                .flex()
+                                .size_full()
+                                .min_h(px(rows * WORKER_ROW_MIN))
+                                .child(second),
+                        )
+                        .into_any_element()
+                } else {
                     div()
                         .flex()
                         .flex_1()
                         .min_w_0()
                         .min_h_0()
                         .overflow_hidden()
-                        .child(second),
-                )
+                        .child(second)
+                        .into_any_element()
+                })
                 .into_any_element()
         }
     }
@@ -329,6 +421,9 @@ fn node(
 
 fn divider(id: &str, vertical: bool) -> impl IntoElement {
     let drag = Divider(id.to_owned());
+    // Worker cards carry their own edges; only the main pane's divider draws
+    // a line.
+    let line = !id.starts_with("grid-");
     let group = format!("pane-divider-{id}");
     div()
         .id(SharedString::from(format!("pane-divider-{id}")))
@@ -343,12 +438,14 @@ fn divider(id: &str, vertical: bool) -> impl IntoElement {
         .justify_center()
         .when(vertical, |d| d.w(px(6.)).h_full().cursor_col_resize())
         .when(!vertical, |d| d.h(px(6.)).w_full().cursor_row_resize())
-        .child(
-            div()
-                .bg(theme().border)
-                .when(vertical, |d| d.w(px(1.)).h_full())
-                .when(!vertical, |d| d.h(px(1.)).w_full()),
-        )
+        .when(line, |d| {
+            d.child(
+                div()
+                    .bg(theme().border)
+                    .when(vertical, |d| d.w(px(1.)).h_full())
+                    .when(!vertical, |d| d.h(px(1.)).w_full()),
+            )
+        })
         .child(crate::theme::split_line(group, vertical, 2.5, false))
         .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
 }
@@ -367,6 +464,7 @@ fn leaf(
         .map(|(_, zone)| zone);
     let body = match content {
         Leaf::Main => main.take().unwrap_or_else(|| div().into_any_element()),
+        Leaf::Worker { agent } => preview::card(s, id, agent, cx),
         _ => s
             .content
             .get(&key(s, id))
@@ -397,6 +495,8 @@ fn leaf(
                 .unwrap_or_else(|| "New chat".into()),
         ),
         Leaf::Terminal { .. } => Some("Terminal".into()),
+        // A worker's card is its own header.
+        Leaf::Worker { .. } => None,
     };
     let (over, dropped) = (id.to_owned(), id.to_owned());
     div()
@@ -487,6 +587,10 @@ fn track(
     bounds: gpui::Bounds<gpui::Pixels>,
     cx: &mut Context<Shell>,
 ) {
+    // A preview takes no drops, so it shows no drop target.
+    if previewing(s).is_some() {
+        return;
+    }
     let state = s.features.get::<State>();
     let next = if bounds.contains(&position) {
         let x = f32::from(position.x - bounds.left()) / f32::from(bounds.size.width).max(1.);
