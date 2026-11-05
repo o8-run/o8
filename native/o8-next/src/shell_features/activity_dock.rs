@@ -803,9 +803,15 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
             };
             // Red only for this workspace's workers waiting on a person.
             let badge = match each {
-                Pane::Plan if remaining > 0 => Some((remaining as u64, theme().text_muted)),
-                Pane::Agents if working > 0 => Some((working as u64, theme().accent)),
-                Pane::Tasks if waiting > 0 => Some((waiting, theme().danger)),
+                Pane::Plan if remaining > 0 => Some((
+                    remaining as u64,
+                    theme().text_secondary,
+                    crate::theme::popover_background(),
+                )),
+                Pane::Agents if working > 0 => {
+                    Some((working as u64, theme().accent, gpui::white().into()))
+                }
+                Pane::Tasks if waiting > 0 => Some((waiting, theme().danger, gpui::white().into())),
                 _ => None,
             };
             div()
@@ -823,7 +829,7 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
                 .hover(|button| button.bg(theme().hover))
                 .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(each.tip().into())).into())
                 .child(crate::icon::stroke(icon, tint, 16., 1.7))
-                .when_some(badge, |button, (count, tone)| {
+                .when_some(badge, |button, (count, tone, ink)| {
                     button.child(
                         div()
                             .absolute()
@@ -841,7 +847,7 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
                             .border_color(crate::theme::popover_background())
                             .text_size(px(9.5))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(gpui::white())
+                            .text_color(ink)
                             .child(count.to_string()),
                     )
                 })
