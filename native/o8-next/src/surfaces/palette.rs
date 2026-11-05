@@ -17,6 +17,9 @@ pub(super) enum Entry {
 impl Entry {
     pub(super) fn label(&self, sessions: &[Session]) -> String {
         match self {
+            Self::Workspace(path) if super::session::is_home(path) => {
+                "Work without a project: Home".into()
+            }
             Self::Workspace(path) => format!(
                 "Switch workspace: {}",
                 std::path::Path::new(path)
@@ -58,6 +61,11 @@ pub(super) fn entries(shell: &Shell) -> Vec<Entry> {
     };
     if registry::extensions().all(|extension| extension.allow_switch(shell)) {
         entries.extend(shell.workspaces.iter().cloned().map(Entry::Workspace));
+        entries.extend(
+            super::session::home_workspace()
+                .filter(|home| !shell.workspaces.contains(home))
+                .map(Entry::Workspace),
+        );
     }
     let query = shell.query.to_lowercase();
     entries

@@ -204,11 +204,13 @@ impl Shell {
                         this.sessions = sessions;
                         this.workspaces = load.paths.into_iter().collect();
                         this.connected = true;
-                        if let Some(active) = load.active_project {
+                        // Home stays selected: it belongs to no project.
+                        let home = this.state.selected.as_deref().is_some_and(session::is_home);
+                        if let Some(active) = load.active_project.filter(|_| !home) {
                             if !this.state.selected.as_ref().is_some_and(|w| active.contains(w)) {
                                 this.state.selected = active.first().cloned();
                             }
-                        } else if !this.state.selected.as_ref().is_some_and(|w| this.workspaces.contains(w)) {
+                        } else if !home && !this.state.selected.as_ref().is_some_and(|w| this.workspaces.contains(w)) {
                             this.state.selected = this.workspaces.first().cloned();
                         }
                         this.notice.clear();
@@ -342,7 +344,7 @@ impl Shell {
     }
     fn switch(&mut self, workspace: String, window: &mut Window, cx: &mut Context<Self>) {
         if !registry::extensions().all(|extension| extension.allow_switch(self))
-            || !self.workspaces.contains(&workspace)
+            || !(self.workspaces.contains(&workspace) || session::is_home(&workspace))
         {
             return;
         }
