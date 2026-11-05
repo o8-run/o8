@@ -329,18 +329,30 @@ impl PullRequests {
                 self.detail["deletions"].as_u64().unwrap_or(0)
             ))
             .child(
-                small_button("pr-files-toggle".into(), if all_open { "Collapse all" } else { "Expand all" })
-                    .on_click(cx.listener(move |s, _, _, cx| {
-                        if all_open {
-                            s.open_files.clear();
-                        } else {
-                            s.open_files = array(&s.detail, "files")
-                                .iter()
-                                .map(|f| string(f, "path").to_owned())
-                                .collect();
-                        }
-                        s.changed(cx);
-                    })),
+                div()
+                    .flex()
+                    .gap(px(6.))
+                    .child(
+                        small_button("pr-diff-view".into(), if self.split_diff { "Unified" } else { "Split" })
+                            .on_click(cx.listener(|s, _, _, cx| {
+                                s.split_diff = !s.split_diff;
+                                s.changed(cx);
+                            })),
+                    )
+                    .child(
+                        small_button("pr-files-toggle".into(), if all_open { "Collapse all" } else { "Expand all" })
+                            .on_click(cx.listener(move |s, _, _, cx| {
+                                if all_open {
+                                    s.open_files.clear();
+                                } else {
+                                    s.open_files = array(&s.detail, "files")
+                                        .iter()
+                                        .map(|f| string(f, "path").to_owned())
+                                        .collect();
+                                }
+                                s.changed(cx);
+                            })),
+                    ),
             );
         let mut list = div().flex().flex_col().px(px(12.)).gap(px(6.));
         for (i, f) in files.iter().enumerate() {
@@ -383,42 +395,31 @@ impl PullRequests {
                         })),
                 );
             if open {
-                let patch = f["patch"].as_str();
-                let mut lines = div()
-                    .border_t_1()
-                    .border_color(theme().border)
-                    .py(px(4.))
-                    .font_family(theme().font_mono)
-                    .text_size(px(11.))
-                    .flex()
-                    .flex_col();
-                match patch {
+                // GitHub's patch is hunks only; the shared diff rows number
+                // both sides and pair each removal with its replacement.
+                let body = match f["patch"].as_str() {
                     Some(patch) => {
-                        for line in patch.lines() {
-                            let (bg, color) = match line.chars().next() {
-                                Some('+') => (Some(theme().success_surface), theme().text),
-                                Some('-') => (Some(theme().danger_surface), theme().text),
-                                Some('@') => (None, theme().text_muted),
-                                _ => (None, theme().text_secondary),
-                            };
-                            lines = lines.child(
-                                div()
-                                    .px(px(10.))
-                                    .min_h(px(17.))
-                                    .when_some(bg, |l, bg| l.bg(bg))
-                                    .text_color(color)
-                                    .whitespace_nowrap()
-                                    .child(if line.is_empty() { " ".to_owned() } else { line.to_owned() }),
-                            );
-                        }
+                        let mut scroll = div().id(("pr-file-diff", i)).overflow_x_scroll().py(px(4.));
+                        // A vertical wheel over a wide split diff scrolls the
+                        // PR, not the file sideways.
+                        scroll.style().restrict_scroll_to_axis = Some(true);
+                        scroll
+                            .child(crate::files_panel::file_diff::rows(
+                                &crate::files_panel::file_diff::parse(patch),
+                                self.split_diff,
+                                &format!("pr-file-{i}"),
+                            ))
+                            .into_any_element()
                     }
-                    None => {
-                        lines = lines.child(
-                            div().px(px(10.)).py(px(6.)).text_color(theme().text_muted).child("Patch unavailable. Open GitHub to inspect this file."),
-                        )
-                    }
-                }
-                file = file.child(lines);
+                    None => div()
+                        .px(px(10.))
+                        .py(px(6.))
+                        .text_size(px(11.))
+                        .text_color(theme().text_muted)
+                        .child("Patch unavailable. Open GitHub to inspect this file.")
+                        .into_any_element(),
+                };
+                file = file.child(div().border_t_1().border_color(theme().border).child(body));
             }
             list = list.child(file);
         }

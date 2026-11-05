@@ -76,7 +76,7 @@ packet gates. Disable auto-merge remains available. This is an explicit parity g
 | Review comment, Approve, Request changes, Use latest commit | Head-pinned review controls | Ported |
 | Busy, uncertain delivery, acknowledge after checking GitHub | App-wide per-repository/PR delivery state shared across workspaces | Ported |
 | Summary, description, review decision, diff totals | Plain native summary | Partial; collapse and review guide missing |
-| Changes, file tree, open/collapse files, split/unified, syntax highlighting | Plain file patches with unavailable notice | Partial; file navigation and diff controls missing |
+| Changes, file tree, open/collapse files, split/unified, syntax highlighting | Open/collapse files; numbered unified or split rows shared with Files › Changes; unavailable notice | Partial; file tree, file filter and syntax highlighting missing |
 | Checks, buckets, View run | Desktop-ordered status buckets and View run | Ported |
 | Fix failing checks, selection, Start repair, receipt retry, open owner/worker | None | Missing |
 | Timeline, sort order, pagination, commits | None | Missing |

@@ -99,6 +99,9 @@ pub struct PullRequests {
     pub notice: String,
     pub review_action: &'static str,
     pub open_files: std::collections::HashSet<String>,
+    /// Changes shows each patch side by side instead of unified; it holds
+    /// across PRs, as the desktop ChangesTab's view toggle does.
+    pub split_diff: bool,
     /// The Timeline tab's activity pages, read when the tab first shows.
     pub timeline: Vec<Value>,
     pub timeline_next: Option<u64>,
@@ -181,6 +184,7 @@ impl PullRequests {
             notice: String::new(),
             review_action: "review-comment",
             open_files: Default::default(),
+            split_diff: false,
             timeline: vec![],
             timeline_next: None,
             timeline_loading: false,

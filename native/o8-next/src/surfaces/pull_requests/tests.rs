@@ -436,6 +436,16 @@ fn pull_requests_real_server_actions_and_paint(cx: &mut TestAppContext) {
         }));
         view.read_with(cx, |s, _| assert_eq!(s.painted.get(), s.revision));
     }
+    // Changes draws the patch through the shared diff rows, unified until
+    // Split asks for both sides (the pairing itself is file_diff's test).
+    click(cx, "pr-tab-changes");
+    click(cx, "pr-file-0");
+    assert!(cx.debug_bounds("pr-file-0-diff-unified").is_some());
+    assert!(cx.debug_bounds("pr-file-0-diff-row-0").is_some());
+    click(cx, "pr-diff-view");
+    assert!(cx.debug_bounds("pr-file-0-diff-side").is_some());
+    assert!(cx.debug_bounds("pr-file-0-diff-unified").is_none());
+    click(cx, "pr-diff-view");
     for id in ["pr-link", "pr-number", "pr-checkout", "pr-open"] {
         choose(cx, id);
     }
