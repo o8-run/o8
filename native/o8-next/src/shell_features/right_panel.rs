@@ -40,6 +40,14 @@ struct RightPanel;
 pub(super) fn subagent_list(s: &Shell, cx: &App) -> Vec<crate::subagents::model::Agent> {
     subagents::chat(s, cx).map_or_else(Vec::new, |view| view.read(cx).agents.clone())
 }
+/// One of the workspace's agents, whichever chat's list holds it.
+pub(super) fn find_subagent(
+    s: &Shell,
+    id: &str,
+    cx: &App,
+) -> Option<crate::subagents::model::Agent> {
+    subagents::find(s, id, cx)
+}
 /// How many agents the whole workspace has, whichever chat started them.
 pub(super) fn workspace_subagent_count(s: &Shell, cx: &App) -> usize {
     s.state

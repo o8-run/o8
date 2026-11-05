@@ -4,6 +4,8 @@ use gpui::{DragMoveEvent, SharedString};
 use std::collections::{HashMap, HashSet};
 #[path = "panes/preview.rs"]
 mod preview;
+#[path = "panes/worker.rs"]
+mod worker;
 // The workspace's split panes, as classic's TileContainer: drag the rail's
 // Run orchestrator or Run terminal onto any pane and let go near an edge to
 // split it there, as many times as you like. Each pane after the first holds
@@ -38,6 +40,14 @@ struct State {
     preview: Option<preview::Preview>,
     /// Bumped by each preview start or end, so an older run stops adding.
     preview_run: u64,
+    /// Real worker panes, by their pane key.
+    workers: HashMap<String, gpui::Entity<worker::WorkerPane>>,
+    /// The workers each workspace closed: they don't join again.
+    dismissed: HashMap<String, HashSet<String>>,
+    /// The worker pane last clicked.
+    focused: Option<String>,
+    /// The panes' measured width, for how many worker columns fit.
+    width: f32,
 }
 
 /// A dragged divider, by its split's id.
@@ -53,6 +63,38 @@ impl Render for Divider {
 const MAIN_MIN: f32 = 400.;
 /// The shortest a row of worker cards gets before the grid scrolls.
 const WORKER_ROW_MIN: f32 = 150.;
+/// The narrowest a worker card gets before the grid drops a column.
+const CARD_MIN: f32 = 230.;
+
+/// How many worker columns fit beside the main pane in `width`.
+fn columns(width: f32) -> usize {
+    if width <= 0. {
+        return 4;
+    }
+    (((width - MAIN_MIN) / CARD_MIN).floor() as usize).clamp(1, 4)
+}
+/// The workers of a layout that is only the main pane and workers, in order.
+fn worker_leaves(tree: &Node) -> Option<Vec<Node>> {
+    let mut workers = vec![];
+    for (id, leaf) in tree.leaves() {
+        match leaf {
+            Leaf::Main => {}
+            Leaf::Worker { .. } => workers.push(Node::Leaf {
+                id: id.to_owned(),
+                content: leaf.clone(),
+            }),
+            _ => return None,
+        }
+    }
+    Some(workers)
+}
+/// Whether `tree` is still the automatic grid of its workers: no divider
+/// moved, so arrivals and closes may reflow it.
+fn automatic(tree: &Node, workers: &[Node]) -> bool {
+    workers.is_empty()
+        || (1..=4)
+            .any(|columns| *tree == Node::worker_grid(Node::main(), workers.to_vec(), columns))
+}
 
 fn workspace(s: &Shell) -> String {
     s.state.selected.clone().unwrap_or_default()
@@ -111,6 +153,7 @@ fn ensure(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     if state.preview.is_some() && previewing(s).is_none() {
         preview::end(s, cx);
     }
+    join(s, cx);
     let Some(panes) = s.current().and_then(|w| w.panes.clone()) else {
         return;
     };
@@ -162,10 +205,91 @@ fn ensure(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                 s.content.insert(key, Content::Terminal(view));
             }
             Leaf::Terminal { session: None } => start_terminal(s, id.to_owned(), cx),
-            // Workers draw from their agent, with no view of their own.
-            Leaf::Worker { .. } => {}
+            Leaf::Worker { agent } => {
+                if s.features.get::<State>().workers.contains_key(&key) {
+                    continue;
+                }
+                let Some(agent) = super::right_panel::find_subagent(s, agent, cx) else {
+                    continue;
+                };
+                let client = s.panel_client(&ws);
+                let view = cx.new(|cx| worker::WorkerPane::new(client, agent, cx));
+                s.features.get::<State>().workers.insert(key, view);
+            }
         }
     }
+    // Each worker follows its agent as the lists read it.
+    let prefix = key(s, "");
+    let views = s
+        .features
+        .get::<State>()
+        .workers
+        .iter()
+        .filter(|(key, _)| key.starts_with(&prefix))
+        .map(|(_, view)| view.clone())
+        .collect::<Vec<_>>();
+    for view in views {
+        let agent = super::right_panel::find_subagent(s, &view.read(cx).agent.id, cx);
+        view.update(cx, |view, cx| view.update(agent, cx));
+    }
+}
+
+/// A worker the workspace's chat starts joins the grid beside it, while the
+/// layout is only that chat and its workers. One closed here stays closed,
+/// and a split of the user's own stops workers joining.
+fn join(s: &mut Shell, cx: &mut Context<Shell>) {
+    if previewing(s).is_some() {
+        return;
+    }
+    let tree = saved(s);
+    let Some(mut workers) = worker_leaves(&tree) else {
+        return;
+    };
+    let ws = workspace(s);
+    let state = s.features.get::<State>();
+    let columns = columns(state.width);
+    let dismissed = state.dismissed.get(&ws).cloned().unwrap_or_default();
+    let shown = tree
+        .leaves()
+        .into_iter()
+        .filter_map(|(_, leaf)| match leaf {
+            Leaf::Worker { agent } => Some(agent.clone()),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+    let arrivals = super::right_panel::subagent_list(s, cx)
+        .into_iter()
+        .filter(|agent| {
+            agent.group == crate::subagents::model::Group::Working
+                && !agent.native
+                && agent.session.is_some()
+                && !shown.contains(&agent.id)
+                && !dismissed.contains(&agent.id)
+        })
+        .collect::<Vec<_>>();
+    if arrivals.is_empty() {
+        return;
+    }
+    let auto = automatic(&tree, &workers);
+    let mut next = tree;
+    for agent in arrivals {
+        let id = format!("worker-{}", agent.id);
+        let leaf = Leaf::Worker { agent: agent.id };
+        if !auto {
+            // A moved divider keeps its place: the worker splits in beside
+            // the last one.
+            let last = workers
+                .last()
+                .map_or(MAIN.to_owned(), |w| w.id().to_owned());
+            next.split(&last, Zone::Right, id.clone(), leaf.clone());
+        }
+        workers.push(Node::Leaf { id, content: leaf });
+    }
+    if auto {
+        next = Node::worker_grid(Node::main(), workers, columns);
+    }
+    save_saved(s, next);
+    cx.notify();
 }
 
 /// Reserves a pane's own shell, which it keeps across restarts.
@@ -283,11 +407,30 @@ fn close(s: &mut Shell, leaf: &str, cx: &mut Context<Shell>) {
         return cx.notify();
     }
     let mut tree = tree(s);
+    let workers = worker_leaves(&tree);
+    let closed = tree
+        .leaves()
+        .into_iter()
+        .find_map(|(id, content)| match content {
+            Leaf::Worker { agent } if id == leaf => Some(agent.clone()),
+            _ => None,
+        });
     if tree.close(leaf) {
         let key = key(s, leaf);
         s.content.remove(&key);
+        let ws = workspace(s);
         let state = s.features.get::<State>();
         state.failed.remove(leaf);
+        state.workers.remove(&key);
+        if let Some(agent) = closed {
+            state.dismissed.entry(ws).or_default().insert(agent);
+            // closeSessionLeaf: the automatic grid reflows.
+            if let Some(workers) = workers.filter(|workers| automatic(&saved(s), workers)) {
+                let rest = workers.into_iter().filter(|w| w.id() != leaf).collect();
+                tree =
+                    Node::worker_grid(Node::main(), rest, columns(s.features.get::<State>().width));
+            }
+        }
         save_tree(s, tree);
     }
     cx.notify();
@@ -305,7 +448,50 @@ pub(super) fn element(s: &mut Shell, main: AnyElement, cx: &mut Context<Shell>) 
     let tree = tree(s);
     let mut main = Some(main);
     let panes = node(s, &tree, &mut main, cx);
+    let measured = cx.entity().downgrade();
+    let measure = gpui::canvas(
+        |_, _, _| (),
+        move |bounds, _, _, cx| {
+            let width = f32::from(bounds.size.width);
+            let _ = measured.update(cx, |s, cx| fit(s, width, cx));
+        },
+    )
+    .absolute()
+    .size_full();
+    let panes = div()
+        .relative()
+        .flex()
+        .flex_1()
+        .size_full()
+        .min_w_0()
+        .min_h_0()
+        .child(measure)
+        .child(panes)
+        .into_any_element();
     preview::wrap(s, panes, cx)
+}
+
+/// The panes are `width` wide: worker grids take the columns that fit.
+fn fit(s: &mut Shell, width: f32, cx: &mut Context<Shell>) {
+    let state = s.features.get::<State>();
+    if state.width == width {
+        return;
+    }
+    state.width = width;
+    let mut changed = state.preview.as_mut().is_some_and(|p| p.fit(width));
+    let tree = saved(s);
+    if let Some(workers) =
+        worker_leaves(&tree).filter(|workers| !workers.is_empty() && automatic(&tree, workers))
+    {
+        let next = Node::worker_grid(Node::main(), workers, columns(width));
+        if next != tree {
+            save_saved(s, next);
+            changed = true;
+        }
+    }
+    if changed {
+        cx.notify();
+    }
 }
 
 fn node(
@@ -464,7 +650,8 @@ fn leaf(
         .map(|(_, zone)| zone);
     let body = match content {
         Leaf::Main => main.take().unwrap_or_else(|| div().into_any_element()),
-        Leaf::Worker { agent } => preview::card(s, id, agent, cx),
+        Leaf::Worker { agent } if previewing(s).is_some() => preview::card(s, id, agent, cx),
+        Leaf::Worker { agent } => worker_card(s, id, agent, cx),
         _ => s
             .content
             .get(&key(s, id))
@@ -741,4 +928,181 @@ fn overlay(zone: Zone) -> impl IntoElement {
         .text_size(px(13.))
         .text_color(theme().text)
         .child(zone.label())
+}
+
+/// A worker card's header facts.
+struct Header {
+    name: String,
+    /// What its color dot is read from.
+    color: String,
+    meta: String,
+    status: String,
+    tone: gpui::Rgba,
+}
+
+/// A worker's card, real or simulated: its color, name, model, status and
+/// close over its body. A click focuses it.
+fn card(
+    id: &str,
+    header: Header,
+    focused: bool,
+    body: AnyElement,
+    cx: &mut Context<Shell>,
+) -> AnyElement {
+    let (focus, close) = (id.to_owned(), id.to_owned());
+    div()
+        .id(SharedString::from(format!("pane-worker-{id}")))
+        .debug_selector({
+            let id = id.to_owned();
+            move || format!("pane-worker-{id}")
+        })
+        .size_full()
+        .p(px(5.))
+        .child(
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .rounded(px(12.))
+                .border_1()
+                .border_color(if focused {
+                    gpui::Rgba {
+                        a: 0.75,
+                        ..theme().accent
+                    }
+                } else {
+                    theme().border
+                })
+                .bg(theme().surface)
+                .when(focused, |card| card.shadow_md())
+                .child(
+                    div()
+                        .h(px(34.))
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .gap(px(7.))
+                        .pl(px(11.))
+                        .pr(px(6.))
+                        .border_b_1()
+                        .border_color(theme().border)
+                        .text_size(px(12.))
+                        .child(
+                            div()
+                                .size(px(7.))
+                                .flex_shrink_0()
+                                .rounded_full()
+                                .bg(crate::subagents::trace::agent_color(&header.color)),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_shrink()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_color(theme().text)
+                                .child(header.name),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(px(11.))
+                                .text_color(theme().text_faint)
+                                .child(header.meta),
+                        )
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .flex()
+                                .items_center()
+                                .gap(px(5.))
+                                .text_size(px(11.))
+                                .text_color(theme().text_secondary)
+                                .child(div().size(px(5.)).rounded_full().bg(header.tone))
+                                .child(header.status),
+                        )
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("pane-close-{id}")))
+                                .debug_selector({
+                                    let id = id.to_owned();
+                                    move || format!("pane-close-{id}")
+                                })
+                                .flex_shrink_0()
+                                .size(px(22.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(6.))
+                                .cursor_pointer()
+                                .text_color(theme().text_muted)
+                                .hover(|d| d.bg(theme().hover).text_color(theme().text))
+                                .child("×")
+                                .on_click(cx.listener(move |s, _, _, cx| {
+                                    cx.stop_propagation();
+                                    self::close(s, &close, cx);
+                                })),
+                        ),
+                )
+                .child(body),
+        )
+        .on_click(cx.listener(move |s, _, _, cx| {
+            let state = s.features.get::<State>();
+            match state.preview.as_mut() {
+                Some(preview) => preview.focused = Some(focus.clone()),
+                None => state.focused = Some(focus.clone()),
+            }
+            cx.notify();
+        }))
+        .into_any_element()
+}
+
+/// A real worker's card: its live transcript and steer box.
+fn worker_card(s: &Shell, id: &str, agent: &str, cx: &mut Context<Shell>) -> AnyElement {
+    let state = s.features.read::<State>();
+    let focused = state.and_then(|state| state.focused.as_deref()) == Some(id);
+    let view = state
+        .and_then(|state| state.workers.get(&key(s, id)))
+        .cloned();
+    let Some(view) = view else {
+        let header = Header {
+            name: agent.to_owned(),
+            color: agent.to_owned(),
+            meta: String::new(),
+            status: String::new(),
+            tone: theme().text_faint,
+        };
+        let body = div()
+            .flex_1()
+            .px(px(12.))
+            .py(px(10.))
+            .text_size(px(12.))
+            .text_color(theme().text_muted)
+            .child("Looking for this worker…")
+            .into_any_element();
+        return card(id, header, focused, body, cx);
+    };
+    let pane = view.read(cx);
+    let (name, meta, status, tone) = worker::facts(&pane.agent, pane.gone);
+    let header = Header {
+        color: pane.agent.id.clone(),
+        name,
+        meta,
+        status,
+        tone,
+    };
+    let body = div()
+        .flex_1()
+        .min_h_0()
+        .flex()
+        .flex_col()
+        .child(view)
+        .into_any_element();
+    card(id, header, focused, body, cx)
 }

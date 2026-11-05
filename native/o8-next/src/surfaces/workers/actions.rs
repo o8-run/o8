@@ -323,7 +323,7 @@ impl Card {
     }
 }
 
-fn steer(client: &Client, body: &Value) -> Result<(u16, Value, bool), String> {
+pub(crate) fn steer(client: &Client, body: &Value) -> Result<(u16, Value, bool), String> {
     let url = client
         .url("/api/orchestrator/steer-packet")
         .map_err(|_| "Invalid steer route")?;

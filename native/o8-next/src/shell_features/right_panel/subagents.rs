@@ -205,6 +205,22 @@ pub(super) fn chat(s: &Shell, cx: &App) -> Option<Entity<Inspector>> {
         .filter_map(|index| workspace.tabs.get(index))
         .find_map(|tab| tab_inspector(s, tab, cx))
 }
+/// An agent by id: the chat's lists first, then the workspace's own.
+pub(super) fn find(s: &Shell, id: &str, cx: &App) -> Option<crate::subagents::model::Agent> {
+    let workspace = s.state.selected.as_ref().and_then(|repo| {
+        s.features
+            .read::<Inspectors>()?
+            .workspace
+            .get(repo)
+            .cloned()
+    });
+    s.current()
+        .map_or(&[][..], |w| &w.tabs[..])
+        .iter()
+        .filter_map(|tab| tab_inspector(s, tab, cx))
+        .chain(workspace)
+        .find_map(|view| view.read(cx).agents.iter().find(|a| a.id == id).cloned())
+}
 /// The workspace list also shows the agents each chat read from its own
 /// transcript; they have no packet for the workspace's read to find.
 fn share_native(s: &Shell, view: &Entity<Inspector>, cx: &mut Context<Shell>) {
