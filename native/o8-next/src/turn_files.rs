@@ -134,6 +134,23 @@ pub(crate) fn by_turn<T>(
     out
 }
 
+/// A row's folder and file name. A file outside the workspace shows only its
+/// parent folder, since the rest of an absolute path is noise.
+fn display(path: &str) -> (String, String) {
+    let Some((dir, name)) = path.rsplit_once('/') else {
+        return (String::new(), path.to_owned());
+    };
+    let dir = if path.starts_with('/') {
+        dir.rsplit('/')
+            .next()
+            .filter(|parent| !parent.is_empty())
+            .map_or("/".to_owned(), |parent| format!("…/{parent}/"))
+    } else {
+        format!("{dir}/")
+    };
+    (dir, name.to_owned())
+}
+
 /// The workspace-relative path the Changes list knows a file by.
 fn relative<'a>(path: &'a str, root: Option<&str>) -> &'a str {
     root.and_then(|root| path.strip_prefix(root.trim_end_matches('/')))
@@ -210,10 +227,7 @@ pub(crate) fn card(
         );
     let rows = files[..shown].iter().enumerate().map(|(row, file)| {
         let path = relative(&file.path, root);
-        let (dir, name) = match path.rsplit_once('/') {
-            Some((dir, name)) => (format!("{dir}/"), name.to_owned()),
-            None => (String::new(), path.to_owned()),
-        };
+        let (dir, name) = display(path);
         div()
             .id(("turn-files-file", index * 1000 + row))
             .debug_selector(move || format!("turn-files-file-{index}-{row}"))
@@ -237,6 +251,7 @@ pub(crate) fn card(
                         div()
                             .min_w_0()
                             .overflow_hidden()
+                            .whitespace_nowrap()
                             .text_ellipsis()
                             .text_color(theme().text_muted)
                             .child(dir),
@@ -361,5 +376,16 @@ mod tests {
         assert_eq!(relative("/r/src/a.rs", Some("/r/")), "src/a.rs");
         assert_eq!(relative("/rx/a.rs", Some("/r")), "/rx/a.rs");
         assert_eq!(relative("src/a.rs", Some("/r")), "src/a.rs");
+    }
+
+    #[test]
+    fn rows_show_a_folder_and_a_name() {
+        assert_eq!(display("src/ui/a.rs"), ("src/ui/".into(), "a.rs".into()));
+        assert_eq!(display("a.rs"), ("".into(), "a.rs".into()));
+        assert_eq!(
+            display("/tmp/x/demo/a.md"),
+            ("…/demo/".into(), "a.md".into())
+        );
+        assert_eq!(display("/a.md"), ("/".into(), "a.md".into()));
     }
 }
