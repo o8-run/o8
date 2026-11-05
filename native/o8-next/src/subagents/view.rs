@@ -178,10 +178,12 @@ impl Inspector {
                     .py(px(24.))
                     .text_size(px(12.))
                     .text_color(theme().text_muted)
-                    .child(if query.is_empty() {
+                    .child(if !query.is_empty() {
+                        "No matching subagents."
+                    } else if self.scope.parent.is_some() {
                         "No subagents in this conversation yet."
                     } else {
-                        "No matching subagents."
+                        "No subagents in this workspace yet."
                     }),
             );
         }
@@ -455,15 +457,15 @@ impl Render for Inspector {
                         .text_size(px(10.))
                         .text_color(theme().text_muted)
                         .child(if self.loaded {
-                            format!(
-                                "{} · {}",
-                                if self.scope.parent.is_some() {
-                                    "This conversation"
-                                } else {
-                                    "This workspace"
-                                },
-                                self.summary()
-                            )
+                            let scope = if self.scope.parent.is_some() {
+                                "This conversation"
+                            } else {
+                                "This workspace"
+                            };
+                            match self.summary() {
+                                summary if summary.is_empty() => scope.to_string(),
+                                summary => format!("{scope} · {summary}"),
+                            }
                         } else {
                             "Reading subagents…".into()
                         }),

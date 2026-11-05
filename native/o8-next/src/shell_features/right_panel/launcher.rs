@@ -5,7 +5,7 @@ pub(in super::super) fn launcher(s: &Shell, cx: &mut Context<Shell>) -> AnyEleme
     let notify = measured.clone();
     let owner = cx.entity().entity_id();
     let height = measured.get().max(1.);
-    let card = ((height - 28. - 36.) / 7.).clamp(52., 64.);
+    let card = ((height - 28. - 36.) / Tool::GROUPS[0].1.len() as f32).clamp(52., 64.);
     let compact = card < 64.;
     let tools = Tool::GROUPS
         .iter()
@@ -18,7 +18,12 @@ pub(in super::super) fn launcher(s: &Shell, cx: &mut Context<Shell>) -> AnyEleme
             format!("panel-tool-{}", tool.label().to_lowercase()),
             tool.description(),
             cx,
-            move |s, w, cx| show(s, tool, w, cx),
+            move |s, w, cx| {
+                if tool == Tool::Subagents {
+                    subagents::all(s, w, cx);
+                }
+                show(s, tool, w, cx)
+            },
         )
         .min_h(px(card))
         .w_full()

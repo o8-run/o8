@@ -2,8 +2,8 @@
 use super::*;
 use crate::subagents::{Inspector, model::Scope};
 #[derive(Default)]
-struct Inspectors {
-    workspace: std::collections::HashMap<String, Entity<Inspector>>,
+pub(super) struct Inspectors {
+    pub(super) workspace: std::collections::HashMap<String, Entity<Inspector>>,
     current: Option<Entity<Inspector>>,
     anchor: Option<(Option<String>, Option<Tab>, Option<gpui::EntityId>)>,
     return_panel: Option<ReturnPanel>,
@@ -92,6 +92,11 @@ pub(super) fn current(s: &mut Shell, cx: &mut Context<Shell>) -> Option<Entity<I
             return Some(inspector);
         }
     }
+    workspace(s, cx)
+}
+/// The workspace's own inspector: every agent it started, whichever chat
+/// started it.
+pub(super) fn workspace(s: &mut Shell, cx: &mut Context<Shell>) -> Option<Entity<Inspector>> {
     let repo = s.state.selected.clone()?;
     if let Some(view) = s.features.get::<Inspectors>().workspace.get(&repo) {
         return Some(view.clone());
@@ -171,7 +176,53 @@ pub(super) fn focus(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
         });
     }
 }
-pub(super) fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
+/// Points the panel at the workspace's whole list, as its tool buttons and
+/// the dock's See all open it.
+pub(super) fn all(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    let Some(view) = workspace(s, cx) else {
+        return;
+    };
+    share_native(s, &view, cx);
+    view.update(cx, |view, cx| view.inspect(None, window, cx));
+    s.features.get::<Inspectors>().current = Some(view);
+}
+/// The inspector a tab's chat or grid keeps for its own agents.
+fn tab_inspector(s: &Shell, tab: &Tab, cx: &App) -> Option<Entity<Inspector>> {
+    match s.content.get(&s.key(tab)) {
+        Some(Content::Grid(view)) => view.read(cx).shell_subagents(),
+        Some(Content::Session(view)) => view.read(cx).shell_subagents(),
+        _ => None,
+    }
+}
+/// The chat the workspace is on: the active tab's, else the chat tab nearest
+/// it, so a pull request or file tab still reads that chat's agents.
+pub(super) fn chat(s: &Shell, cx: &App) -> Option<Entity<Inspector>> {
+    let workspace = s.current()?;
+    let active = workspace.active.min(workspace.tabs.len().saturating_sub(1));
+    (0..workspace.tabs.len())
+        .flat_map(|step| [active.checked_sub(step), Some(active + step)])
+        .flatten()
+        .filter_map(|index| workspace.tabs.get(index))
+        .find_map(|tab| tab_inspector(s, tab, cx))
+}
+/// The workspace list also shows the agents each chat read from its own
+/// transcript; they have no packet for the workspace's read to find.
+fn share_native(s: &Shell, view: &Entity<Inspector>, cx: &mut Context<Shell>) {
+    let mut native: Vec<crate::subagents::model::Agent> = vec![];
+    for tab in s.current().map_or(&[][..], |w| &w.tabs[..]) {
+        let Some(chat) = tab_inspector(s, tab, cx) else {
+            continue;
+        };
+        for agent in chat.read(cx).agents.iter().filter(|a| a.native) {
+            if !native.iter().any(|known| known.id == agent.id) {
+                native.push(agent.clone());
+            }
+        }
+    }
+    view.update(cx, |view, cx| view.set_native(native, cx));
+}
+/// `all` also keeps the workspace's whole list fresh, for the dock's count.
+pub(super) fn tick(s: &mut Shell, all: bool, cx: &mut Context<Shell>) {
     let primary = current(s, cx);
     let anchor = (
         s.state.selected.clone(),
@@ -185,12 +236,24 @@ pub(super) fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
         state.anchor = Some(anchor);
     }
     let mut views = primary.into_iter().collect::<Vec<_>>();
-    let state = s.features.get::<Inspectors>();
-    if let Some(view) = &state.current {
-        if !views.contains(view) {
-            views.push(view.clone());
-        }
+    if all {
+        views.extend(chat(s, cx));
     }
+    // The workspace list keeps its chats' transcript agents current while
+    // the dock counts it or the panel shows it.
+    let shown = s.state.selected.as_ref().and_then(|repo| {
+        let state = s.features.read::<Inspectors>()?;
+        let view = state.workspace.get(repo)?;
+        (state.current.as_ref() == Some(view)).then(|| view.clone())
+    });
+    if let Some(view) = if all { workspace(s, cx) } else { shown } {
+        share_native(s, &view, cx);
+        views.push(view);
+    }
+    let state = s.features.get::<Inspectors>();
+    views.extend(state.current.clone());
+    let mut seen = std::collections::HashSet::new();
+    views.retain(|view| seen.insert(view.entity_id()));
     for view in views {
         view.update(cx, |v, cx| v.tick(false, cx));
     }
@@ -340,26 +403,4 @@ fn close_directory(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
     if selected == Tool::Subagents && !restore_panel(s, cx) {
         layout::focus(s, "panel-new-tab", w);
     }
-}
-/// The inspector `current` would return, without making one.
-pub(super) fn existing(s: &Shell, cx: &App) -> Option<Entity<Inspector>> {
-    match s.active().and_then(|tab| s.content.get(&s.key(&tab))) {
-        Some(Content::Grid(view)) => {
-            if let Some(inspector) = view.read(cx).shell_subagents() {
-                return Some(inspector);
-            }
-        }
-        Some(Content::Session(view)) => {
-            if let Some(inspector) = view.read(cx).shell_subagents() {
-                return Some(inspector);
-            }
-        }
-        _ => {}
-    }
-    let repo = s.state.selected.as_ref()?;
-    s.features
-        .read::<Inspectors>()?
-        .workspace
-        .get(repo)
-        .cloned()
 }

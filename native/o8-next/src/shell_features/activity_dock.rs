@@ -187,9 +187,11 @@ fn now_ms() -> f64 {
 struct Turn {
     todos: Vec<(String, String)>,
     tasks: Vec<(String, String, f64, Option<f64>)>,
-    /// Every agent this chat or workspace started, as the Subagents panel
-    /// lists them.
+    /// The agents the workspace's chat started, as the Subagents panel lists
+    /// them.
     agents: Vec<Agent>,
+    /// Every agent in the workspace, whichever chat started it.
+    all: usize,
 }
 
 fn turn(s: &Shell, cx: &App) -> Turn {
@@ -233,10 +235,12 @@ fn turn(s: &Shell, cx: &App) -> Turn {
         .rev()
         .collect();
     let agents = super::right_panel::subagent_list(s, cx);
+    let all = super::right_panel::workspace_subagent_count(s, cx).max(agents.len());
     Turn {
         todos,
         tasks,
         agents,
+        all,
     }
 }
 
@@ -577,7 +581,7 @@ fn panes(s: &Shell, turn: &Turn) -> Vec<Pane> {
         .into_iter()
         .filter(|pane| match pane {
             Pane::Plan => !turn.todos.is_empty(),
-            Pane::Agents => !turn.agents.is_empty(),
+            Pane::Agents => turn.all > 0,
             Pane::Changes => !data.files.is_empty(),
             // The inbox counts every project: it keeps Tasks reachable, but
             // only this workspace's waiting workers turn its badge red.
@@ -697,7 +701,7 @@ fn pane_height(pane: Pane, data: &Data, turn: &Turn) -> f32 {
         + 10.
         + match pane {
             Pane::Plan => rows(turn.todos.len()),
-            Pane::Agents => rows(turn.agents.len().min(MAX_AGENTS)),
+            Pane::Agents => rows(turn.agents.len().clamp(1, MAX_AGENTS) + 1) + 7.,
             Pane::Changes => {
                 let more = data.files.len() > MAX_FILES;
                 54. + 26.
@@ -1209,7 +1213,8 @@ fn needs_you(agent: &Agent) -> bool {
 }
 
 /// This chat's agents: stuck ones first, then working, then the rest. A row
-/// opens that agent in the Subagents panel; the title opens the whole list.
+/// opens that agent in the Subagents panel; See all opens every agent in the
+/// workspace there.
 fn agents(turn: &Turn, cx: &mut Context<Shell>) -> impl IntoElement {
     let mut agents: Vec<&Agent> = turn.agents.iter().collect();
     agents.sort_by_key(|agent| match agent.group {
@@ -1218,27 +1223,26 @@ fn agents(turn: &Turn, cx: &mut Context<Shell>) -> impl IntoElement {
         Group::Attention => 2,
         Group::Done => 3,
     });
+    let summary = crate::subagents::model::summary(&turn.agents);
     div()
         .child(title(
             "Agents",
-            div()
-                .id("activity-agents-all")
-                .debug_selector(|| "activity-agents-all".into())
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .cursor_pointer()
-                .hover(|link| link.text_color(theme().text))
-                .child(crate::subagents::model::summary(&turn.agents))
-                .child(crate::icon::stroke(CHEVRON, theme().text_muted, 11., 1.8))
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.capture(window, cx);
-                    super::right_panel::inspect_subagent(this, None, window, cx);
-                })),
+            div().child(if summary.is_empty() {
+                "This chat".to_string()
+            } else {
+                summary
+            }),
         ))
         .child(
             div()
                 .pt(px(6.))
+                .when(agents.is_empty(), |list| {
+                    list.child(
+                        row("activity-agents-none")
+                            .text_color(theme().text_muted)
+                            .child("No agents from this chat yet"),
+                    )
+                })
                 .children(agents.into_iter().take(MAX_AGENTS).map(|agent| {
                     let id = agent.id.clone();
                     // The color the agent keeps on its transcript card and panel tab.
@@ -1274,6 +1278,31 @@ fn agents(turn: &Turn, cx: &mut Context<Shell>) -> impl IntoElement {
                             );
                         }))
                 })),
+        )
+        .child(
+            div()
+                .mt(px(4.))
+                .pt(px(3.))
+                .border_t_1()
+                .border_color(theme().border)
+                .child(
+                    row("activity-agents-all")
+                        .cursor_pointer()
+                        .hover(|row| row.bg(theme().hover))
+                        .child(ellipsis("See all agents").text_color(theme().text))
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .text_size(px(12.5))
+                                .text_color(theme().text_muted)
+                                .child(turn.all.to_string()),
+                        )
+                        .child(crate::icon::stroke(CHEVRON, theme().text_muted, 11., 1.8))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.capture(window, cx);
+                            super::right_panel::inspect_all_subagents(this, window, cx);
+                        })),
+                ),
         )
 }
 

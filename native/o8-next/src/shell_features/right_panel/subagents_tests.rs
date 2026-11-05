@@ -128,11 +128,23 @@ fn subagents_trace_opens_detail_without_replacing_steps_or_parent(cx: &mut TestA
 
 /// Opens every agent in the Subagents panel from the Activity dock's Agents pane.
 fn open_agents(s: &Entity<Shell>, v: &mut VisualTestContext) {
+    open_dock_agents(s, v);
+    click(v, "activity-agents-all");
+}
+/// Opens the dock's Agents card and waits out its height animation, so its
+/// last row, See all, is inside the card.
+fn open_dock_agents(s: &Entity<Shell>, v: &mut VisualTestContext) {
     click(v, "header-activity");
     wait(s, v, "activity-tab-agents");
     click(v, "activity-tab-agents");
     wait(s, v, "activity-agents-all");
-    click(v, "activity-agents-all");
+    let deadline = Instant::now() + Duration::from_millis(400);
+    while Instant::now() < deadline {
+        s.update_in(v, |s, w, cx| s.tick(false, w, cx));
+        v.run_until_parked();
+        draw(v);
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn wait_probe(s: &Entity<Shell>, v: &mut VisualTestContext, ready: impl Fn(&Value) -> bool) {
@@ -452,7 +464,8 @@ fn subagents_shared_results_keep_held_delivery_in_attention(cx: &mut TestAppCont
 fn subagents_shared_panel_refreshes_counts_and_keeps_error_recovery(cx: &mut TestAppContext) {
     let (f, s, mut v) = setup(cx);
     open_agents(&s, &mut v);
-    wait(&s, &mut v, "subagents-group-working-1");
+    // See all counts the other chat's running agent too.
+    wait(&s, &mut v, "subagents-group-working-2");
     let _: Value = f
         .client
         .get("/api/subagents-fixture", &[("mode", "done")])
@@ -483,12 +496,10 @@ fn subagents_shared_panel_refreshes_counts_and_keeps_error_recovery(cx: &mut Tes
 }
 
 #[gpui::test]
-fn each_opened_subagent_gets_a_tab_and_none_are_in_the_tools(cx: &mut TestAppContext) {
+fn each_opened_subagent_gets_a_tab_and_the_tools_list_them(cx: &mut TestAppContext) {
     assert!(
-        Tool::GROUPS
-            .iter()
-            .all(|(_, tools)| !tools.contains(&Tool::Subagents)),
-        "subagents open from a subagent, not from the tools"
+        Tool::GROUPS[0].1.contains(&Tool::Subagents),
+        "every worker is one tool button away"
     );
     let (_f, s, mut v) = setup(cx);
     wait(&s, &mut v, "subagent-trace-subagent-calculation");
@@ -573,4 +584,144 @@ fn native_agents_out_of_title_order_settle_after_one_notify(cx: &mut TestAppCont
     });
     assert_eq!(titles, ["Quick calculation", "Sort fruit"]);
     assert_eq!(notified.get(), 1, "the same agents must not notify again");
+}
+
+#[gpui::test]
+fn the_dock_lists_this_chats_agents_and_see_all_opens_the_workspace(cx: &mut TestAppContext) {
+    let (_f, s, mut v) = setup(cx);
+    open_dock_agents(&s, &mut v);
+    wait(&s, &mut v, "activity-agent-subagent-calculation");
+    assert!(
+        v.debug_bounds("activity-agent-subagent-unrelated")
+            .is_none(),
+        "another chat's agent waits behind See all"
+    );
+    click(&mut v, "activity-agents-all");
+    wait(&s, &mut v, "subagent-row-subagent-unrelated");
+    assert!(
+        v.debug_bounds("subagent-row-subagent-calculation")
+            .is_some()
+    );
+}
+
+#[gpui::test]
+fn the_subagents_tool_opens_every_agent(cx: &mut TestAppContext) {
+    let (_f, s, mut v) = setup(cx);
+    click(&mut v, "header-right-panel");
+    wait(&s, &mut v, "panel-tool-subagents");
+    click(&mut v, "panel-tool-subagents");
+    wait(&s, &mut v, "subagent-row-subagent-unrelated");
+    assert!(
+        v.debug_bounds("subagent-row-subagent-calculation")
+            .is_some()
+    );
+}
+
+#[gpui::test]
+fn see_all_keeps_the_agents_a_chat_read_from_its_transcript(cx: &mut TestAppContext) {
+    let (_f, s, mut v) = setup(cx);
+    wait(&s, &mut v, "subagent-trace-subagent-calculation");
+    let native = crate::subagents::model::Agent {
+        shared: false,
+        native: true,
+        cleanup: None,
+        prompt: Some("Check the sums".into()),
+        run: "native-sums".into(),
+        id: "native-sums".into(),
+        title: "Check the sums".into(),
+        runtime: String::new(),
+        model: None,
+        effort: None,
+        parent: None,
+        session: None,
+        group: crate::subagents::model::Group::Working,
+        status: "Working".into(),
+        progress: None,
+        result: None,
+        started: None,
+        finished: None,
+        facts: Default::default(),
+    };
+    // One update: the chat's transcript observer would replace the injected
+    // agent once effects flush, so See all must read it before then.
+    s.update_in(&mut v, |s, w, cx| {
+        let chat = subagents::chat(s, cx).expect("the chat's inspector");
+        chat.update(cx, |chat, cx| {
+            let mut agents: Vec<_> = chat.agents.iter().filter(|a| a.native).cloned().collect();
+            agents.push(native.clone());
+            chat.set_native(agents, cx)
+        });
+        subagents::all(s, w, cx);
+        show(s, Tool::Subagents, w, cx);
+    });
+    let listed = s.read_with(&v, |s, cx| {
+        let repo = s.state.selected.clone().unwrap();
+        s.features
+            .read::<subagents::Inspectors>()
+            .unwrap()
+            .workspace[&repo]
+            .read(cx)
+            .agents
+            .iter()
+            .any(|a| a.id == "native-sums")
+    });
+    assert!(listed, "See all lists the chat's transcript agents too");
+}
+
+#[gpui::test]
+fn the_shown_workspace_list_follows_a_chats_transcript_agents_with_the_dock_closed(
+    cx: &mut TestAppContext,
+) {
+    let (_f, s, mut v) = setup(cx);
+    wait(&s, &mut v, "subagent-trace-subagent-calculation");
+    s.update_in(&mut v, |s, w, cx| {
+        subagents::all(s, w, cx);
+        show(s, Tool::Subagents, w, cx);
+    });
+    let native = |id: &str| crate::subagents::model::Agent {
+        shared: false,
+        native: true,
+        cleanup: None,
+        prompt: None,
+        run: id.into(),
+        id: id.into(),
+        title: id.into(),
+        runtime: String::new(),
+        model: None,
+        effort: None,
+        parent: None,
+        session: None,
+        group: crate::subagents::model::Group::Working,
+        status: "Working".into(),
+        progress: None,
+        result: None,
+        started: None,
+        finished: None,
+        facts: Default::default(),
+    };
+    // A tick with the dock closed, in the same update as the chat's new
+    // agent, before its transcript observer replaces it.
+    s.update_in(&mut v, |s, w, cx| {
+        assert!(!super::super::activity_dock::is_shown(s));
+        let chat = subagents::chat(s, cx).expect("the chat's inspector");
+        chat.update(cx, |chat, cx| {
+            let mut agents: Vec<_> = chat.agents.iter().filter(|a| a.native).cloned().collect();
+            agents.push(native("native-late"));
+            chat.set_native(agents, cx)
+        });
+        let _ = w;
+        subagents::tick(s, false, cx);
+    });
+    let listed = s.read_with(&v, |s, cx| {
+        let repo = s.state.selected.clone().unwrap();
+        s.features
+            .read::<subagents::Inspectors>()
+            .unwrap()
+            .workspace[&repo]
+            .read(cx)
+            .agents
+            .iter()
+            .any(|a| a.id == "native-late")
+    });
+    assert!(listed, "the shown workspace list takes a chat's new agent");
 }
