@@ -18,8 +18,10 @@ for package in "${packages[@]}"; do
 done
 # The runner's mirror list falls back to the next mirror only after a request
 # fails. apt's default timeout lets one stalled mirror hold every package for
-# minutes and run native shards into their job limit, so fail over quickly.
-apt_options=(-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=5)
+# minutes and run native shards into their job limit. Short timeouts with one
+# retry move each request to the next mirror in about a minute; more retries
+# keep hammering the stalled one.
+apt_options=(-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=1)
 if (( ${#missing[@]} )); then
   sudo apt-get "${apt_options[@]}" update -qq
   sudo apt-get "${apt_options[@]}" install -y --no-install-recommends "${missing[@]}"
