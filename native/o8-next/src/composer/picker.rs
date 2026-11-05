@@ -47,6 +47,8 @@ pub(super) const HOUSES: &[(&str, &[(&str, &str, &str, &str)])] = &[
 ];
 
 const CHECK: &str = "M5 12l5 5L20 7";
+/// The model picker's height: its header, search and 320 px of rows.
+pub(super) const MODEL_HEIGHT: f32 = 396.;
 
 impl Surface {
     /// The floating menu above the composer card for the open chip.
@@ -108,7 +110,11 @@ impl Surface {
                 "model" => 366.,
                 _ => 260.,
             }))
-            .max_h(px(if open == "model" { 470. } else { 520. }))
+            // The model picker keeps one size from its first frame: a rail
+            // that fills in as the inventory lands must not grow it upward
+            // under the pointer. Rail and rows scroll inside it.
+            .when(open == "model", |m| m.h(px(MODEL_HEIGHT)))
+            .when(open != "model", |m| m.max_h(px(520.)))
             .overflow_y_scroll()
             .p(px(if open == "model" { 0. } else { 6. }))
             .flex()

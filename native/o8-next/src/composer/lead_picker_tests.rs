@@ -217,3 +217,62 @@ fn native_composer_lead_picker_lists_and_binds_provider_instances(cx: &mut TestA
         .unwrap();
     assert_eq!(history["backend"], "codex");
 }
+
+#[gpui::test]
+fn native_composer_model_picker_keeps_its_size_and_rail_while_the_inventory_lands(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    let set = |surface: &gpui::Entity<Surface>, cx: &mut VisualTestContext, inventory: Value| {
+        surface.update(cx, |s, cx| {
+            s.composer.update(cx, |i, _| i.controls.inventory = inventory);
+            cx.notify();
+        });
+        draw(cx);
+    };
+    // The first frame: the runtime inventory has not landed yet.
+    set(&surface, cx, json!("loading"));
+    click("composer-model", cx);
+    set(&surface, cx, json!("loading"));
+    let bounds = |cx: &mut VisualTestContext, id: &'static str| {
+        cx.debug_bounds(id).unwrap_or_else(|| panic!("{id}"))
+    };
+    let first = [
+        bounds(cx, "composer-picker"),
+        bounds(cx, "lead-house-claude"),
+        bounds(cx, "lead-house-codex"),
+        bounds(cx, "lead-house-o8"),
+    ];
+    assert!(cx.debug_bounds("lead-house-opencode").is_none());
+    // Five more houses are installed.
+    let installed = |id: &str| json!({"id": id, "available": true, "installed": true});
+    set(
+        &surface,
+        cx,
+        json!([
+            installed("claude-code"),
+            installed("codex"),
+            installed("opencode"),
+            installed("pi"),
+            installed("muse"),
+            installed("hermes"),
+            installed("acp"),
+        ]),
+    );
+    assert!(cx.debug_bounds("lead-house-opencode").is_some());
+    assert!(cx.debug_bounds("lead-house-pi").is_some());
+    let after = [
+        bounds(cx, "composer-picker"),
+        bounds(cx, "lead-house-claude"),
+        bounds(cx, "lead-house-codex"),
+        bounds(cx, "lead-house-o8"),
+    ];
+    assert_eq!(after, first, "the picker and its first houses stay put");
+    assert_eq!(
+        after[0].size.height,
+        gpui::px(super::composer_picker::MODEL_HEIGHT)
+    );
+    // The new houses join below the ones already drawn.
+    assert!(bounds(cx, "lead-house-opencode").top() > after[3].top());
+}
