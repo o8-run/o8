@@ -635,6 +635,7 @@ fn review_opens_a_requested_packet_and_never_swaps_an_unlisted_one(cx: &mut Test
 
 #[gpui::test]
 fn review_stacks_every_changed_file_with_a_files_drawer(cx: &mut TestAppContext) {
+    use crate::diff_ui::DiffSurface;
     let fixture = Fixture::start_mode(false, "--review");
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -651,6 +652,14 @@ fn review_stacks_every_changed_file_with_a_files_drawer(cx: &mut TestAppContext)
     }
     let long: String = (0..2_100).map(|n| format!("line {n}\n")).collect();
     fs::write(path.join("stack-large.txt"), long).unwrap();
+    // A pure rename has no hunks to draw.
+    let moved = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&path)
+        .args(["mv", "changed.rs", "moved.rs"])
+        .status()
+        .unwrap();
+    assert!(moved.success());
     run(cx, "d i f f");
     let started = Instant::now();
     loop {
@@ -665,49 +674,116 @@ fn review_stacks_every_changed_file_with_a_files_drawer(cx: &mut TestAppContext)
         std::thread::sleep(Duration::from_millis(20));
     }
     let (view, _) = review_target(&shell, cx);
-    let child = view.read_with(cx, |v, _| v.child.clone().unwrap());
-    let files = child.read_with(cx, |d, _| {
-        d.document
-            .files
-            .iter()
-            .map(|f| f.path.clone())
-            .collect::<Vec<_>>()
-    });
-    let a = files.iter().position(|f| f == "stack-a.txt").unwrap();
-    let b = files.iter().position(|f| f == "stack-b.txt").unwrap();
-    let large = files.iter().position(|f| f == "stack-large.txt").unwrap();
-    let card =
-        |i: usize| -> &'static str { Box::leak(format!("diff-stack-file-{i}").into_boxed_str()) };
-    let body = |i: usize| -> &'static str {
-        Box::leak(format!("review-file-{i}-diff-unified").into_boxed_str())
+    let child: Entity<DiffSurface> = view.read_with(cx, |v, _| v.child.clone().unwrap());
+    let index = |cx: &mut VisualTestContext, name: &str| {
+        child.read_with(cx, |d, _| {
+            d.document.files.iter().position(|f| f.path == name)
+        })
     };
+    let refresh = |cx: &mut VisualTestContext, done: &dyn Fn(&DiffSurface) -> bool| {
+        let button = cx.debug_bounds("diff-refresh").unwrap();
+        cx.simulate_click(button.center(), gpui::Modifiers::default());
+        let started = Instant::now();
+        loop {
+            settled(&shell, cx);
+            if child.read_with(cx, |d, _| d.ready && done(d)) {
+                break;
+            }
+            assert!(started.elapsed() < Duration::from_secs(10), "no refresh");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        settled(&shell, cx);
+    };
+    let click = |cx: &mut VisualTestContext, id: &str| {
+        let id: &'static str = Box::leak(id.to_owned().into_boxed_str());
+        let bounds = cx.debug_bounds(id).unwrap_or_else(|| panic!("{id}"));
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        settled(&shell, cx);
+        settled(&shell, cx);
+    };
+    let shows = |cx: &mut VisualTestContext, id: String| {
+        cx.debug_bounds(Box::leak(id.into_boxed_str())).is_some()
+    };
+    let body = |i: usize| format!("review-file-{i}-diff-unified");
+    let card = |i: usize| format!("diff-stack-file-{i}");
+    let (a, b) = (
+        index(cx, "stack-a.txt").unwrap(),
+        index(cx, "stack-b.txt").unwrap(),
+    );
+    let (large, renamed) = (
+        index(cx, "stack-large.txt").unwrap(),
+        index(cx, "moved.rs").unwrap(),
+    );
     // Every file is a card with its diff rows open, one after another.
-    let (card_a, card_b) = (cx.debug_bounds(card(a)), cx.debug_bounds(card(b)));
-    assert!(card_a.is_some() && card_b.is_some(), "{files:?}");
-    assert!(cx.debug_bounds(body(a)).is_some(), "file a's rows show");
+    assert!(shows(cx, card(a)) && shows(cx, card(b)));
+    assert!(shows(cx, body(a)), "file a's rows show");
     assert!(
         cx.debug_bounds("diff-viewport").is_none(),
         "no one-file viewer"
     );
+    // A file over the row limit starts closed and says what opening costs.
+    assert!(shows(cx, card(large)) && !shows(cx, body(large)));
+    assert!(shows(cx, format!("diff-stack-hint-{large}")));
+    // A rename without hunks says what moved instead of drawing rows.
+    assert!(shows(cx, format!("diff-stack-meta-{renamed}")));
+    assert!(child.read_with(cx, |d, _| d.document.files[renamed].status == "renamed"));
+    // The large file is one Expand all opens, so the toolbar offers it.
+    assert!(!child.read_with(cx, |d, _| d.all_open()));
+    click(cx, "diff-collapse");
+    assert!(child.read_with(cx, |d, _| d.all_open()), "expanded");
+    assert!(shows(cx, body(large)), "opened, drawing its first rows");
+    assert!(shows(cx, format!("diff-stack-more-{large}")));
+    click(cx, "diff-collapse");
+    for i in [a, b, large] {
+        assert!(!shows(cx, body(i)), "collapse all closes file {i}");
+    }
+    assert!(!child.read_with(cx, |d, _| d.all_open()));
+    // A drawer jump to a file taller than the stack lands on its header.
+    click(cx, &format!("diff-file-{large}"));
+    assert!(shows(cx, body(large)), "a jump opens the file");
+    let stack = cx.debug_bounds("diff-stack").unwrap();
+    let header = cx
+        .debug_bounds(Box::leak(card(large).into_boxed_str()))
+        .unwrap();
     assert!(
-        cx.debug_bounds(card(large)).is_some() && cx.debug_bounds(body(large)).is_none(),
-        "a file over the row limit starts collapsed"
+        (header.top() - stack.top()).abs() < gpui::px(2.),
+        "header at {:?}, stack at {:?}",
+        header.top(),
+        stack.top()
     );
-    // A header collapses its file and only its file.
-    cx.simulate_click(card_a.unwrap().center(), gpui::Modifiers::default());
-    settled(&shell, cx);
-    assert!(cx.debug_bounds(body(a)).is_none(), "collapsed");
-    assert!(child.read_with(cx, |d, _| d.closed.contains(&a)));
-    // The drawer lists the files; picking one opens it again.
-    let row: &'static str = Box::leak(format!("diff-file-{a}").into_boxed_str());
-    let entry = cx.debug_bounds(row).expect("the files drawer");
-    cx.simulate_click(entry.center(), gpui::Modifiers::default());
-    settled(&shell, cx);
-    assert!(cx.debug_bounds(body(a)).is_some(), "a jump opens the file");
+    // Back at the top, a header opens its file and only its file.
+    click(cx, "diff-file-0");
+    click(cx, &card(a));
+    assert!(shows(cx, body(a)) && !shows(cx, body(b)));
+    // A new file above them moves every index; open and closed follow the path.
+    fs::write(path.join("stack-0.txt"), "first\n").unwrap();
+    refresh(cx, &|d| {
+        d.document.files.iter().any(|f| f.path == "stack-0.txt")
+    });
+    let (a2, b2) = (
+        index(cx, "stack-a.txt").unwrap(),
+        index(cx, "stack-b.txt").unwrap(),
+    );
+    assert_eq!(a2, a + 1, "the new file sorts first");
+    assert!(shows(cx, body(a2)), "a stays open at its new index");
+    assert!(!shows(cx, body(b2)), "b stays closed at its new index");
+    let first = index(cx, "stack-0.txt").unwrap();
+    assert!(shows(cx, body(first)), "a new small file opens");
+    // A refresh that drops the selected last file keeps the selection in range.
+    let last = index(cx, "stack-large.txt").unwrap();
+    click(cx, &format!("diff-file-{last}"));
+    assert_eq!(child.read_with(cx, |d, _| d.selected), last);
+    fs::remove_file(path.join("stack-large.txt")).unwrap();
+    fs::remove_file(path.join("stack-0.txt")).unwrap();
+    refresh(cx, &|d| {
+        !d.document.files.iter().any(|f| f.path == "stack-large.txt")
+    });
+    let (selected, total) = child.read_with(cx, |d, _| (d.selected, d.document.files.len()));
+    assert!(selected < total, "{selected} of {total}");
     // The drawer hides and shows from the toolbar.
-    let drawer = cx.debug_bounds("diff-drawer").unwrap();
-    cx.simulate_click(drawer.center(), gpui::Modifiers::default());
-    settled(&shell, cx);
-    assert!(cx.debug_bounds(row).is_none(), "drawer hidden");
-    assert!(cx.debug_bounds(card(b)).is_some(), "the stack stays");
+    let row = format!("diff-file-{}", index(cx, "stack-a.txt").unwrap());
+    assert!(shows(cx, row.clone()), "the files drawer");
+    click(cx, "diff-drawer");
+    assert!(!shows(cx, row), "drawer hidden");
+    assert!(shows(cx, card(0)), "the stack stays");
 }

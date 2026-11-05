@@ -10,7 +10,11 @@ use gpui::{
     Window, WindowBounds, WindowOptions, canvas, div, point, prelude::*, px, size, uniform_list,
 };
 use serde_json::Value;
-use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{BTreeSet, HashMap},
+    rc::Rc,
+};
 
 #[path = "diff_ui_stack.rs"]
 mod stack;
@@ -35,8 +39,11 @@ pub(crate) struct DiffSurface {
     pub(crate) painted: Rc<RefCell<BTreeSet<usize>>>,
     /// Working changes: each file's shared diff rows, stacked.
     stack: Rc<Vec<Vec<crate::files_panel::file_diff::Line>>>,
-    /// Stacked files the reader collapsed.
-    pub(crate) closed: BTreeSet<usize>,
+    /// Stacked files the reader opened (`true`) or closed, by path. Every
+    /// other file opens while it fits the row budget.
+    pub(crate) chosen: HashMap<String, bool>,
+    /// Said beside the notice when Expand all left files closed.
+    limit_note: Option<String>,
     /// The files list beside the stack.
     pub(crate) drawer: bool,
     stack_scroll: gpui::ScrollHandle,
@@ -67,7 +74,8 @@ impl DiffSurface {
             scroll: UniformListScrollHandle::new(),
             painted: Rc::new(RefCell::new(BTreeSet::new())),
             stack: Rc::new(vec![]),
-            closed: BTreeSet::new(),
+            chosen: HashMap::new(),
+            limit_note: None,
             drawer: true,
             stack_scroll: gpui::ScrollHandle::new(),
         };
@@ -97,21 +105,14 @@ impl DiffSurface {
                     Ok((document, state)) => {
                         this.document = Rc::new(document);
                         if this.stacked() {
-                            // Large files start collapsed on the first read
-                            // only; a refresh keeps what the reader opened.
-                            let first = this.stack.is_empty();
+                            // What the reader opened or closed follows each
+                            // file's path across a refresh.
                             this.stack = Rc::new(stack::parse(&this.document));
-                            this.closed.retain(|i| *i < this.document.files.len());
-                            if first {
-                                let large: Vec<usize> = this
-                                    .stack
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(_, lines)| lines.len() > stack::LARGE)
-                                    .map(|(i, _)| i)
-                                    .collect();
-                                this.closed.extend(large);
-                            }
+                            let files = &this.document.files;
+                            this.chosen
+                                .retain(|path, _| files.iter().any(|f| &f.path == path));
+                            this.selected = this.selected.min(files.len().saturating_sub(1));
+                            this.limit_note = None;
                         }
                         this.state = state;
                         this.ready = true;
@@ -333,7 +334,7 @@ impl Render for DiffSurface {
             && !doc.files.is_empty()
             && matches!(self.target, Target::Packet(_));
         let stacked = self.stacked();
-        let all_open = self.closed.is_empty();
+        let all_open = stacked && self.all_open();
         let files = uniform_list(
             "diff-files",
             doc.files.len(),
@@ -508,9 +509,9 @@ impl Render for DiffSurface {
                             .on_click(cx.listener(
                                 move |s, _, _, cx| {
                                     if all_open {
-                                        s.closed = (0..s.document.files.len()).collect();
+                                        s.collapse_all();
                                     } else {
-                                        s.closed.clear();
+                                        s.expand_all();
                                     }
                                     cx.notify();
                                 },
@@ -540,7 +541,10 @@ impl Render for DiffSurface {
                     .py(px(8.))
                     .text_size(px(11.))
                     .text_color(theme().text_muted)
-                    .child(self.notice.clone()),
+                    .child(match &self.limit_note {
+                        Some(note) => format!("{} · {note}", self.notice),
+                        None => self.notice.clone(),
+                    }),
             )
             .child(body)
     }
