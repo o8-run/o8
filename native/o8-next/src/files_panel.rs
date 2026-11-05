@@ -4,7 +4,7 @@
 mod changes;
 mod edit;
 mod editor;
-mod file_diff;
+pub(crate) mod file_diff;
 mod icons;
 mod io;
 mod markdown;

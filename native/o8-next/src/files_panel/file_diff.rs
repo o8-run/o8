@@ -2,7 +2,7 @@
 use super::*;
 use std::sync::LazyLock;
 #[derive(Clone, Copy, PartialEq)]
-pub(super) enum Kind {
+pub(crate) enum Kind {
     Add,
     Del,
     Context,
@@ -10,13 +10,13 @@ pub(super) enum Kind {
     Meta,
 }
 #[derive(Clone)]
-pub(super) struct Line {
+pub(crate) struct Line {
     pub kind: Kind,
     pub text: SharedString,
     pub old: Option<usize>,
     pub new: Option<usize>,
 }
-pub(super) fn parse(source: &str) -> Vec<Line> {
+pub(crate) fn parse(source: &str) -> Vec<Line> {
     static HUNK: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@").unwrap());
     let mut old = 0;
@@ -131,19 +131,27 @@ fn side(line: Option<&Line>, before: bool) -> gpui::AnyElement {
         .into_any_element()
 }
 pub(super) fn view(lines: &[Line], split: bool) -> gpui::AnyElement {
+    div()
+        .id("files-diff-scroll")
+        .flex_1()
+        .min_w_0()
+        .min_h_0()
+        .overflow_scroll()
+        .py(px(10.))
+        .when(!split, |d| d.pr(px(8.)))
+        .child(rows(lines, split, "files"))
+        .into_any_element()
+}
+/// The diff rows without a scroll container, for a caller that scrolls them
+/// itself; `key` prefixes the selectors so several diffs can share a view.
+pub(crate) fn rows(lines: &[Line], split: bool, key: &str) -> gpui::AnyElement {
+    let side_id = format!("{key}-diff-side");
+    let unified_id = format!("{key}-diff-unified");
+    let selector = if split { side_id } else { unified_id };
+    let row_key = key.to_owned();
     let mut body = div()
-        .id(if split {
-            "files-diff-side"
-        } else {
-            "files-diff-unified"
-        })
-        .debug_selector(move || {
-            if split {
-                "files-diff-side".into()
-            } else {
-                "files-diff-unified".into()
-            }
-        })
+        .id(gpui::SharedString::from(selector.clone()))
+        .debug_selector(move || selector.clone())
         .w_full()
         .min_w_0()
         .flex()
@@ -156,7 +164,10 @@ pub(super) fn view(lines: &[Line], split: bool) -> gpui::AnyElement {
         for (i, (left, right)) in pair(lines).into_iter().enumerate() {
             body = body.child(
                 div()
-                    .debug_selector(move || format!("files-diff-row-{i}"))
+                    .debug_selector({
+                        let row_key = row_key.clone();
+                        move || format!("{row_key}-diff-row-{i}")
+                    })
                     .flex()
                     .min_h(px(18.))
                     .child(side(left.map(|i| &lines[i]), true))
@@ -168,7 +179,10 @@ pub(super) fn view(lines: &[Line], split: bool) -> gpui::AnyElement {
             let (background, color) = tone(line.kind);
             body = body.child(
                 div()
-                    .debug_selector(move || format!("files-diff-row-{i}"))
+                    .debug_selector({
+                        let row_key = row_key.clone();
+                        move || format!("{row_key}-diff-row-{i}")
+                    })
                     .w_full()
                     .min_w_0()
                     .flex()
@@ -201,14 +215,36 @@ pub(super) fn view(lines: &[Line], split: bool) -> gpui::AnyElement {
             );
         }
     }
-    div()
-        .id("files-diff-scroll")
-        .flex_1()
-        .min_w_0()
-        .min_h_0()
-        .overflow_scroll()
-        .py(px(10.))
-        .when(!split, |d| d.pr(px(8.)))
-        .child(body)
-        .into_any_element()
+    body.into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_pairs_each_removal_with_its_replacement() {
+        let lines = parse("@@ -1,2 +1,2 @@\n keep\n-before\n+after\n+added");
+        assert_eq!(lines.len(), 5);
+        assert_eq!(
+            pair(&lines),
+            vec![
+                (Some(0), Some(0)),
+                (Some(1), Some(1)),
+                (Some(2), Some(3)),
+                (None, Some(4)),
+            ]
+        );
+        let numbers: Vec<_> = lines.iter().map(|l| (l.old, l.new)).collect();
+        assert_eq!(
+            numbers,
+            vec![
+                (None, None),
+                (Some(1), Some(1)),
+                (Some(2), None),
+                (None, Some(2)),
+                (None, Some(3))
+            ]
+        );
+    }
 }
