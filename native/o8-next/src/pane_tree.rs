@@ -14,17 +14,13 @@ const MAX_RATIO: f32 = 0.85;
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Leaf {
     Main,
-    Chat {
-        session: String,
-    },
+    Chat { session: String },
     Terminal {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<String>,
     },
     /// One worker's card in the automatic grid.
-    Worker {
-        agent: String,
-    },
+    Worker { agent: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -63,11 +59,9 @@ impl Zone {
             (Zone::Above, y),
             (Zone::Below, 1. - y),
         ];
-        let (zone, distance) =
-            edges.into_iter().fold(
-                edges[0],
-                |best, edge| if edge.1 < best.1 { edge } else { best },
-            );
+        let (zone, distance) = edges
+            .into_iter()
+            .fold(edges[0], |best, edge| if edge.1 < best.1 { edge } else { best });
         if distance < 0.28 { zone } else { Zone::Center }
     }
     /// TileContainer's overlay label.
@@ -414,13 +408,12 @@ mod tests {
         assert!(!closed.close(MAIN));
     }
     fn chat(id: &str) -> Leaf {
-        Leaf::Chat { session: id.into() }
+        Leaf::Chat {
+            session: id.into(),
+        }
     }
     fn ids(node: &Node) -> Vec<String> {
-        node.leaves()
-            .into_iter()
-            .map(|(id, _)| id.to_owned())
-            .collect()
+        node.leaves().into_iter().map(|(id, _)| id.to_owned()).collect()
     }
     #[test]
     fn zones_follow_workspace_tab_drop_zone() {
@@ -435,25 +428,16 @@ mod tests {
     fn panes_split_without_limit_close_and_resize() {
         let mut root = Node::main();
         assert!(root.split(MAIN, Zone::Right, "a".into(), chat("1")));
-        assert!(root.split(
-            "a",
-            Zone::Below,
-            "b".into(),
-            Leaf::Terminal { session: None }
-        ));
+        assert!(root.split("a", Zone::Below, "b".into(), Leaf::Terminal { session: None }));
         assert!(root.split(MAIN, Zone::Left, "c".into(), chat("2")));
         assert!(root.split("b", Zone::Center, "d".into(), chat("3")));
         assert_eq!(ids(&root), ["c", "main", "a", "b", "d"]);
         assert!(!root.split("missing", Zone::Left, "e".into(), chat("4")));
-        let Node::Split { id, vertical, .. } = &root else {
-            panic!()
-        };
+        let Node::Split { id, vertical, .. } = &root else { panic!() };
         assert!(*vertical);
         let top = id.clone();
         assert!(root.resize(&top, 0.99));
-        let Node::Split { ratio, .. } = &root else {
-            panic!()
-        };
+        let Node::Split { ratio, .. } = &root else { panic!() };
         assert_eq!(*ratio, 0.85);
         assert!(!root.close(MAIN));
         assert!(root.close("b"));

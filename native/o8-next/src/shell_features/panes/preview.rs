@@ -79,6 +79,8 @@ const LAUNCH_ENV: &str = "O8_DEV_WORKER_PREVIEW";
 const CARD_MIN: f32 = 230.;
 
 pub(super) struct Preview {
+    /// The workspace it shows in; switching away ends it.
+    pub(super) workspace: String,
     /// How many workers this run adds.
     target: usize,
     /// Which of WORKERS show, in arrival order.
@@ -156,10 +158,12 @@ impl Preview {
 }
 
 pub(super) fn start(s: &mut Shell, count: usize, cx: &mut Context<Shell>) {
+    let workspace = super::workspace(s);
     let state = s.features.get::<State>();
     state.preview_run += 1;
     let run = state.preview_run;
     state.preview = Some(Preview {
+        workspace,
         target: count,
         workers: vec![],
         tree: Node::main(),
@@ -225,7 +229,11 @@ pub(super) static END: PaletteCommand = PaletteCommand {
         s.restore_focus(window, cx);
     },
 };
+/// Dev windows only, as classic's preview: O8_DEV_WORKER_PREVIEW set.
 pub(super) fn commands(s: &Shell) -> Vec<Command> {
+    if std::env::var_os(LAUNCH_ENV).is_none() {
+        return vec![];
+    }
     let active = s
         .features
         .read::<State>()
@@ -240,11 +248,7 @@ pub(super) fn commands(s: &Shell) -> Vec<Command> {
 /// The panes with the preview's bar over them, or with the launch button in
 /// a dev window.
 pub(super) fn wrap(s: &Shell, panes: AnyElement, cx: &mut Context<Shell>) -> AnyElement {
-    let shown = s
-        .features
-        .read::<State>()
-        .and_then(|state| state.preview.as_ref())
-        .map(|preview| (preview.workers.len(), preview.target));
+    let shown = super::previewing(s).map(|preview| (preview.workers.len(), preview.target));
     let frame = div()
         .size_full()
         .flex()
@@ -369,11 +373,8 @@ pub(super) fn card(s: &Shell, id: &str, agent: &str, cx: &mut Context<Shell>) ->
         .copied()
         .find(|worker| worker.0 == agent)
         .unwrap_or((agent, "", "Working", ""));
-    let focused = s
-        .features
-        .read::<State>()
-        .and_then(|state| state.preview.as_ref())
-        .is_some_and(|preview| preview.focused.as_deref() == Some(id));
+    let focused =
+        super::previewing(s).is_some_and(|preview| preview.focused.as_deref() == Some(id));
     let tone = match status {
         "Needs input" => theme().warning,
         "Review" => theme().accent,
@@ -681,15 +682,73 @@ mod tests {
         assert_eq!(workers(&s, &v), ["preview-worker-2", "preview-worker-4"]);
         assert_eq!(ratio(&s, &v), moved, "a moved divider stays put");
 
+        // A rail drop takes no real chat into the simulated grid.
+        let sessions = s.read_with(&v, |s, _| s.sessions.len());
+        let before = s.read_with(&v, |s, _| tree(s));
+        s.update_in(&mut v, |s, _, cx| {
+            super::super::split(
+                s,
+                "preview-worker-2",
+                Zone::Right,
+                super::super::super::RailPane::Chat,
+                cx,
+            )
+        });
+        settle(&mut v, 50);
+        assert_eq!(s.read_with(&v, |s, _| s.sessions.len()), sessions);
+        assert_eq!(s.read_with(&v, |s, _| tree(s)), before);
+
         click(&mut v, "worker-preview-end");
         assert!(workers(&s, &v).is_empty());
         assert!(v.debug_bounds("worker-preview-bar").is_none());
         assert!(v.debug_bounds("pane-main").is_some());
     }
 
+    #[gpui::test]
+    fn a_preview_ends_when_its_workspace_is_left(cx: &mut TestAppContext) {
+        let f = Fixture::start(true);
+        let (s, mut v) = open(
+            f.client.clone(),
+            f.root.join("worker-preview-switch.json"),
+            crate::shell_state::State::default(),
+            cx,
+        );
+        ready(&s, &mut v);
+        assert!(
+            s.read_with(&v, |s, _| commands(s)).is_empty(),
+            "only a dev window lists the preview"
+        );
+        s.update_in(&mut v, |s, _, cx| start(s, 4, cx));
+        v.executor().advance_clock(ARRIVAL);
+        settle(&mut v, 20);
+        assert_eq!(workers(&s, &v).len(), 1);
+        // As if the shell moved to another workspace under it.
+        s.update_in(&mut v, |s, _, _| {
+            s.features
+                .get::<State>()
+                .preview
+                .as_mut()
+                .unwrap()
+                .workspace = "elsewhere".into();
+        });
+        assert!(
+            workers(&s, &v).is_empty(),
+            "another workspace never shows it"
+        );
+        s.update_in(&mut v, |s, w, cx| s.tick(false, w, cx));
+        settle(&mut v, 20);
+        assert!(s.read_with(&v, |s, _| {
+            s.features.read::<State>().unwrap().preview.is_none()
+        }));
+        v.executor().advance_clock(ARRIVAL * 4);
+        settle(&mut v, 20);
+        assert!(workers(&s, &v).is_empty(), "its spawn stops too");
+    }
+
     #[test]
     fn the_grid_drops_columns_to_keep_cards_readable() {
         let mut preview = Preview {
+            workspace: String::new(),
             target: 10,
             workers: (0..10).collect(),
             tree: Node::main(),

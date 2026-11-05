@@ -60,24 +60,38 @@ fn workspace(s: &Shell) -> String {
 fn key(s: &Shell, leaf: &str) -> String {
     format!("pane|{}|{leaf}", workspace(s))
 }
+/// The worker preview this workspace shows, if any.
+fn previewing(s: &Shell) -> Option<&preview::Preview> {
+    let ws = workspace(s);
+    s.features
+        .read::<State>()?
+        .preview
+        .as_ref()
+        .filter(|preview| preview.workspace == ws)
+}
 fn tree(s: &Shell) -> Node {
-    if let Some(preview) = s
-        .features
-        .read::<State>()
-        .and_then(|state| state.preview.as_ref())
-    {
-        return preview.tree.clone();
+    match previewing(s) {
+        Some(preview) => preview.tree.clone(),
+        None => saved(s),
     }
+}
+/// The workspace's own panes, under any preview.
+fn saved(s: &Shell) -> Node {
     s.current()
         .and_then(|w| w.panes.clone())
         .unwrap_or_else(Node::main)
 }
 fn save_tree(s: &mut Shell, tree: Node) {
     // A preview's panes are never saved.
-    if let Some(preview) = s.features.get::<State>().preview.as_mut() {
-        preview.tree = tree;
+    if previewing(s).is_some() {
+        if let Some(preview) = s.features.get::<State>().preview.as_mut() {
+            preview.tree = tree;
+        }
         return;
     }
+    save_saved(s, tree);
+}
+fn save_saved(s: &mut Shell, tree: Node) {
     let Some(w) = s
         .state
         .selected
@@ -92,6 +106,11 @@ fn save_tree(s: &mut Shell, tree: Node) {
 
 /// Creates each pane's content once its chat is listed or its shell exists.
 fn ensure(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    // A preview belongs to the workspace it started in.
+    let state = s.features.get::<State>();
+    if state.preview.is_some() && previewing(s).is_none() {
+        preview::end(s, cx);
+    }
     let Some(panes) = s.current().and_then(|w| w.panes.clone()) else {
         return;
     };
@@ -167,10 +186,12 @@ fn start_terminal(s: &mut Shell, leaf: String, cx: &mut Context<Shell>) {
             s.features.get::<State>().starting.remove(&leaf);
             match result {
                 Ok(session) => {
-                    let mut tree = tree(s);
+                    // The shell belongs to the workspace's own panes, even
+                    // while a preview shows.
+                    let mut tree = saved(s);
                     if let Some(Leaf::Terminal { session: slot }) = tree.leaf_mut(&leaf) {
                         *slot = Some(session);
-                        save_tree(s, tree);
+                        save_saved(s, tree);
                     }
                 }
                 Err(error) => {
@@ -185,6 +206,10 @@ fn start_terminal(s: &mut Shell, leaf: String, cx: &mut Context<Shell>) {
 
 /// Splits `target` with a new chat or terminal pane where it was dropped.
 fn split(s: &mut Shell, target: &str, zone: Zone, pane: super::RailPane, cx: &mut Context<Shell>) {
+    // Simulated workers take no real chat or shell beside them.
+    if previewing(s).is_some() {
+        return;
+    }
     let leaf = match pane {
         super::RailPane::Chat => match s.start_thread(false, cx) {
             Some(session) => Leaf::Chat { session },
@@ -231,6 +256,9 @@ fn split(s: &mut Shell, target: &str, zone: Zone, pane: super::RailPane, cx: &mu
 
 /// Moves a pane beside `target`, keeping its id so its chat or terminal view stays.
 fn move_pane(s: &mut Shell, leaf: &str, target: &str, zone: Zone, cx: &mut Context<Shell>) {
+    if previewing(s).is_some() {
+        return;
+    }
     let mut tree = tree(s);
     let Some(content) = tree
         .leaves()
@@ -323,7 +351,10 @@ fn node(
                             )
                         };
                         let mut tree = tree(s);
-                        if tree.resize(&split, f32::from(at) / f32::from(size).max(1.)) {
+                        let size = f32::from(size).max(1.);
+                        // The main pane's floor beside a worker grid.
+                        let floor = if split == "grid" { MAIN_MIN / size } else { 0. };
+                        if tree.resize(&split, (f32::from(at) / size).max(floor)) {
                             if let Some(preview) = s.features.get::<State>().preview.as_mut() {
                                 preview.tree = tree;
                                 preview.manual = true;
@@ -556,6 +587,10 @@ fn track(
     bounds: gpui::Bounds<gpui::Pixels>,
     cx: &mut Context<Shell>,
 ) {
+    // A preview takes no drops, so it shows no drop target.
+    if previewing(s).is_some() {
+        return;
+    }
     let state = s.features.get::<State>();
     let next = if bounds.contains(&position) {
         let x = f32::from(position.x - bounds.left()) / f32::from(bounds.size.width).max(1.);
