@@ -40,23 +40,25 @@ impl Scope {
     }
 }
 
-/// Both sides of a rename as the route names it: `old → new`, or Git's
-/// `old => new` and `dir/{old => new}.rs`. Any other path is itself.
+/// The paths a changed file can show under: always the path as given, plus
+/// both sides of a rename. The routes name a rename `old → new`; Git's
+/// `dir/{old => new}.rs` form is read only with its braces, so a file
+/// literally named `a => b.txt` stays one path.
 fn sides(path: &str) -> Vec<String> {
-    for arrow in [" → ", " => "] {
-        let Some((before, after)) = path.split_once(arrow) else {
-            continue;
-        };
-        if let (Some(open), Some(close)) = (before.rfind('{'), after.find('}')) {
-            let (prefix, suffix) = (&before[..open], &after[close + 1..]);
-            return [&before[open + 1..], &after[..close]]
+    let mut sides = vec![path.to_owned()];
+    if let Some((before, after)) = path.split_once(" → ") {
+        sides.extend([before.to_owned(), after.to_owned()]);
+    } else if let Some((before, after)) = path.split_once(" => ")
+        && let (Some(open), Some(close)) = (before.rfind('{'), after.find('}'))
+    {
+        let (prefix, suffix) = (&before[..open], &after[close + 1..]);
+        sides.extend(
+            [&before[open + 1..], &after[..close]]
                 .iter()
-                .map(|part| format!("{prefix}{part}{suffix}").replace("//", "/"))
-                .collect();
-        }
-        return vec![before.to_owned(), after.to_owned()];
+                .map(|part| format!("{prefix}{part}{suffix}").replace("//", "/")),
+        );
     }
-    vec![path.to_owned()]
+    sides
 }
 
 /// The changed files whose `flag` (`staged` or `unstaged`) is set, from a
@@ -217,18 +219,52 @@ mod tests {
     fn a_rename_matches_by_either_path() {
         let body = serde_json::json!({"changedFiles": [
             {"path": "old.txt → new.txt", "staged": true, "unstaged": true},
-            {"path": "src/{a => b}/lib.rs", "staged": true},
-            {"path": "x.rs => y.rs", "unstaged": true}
+            {"path": "src/{a => b}/lib.rs", "staged": true}
         ]});
         assert_eq!(
             flagged(&body, "staged").into_iter().collect::<Vec<_>>(),
-            ["new.txt", "old.txt", "src/a/lib.rs", "src/b/lib.rs"]
+            [
+                "new.txt",
+                "old.txt",
+                "old.txt → new.txt",
+                "src/a/lib.rs",
+                "src/b/lib.rs",
+                "src/{a => b}/lib.rs"
+            ]
         );
         assert_eq!(
             flagged(&body, "unstaged").into_iter().collect::<Vec<_>>(),
-            ["new.txt", "old.txt", "x.rs", "y.rs"]
+            ["new.txt", "old.txt", "old.txt → new.txt"]
         );
-        assert_eq!(sides("{old => new}/x.rs"), ["old/x.rs", "new/x.rs"]);
-        assert_eq!(sides("dir/{ => sub}/x.rs"), ["dir/x.rs", "dir/sub/x.rs"]);
+        assert_eq!(
+            sides("{old => new}/x.rs"),
+            ["{old => new}/x.rs", "old/x.rs", "new/x.rs"]
+        );
+        assert_eq!(
+            sides("dir/{ => sub}/x.rs"),
+            ["dir/{ => sub}/x.rs", "dir/x.rs", "dir/sub/x.rs"]
+        );
+    }
+
+    /// Braces in a route's `old → new` are part of the names, and ` => `
+    /// without braces is part of one name.
+    #[test]
+    fn only_gits_brace_form_is_read_as_a_rename() {
+        assert_eq!(
+            sides("src/{a}.rs → src/{b}.rs"),
+            ["src/{a}.rs → src/{b}.rs", "src/{a}.rs", "src/{b}.rs"]
+        );
+        let body = serde_json::json!({"changedFiles": [
+            {"path": "src/{a}.rs → src/{b}.rs", "staged": true},
+            {"path": "a => b.txt", "staged": true}
+        ]});
+        let staged = flagged(&body, "staged");
+        assert!(
+            staged.contains("src/{b}.rs"),
+            "the staged rename stays shown"
+        );
+        assert!(staged.contains("a => b.txt"));
+        assert!(!staged.contains("b.txt"), "{staged:?}");
+        assert!(!staged.contains("a"), "{staged:?}");
     }
 }
