@@ -49,6 +49,7 @@ impl Projects {
         let enabled = !self.busy && !self.loading && self.form.is_none();
         let id = project.id.clone();
         let detail_id = id.clone();
+        let open_card = id.clone();
         let edit = project.clone();
         let delete = id.clone();
         let workspace = self.snapshot.workspace(&project).cloned();
@@ -56,162 +57,286 @@ impl Projects {
         let open_enabled = enabled && workspace.as_ref().is_some_and(|r| r.exists);
         let members = project.repos.clone();
         let detail = self.detail.as_ref() == Some(&id);
-        div()
-            .p(px(10.))
-            .mb(px(8.))
-            .border_1()
-            .border_color(theme().border)
-            .rounded(px(8.))
+        let active = self.snapshot.ledger.projects.iter().any(|p| {
+            p.id == self.snapshot.ledger.active_project_id
+                && (p.id == id || p.sqlite_project_id.as_ref() == Some(&id))
+        });
+        let description = project.description.clone().filter(|d| !d.trim().is_empty());
+        let count = match members.len() {
+            1 => "1 repository".to_owned(),
+            n => format!("{n} repositories"),
+        };
+        let heading = div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(
-                        div().flex_1().child(project.name.clone()).child(
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(if detail { 24. } else { 14. }))
+                    .when(detail, |d| d.font_weight(gpui::FontWeight::EXTRA_LIGHT))
+                    .when(!detail, |d| d.font_weight(gpui::FontWeight::MEDIUM))
+                    .child(project.name.clone()),
+            )
+            .when(active, |row| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .px(px(6.))
+                        .py(px(1.))
+                        .rounded(px(4.))
+                        .bg(theme().surface_raised)
+                        .text_size(px(10.))
+                        .text_color(theme().text_muted)
+                        .child("Active"),
+                )
+            });
+        let summary = div()
+            .mt(px(4.))
+            .text_size(px(12.))
+            .text_color(theme().text_muted)
+            .when(!detail, |d| d.line_clamp(2))
+            .child(
+                description
+                    .clone()
+                    .unwrap_or_else(|| "No instructions yet.".into()),
+            );
+        let actions = div()
+            .flex()
+            .flex_wrap()
+            .gap(px(6.))
+            .mt(px(10.))
+            .when(!detail, |row| {
+                row.child(
+                    control(
+                        format!("project-details-{}", project.slug),
+                        "Details",
+                        enabled,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if enabled {
+                            this.detail = Some(detail_id.clone());
+                            cx.notify();
+                        }
+                    })),
+                )
+            })
+            .child(self.action(
+                format!("project-activate-{}", project.slug),
+                if active {
+                    "Active project"
+                } else {
+                    "Switch project"
+                },
+                Action::Activate(id.clone()),
+                cx,
+            ))
+            .child(
+                control(
+                    format!("project-open-{}", project.slug),
+                    "Open workspace",
+                    open_enabled,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if open_enabled {
+                        this.act(
+                            Action::Open(open_id.clone(), workspace.as_ref().unwrap().id.clone()),
+                            cx,
+                        );
+                    }
+                })),
+            )
+            .child(
+                control(format!("project-edit-{}", project.slug), "Edit", enabled).on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        if enabled {
+                            this.edit(Some(edit.clone()), window, cx);
+                        }
+                    }),
+                ),
+            )
+            .child(
+                control(
+                    format!("project-delete-{}", project.slug),
+                    "Delete",
+                    enabled,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if enabled {
+                        this.confirmation = Some(Action::Delete(delete.clone()));
+                        cx.notify();
+                    }
+                })),
+            );
+        if !detail {
+            // A card: its name opens the project page. The card itself
+            // takes no click, so its buttons act on their own.
+            return div()
+                .w(px(300.))
+                .p(px(14.))
+                .border_1()
+                .border_color(theme().border)
+                .rounded(px(10.))
+                .child(
+                    div()
+                        .id(ElementId::Name(
+                            format!("project-card-{}", project.slug).into(),
+                        ))
+                        .when(enabled, |name| {
+                            name.cursor_pointer()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.detail = Some(open_card.clone());
+                                    cx.notify();
+                                }))
+                        })
+                        .child(heading),
+                )
+                .child(
+                    div()
+                        .mt(px(2.))
+                        .text_size(px(11.))
+                        .text_color(theme().text_muted)
+                        .child(count),
+                )
+                .child(summary)
+                .child(actions)
+                .into_any_element();
+        }
+        let repo_row = |r: usize, repo: &Repo| {
+            div()
+                .flex()
+                .gap(px(8.))
+                .items_center()
+                .py(px(7.))
+                .border_b_1()
+                .border_color(theme().border)
+                .child(crate::shell::sidebar::repo_identity(
+                    &repo.name,
+                    None,
+                    repo.icon.as_ref(),
+                    18.,
+                    &format!("project-repo-identity-{r}"),
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().truncate().child(repo.name.clone()))
+                        .child(
                             div()
+                                .truncate()
                                 .text_size(px(11.))
                                 .text_color(theme().text_muted)
-                                .child(format!(
-                                    "{} · {} repositories",
-                                    project.slug,
-                                    members.len()
-                                )),
+                                .child(repo.local_path.clone()),
                         ),
-                    )
-                    .child(
-                        control(
-                            format!("project-details-{}", project.slug),
-                            "Details",
-                            enabled,
-                        )
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if enabled {
-                                this.detail = Some(detail_id.clone());
-                                cx.notify();
-                            }
-                        })),
-                    )
-                    .child(self.action(
-                        format!("project-activate-{}", project.slug),
-                        if self.snapshot.ledger.projects.iter().any(|p| {
-                            p.id == self.snapshot.ledger.active_project_id
-                                && (p.id == id || p.sqlite_project_id.as_ref() == Some(&id))
-                        }) {
-                            "Active project"
-                        } else {
-                            "Switch project"
-                        },
-                        Action::Activate(id.clone()),
-                        cx,
-                    ))
-                    .child(
-                        control(
-                            format!("project-open-{}", project.slug),
-                            "Open workspace",
-                            open_enabled,
-                        )
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if open_enabled {
-                                this.act(
-                                    Action::Open(
-                                        open_id.clone(),
-                                        workspace.as_ref().unwrap().id.clone(),
-                                    ),
-                                    cx,
-                                );
-                            }
-                        })),
-                    )
-                    .child(
-                        control(format!("project-edit-{}", project.slug), "Edit", enabled)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                if enabled {
-                                    this.edit(Some(edit.clone()), window, cx);
-                                }
-                            })),
-                    )
-                    .child(
-                        control(
-                            format!("project-delete-{}", project.slug),
-                            "Delete",
-                            enabled,
-                        )
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if enabled {
-                                this.confirmation = Some(Action::Delete(delete.clone()));
-                                cx.notify();
-                            }
-                        })),
-                    ),
+                )
+        };
+        let section = |title: &'static str, note: &'static str| {
+            div()
+                .mt(px(22.))
+                .mb(px(4.))
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme().text_muted)
+                        .child(note),
+                )
+        };
+        let repos: Vec<(usize, Repo)> = self.snapshot.repos.iter().cloned().enumerate().collect();
+        let (linked, others): (Vec<_>, Vec<_>) = repos
+            .into_iter()
+            .partition(|(_, repo)| members.iter().any(|m| m.repo_id == repo.id));
+        div()
+            .max_w(px(760.))
+            .child(heading)
+            .child(
+                div()
+                    .mt(px(2.))
+                    .text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child(format!("{} · {count}", project.slug)),
             )
-            .when(detail, |view| {
+            .child(actions)
+            .child(section(
+                "Instructions",
+                "Every agent working in this project reads these first. Edit to change them.",
+            ))
+            .child(
+                div()
+                    .p(px(12.))
+                    .rounded(px(8.))
+                    .bg(theme().surface_raised)
+                    .text_size(px(12.))
+                    .when(description.is_none(), |d| d.text_color(theme().text_muted))
+                    .child(description.unwrap_or_else(|| "No instructions yet.".into())),
+            )
+            .child(section(
+                "In this project",
+                "Agents in this project can work across all of these repositories.",
+            ))
+            .when(linked.is_empty(), |view| {
                 view.child(
                     div()
-                        .my(px(8.))
+                        .py(px(6.))
                         .text_color(theme().text_muted)
-                        .child(project.description.clone().unwrap_or_default()),
+                        .child("No repositories yet. Add one below."),
                 )
-                .children(
-                    self.snapshot
-                        .repos
-                        .iter()
-                        .cloned()
-                        .enumerate()
-                        .map(|(r, repo)| {
-                            let member = members.iter().find(|m| m.repo_id == repo.id);
-                            let row = div()
-                                .flex()
-                                .gap(px(8.))
-                                .items_center()
-                                .py(px(5.))
-                                .child(div().flex_1().child(repo.name.clone()));
-                            if let Some(member) = member {
-                                let role = member.role.as_deref().unwrap_or("");
-                                let next = (ROLES.iter().position(|r| *r == role).unwrap_or(0) + 1)
-                                    % ROLES.len();
-                                row.child(self.action(
-                                    format!("project-role-{r}"),
-                                    format!(
-                                        "Role: {}",
-                                        if role.is_empty() { "none" } else { role }
-                                    ),
-                                    Action::Role(
-                                        id.clone(),
-                                        repo.id.clone(),
-                                        (!ROLES[next].is_empty()).then(|| ROLES[next].into()),
-                                    ),
-                                    cx,
-                                ))
-                                .child(self.action(
-                                    format!("project-main-{r}"),
-                                    if project.main_repo_id.as_ref() == Some(&repo.id) {
-                                        "Main repository"
-                                    } else {
-                                        "Set main"
-                                    },
-                                    Action::Main(id.clone(), repo.id.clone()),
-                                    cx,
-                                ))
-                                .child(self.action(
-                                    format!("project-unlink-{r}"),
-                                    "Remove from project",
-                                    Action::Unlink(id.clone(), repo.id),
-                                    cx,
-                                ))
-                            } else {
-                                row.child(self.action(
-                                    format!("project-link-{r}"),
-                                    "Add to project",
-                                    Action::Link(id.clone(), repo.id),
-                                    cx,
-                                ))
-                            }
-                        }),
-                )
-                .when(self.snapshot.repos.is_empty(), |view| {
-                    view.child("No repositories connected. Add a repository below.")
-                })
+            })
+            .children(linked.into_iter().map(|(r, repo)| {
+                let member = members.iter().find(|m| m.repo_id == repo.id);
+                let role = member.and_then(|m| m.role.clone()).unwrap_or_default();
+                let next = (ROLES.iter().position(|x| *x == role).unwrap_or(0) + 1) % ROLES.len();
+                repo_row(r, &repo)
+                    .child(self.action(
+                        format!("project-role-{r}"),
+                        format!("Role: {}", if role.is_empty() { "none" } else { &role }),
+                        Action::Role(
+                            id.clone(),
+                            repo.id.clone(),
+                            (!ROLES[next].is_empty()).then(|| ROLES[next].into()),
+                        ),
+                        cx,
+                    ))
+                    .child(self.action(
+                        format!("project-main-{r}"),
+                        if project.main_repo_id.as_ref() == Some(&repo.id) {
+                            "Main repository"
+                        } else {
+                            "Set main"
+                        },
+                        Action::Main(id.clone(), repo.id.clone()),
+                        cx,
+                    ))
+                    .child(self.action(
+                        format!("project-unlink-{r}"),
+                        "Remove from project",
+                        Action::Unlink(id.clone(), repo.id),
+                        cx,
+                    ))
+            }))
+            .when(!others.is_empty(), |view| {
+                view.child(section(
+                    "Add from your repositories",
+                    "Link a repository that belongs to this project.",
+                ))
+            })
+            .children(others.into_iter().map(|(r, repo)| {
+                repo_row(r, &repo).child(self.action(
+                    format!("project-link-{r}"),
+                    "Add to project",
+                    Action::Link(id.clone(), repo.id),
+                    cx,
+                ))
+            }))
+            .when(self.snapshot.repos.is_empty(), |view| {
+                view.child("No repositories connected. Add a repository below.")
             })
             .into_any_element()
     }
@@ -244,12 +369,12 @@ impl Render for Projects {
         div().id("projects-surface").size_full().overflow_y_scroll().p(px(20.))
             .bg(theme().background).text_color(theme().text).font_family(theme().font_ui).text_size(px(13.))
             .child(div().flex().items_center().gap(px(12.)).mb(px(12.))
-                .child(div().flex_1().text_size(px(18.)).child("Projects"))
+                .child(div().flex_1().text_size(px(24.)).font_weight(gpui::FontWeight::EXTRA_LIGHT).child("Projects"))
                 .child(control("project-new", "New project", enabled && self.form.is_none()).on_click(cx.listener(move |this, _, window, cx| {
                     if enabled && this.form.is_none() { this.edit(None, window, cx); }
                 })))
                 .child(control("projects-refresh", "Refresh", enabled).on_click(cx.listener(|this, _, _, cx| this.load(cx)))))
-            .child(div().text_color(theme().text_muted).mb(px(12.)).child("Group repositories and shared instructions for your project."))
+            .child(div().text_color(theme().text_muted).mb(px(16.)).child("A project links the repositories that belong together and the instructions every agent reads."))
             .when(self.loading || self.busy, |view| view.child(div().debug_selector(|| "projects-loading".into())
                 .mb(px(10.)).child(if self.loading { "Loading…" } else { "Saving…" })))
             .when_some(self.error.clone(), |view, error| view.child(div().debug_selector(|| "projects-error".into())
@@ -257,7 +382,7 @@ impl Render for Projects {
             .when(!self.loading && self.error.is_none() && first_run, |view| view.child(div().debug_selector(|| "projects-empty".into())
                 .mb(px(12.)).child("No projects yet. Create a project, then connect a repository to get started.")))
             .when(self.form.is_none(), |view| view.child(field("projects-search", "Search projects", self.search.clone())))
-            .when(self.detail.is_some(), |view| view.child(control("projects-all", "All projects", enabled)
+            .when(self.detail.is_some(), |view| view.child(control("projects-all", "‹ All projects", enabled).mb(px(14.))
                 .on_click(cx.listener(move |this, _, _, cx| { if enabled { this.detail = None; cx.notify(); } }))))
             .when(self.form.is_some(), |view| view.child(div().mb(px(12.))
                 .child(field("project-name", "Project name", self.name.clone()))
@@ -268,11 +393,12 @@ impl Render for Projects {
                     .child(control("project-cancel", "Cancel", enabled).on_click(cx.listener(move |this, _, _, cx| {
                         if enabled { this.form = None; cx.notify(); }
                     }))))))
-            .when(self.form.is_none(), |view| view.children(visible.iter().map(|(_, p)| self.card(p.clone(), cx))))
+            .when(self.form.is_none(), |view| view.child(div().flex().flex_wrap().gap(px(12.)).mb(px(8.))
+                .children(visible.iter().map(|(_, p)| self.card(p.clone(), cx)))))
             .when(!self.loading && self.error.is_none() && !first_run && visible.is_empty() && self.form.is_none(), |view| view.child(div()
                 .debug_selector(|| "projects-no-match".into()).child("No projects match your search.")))
             .child(div().flex().gap(px(8.)).items_center().my(px(12.))
-                .child(div().flex_1().child("Repositories"))
+                .child(div().flex_1().mt(px(16.)).text_size(px(13.)).font_weight(gpui::FontWeight::MEDIUM).child("All repositories"))
                 .child(control("repo-add", "Add repository", enabled).on_click(cx.listener(move |this, _, window, cx| {
                     if enabled { this.adding = true; this.validation = None; this.path.read(cx).focus.focus(window); cx.notify(); }
                 }))))
