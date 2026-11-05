@@ -483,8 +483,8 @@ fn activity_short_commit_prefix_keeps_ci_detail_reachable(cx: &mut TestAppContex
         .unwrap();
     activity_click(cx, "activity-refresh");
     activity_click(cx, "activity-filter-ci");
-    // Desktop groups equal normalized SHAs. A seven-character commit prefix
-    // must not absorb a forty-character CI identity and hide its detail action.
+    // A seven-character commit prefix groups with its forty-character CI run
+    // (#5106); the CI filter still lists the run, so its detail stays reachable.
     activity_click(cx, "activity-row-ci-example/activity-91");
     assert!(cx.debug_bounds("activity-ci-job-0").is_some());
 }

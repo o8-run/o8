@@ -10,6 +10,8 @@ fn read(f: &Fixture, query: &[(&str, &str)]) -> Value {
 fn activity_dossiers_scope_disclosure_and_evidence(cx: &mut TestAppContext) {
     let f = Fixture::start_mode(false, "--activity --activity-dossiers");
     let (_, mut v, _) = activity_open(&f, cx);
+    // Problems and directives sit behind the summary row.
+    activity_click(&mut v, "activity-attention");
     assert!(v.debug_bounds("activity-dossiers").is_some());
     assert!(v.debug_bounds("activity-dossier-candidate").is_some());
     assert!(v.debug_bounds("activity-dossier-foreign").is_none());
@@ -41,6 +43,8 @@ fn activity_dossiers_scope_disclosure_and_evidence(cx: &mut TestAppContext) {
 fn activity_dossier_decisions_write_real_state_and_replay_receipt(cx: &mut TestAppContext) {
     let f = Fixture::start_mode(false, "--activity --activity-dossiers");
     let (_, mut v, _) = activity_open(&f, cx);
+    // Problems and directives sit behind the summary row.
+    activity_click(&mut v, "activity-attention");
     read(&f, &[("mode", "slow")]);
     activity_click(&mut v, "activity-dossier-candidate-suppress");
     let result = read(&f, &[]);
@@ -100,6 +104,8 @@ fn activity_dossier_decisions_write_real_state_and_replay_receipt(cx: &mut TestA
 fn activity_dossier_unsettled_and_read_failure_keep_context(cx: &mut TestAppContext) {
     let f = Fixture::start_mode(false, "--activity --activity-dossiers");
     let (_, mut v, _) = activity_open(&f, cx);
+    // Problems and directives sit behind the summary row.
+    activity_click(&mut v, "activity-attention");
     read(&f, &[("mode", "error")]);
     activity_click(&mut v, "activity-refresh");
     assert!(v.debug_bounds("activity-dossiers-error").is_some());
@@ -122,6 +128,8 @@ fn activity_dossier_unsettled_and_read_failure_keep_context(cx: &mut TestAppCont
 fn activity_dossier_status_controls_follow_real_projection(cx: &mut TestAppContext) {
     let f = Fixture::start_mode(false, "--activity --activity-dossiers");
     let (_, mut v, _) = activity_open(&f, cx);
+    // Problems and directives sit behind the summary row.
+    activity_click(&mut v, "activity-attention");
     for (status, allowed) in [
         ("candidate", vec!["accept", "suppress"]),
         ("accepted", vec!["stop"]),
@@ -144,4 +152,29 @@ fn activity_dossier_status_controls_follow_real_projection(cx: &mut TestAppConte
             );
         }
     }
+}
+#[gpui::test]
+fn activity_feed_comes_first_with_problems_and_directives_behind_one_row(cx: &mut TestAppContext) {
+    let f = Fixture::start_mode(false, "--activity --activity-dossiers");
+    let (_, mut v, _) = activity_open(&f, cx);
+    let row = v.debug_bounds("activity-attention").unwrap();
+    assert_eq!(row.size.height, gpui::px(28.));
+    assert!(v.debug_bounds("activity-dossiers").is_none());
+    assert!(v.debug_bounds("activity-proposals").is_none());
+    let list = v.debug_bounds("activity-list").unwrap();
+    assert!(
+        list.top() >= row.bottom(),
+        "the feed starts below the one row"
+    );
+    activity_click(&mut v, "activity-attention");
+    assert!(v.debug_bounds("activity-attention-body").is_some());
+    assert!(v.debug_bounds("activity-dossiers").is_some());
+    assert!(v.debug_bounds("activity-proposals").is_some());
+    activity_click(&mut v, "activity-attention");
+    assert!(v.debug_bounds("activity-dossiers").is_none());
+    assert_eq!(
+        v.debug_bounds("activity-list").unwrap().top(),
+        list.top(),
+        "closing the row returns the feed to where it was"
+    );
 }

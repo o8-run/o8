@@ -20,6 +20,8 @@ fn press(v: &mut VisualTestContext) {
 
 fn start(f: &Fixture, cx: &mut TestAppContext) -> (Entity<Shell>, VisualTestContext) {
     let (s, mut v, _) = activity_open(f, cx);
+    // Problems and directives sit behind the summary row.
+    activity_click(&mut v, "activity-attention");
     activity_click(&mut v, "activity-dossiers");
     (s, v)
 }
@@ -191,6 +193,7 @@ fn activity_preferences_seen_and_visibility_survive_shell_reload(cx: &mut TestAp
     );
     let (s2, mut v2) = open(f.client.clone(), file, state, cx);
     ready(&s2, &mut v2);
+    activity_click(&mut v2, "activity-attention");
     assert!(v2.debug_bounds("activity-proposals").is_some());
     assert!(
         v2.debug_bounds(selector("auto", "auto-fixture", ""))
@@ -217,6 +220,8 @@ fn activity_feed_scroll_and_expansion_survive_native_reopen(cx: &mut TestAppCont
         .get("/api/activity-fixture", &[("mode", "empty")])
         .unwrap();
     let (s, mut v, _) = activity_open(&f, cx);
+    // Problems and directives sit behind the summary row.
+    activity_click(&mut v, "activity-attention");
     let view = activity_view(&s, &mut v);
     let (id, key) = view.read_with(&v, |v, _| {
         let row = v

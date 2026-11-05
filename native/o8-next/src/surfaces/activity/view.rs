@@ -95,6 +95,110 @@ impl ActivityPane {
             .opacity(0.6)
             .child(label.into())
     }
+    /// Recurring problems and Proposed directives behind one summary row, so
+    /// the feed comes first. The row keeps its height while they load; a click
+    /// opens both sections in a bounded area above the feed.
+    fn attention(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let scope = self.scope.clone();
+        let problems = self
+            .decisions
+            .dossiers
+            .iter()
+            .filter(|d| scope == "*" || d["repoPath"] == scope.as_str())
+            .filter(|d| d["status"] != "verified_closed" && d["status"] != "suppressed")
+            .count();
+        let rows = self.proposals.rows();
+        let unread = rows
+            .iter()
+            .filter(|p| !self.proposals.snapshot.contains(&text(p, "id")))
+            .count();
+        let loading = self.decisions.loading || self.proposals.loading;
+        let failed = self.decisions.error.is_some() || !self.proposals.errors.is_empty();
+        let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        let summary = if problems == 0 && rows.is_empty() && !failed {
+            if loading {
+                "Checking problems and directives…".to_owned()
+            } else {
+                "No recurring problems or proposed directives".to_owned()
+            }
+        } else {
+            let mut parts = vec![
+                plural(problems, "recurring problem", "recurring problems"),
+                plural(rows.len(), "proposed directive", "proposed directives"),
+            ];
+            if failed {
+                parts.push("some could not load".into());
+            }
+            parts.join(" · ")
+        };
+        let hot = problems > 0 || unread > 0;
+        let open = self.attention_open;
+        let mut row = self
+            .control("activity-attention", Action::Attention, cx)
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .h(px(28.))
+            .px(px(8.))
+            .rounded(px(8.))
+            .hover(|v| v.bg(theme().hover))
+            .child(icon::stroke(
+                if open { "m6 9 6 6 6-6" } else { "m9 6 6 6-6 6" },
+                theme().text_faint,
+                10.,
+                1.5,
+            ))
+            .child(
+                div()
+                    .size(px(6.))
+                    .rounded_full()
+                    .bg(if hot { theme().accent } else { theme().border }),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(11.))
+                    .text_color(if hot { theme().text } else { theme().text_muted })
+                    .child(summary),
+            );
+        if unread > 0 {
+            row = row.child(
+                div()
+                    .debug_selector(|| "activity-attention-new".into())
+                    .px(px(7.))
+                    .py(px(1.))
+                    .rounded_full()
+                    .text_size(px(9.5))
+                    .bg(theme().accent)
+                    .text_color(crate::theme::on_accent())
+                    .child(format!("{unread} new")),
+            );
+        }
+        let mut section = div()
+            .debug_selector(|| "activity-attention-section".into())
+            .flex()
+            .flex_col()
+            .child(row);
+        if open {
+            let mut body = div()
+                .id("activity-attention-body")
+                .debug_selector(|| "activity-attention-body".into())
+                .max_h(px(280.))
+                .overflow_y_scroll()
+                .flex()
+                .flex_col();
+            if let Some(dossiers) = self.dossiers(cx) {
+                body = body.child(dossiers);
+            }
+            if let Some(proposals) = self.proposal_drawer(cx) {
+                body = body.child(proposals);
+            }
+            section = section.child(body);
+        }
+        section.into_any_element()
+    }
     /// O8ActivityMissionControls' compact button: 24px, hairline, 10px medium.
     fn compact(
         &mut self,
@@ -1173,6 +1277,7 @@ impl Render for ActivityPane {
                     }),
             );
         }
+        let attention = self.attention(cx);
         let header = div()
             .flex()
             .flex_col()
@@ -1184,7 +1289,8 @@ impl Render for ActivityPane {
             .border_b_1()
             .border_color(theme().border)
             .child(top)
-            .child(div().flex().child(pills));
+            .child(div().flex().child(pills))
+            .child(attention);
         let mut list = div()
             .id("activity-list")
             .w_full()
@@ -1202,12 +1308,6 @@ impl Render for ActivityPane {
             .overflow_y_scroll()
             .flex()
             .flex_col();
-        if let Some(dossiers) = self.dossiers(cx) {
-            list = list.child(dossiers);
-        }
-        if let Some(proposals) = self.proposal_drawer(cx) {
-            list = list.child(proposals);
-        }
         let status = || {
             div()
                 .flex()
@@ -1250,15 +1350,17 @@ impl Render for ActivityPane {
         if !self.notice.is_empty() && !packet_feedback_visible {
             list = list.child(status().child(self.notice.clone()));
         }
+        // The CI filter lists the runs themselves, including runs grouped onto
+        // their commit, so each run keeps its own detail and actions.
         let rows = self
             .rows
             .iter()
-            .filter(|r| {
-                self.filter == "all"
-                    || r.kind == self.filter
-                    || self.filter == "ci" && r.ci.is_some()
+            .filter_map(|r| match (self.filter, &r.ci) {
+                ("all", _) => Some(r.clone()),
+                ("ci", Some(ci)) if r.kind == "commit" => Some((**ci).clone()),
+                (filter, _) if r.kind == filter => Some(r.clone()),
+                _ => None,
             })
-            .cloned()
             .collect::<Vec<_>>();
         let quiet = || {
             div()
