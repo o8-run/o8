@@ -30,6 +30,7 @@ No peer header grants local authority.
 | `/api/runtime/telemetry` | session | composer/context.rs, command_client.rs | gate |
 | `/api/orchestrator/status` | session | composer/command_client.rs | gate + panel |
 | `/api/setup/cli-updates` | setup, settings | shell_features/update.rs | gate |
+| `/api/panel/o8-update-summary` | settings | shell_features/update.rs | gate |
 | `/api/cortex/proposals` | activity | surfaces/activity/proposals.rs | gate |
 | `/api/panel/problem-dossiers` | activity | surfaces/activity/decisions.rs | gate + panel |
 | `/api/panel/file-asset` | session | files_panel/media.rs | gate |
@@ -65,7 +66,6 @@ the heal-bot is on, and skips the ticks the running heal-bot already covers.
 | Candidate | Reason |
 | --- | --- |
 | `/api/panel/devices` | Handler requires verified loopback in addition to operator authority. The adapter stamps `unverified-proxy`; a bearer cannot satisfy the local-peer condition. |
-| `/api/panel/o8-update-summary` | `getReleaseNotes` writes a disk cache on GET. |
 | `/api/tasks` | `getTaskPool` calls `getProjectsLedger`, which bootstraps and writes the project ledger when absent; project context reads share that bootstrap path. |
 | `/api/tasks/[id]/preview` | Native client uses POST/DELETE; production route has no GET. |
 | `/api/repo-spec/asset` | Native client uploads with POST; production route has no GET. |
