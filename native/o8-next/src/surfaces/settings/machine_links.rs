@@ -92,6 +92,22 @@ impl Links {
         }
     }
 
+    /// Marks a machine online with the given client, without a tunnel.
+    #[cfg(test)]
+    pub(crate) fn online(&self, id: &str, label: &str, client: Client) {
+        self.machines
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                id.to_owned(),
+                Machine {
+                    id: id.to_owned(),
+                    label: label.to_owned(),
+                    reach: Reach::Online(client),
+                },
+            );
+    }
+
     fn set(&self, route: &Route, label: &str, reach: Reach) {
         self.machines
             .lock()
