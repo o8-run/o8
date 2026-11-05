@@ -32,6 +32,9 @@ export async function GET(request: Request) {
     // changesOnly=1 the snapshot skips every network `gh` call — the slow path
     // that made a freshly-added repo blank for ~13s on first open (#1340).
     const changesOnly = searchParams.get('changesOnly') === '1';
+    // fresh=1 reads Git now instead of a snapshot up to 20s old, for a view
+    // that must agree with a diff it just read.
+    const fresh = searchParams.get('fresh') === '1';
 
     // Do not let a missing workspace param silently fall through to
     // process.cwd(). The client is expected to pass an absolute workspace
@@ -49,6 +52,7 @@ export async function GET(request: Request) {
       repoSlug,
       allowFallbackPullRequests: !strictBranch,
       changesOnly,
+      fresh,
     });
     return NextResponse.json(snapshot, {
       headers: {

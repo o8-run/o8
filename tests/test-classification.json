@@ -6918,6 +6918,14 @@
       ]
     },
     {
+      "path": "tests/review-workspace-fresh-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-workspace-panel-real-path.test.ts",
       "reasons": [
         "child-process",
