@@ -33,7 +33,7 @@ pub(crate) fn parse(source: &str) -> Vec<Line> {
             let count = |c: &regex::Captures, i: usize| {
                 c.get(i).map_or(1, |m| m.as_str().parse().unwrap_or(0))
             };
-            let (kind, left, right) = if let Some(c) = HUNK.captures(text).filter(|_| !in_hunk) {
+            let (kind, left, right) = if let Some(c) = HUNK.captures(text) {
                 old = c[1].parse().unwrap_or(0);
                 new = c[3].parse().unwrap_or(0);
                 old_left = count(&c, 2);
