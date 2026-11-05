@@ -182,24 +182,44 @@ pub(super) fn all(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     let Some(view) = workspace(s, cx) else {
         return;
     };
+    share_native(s, &view, cx);
     view.update(cx, |view, cx| view.inspect(None, window, cx));
     s.features.get::<Inspectors>().current = Some(view);
+}
+/// The inspector a tab's chat or grid keeps for its own agents.
+fn tab_inspector(s: &Shell, tab: &Tab, cx: &App) -> Option<Entity<Inspector>> {
+    match s.content.get(&s.key(tab)) {
+        Some(Content::Grid(view)) => view.read(cx).shell_subagents(),
+        Some(Content::Session(view)) => view.read(cx).shell_subagents(),
+        _ => None,
+    }
 }
 /// The chat the workspace is on: the active tab's, else the chat tab nearest
 /// it, so a pull request or file tab still reads that chat's agents.
 pub(super) fn chat(s: &Shell, cx: &App) -> Option<Entity<Inspector>> {
     let workspace = s.current()?;
-    let inspector = |tab: &Tab| match s.content.get(&s.key(tab)) {
-        Some(Content::Grid(view)) => view.read(cx).shell_subagents(),
-        Some(Content::Session(view)) => view.read(cx).shell_subagents(),
-        _ => None,
-    };
     let active = workspace.active.min(workspace.tabs.len().saturating_sub(1));
     (0..workspace.tabs.len())
         .flat_map(|step| [active.checked_sub(step), Some(active + step)])
         .flatten()
         .filter_map(|index| workspace.tabs.get(index))
-        .find_map(inspector)
+        .find_map(|tab| tab_inspector(s, tab, cx))
+}
+/// The workspace list also shows the agents each chat read from its own
+/// transcript; they have no packet for the workspace's read to find.
+fn share_native(s: &Shell, view: &Entity<Inspector>, cx: &mut Context<Shell>) {
+    let mut native: Vec<crate::subagents::model::Agent> = vec![];
+    for tab in s.current().map_or(&[][..], |w| &w.tabs[..]) {
+        let Some(chat) = tab_inspector(s, tab, cx) else {
+            continue;
+        };
+        for agent in chat.read(cx).agents.iter().filter(|a| a.native) {
+            if !native.iter().any(|known| known.id == agent.id) {
+                native.push(agent.clone());
+            }
+        }
+    }
+    view.update(cx, |view, cx| view.set_native(native, cx));
 }
 /// `all` also keeps the workspace's whole list fresh, for the dock's count.
 pub(super) fn tick(s: &mut Shell, all: bool, cx: &mut Context<Shell>) {
@@ -218,7 +238,10 @@ pub(super) fn tick(s: &mut Shell, all: bool, cx: &mut Context<Shell>) {
     let mut views = primary.into_iter().collect::<Vec<_>>();
     if all {
         views.extend(chat(s, cx));
-        views.extend(workspace(s, cx));
+        if let Some(view) = workspace(s, cx) {
+            share_native(s, &view, cx);
+            views.push(view);
+        }
     }
     let state = s.features.get::<Inspectors>();
     views.extend(state.current.clone());
@@ -373,26 +396,4 @@ fn close_directory(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
     if selected == Tool::Subagents && !restore_panel(s, cx) {
         layout::focus(s, "panel-new-tab", w);
     }
-}
-/// The inspector `current` would return, without making one.
-pub(super) fn existing(s: &Shell, cx: &App) -> Option<Entity<Inspector>> {
-    match s.active().and_then(|tab| s.content.get(&s.key(&tab))) {
-        Some(Content::Grid(view)) => {
-            if let Some(inspector) = view.read(cx).shell_subagents() {
-                return Some(inspector);
-            }
-        }
-        Some(Content::Session(view)) => {
-            if let Some(inspector) = view.read(cx).shell_subagents() {
-                return Some(inspector);
-            }
-        }
-        _ => {}
-    }
-    let repo = s.state.selected.as_ref()?;
-    s.features
-        .read::<Inspectors>()?
-        .workspace
-        .get(repo)
-        .cloned()
 }

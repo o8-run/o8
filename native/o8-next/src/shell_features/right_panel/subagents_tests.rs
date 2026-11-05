@@ -616,3 +616,55 @@ fn the_subagents_tool_opens_every_agent(cx: &mut TestAppContext) {
             .is_some()
     );
 }
+
+#[gpui::test]
+fn see_all_keeps_the_agents_a_chat_read_from_its_transcript(cx: &mut TestAppContext) {
+    let (_f, s, mut v) = setup(cx);
+    wait(&s, &mut v, "subagent-trace-subagent-calculation");
+    let native = crate::subagents::model::Agent {
+        shared: false,
+        native: true,
+        cleanup: None,
+        prompt: Some("Check the sums".into()),
+        run: "native-sums".into(),
+        id: "native-sums".into(),
+        title: "Check the sums".into(),
+        runtime: String::new(),
+        model: None,
+        effort: None,
+        parent: None,
+        session: None,
+        group: crate::subagents::model::Group::Working,
+        status: "Working".into(),
+        progress: None,
+        result: None,
+        started: None,
+        finished: None,
+        facts: Default::default(),
+    };
+    // One update: the chat's transcript observer would replace the injected
+    // agent once effects flush, so See all must read it before then.
+    s.update_in(&mut v, |s, w, cx| {
+        let chat = subagents::chat(s, cx).expect("the chat's inspector");
+        chat.update(cx, |chat, cx| {
+            let mut agents: Vec<_> = chat.agents.iter().filter(|a| a.native).cloned().collect();
+            agents.push(native.clone());
+            chat.set_native(agents, cx)
+        });
+        subagents::all(s, w, cx);
+        show(s, Tool::Subagents, w, cx);
+    });
+    let listed = s.read_with(&v, |s, cx| {
+        let repo = s.state.selected.clone().unwrap();
+        s.features
+            .read::<subagents::Inspectors>()
+            .unwrap()
+            .workspace[&repo]
+            .read(cx)
+            .agents
+            .iter()
+            .any(|a| a.id == "native-sums")
+    });
+    assert!(listed, "See all lists the chat's transcript agents too");
+    wait(&s, &mut v, "subagent-row-native-sums");
+}
