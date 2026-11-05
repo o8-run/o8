@@ -509,6 +509,13 @@ fn activity_short_commit_prefix_keeps_ci_detail_reachable(cx: &mut TestAppContex
     activity_click(cx, "activity-filter-ci");
     activity_click(cx, "activity-row-ci-example/activity-91");
     assert!(cx.debug_bounds("activity-ci-job-0").is_some());
+    // A reload keeps the grouped run expanded with its detail. A detail read
+    // in the last two minutes is not fetched again, as for any expanded row.
+    activity_click(cx, "activity-refresh");
+    let expanded = view.read_with(cx, |v, _| v.expanded.clone());
+    assert_eq!(expanded.as_deref(), Some("ci-example/activity-91"));
+    assert!(cx.debug_bounds("activity-row-ci-example/activity-91").is_some());
+    assert!(cx.debug_bounds("activity-ci-job-0").is_some());
 }
 
 #[gpui::test]

@@ -313,15 +313,17 @@ impl ActivityPane {
                 this.cache = snapshot.cache;
                 this.mission = snapshot.mission;
                 this.remote_updated = snapshot.remote_updated;
-                if !this.rows.iter().any(|r| Some(r.key()) == this.expanded) {
-                    this.expanded = None;
-                }
-                if let Some(row) = this
+                // A CI run grouped onto its commit stays expanded across reloads.
+                let expanded = this
                     .rows
                     .iter()
+                    .flat_map(|row| std::iter::once(row).chain(&row.ci))
                     .find(|r| Some(r.key()) == this.expanded)
-                    .cloned()
-                {
+                    .cloned();
+                if expanded.is_none() {
+                    this.expanded = None;
+                }
+                if let Some(row) = expanded {
                     if row.kind == "packet" {
                         this.packet_read(row, false, cx);
                     } else {
