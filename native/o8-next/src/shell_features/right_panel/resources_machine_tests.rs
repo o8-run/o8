@@ -111,3 +111,42 @@ fn sparkline_keeps_the_last_sixty_distinct_samples() {
         "a sample without a time is not recorded"
     );
 }
+#[test]
+fn a_saved_machine_says_why_it_has_no_meters() {
+    let dead = crate::shell::settings::machine_links::dead_client;
+    assert_eq!(
+        remote_status(&Reach::Connecting, None).as_deref(),
+        Some("Connecting…")
+    );
+    assert_eq!(
+        remote_status(&Reach::Offline("Connection lost.".into()), None).as_deref(),
+        Some("Offline · Connection lost.")
+    );
+    assert_eq!(
+        remote_status(&Reach::Offline(" ".into()), None).as_deref(),
+        Some("Offline")
+    );
+    assert_eq!(
+        remote_status(&Reach::Online(dead()), None).as_deref(),
+        Some("Reading…"),
+        "online, before the first reading"
+    );
+    let failed = Remote {
+        error: Some("HTTP 404".into()),
+        ..Remote::default()
+    };
+    assert_eq!(
+        remote_status(&Reach::Online(dead()), Some(&failed)).as_deref(),
+        Some("HTTP 404")
+    );
+    let read = Remote {
+        machine: Some(full(1., 20., 0.)),
+        error: Some("a later read failed".into()),
+        ..Remote::default()
+    };
+    assert_eq!(
+        remote_status(&Reach::Online(dead()), Some(&read)),
+        None,
+        "a known reading keeps its meters"
+    );
+}

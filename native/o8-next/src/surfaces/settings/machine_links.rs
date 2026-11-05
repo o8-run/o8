@@ -123,6 +123,18 @@ impl Links {
             wait = next_retry(wait);
         }
     }
+
+    /// Lists a machine in the given state, without a tunnel or a saved entry.
+    #[cfg(test)]
+    pub(crate) fn put(&self, id: &str, label: &str, reach: Reach) {
+        let route = Route {
+            id: id.into(),
+            target: id.into(),
+            port: 22,
+            ssh_config: None,
+        };
+        self.set(&route, label, reach);
+    }
 }
 
 /// Returns when the tunnel dies or the machine is removed; dropping the link

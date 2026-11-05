@@ -1,8 +1,9 @@
 //! Classic O8ResourcesPane behavior, using its existing process attribution route.
 use super::*;
+use crate::shell::settings::machine_links::Reach;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 const POLL: Duration = Duration::from_millis(2500);
 const ROUTE: &str = "/api/panel/resource-usage";
@@ -71,6 +72,38 @@ struct Snapshot {
     error: Option<String>,
     #[serde(default)]
     machine: Option<Machine>,
+}
+/// The part of another machine's reading this panel shows: its Machine block.
+#[derive(Deserialize)]
+struct MachineOnly {
+    #[serde(default)]
+    machine: Option<Machine>,
+}
+/// A saved machine's reading, from its own server through its tunnel.
+#[derive(Default)]
+struct Remote {
+    machine: Option<Machine>,
+    error: Option<String>,
+    pending: bool,
+    history: History,
+}
+/// What a saved machine's section says instead of meters, or `None` when
+/// there is a reading to draw.
+fn remote_status(reach: &Reach, remote: Option<&Remote>) -> Option<String> {
+    match reach {
+        Reach::Connecting => Some("Connecting…".into()),
+        Reach::Offline(reason) if reason.trim().is_empty() => Some("Offline".into()),
+        Reach::Offline(reason) => Some(format!("Offline · {reason}")),
+        Reach::Online(_) => match remote {
+            Some(Remote {
+                machine: Some(_), ..
+            }) => None,
+            Some(Remote {
+                error: Some(error), ..
+            }) => Some(error.clone()),
+            _ => Some("Reading…".into()),
+        },
+    }
 }
 const HISTORY: usize = 60;
 /// The last `HISTORY` machine samples, kept client side for the sparkline.
@@ -252,6 +285,8 @@ struct State {
     stopping: bool,
     scroll: gpui::ScrollHandle,
     history: History,
+    /// Saved machines' readings, by machine id.
+    remote: HashMap<String, Remote>,
 }
 pub(super) fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
     let active = s.features.read::<Panel>().is_some_and(|p| {
@@ -271,7 +306,58 @@ pub(super) fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
         load(s, cx);
     }
 }
+/// Reads each online saved machine's Machine block from its own server.
+/// Each machine keeps one request in flight; a slow machine never holds
+/// another machine's or this computer's reading.
+fn load_remote(s: &mut Shell, cx: &mut Context<Shell>) {
+    let machines = s.links.machines();
+    let state = s.features.get::<State>();
+    state
+        .remote
+        .retain(|id, _| machines.iter().any(|machine| &machine.id == id));
+    for machine in machines {
+        let Reach::Online(client) = machine.reach else {
+            continue;
+        };
+        let remote = state.remote.entry(machine.id.clone()).or_default();
+        if remote.pending {
+            continue;
+        }
+        remote.pending = true;
+        let id = machine.id;
+        let task = cx.background_executor().spawn(async move {
+            client
+                .get::<MachineOnly>(ROUTE, &[])
+                .map(|reading| reading.machine)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |s, cx| {
+                let Some(remote) = s.features.get::<State>().remote.get_mut(&id) else {
+                    return;
+                };
+                remote.pending = false;
+                match result {
+                    Ok(Some(machine)) => {
+                        remote.history.push(&machine);
+                        remote.machine = Some(machine);
+                        remote.error = None;
+                    }
+                    Ok(None) => {
+                        remote.machine = None;
+                        remote.error =
+                            Some("This machine's o8 does not report machine resources.".into());
+                    }
+                    Err(error) => remote.error = Some(error.to_string()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+}
 fn load(s: &mut Shell, cx: &mut Context<Shell>) {
+    load_remote(s, cx);
     if s.features.get::<State>().pending {
         return;
     }
@@ -589,9 +675,13 @@ fn bar(fraction: Option<f32>) -> gpui::Div {
                 .bg(theme().text_secondary),
         )
 }
-fn machine_section(view: &MachineView) -> AnyElement {
+/// One machine's section. `key` is `None` for this computer and the saved
+/// machine's id otherwise, so each section's controls stay distinct.
+fn machine_section(view: &MachineView, key: Option<&str>) -> AnyElement {
+    let suffix = key.map(|key| format!("-{key}")).unwrap_or_default();
+    let spark_id = format!("resources-sparkline{suffix}");
     let spark = div()
-        .debug_selector(|| "resources-sparkline".into())
+        .debug_selector(move || spark_id.clone())
         .mt(px(8.))
         .h(px(24.))
         .flex()
@@ -603,39 +693,12 @@ fn machine_section(view: &MachineView) -> AnyElement {
                 .h(gpui::relative(height.max(0.04)))
                 .bg(theme().text_secondary)
         }));
-    div()
-        .debug_selector(|| "resources-machine".into())
-        .px(px(14.))
-        .pt(px(10.))
-        .pb(px(10.))
-        .border_b_1()
-        .border_color(theme().border)
-        .child(
-            div()
-                .text_size(px(9.))
-                .text_color(theme().text_muted)
-                .child("MACHINE"),
-        )
-        .child(
-            div()
-                .mt(px(4.))
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .child(div().text_size(px(13.)).child(view.name.clone()))
-                .when(!view.summary.is_empty(), |line| {
-                    line.child(
-                        div()
-                            .text_size(px(9.5))
-                            .text_color(theme().text_muted)
-                            .child(view.summary.clone()),
-                    )
-                }),
-        )
+    let section_id = format!("resources-machine{suffix}");
+    machine_frame(section_id, &view.name, &view.summary)
         .children(view.meters.iter().map(|meter| {
-            let id = meter.id;
+            let id = format!("resources-meter{suffix}-{}", meter.id);
             div()
-                .debug_selector(move || format!("resources-meter-{id}"))
+                .debug_selector(move || id.clone())
                 .mt(px(8.))
                 .child(
                     div()
@@ -654,6 +717,70 @@ fn machine_section(view: &MachineView) -> AnyElement {
         }))
         .when(!view.spark.is_empty(), |v| v.child(spark))
         .into_any_element()
+}
+/// A Machine section's frame: the MACHINE label, the name and a summary line.
+fn machine_frame(id: String, name: &str, summary: &str) -> gpui::Div {
+    div()
+        .debug_selector(move || id.clone())
+        .px(px(14.))
+        .pt(px(10.))
+        .pb(px(10.))
+        .border_b_1()
+        .border_color(theme().border)
+        .child(
+            div()
+                .text_size(px(9.))
+                .text_color(theme().text_muted)
+                .child("MACHINE"),
+        )
+        .child(
+            div()
+                .mt(px(4.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(div().text_size(px(13.)).child(name.to_owned()))
+                .when(!summary.is_empty(), |line| {
+                    line.child(
+                        div()
+                            .text_size(px(9.5))
+                            .text_color(theme().text_muted)
+                            .child(summary.to_owned()),
+                    )
+                }),
+        )
+}
+/// A section per saved machine, in the sidebar's order: its meters from its
+/// own server, or why there are none yet.
+fn remote_sections(s: &Shell) -> Vec<AnyElement> {
+    let remote = s.features.read::<State>().map(|state| &state.remote);
+    s.links
+        .machines()
+        .into_iter()
+        .map(|machine| {
+            let reading = remote.and_then(|remote| remote.get(&machine.id));
+            match (remote_status(&machine.reach, reading), reading) {
+                (
+                    None,
+                    Some(Remote {
+                        machine: Some(sample),
+                        history,
+                        ..
+                    }),
+                ) => {
+                    let mut view = machine_view(sample, history);
+                    view.name = machine.label;
+                    machine_section(&view, Some(&machine.id))
+                }
+                (status, _) => machine_frame(
+                    format!("resources-machine-{}", machine.id),
+                    &machine.label,
+                    &status.unwrap_or_default(),
+                )
+                .into_any_element(),
+            }
+        })
+        .collect()
 }
 pub(super) fn element(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
     let state = s.features.read::<State>();
@@ -697,11 +824,12 @@ pub(super) fn element(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
             .filter_map(|row| row.mem_bytes)
             .fold(0., f64::max);
         if let Some(machine) = &data.machine {
-            body = body.child(machine_section(&machine_view(
-                machine,
-                &state.unwrap().history,
-            )));
+            body = body.child(machine_section(
+                &machine_view(machine, &state.unwrap().history),
+                None,
+            ));
         }
+        body = body.children(remote_sections(s));
         if data.sessions.is_empty() && data.processes.is_empty() {
             body = body.child(
                 div()
@@ -735,6 +863,10 @@ pub(super) fn element(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
                 .text_color(theme().text_muted)
                 .child("Reading process table…"),
         );
+    }
+    if data.is_none() {
+        // Saved machines still show while this computer's reading is missing.
+        body = body.children(remote_sections(s));
     }
     let total = data
         .map(|d| {
@@ -775,7 +907,21 @@ pub(super) fn element(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
 #[cfg(test)]
 pub(super) fn probe(s: &Shell) -> Value {
     let state = s.features.read::<State>().unwrap();
-    json!({"data":state.data,"pending":state.pending,"active":state.active,"error":state.error,"history":state.history.cpu})
+    let remote: serde_json::Map<String, Value> = state
+        .remote
+        .iter()
+        .filter_map(|(id, remote)| Some((id.clone(), json!(remote.machine.as_ref()?))))
+        .collect();
+    let status: serde_json::Map<String, Value> = s
+        .links
+        .machines()
+        .iter()
+        .filter_map(|machine| {
+            let status = remote_status(&machine.reach, state.remote.get(&machine.id))?;
+            Some((machine.id.clone(), json!(status)))
+        })
+        .collect();
+    json!({"data":state.data,"pending":state.pending,"active":state.active,"error":state.error,"history":state.history.cpu,"remote":remote,"status":status})
 }
 #[cfg(test)]
 pub(super) fn due(s: &mut Shell) {

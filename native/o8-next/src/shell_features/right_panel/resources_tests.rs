@@ -160,3 +160,126 @@ fn refresh(s: &Entity<Shell>, v: &mut VisualTestContext) {
     s.update(v, |s, _| resources::due(s));
     tick(s, v);
 }
+
+/// A saved machine's own server: its resource reading reports 61% CPU.
+fn remote_machine_server() -> crate::client::Client {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut first = String::new();
+            let _ = reader.read_line(&mut first);
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+            }
+            let body = if first.contains("/api/panel/resource-usage") {
+                json!({
+                    "sessions": [], "processes": [],
+                    "total": {"cpuPercent": 0, "memBytes": 0, "ramTotalBytes": 0},
+                    "machine": {
+                        "name": "local", "sampledAt": 1, "cpuPercent": 61, "cores": 10,
+                        "loadAverage": [2.0, 1.5, 1.0],
+                        "memory": {"usedBytes": 6442450944u64, "totalBytes": 25769803776u64},
+                        "swap": {"usedBytes": 0, "totalBytes": 0},
+                        "disks": {"data": {"usedBytes": 1, "freeBytes": 3, "totalBytes": 4}, "projects": null},
+                        "network": {"inBytesPerSec": 1024, "outBytesPerSec": 1024}
+                    }
+                })
+            } else {
+                json!({})
+            }
+            .to_string();
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    crate::client::Client::authenticated(&origin, None).unwrap()
+}
+
+#[gpui::test]
+fn resources_shows_each_saved_machine_from_its_own_server(cx: &mut TestAppContext) {
+    use crate::shell::settings::machine_links::Reach;
+    let f = Fixture::start_mode(false, "--resources");
+    let mut state = crate::shell_state::State::default();
+    state.right_panel.visible = true;
+    let (s, mut v) = open(
+        f.client.clone(),
+        f.root.join("resources-remote.json"),
+        state,
+        cx,
+    );
+    v.simulate_resize(gpui::size(px(1680.), px(1050.)));
+    ready(&s, &mut v);
+    s.update(&mut v, |s, _| {
+        s.links.put(
+            "build-box",
+            "Build box",
+            Reach::Online(remote_machine_server()),
+        );
+        s.links.put(
+            "laptop",
+            "Laptop",
+            Reach::Offline("Connection lost.".into()),
+        );
+        s.links.put("studio", "Studio", Reach::Connecting);
+    });
+    click(&mut v, "panel-launcher-more");
+    click(&mut v, "panel-tool-resources");
+    let started = Instant::now();
+    while v.debug_bounds("resources-meter-build-box-cpu").is_none() {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the saved machine's meters never rendered"
+        );
+        tick(&s, &mut v);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let local = v.debug_bounds("resources-machine").unwrap();
+    let remote = v.debug_bounds("resources-machine-build-box").unwrap();
+    assert!(local.top() < remote.top(), "this computer comes first");
+    for meter in [
+        "cpu",
+        "memory",
+        "swap",
+        "disk-data",
+        "disk-projects",
+        "network",
+    ] {
+        let id: &'static str =
+            Box::leak(format!("resources-meter-build-box-{meter}").into_boxed_str());
+        assert!(v.debug_bounds(id).is_some(), "{id}");
+    }
+    let probe = s.read_with(&v, |s, _| resources::probe(s));
+    assert_eq!(probe["remote"]["build-box"]["cpuPercent"], 61.);
+    assert_eq!(probe["remote"]["build-box"]["cores"], 10);
+    // Offline and connecting machines keep a section that says so, with no meters.
+    for id in ["laptop", "studio"] {
+        let section: &'static str = Box::leak(format!("resources-machine-{id}").into_boxed_str());
+        let meter: &'static str = Box::leak(format!("resources-meter-{id}-cpu").into_boxed_str());
+        assert!(v.debug_bounds(section).is_some(), "{section}");
+        assert!(v.debug_bounds(meter).is_none(), "{meter}");
+    }
+    assert_eq!(
+        probe["status"],
+        json!({"laptop": "Offline · Connection lost.", "studio": "Connecting…"})
+    );
+    // The local panel still reads this computer's sessions.
+    assert!(v.debug_bounds("resource-row-session-heavy").is_some());
+    // A machine that goes offline keeps its section but drops stale meters.
+    s.update(&mut v, |s, _| {
+        s.links
+            .put("build-box", "Build box", Reach::Offline(String::new()))
+    });
+    refresh(&s, &mut v);
+    assert!(v.debug_bounds("resources-meter-build-box-cpu").is_none());
+    assert!(v.debug_bounds("resources-machine-build-box").is_some());
+}
