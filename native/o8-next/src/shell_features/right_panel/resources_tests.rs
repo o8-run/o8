@@ -324,6 +324,30 @@ fn resources_shows_each_saved_machine_from_its_own_server(cx: &mut TestAppContex
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    // Offline and back while Resources is closed: reopening shows none of the
+    // old meters, only the new read's error.
+    std::thread::sleep(Duration::from_millis(300));
+    click(&mut v, "header-right-panel");
+    tick(&s, &mut v);
+    s.update(&mut v, |s, _| {
+        s.links
+            .put("build-box", "Build box", Reach::Offline(String::new()));
+        s.links.put(
+            "build-box",
+            "Build box",
+            Reach::Online(crate::shell::settings::machine_links::dead_client()),
+        );
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    click(&mut v, "header-right-panel");
+    tick(&s, &mut v);
+    assert!(v.debug_bounds("resources-machine-build-box").is_some());
+    assert!(
+        v.debug_bounds("resources-meter-build-box-cpu").is_none(),
+        "the reading from before closing must not come back"
+    );
+    let probe = s.read_with(&v, |s, _| resources::probe(s));
+    assert!(probe["remote"]["build-box"].is_null(), "{probe}");
     s.update(&mut v, |s, _| s.links.remove("build-box"));
     refresh(&s, &mut v);
     let served = hits.load(std::sync::atomic::Ordering::SeqCst);
