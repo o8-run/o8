@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import { resolveRate, type ResolvedRate } from '@/lib/cost/rate-table';
+import { requestRate, resolveRate, type ResolvedRate } from '@/lib/cost/rate-table';
 import { registerCostParser } from './shared/cost-parser-registry';
 
 export type { SessionCostData } from './shared/cost-parser-registry';
@@ -86,7 +86,10 @@ function buildParsedUsageEntry(
   );
   const cacheWriteRemainder = Math.max(0, cacheWriteTokens - cacheWrite5mTokens - cacheWrite1hTokens);
   const normalizedCacheWrite5mTokens = cacheWrite5mTokens + cacheWriteRemainder;
-  const pricing = detectPricingModel(rawModel, usage);
+  const resolved = detectPricingModel(rawModel, usage);
+  // Haiku 5.5 prices a request whose prompt (input, cache reads and cache
+  // writes) passes 100K tokens at its long-prompt rates.
+  const pricing = resolved && requestRate(resolved, inputTokens + cacheReadTokens + cacheWriteTokens);
   const model = pricing?.modelKey ?? fallbackModel ?? rawModel?.trim() ?? null;
 
   const totalCostUsd = (

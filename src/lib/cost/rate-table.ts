@@ -4,6 +4,8 @@ export interface ModelRate {
   cacheReadUsdPerMillion?: number;
   cacheWriteUsdPerMillion?: number;
   cacheWrite1hUsdPerMillion?: number;
+  /** Every rate above, for a request whose prompt passes `aboveTokens`. */
+  longPrompt?: { aboveTokens: number } & Omit<ModelRate, 'longPrompt'>;
 }
 
 export interface ModelRateTable {
@@ -16,11 +18,13 @@ export interface ModelRateTable {
  * Original rates were consolidated on 2026-08-28. Opus 5.5 and Fable 5.1
  * were added from https://platform.claude.com/docs/en/about-claude/pricing
  * on 2026-09-26. GPT-6.1 Sol was added on 2026-09-29 (#2950).
- * This does not claim the older entries were refreshed.
+ * Sonnet 5.5 and Haiku 5.5 were added, and Sonnet 5 and Haiku 4.5 corrected,
+ * from the same page on 2026-11-05. This does not claim the other entries
+ * were refreshed.
  */
 export const modelRateTable = {
-  rateTableVersion: '2026-09-29.1',
-  observedOn: '2026-09-29',
+  rateTableVersion: '2026-11-05.1',
+  observedOn: '2026-11-05',
   rates: {
     'claude-opus-5-5': {
       inputUsdPerMillion: 4,
@@ -78,12 +82,19 @@ export const modelRateTable = {
       cacheWriteUsdPerMillion: 37.5,
       cacheWrite1hUsdPerMillion: 60,
     },
+    'claude-sonnet-5-5': {
+      inputUsdPerMillion: 2,
+      outputUsdPerMillion: 10,
+      cacheReadUsdPerMillion: 0.1,
+      cacheWriteUsdPerMillion: 2.5,
+      cacheWrite1hUsdPerMillion: 4,
+    },
     'claude-sonnet-5': {
-      inputUsdPerMillion: 3,
-      outputUsdPerMillion: 15,
-      cacheReadUsdPerMillion: 0.3,
-      cacheWriteUsdPerMillion: 3.75,
-      cacheWrite1hUsdPerMillion: 6,
+      inputUsdPerMillion: 2,
+      outputUsdPerMillion: 10,
+      cacheReadUsdPerMillion: 0.2,
+      cacheWriteUsdPerMillion: 2.5,
+      cacheWrite1hUsdPerMillion: 4,
     },
     'claude-sonnet-4-6': {
       inputUsdPerMillion: 3,
@@ -99,12 +110,28 @@ export const modelRateTable = {
       cacheWriteUsdPerMillion: 3.75,
       cacheWrite1hUsdPerMillion: 6,
     },
+    // A prompt's length counts every input token, cache reads and writes included.
+    'claude-haiku-5-5': {
+      inputUsdPerMillion: 0.1,
+      outputUsdPerMillion: 0.5,
+      cacheReadUsdPerMillion: 0.01,
+      cacheWriteUsdPerMillion: 0.125,
+      cacheWrite1hUsdPerMillion: 0.2,
+      longPrompt: {
+        aboveTokens: 100_000,
+        inputUsdPerMillion: 0.5,
+        outputUsdPerMillion: 2.5,
+        cacheReadUsdPerMillion: 0.05,
+        cacheWriteUsdPerMillion: 0.625,
+        cacheWrite1hUsdPerMillion: 1,
+      },
+    },
     'claude-haiku-4-5': {
-      inputUsdPerMillion: 0.8,
-      outputUsdPerMillion: 4,
-      cacheReadUsdPerMillion: 0.08,
-      cacheWriteUsdPerMillion: 1,
-      cacheWrite1hUsdPerMillion: 1.6,
+      inputUsdPerMillion: 1,
+      outputUsdPerMillion: 5,
+      cacheReadUsdPerMillion: 0.1,
+      cacheWriteUsdPerMillion: 1.25,
+      cacheWrite1hUsdPerMillion: 2,
     },
     'gpt-6.1-sol': {
       inputUsdPerMillion: 2,
@@ -209,6 +236,14 @@ export const modelRateTable = {
 
 export type ResolvedRate = ModelRate & { modelKey: string };
 
+/** The rates for one request: a model's long-prompt rates once its prompt passes their threshold. */
+export function requestRate(rate: ResolvedRate, promptTokens: number): ResolvedRate {
+  const long = rate.longPrompt;
+  if (!long || promptTokens <= long.aboveTokens) return rate;
+  const { aboveTokens: _threshold, ...rates } = long;
+  return { ...rates, longPrompt: long, modelKey: rate.modelKey };
+}
+
 /** Codex usage includes cached input in inputTokens; the surcharge is per request. */
 export function codexUsageCostUsd(rate: ResolvedRate, usage: {
   inputTokens: number; cachedInputTokens: number; outputTokens: number;
@@ -234,9 +269,11 @@ function resolveAnthropicRate(model: string): ResolvedRate | null {
   if (normalized.includes('opus-4-8')) return resolved(fast ? 'claude-opus-4-8-fast' : 'claude-opus-4-8');
   if (normalized.includes('opus-4-7')) return resolved(fast ? 'claude-opus-4-7-fast' : 'claude-opus-4-7');
   if (normalized.includes('opus-4-6')) return resolved(fast ? 'claude-opus-4-6-fast' : 'claude-opus-4-6');
+  if (normalized.includes('sonnet-5-5')) return resolved('claude-sonnet-5-5');
   if (normalized.includes('sonnet-5')) return resolved('claude-sonnet-5');
   if (normalized.includes('sonnet-4-6')) return resolved('claude-sonnet-4-6');
   if (normalized.includes('sonnet-4-5') || normalized.includes('sonnet-4')) return resolved('claude-sonnet-4-5');
+  if (normalized.includes('haiku-5-5')) return resolved('claude-haiku-5-5');
   if (normalized.includes('haiku-4-5') || normalized.includes('haiku')) return resolved('claude-haiku-4-5');
   return null;
 }

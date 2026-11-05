@@ -52,8 +52,12 @@ describe('dated model rate table reproducibility', () => {
   });
 
   it.each([
+    // Anthropic pricing page, https://platform.claude.com/docs/en/about-claude/pricing, read 2026-11-05.
     ['claude-opus-5-5', 4, 20, 0.2, 5, 8],
     ['claude-fable-5-1', 10, 50, 0.25, 12.5, 20],
+    ['claude-sonnet-5-5', 2, 10, 0.1, 2.5, 4],
+    ['claude-sonnet-5', 2, 10, 0.2, 2.5, 4],
+    ['claude-haiku-4-5', 1, 5, 0.1, 1.25, 2],
   ] as const)('prices %s consistently through the session parser and estimator', async (model, input, output, cacheRead, cacheWrite, cacheWrite1h) => {
     expect(resolveRate('claude-code', model)).toMatchObject({
       inputUsdPerMillion: input, outputUsdPerMillion: output,
@@ -66,6 +70,42 @@ describe('dated model rate table reproducibility', () => {
       message: { id: model, model, usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } },
     }));
     expect(parsed.totalCostUsd).toBe(input + output);
+  });
+
+  it.each([
+    // The estimator takes ids and display names; session logs carry ids.
+    ['Claude Sonnet 5.5', 'claude-sonnet-5-5[1m]', 'claude-sonnet-5-5', 2, 10],
+    ['Claude Haiku 5.5', 'claude-haiku-5-5', 'claude-haiku-5-5', 0.1, 0.5],
+    ['Claude Haiku 4.5', 'claude-haiku-4-5-20251001', 'claude-haiku-4-5', 1, 5],
+  ] as const)('reads %s as its own model, not an older one', (name, id, modelKey, input, output) => {
+    expect(anthropicPricingForModel(name)).toEqual({ input, output });
+    expect(anthropicPricingForModel(id)).toEqual({ input, output });
+    expect(resolveRate('claude-code', id)).toMatchObject({ modelKey });
+  });
+
+  it('prices Haiku 5.5 by prompt length, cache reads and writes included', async () => {
+    expect(resolveRate('claude-code', 'claude-haiku-5-5')).toMatchObject({
+      modelKey: 'claude-haiku-5-5', inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.5,
+      cacheReadUsdPerMillion: 0.01, cacheWriteUsdPerMillion: 0.125, cacheWrite1hUsdPerMillion: 0.2,
+    });
+    expect(anthropicPricingForModel('claude-haiku-5-5')).toEqual({ input: 0.1, output: 0.5 });
+    const request = (id: string, input: number) => ({
+      type: 'assistant', requestId: id,
+      message: { id, model: 'claude-haiku-5-5', usage: {
+        input_tokens: input, output_tokens: 10_000, cache_read_input_tokens: 40_000,
+        cache_creation_input_tokens: 20_000,
+        cache_creation: { ephemeral_5m_input_tokens: 15_000, ephemeral_1h_input_tokens: 5_000 },
+      } },
+    });
+    // 40,000 input + 40,000 cache read + 20,000 cache write: exactly 100,000.
+    const short = await parseSessionCost(fixture('haiku-short.jsonl', request('haiku-short', 40_000)));
+    expect(short.totalCostUsd).toBe(rounded((40_000 * 0.1 + 10_000 * 0.5 + 40_000 * 0.01
+      + 15_000 * 0.125 + 5_000 * 0.2) / TOKENS_PER_MILLION));
+    // One more input token passes 100,000: every rate of that request is the long-prompt rate.
+    const long = await parseSessionCost(fixture('haiku-long.jsonl', request('haiku-long', 40_001)));
+    expect(long.totalCostUsd).toBe(rounded((40_001 * 0.5 + 10_000 * 2.5 + 40_000 * 0.05
+      + 15_000 * 0.625 + 5_000 * 1) / TOKENS_PER_MILLION));
+    expect(long.model).toBe('claude-haiku-5-5');
   });
 
   it('reproduces each table-priced parser and the Brain estimator', async () => {
@@ -158,8 +198,8 @@ describe('dated model rate table reproducibility', () => {
     ) / TOKENS_PER_MILLION);
 
     expect(modelRateTable).toMatchObject({
-      rateTableVersion: '2026-09-29.1',
-      observedOn: '2026-09-29',
+      rateTableVersion: '2026-11-05.1',
+      observedOn: '2026-11-05',
     });
   });
 
