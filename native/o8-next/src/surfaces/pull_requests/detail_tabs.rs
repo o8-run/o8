@@ -398,16 +398,19 @@ impl PullRequests {
                 // GitHub's patch is hunks only; the shared diff rows number
                 // both sides and pair each removal with its replacement.
                 let body = match f["patch"].as_str() {
-                    Some(patch) => div()
-                        .id(("pr-file-diff", i))
-                        .overflow_x_scroll()
-                        .py(px(4.))
-                        .child(crate::files_panel::file_diff::rows(
-                            &crate::files_panel::file_diff::parse(patch),
-                            self.split_diff,
-                            &format!("pr-file-{i}"),
-                        ))
-                        .into_any_element(),
+                    Some(patch) => {
+                        let mut scroll = div().id(("pr-file-diff", i)).overflow_x_scroll().py(px(4.));
+                        // A vertical wheel over a wide split diff scrolls the
+                        // PR, not the file sideways.
+                        scroll.style().restrict_scroll_to_axis = Some(true);
+                        scroll
+                            .child(crate::files_panel::file_diff::rows(
+                                &crate::files_panel::file_diff::parse(patch),
+                                self.split_diff,
+                                &format!("pr-file-{i}"),
+                            ))
+                            .into_any_element()
+                    }
                     None => div()
                         .px(px(10.))
                         .py(px(6.))
