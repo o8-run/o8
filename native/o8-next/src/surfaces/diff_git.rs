@@ -10,35 +10,110 @@ use std::time::Duration;
 
 /// Open pull request is off on these, as in classic.
 const DEFAULT_BRANCHES: [&str; 2] = ["main", "master"];
+/// What the workspace snapshot says instead of a branch: `git status`'s
+/// detached head, and the route's fallback.
+const NOT_A_BRANCH: [&str; 3] = ["HEAD", "(detached)", "unknown"];
 const TOAST: Duration = Duration::from_millis(4500);
+/// Commit runs hooks for up to 15 s and push may take 30 s on the server, so
+/// the client's 5 s agent deadline would give up on a commit that lands.
+const POST_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_secs(2)
+} else {
+    crate::client::LOAD_REQUEST_TIMEOUT
+};
+
+fn can_open_pull_request(branch: Option<&str>) -> bool {
+    branch.is_some_and(|b| {
+        !b.is_empty() && !NOT_A_BRANCH.contains(&b) && !DEFAULT_BRANCHES.contains(&b)
+    })
+}
+
+/// A branch as one URL path: `/` kept, everything outside Git's usual
+/// characters percent-encoded.
+fn encode_branch(branch: &str) -> String {
+    branch
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
 
 /// GitHub's form for a new pull request from `branch`; `None` on a default
-/// or unknown branch.
+/// branch, a detached head or an unknown branch.
 pub(crate) fn pull_request_url(slug: Option<&str>, branch: Option<&str>) -> Option<String> {
-    let branch = branch.filter(|b| !b.is_empty() && !DEFAULT_BRANCHES.contains(b))?;
+    let branch = branch.filter(|b| can_open_pull_request(Some(b)))?;
     let slug = slug.filter(|s| s.contains('/'))?;
     Some(format!(
-        "https://github.com/{slug}/compare/{branch}?expand=1"
+        "https://github.com/{slug}/compare/{}?expand=1",
+        encode_branch(branch)
     ))
 }
 
-fn can_open_pull_request(branch: Option<&str>) -> bool {
-    branch.is_some_and(|b| !b.is_empty() && b != "HEAD" && !DEFAULT_BRANCHES.contains(&b))
+/// A Git route's answer.
+#[derive(Debug)]
+enum Reply {
+    Done(Value),
+    /// The route answered with an error, or the request never left.
+    Refused(String),
+    /// Sent, but no answer came: the commit or push may still have landed.
+    Unknown,
 }
 
-fn post(client: &crate::client::Client, path: &str, body: Value) -> Result<Value, String> {
-    let url = client.url(path).map_err(|error| error.to_string())?;
-    match client.request("POST", &url).send_json(body) {
-        Ok(response) => crate::client::Client::read(response),
+fn post(client: &crate::client::Client, path: &str, body: Value) -> Reply {
+    let Ok(url) = client.url(path) else {
+        return Reply::Refused(format!("Bad route {path}"));
+    };
+    match client
+        .request("POST", &url)
+        .timeout(POST_TIMEOUT)
+        .send_json(body)
+    {
+        Ok(response) => match crate::client::Client::read(response) {
+            Ok(reply) => Reply::Done(reply),
+            Err(error) => Reply::Refused(error),
+        },
         // The routes answer `{error}` with the Git message.
         Err(ureq::Error::Status(code, response)) => {
             let body: Value = response.into_json().unwrap_or_default();
-            Err(body["error"]
-                .as_str()
-                .map_or_else(|| format!("HTTP {code}"), str::to_owned))
+            Reply::Refused(
+                body["error"]
+                    .as_str()
+                    .map_or_else(|| format!("HTTP {code}"), str::to_owned),
+            )
         }
-        Err(error) => Err(error.to_string()),
+        // A read that timed out or broke after sending.
+        Err(ureq::Error::Transport(error)) if error.kind() == ureq::ErrorKind::Io => Reply::Unknown,
+        Err(error) => Reply::Refused(error.to_string()),
     }
+}
+
+/// The workspace's branch and GitHub repository, from the snapshot classic's
+/// Review header reads; `fresh` asks for Git's current state.
+fn snapshot(
+    client: &crate::client::Client,
+    workspace: &str,
+) -> Option<(Option<String>, Option<String>)> {
+    let body: Value = client
+        .get(
+            "/api/review/workspace",
+            &[
+                ("workspace", workspace),
+                ("changesOnly", "1"),
+                ("fresh", "1"),
+            ],
+        )
+        .ok()?;
+    let text = |key: &str| {
+        body[key]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    };
+    Some((text("branch"), text("repoSlug")))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -51,6 +126,7 @@ pub(crate) struct GitActions {
     client: crate::client::Client,
     workspace: String,
     diff: WeakEntity<DiffSurface>,
+    focus: FocusHandle,
     pub(crate) branch: Option<String>,
     pub(crate) slug: Option<String>,
     pub(crate) menu: bool,
@@ -83,6 +159,7 @@ impl GitActions {
             client,
             workspace,
             diff,
+            focus: cx.focus_handle(),
             branch: None,
             slug: None,
             menu: false,
@@ -98,29 +175,19 @@ impl GitActions {
         actions
     }
 
-    /// The branch and GitHub repository, from the same snapshot classic's
-    /// Review header reads.
+    /// Reads the branch again: on opening, and after every commit or push.
     fn read_branch(&mut self, cx: &mut Context<Self>) {
         let (client, workspace) = (self.client.clone(), self.workspace.clone());
-        let task = cx.background_executor().spawn(async move {
-            client.get::<Value>(
-                "/api/review/workspace",
-                &[("workspace", &workspace), ("changesOnly", "1")],
-            )
-        });
+        let task = cx
+            .background_executor()
+            .spawn(async move { snapshot(&client, &workspace) });
         cx.spawn(async move |this, cx| {
-            let Ok(body) = task.await else {
+            let Some((branch, slug)) = task.await else {
                 return;
             };
             let _ = this.update(cx, |this, cx| {
-                let text = |key: &str| {
-                    body[key]
-                        .as_str()
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_owned)
-                };
-                this.branch = text("branch");
-                this.slug = text("repoSlug");
+                this.branch = branch;
+                this.slug = slug;
                 cx.notify();
             });
         })
@@ -144,14 +211,14 @@ impl GitActions {
         cx.notify();
     }
 
-    /// Runs one route off the UI thread, then `done` with its reply.
-    fn run(
+    /// Runs `work` off the UI thread, then `done` with its result; the
+    /// branch is read again afterwards.
+    fn run<T: Send + 'static>(
         &mut self,
         busy: Busy,
-        path: &'static str,
-        body: Value,
         cx: &mut Context<Self>,
-        done: impl FnOnce(&mut Self, Result<Value, String>, &mut Context<Self>) + 'static,
+        work: impl FnOnce(crate::client::Client) -> T + Send + 'static,
+        done: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
     ) {
         if self.busy.is_some() {
             return;
@@ -160,18 +227,21 @@ impl GitActions {
         self.menu = false;
         cx.notify();
         let client = self.client.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move { post(&client, path, body) });
+        let task = cx.background_executor().spawn(async move { work(client) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.busy = None;
                 done(this, result, cx);
+                this.read_branch(cx);
                 cx.notify();
             });
         })
         .detach();
+    }
+
+    fn reload_diff(&mut self, cx: &mut Context<Self>) {
+        let _ = self.diff.update(cx, |diff, cx| diff.load(cx));
     }
 
     pub(crate) fn commit(&mut self, cx: &mut Context<Self>) {
@@ -183,20 +253,29 @@ impl GitActions {
         let body = json!({ "message": message, "workspace": self.workspace });
         self.run(
             Busy::Committing,
-            "/api/review/commit",
-            body,
             cx,
-            |this, result, cx| {
-                match result {
-                    Ok(reply) => {
-                        let hash = reply["hash"].as_str().unwrap_or_default();
-                        this.say(format!("Committed {hash}").trim().to_owned(), false, cx);
-                        this.composing = false;
-                        this.input.update(cx, |input, cx| input.set_text("", cx));
-                        // The committed files leave the working changes.
-                        let _ = this.diff.update(cx, |diff, cx| diff.load(cx));
-                    }
-                    Err(error) => this.error = Some(error),
+            move |client| post(&client, "/api/review/commit", body),
+            |this, reply, cx| match reply {
+                Reply::Done(reply) => {
+                    let hash = reply["hash"].as_str().unwrap_or_default();
+                    this.say(format!("Committed {hash}").trim().to_owned(), false, cx);
+                    this.composing = false;
+                    this.input.update(cx, |input, cx| input.set_text("", cx));
+                    // The committed files leave the working changes.
+                    this.reload_diff(cx);
+                }
+                Reply::Refused(error) => this.error = Some(error),
+                // A slow hook can outlast the request while the commit
+                // lands: show what Git has now, never a false failure that
+                // invites a second commit.
+                Reply::Unknown => {
+                    this.composing = false;
+                    this.say(
+                        "No reply from the commit in time. It may have landed; the changes are reloading.".into(),
+                        true,
+                        cx,
+                    );
+                    this.reload_diff(cx);
                 }
             },
         );
@@ -206,40 +285,67 @@ impl GitActions {
         let body = json!({ "workspace": self.workspace });
         self.run(
             Busy::Pushing,
-            "/api/review/push",
-            body,
             cx,
-            |this, result, cx| match result {
-                Ok(reply) => {
+            move |client| post(&client, "/api/review/push", body),
+            |this, reply, cx| match reply {
+                Reply::Done(reply) => {
                     let text = reply["message"].as_str().unwrap_or("Pushed").to_owned();
                     this.say(text, false, cx);
                 }
-                Err(error) => this.say(error, true, cx),
+                Reply::Refused(error) => this.say(error, true, cx),
+                Reply::Unknown => this.say(
+                    "No reply from the push in time. It may have landed; check the branch on GitHub.".into(),
+                    true,
+                    cx,
+                ),
             },
         );
     }
 
-    /// Pushes the branch, then opens GitHub's form for a new pull request.
+    /// Reads the branch now, pushes it, then opens GitHub's form for a new
+    /// pull request from the branch the push named.
     pub(crate) fn open_pull_request(&mut self, cx: &mut Context<Self>) {
         if !can_open_pull_request(self.branch.as_deref()) {
             return;
         }
-        let url = pull_request_url(self.slug.as_deref(), self.branch.as_deref());
-        let body = json!({ "workspace": self.workspace });
+        let (workspace, body) = (
+            self.workspace.clone(),
+            json!({ "workspace": self.workspace }),
+        );
         self.run(
             Busy::Pushing,
-            "/api/review/push",
-            body,
             cx,
-            move |this, result, cx| match (result, url) {
-                (Ok(_), Some(url)) => {
-                    cx.open_url(&url);
-                    this.say("Pushed. Opening the pull request form.".into(), false, cx);
+            move |client| {
+                let (branch, slug) = snapshot(&client, &workspace).unwrap_or_default();
+                if !can_open_pull_request(branch.as_deref()) {
+                    return Err(branch);
                 }
-                (Ok(_), None) => {
-                    this.say("Pushed. Open the pull request on GitHub.".into(), false, cx);
+                Ok((slug, post(&client, "/api/review/push", body)))
+            },
+            |this, result, cx| match result {
+                Err(branch) => this.say(
+                    format!(
+                        "Open pull request needs a feature branch; this is {}.",
+                        branch.as_deref().unwrap_or("not a branch")
+                    ),
+                    true,
+                    cx,
+                ),
+                Ok((slug, Reply::Done(reply))) => {
+                    match pull_request_url(slug.as_deref(), reply["branch"].as_str()) {
+                        Some(url) => {
+                            cx.open_url(&url);
+                            this.say("Pushed. Opening the pull request form.".into(), false, cx);
+                        }
+                        None => this.say("Pushed. Open the pull request on GitHub.".into(), false, cx),
+                    }
                 }
-                (Err(error), _) => this.say(error, true, cx),
+                Ok((_, Reply::Refused(error))) => this.say(error, true, cx),
+                Ok((_, Reply::Unknown)) => this.say(
+                    "No reply from the push in time. It may have landed; check the branch on GitHub.".into(),
+                    true,
+                    cx,
+                ),
             },
         );
     }
@@ -327,6 +433,13 @@ impl Render for GitActions {
         let can_pr = idle && can_open_pull_request(self.branch.as_deref());
         let message = !self.input.read(cx).text.trim().is_empty();
         let mut actions = div()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" && (this.menu || this.composing) {
+                    this.close(cx);
+                    cx.stop_propagation();
+                }
+            }))
             .relative()
             .flex()
             .items_center()
@@ -361,10 +474,12 @@ impl Render for GitActions {
                             .border_l_1()
                             .border_color(theme().border)
                             .when(self.menu, |face| face.bg(theme().hover))
-                            .on_click(cx.listener(|this, _, _, cx| {
+                            .on_click(cx.listener(|this, _, window, cx| {
                                 if this.busy.is_none() {
                                     this.menu = !this.menu;
                                     this.composing = false;
+                                    // Escape reaches the menu from here.
+                                    this.focus.focus(window);
                                     cx.notify();
                                 }
                             })),

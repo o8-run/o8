@@ -1,7 +1,7 @@
 use super::{GitActions, can_open_pull_request, pull_request_url};
 use crate::shell::palette::tests::{run, settled};
 use crate::shell::test_support::*;
-use crate::shell::{Content, State, Tab};
+use crate::shell::{Content, Shell, State, Tab};
 use gpui::Entity;
 use std::process::Command as Git;
 use std::time::Duration;
@@ -16,8 +16,21 @@ fn a_pull_request_needs_a_feature_branch_and_a_github_repository() {
         assert_eq!(pull_request_url(Some("o8-fixture/review"), branch), None);
         assert!(!can_open_pull_request(branch), "{branch:?}");
     }
-    assert!(!can_open_pull_request(Some("HEAD")), "detached");
+    // `git status` names a detached head `(detached)`; the route falls back
+    // to `unknown`.
+    for branch in ["HEAD", "(detached)", "unknown"] {
+        assert!(!can_open_pull_request(Some(branch)), "{branch}");
+        assert_eq!(
+            pull_request_url(Some("o8-fixture/review"), Some(branch)),
+            None
+        );
+    }
     assert!(can_open_pull_request(Some("fix/thing")));
+    assert_eq!(
+        pull_request_url(Some("o8-fixture/review"), Some("fix/a b#1")).as_deref(),
+        Some("https://github.com/o8-fixture/review/compare/fix/a%20b%231?expand=1"),
+        "the branch is one encoded path"
+    );
     assert_eq!(pull_request_url(None, Some("fix/thing")), None);
     assert_eq!(pull_request_url(Some(""), Some("fix/thing")), None);
 }
@@ -37,11 +50,17 @@ fn git(path: &std::path::Path, args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_owned()
 }
 
-#[gpui::test]
-fn review_commits_pushes_and_opens_a_pull_request_through_the_review_routes(
-    cx: &mut TestAppContext,
-) {
-    let fixture = Fixture::start_mode(false, "--review --review-git");
+struct Rig {
+    _fixture: Fixture,
+    shell: Entity<Shell>,
+    view: Entity<crate::shell::palette::target::Picker<crate::shell::diff::PacketDiff>>,
+    path: std::path::PathBuf,
+}
+
+/// The review fixture with a GitHub origin, its Changes tab open on a new
+/// note.
+fn rig(options: &str, cx: &mut TestAppContext) -> (Rig, VisualTestContext) {
+    let fixture = Fixture::start_mode(false, options);
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("review-git.json"),
@@ -58,34 +77,57 @@ fn review_commits_pushes_and_opens_a_pull_request_through_the_review_routes(
         Content::Diff(v) => v.clone(),
         _ => panic!("diff"),
     });
-    let wait =
-        |cx: &mut VisualTestContext, what: &str, done: &dyn Fn(&mut VisualTestContext) -> bool| {
-            let started = Instant::now();
-            loop {
-                settled(&shell, cx);
-                if done(cx) {
-                    break;
-                }
-                assert!(started.elapsed() < Duration::from_secs(15), "{what}");
-                std::thread::sleep(Duration::from_millis(20));
+    let rig = Rig {
+        _fixture: fixture,
+        shell,
+        view,
+        path,
+    };
+    rig.wait(cx, "the note is a working change", &|rig, cx| {
+        rig.files(cx).iter().any(|f| f == "git-note.txt")
+    });
+    rig.wait(cx, "branch read", &|rig, cx| {
+        rig.actions(cx).read_with(cx, |a, _| a.branch.is_some())
+    });
+    (rig, visual)
+}
+
+impl Rig {
+    fn wait(
+        &self,
+        cx: &mut VisualTestContext,
+        what: &str,
+        done: &dyn Fn(&Self, &mut VisualTestContext) -> bool,
+    ) {
+        let started = Instant::now();
+        loop {
+            settled(&self.shell, cx);
+            if done(self, cx) {
+                break;
             }
-        };
-    let click = |cx: &mut VisualTestContext, id: &'static str| {
+            assert!(started.elapsed() < Duration::from_secs(20), "{what}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn click(&self, cx: &mut VisualTestContext, id: &'static str) {
         let bounds = cx.debug_bounds(id).unwrap_or_else(|| panic!("{id}"));
         cx.simulate_click(bounds.center(), gpui::Modifiers::default());
-        settled(&shell, cx);
-    };
-    let actions = |cx: &mut VisualTestContext| -> Entity<GitActions> {
-        view.read_with(cx, |v, _| {
+        settled(&self.shell, cx);
+    }
+
+    fn actions(&self, cx: &mut VisualTestContext) -> Entity<GitActions> {
+        self.view.read_with(cx, |v, _| {
             v.bar
                 .clone()
                 .expect("Git actions")
                 .downcast::<GitActions>()
                 .unwrap()
         })
-    };
-    let files = |cx: &mut VisualTestContext| -> Vec<String> {
-        view.read_with(cx, |v, cx| {
+    }
+
+    fn files(&self, cx: &mut VisualTestContext) -> Vec<String> {
+        self.view.read_with(cx, |v, cx| {
             v.child.as_ref().map_or(vec![], |child| {
                 let child = child.read(cx);
                 if !child.ready {
@@ -99,15 +141,31 @@ fn review_commits_pushes_and_opens_a_pull_request_through_the_review_routes(
                     .collect()
             })
         })
-    };
-    wait(cx, "the note is a working change", &|cx| {
-        files(cx).iter().any(|f| f == "git-note.txt")
-    });
-    wait(cx, "branch read", &|cx| {
-        actions(cx).read_with(cx, |a, _| a.branch.is_some())
-    });
-    let git_actions = actions(cx);
-    let (branch, slug): (Option<String>, Option<String>) = git_actions.read_with(cx, |a, _| (a.branch.clone(), a.slug.clone()));
+    }
+
+    fn type_message(&self, cx: &mut VisualTestContext, text: &str) {
+        let input = self.actions(cx).read_with(cx, |a, _| a.input.clone());
+        input.update(cx, |input, cx| input.set_text(text, cx));
+        settled(&self.shell, cx);
+    }
+}
+
+#[gpui::test]
+fn review_commits_pushes_and_opens_a_pull_request_through_the_review_routes(
+    cx: &mut TestAppContext,
+) {
+    let (rig, mut visual) = rig("--review --review-git", cx);
+    let cx = &mut visual;
+    let (path, view) = (rig.path.clone(), rig.view.clone());
+    let wait =
+        |cx: &mut VisualTestContext, what: &str, done: &dyn Fn(&mut VisualTestContext) -> bool| {
+            rig.wait(cx, what, &|_, cx| done(cx))
+        };
+    let click = |cx: &mut VisualTestContext, id: &'static str| rig.click(cx, id);
+    let files = |cx: &mut VisualTestContext| rig.files(cx);
+    let git_actions = rig.actions(cx);
+    let (branch, slug): (Option<String>, Option<String>) =
+        git_actions.read_with(cx, |a, _| (a.branch.clone(), a.slug.clone()));
     assert_eq!(branch.as_deref(), Some("fixture-review"));
     assert_eq!(slug.as_deref(), Some("o8-fixture/review"));
 
@@ -120,7 +178,7 @@ fn review_commits_pushes_and_opens_a_pull_request_through_the_review_routes(
     let input: Entity<crate::composer::Composer> =
         git_actions.read_with(cx, |a, _| a.input.clone());
     input.update(cx, |input, cx| input.set_text("Add the review note", cx));
-    settled(&shell, cx);
+    settled(&rig.shell, cx);
     let before = git(&path, &["rev-parse", "HEAD"]);
     click(cx, "review-commit-submit");
     wait(cx, "commit reply", &|cx| {
@@ -144,7 +202,7 @@ fn review_commits_pushes_and_opens_a_pull_request_through_the_review_routes(
     // A clean tree: the route's refusal shows in the message box.
     click(cx, "review-commit");
     input.update(cx, |input, cx| input.set_text("Nothing to add", cx));
-    settled(&shell, cx);
+    settled(&rig.shell, cx);
     click(cx, "review-commit-submit");
     wait(cx, "refusal", &|cx| {
         git_actions.read_with(cx, |a, _| a.error.is_some())
@@ -203,4 +261,93 @@ fn review_commits_pushes_and_opens_a_pull_request_through_the_review_routes(
     });
     assert!(view.read_with(cx, |v, _| v.bar.is_none()));
     assert!(cx.debug_bounds("review-commit").is_none());
+}
+
+/// A slow pre-commit hook outlasts the request: the commit may still land,
+/// so Review says the outcome is unknown and shows what Git has now, never a
+/// failure that invites a second commit.
+#[gpui::test]
+fn a_commit_without_a_reply_in_time_reloads_instead_of_failing(cx: &mut TestAppContext) {
+    let (rig, mut visual) = rig("--review --review-git", cx);
+    let cx = &mut visual;
+    let hook = rig.path.join(".git/hooks/pre-commit");
+    fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    fs::write(&hook, "#!/bin/sh\nsleep 6\n").unwrap();
+    std::process::Command::new("chmod")
+        .args(["+x"])
+        .arg(&hook)
+        .status()
+        .unwrap();
+    let actions = rig.actions(cx);
+    let before = git(&rig.path, &["rev-parse", "HEAD"]);
+    rig.click(cx, "review-commit");
+    rig.type_message(cx, "Slow hook commit");
+    rig.click(cx, "review-commit-submit");
+    rig.wait(cx, "commit outcome", &|_, cx| {
+        actions.read_with(cx, |a, _| a.busy.is_none() && a.toast.is_some())
+    });
+    let (toast, error, composing) =
+        actions.read_with(cx, |a, _| (a.toast.clone(), a.error.clone(), a.composing));
+    let toast = toast.unwrap();
+    assert!(
+        toast.0.starts_with("No reply from the commit in time"),
+        "{toast:?}"
+    );
+    assert_eq!(error, None, "no refusal in the message box");
+    assert!(!composing);
+    rig.wait(cx, "the commit lands", &|rig, _| {
+        git(&rig.path, &["log", "-1", "--format=%s"]) == "Slow hook commit"
+    });
+    assert_ne!(git(&rig.path, &["rev-parse", "HEAD"]), before);
+    rig.wait(cx, "the diff reloads", &|rig, cx| rig.files(cx).is_empty());
+}
+
+/// On a detached head Open pull request is off and opens nothing.
+#[gpui::test]
+fn open_pull_request_is_off_on_a_detached_head(cx: &mut TestAppContext) {
+    let (rig, mut visual) = rig("--review --review-git --review-git-detached", cx);
+    let cx = &mut visual;
+    assert_eq!(
+        git(&rig.path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "HEAD"
+    );
+    let actions = rig.actions(cx);
+    assert_eq!(
+        actions.read_with(cx, |a, _| a.branch.clone()).as_deref(),
+        Some("(detached)"),
+        "the workspace snapshot's own value"
+    );
+    rig.click(cx, "review-open-pr");
+    assert_eq!(actions.read_with(cx, |a, _| a.busy), None, "no push starts");
+    std::thread::sleep(Duration::from_millis(1500));
+    settled(&rig.shell, cx);
+    assert_eq!(
+        actions.read_with(cx, |a, _| a.toast.clone()),
+        None,
+        "nothing was pushed or refused"
+    );
+    assert_eq!(cx.opened_url(), None);
+}
+
+/// Escape closes the caret menu and the message box.
+#[gpui::test]
+fn escape_closes_the_menu_and_the_message_box(cx: &mut TestAppContext) {
+    let (rig, mut visual) = rig("--review --review-git", cx);
+    let cx = &mut visual;
+    rig.click(cx, "review-git-more");
+    assert!(cx.debug_bounds("review-git-menu").is_some());
+    cx.simulate_keystrokes("escape");
+    settled(&rig.shell, cx);
+    assert!(cx.debug_bounds("review-git-menu").is_none());
+    rig.click(cx, "review-commit");
+    rig.type_message(cx, "kept");
+    cx.simulate_keystrokes("escape");
+    settled(&rig.shell, cx);
+    assert!(cx.debug_bounds("review-commit-box").is_none());
+    let actions = rig.actions(cx);
+    assert_eq!(
+        actions.read_with(cx, |a, cx| a.input.read(cx).text.clone()),
+        "kept",
+        "the message stays for next time"
+    );
 }

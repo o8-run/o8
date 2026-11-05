@@ -10,6 +10,8 @@ export default async function register({ root, repo }: SurfaceContext): Promise<
   const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'ignore' });
   git('remote', 'add', 'origin', 'https://github.com/o8-fixture/review.git');
   git('config', 'remote.origin.pushurl', remote);
+  // --review-git-detached: the workspace starts on a detached head, as after a checkout of a commit.
+  if (process.argv.includes('--review-git-detached')) git('checkout', '-q', '--detach');
   const commit = await import('../../../src/app/api/review/commit/route');
   const push = await import('../../../src/app/api/review/push/route');
   const workspace = await import('../../../src/app/api/review/workspace/route');
