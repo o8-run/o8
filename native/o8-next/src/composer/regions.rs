@@ -92,7 +92,7 @@ impl Surface {
         // loses them is measured again.
         let ends = Rc::new(crate::transcript_actions::turn_ends(&rows));
         let turn_files = Rc::new(crate::turn_files::by_turn(&rows, &ends));
-        let turn_files_open = self.turn_files_open.clone();
+        let turn_files_open = Rc::new(self.turn_files_open.clone());
         let prompts = Rc::new(self.prompt_action_rows(window, cx));
         let marked: BTreeSet<usize> = ends.keys().chain(prompts.keys()).copied().collect();
         for index in marked.symmetric_difference(&self.action_rows) {
@@ -166,12 +166,15 @@ impl Surface {
                                 .flex_col()
                                 .child(row)
                                 .children(turn_files.get(&index).map(|files| {
+                                    let turn = rows[index].borrow().row.id().to_owned();
+                                    let expanded = turn_files_open.contains(&turn);
                                     crate::turn_files::card(
                                         view.clone(),
+                                        turn,
                                         index,
                                         files,
                                         file_root.as_ref().map(|root| root.as_ref()),
-                                        turn_files_open.contains(&index),
+                                        expanded,
                                     )
                                 }))
                                 .child(crate::transcript_actions::row(
@@ -198,8 +201,8 @@ impl Surface {
             .into_any_element()
     }
     /// "Show N more" on a turn's files card; the row grows, so it is measured again.
-    pub(crate) fn expand_turn_files(&mut self, index: usize, cx: &mut Context<Self>) {
-        self.turn_files_open.insert(index);
+    pub(crate) fn expand_turn_files(&mut self, turn: String, index: usize, cx: &mut Context<Self>) {
+        self.turn_files_open.insert(turn);
         self.remeasure_action_row(index);
         cx.notify();
     }

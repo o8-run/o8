@@ -5,7 +5,7 @@
 use crate::model::Row;
 use crate::retained::RowState;
 use crate::theme::current as theme;
-use gpui::{AnyElement, Entity, div, prelude::*, px};
+use gpui::{AnyElement, Entity, SharedString, div, prelude::*, px};
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -151,6 +151,12 @@ fn display(path: &str) -> (String, String) {
     (dir, name.to_owned())
 }
 
+/// Whether the Changes list can show this file: a repo path, or an absolute
+/// path under the workspace. The server refuses a diff outside it.
+fn inside(path: &str, root: Option<&str>) -> bool {
+    !path.starts_with('/') || relative(path, root) != path
+}
+
 /// The workspace-relative path the Changes list knows a file by.
 fn relative<'a>(path: &'a str, root: Option<&str>) -> &'a str {
     root.and_then(|root| path.strip_prefix(root.trim_end_matches('/')))
@@ -172,6 +178,7 @@ fn counts_label(add: u64, del: u64) -> impl IntoElement {
 /// diff in Files › Changes.
 pub(crate) fn card(
     view: Entity<crate::ui::Surface>,
+    turn: String,
     index: usize,
     files: &[Edit],
     root: Option<&str>,
@@ -209,27 +216,34 @@ pub(crate) fn card(
                 .child(format!("Edited {} {noun}", files.len()))
                 .children(total.map(|(add, del)| counts_label(add, del))),
         )
-        .child(
-            div()
-                .id(("turn-files-review", index))
-                .debug_selector(move || format!("turn-files-review-{index}"))
-                .px(px(8.))
-                .h(px(24.))
-                .flex()
-                .items_center()
-                .rounded(px(6.))
-                .cursor_pointer()
-                .text_size(px(12.))
-                .text_color(theme().accent)
-                .hover(|d| d.bg(theme().hover))
-                .child("Review")
-                .on_click(open(relative(&files[0].path, root).to_owned())),
+        .children(
+            files
+                .iter()
+                .find(|file| inside(&file.path, root))
+                .map(|file| {
+                    div()
+                        .id(("turn-files-review", index))
+                        .debug_selector(move || format!("turn-files-review-{index}"))
+                        .px(px(8.))
+                        .h(px(24.))
+                        .flex()
+                        .items_center()
+                        .rounded(px(6.))
+                        .cursor_pointer()
+                        .text_size(px(12.))
+                        .text_color(theme().accent)
+                        .hover(|d| d.bg(theme().hover))
+                        .child("Review")
+                        .on_click(open(relative(&file.path, root).to_owned()))
+                }),
         );
     let rows = files[..shown].iter().enumerate().map(|(row, file)| {
         let path = relative(&file.path, root);
         let (dir, name) = display(path);
+        // A file outside the workspace has no diff to open, so it is a label.
+        let reachable = inside(&file.path, root);
         div()
-            .id(("turn-files-file", index * 1000 + row))
+            .id(SharedString::from(format!("turn-files-file-{index}-{row}")))
             .debug_selector(move || format!("turn-files-file-{index}-{row}"))
             .flex()
             .items_center()
@@ -238,8 +252,11 @@ pub(crate) fn card(
             .h(px(26.))
             .px(px(6.))
             .rounded(px(6.))
-            .cursor_pointer()
-            .hover(|d| d.bg(theme().hover))
+            .when(reachable, |row| {
+                row.cursor_pointer()
+                    .hover(|d| d.bg(theme().hover))
+                    .on_click(open(path.to_owned()))
+            })
             .child(
                 div()
                     .min_w_0()
@@ -259,7 +276,6 @@ pub(crate) fn card(
                     .child(div().flex_shrink_0().text_color(theme().text).child(name)),
             )
             .children(file.counts.map(|(add, del)| counts_label(add, del)))
-            .on_click(open(path.to_owned()))
     });
     let card = div()
         .debug_selector(move || format!("turn-files-{index}"))
@@ -291,7 +307,9 @@ pub(crate) fn card(
                     .hover(|d| d.text_color(theme().text))
                     .child(format!("Show {more} more"))
                     .on_click(move |_, _, cx| {
-                        view.update(cx, |view, cx| view.expand_turn_files(index, cx));
+                        view.update(cx, |view, cx| {
+                            view.expand_turn_files(turn.clone(), index, cx)
+                        });
                     }),
             )
         });
@@ -376,6 +394,68 @@ mod tests {
         assert_eq!(relative("/r/src/a.rs", Some("/r/")), "src/a.rs");
         assert_eq!(relative("/rx/a.rs", Some("/r")), "/rx/a.rs");
         assert_eq!(relative("src/a.rs", Some("/r")), "src/a.rs");
+    }
+
+    #[test]
+    fn only_files_in_the_workspace_open_a_diff() {
+        assert!(inside("src/a.rs", None));
+        assert!(inside("/r/src/a.rs", Some("/r")));
+        assert!(!inside("/tmp/a.md", Some("/r")));
+        assert!(!inside("/r/a.md", None));
+    }
+
+    #[test]
+    fn each_finished_turn_lists_its_own_files_on_its_answer() {
+        let row = |row: Row| Rc::new(RefCell::new(RowState::new(row)));
+        let message = |id: &str, role: &str, text: &str| {
+            row(Row::Message {
+                id: id.into(),
+                role: role.into(),
+                author: None,
+                nodes: crate::text::markdown(text),
+            })
+        };
+        let edit = |id: &str, path: &str, status: &str| {
+            crate::activity::activity(
+                id,
+                &json!({"name": "Edit", "status": status, "args": {
+                    "file_path": path, "old_string": "a", "new_string": "b\nc"
+                }}),
+                "",
+            )
+        };
+        let activity = |id: &str, steps: Vec<crate::activity::Step>| {
+            row(Row::Activity {
+                id: id.into(),
+                steps,
+                trace: Default::default(),
+            })
+        };
+        let rows = vec![
+            message("u1", "user", "first"),
+            activity(
+                "a1",
+                vec![edit("t1", "a.rs", "done"), edit("t2", "b.rs", "error")],
+            ),
+            message("m1", "assistant", "one"),
+            message("u2", "user", "second"),
+            message("m2", "assistant", "nothing edited"),
+            message("u3", "user", "third"),
+            activity("a3", vec![edit("t3", "c.rs", "done")]),
+            message("m3", "assistant", "three"),
+        ];
+        let ends = crate::transcript_actions::turn_ends(&rows);
+        let files = by_turn(&rows, &ends);
+        let paths = |index: usize| {
+            files[&index]
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(paths(2), ["a.rs"], "a failed edit is not listed");
+        assert_eq!(files[&2][0].counts, Some((2, 1)));
+        assert!(!files.contains_key(&4), "a turn without edits has no card");
+        assert_eq!(paths(7), ["c.rs"]);
     }
 
     #[test]
