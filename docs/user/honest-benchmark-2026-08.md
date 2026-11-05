@@ -1,5 +1,7 @@
 # What o8 actually does: an honest benchmark
 
+> **Archived 2026-11-04.** o8 no longer publishes or maintains a benchmark. This page is kept unchanged as a record of the August 2026 study; its figures describe v0.1.652 builds, not current releases.
+
 *First run 2026-06-01/02. Re-run and substantially rebuilt 2026-08-02/03 against v0.1.652.*
 
 **September 12, 2026 coding update:** A [new fixed paired trial](https://github.com/hurttlocker/o8/issues/1684#issuecomment-5645498074) scored two complete tasks, with zero decisive contract wins in either runtime. The third task was excluded for an invalid contract. The quality decision rule remains unmet. The report below preserves the August results; its coding conclusions describe that earlier sample.

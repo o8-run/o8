@@ -240,6 +240,7 @@ import {
 import { invalidateReviewingLaneForWorkerActivity } from './lib/supervisor/review-invalidation';
 import {
   enqueueSupervisorInboxItem,
+  healBotLoopRunning,
   startHealBot,
   type SupervisorInboxKind,
   type SupervisorInboxPayload,
@@ -2556,6 +2557,7 @@ let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopHeadlessLoop: (() => void) | null = null;
 let stopHealBotLoop: (() => void) | null = null;
+let stopDossierReconcile: (() => void) | null = null;
 let stopSilentExitDetectorLoop: (() => void) | null = null;
 let stopDocWatcherLoop: (() => void) | null = null;
 let stopBroadcastSpeakerLoop: (() => void) | null = null;
@@ -10080,6 +10082,11 @@ async function bootstrapWsServer() {
     } else {
       console.log('[heal-bot] Start skipped — disabled via operator defaults');
     }
+    // Dossier reconciliation is local database work with no model call, so it
+    // runs whether or not the heal-bot is on, skipping ticks the heal-bot covers.
+    void import('@/lib/problems/reconcile-schedule')
+      .then((m) => { stopDossierReconcile = m.startProblemDossierReconcile({ healBotRunning: healBotLoopRunning }); })
+      .catch(() => {});
 
     if (isSilentExitDetectorEnabled()) {
       stopSilentExitDetectorLoop = startSilentExitDetector();
@@ -10131,6 +10138,8 @@ async function shutdown(signal: string, exitCode = 0) {
   stopHeadlessLoop = null;
   stopHealBotLoop?.();
   stopHealBotLoop = null;
+  stopDossierReconcile?.();
+  stopDossierReconcile = null;
   stopSilentExitDetectorLoop?.();
   stopSilentExitDetectorLoop = null;
   stopDocWatcherLoop?.();

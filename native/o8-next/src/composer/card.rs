@@ -187,7 +187,11 @@ impl Surface {
         let sending = morph >= 0.5;
         let state = self.dictation;
         let live = !sending && matches!(self.voice, VoiceState::Connecting | VoiceState::Live);
-        let (id, tip, enabled) = if sending {
+        let shell = sending
+            && crate::composer::commands::shell_line(self.composer.read(cx).text.trim()).is_some();
+        let (id, tip, enabled) = if shell {
+            ("send", "Run in this workspace", enabled)
+        } else if sending {
             ("send", "Send · hold for Queue and Fork", enabled)
         } else if live || self.voice == VoiceState::Closing {
             (
@@ -322,14 +326,18 @@ impl Surface {
                 .into_any_element()
         };
         let grow = 0.6 + 0.4 * morph;
-        button
-            .child(mic)
-            .child(layer().opacity(morph).child(crate::icon::stroke(
-                "M12 19V5M5 12l7-7 7 7",
-                white,
-                15. * grow,
-                2.,
-            )))
+        // A `!` draft runs in the workspace, so Send shows the terminal mark.
+        let glyph = if shell {
+            super::shell_run::SHELL_GLYPH
+        } else {
+            "M12 19V5M5 12l7-7 7 7"
+        };
+        button.child(mic).child(
+            layer()
+                .opacity(morph)
+                .when(shell, |l| l.debug_selector(|| "send-shell-glyph".into()))
+                .child(crate::icon::stroke(glyph, white, 15. * grow, 2.)),
+        )
     }
 
     pub(in crate::ui) fn composer_routing(&self, cx: &App) -> Option<Value> {
@@ -710,12 +718,11 @@ impl Surface {
                             .text_size(px(11.5))
                             .text_color(theme().text_muted)
                             .child(
-                                "Shell command · Runs in this workspace's terminal · Tab completes",
+                                "Shell command. Runs in this workspace. Use Add to chat on the result to show it to the agent.",
                             ),
                     )
                 },
             )
-            .children(self.shell_run_strip(cx))
             .capture_key_down(cx.listener(|s, event: &KeyDownEvent, window, cx| {
                 if s.prompt_picker_key(event, window, cx) {
                     return;

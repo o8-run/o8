@@ -1,95 +1,112 @@
 # Current UI parity
 
-Inventory at #4714. `ported` means the named surface's existing interaction is
-available; `partial` means a usable slice exists with the gaps below; `missing`
-means there is no native counterpart. These states describe functionality, not
-visual or accessibility equivalence. Linux fixture screenshots establish shell
-rendering only, without accounts or provider sessions. No new screen is added by
-the Linux CI work.
+Refreshed for #5563 from the Linux gap audit in #5553
+([linux-gap-audit.md](../../docs/internals/linux-gap-audit.md), base `801fb1402`),
+which reconciled every `partial` and `missing` row of the #4714 inventory against
+current registrations.
+
+`ported` means the named surface's existing interaction is available; `partial`
+means a usable slice exists with the gaps listed; `missing` means there is no
+native counterpart. A `partial` row records an implementation, not a claim that
+every desktop interaction is equivalent. These states describe functionality, not
+visual or accessibility equivalence.
+
+Platform columns:
+- **macOS**: the native build's reference platform.
+- **Linux**: from the audit's Linux runs (X11 under Xvfb, software Vulkan). Linux
+  fixture screenshots establish shell rendering only, without accounts or provider
+  sessions.
+- **Windows**: source only. Nothing has been built or run on Windows. Windows takes
+  the same non-macOS code branches as Linux, so its column repeats Linux's and is
+  not a test result.
 
 The current UI inventory comes from [canvas kinds](../../src/components/desktop/Canvas.tsx),
 [settings tabs](../../src/components/desktop/settings/shared.tsx),
 [Customize tabs](../../src/components/desktop/customize/CustomizeHeader.tsx), and
 the desktop shell. Native registration lives in [shell.rs](src/shell.rs).
 
-| Current UI surface | State | Native surface and remaining scope |
-| --- | --- | --- |
-| Workspace shell, tabs, commands and restore | partial | [App shell](APP-SHELL.md); saved local workspaces and supported surfaces, no complete desktop navigation or window management |
-| Projects and repository selection | partial | `projects.rs`; registered projects, repository context and switching, no complete desktop project management |
-| Session list, history and live transcript (`transcript`) | partial | `surfaces/session.rs`, `ui.rs`; retained transcript and live stream, unsupported rich cards remain below |
-| Composer and queued messages | partial | `composer.rs`; queue, steer and approvals, no full attachment/voice interaction |
-| Worker sessions | partial | Existing runtime inventory/history; read-only workers, no full worker lifecycle controls |
-| Split session panes | partial | `surfaces/grid.rs`; saved 1/2/4/6 panes, no arbitrary desktop canvas arrangement |
-| Terminal | partial | [Protocol and limits](TERMINAL-PROTOCOL.md); attach/input/resize/replay, selection/copy and mouse reporting missing |
-| Brain conversation, search and sources | partial | [Brain](BRAIN.md); conversation/memory slice, no full desktop memory management |
-| Inbox: Needs reply, Contributions, Approvals, Agent issues, History | partial | `surfaces/inbox.rs`; scoped cards, navigation and decisions, real account acquisition/refresh missing |
-| Issues list, detail and creation (`issue`, `new-issue`) | partial | `surfaces/issues.rs`; existing issue slice, full desktop issue workflow missing |
-| File tree and text file viewer/editor (`file`) | missing | No registered file surface |
-| Diff and review (`diff`) | partial | `surfaces/diff.rs`, `diff_ui.rs`; native review slice, full desktop integration missing |
-| Commit detail (`commit`) | missing | No commit surface |
-| Pull request detail and list (`pr`, `pull-requests`) | partial | [Native PRs](docs/surfaces/pull-requests.md); list/detail and confirmed actions, packet-linked merge, thread controls and view persistence missing |
-| Git history (`git-log`) | missing | No history surface |
-| CI runs (`ci`) | partial | Activity exposes lazy CI failure details/retry/links; no standalone CI workspace |
-| Deployments (`deploy`) | missing | No deployment surface |
-| Usage (`usage`) | missing | No analytics workspace |
-| Automations (`automations`) | missing | No automation workspace |
-| Activity feed and packet controls | partial | [Activity parity](evidence/activity/parity.md); grouped feed, details, holds and mission stop; complete packet editing, lifecycle and review navigation missing |
-| Plugin catalog (`plugins`) | missing | No catalog or installation UI |
-| Customize (`customize`) | partial | See section inventory below and [detailed parity](docs/surfaces/customize/verification.md) |
-| README and Markdown documents (`readme`) | missing | Transcript prose is not a document surface |
-| Images and PDFs (`image`) | missing | Transcript placeholders only |
-| Interactive visualization cards (`visualization`) | partial | [Inline cards](docs/surfaces/visualizations.md); interactive macOS documents, resizing, theme and saved state; Linux renders a static picture with theme and width refresh; Linux interaction, page-driven resizing and live state remain open; Windows shows an error and retry row; workspace expansion and version controls remain open |
-| Diagrams (`mermaid`) | missing | No diagram renderer |
-| Browser/preview (`preview`) | missing | No browser surface |
-| Timeline (`timeline`) | missing | No timeline surface |
-| Audit log (`audit-log`) | missing | No audit-log viewer |
-| Welcome and onboarding (`welcome`) | partial | [First-run setup](docs/surfaces/setup.md); project registration, tools, privacy and first conversation; full desktop onboarding parity remains open |
-| Sign-in and account binding | missing | Explicit local opt-in connection only |
-| Mobile pairing (`mobile-pairing`) | missing | No pairing or mobile UI |
-| Notifications, toasts and quick drawers | missing | No equivalent desktop overlay system |
-| Voice, dictation and attention overlays | missing | No native voice surface |
+| Current UI surface | macOS | Linux | Windows | Native surface and remaining scope |
+| --- | --- | --- | --- | --- |
+| Workspace shell, tabs, commands and restore | partial | partial | partial | `shell.rs`, `shell_features/window_state.rs`, `pane_tree.rs`; tabs, restore, navigation and a saved pane tree. Off macOS, All Glass installs no system blur and the window uses an ordinary titlebar |
+| Projects and repository selection | partial | partial | partial | `projects_model.rs`, `projects_view.rs`; project CRUD, repository registration and switching. Full desktop parity unverified |
+| Session list, history and live transcript (`transcript`) | partial | partial | partial | `ui.rs`, `rich.rs`, `retained.rs`; retained transcript and live stream. Unsupported media cards remain |
+| Composer and queued messages | partial | partial | partial | `composer.rs`; queue, steer, approvals, attachments and voice actions. Off macOS, the recent-screenshot picker is empty and the held dictation shortcut is not intercepted |
+| Worker sessions | partial | partial | partial | `surfaces/workers/actions.rs`, `drafts.rs`; delivery, interrupt, resume and persisted pending requests |
+| Split session panes | partial | partial | partial | `pane_layout.rs`, `pane_tree.rs`, `shell_features/panes.rs`; fixed grid plus a saved binary split tree |
+| Terminal | partial | partial | partial | [Protocol and limits](TERMINAL-PROTOCOL.md); attach, input, resize and replay. Selection, copy and mouse reporting missing |
+| Brain conversation, search and sources | partial | partial | partial | [Brain](BRAIN.md); conversation, sources and local search. Memory editing and deletion missing |
+| Inbox: Needs reply, Contributions, Approvals, Agent issues, History | partial | partial | partial | `inbox.rs`, `surfaces/inbox.rs`; production-route reads and actions. Account sign-in missing |
+| Issues list, detail and creation (`issue`, `new-issue`) | partial | partial | partial | `issues.rs`, `issues_view.rs`, `surfaces/issues.rs`; list, detail, creation, discussion and contextual tabs |
+| File tree and text file viewer/editor (`file`) | partial | partial | partial | `files_panel.rs`, `files_panel/editor.rs`; tree, editor, syntax and large files. Off macOS, video poster thumbnails fall back to a plain tile |
+| Diff and review (`diff`) | partial | partial | partial | `diff_ui.rs`, `files_panel/file_diff.rs`; split and unified patches and commit diffs. Right-panel Review parity is tracked in #5576 |
+| Commit detail (`commit`) | partial | partial | partial | `surfaces/activity/commit.rs`; Activity opens a native commit diff |
+| Pull request detail and list (`pr`, `pull-requests`) | partial | partial | partial | [Native PRs](docs/surfaces/pull-requests.md); list, detail and confirmed actions. Linked-packet actions and persisted view and draft state missing |
+| Git history (`git-log`) | missing | missing | missing | No history workspace; Activity shows recent commits and a commit diff |
+| CI runs (`ci`) | partial | partial | partial | `surfaces/activity/view.rs`; CI summaries, details, retry and links in Activity. No standalone CI workspace |
+| Deployments (`deploy`) | missing | missing | missing | No registered surface |
+| Usage (`usage`) | partial | partial | partial | `surfaces/usage.rs`; limits and local usage history |
+| Automations (`automations`) | partial | partial | partial | `surfaces/scheduled.rs`; local, manual and cron automations and connected schedules |
+| Activity feed and packet controls | partial | partial | partial | [Activity parity](evidence/activity/parity.md); grouped feed, details, holds, mission stop, lane stop/resume/merge, archive and restore, proposals and dossiers. Right-panel parity is tracked in #5576 |
+| Plugin catalog (`plugins`) | partial | partial | partial | `surfaces/customize/plugins.rs`; local action plugins. No remote catalog, search, install or update |
+| Customize (`customize`) | partial | partial | partial | See the Customize table below and [detailed parity](docs/surfaces/customize/verification.md) |
+| README and Markdown documents (`readme`) | partial | partial | partial | `files_panel/markdown_view.rs`, `files_panel/spec.rs`; Markdown renders in Files and Workspace Notes. No separate document tab |
+| Images and PDFs (`image`) | partial | partial | partial | `files_panel/media.rs`, `transcript_images.rs`; raster images. PDF, video and audio previews missing |
+| Interactive visualization cards (`visualization`) | partial | partial | missing | [Inline cards](docs/surfaces/visualizations.md); interactive macOS documents, resizing, theme and saved state. Linux renders a static picture with theme and width refresh. Windows shows an error and retry row |
+| Diagrams (`mermaid`) | partial | partial | partial | `transcript_diagram.rs`; transcript diagram parser, layout and interaction |
+| Browser/preview (`preview`) | partial | missing | missing | `browser_panel.rs`; off macOS the pane reads "The Browser needs macOS for now." and remote previews show an error row |
+| Timeline (`timeline`) | missing | missing | missing | No registered surface |
+| Audit log (`audit-log`) | missing | missing | missing | No registered viewer |
+| Welcome and onboarding (`welcome`) | partial | partial | partial | [First-run setup](docs/surfaces/setup.md); projects, tools, privacy, providers and first conversation |
+| Sign-in and account binding | missing | missing | missing | `shell_features/connection.rs`; explicit local connection only, no account or sign-in page |
+| Mobile pairing (`mobile-pairing`) | partial | partial | partial | `surfaces/settings/mobile.rs`; pairing and revoke |
+| Notifications, toasts and quick drawers | partial | partial | partial | `shell_features/toasts.rs`, `right_panel/drawer.rs`, `shell_features/inbox_reply.rs`; shell toasts, reply actions and drawers. OS notification parity not established |
+| Voice, dictation and attention overlays | partial | partial | partial | `shell_features/dictation.rs`, `settings_voice_fields.rs`; Live, dictation and attention settings. Off macOS the held shortcut is not intercepted |
+| Live device viewer | partial | missing | missing | `devices_panel.rs`; device state and agent controls everywhere, the live viewer on macOS only |
 
 ## Settings
 
 The native settings slice uses `settings.rs`, `settings_fields.rs` and
 `settings_secret.rs`. Native grouping differs from desktop tab names. A shared
-API field does not establish parity with every control on its desktop tab.
+API field does not establish parity with every control on its desktop tab. No
+settings row has a platform-specific gate, so the three platform states match.
 
-| Current settings tab | State | Available scope or gap |
-| --- | --- | --- |
-| General | partial | Existing general operator defaults; desktop startup/privacy controls incomplete |
-| Account | missing | No account/sign-in management |
-| Appearance | missing | Shared native theme, no desktop theme controls |
-| Models | partial | Provider/model defaults and connection fields; account flows incomplete |
-| API keys | partial | Existing key presence, save/remove and refusal flows |
-| Local models | missing | No local model management |
-| Operator defaults | partial | Existing dispatch, supervision and model fields |
-| Worktrees | partial | Storage defaults; full usage/cleanup/parking UI missing |
-| Projects | partial | Separate native project slice; complete settings tab missing |
-| Git & PRs | partial | Existing Git defaults; full branch/commit/PR controls missing |
-| Indexing | missing | No indexing settings |
-| MCP | missing | Customize connection inventory is not server management |
-| Connections | missing | No remote access or device management |
-| Workers | missing | No worker settings |
-| Cloud workers | missing | No cloud worker settings |
-| Analytics | missing | No spend/usage settings |
-| Voice | missing | No voice settings |
-| Permissions | missing | No operating-system permission settings |
-| Diagnostics | missing | No diagnostics/reset UI |
-| About | missing | No version/credits/onboarding settings |
+| Current settings tab | macOS | Linux | Windows | Available scope or gap |
+| --- | --- | --- | --- | --- |
+| General | partial | partial | partial | Operator defaults and privacy toggles; no launch-at-login control |
+| Account | missing | missing | missing | No account or sign-in page |
+| Appearance | partial | partial | partial | Light, dark and glass, and chat width (`settings_panels.rs`). Off macOS, glass installs no system blur |
+| Models | partial | partial | partial | Defaults, provider instances and connection forms; account sign-in missing |
+| API keys | partial | partial | partial | Key presence, save, remove and refusal flows |
+| Local models | partial | partial | partial | Local-model defaults; no install, remove, start or stop manager |
+| Operator defaults | partial | partial | partial | Dispatch and model fields |
+| Worktrees | partial | partial | partial | Storage defaults, usage, allocated space and parking (`settings_storage.rs`); full cleanup workflow unverified |
+| Projects | partial | partial | partial | Project management lives in its own native surface (`surfaces/projects.rs`), not a Settings tab |
+| Git & PRs | partial | partial | partial | Git defaults; branch, commit and PR actions live in their native surfaces |
+| Indexing | partial | partial | partial | Indexing read and refresh (`settings_indexing.rs`) |
+| MCP | partial | partial | partial | External-client connection management (`surfaces/settings/mcp.rs`); no server management in Customize Connections |
+| Connections | partial | partial | partial | Adapter diagnostics, Machines and Devices (`settings_connections.rs`); the live device viewer is macOS only |
+| Workers | partial | partial | partial | Worker defaults in Dispatch and model fields, lifecycle actions in Workers; no dedicated tab |
+| Cloud workers | missing | missing | missing | No cloud-worker settings page |
+| Analytics | partial | partial | partial | Spend and usage live in the Usage workspace; no separate Analytics page |
+| Voice | partial | partial | partial | Voice, dictation, speech-to-text and attention fields (`settings_voice_fields.rs`) |
+| Permissions | missing | missing | missing | No operating-system permission page |
+| Diagnostics | partial | partial | partial | Feature audit and switch diagnostics (`settings_diagnostics.rs`) |
+| About | partial | partial | partial | Version, platform, update information and links (`settings_about.rs`) |
 
 ## Customize
 
-| Current Customize tab | State | Available scope or gap |
-| --- | --- | --- |
-| Instructions (`rules`) | partial | Authored inventory; backing-file edit/forget and indexed references missing |
-| Commands | missing | No command inventory/actions |
-| Prompts | partial | Saved prompt create/edit/copy/delete; imports, insertion and scope reassignment missing |
-| Skills | partial | Metadata inventory; full content, import and bundle management missing |
-| Plugins | missing | No plugin management |
-| Connections | partial | Basic metadata and built-in inventory; management missing |
-| Agents | partial | Metadata inventory; backing-file view missing |
-| Hooks | partial | Event/type inventory; complete configuration controls missing |
+No Customize tab has a platform-specific gate, so the three platform states match.
+
+| Current Customize tab | macOS | Linux | Windows | Available scope or gap |
+| --- | --- | --- | --- | --- |
+| Instructions (`rules`) | partial | partial | partial | Authored inventory; backing-file edit and forget, and indexed references, missing |
+| Commands | missing | missing | missing | No Commands tab; the shell palette is separate |
+| Prompts | partial | partial | partial | Create, edit, copy and delete; import and scope reassignment missing. Composer insertion is separate |
+| Skills | partial | partial | partial | Metadata rows; full content, import and bundle management missing |
+| Plugins | partial | partial | partial | Local action folders; no remote catalog |
+| Connections | partial | partial | partial | Metadata and built-in inventory; external-client management lives in Settings › MCP |
+| Agents | partial | partial | partial | Metadata rows; backing-file view missing |
+| Hooks | partial | partial | partial | Event metadata; configuration workflow missing |
 
 ## Linux CI measurements
 

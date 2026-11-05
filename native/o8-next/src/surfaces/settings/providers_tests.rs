@@ -17,6 +17,53 @@ fn provider_instance_writes_use_the_settings_timeout_not_the_shared_5s() {
 }
 
 #[test]
+fn a_new_thread_leads_on_a_connected_runtime() {
+    let defaults = |backend: &str, codex: bool, claude: bool| {
+        json!({
+            "values": {"orchestratorBackend": backend, "orchestratorModel": "gpt-6-astra"},
+            "dispatchableRuntimes": [
+                {"id": "codex", "available": codex},
+                {"id": "claude-code", "available": claude},
+            ]
+        })
+    };
+    let claude = FreshLead::Fallback {
+        backend: "claude",
+        model: "claude-opus-5-5",
+    };
+    // Codex unavailable and Claude connected: a Claude default.
+    assert_eq!(fresh_lead(&defaults("auto", false, true)), claude);
+    // A saved Codex default with Codex unavailable falls back to Claude.
+    assert_eq!(fresh_lead(&defaults("codex", false, true)), claude);
+    assert_eq!(fresh_lead(&defaults("codex", true, true)), FreshLead::Saved);
+    assert_eq!(
+        fresh_lead(&defaults("claude", false, true)),
+        FreshLead::Saved
+    );
+    // Never an unconnected runtime.
+    assert_eq!(
+        fresh_lead(&defaults("claude", true, false)),
+        FreshLead::Fallback {
+            backend: "codex",
+            model: "gpt-6.1-sol"
+        }
+    );
+    assert_eq!(
+        fresh_lead(&defaults("codex", false, false)),
+        FreshLead::Unconnected
+    );
+    // A disabled runtime counts as unavailable.
+    let mut off = defaults("codex", true, true);
+    off["values"]["disabledRuntimes"] = json!(["codex"]);
+    assert_eq!(fresh_lead(&off), claude);
+    // Without a runtime list, the saved lead stands.
+    assert_eq!(
+        fresh_lead(&json!({"values": {"orchestratorBackend": "codex"}})),
+        FreshLead::Saved
+    );
+}
+
+#[test]
 fn provider_version_status_and_home_are_display_only() {
     assert_eq!(version("codex-cli 0.162.1").as_deref(), Some("v0.162.1"));
     assert_eq!(

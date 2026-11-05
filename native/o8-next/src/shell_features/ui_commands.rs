@@ -105,10 +105,9 @@ fn symon(s: &mut Shell, data: &Value, window: &mut Window, cx: &mut Context<Shel
             window,
             cx,
         ),
+        // The Pull requests surface stays removable, so open it through its registration.
         "prs" => {
-            if !s.open_registered("Pull requests", window, cx) {
-                toasts::info("Pull requests are not in o8 next yet.", cx);
-            }
+            s.open_registered("Pull requests", window, cx);
         }
         "orchestrator_draft" => {
             if let Some(text) = data["text"].as_str() {

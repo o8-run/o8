@@ -11,7 +11,6 @@ import { listProblemDossiers, listProblemRemedies } from '@/lib/problems/dossier
 import { projectProblemDossierMetrics } from '@/lib/problems/metrics';
 import {
   acceptProblemDossier,
-  reconcileProblemDossiers,
   resumeProblemDossier,
   stopProblemDossier,
   suppressProblemDossier,
@@ -51,7 +50,7 @@ export async function GET(request: NextRequest) {
   const includeSuppressed = request.nextUrl.searchParams.get('includeSuppressed') === 'true';
 
   try {
-    await reconcileProblemDossiers({ projectId });
+    // Reads only. Heal-bot maintenance and the operator tools reconcile.
     return NextResponse.json(projectDossiers(projectId, includeSuppressed), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });

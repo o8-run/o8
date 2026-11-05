@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { githubInstallationFetch, hasGitHubBrokerAccess } = vi.hoisted(() => ({ githubInstallationFetch: vi.fn(), hasGitHubBrokerAccess: vi.fn() }));
 vi.mock('./auth', () => ({ githubInstallationFetch, hasGitHubBrokerAccess }));
@@ -49,5 +49,48 @@ describe('paged pull request reads', () => {
     expect(result.prs[0]).toMatchObject({ state: 'merged', additions: null, deletions: null, checks: null });
     expect(result.nextPage).toBeNull();
     expect(result.statsUnavailable).toBe(true);
+  });
+
+  // #5169: the o8-run/o8 list hung past its 15 s GitHub timeout because a
+  // stalled response body ignored the abort. Every wait is bounded now.
+  describe('a stalled GitHub response (#5169)', () => {
+    const stalled = () => new Response(new ReadableStream({ start() {} }), { headers: { 'content-type': 'application/json' } });
+    function shortDeadline() {
+      const deadlines: number[] = [];
+      vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+        deadlines.push(ms);
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(new DOMException('GitHub read timed out.', 'TimeoutError')), 40);
+        return controller.signal;
+      });
+      return deadlines;
+    }
+    afterEach(() => { vi.restoreAllMocks(); });
+
+    it('answers at its own deadline when the list body never finishes', async () => {
+      const deadlines = shortDeadline();
+      githubInstallationFetch.mockResolvedValue({ response: stalled() });
+      const started = Date.now();
+      await expect(fetchPullRequestListPage('example/repo', 'open', 1)).rejects.toMatchObject({ name: 'TimeoutError' });
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(deadlines).toEqual([15_000]);
+    });
+
+    it('releases the request when the caller disconnects mid-body', async () => {
+      githubInstallationFetch.mockResolvedValue({ response: stalled() });
+      const caller = new AbortController();
+      setTimeout(() => caller.abort(new DOMException('Client closed.', 'AbortError')), 40);
+      await expect(fetchPullRequestListPage('example/repo', 'open', 1, caller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    it('keeps the list when only the optional summary body stalls', async () => {
+      shortDeadline();
+      githubInstallationFetch.mockImplementation(async (_repo: string, path: string) => ({
+        response: path === '/graphql' ? stalled() : Response.json([pull(1)]),
+      }));
+      const result = await fetchPullRequestListPage('example/repo', 'open', 1);
+      expect(result.prs.map((pr) => pr.number)).toEqual([1]);
+      expect(result.statsUnavailable).toBe(true);
+    });
   });
 });

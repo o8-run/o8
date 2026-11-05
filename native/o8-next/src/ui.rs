@@ -78,7 +78,7 @@ thread_local! {
     static PENDING_LINK: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// The `!` line a RunShellLine dispatch runs. Apart from links, so text
     /// from a reply can never reach a shell.
-    static PENDING_SHELL_LINE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    static PENDING_SHELL_LINE: std::cell::RefCell<Option<(String, gpui::WeakEntity<Surface>)>> = const { std::cell::RefCell::new(None) };
     /// The `!` line a StopShellLine dispatch interrupts.
     static PENDING_SHELL_STOP: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// The `!` line an AddShellOutput dispatch reads, and the view it goes to.
@@ -91,13 +91,18 @@ pub(crate) fn open_link(url: &str, window: &mut Window, cx: &mut App) {
     window.dispatch_action(Box::new(OpenTranscriptLink), cx);
 }
 
-/// Asks the shell to run a composer `!` line.
-pub(crate) fn run_shell_line(line: String, window: &mut Window, cx: &mut App) {
-    PENDING_SHELL_LINE.with(|pending| *pending.borrow_mut() = Some(line));
+/// Asks the shell to run a composer `!` line, and to report it to that view's card.
+pub(crate) fn run_shell_line(
+    line: String,
+    view: gpui::WeakEntity<Surface>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    PENDING_SHELL_LINE.with(|pending| *pending.borrow_mut() = Some((line, view)));
     window.dispatch_action(Box::new(RunShellLine), cx);
 }
 
-pub(crate) fn take_pending_shell_line() -> Option<String> {
+pub(crate) fn take_pending_shell_line() -> Option<(String, gpui::WeakEntity<Surface>)> {
     PENDING_SHELL_LINE.with(|pending| pending.borrow_mut().take())
 }
 
