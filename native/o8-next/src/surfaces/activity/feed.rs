@@ -69,7 +69,8 @@ pub struct Row {
     pub title: String,
     pub date: String,
     pub data: Value,
-    pub ci: Option<Box<Row>>,
+    /// CI runs grouped onto this commit, newest first.
+    pub ci: Vec<Row>,
 }
 impl Row {
     pub fn key(&self) -> String {
@@ -156,7 +157,7 @@ fn rows(
                 title,
                 date,
                 data: v.clone(),
-                ci: None,
+                ci: vec![],
             })
         })
         .collect()
@@ -319,42 +320,160 @@ pub fn load(
             .unwrap_or(&options.packet_fallback)
             .into(),
             data: packet.clone(),
-            ci: None,
+            ci: vec![],
         });
     }
-    // Group only matching stable repository/SHA pairs, including local roots.
-    let mut grouped = vec![];
-    for row in &out.rows {
-        if row.kind == "ci" {
-            let sha = text(&row.data, "headSha").to_lowercase();
-            if !sha.is_empty()
-                && let Some(commit) = grouped.iter_mut().find(|c: &&mut Row| {
-                    c.kind == "commit"
-                        && row.repo.is_some()
-                        && c.repo_identity == row.repo_identity
-                        && sha == c.id.to_lowercase()
-                })
-            {
-                commit.ci = Some(Box::new(row.clone()));
-                if crate::clock::timestamp(&row.date) > crate::clock::timestamp(&commit.date) {
-                    commit.date = row.date.clone();
-                }
-                continue;
-            }
-        }
-        if row.kind != "commit"
-            || !grouped
-                .iter()
-                .any(|c: &Row| c.kind == "commit" && c.key() == row.key())
-        {
-            grouped.push(row.clone());
-        }
-    }
+    let mut grouped = group(&out.rows);
     grouped.sort_by_key(|row| std::cmp::Reverse(crate::clock::timestamp(&row.date).unwrap_or(0)));
     grouped.truncate(50);
     out.rows = grouped;
     out.remote_updated = stamps.into_iter().min();
     out
+}
+
+/// Two commit ids name the same commit when one is a prefix of the other and
+/// the shorter has at least seven characters (a short hash against a full SHA).
+fn same_sha(a: &str, b: &str) -> bool {
+    let (a, b) = (a.to_lowercase(), b.to_lowercase());
+    let shorter = a.len().min(b.len());
+    shorter >= 7
+        && a.get(..shorter)
+            .is_some_and(|a| b.get(..shorter) == Some(a))
+}
+
+/// Folds each CI run into its commit row: same repository identity and the
+/// same SHA, short or full, whichever order the rows arrive in. A commit keeps
+/// every run, newest first, and takes the newest run's date when it is later.
+/// Duplicate commit rows collapse into the first.
+fn group(rows: &[Row]) -> Vec<Row> {
+    let mut grouped: Vec<Row> = vec![];
+    for row in rows.iter().filter(|row| row.kind != "ci") {
+        if row.kind != "commit"
+            || !grouped
+                .iter()
+                .any(|c| c.kind == "commit" && c.key() == row.key())
+        {
+            grouped.push(row.clone());
+        }
+    }
+    for row in rows.iter().filter(|row| row.kind == "ci") {
+        let sha = text(&row.data, "headSha");
+        let commit = grouped.iter_mut().find(|c| {
+            c.kind == "commit"
+                && row.repo.is_some()
+                && c.repo_identity == row.repo_identity
+                && same_sha(&sha, &c.id)
+        });
+        match commit {
+            Some(commit) => {
+                if crate::clock::timestamp(&row.date) > crate::clock::timestamp(&commit.date) {
+                    commit.date = row.date.clone();
+                }
+                commit.ci.push(row.clone());
+            }
+            None => grouped.push(row.clone()),
+        }
+    }
+    for commit in &mut grouped {
+        commit
+            .ci
+            .sort_by_key(|run| std::cmp::Reverse(crate::clock::timestamp(&run.date).unwrap_or(0)));
+    }
+    grouped
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn row(kind: &'static str, id: &str, date: &str, data: Value) -> Row {
+        Row {
+            kind,
+            id: id.into(),
+            repo: Some("example/repo".into()),
+            repo_identity: "example/repo".into(),
+            title: format!("{kind} {id}"),
+            date: date.into(),
+            data,
+            ci: vec![],
+        }
+    }
+
+    #[test]
+    fn a_full_sha_ci_run_joins_its_short_sha_commit_even_when_it_arrives_first() {
+        let full = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+        let rows = [
+            row(
+                "ci",
+                "901",
+                "2026-11-04T12:05:00Z",
+                json!({"headSha": full}),
+            ),
+            row(
+                "commit",
+                "a1b2c3d",
+                "2026-11-04T12:00:00Z",
+                json!({"hash": "a1b2c3d"}),
+            ),
+        ];
+        let grouped = group(&rows);
+        assert_eq!(grouped.len(), 1, "the CI run folds into the commit");
+        assert_eq!(grouped[0].kind, "commit");
+        assert_eq!(grouped[0].ci.first().map(|ci| ci.id.as_str()), Some("901"));
+        assert_eq!(grouped[0].date, "2026-11-04T12:05:00Z");
+    }
+
+    #[test]
+    fn a_ci_run_stays_separate_from_a_different_commit_or_repository() {
+        let mut other = row("commit", "a1b2c3d", "2026-11-04T12:00:00Z", json!({}));
+        other.repo_identity = "example/other".into();
+        let rows = [
+            row("commit", "ffffff0", "2026-11-04T12:00:00Z", json!({})),
+            other,
+            row(
+                "ci",
+                "902",
+                "2026-11-04T12:05:00Z",
+                json!({"headSha": "a1b2c3d4e5f6"}),
+            ),
+            // Fewer than seven characters never match.
+            row(
+                "ci",
+                "903",
+                "2026-11-04T12:06:00Z",
+                json!({"headSha": "ffffff"}),
+            ),
+        ];
+        let grouped = group(&rows);
+        assert_eq!(grouped.len(), 4);
+        assert!(grouped.iter().all(|row| row.ci.is_empty()));
+    }
+
+    #[test]
+    fn a_commit_keeps_every_run_and_shows_the_newest() {
+        let sha = "a1b2c3d4e5f6";
+        // Runs arrive newest first, as the feed sends them.
+        let rows = [
+            row("commit", "a1b2c3d", "2026-11-04T12:00:00Z", json!({})),
+            row("ci", "912", "2026-11-04T12:20:00Z", json!({"headSha": sha})),
+            row("ci", "911", "2026-11-04T12:10:00Z", json!({"headSha": sha})),
+            row("ci", "913", "2026-11-04T12:15:00Z", json!({"headSha": sha})),
+        ];
+        let grouped = group(&rows);
+        assert_eq!(grouped.len(), 1);
+        let runs: Vec<_> = grouped[0].ci.iter().map(|ci| ci.id.as_str()).collect();
+        assert_eq!(runs, ["912", "913", "911"], "every run, newest first");
+        assert_eq!(grouped[0].date, "2026-11-04T12:20:00Z");
+    }
+
+    #[test]
+    fn a_multibyte_id_never_matches_and_never_panics() {
+        // The eighth byte falls inside "é", so a byte slice there would panic.
+        assert!(!same_sha("a1b2c3d4", "a1b2c3dé0"));
+        assert!(!same_sha("a1b2c3dé0", "a1b2c3d4"));
+        assert!(same_sha("A1B2C3D", "a1b2c3d4e5"));
+    }
 }
 
 #[derive(Clone, Deserialize)]

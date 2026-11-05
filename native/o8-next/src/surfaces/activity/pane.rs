@@ -23,6 +23,8 @@ pub enum ActivityEvent {
 pub(super) enum Action {
     BackToFeed,
     Packet(packet::Command),
+    /// The summary row that holds Recurring problems and Proposed directives.
+    Attention,
     Proposals,
     ProposalDetail(String),
     ProposalDecision(String, bool),
@@ -102,6 +104,8 @@ pub struct ActivityPane {
     pub(super) loading: bool,
     pub(super) errors: Vec<String>,
     pub(super) filter: &'static str,
+    /// Recurring problems and Proposed directives are open under their summary row.
+    pub(super) attention_open: bool,
     pub(super) expanded: Option<String>,
     pub(super) details: HashMap<String, Detail>,
     pub(super) pending: bool,
@@ -158,6 +162,7 @@ impl ActivityPane {
             loading: false,
             errors: vec![],
             filter: "all",
+            attention_open: false,
             expanded: None,
             details: HashMap::new(),
             pending: false,
@@ -215,7 +220,14 @@ impl ActivityPane {
             (detail.error.is_some()
                 && !detail.loading
                 && detail.retry_at.is_some_and(|at| at <= Instant::now()))
-            .then(|| self.rows.iter().find(|row| row.key() == *key).cloned())
+            .then(|| {
+                // A CI run grouped onto its commit retries from there.
+                self.rows
+                    .iter()
+                    .flat_map(|row| std::iter::once(row).chain(&row.ci))
+                    .find(|row| row.key() == *key)
+                    .cloned()
+            })
             .flatten()
         });
         if let Some(row) = retry {
@@ -301,15 +313,17 @@ impl ActivityPane {
                 this.cache = snapshot.cache;
                 this.mission = snapshot.mission;
                 this.remote_updated = snapshot.remote_updated;
-                if !this.rows.iter().any(|r| Some(r.key()) == this.expanded) {
-                    this.expanded = None;
-                }
-                if let Some(row) = this
+                // A CI run grouped onto its commit stays expanded across reloads.
+                let expanded = this
                     .rows
                     .iter()
+                    .flat_map(|row| std::iter::once(row).chain(&row.ci))
                     .find(|r| Some(r.key()) == this.expanded)
-                    .cloned()
-                {
+                    .cloned();
+                if expanded.is_none() {
+                    this.expanded = None;
+                }
+                if let Some(row) = expanded {
                     if row.kind == "packet" {
                         this.packet_read(row, false, cx);
                     } else {
@@ -516,6 +530,10 @@ impl ActivityPane {
                 self.packet.reads.clear(); self.packet.editor = None; self.rows.clear(); self.errors.clear(); self.details.clear(); self.keyboard = None; self.load(cx);
             }
             Action::Refresh => { self.packet.reads.clear(); self.refresh_feed(true,true,cx); self.load_dossiers(cx); self.load_proposals(cx); },
+            Action::Attention => {
+                self.attention_open = !self.attention_open;
+                self.mark_proposals_seen(cx);
+            }
             Action::Dossiers => self.decisions.open = !self.decisions.open,
             Action::DossierHistory(id) => self.decisions.expanded = if self.decisions.expanded.as_ref() == Some(&id) { None } else { Some(id) },
             Action::DossierDecision(id, action) => self.dossier_decision(id, action, cx),
@@ -660,3 +678,11 @@ pub(super) mod preferences;
 mod proposals;
 #[path = "updates.rs"]
 mod updates;
+
+#[cfg(test)]
+impl ActivityPane {
+    /// Proposed directives loaded, and directive ids saved as seen.
+    pub(super) fn proposal_counts(&self) -> (usize, usize) {
+        (self.proposals.rows().len(), self.proposals.seen.len())
+    }
+}
