@@ -2,13 +2,17 @@ use super::*;
 
 impl Tool {
     pub(super) fn parse(value: &str) -> Self {
+        Self::find(value).unwrap_or(Self::Launcher)
+    }
+    /// A saved tool the panel can open now. Tools not in the groups, such as
+    /// ones that are not ready, are dropped from saved layouts.
+    fn find(value: &str) -> Option<Self> {
         Self::GROUPS
             .iter()
             .flat_map(|(_, tools)| tools.iter())
             .copied()
             .chain([Self::Launcher, Self::Prs, Self::Compare])
             .find(|t| t.slug() == value)
-            .unwrap_or(Self::Launcher)
     }
     pub(super) fn utility(self) -> bool {
         !matches!(
@@ -104,19 +108,26 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
             }
             out
         });
-    p.selected = Tool::parse(&saved.primary);
+    // A saved tool that is no longer offered gives way to the first saved tab.
+    p.selected = Tool::find(&saved.primary)
+        .or_else(|| p.tabs.first().copied())
+        .unwrap_or(Tool::Launcher);
     p.active = p.tabs.iter().position(|t| *t == p.selected).unwrap_or(0);
-    p.lower = saved.split.then(|| Tool::parse(&saved.secondary)).map(|t| {
-        if t == p.selected {
-            if t == Tool::Browser {
-                Tool::Spec
+    p.lower = saved
+        .split
+        .then(|| Tool::find(&saved.secondary))
+        .flatten()
+        .map(|t| {
+            if t == p.selected {
+                if t == Tool::Browser {
+                    Tool::Spec
+                } else {
+                    Tool::Browser
+                }
             } else {
-                Tool::Browser
+                t
             }
-        } else {
-            t
-        }
-    });
+        });
     p.motion = Transition::settled(260, saved.visible && viewport >= 1180.);
     p.morph = Transition::settled(200, saved.visible && viewport >= 1180.);
     p.content = Transition::settled(200, true);
@@ -125,7 +136,7 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         .get(&scope)
         .into_iter()
         .flatten()
-        .map(|v| Tool::parse(v))
+        .filter_map(|v| Tool::find(v))
         .filter(|t| *t != p.selected)
         .fold(vec![], |mut out, t| {
             if !out.contains(&t) {
@@ -337,7 +348,7 @@ pub(super) fn split(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>)
     let p = s.features.get::<Panel>();
     if p.lower.take().is_none() {
         let upper = p.selected;
-        let lower = Tool::parse(&s.state.right_panel.secondary);
+        let lower = Tool::find(&s.state.right_panel.secondary).unwrap_or(Tool::Spec);
         let lower = if lower == upper {
             if upper == Tool::Browser {
                 Tool::Spec
