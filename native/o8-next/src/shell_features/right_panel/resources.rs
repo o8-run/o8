@@ -365,6 +365,13 @@ pub(super) fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
     }
     let machines = s.links.machines();
     let state = s.features.get::<State>();
+    if reopened {
+        // Nothing is pruned while Resources is closed, so a machine that went
+        // offline and came back meanwhile would still show its old reading.
+        // A reply to a read made before closing finds no entry, or a newer
+        // request, and is dropped.
+        state.remote.clear();
+    }
     prune(&mut state.remote, &machines);
     if reopened || state.remote_next.is_none_or(|at| at <= Instant::now()) {
         load_remote(s, machines, cx);
