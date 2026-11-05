@@ -49,14 +49,16 @@ enum Pane {
 }
 
 impl Pane {
+    /// Left to right. The toolbar is right-aligned, so the steady panes sit
+    /// at the right end and a pane that comes and goes never moves them.
     const ALL: [Pane; 7] = [
         Pane::Plan,
         Pane::Agents,
-        Pane::Changes,
         Pane::Tasks,
+        Pane::Ports,
+        Pane::Changes,
         Pane::Branch,
         Pane::Files,
-        Pane::Ports,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -374,12 +376,20 @@ fn read_pull_details(data: &mut Data, body: &Value) {
         .map(String::from);
 }
 
-fn read_ports(data: &mut Data, body: &Value) {
+/// Pages served from inside this workspace; the machine's other servers
+/// stay out of the dock.
+fn read_ports(data: &mut Data, body: &Value, workspace: &str) {
+    let root = workspace.trim_end_matches('/');
     data.ports = body["ports"]
         .as_array()
         .into_iter()
         .flatten()
         .filter(|port| port["kind"] == "page")
+        .filter(|port| {
+            port["cwd"].as_str().is_some_and(|cwd| {
+                !root.is_empty() && (cwd == root || cwd.starts_with(&format!("{root}/")))
+            })
+        })
         .filter_map(|port| {
             let label = port["label"].as_str().unwrap_or("Local page");
             let label = match port["repo"].as_str() {
@@ -450,9 +460,7 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
             vec![("workspace", workspace.clone())],
             |data, body, _| read_snapshot(data, body),
         ),
-        ("/api/panel/ports", vec![], |data, body, _| {
-            read_ports(data, body)
-        }),
+        ("/api/panel/ports", vec![], read_ports),
         ("/api/orchestrator/state", vec![], read_packets),
         (
             "/api/panel/supervisor-inbox",
@@ -571,6 +579,8 @@ fn panes(s: &Shell, turn: &Turn) -> Vec<Pane> {
             Pane::Plan => !turn.todos.is_empty(),
             Pane::Agents => !turn.agents.is_empty(),
             Pane::Changes => !data.files.is_empty(),
+            // The inbox counts every project: it keeps Tasks reachable, but
+            // only this workspace's waiting workers turn its badge red.
             Pane::Tasks => {
                 !step_tasks(turn).is_empty() || !data.packets.is_empty() || data.inbox > 0
             }
@@ -759,6 +769,12 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
         .iter()
         .filter(|(_, status)| status != "completed")
         .count();
+    let waiting = dock
+        .data
+        .packets
+        .iter()
+        .filter(|packet| matches!(packet.status.as_str(), "blocked" | "awaiting review"))
+        .count() as u64;
 
     let toolbar = div()
         .h(px(PILL_H))
@@ -785,10 +801,17 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
                 Pane::Files => FOLDER,
                 Pane::Ports => PORTS,
             };
+            // Red only for this workspace's workers waiting on a person.
             let badge = match each {
-                Pane::Plan if remaining > 0 => Some(remaining as u64),
-                Pane::Agents if working > 0 => Some(working as u64),
-                Pane::Tasks if dock.data.inbox > 0 => Some(dock.data.inbox),
+                Pane::Plan if remaining > 0 => Some((
+                    remaining as u64,
+                    theme().text_secondary,
+                    crate::theme::popover_background(),
+                )),
+                Pane::Agents if working > 0 => {
+                    Some((working as u64, theme().accent, gpui::white().into()))
+                }
+                Pane::Tasks if waiting > 0 => Some((waiting, theme().danger, gpui::white().into())),
                 _ => None,
             };
             div()
@@ -806,7 +829,7 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
                 .hover(|button| button.bg(theme().hover))
                 .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(each.tip().into())).into())
                 .child(crate::icon::stroke(icon, tint, 16., 1.7))
-                .when_some(badge, |button, count| {
+                .when_some(badge, |button, (count, tone, ink)| {
                     button.child(
                         div()
                             .absolute()
@@ -819,12 +842,12 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
                             .items_center()
                             .justify_center()
                             .rounded(px(8.))
-                            .bg(theme().danger)
+                            .bg(tone)
                             .border_1()
                             .border_color(crate::theme::popover_background())
                             .text_size(px(9.5))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(gpui::white())
+                            .text_color(ink)
                             .child(count.to_string()),
                     )
                 })
@@ -1327,7 +1350,10 @@ fn tasks(turn: &Turn, data: &Data, cx: &mut Context<Shell>) -> impl IntoElement 
                             .cursor_pointer()
                             .hover(|row| row.bg(theme().hover))
                             .child(crate::icon::stroke(INBOX, theme().danger, 14., 1.7))
-                            .child(ellipsis("Needs you").text_color(theme().text_secondary))
+                            .child(
+                                ellipsis("Needs you · all projects")
+                                    .text_color(theme().text_secondary),
+                            )
                             .child(
                                 div()
                                     .flex_shrink_0()
@@ -1690,6 +1716,32 @@ const SPEC: &str = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5 M14 3l5 5v3 M8 9h6 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ports_keep_only_this_workspaces_pages() {
+        let body = serde_json::json!({"ports": [
+            {"port": 3000, "kind": "page", "label": "Next.js", "repo": "site", "cwd": "/r/site"},
+            {"port": 5173, "kind": "page", "label": "Vite", "cwd": "/r/site/apps/web"},
+            {"port": 4000, "kind": "page", "label": "Other", "cwd": "/r/site-old"},
+            {"port": 47100, "kind": "page", "label": "Next.js", "cwd": "/Applications/o8.app"},
+            {"port": 5432, "kind": "service", "label": "postgres", "cwd": "/r/site"}
+        ]});
+        let mut data = Data::default();
+        read_ports(&mut data, &body, "/r/site/");
+        assert_eq!(
+            data.ports,
+            vec![
+                (3000, "Next.js · site".to_owned()),
+                (5173, "Vite".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn steady_panes_sit_at_the_right_end() {
+        let last: Vec<_> = Pane::ALL[4..].iter().map(|pane| pane.name()).collect();
+        assert_eq!(last, ["changes", "branch", "files"]);
+    }
 
     #[test]
     fn only_stuck_agents_read_as_needing_you() {
