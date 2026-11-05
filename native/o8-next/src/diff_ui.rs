@@ -19,6 +19,8 @@ pub(crate) struct DiffSurface {
     pub(crate) selected: usize,
     pub(crate) split: bool,
     pub(crate) ready: bool,
+    /// The last read failed and its error is the notice.
+    pub(crate) failed: bool,
     busy: bool,
     generation: u64,
     pending: Option<Value>,
@@ -44,6 +46,7 @@ impl DiffSurface {
             selected: 0,
             split: false,
             ready: false,
+            failed: false,
             busy: false,
             generation: 0,
             pending: None,
@@ -63,6 +66,7 @@ impl DiffSurface {
         self.generation += 1;
         let generation = self.generation;
         self.ready = false;
+        self.failed = false;
         self.pending = None;
         self.notice = "Reading diff…".into();
         let client = self.client.clone();
@@ -86,7 +90,10 @@ impl DiffSurface {
                             "Unsupported patch format. Review disabled; use a plain unified Git diff.".into()
                         } else { this.state_label() };
                     }
-                    Err(error) => this.notice = error,
+                    Err(error) => {
+                        this.notice = error;
+                        this.failed = true;
+                    }
                 }
                 cx.notify();
             });
@@ -94,6 +101,14 @@ impl DiffSurface {
         cx.notify();
     }
     fn state_label(&self) -> String {
+        if let Target::Worktree { .. } = self.target {
+            let head = &self.document.head[..self.document.head.len().min(12)];
+            return match self.document.files.len() {
+                0 => format!("No uncommitted changes · HEAD {head}"),
+                1 => format!("Working changes · 1 file · HEAD {head}"),
+                n => format!("Working changes · {n} files · HEAD {head}"),
+            };
+        }
         let verdict = self.state["orchestratorReview"]["verdict"]
             .as_str()
             .unwrap_or("unreviewed");
