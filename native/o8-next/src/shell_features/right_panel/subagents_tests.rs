@@ -666,5 +666,62 @@ fn see_all_keeps_the_agents_a_chat_read_from_its_transcript(cx: &mut TestAppCont
             .any(|a| a.id == "native-sums")
     });
     assert!(listed, "See all lists the chat's transcript agents too");
-    wait(&s, &mut v, "subagent-row-native-sums");
+}
+
+#[gpui::test]
+fn the_shown_workspace_list_follows_a_chats_transcript_agents_with_the_dock_closed(
+    cx: &mut TestAppContext,
+) {
+    let (_f, s, mut v) = setup(cx);
+    wait(&s, &mut v, "subagent-trace-subagent-calculation");
+    s.update_in(&mut v, |s, w, cx| {
+        subagents::all(s, w, cx);
+        show(s, Tool::Subagents, w, cx);
+    });
+    let native = |id: &str| crate::subagents::model::Agent {
+        shared: false,
+        native: true,
+        cleanup: None,
+        prompt: None,
+        run: id.into(),
+        id: id.into(),
+        title: id.into(),
+        runtime: String::new(),
+        model: None,
+        effort: None,
+        parent: None,
+        session: None,
+        group: crate::subagents::model::Group::Working,
+        status: "Working".into(),
+        progress: None,
+        result: None,
+        started: None,
+        finished: None,
+        facts: Default::default(),
+    };
+    // A tick with the dock closed, in the same update as the chat's new
+    // agent, before its transcript observer replaces it.
+    s.update_in(&mut v, |s, w, cx| {
+        assert!(!super::super::activity_dock::is_shown(s));
+        let chat = subagents::chat(s, cx).expect("the chat's inspector");
+        chat.update(cx, |chat, cx| {
+            let mut agents: Vec<_> = chat.agents.iter().filter(|a| a.native).cloned().collect();
+            agents.push(native("native-late"));
+            chat.set_native(agents, cx)
+        });
+        let _ = w;
+        subagents::tick(s, false, cx);
+    });
+    let listed = s.read_with(&v, |s, cx| {
+        let repo = s.state.selected.clone().unwrap();
+        s.features
+            .read::<subagents::Inspectors>()
+            .unwrap()
+            .workspace[&repo]
+            .read(cx)
+            .agents
+            .iter()
+            .any(|a| a.id == "native-late")
+    });
+    assert!(listed, "the shown workspace list takes a chat's new agent");
 }

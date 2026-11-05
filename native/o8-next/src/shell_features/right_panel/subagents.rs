@@ -238,10 +238,17 @@ pub(super) fn tick(s: &mut Shell, all: bool, cx: &mut Context<Shell>) {
     let mut views = primary.into_iter().collect::<Vec<_>>();
     if all {
         views.extend(chat(s, cx));
-        if let Some(view) = workspace(s, cx) {
-            share_native(s, &view, cx);
-            views.push(view);
-        }
+    }
+    // The workspace list keeps its chats' transcript agents current while
+    // the dock counts it or the panel shows it.
+    let shown = s.state.selected.as_ref().and_then(|repo| {
+        let state = s.features.read::<Inspectors>()?;
+        let view = state.workspace.get(repo)?;
+        (state.current.as_ref() == Some(view)).then(|| view.clone())
+    });
+    if let Some(view) = if all { workspace(s, cx) } else { shown } {
+        share_native(s, &view, cx);
+        views.push(view);
     }
     let state = s.features.get::<Inspectors>();
     views.extend(state.current.clone());
