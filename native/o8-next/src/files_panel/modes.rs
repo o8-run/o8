@@ -1,7 +1,12 @@
 //! Entry point for the requested legacy ChangesList and DiffViewer contracts.
 use super::*;
 impl FilesPanel {
-    fn switch_files(&mut self, changes: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn switch_files(
+        &mut self,
+        changes: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.show_changes = changes;
         if changes {
             if self.changes.is_none() {

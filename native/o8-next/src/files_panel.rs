@@ -286,6 +286,13 @@ impl FilesPanel {
         self.pending_line = line;
         self.show_pending_line();
     }
+    /// Shows Changes with this repo-relative path's diff selected.
+    pub fn open_change(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.switch_files(true, window, cx);
+        if let Some(view) = &self.changes {
+            view.update(cx, |view, cx| view.select(path.to_owned(), cx));
+        }
+    }
     /// The line waits here until the file it belongs to has loaded.
     fn show_pending_line(&mut self) {
         if let File::Loaded { source, .. } = &self.file

@@ -109,7 +109,7 @@ impl Changes {
         }
         cx.notify();
     }
-    fn select(&mut self, path: String, cx: &mut Context<Self>) {
+    pub(super) fn select(&mut self, path: String, cx: &mut Context<Self>) {
         if self.selected.as_ref() == Some(&path) && matches!(self.diff, Diff::Loading) {
             return;
         }

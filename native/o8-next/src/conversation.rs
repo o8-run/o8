@@ -32,6 +32,9 @@ mod card_tests;
 #[cfg(test)]
 #[path = "composer/network_tests.rs"]
 mod network_tests;
+#[path = "composer/changes_pill.rs"]
+mod changes_pill;
+pub(crate) use changes_pill::ChangesPill;
 #[path = "composer/queue_tail.rs"]
 mod queue_rows;
 pub(super) use queue_rows::queue_tail;
@@ -746,6 +749,7 @@ impl Surface {
             .flex_col()
             .children(self.shell_run_card(cx))
             .children(self.lineage_strip(cx))
+            .children(self.changes_pill(cx))
             .child(self.composer_card(window, cx))
             .into_any_element()
     }
