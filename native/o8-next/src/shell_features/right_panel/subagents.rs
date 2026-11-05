@@ -341,37 +341,25 @@ fn close_directory(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
         layout::focus(s, "panel-new-tab", w);
     }
 }
-pub(super) fn summary_button(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
-    let view = current(s, cx);
-    // Nothing to show until a subagent exists; the transcript opens them.
-    let Some(summary) = view
-        .as_ref()
-        .map(|v| v.read(cx).summary())
-        .filter(|s| !s.is_empty())
-    else {
-        return div().into_any_element();
-    };
-    let label = summary.clone();
-    let keyboard_view = view.clone();
-    super::super::header::pill("header-subagents", "Inspect subagents", view.is_some())
-        .debug_selector(|| "header-subagents".into())
-        .focusable()
-        .px(px(8.))
-        .text_size(px(11.))
-        .on_click(cx.listener(move |_, _, w, cx| {
-            if let Some(view) = &view {
-                view.update(cx, |v, cx| v.inspect(None, w, cx));
+/// The inspector `current` would return, without making one.
+pub(super) fn existing(s: &Shell, cx: &App) -> Option<Entity<Inspector>> {
+    match s.active().and_then(|tab| s.content.get(&s.key(&tab))) {
+        Some(Content::Grid(view)) => {
+            if let Some(inspector) = view.read(cx).shell_subagents() {
+                return Some(inspector);
             }
-            cx.stop_propagation();
-        }))
-        .on_key_down(cx.listener(move |_, e: &KeyDownEvent, w, cx| {
-            if matches!(e.keystroke.key.as_str(), "enter" | "space") {
-                if let Some(view) = &keyboard_view {
-                    view.update(cx, |v, cx| v.inspect(None, w, cx));
-                }
-                cx.stop_propagation();
+        }
+        Some(Content::Session(view)) => {
+            if let Some(inspector) = view.read(cx).shell_subagents() {
+                return Some(inspector);
             }
-        }))
-        .child(label)
-        .into_any_element()
+        }
+        _ => {}
+    }
+    let repo = s.state.selected.as_ref()?;
+    s.features
+        .read::<Inspectors>()?
+        .workspace
+        .get(repo)
+        .cloned()
 }

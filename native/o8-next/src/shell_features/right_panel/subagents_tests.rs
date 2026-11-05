@@ -126,6 +126,15 @@ fn subagents_trace_opens_detail_without_replacing_steps_or_parent(cx: &mut TestA
     );
 }
 
+/// Opens every agent in the Subagents panel from the Activity dock's Agents pane.
+fn open_agents(s: &Entity<Shell>, v: &mut VisualTestContext) {
+    click(v, "header-activity");
+    wait(s, v, "activity-tab-agents");
+    click(v, "activity-tab-agents");
+    wait(s, v, "activity-agents-all");
+    click(v, "activity-agents-all");
+}
+
 fn wait_probe(s: &Entity<Shell>, v: &mut VisualTestContext, ready: impl Fn(&Value) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
@@ -147,7 +156,7 @@ fn wait_probe(s: &Entity<Shell>, v: &mut VisualTestContext, ready: impl Fn(&Valu
 #[gpui::test]
 fn subagents_late_history_cannot_restore_cleared_detail(cx: &mut TestAppContext) {
     let (f, s, mut v) = setup(cx);
-    click(&mut v, "header-subagents");
+    open_agents(&s, &mut v);
     wait(&s, &mut v, "subagent-row-subagent-calculation");
     let inspector = s.read_with(&v, |s, cx| {
         let tab = s.active().unwrap();
@@ -233,7 +242,7 @@ fn subagents_grid_follows_focused_parent_and_fits_compact_window(cx: &mut TestAp
         .unwrap();
     s.update_in(&mut v, |s, w, cx| s.execute(Command::Grid, w, cx));
     ready(&s, &mut v);
-    click(&mut v, "header-subagents");
+    open_agents(&s, &mut v);
     wait(&s, &mut v, "subagent-row-subagent-calculation");
     let grid = s.read_with(&v, |s, _| {
         let Content::Grid(g) = &s.content[&s.key(&Tab::Grid)] else {
@@ -442,8 +451,7 @@ fn subagents_shared_results_keep_held_delivery_in_attention(cx: &mut TestAppCont
 #[gpui::test]
 fn subagents_shared_panel_refreshes_counts_and_keeps_error_recovery(cx: &mut TestAppContext) {
     let (f, s, mut v) = setup(cx);
-    wait(&s, &mut v, "header-subagents");
-    click(&mut v, "header-subagents");
+    open_agents(&s, &mut v);
     wait(&s, &mut v, "subagents-group-working-1");
     let _: Value = f
         .client

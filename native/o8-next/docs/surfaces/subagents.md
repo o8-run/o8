@@ -4,8 +4,8 @@ The native inspector extends the existing transcript traces with named agent
 links. The trace's tools, branches, reasoning, disclosure and retained rows stay
 in place. A launch tool returning successfully does not mark its worker done.
 
-Open an agent from a trace, the workspace header, the right panel's Subagents
-tool, or **Inspect agent** on a Workers card. Main chat and side chat keep their
+Open an agent from a trace, the Activity dock's Agents pane, the right panel's
+Subagents tool, or **Inspect agent** on a Workers card. Main chat and side chat keep their
 own parent context. Grid follows the focused pane. Outside a conversation, the
 inspector shows the selected workspace's recorded work. Opening, reading and
 copying do not dispatch, resume, steer or approve a worker.
@@ -60,7 +60,7 @@ proves that a late reply cannot restore the old transcript or images.
 `tests/o8d-next-surfaces-real-path.test.ts` covers the Shared read through the
 production native bridge with Next stopped.
 
-The initial native regressions fail on the absent `header-subagents` and
+The initial native regressions fail on the absent `activity-agents-all` and
 `subagent-trace-subagent-calculation` controls. Final green receipts and live
 visual acceptance are recorded with the pull request; source tests alone do not
 establish installed-app acceptance.
