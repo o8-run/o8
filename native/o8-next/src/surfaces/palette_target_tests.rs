@@ -288,6 +288,10 @@ fn target_click_keeps_identity_when_inventory_reorders(cx: &mut TestAppContext) 
         ready(&shell, cx);
         run(cx, "d i f f");
         settled(&shell, cx);
+        // Review opens on the working changes; its switch returns to the list.
+        let switch = cx.debug_bounds("target-switch").unwrap();
+        cx.simulate_click(switch.center(), gpui::Modifiers::default());
+        settled(&shell, cx);
         let view = shell.read_with(cx, |s, _| match &s.content[&s.key(&Tab::Diff)] {
             Content::Diff(v) => v.clone(),
             _ => panic!("diff"),
@@ -388,7 +392,8 @@ fn target_choices_compare_canonical_workspace_paths(cx: &mut TestAppContext) {
             Content::Diff(v) => v.read(cx).choices.len(),
             _ => 0,
         }),
-        2
+        3,
+        "two packets and the alias workspace's working changes"
     );
     run(cx, "t e r m i n a l");
     settled(&shell, cx);
@@ -435,4 +440,83 @@ fn target_load_finishing_after_workspace_switch_keeps_composer_focus(cx: &mut Te
         _ => panic!("session"),
     });
     cx.update(|window, cx| assert!(view.read(cx).shell_selection(window, cx).1));
+}
+
+#[gpui::test]
+fn review_opens_on_the_working_changes_and_switches_to_packets(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--review");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("working-changes.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    let workspace = shell.read_with(cx, |s, _| s.state.selected.clone().unwrap());
+    let path = crate::shell::session::workspace_path(&workspace).to_owned();
+    fs::write(
+        std::path::Path::new(&path).join("review-working-note.txt"),
+        "uncommitted\n",
+    )
+    .unwrap();
+    run(cx, "d i f f");
+    let view = shell.read_with(cx, |s, _| match &s.content[&s.key(&Tab::Diff)] {
+        Content::Diff(v) => v.clone(),
+        _ => panic!("diff"),
+    });
+    let started = Instant::now();
+    loop {
+        settled(&shell, cx);
+        let ready = view.read_with(cx, |v, cx| {
+            v.child.as_ref().is_some_and(|child| child.read(cx).ready)
+        });
+        if ready {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the working changes never loaded"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let (target, files, notice) = view.read_with(cx, |v, cx| {
+        let child = v.child.as_ref().unwrap().read(cx);
+        (
+            child.target.clone(),
+            child
+                .document
+                .files
+                .iter()
+                .map(|f| f.path.clone())
+                .collect::<Vec<_>>(),
+            child.notice.clone(),
+        )
+    });
+    assert!(
+        matches!(&target, crate::diff::Target::Worktree { path: p, base: None, file: None } if *p == path),
+        "Review opens the workspace's working changes against HEAD"
+    );
+    assert!(
+        files.iter().any(|f| f == "review-working-note.txt"),
+        "an untracked file is a working change: {files:?}"
+    );
+    assert!(notice.starts_with("Working changes · "), "{notice}");
+    assert!(cx.debug_bounds("diff-file-0").is_some());
+    assert!(
+        cx.debug_bounds("diff-approve").is_none(),
+        "working changes are not a packet decision"
+    );
+    let switch = cx.debug_bounds("target-switch").unwrap();
+    cx.simulate_click(switch.center(), gpui::Modifiers::default());
+    settled(&shell, cx);
+    assert!(cx.debug_bounds("target-picker").is_some());
+    let labels = view.read_with(cx, |v, _| {
+        v.choices
+            .iter()
+            .map(|c| c.label.clone())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(labels.first().map(String::as_str), Some("Working changes"));
+    assert!(labels.len() > 1, "packets stay listed: {labels:?}");
 }

@@ -47,12 +47,31 @@ pub(super) const REGISTRATION: Registration = Registration {
         Some((Tab::Diff, false))
     })
 };
+/// The Review tab's own target: the workspace's uncommitted changes against
+/// HEAD, untracked files included. Packet ids never take this prefix.
+const WORKING: &str = "working:";
+fn working(workspace: &str) -> Option<Choice> {
+    (!workspace.is_empty()).then(|| Choice {
+        id: format!("{WORKING}{workspace}"),
+        label: "Working changes".into(),
+    })
+}
 impl Port for PacketDiff {
     type View = crate::diff_ui::DiffSurface;
     const TITLE: &'static str = "Packets";
     const EMPTY: &'static str = "No packets";
+    const SWITCH: Option<&'static str> = Some("Working changes and packets");
     fn choices(client: &Client, workspace: &str) -> Result<Vec<Choice>, String> {
-        client.shell_packets(workspace)
+        let mut choices = client.shell_packets(workspace)?;
+        choices.extend(working(workspace));
+        Ok(choices)
+    }
+    /// Review opens on the working changes when no packet is restored.
+    fn own(_client: &Client, workspace: &str) -> Option<Result<String, String>> {
+        working(workspace).map(|choice| Ok(choice.id))
+    }
+    fn first(choice: &Choice) -> bool {
+        choice.id.starts_with(WORKING)
     }
     fn create(
         client: Client,
@@ -60,11 +79,21 @@ impl Port for PacketDiff {
         window: &mut Window,
         cx: &mut Context<Self::View>,
     ) -> Self::View {
-        crate::diff_ui::DiffSurface::new(client, crate::diff::Target::Packet(id), window, cx)
+        let target = match id.strip_prefix(WORKING) {
+            Some(path) => crate::diff::Target::Worktree {
+                path: path.to_owned(),
+                base: None,
+                file: None,
+            },
+            None => crate::diff::Target::Packet(id),
+        };
+        crate::diff_ui::DiffSurface::new(client, target, window, cx)
     }
     #[cfg(test)]
     fn ready(view: &Entity<Self::View>, cx: &App) -> bool {
-        view.read(cx).ready && !view.read(cx).painted.borrow().is_empty()
+        let view = view.read(cx);
+        // A clean working tree has no rows to paint.
+        view.ready && (!view.painted.borrow().is_empty() || view.document.files.is_empty())
     }
 }
 impl Client {

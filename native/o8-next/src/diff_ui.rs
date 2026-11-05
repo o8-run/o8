@@ -94,6 +94,14 @@ impl DiffSurface {
         cx.notify();
     }
     fn state_label(&self) -> String {
+        if let Target::Worktree { .. } = self.target {
+            let head = &self.document.head[..self.document.head.len().min(12)];
+            return match self.document.files.len() {
+                0 => format!("No uncommitted changes · HEAD {head}"),
+                1 => format!("Working changes · 1 file · HEAD {head}"),
+                n => format!("Working changes · {n} files · HEAD {head}"),
+            };
+        }
         let verdict = self.state["orchestratorReview"]["verdict"]
             .as_str()
             .unwrap_or("unreviewed");
