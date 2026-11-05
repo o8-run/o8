@@ -60,6 +60,7 @@ mod subagents;
 mod transcript_actions;
 mod transcript_diagram;
 mod transcript_peek;
+mod turn_files;
 mod transport;
 mod ui;
 mod visualizations;
