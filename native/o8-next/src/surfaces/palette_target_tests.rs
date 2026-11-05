@@ -738,6 +738,18 @@ fn review_stacks_every_changed_file_with_a_files_drawer(cx: &mut TestAppContext)
         assert!(!shows(cx, body(i)), "collapse all closes file {i}");
     }
     assert!(!child.read_with(cx, |d, _| d.all_open()));
+    // Walking the list (Home, End, Alt+arrows) moves to a file without
+    // opening it.
+    child.update(cx, |d, cx| d.select_file(b, cx));
+    settled(&shell, cx);
+    assert!(!shows(cx, body(b)), "walking keeps b closed");
+    assert_eq!(
+        child.read_with(cx, |d, _| (
+            d.selected,
+            d.chosen.get("stack-b.txt").copied()
+        )),
+        (b, Some(false))
+    );
     // A drawer jump to a file taller than the stack lands on its header.
     click(cx, &format!("diff-file-{large}"));
     assert!(shows(cx, body(large)), "a jump opens the file");
@@ -751,6 +763,31 @@ fn review_stacks_every_changed_file_with_a_files_drawer(cx: &mut TestAppContext)
         header.top(),
         stack.top()
     );
+    // Rows past the limit open in the one-file view, and the stack comes back.
+    assert!(shows(cx, format!("diff-stack-full-{large}")));
+    child.update(cx, |d, cx| d.open_full(large, cx));
+    let started = Instant::now();
+    while !(child.read_with(cx, |d, _| d.ready) && cx.debug_bounds("diff-viewport").is_some()) {
+        assert!(started.elapsed() < Duration::from_secs(10), "no full file");
+        settled(&shell, cx);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let (file, rows) = child.read_with(cx, |d, _| match &d.target {
+        crate::diff::Target::Worktree { file, .. } => (file.clone(), d.row_count()),
+        _ => (None, 0),
+    });
+    assert_eq!(file.as_deref(), Some("stack-large.txt"));
+    assert!(rows > 2_000, "every row is reachable: {rows}");
+    click(cx, "diff-back");
+    let started = Instant::now();
+    while !(child.read_with(cx, |d, _| d.ready) && cx.debug_bounds("diff-stack").is_some()) {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "no stack again"
+        );
+        settled(&shell, cx);
+        std::thread::sleep(Duration::from_millis(20));
+    }
     // Back at the top, a header opens its file and only its file.
     click(cx, "diff-file-0");
     click(cx, &card(a));
@@ -786,4 +823,99 @@ fn review_stacks_every_changed_file_with_a_files_drawer(cx: &mut TestAppContext)
     click(cx, "diff-drawer");
     assert!(!shows(cx, row), "drawer hidden");
     assert!(shows(cx, card(0)), "the stack stays");
+}
+
+#[gpui::test]
+fn review_stack_fits_a_narrow_pane(cx: &mut TestAppContext) {
+    use crate::diff_ui::DiffSurface;
+    let fixture = Fixture::start_mode(false, "--review");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("narrow-changes.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    let workspace = shell.read_with(cx, |s, _| s.state.selected.clone().unwrap());
+    let path = std::path::PathBuf::from(crate::shell::session::workspace_path(&workspace));
+    // One line far wider than the pane.
+    let wide = "# A long line that would wrap one character per line ".repeat(6);
+    fs::write(path.join("narrow.md"), format!("{wide}\nsecond\n")).unwrap();
+    cx.simulate_resize(gpui::size(gpui::px(680.), gpui::px(800.)));
+    run(cx, "d i f f");
+    let started = Instant::now();
+    loop {
+        settled(&shell, cx);
+        let (_, target) = review_target(&shell, cx);
+        if matches!(target, Some(crate::diff::Target::Worktree { .. }))
+            && cx.debug_bounds("diff-stack").is_some()
+        {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10), "no stack");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    settled(&shell, cx);
+    let (view, _) = review_target(&shell, cx);
+    let child: Entity<DiffSurface> = view.read_with(cx, |v, _| v.child.clone().unwrap());
+    let (width, i) = child.read_with(cx, |d, _| {
+        let i = d.document.files.iter().position(|f| f.path == "narrow.md");
+        (d.width, i.unwrap())
+    });
+    assert!(
+        width > gpui::px(0.) && width < gpui::px(640.),
+        "the pane is narrow: {width:?}"
+    );
+    // Narrow, the drawer starts hidden and the stack has the pane.
+    assert!(cx.debug_bounds("diff-drawer-column").is_none());
+    // Each row stays one line tall and scrolls sideways instead of wrapping.
+    let row = |n: usize| -> &'static str {
+        Box::leak(format!("review-file-{i}-diff-row-{n}").into_boxed_str())
+    };
+    let (hunk, content) = (
+        cx.debug_bounds(row(0)).expect("hunk row"),
+        cx.debug_bounds(row(1)).expect("content row"),
+    );
+    // The Files toggle opens the drawer over the stack, at its fixed width.
+    let toggle = cx.debug_bounds("diff-drawer").unwrap();
+    let pane = cx.debug_bounds("diff-stack").unwrap();
+    assert!(
+        toggle.right() <= pane.right() + gpui::px(1.),
+        "the Files button stays in the pane: {toggle:?} in {pane:?}"
+    );
+    cx.simulate_click(toggle.center(), gpui::Modifiers::default());
+    settled(&shell, cx);
+    let stack = cx.debug_bounds("diff-stack").unwrap();
+    let drawer = cx.debug_bounds("diff-drawer-column").expect("drawer shown");
+    eprintln!(
+        "narrow pane: surface {width:?}, stack {:?}, drawer {:?}, hunk row {:?} x {:?}, content row {:?} x {:?}",
+        stack.size.width,
+        drawer.size.width,
+        hunk.size.width,
+        hunk.size.height,
+        content.size.width,
+        content.size.height
+    );
+    assert!(hunk.size.height <= gpui::px(18.5) && content.size.height <= gpui::px(18.5));
+    assert!(
+        content.size.width > stack.size.width,
+        "the row keeps its width"
+    );
+    assert!(
+        stack.size.width > drawer.size.width,
+        "the stack is wider than the drawer"
+    );
+    assert!(
+        stack.size.width <= width + gpui::px(1.),
+        "the stack fits the pane"
+    );
+    assert_eq!(drawer.size.width, gpui::px(210.));
+    // Picking a file in the overlay opens it and puts the drawer away.
+    let entry: &'static str = Box::leak(format!("diff-file-{i}").into_boxed_str());
+    let entry = cx.debug_bounds(entry).unwrap();
+    cx.simulate_click(entry.center(), gpui::Modifiers::default());
+    settled(&shell, cx);
+    assert!(cx.debug_bounds("diff-drawer-column").is_none());
+    assert!(cx.debug_bounds(row(1)).is_some());
 }

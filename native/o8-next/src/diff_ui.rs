@@ -44,9 +44,14 @@ pub(crate) struct DiffSurface {
     pub(crate) chosen: HashMap<String, bool>,
     /// Said beside the notice when Expand all left files closed.
     limit_note: Option<String>,
-    /// The files list beside the stack.
-    pub(crate) drawer: bool,
+    /// The files list beside the stack: the reader's choice, or else shown
+    /// unless the surface is narrow.
+    pub(crate) drawer: Option<bool>,
+    /// The stack's measured width, for the narrow layout.
+    pub(crate) width: gpui::Pixels,
     stack_scroll: gpui::ScrollHandle,
+    /// The working changes to go back to from one file's full view.
+    pub(crate) stack_target: Option<Target>,
 }
 impl DiffSurface {
     pub(crate) fn new(
@@ -76,8 +81,10 @@ impl DiffSurface {
             stack: Rc::new(vec![]),
             chosen: HashMap::new(),
             limit_note: None,
-            drawer: true,
+            drawer: None,
+            width: px(0.),
             stack_scroll: gpui::ScrollHandle::new(),
+            stack_target: None,
         };
         surface.load(cx);
         surface
@@ -160,8 +167,9 @@ impl DiffSurface {
     pub(crate) fn select_file(&mut self, index: usize, cx: &mut Context<Self>) {
         self.selected = index.min(self.document.files.len().saturating_sub(1));
         if self.stacked() {
+            // Walking the list moves to a file without opening it.
             let selected = self.selected;
-            self.reveal(selected, cx);
+            self.reveal(selected, false, cx);
             return;
         }
         self.scroll = UniformListScrollHandle::new();
@@ -377,12 +385,12 @@ impl Render for DiffSurface {
                                         }
                                     )),
                             )
-                            .on_click(cx.listener(move |s, _, _, cx| s.select_file(i, cx)))
+                            .on_click(cx.listener(move |s, _, _, cx| s.pick(i, cx)))
                     })
                     .collect::<Vec<_>>()
             }),
         )
-        .w(px(240.))
+        .w(if stacked { stack::DRAWER } else { px(240.) })
         .flex_shrink_0()
         .h_full();
         let rows = div().flex_1().min_w_0().h_full().child(
@@ -470,11 +478,14 @@ impl Render for DiffSurface {
             }))
             .child(
                 div()
-                    .h(px(40.))
+                    .min_h(px(40.))
                     .flex_shrink_0()
                     .flex()
+                    // A narrow pane wraps the buttons instead of clipping them.
+                    .flex_wrap()
                     .items_center()
                     .px(px(16.))
+                    .py(px(4.))
                     .gap(px(8.))
                     .child("o8 next · Diff")
                     .child(
@@ -490,12 +501,14 @@ impl Render for DiffSurface {
                             .on_click(cx.listener(|s, _, _, cx| s.load(cx))),
                     )
                     .when(stacked, |bar| {
-                        bar.child(button("diff-drawer", "Files", self.drawer).on_click(
-                            cx.listener(|s, _, _, cx| {
-                                s.drawer = !s.drawer;
-                                cx.notify();
-                            }),
-                        ))
+                        bar.child(
+                            button("diff-drawer", "Files", self.drawer_shown()).on_click(
+                                cx.listener(|s, _, _, cx| {
+                                    s.drawer = Some(!s.drawer_shown());
+                                    cx.notify();
+                                }),
+                            ),
+                        )
                         .child(
                             button(
                                 "diff-collapse",
@@ -516,6 +529,12 @@ impl Render for DiffSurface {
                                     cx.notify();
                                 },
                             )),
+                        )
+                    })
+                    .when(self.stack_target.is_some(), |bar| {
+                        bar.child(
+                            button("diff-back", "All changes", false)
+                                .on_click(cx.listener(|s, _, _, cx| s.back_to_stack(cx))),
                         )
                     })
                     .when(can_review, |bar| {

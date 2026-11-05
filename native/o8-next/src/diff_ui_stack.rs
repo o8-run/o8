@@ -13,6 +13,16 @@ const CHEVRON_RIGHT: &str = "m9 6 6 6-6 6";
 pub(super) const LARGE: usize = 2_000;
 /// The most rows the open files draw together without the reader asking.
 pub(super) const BUDGET: usize = 6_000;
+/// The files drawer's width.
+pub(super) const DRAWER: gpui::Pixels = px(210.);
+/// Narrower than this, the drawer starts hidden and opens over the stack.
+const NARROW: gpui::Pixels = px(640.);
+/// The stack never gets narrower than this beside the drawer.
+const STACK_MIN: gpui::Pixels = px(220.);
+/// One monospace character of a diff row, with room to spare.
+const CHAR: f32 = 7.;
+/// A row's line-number gutter and padding.
+const GUTTER: f32 = 76.;
 
 /// Each file's hunks, in the order `diff::parse` lists the files: one entry
 /// per `diff --git` header, from its first hunk on. A file without hunks
@@ -118,6 +128,17 @@ fn note(id: (&'static str, usize), selector: String, text: String) -> gpui::Stat
         .child(text)
 }
 
+fn files_column(files: gpui::AnyElement) -> gpui::Div {
+    div()
+        .debug_selector(|| "diff-drawer-column".into())
+        .w(DRAWER)
+        .flex_shrink_0()
+        .h_full()
+        .border_r_1()
+        .border_color(theme().border)
+        .child(files)
+}
+
 impl DiffSurface {
     /// The whole working tree stacks; a single file keeps the virtualized
     /// one-file viewer.
@@ -175,15 +196,62 @@ impl DiffSurface {
         if let Some(file) = self.document.files.get(index) {
             self.chosen.insert(file.path.clone(), !open);
         }
+        self.limit_note = None;
     }
 
-    /// Jumps the stack to a file's header and opens it.
-    pub(super) fn reveal(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(file) = self.document.files.get(index) {
+    fn narrow(&self) -> bool {
+        self.width > px(0.) && self.width < NARROW
+    }
+
+    pub(crate) fn drawer_shown(&self) -> bool {
+        self.drawer.unwrap_or(!self.narrow())
+    }
+
+    /// Jumps the stack to a file's header; `open` also opens it. Walking the
+    /// list with the keyboard moves without opening.
+    pub(super) fn reveal(&mut self, index: usize, open: bool, cx: &mut Context<Self>) {
+        if open && let Some(file) = self.document.files.get(index) {
             self.chosen.insert(file.path.clone(), true);
+            self.limit_note = None;
         }
         self.stack_scroll.scroll_to_top_of_item(index);
         cx.notify();
+    }
+
+    /// A file picked in the drawer: in the stack, it opens; over a narrow
+    /// stack, the drawer then gets out of the way.
+    pub(super) fn pick(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.select_file(index, cx);
+        if self.stacked() {
+            self.reveal(self.selected, true, cx);
+            if self.narrow() {
+                self.drawer = None;
+            }
+        }
+    }
+
+    /// Shows one file of the working changes in the virtualized one-file
+    /// view, where every row can be reached.
+    pub(crate) fn open_full(&mut self, index: usize, cx: &mut Context<Self>) {
+        let (Some(file), Target::Worktree { path, base, .. }) =
+            (self.document.files.get(index), &self.target)
+        else {
+            return;
+        };
+        let full = Target::Worktree {
+            path: path.clone(),
+            base: base.clone(),
+            file: Some(file.path.clone()),
+        };
+        self.stack_target = Some(std::mem::replace(&mut self.target, full));
+        self.load(cx);
+    }
+
+    pub(super) fn back_to_stack(&mut self, cx: &mut Context<Self>) {
+        if let Some(target) = self.stack_target.take() {
+            self.target = target;
+            self.load(cx);
+        }
     }
 
     pub(super) fn stack_view(
@@ -195,11 +263,14 @@ impl DiffSurface {
         let stack = self.stack.clone();
         let painted = self.painted.clone();
         let opens = self.open_files();
+        let (narrow, drawer) = (self.narrow(), self.drawer_shown());
         let mut cards = div()
             .id("diff-stack")
             .debug_selector(|| "diff-stack".into())
             .flex_1()
-            .min_w_0()
+            // Beside the drawer the stack keeps a usable width; a narrow pane
+            // gives it all of its width and lays the drawer over it.
+            .min_w(if narrow { px(0.) } else { STACK_MIN })
             .h_full()
             .overflow_y_scroll()
             .track_scroll(&self.stack_scroll)
@@ -280,19 +351,41 @@ impl DiffSurface {
                 let mut scroll = div().id(("diff-stack-body", i)).overflow_x_scroll();
                 // A vertical wheel over a wide file scrolls the stack.
                 scroll.style().restrict_scroll_to_axis = Some(true);
-                let rows = scroll.child(file_diff::rows(
-                    shown,
-                    self.split,
-                    &format!("review-file-{i}"),
+                // Rows never wrap: they keep their full width and scroll
+                // sideways inside the card, however narrow the pane.
+                let chars = shown
+                    .iter()
+                    .map(|line| line.text.chars().count())
+                    .max()
+                    .unwrap_or(0) as f32;
+                let width = (chars * CHAR + GUTTER) * if self.split { 2. } else { 1. };
+                let rows = scroll.child(div().min_w(px(width)).whitespace_nowrap().child(
+                    file_diff::rows(shown, self.split, &format!("review-file-{i}")),
                 ));
                 Some(if shown.len() < lines.len() {
                     div()
                         .child(rows)
-                        .child(note(
-                            ("diff-stack-more", i),
-                            format!("diff-stack-more-{i}"),
-                            format!("Showing the first {LARGE} of {} lines.", lines.len()),
-                        ))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .child(note(
+                                    ("diff-stack-more", i),
+                                    format!("diff-stack-more-{i}"),
+                                    format!("Showing the first {LARGE} of {} lines.", lines.len()),
+                                ))
+                                .child(
+                                    note(
+                                        ("diff-stack-full", i),
+                                        format!("diff-stack-full-{i}"),
+                                        "Open full file".into(),
+                                    )
+                                    .text_color(theme().accent)
+                                    .cursor_pointer()
+                                    .on_click(cx.listener(move |s, _, _, cx| s.open_full(i, cx))),
+                                ),
+                        )
                         .into_any_element()
                 } else {
                     rows.into_any_element()
@@ -330,12 +423,49 @@ impl DiffSurface {
             )
             .size(px(1.)),
         );
+        let measured = cx.entity().downgrade();
+        let column = drawer.then(|| files_column(files));
+        let (beside, over) = if narrow {
+            (None, column)
+        } else {
+            (column, None)
+        };
         div()
+            .relative()
             .flex()
             .flex_1()
             .min_h_0()
-            .when(self.drawer, |row| row.child(files))
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    move |bounds, _, _, cx| {
+                        let _ = measured.update(cx, |this, cx| {
+                            let width = bounds.size.width.floor();
+                            if this.width != width {
+                                this.width = width;
+                                cx.notify();
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
+            .children(beside)
             .child(cards)
+            .when_some(over, |row, column| {
+                // Over a narrow stack the drawer opens on top of it.
+                row.child(
+                    column
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .bottom_0()
+                        .bg(theme().background)
+                        .shadow_md()
+                        .occlude(),
+                )
+            })
             .into_any_element()
     }
 }
