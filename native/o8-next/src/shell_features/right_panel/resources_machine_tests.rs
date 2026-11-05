@@ -150,3 +150,71 @@ fn a_saved_machine_says_why_it_has_no_meters() {
         "a known reading keeps its meters"
     );
 }
+#[test]
+fn a_saved_machine_keeps_one_read_in_flight_and_ignores_old_replies() {
+    let mut remote = Remote::default();
+    assert!(remote.start(1));
+    assert!(!remote.start(2), "one read at a time");
+    assert!(
+        !remote.finish(2, Ok(Some(full(1., 10., 0.)))),
+        "not its request"
+    );
+    assert!(remote.machine.is_none());
+    assert!(remote.finish(1, Ok(Some(full(1., 10., 0.)))));
+    assert!(remote.start(3), "the next read starts once the reply lands");
+}
+#[test]
+fn a_failed_read_marks_the_reading_stale_then_drops_it() {
+    let mut remote = Remote::default();
+    remote.start(1);
+    remote.finish(1, Ok(Some(full(1., 10., 0.))));
+    assert_eq!(remote.stale(), None);
+    remote.start(2);
+    remote.finish(2, Err("HTTP 502".into()));
+    assert_eq!(remote.stale().as_deref(), Some("Stale · HTTP 502"));
+    assert!(
+        remote.machine.is_some(),
+        "one failure keeps the last reading"
+    );
+    for request in 3..=STALE_LIMIT as u64 + 1 {
+        remote.start(request);
+        remote.finish(request, Err("HTTP 502".into()));
+    }
+    assert!(remote.machine.is_none(), "{STALE_LIMIT} failures drop it");
+    assert!(remote.history.cpu.is_empty());
+    assert_eq!(remote.stale(), None);
+    assert_eq!(
+        remote_status(
+            &Reach::Online(crate::shell::settings::machine_links::dead_client()),
+            Some(&remote)
+        )
+        .as_deref(),
+        Some("HTTP 502"),
+        "the last error stays visible"
+    );
+    remote.start(9);
+    remote.finish(9, Ok(Some(full(9., 30., 0.))));
+    assert_eq!((remote.failures, remote.stale()), (0, None));
+}
+#[test]
+fn only_online_machines_keep_a_reading() {
+    let dead = crate::shell::settings::machine_links::dead_client;
+    let link = |id: &str, reach| MachineLink {
+        id: id.into(),
+        label: id.into(),
+        reach,
+    };
+    let mut remote: HashMap<String, Remote> = ["up", "down", "dialing", "gone"]
+        .into_iter()
+        .map(|id| (id.to_owned(), Remote::default()))
+        .collect();
+    prune(
+        &mut remote,
+        &[
+            link("up", Reach::Online(dead())),
+            link("down", Reach::Offline("Connection lost.".into())),
+            link("dialing", Reach::Connecting),
+        ],
+    );
+    assert_eq!(remote.keys().collect::<Vec<_>>(), ["up"]);
+}

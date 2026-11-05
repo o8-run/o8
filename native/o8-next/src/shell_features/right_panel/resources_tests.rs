@@ -161,8 +161,14 @@ fn refresh(s: &Entity<Shell>, v: &mut VisualTestContext) {
     tick(s, v);
 }
 
-/// A saved machine's own server: its resource reading reports 61% CPU.
-fn remote_machine_server() -> crate::client::Client {
+/// A saved machine's own server: its resource reading reports 61% CPU. The
+/// counter holds how many readings it has served.
+fn remote_machine_server() -> (
+    crate::client::Client,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let served = hits.clone();
     use std::io::{BufRead, BufReader, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -179,6 +185,7 @@ fn remote_machine_server() -> crate::client::Client {
                 }
             }
             let body = if first.contains("/api/panel/resource-usage") {
+                served.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 json!({
                     "sessions": [], "processes": [],
                     "total": {"cpuPercent": 0, "memBytes": 0, "ramTotalBytes": 0},
@@ -202,7 +209,10 @@ fn remote_machine_server() -> crate::client::Client {
             );
         }
     });
-    crate::client::Client::authenticated(&origin, None).unwrap()
+    (
+        crate::client::Client::authenticated(&origin, None).unwrap(),
+        hits,
+    )
 }
 
 #[gpui::test]
@@ -219,12 +229,10 @@ fn resources_shows_each_saved_machine_from_its_own_server(cx: &mut TestAppContex
     );
     v.simulate_resize(gpui::size(px(1680.), px(1050.)));
     ready(&s, &mut v);
+    let (server, hits) = remote_machine_server();
     s.update(&mut v, |s, _| {
-        s.links.put(
-            "build-box",
-            "Build box",
-            Reach::Online(remote_machine_server()),
-        );
+        s.links
+            .put("build-box", "Build box", Reach::Online(server.clone()));
         s.links.put(
             "laptop",
             "Laptop",
@@ -274,7 +282,7 @@ fn resources_shows_each_saved_machine_from_its_own_server(cx: &mut TestAppContex
     );
     // The local panel still reads this computer's sessions.
     assert!(v.debug_bounds("resource-row-session-heavy").is_some());
-    // A machine that goes offline keeps its section but drops stale meters.
+    // A machine that goes offline keeps its section and loses its reading.
     s.update(&mut v, |s, _| {
         s.links
             .put("build-box", "Build box", Reach::Offline(String::new()))
@@ -282,4 +290,48 @@ fn resources_shows_each_saved_machine_from_its_own_server(cx: &mut TestAppContex
     refresh(&s, &mut v);
     assert!(v.debug_bounds("resources-meter-build-box-cpu").is_none());
     assert!(v.debug_bounds("resources-machine-build-box").is_some());
+    let probe = s.read_with(&v, |s, _| resources::probe(s));
+    assert!(probe["remote"]["build-box"].is_null(), "{probe}");
+    // Back online with its server unreachable: no old meters, the error shows.
+    s.update(&mut v, |s, _| {
+        s.links.put(
+            "build-box",
+            "Build box",
+            Reach::Online(crate::shell::settings::machine_links::dead_client()),
+        )
+    });
+    refresh(&s, &mut v);
+    assert!(v.debug_bounds("resources-meter-build-box-cpu").is_none());
+    let status = s.read_with(&v, |s, _| resources::probe(s))["status"]["build-box"].clone();
+    assert!(
+        status.as_str().is_some_and(|s| s != "Reading…"),
+        "the failed read is shown: {status}"
+    );
+    // A removed machine's section goes, and its server is not read again.
+    s.update(&mut v, |s, _| {
+        s.links
+            .put("build-box", "Build box", Reach::Online(server.clone()))
+    });
+    let started = Instant::now();
+    loop {
+        refresh(&s, &mut v);
+        if v.debug_bounds("resources-meter-build-box-cpu").is_some() {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "no fresh reading"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    s.update(&mut v, |s, _| s.links.remove("build-box"));
+    refresh(&s, &mut v);
+    let served = hits.load(std::sync::atomic::Ordering::SeqCst);
+    for _ in 0..3 {
+        refresh(&s, &mut v);
+    }
+    assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), served);
+    assert!(v.debug_bounds("resources-machine-build-box").is_none());
+    let probe = s.read_with(&v, |s, _| resources::probe(s));
+    assert!(probe["remote"]["build-box"].is_null(), "{probe}");
 }

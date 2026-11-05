@@ -135,6 +135,15 @@ impl Links {
         };
         self.set(&route, label, reach);
     }
+
+    /// Drops a listed machine, as removing it from the saved list does.
+    #[cfg(test)]
+    pub(crate) fn remove(&self, id: &str) {
+        self.machines
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
+    }
 }
 
 /// Returns when the tunnel dies or the machine is removed; dropping the link

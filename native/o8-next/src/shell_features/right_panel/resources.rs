@@ -1,6 +1,6 @@
 //! Classic O8ResourcesPane behavior, using its existing process attribution route.
 use super::*;
-use crate::shell::settings::machine_links::Reach;
+use crate::shell::settings::machine_links::{Machine as MachineLink, Reach};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
@@ -79,13 +79,73 @@ struct MachineOnly {
     #[serde(default)]
     machine: Option<Machine>,
 }
+/// Failed reads in a row after which a saved machine's last reading is
+/// dropped instead of shown as stale.
+const STALE_LIMIT: u32 = 3;
 /// A saved machine's reading, from its own server through its tunnel.
 #[derive(Default)]
 struct Remote {
     machine: Option<Machine>,
     error: Option<String>,
-    pending: bool,
+    /// Failed reads since the last good one.
+    failures: u32,
+    /// The read in flight; only its reply is taken.
+    request: Option<u64>,
     history: History,
+}
+impl Remote {
+    /// Claims the next read. `false` while another read is in flight.
+    fn start(&mut self, request: u64) -> bool {
+        if self.request.is_some() {
+            return false;
+        }
+        self.request = Some(request);
+        true
+    }
+    /// Takes a read's reply, unless it answers a request this entry did not make.
+    fn finish(&mut self, request: u64, result: Result<Option<Machine>, String>) -> bool {
+        if self.request != Some(request) {
+            return false;
+        }
+        self.request = None;
+        match result {
+            Ok(Some(machine)) => {
+                self.history.push(&machine);
+                self.machine = Some(machine);
+                self.error = None;
+                self.failures = 0;
+            }
+            Ok(None) => {
+                self.machine = None;
+                self.history = History::default();
+                self.error = Some("This machine's o8 does not report machine resources.".into());
+            }
+            Err(error) => {
+                self.failures += 1;
+                self.error = Some(error);
+                if self.failures >= STALE_LIMIT {
+                    self.machine = None;
+                    self.history = History::default();
+                }
+            }
+        }
+        true
+    }
+    /// Said in place of cores and load while the last reading is still shown
+    /// after a failed read.
+    fn stale(&self) -> Option<String> {
+        self.machine.as_ref()?;
+        self.error.as_ref().map(|error| format!("Stale · {error}"))
+    }
+}
+/// Only online machines keep a reading. A machine that goes offline, starts
+/// connecting or is removed loses it, so nothing old shows when it returns.
+fn prune(remote: &mut HashMap<String, Remote>, machines: &[MachineLink]) {
+    remote.retain(|id, _| {
+        machines
+            .iter()
+            .any(|machine| &machine.id == id && matches!(machine.reach, Reach::Online(_)))
+    });
 }
 /// What a saved machine's section says instead of meters, or `None` when
 /// there is a reading to draw.
@@ -287,6 +347,10 @@ struct State {
     history: History,
     /// Saved machines' readings, by machine id.
     remote: HashMap<String, Remote>,
+    /// When saved machines are read next, apart from this computer.
+    remote_next: Option<Instant>,
+    /// The last read id given to a saved machine.
+    requests: u64,
 }
 pub(super) fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
     let active = s.features.read::<Panel>().is_some_and(|p| {
@@ -299,6 +363,13 @@ pub(super) fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
         state.confirming = None;
         return;
     }
+    let machines = s.links.machines();
+    let state = s.features.get::<State>();
+    prune(&mut state.remote, &machines);
+    if reopened || state.remote_next.is_none_or(|at| at <= Instant::now()) {
+        load_remote(s, machines, cx);
+    }
+    let state = s.features.get::<State>();
     if !state.pending
         && !state.stopping
         && (reopened || state.next.is_none_or(|at| at <= Instant::now()))
@@ -306,24 +377,26 @@ pub(super) fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
         load(s, cx);
     }
 }
-/// Reads each online saved machine's Machine block from its own server.
-/// Each machine keeps one request in flight; a slow machine never holds
-/// another machine's or this computer's reading.
-fn load_remote(s: &mut Shell, cx: &mut Context<Shell>) {
-    let machines = s.links.machines();
+/// Reads each online saved machine's Machine block from its own server, on
+/// its own schedule. Each machine keeps one read in flight; a slow machine
+/// never holds another machine's or this computer's reading.
+fn load_remote(s: &mut Shell, machines: Vec<MachineLink>, cx: &mut Context<Shell>) {
     let state = s.features.get::<State>();
-    state
-        .remote
-        .retain(|id, _| machines.iter().any(|machine| &machine.id == id));
+    state.remote_next = Some(Instant::now() + POLL);
     for machine in machines {
         let Reach::Online(client) = machine.reach else {
             continue;
         };
-        let remote = state.remote.entry(machine.id.clone()).or_default();
-        if remote.pending {
+        let request = state.requests + 1;
+        if !state
+            .remote
+            .entry(machine.id.clone())
+            .or_default()
+            .start(request)
+        {
             continue;
         }
-        remote.pending = true;
+        state.requests = request;
         let id = machine.id;
         let task = cx.background_executor().spawn(async move {
             client
@@ -336,28 +409,15 @@ fn load_remote(s: &mut Shell, cx: &mut Context<Shell>) {
                 let Some(remote) = s.features.get::<State>().remote.get_mut(&id) else {
                     return;
                 };
-                remote.pending = false;
-                match result {
-                    Ok(Some(machine)) => {
-                        remote.history.push(&machine);
-                        remote.machine = Some(machine);
-                        remote.error = None;
-                    }
-                    Ok(None) => {
-                        remote.machine = None;
-                        remote.error =
-                            Some("This machine's o8 does not report machine resources.".into());
-                    }
-                    Err(error) => remote.error = Some(error.to_string()),
+                if remote.finish(request, result.map_err(|error| error.to_string())) {
+                    cx.notify();
                 }
-                cx.notify();
             });
         })
         .detach();
     }
 }
 fn load(s: &mut Shell, cx: &mut Context<Shell>) {
-    load_remote(s, cx);
     if s.features.get::<State>().pending {
         return;
     }
@@ -770,6 +830,9 @@ fn remote_sections(s: &Shell) -> Vec<AnyElement> {
                 ) => {
                     let mut view = machine_view(sample, history);
                     view.name = machine.label;
+                    if let Some(stale) = reading.and_then(Remote::stale) {
+                        view.summary = stale;
+                    }
                     machine_section(&view, Some(&machine.id))
                 }
                 (status, _) => machine_frame(
@@ -921,11 +984,18 @@ pub(super) fn probe(s: &Shell) -> Value {
             Some((machine.id.clone(), json!(status)))
         })
         .collect();
-    json!({"data":state.data,"pending":state.pending,"active":state.active,"error":state.error,"history":state.history.cpu,"remote":remote,"status":status})
+    let stale: serde_json::Map<String, Value> = state
+        .remote
+        .iter()
+        .filter_map(|(id, remote)| Some((id.clone(), json!(remote.stale()?))))
+        .collect();
+    json!({"data":state.data,"pending":state.pending,"active":state.active,"error":state.error,"history":state.history.cpu,"remote":remote,"status":status,"stale":stale})
 }
 #[cfg(test)]
 pub(super) fn due(s: &mut Shell) {
-    s.features.get::<State>().next = None;
+    let state = s.features.get::<State>();
+    state.next = None;
+    state.remote_next = None;
 }
 #[cfg(test)]
 #[path = "resources_machine_tests.rs"]
