@@ -203,7 +203,7 @@ fn settings_parity_model_defaults_persist(cx: &mut TestAppContext) {
     click(cx, "setting-orchestratorModel-7");
     frame(&shell, cx);
     assert_eq!(error(&shell, cx), None);
-    assert_eq!(values(&fixture)["orchestratorModel"], "claude-sonnet-5");
+    assert_eq!(values(&fixture)["orchestratorModel"], "claude-sonnet-5-5");
     for (field, text) in [
         ("localChatModel", "qwen2.5-coder:7b"),
         ("localEmbedModel", "nomic-embed-text"),

@@ -856,6 +856,8 @@ fn model_names_read_like_the_desktop() {
         ("gpt-5.5", "GPT-5.5"),
         ("gpt-5.3-codex", "Codex 5.3"),
         ("claude-opus-5-5", "Opus 5.5"),
+        ("claude-sonnet-5-5", "Sonnet 5.5"),
+        ("claude-haiku-5-5", "Haiku 5.5"),
         ("claude-fable-5[1m]", "Fable 5 (1M)"),
         ("claude-sonnet-4-20250514", "Sonnet 4"),
         ("gemini-3-flash-preview", "Gemini 3 Flash"),
@@ -876,4 +878,5 @@ fn native_composer_model_search_on_favorites_searches_every_house(cx: &mut TestA
     draw(cx);
     // Sonnet lives on the Claude tab; typing on Favorites must still find it.
     assert!(cx.debug_bounds("model-claude-sonnet-5").is_some());
+    assert!(cx.debug_bounds("model-claude-sonnet-5-5").is_some());
 }
