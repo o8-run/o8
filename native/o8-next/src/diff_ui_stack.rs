@@ -454,14 +454,15 @@ impl DiffSurface {
             .children(beside)
             .child(cards)
             .when_some(over, |row, column| {
-                // Over a narrow stack the drawer opens on top of it.
+                // Over a narrow stack the drawer opens on top of it, opaque
+                // even in a glass window, whose background is see-through.
                 row.child(
                     column
                         .absolute()
                         .top_0()
                         .left_0()
                         .bottom_0()
-                        .bg(theme().background)
+                        .bg(crate::theme::popover_background())
                         .shadow_md()
                         .occlude(),
                 )
