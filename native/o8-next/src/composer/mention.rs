@@ -1,8 +1,10 @@
-//! `@` picks workspace files or threads, and a `!` line its command and
-//! paths. Thread titles stay visible in the draft while their identities
-//! travel separately to the send path.
+//! `@` picks workspace files, threads, agents, worktrees, scripts or
+//! terminals, and a `!` line its command and paths. Labels stay visible in
+//! the draft while what they name travels separately to the send path.
 use super::*;
 use commands::Changed;
+#[path = "mention_groups.rs"]
+pub(crate) mod groups;
 
 #[derive(Default)]
 pub(crate) struct Mention {
@@ -10,6 +12,11 @@ pub(crate) struct Mention {
     pub results: Vec<MentionResult>,
     /// Picked titles and ids, retained only while their text is still present.
     pub threads: Vec<(String, String)>,
+    /// Picked agents, worktrees, scripts and terminals, kept the same way.
+    pub objects: Vec<groups::Mentioned>,
+    /// The project's worktree listing and package.json, read once while the
+    /// menu stays open: the project and both reads.
+    pub sources: Option<(String, serde_json::Value, serde_json::Value)>,
     pub index: usize,
     pub dismissed: Option<String>,
     pub scroll: ScrollHandle,
@@ -26,6 +33,7 @@ pub(crate) enum MentionResult {
         title: String,
         status: String,
     },
+    Object(groups::Mentioned),
     /// A command for a `!` line's command word.
     Command(String),
     /// A path for a later `!` word, as typed folder plus name.
@@ -39,6 +47,7 @@ impl MentionResult {
         match self {
             Self::File(_) => "Files",
             Self::Thread { .. } => "Threads",
+            Self::Object(object) => object.group(),
             Self::Command(_) => "Commands",
             Self::Path { .. } => "Paths",
         }
@@ -47,6 +56,7 @@ impl MentionResult {
         match self {
             Self::File(path) | Self::Command(path) | Self::Path { path, .. } => path,
             Self::Thread { title, .. } => title,
+            Self::Object(object) => object.label(),
         }
     }
 }
@@ -107,6 +117,7 @@ impl Composer {
         } else {
             self.controls.mention.results.clear();
             self.controls.mention.search = None;
+            self.controls.mention.sources = None;
             cx.emit(Changed(false));
         }
     }
@@ -144,6 +155,9 @@ impl Composer {
                 .mention
                 .threads
                 .push((title.clone(), id.clone()));
+        }
+        if let MentionResult::Object(object) = result {
+            self.remember_object(object.clone());
         }
         self.focus.focus(window);
     }
@@ -191,7 +205,11 @@ impl Composer {
                 let index = (self.controls.mention.index + step) % count;
                 self.controls.mention.index = index;
                 let results = self.mention_suggestions();
-                let groups = 1 + usize::from(results[index].group() != results[0].group());
+                // Each group above the row adds its heading.
+                let groups = 1 + results[..=index]
+                    .windows(2)
+                    .filter(|pair| pair[0].group() != pair[1].group())
+                    .count();
                 self.controls.mention.scroll.scroll_to_item(index + groups);
                 cx.emit(Changed(false));
                 cx.notify();
@@ -257,18 +275,21 @@ pub(crate) fn thread_matches(
     threads.into_iter().take(6).cloned().collect()
 }
 
+/// A token at `start` stands alone: after a space or the start, and before
+/// a space, the end or punctuation.
+fn bounded(text: &str, start: usize, len: usize) -> bool {
+    text[..start]
+        .chars()
+        .next_back()
+        .is_none_or(char::is_whitespace)
+        && text[start + len..].chars().next().is_none_or(|c| {
+            c.is_whitespace() || matches!(c, ',' | '.' | ';' | ':' | '!' | '?' | ')' | ']' | '}')
+        })
+}
 fn contains_title(text: &str, title: &str) -> bool {
     let token = format!("@{title}");
-    text.match_indices(&token).any(|(start, _)| {
-        text[..start]
-            .chars()
-            .next_back()
-            .is_none_or(char::is_whitespace)
-            && text[start + token.len()..].chars().next().is_none_or(|c| {
-                c.is_whitespace()
-                    || matches!(c, ',' | '.' | ';' | ':' | '!' | '?' | ')' | ']' | '}')
-            })
-    })
+    text.match_indices(&token)
+        .any(|(start, _)| bounded(text, start, token.len()))
 }
 impl Composer {
     fn retain_thread_mentions(&mut self) {

@@ -22,6 +22,7 @@ mod lineage;
 mod input_reuse_tests;
 mod issues;
 mod merge;
+mod mission_card;
 mod model;
 mod motion;
 mod pane;
@@ -39,6 +40,7 @@ mod settings_secret;
 mod shell;
 mod shell_state;
 mod sidebar;
+mod snapshot_hotkey;
 mod stream;
 mod switch_receipt;
 mod terminal;
@@ -47,6 +49,9 @@ mod terminal_transport;
 mod text;
 mod thread_messages;
 mod theme;
+mod theme_import;
+#[cfg(test)]
+mod theme_font_tests;
 #[cfg(test)]
 mod theme_tests;
 mod trace;

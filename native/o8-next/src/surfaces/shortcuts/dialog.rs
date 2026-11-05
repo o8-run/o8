@@ -12,6 +12,7 @@ pub(super) const ROWS: &[(&str, &str, &str)] = &[
 ];
 
 pub(super) struct Close;
+pub(super) struct Customize;
 pub(crate) struct Dialog {
     pub close_focus: FocusHandle,
     pub list_focus: FocusHandle,
@@ -19,6 +20,7 @@ pub(crate) struct Dialog {
     pub scroll: gpui::ScrollHandle,
 }
 impl gpui::EventEmitter<Close> for Dialog {}
+impl gpui::EventEmitter<Customize> for Dialog {}
 impl Render for Dialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         gpui::anchored().position(point(px(0.), px(0.))).child(
@@ -55,7 +57,19 @@ impl Render for Dialog {
                                     .items_center()
                                     .justify_between()
                                     .p(px(12.))
-                                    .child("Keyboard shortcuts")
+                                    .child(div().flex_1().child("Keyboard shortcuts"))
+                                    .child(
+                                        div()
+                                            .id("shortcuts-customize")
+                                            .debug_selector(|| "shortcuts-customize".into())
+                                            .p(px(8.))
+                                            .cursor_pointer()
+                                            .child("Customize")
+                                            .on_click(cx.listener(|_, _, _, cx| {
+                                                cx.emit(Customize);
+                                                cx.stop_propagation();
+                                            })),
+                                    )
                                     .child(
                                         div()
                                             .id("shortcuts-close")

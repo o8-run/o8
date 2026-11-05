@@ -32,7 +32,7 @@ import {
   isBroadcastVoiceClockTime,
   isBroadcastVoiceQuietHoursMode,
 } from '@/lib/operator/broadcast-commentary-defaults';
-import { botRailUpdate, isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
+import { botRailUpdate, isNativeKeybindings, isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
 import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/operator/judgment-default';
 import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED, JUDGMENT_BETA_END_DATE_EXPECTED } from '@/lib/operator/judgment-allowance-default';
 import { resolveJudgmentPath } from '@/lib/judgment/route';
@@ -48,7 +48,8 @@ import {
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
 import { operatorDefaultsUpdateFailure } from '@/lib/settings/operator-defaults-error';
-import { mergeNativeSettingsToml, readNativeSettings, updateNativeSettings } from '@/lib/settings/native-settings';
+import { isSettingsLayerId } from '@/lib/settings/scopes';
+import { mergeNativeSettingsToml, readNativeSettings, updateNativeScopedSetting, updateNativeSettings } from '@/lib/settings/native-settings';
 import { validateCredentialSafeUrl } from '@/lib/settings/credential-safe-url';
 import { resolveApfsDependencyImagesOverride } from '@/lib/workspace/dependency-image-policy';
 import {
@@ -293,6 +294,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('composerEnterQueues must be boolean.');
     }
     update.composerEnterQueues = body.composerEnterQueues;
+  }
+  if (body.nativeKeybindings !== undefined) {
+    if (!isNativeKeybindings(body.nativeKeybindings)) {
+      throw new Error('nativeKeybindings must be a list of unique "command=chord" entries.');
+    }
+    update.nativeKeybindings = [...body.nativeKeybindings];
   }
   if (body.presentationQuietMode !== undefined) {
     if (typeof body.presentationQuietMode !== 'boolean') {
@@ -723,6 +730,36 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
   return update;
 }
 
+/** `project` names the project layer a native read or write resolves against. */
+function projectParam(query: URLSearchParams): string | null {
+  const project = query.get('project')?.trim();
+  return project && isSettingsLayerId(project) ? project : null;
+}
+
+/** One key per scoped write; `null` clears the layer value so it falls through. */
+async function postNativeScoped(query: URLSearchParams, body: Record<string, unknown>) {
+  const scope = query.get('scope');
+  if (scope !== 'project' && scope !== 'machine') return response({ error: 'scope must be global, project or machine.' }, 400);
+  const keys = Object.keys(body).filter((key) => key !== 'settingsTomlRevision');
+  if (keys.length !== 1) return response({ error: 'A scoped write changes exactly one setting.' }, 400);
+  const [key] = keys;
+  let value: unknown = null;
+  if (body[key] !== null) {
+    // Same field validation as a global write.
+    if (key === 'workerRuntimes' && !isWorkerRuntimeList(body[key])) {
+      return response({ error: 'workerRuntimes must contain at least one dispatchable runtime.' }, 400);
+    }
+    const storageValidationError = workspaceStorageValidationError({ [key]: body[key] });
+    if (storageValidationError) return response({ error: storageValidationError }, 400);
+    const update = normalizeUpdate({ [key]: body[key] });
+    if (!Object.hasOwn(update, key)) return response({ error: 'No supported fields in request body.' }, 400);
+    if (update.threecodeWorkerModel) await assertThreecodeWorkerModelAvailable(update.threecodeWorkerModel);
+    value = (update as Record<string, unknown>)[key];
+  }
+  await withStoragePressurePolicyLock(() => updateNativeScopedSetting(scope, projectParam(query), key, value, body.settingsTomlRevision));
+  return response({ ok: true });
+}
+
 export async function GET(request: Request) {
   const query = new URL(request.url).searchParams;
   try {
@@ -730,7 +767,7 @@ export async function GET(request: Request) {
       const { values } = await getOperatorDefaults();
       return response({ values: { presentationQuietMode: values.presentationQuietMode, notificationsReviewReady: values.notificationsReviewReady } });
     }
-    if (query.get('include') === 'native') return response(await readNativeSettings());
+    if (query.get('include') === 'native') return response(await readNativeSettings(projectParam(query)));
     if (query.get('include') === 'setup-built-in') return response({ builtInAgent: await readBuiltInAgentRuntime() });
     if (query.get('refresh') === 'runtime') invalidateRuntimeAuthCache();
     if (query.get('include') === 'values') {
@@ -757,12 +794,14 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const native = new URL(request.url).searchParams.get('include') === 'native';
+  const query = new URL(request.url).searchParams;
+  const native = query.get('include') === 'native';
   try {
     const body = await request.json().catch(() => null);
     if (!isRecord(body)) {
       return response({ error: 'Invalid request body.' }, 400);
     }
+    if (native && query.has('scope') && query.get('scope') !== 'global') return await postNativeScoped(query, body);
     const sourceUpdate = body.knowledgeSources ?? (typeof body.settingsToml === 'string' ? parseOperatorDefaultsToml(body.settingsToml).knowledgeSources : undefined);
     if ((sourceUpdate !== undefined || (body.settingsToml !== undefined && (await getOperatorDefaults()).values.knowledgeSources.length > 0)) && resolveRequestPrincipalContext(request).role !== 'operator') return response({ error: 'Knowledge sources require an operator credential.' }, 403);
     if (body.settingsToml !== undefined) {

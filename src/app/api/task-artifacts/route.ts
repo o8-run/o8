@@ -11,6 +11,7 @@ import { createTaskArtifact, listTaskArtifactViews, TaskArtifactError } from '@/
  * POST /api/task-artifacts — attach an artifact to a thread or packet.
  *   Operator (MCP, CLI, app): { title, html, actions, headPolicy?, threadId + repoPath | packetId }
  *   Packet worker token:      { title, html, actions, headPolicy? } — pinned to its own packet.
+ *   A mission card (#5468) sends `card` instead of html and actions.
  * GET  /api/task-artifacts?threadId=&repoPath=  or  ?packetId=
  *   Operator lists any; a worker may list only its own packet.
  * Gated by the global middleware (loopback or bearer).
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest) {
       title: body.title,
       html: body.html,
       actions: body.actions,
+      card: body.card,
       headPolicy: body.headPolicy,
       threadId: body.threadId,
       packetId: body.packetId,

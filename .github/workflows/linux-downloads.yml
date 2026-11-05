@@ -80,18 +80,20 @@ jobs:
       - name: Graphical proof prerequisites
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends xvfb xauth x11-xserver-utils imagemagick mesa-vulkan-drivers fonts-dejavu-core
+          sudo apt-get install -y --no-install-recommends xvfb xauth x11-xserver-utils imagemagick mesa-vulkan-drivers fonts-dejavu-core libwebkit2gtk-4.1-0 libgtk-3-0t64 dbus-daemon
           chmod +x work/linux-downloads/*.AppImage
       - name: Install DEB, fresh-server and terminal-daemon launch, then uninstall
         if: matrix.format == 'deb'
         run: |
           sudo apt-get install -y ./work/linux-downloads/*.deb
+          test -x /usr/lib/o8/o8-next-viz-render
           export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
           test -n "$VK_ICD_FILENAMES"
           xvfb-run -a -s '-screen 0 1440x1024x24 -nolisten tcp -noreset -br' /usr/lib/o8/node scripts/linux/smoke-payload.mjs --installed-root / --output work/deb-proof
           cp /usr/lib/o8/node "$RUNNER_TEMP/o8-proof-node"
           sudo apt-get remove -y o8
           test ! -e /usr/bin/o8
+          test ! -e /usr/lib/o8/o8-next-viz-render
           "$RUNNER_TEMP/o8-proof-node" --input-type=module -e '
             import {existsSync, readFileSync, rmSync, writeFileSync} from "node:fs";
             const path = "work/deb-proof/receipt.json";
@@ -114,6 +116,7 @@ jobs:
         run: |
           export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
           work/linux-downloads/*.AppImage --appimage-extract
+          test -x squashfs-root/usr/lib/o8/o8-next-viz-render
           xvfb-run -a -s '-screen 0 1440x1024x24 -nolisten tcp -noreset -br' squashfs-root/usr/lib/o8/node scripts/linux/smoke-payload.mjs --appimage "$(find work/linux-downloads -name '*.AppImage' -print -quit)" --output work/appimage-proof
       - name: Save first frames, launch evidence and idle RSS
         if: always()

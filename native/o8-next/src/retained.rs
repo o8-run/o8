@@ -46,6 +46,8 @@ pub struct RowState {
     diagram_list: Option<(gpui::ListState, usize)>,
     pub(crate) images: crate::ui::images::Cache,
     pub cards: crate::visualizations::Cards,
+    /// A mission card row's decision state (#5468).
+    pub(crate) mission_card: Option<Rc<RefCell<crate::mission_card::CardState>>>,
     /// The workspace a transcript row belongs to, so its file pills can say
     /// where they point.
     pub(crate) file_root: Option<gpui::SharedString>,
@@ -92,6 +94,7 @@ impl RowState {
             diagram_list: None,
             images: Default::default(),
             cards: Default::default(),
+            mission_card: None,
             file_root: None,
             peeks: None,
             subagents: None,
@@ -127,9 +130,11 @@ impl RowState {
                     .or_insert_with(|| cx.focus_handle());
             }
             for item in crate::subagents::trace::items(steps, trace, &self.subagent_agents) {
-                self.subagent_focus
-                    .entry(format!("subagent-roster-open-{}", item.id))
-                    .or_insert_with(|| cx.focus_handle());
+                for control in ["open", "approve", "deny"] {
+                    self.subagent_focus
+                        .entry(format!("subagent-roster-{control}-{}", item.id))
+                        .or_insert_with(|| cx.focus_handle());
+                }
                 self.subagent_focus
                     .entry(item.id)
                     .or_insert_with(|| cx.focus_handle());
@@ -177,9 +182,36 @@ impl RowState {
         }
         self.cards.retain(|id, _| keep.contains(id));
     }
+    /// A card row decides through the transcript's client; a lead chat also
+    /// hands over its routing so the decision queues as the lead's next turn.
+    pub fn attach_mission_card(
+        &mut self,
+        client: &crate::client::Client,
+        routing: Option<serde_json::Value>,
+    ) {
+        if !matches!(self.row, Row::Card { .. }) {
+            return;
+        }
+        match &self.mission_card {
+            // A transcript without routing never clears one another view supplied.
+            Some(card) => {
+                if routing.is_some() {
+                    card.borrow_mut().set_routing(routing)
+                }
+            }
+            None => {
+                self.mission_card = Some(Rc::new(RefCell::new(
+                    crate::mission_card::CardState::new(client.clone(), routing),
+                )))
+            }
+        }
+    }
     pub fn poll_visualizations(&mut self) -> bool {
         let mut changed = false;
         for card in self.cards.values() {
+            changed |= card.borrow_mut().poll();
+        }
+        if let Some(card) = &self.mission_card {
             changed |= card.borrow_mut().poll();
         }
         if changed {
@@ -865,6 +897,15 @@ fn layout(
                 }
             }
         }
+        // Drawn by `mission_card::element`; this is the plain fallback.
+        Row::Card { card, .. } => {
+            b.plain(
+                crate::text::sanitize(&crate::mission_card::receipt_line(card)),
+                12.,
+                18.,
+                window,
+            );
+        }
     }
     Layout {
         size: size(width, b.y + px(8.)),
@@ -977,6 +1018,9 @@ impl RetainedRow {
         self.state.borrow_mut().diagram_list = Some((list.clone(), self.index));
         if matches!(self.state.borrow().row, Row::Activity { .. }) {
             return crate::trace::element(self.state.clone(), self.index, list);
+        }
+        if matches!(self.state.borrow().row, Row::Card { .. }) {
+            return crate::mission_card::element(self.state.clone(), self.index, list);
         }
         if !self.state.borrow().cards.is_empty() {
             let state = self.state.clone();
@@ -1178,6 +1222,34 @@ impl Element for RetainedRow {
                 )
             })
             .collect();
+        let pictures: Vec<gpui::AnyElement> = {
+            #[cfg(target_os = "linux")]
+            {
+                cache
+                    .cards
+                    .iter()
+                    .filter_map(|(id, placement)| {
+                        let picture = state.cards.get(id)?.borrow().picture()?;
+                        let mut picture = img(picture)
+                            .w(placement.size.width)
+                            .h(placement.size.height)
+                            .object_fit(ObjectFit::Fill)
+                            .into_any_element();
+                        picture.layout_as_root(
+                            placement.size.map(AvailableSpace::Definite),
+                            window,
+                            cx,
+                        );
+                        picture.prepaint_at(origin + placement.origin, window, cx);
+                        Some(picture)
+                    })
+                    .collect()
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                Vec::new()
+            }
+        };
         let elements = cache
             .images
             .iter()
@@ -1219,6 +1291,7 @@ impl Element for RetainedRow {
             })
             .collect::<Vec<_>>()
             .into_iter()
+            .chain(pictures)
             .chain(cache.links.iter().enumerate().map(|(index, link)| {
                 let url = link.url.clone();
                 // Unique across rows: elements sharing an id share click state,
@@ -1227,14 +1300,23 @@ impl Element for RetainedRow {
                 let name = SharedString::from(selector.clone());
                 let root = state.file_root.as_ref().map(|root| root.as_ref());
                 let tip = link_tip(root, &url).map(SharedString::from);
-                // A file pill peeks at its lines instead of naming its path.
-                let peek = state.peeks.clone().zip(root).and_then(|(peeks, root)| {
-                    let (path, line) = crate::text::file_ref(url.strip_prefix("file:")?)?;
+                // A file pill peeks at its lines instead of naming its path,
+                // and a sent mention at what it names.
+                let peek = state.peeks.clone().and_then(|peeks| {
+                    let mention = crate::composer::mention::groups::sent_preview(&url);
+                    let (root, path, line) = match &mention {
+                        Some(_) => (String::new(), String::new(), None),
+                        None => {
+                            let (path, line) = crate::text::file_ref(url.strip_prefix("file:")?)?;
+                            (root?.to_owned(), path.to_owned(), line)
+                        }
+                    };
                     let target = crate::transcript_peek::Target {
                         key: selector.clone(),
-                        root: root.to_owned(),
-                        path: path.to_owned(),
+                        root,
+                        path,
                         line,
+                        preview: mention,
                     };
                     Some((peeks, target))
                 });

@@ -45,7 +45,7 @@ function main() {
   const payloadFiles = files(stage);
   let payloadBytes = payloadFiles.reduce((sum, file) => sum + file.bytes, 0);
   if (payloadBytes > PAYLOAD_BUDGET) throw new Error(`Exceeded payload size budget: ${payloadBytes} > ${PAYLOAD_BUDGET}`);
-  for (const name of ['usr/bin/o8', 'usr/lib/o8/node', 'usr/lib/o8/o8-next', 'usr/lib/o8/server/cli/desktop.mjs']) {
+  for (const name of ['usr/bin/o8', 'usr/lib/o8/node', 'usr/lib/o8/o8-next', 'usr/lib/o8/o8-next-viz-render', 'usr/lib/o8/server/cli/desktop.mjs']) {
     if (!existsSync(join(stage, name))) throw new Error(`Incomplete stage: ${name}`);
   }
   const channel = JSON.parse(readFileSync(join(stage, 'usr/lib/o8/server/o8-build-channel.json'), 'utf8'));
@@ -82,13 +82,13 @@ function main() {
     const debroot = join(scratch, 'deb');
     mkdirSync(join(debroot, 'DEBIAN'), { recursive: true });
     cpSync(join(appdir, 'usr'), join(debroot, 'usr'), { recursive: true });
-    const dependencies = 'libc6 (>= 2.39), libgcc-s1, libstdc++6, libx11-6, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libvulkan1, libfontconfig1, libfreetype6, libasound2t64, util-linux';
+    const dependencies = 'libc6 (>= 2.39), libgcc-s1, libstdc++6, libx11-6, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libvulkan1, libfontconfig1, libfreetype6, libasound2t64, util-linux, dbus-daemon, libwebkit2gtk-4.1-0, libgtk-3-0t64';
     writeFileSync(join(debroot, 'DEBIAN/control'), `Package: o8\nVersion: ${channel.version}\nArchitecture: amd64\nMaintainer: o8\nSection: devel\nPriority: optional\nDepends: ${dependencies}\nDescription: o8 next with the bundled o8 server\n`);
     const rpm = join(scratch, 'rpm');
     for (const dir of ['BUILD', 'BUILDROOT', 'RPMS', 'SOURCES', 'SPECS', 'SRPMS']) mkdirSync(join(rpm, dir), { recursive: true });
     cpSync(join(appdir, 'usr'), join(rpm, 'SOURCES/usr'), { recursive: true });
     const spec = join(rpm, 'SPECS/o8.spec');
-    writeFileSync(spec, `Name: o8\nVersion: ${channel.version}\nRelease: 1\nSummary: o8 next with the bundled o8 server\nLicense: MIT\nBuildArch: x86_64\nAutoReqProv: no\nRequires: glibc >= 2.39, libgcc, libstdc++, libX11, libxcb, libxkbcommon, libxkbcommon-x11, vulkan-loader, fontconfig, freetype, alsa-lib, util-linux\n%description\no8 next and its bundled Node server.\n%prep\n%build\n%install\nmkdir -p %{buildroot}\ncp -a %{_sourcedir}/usr %{buildroot}/usr\n%files\n/usr/bin/o8\n/usr/lib/o8\n/usr/share/applications/o8.desktop\n/usr/share/icons/hicolor/256x256/apps/o8.png\n/usr/share/doc/o8\n`);
+    writeFileSync(spec, `Name: o8\nVersion: ${channel.version}\nRelease: 1\nSummary: o8 next with the bundled o8 server\nLicense: MIT\nBuildArch: x86_64\nAutoReqProv: no\nRequires: glibc >= 2.39, libgcc, libstdc++, libX11, libxcb, libxkbcommon, libxkbcommon-x11, vulkan-loader, fontconfig, freetype, alsa-lib, util-linux, dbus-daemon, webkit2gtk4.1, gtk3\n%description\no8 next and its bundled Node server.\n%prep\n%build\n%install\nmkdir -p %{buildroot}\ncp -a %{_sourcedir}/usr %{buildroot}/usr\n%files\n/usr/bin/o8\n/usr/lib/o8\n/usr/share/applications/o8.desktop\n/usr/share/icons/hicolor/256x256/apps/o8.png\n/usr/share/doc/o8\n`);
     mkdirSync(output); // Exclusive; never replace an operator's directory.
     const prefix = `o8_${channel.version}`;
     const artifacts = [

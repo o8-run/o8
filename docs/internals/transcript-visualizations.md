@@ -141,3 +141,12 @@ outside the caller's workspace are refused.
 HTML is limited to 512 KiB, preview widths to 320–1600 pixels, and initial heights
 to 80–1800 pixels. Preview requires installed Chrome or Chromium. Rendering and
 viewing saved documents continue to work when a preview browser is unavailable.
+
+The o8 next Linux transcript displays saved documents as static pictures rendered
+by an isolated WebKitGTK helper in the same executable. The helper receives only
+the sealed document and presentation inputs over pipes; it never receives
+application credentials. Width and theme changes refresh the picture. Saved
+presentation state is applied before capture, and bounded state received during
+capture is retained. Interaction, later page-driven resizing and live state are
+still open on Linux; macOS keeps its interactive embedded view. Both hosts retain
+the opaque frame and content restrictions described above.

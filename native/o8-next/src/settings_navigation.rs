@@ -113,7 +113,7 @@ impl Settings {
         }
         [
             ("appearance", "Appearance", "appearance theme light dark solid all glass workspace"),
-            ("keyboard", "Keyboard", "keyboard shortcuts help keybindings hotkeys"),
+            ("keyboard", "Keyboard", "keyboard shortcuts help keybindings hotkeys snapshot screenshot shift capture"),
             ("about", "About", "about version platform mode updates github documentation releases credits"),
             ("mcp", "MCP", "mcp clients claude desktop code hermes openclaw servers tools"),
             ("mobile", "Mobile", "mobile phone pair pairing qr code devices revoke relay connect remote"),

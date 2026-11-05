@@ -124,6 +124,10 @@ pub struct State {
     /// Workspace Notes target history and user-selected annotation ink.
     #[serde(default)]
     pub notes: crate::files_panel::NotesPreferences,
+    /// This machine's shortcut overrides, command id to chord. Global ones
+    /// live in shared settings.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub keybindings: BTreeMap<String, String>,
     #[serde(skip)]
     pub(crate) retain_file: bool,
     #[serde(skip)]
@@ -152,6 +156,7 @@ impl Default for State {
             sidebar_detailed_rows: false,
             sidebar_working_section: false,
             notes: Default::default(),
+            keybindings: BTreeMap::new(),
             retain_file: false,
             backup_file: Arc::default(),
         }

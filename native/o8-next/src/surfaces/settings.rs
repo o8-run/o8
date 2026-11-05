@@ -9,6 +9,8 @@ pub(super) struct Runtime {
     pub view: Option<Entity<Settings>>,
     // Every shell closer drops this slot, so action listeners share its lifetime.
     pub subscription: Option<(gpui::Subscription, gpui::Subscription)>,
+    /// The active project, so an open Settings re-resolves on a switch.
+    pub project: Option<String>,
 }
 pub(super) const REGISTRATION: Registration = Registration {
     command: Some((6, || Command::Settings)),
@@ -65,7 +67,8 @@ impl Shell {
         self.surfaces.projects.open = false;
         let client = self.client.clone();
         let providers = cx.new(|cx| providers::Providers::new(client.clone(), cx));
-        let settings = cx.new(|cx| Settings::new(client, window, cx));
+        let project = self.surfaces.settings.project.clone();
+        let settings = cx.new(|cx| Settings::with_project(client, project, window, cx));
         settings.update(cx, |s, _| s.providers = Some(providers.into()));
         let close_subscription = cx.subscribe_in(
             &settings,
@@ -80,6 +83,7 @@ impl Shell {
                 crate::settings::Action::Shortcuts => {
                     (super::shortcuts::REGISTRATION.open)(this, Command::Shortcuts, window, cx);
                 }
+                crate::settings::Action::SnapshotHotkey => this.apply_snapshot_hotkey(true, window, cx),
             },
         );
         self.surfaces.settings.subscription = Some((close_subscription, action_subscription));
@@ -94,6 +98,15 @@ impl Shell {
         self.surfaces.settings.view = Some(settings);
         self.revision += 1;
         cx.notify();
+    }
+    pub(crate) fn settings_project(&mut self, project: Option<String>, cx: &mut Context<Self>) {
+        if self.surfaces.settings.project == project {
+            return;
+        }
+        self.surfaces.settings.project = project.clone();
+        if let Some(view) = &self.surfaces.settings.view {
+            view.update(cx, |settings, cx| settings.set_project(project, cx));
+        }
     }
     fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.surfaces.settings.view = None;

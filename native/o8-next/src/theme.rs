@@ -1,8 +1,8 @@
 //! Native counterparts of src/app/globals.css. Keep appearance selection here;
 //! views consume semantic tokens and never choose their own palette or fonts.
 use gpui::{Rgba, rgb};
-use std::sync::LazyLock;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{LazyLock, Mutex, RwLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Appearance {
@@ -11,6 +11,7 @@ pub enum Appearance {
     Glass,
 }
 
+#[derive(Clone)]
 pub struct Theme {
     pub background: Rgba,
     pub surface: Rgba,
@@ -41,21 +42,21 @@ pub struct Theme {
     pub font_annotation: &'static str,
 }
 
-// This is the only appearance selection. A future system-appearance hook can
-// replace it without changing any view's choice of semantic tokens.
+// This is the only appearance selection. Settings › Appearance picks a
+// built-in appearance, the system's light or dark, or an imported theme.
 // An explicit launch setting wins over the choice saved from the profile menu.
-static LAUNCH: LazyLock<Appearance> = LazyLock::new(|| {
+static LAUNCH: LazyLock<u8> = LazyLock::new(|| {
     match std::env::var("O8_NEXT_APPEARANCE")
         .ok()
         .or_else(saved_appearance)
         .as_deref()
-        .and_then(named)
+        .and_then(choice_id)
     {
-        Some(appearance) => appearance,
+        Some(choice) => choice,
         None if cfg!(target_os = "macos") && std::env::args().any(|arg| arg == "--app-shell") => {
-            Appearance::Glass
+            appearance_id(Appearance::Glass)
         }
-        None => Appearance::Dark,
+        None => appearance_id(Appearance::Dark),
     }
 });
 fn named(mode: &str) -> Option<Appearance> {
@@ -66,14 +67,49 @@ fn named(mode: &str) -> Option<Appearance> {
         _ => None,
     }
 }
+/// Choices past the built-in appearances: 3 follows the system, and 4 and up
+/// are imported themes by their place in IMPORTED.
+const SYSTEM: u8 = 3;
+const FIRST_IMPORTED: u8 = 4;
+/// A saved or menu name: "light", "dark", "glass", "system" or "theme:<id>".
+fn choice_id(mode: &str) -> Option<u8> {
+    if let Some(appearance) = named(mode) {
+        return Some(appearance_id(appearance));
+    }
+    if mode == "system" {
+        return Some(SYSTEM);
+    }
+    let id = mode.strip_prefix("theme:")?;
+    let themes = IMPORTED.read().unwrap();
+    let index = themes.iter().position(|theme| theme.id == id)?;
+    u8::try_from(index).ok()?.checked_add(FIRST_IMPORTED)
+}
 /// The profile menu's choice while the app runs; unset until it switches.
 static CHOSEN: AtomicU8 = AtomicU8::new(u8::MAX);
-fn selected() -> Appearance {
+/// Whether the window's system appearance is light, for the System choice.
+static SYSTEM_LIGHT: AtomicBool = AtomicBool::new(false);
+/// Bumped by every switch that repaints, for caches that keep painted colors.
+static GENERATION: AtomicU8 = AtomicU8::new(0);
+fn choice() -> u8 {
     match CHOSEN.load(Ordering::Relaxed) {
+        u8::MAX => *LAUNCH,
+        choice => choice,
+    }
+}
+fn imported(choice: u8) -> Option<&'static ImportedTheme> {
+    let index = usize::from(choice.checked_sub(FIRST_IMPORTED)?);
+    IMPORTED.read().unwrap().get(index).copied()
+}
+/// The appearance the running choice is based on: an imported theme follows
+/// its own light or dark type, and System follows the window.
+fn selected() -> Appearance {
+    match choice() {
         0 => Appearance::Dark,
         1 => Appearance::Light,
         2 => Appearance::Glass,
-        _ => *LAUNCH,
+        SYSTEM if SYSTEM_LIGHT.load(Ordering::Relaxed) => Appearance::Light,
+        SYSTEM => Appearance::Dark,
+        choice => imported(choice).map_or(Appearance::Dark, |theme| theme.base),
     }
 }
 fn appearance_id(appearance: Appearance) -> u8 {
@@ -86,15 +122,106 @@ fn appearance_id(appearance: Appearance) -> u8 {
 /// Switches the running appearance and saves it for the next launch. True
 /// when it changed; the caller then refreshes the window and its material.
 pub fn set_appearance(mode: &str) -> bool {
-    let Some(next) = named(mode) else {
+    let Some(next) = choice_id(mode) else {
         return false;
     };
     save_appearance(mode);
-    if next == selected() {
+    if next == choice() {
         return false;
     }
-    CHOSEN.store(appearance_id(next), Ordering::Relaxed);
+    CHOSEN.store(next, Ordering::Relaxed);
+    GENERATION.fetch_add(1, Ordering::Relaxed);
     true
+}
+/// Records the window's system appearance. True when the System choice is
+/// running and its colors changed; the caller then repaints.
+pub fn set_system_light(light: bool) -> bool {
+    let changed = SYSTEM_LIGHT.swap(light, Ordering::Relaxed) != light && choice() == SYSTEM;
+    if changed {
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+    }
+    changed
+}
+/// The running choice as Settings names it: "light", "dark", "glass",
+/// "system" or "theme:<id>".
+pub fn choice_name() -> String {
+    match choice() {
+        SYSTEM => "system".into(),
+        choice if choice >= FIRST_IMPORTED => {
+            imported(choice).map_or_else(|| "dark".into(), |theme| format!("theme:{}", theme.id))
+        }
+        _ => appearance_name().into(),
+    }
+}
+/// A VS Code color theme mapped onto the token set. Imported themes live for
+/// the rest of the process, like the built-in token sets.
+pub struct ImportedTheme {
+    pub id: String,
+    pub name: String,
+    pub base: Appearance,
+    pub theme: Theme,
+}
+static IMPORTED: LazyLock<RwLock<Vec<&'static ImportedTheme>>> = LazyLock::new(|| {
+    RwLock::new(
+        themes_path()
+            .map(|path| crate::theme_import::load(&path))
+            .unwrap_or_default()
+            .into_iter()
+            .take(MAX_IMPORTED)
+            .map(|theme| &*Box::leak(Box::new(theme)))
+            .collect(),
+    )
+});
+/// Imported themes as Settings lists them: choice name and label.
+pub fn imported_themes() -> Vec<(String, String)> {
+    IMPORTED
+        .read()
+        .unwrap()
+        .iter()
+        .map(|theme| (format!("theme:{}", theme.id), theme.name.clone()))
+        .collect()
+}
+/// Imports a VS Code color theme and saves it with the appearance choice.
+/// Returns its choice name; a theme with the same id is replaced. On an error
+/// nothing is saved and nothing changes.
+pub fn import_theme(source: &str, fallback_name: &str) -> Result<String, String> {
+    let theme = crate::theme_import::parse(source, fallback_name)?;
+    let replaces = IMPORTED
+        .read()
+        .unwrap()
+        .iter()
+        .any(|old| old.id == theme.id);
+    if !replaces && IMPORTED.read().unwrap().len() >= MAX_IMPORTED {
+        return Err("Too many imported themes.".into());
+    }
+    if let Some(path) = themes_path() {
+        crate::theme_import::save(&path, &theme.id, source)?;
+    }
+    let name = format!("theme:{}", theme.id);
+    let theme: &'static ImportedTheme = Box::leak(Box::new(theme));
+    let mut themes = IMPORTED.write().unwrap();
+    match themes.iter().position(|old| old.id == theme.id) {
+        Some(index) => themes[index] = theme,
+        None => themes.push(theme),
+    }
+    drop(themes);
+    // A replaced theme that is running repaints with its new colors.
+    GENERATION.fetch_add(1, Ordering::Relaxed);
+    Ok(name)
+}
+/// Tests that switch the process-wide theme choice hold this so they do not
+/// see each other's switches.
+#[cfg(test)]
+pub(crate) fn selection_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+/// Imported themes fit the choice ids below the unset sentinel.
+const MAX_IMPORTED: usize = (u8::MAX - 1 - FIRST_IMPORTED) as usize;
+fn themes_path() -> Option<std::path::PathBuf> {
+    Some(saved_path()?.with_file_name("next-themes.json"))
 }
 /// The chat widths Settings offers: saved name, label and width. Comfortable
 /// is the composer's designed width.
@@ -146,7 +273,7 @@ fn saved_chat_width() -> Option<String> {
 }
 /// Changes with the appearance, for caches that keep painted colors.
 pub fn generation() -> u8 {
-    appearance_id(selected())
+    GENERATION.load(Ordering::Relaxed)
 }
 fn saved_path() -> Option<std::path::PathBuf> {
     if cfg!(test) {
@@ -172,6 +299,7 @@ fn save_appearance(mode: &str) {
     }
 }
 /// The running appearance as the menu names it: "light", "dark" or "glass".
+/// System and imported themes name the appearance they are based on.
 pub fn appearance_name() -> &'static str {
     match selected() {
         Appearance::Light => "light",
@@ -179,15 +307,218 @@ pub fn appearance_name() -> &'static str {
         Appearance::Dark => "dark",
     }
 }
-static DARK: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Dark));
-static LIGHT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Light));
-static GLASS: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Glass));
-pub fn current() -> &'static Theme {
-    match selected() {
-        Appearance::Dark => &DARK,
-        Appearance::Light => &LIGHT,
-        Appearance::Glass => &GLASS,
+/// The UI and code font families Settings › Appearance picked, by name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fonts {
+    pub ui: &'static str,
+    pub mono: &'static str,
+}
+pub const DEFAULT_FONTS: Fonts = Fonts {
+    ui: UI_FONT,
+    mono: MONO_FONT,
+};
+/// The running token sets for Dark, Light and Glass with the picked fonts.
+static ACTIVE: LazyLock<RwLock<(Fonts, [&'static Theme; 3])>> = LazyLock::new(|| {
+    let fonts = saved_fonts().unwrap_or(DEFAULT_FONTS);
+    RwLock::new((fonts, themes_with(fonts)))
+});
+/// The fonts as last saved, which may name a family that is not installed
+/// right now; the running fonts never do.
+static SAVED: LazyLock<Mutex<Fonts>> =
+    LazyLock::new(|| Mutex::new(saved_fonts().unwrap_or(DEFAULT_FONTS)));
+/// Token sets live for the process, one per font pairing ever picked.
+fn themes_with(fonts: Fonts) -> [&'static Theme; 3] {
+    static BUILT: Mutex<Vec<(Fonts, [&'static Theme; 3])>> = Mutex::new(Vec::new());
+    let mut built = BUILT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((_, themes)) = built.iter().find(|(pair, _)| *pair == fonts) {
+        return *themes;
     }
+    let themes = [Appearance::Dark, Appearance::Light, Appearance::Glass].map(|appearance| {
+        let mut theme = Theme::for_appearance(appearance);
+        theme.font_ui = fonts.ui;
+        theme.font_mono = fonts.mono;
+        &*Box::leak(Box::new(theme))
+    });
+    built.push((fonts, themes));
+    themes
+}
+pub fn current() -> &'static Theme {
+    let active = ACTIVE
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match imported(choice()) {
+        Some(theme) => imported_with_fonts(&theme.theme, active.0),
+        None => active.1[usize::from(appearance_id(selected()))],
+    }
+}
+/// An imported theme's tokens with the picked fonts, built once per pairing.
+fn imported_with_fonts(theme: &'static Theme, fonts: Fonts) -> &'static Theme {
+    if (theme.font_ui, theme.font_mono) == (fonts.ui, fonts.mono) {
+        return theme;
+    }
+    static BUILT: Mutex<Vec<(usize, Fonts, &'static Theme)>> = Mutex::new(Vec::new());
+    let key = theme as *const Theme as usize;
+    let mut built = BUILT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((_, _, with_fonts)) = built
+        .iter()
+        .find(|(source, pair, _)| *source == key && *pair == fonts)
+    {
+        return with_fonts;
+    }
+    let with_fonts: &'static Theme = Box::leak(Box::new(Theme {
+        font_ui: fonts.ui,
+        font_mono: fonts.mono,
+        ..theme.clone()
+    }));
+    built.push((key, fonts, with_fonts));
+    with_fonts
+}
+pub fn fonts() -> Fonts {
+    ACTIVE
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .0
+}
+/// A family name kept for the process, so tokens can hold it; one copy each.
+fn intern(family: &str) -> &'static str {
+    static NAMES: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+    if let Some(name) = [UI_FONT, MONO_FONT]
+        .into_iter()
+        .find(|name| *name == family)
+    {
+        return name;
+    }
+    let mut names = NAMES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(name) = names.iter().find(|name| **name == family) {
+        return name;
+    }
+    let name: &'static str = Box::leak(family.to_owned().into_boxed_str());
+    names.push(name);
+    name
+}
+/// A family the text system lists, else the default: a missing font never
+/// reaches a view.
+fn installed_or_default(family: &str, default: &'static str, installed: &[String]) -> &'static str {
+    if family != default && installed.iter().any(|name| name == family) {
+        intern(family)
+    } else {
+        default
+    }
+}
+fn apply_fonts(fonts: Fonts) -> bool {
+    let mut active = ACTIVE
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if active.0 == fonts {
+        return false;
+    }
+    *active = (fonts, themes_with(fonts));
+    GENERATION.fetch_add(1, Ordering::Relaxed);
+    true
+}
+/// Switches the UI or code font and saves both for the next launch. True when
+/// the running fonts changed; the caller then repaints.
+pub fn set_font(mono: bool, family: &str, installed: &[String]) -> bool {
+    let mut fonts = self::fonts();
+    let mut saved = SAVED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if mono {
+        fonts.mono = installed_or_default(family, MONO_FONT, installed);
+        saved.mono = fonts.mono;
+    } else {
+        fonts.ui = installed_or_default(family, UI_FONT, installed);
+        saved.ui = fonts.ui;
+    }
+    // The other font keeps its saved family, even one not installed now.
+    if let Some(path) = fonts_path() {
+        let _ = save_fonts(&path, *saved);
+    }
+    drop(saved);
+    apply_fonts(fonts)
+}
+/// Runs a saved family that is no longer installed in its default, keeping
+/// the saved choice for when it returns. True when the fonts changed.
+pub fn check_installed_fonts(installed: &[String]) -> bool {
+    let fonts = self::fonts();
+    apply_fonts(Fonts {
+        ui: if fonts.ui == UI_FONT {
+            UI_FONT
+        } else {
+            installed_or_default(fonts.ui, UI_FONT, installed)
+        },
+        mono: if fonts.mono == MONO_FONT {
+            MONO_FONT
+        } else {
+            installed_or_default(fonts.mono, MONO_FONT, installed)
+        },
+    })
+}
+/// One row of a font picker.
+#[derive(Debug, PartialEq, Eq)]
+pub struct FontOption {
+    pub family: String,
+    pub current: bool,
+    pub default: bool,
+}
+/// The UI or code font picker: the default first, then the installed
+/// families by name. Names starting with a dot are the system's private
+/// faces and are left out.
+pub fn font_options(mono: bool, installed: &[String]) -> Vec<FontOption> {
+    let default = if mono { MONO_FONT } else { UI_FONT };
+    let current = if mono { fonts().mono } else { fonts().ui };
+    let mut families: Vec<&str> = installed
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !name.starts_with('.') && *name != default)
+        .collect();
+    families.sort_by_key(|name| name.to_lowercase());
+    families.dedup();
+    std::iter::once(default)
+        .chain(families)
+        .map(|family| FontOption {
+            family: family.to_string(),
+            current: family == current,
+            default: family == default,
+        })
+        .collect()
+}
+fn fonts_path() -> Option<std::path::PathBuf> {
+    Some(saved_path()?.with_file_name("next-fonts.json"))
+}
+fn saved_fonts() -> Option<Fonts> {
+    load_fonts(&fonts_path()?)
+}
+/// Saved fonts, as `{"ui": family, "mono": family}`.
+pub(crate) fn load_fonts(path: &std::path::Path) -> Option<Fonts> {
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    let family = |key: &str, default: &'static str| {
+        saved[key]
+            .as_str()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map_or(default, intern)
+    };
+    Some(Fonts {
+        ui: family("ui", UI_FONT),
+        mono: family("mono", MONO_FONT),
+    })
+}
+pub(crate) fn save_fonts(path: &std::path::Path, fonts: Fonts) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(
+        path,
+        serde_json::json!({ "ui": fonts.ui, "mono": fonts.mono }).to_string(),
+    )
 }
 pub fn glass() -> bool {
     matches!(selected(), Appearance::Glass)
@@ -223,6 +554,9 @@ pub(crate) fn edge_fade(bottom: bool, height: f32, color: Rgba) -> gpui::Div {
         ))
 }
 pub fn plain_background() -> Rgba {
+    if let Some(theme) = imported(choice()) {
+        return theme.theme.background;
+    }
     Theme::for_appearance(if matches!(selected(), Appearance::Light) {
         Appearance::Light
     } else {
@@ -233,6 +567,9 @@ pub fn plain_background() -> Rgba {
 /// Floating cards (the desktop overlay material). Opaque, because the native
 /// shell has no backdrop blur to frost a translucent card over glass.
 pub fn popover_background() -> Rgba {
+    if let Some(theme) = imported(choice()) {
+        return theme.theme.surface_raised;
+    }
     match selected() {
         Appearance::Light => rgb(0xffffff),
         Appearance::Glass => rgb(0x3e3f47),

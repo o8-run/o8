@@ -4,12 +4,14 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
+import { getCachedInstanceIdentity } from '@/lib/panel/instance-identity';
 import type { OperatorDefaults, OperatorDefaultsWithSources } from '@/lib/operator/defaults';
 import {
   parseOperatorDefaultsToml,
   serializeOperatorDefaultsToml,
   writeFileAtomic,
 } from './toml';
+import { machineLayerValues, writeScopedSetting, type SettingsLayerScope } from './scopes';
 
 const LEGACY_DEFAULTS_FILE = 'operator-defaults.json';
 const SETTINGS_TOML_FILE = 'settings.toml';
@@ -79,6 +81,11 @@ function isMissingFile(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
+/** This server's machine layer applies to every reader on this machine. */
+function withMachineLayer(raw: string): Partial<OperatorDefaults> {
+  return { ...parseOperatorDefaultsToml(raw), ...machineLayerValues(raw, getCachedInstanceIdentity().instanceId) };
+}
+
 function withExplicitRuntime(values: Partial<OperatorDefaults>): FileOperatorDefaults {
   return {
     ...values,
@@ -90,7 +97,7 @@ export async function loadOperatorDefaultsFiles(
   parseLegacy: (raw: string) => FileOperatorDefaults,
 ): Promise<FileOperatorDefaults> {
   try {
-    return withExplicitRuntime(parseOperatorDefaultsToml(await readFile(getOperatorDefaultsTomlPath(), 'utf8')));
+    return withExplicitRuntime(withMachineLayer(await readFile(getOperatorDefaultsTomlPath(), 'utf8')));
   } catch (error) {
     if (!isMissingFile(error)) {
       // Parser errors can quote source lines containing saved credentials.
@@ -111,7 +118,7 @@ export function loadOperatorDefaultsFilesSync(
   parseLegacy: (raw: string) => FileOperatorDefaults,
 ): FileOperatorDefaults {
   try {
-    return withExplicitRuntime(parseOperatorDefaultsToml(readFileSync(getOperatorDefaultsTomlPath(), 'utf8')));
+    return withExplicitRuntime(withMachineLayer(readFileSync(getOperatorDefaultsTomlPath(), 'utf8')));
   } catch (error) {
     if (!isMissingFile(error)) {
       console.error('[operator-defaults] Invalid settings.toml during sync read; using last-good defaults.');
@@ -161,6 +168,22 @@ async function writeSettingsTomlAtRevision(content: string, expectedRevision: st
     content,
     () => assertSettingsTomlRevision(expectedRevision),
   );
+}
+
+/** Sets or clears one key in a project or machine layer, under the caller's write lock. */
+export async function writeScopedOperatorDefault(
+  scope: SettingsLayerScope,
+  id: string,
+  key: string,
+  value: unknown,
+  expectedRevision: string,
+  validate: (next: string) => void = () => {},
+): Promise<void> {
+  const raw = await readCurrentSettingsToml();
+  if (settingsTomlRevision(raw) !== expectedRevision) throw new SettingsTomlConflictError();
+  const next = writeScopedSetting(raw, scope, id, key, value);
+  validate(next);
+  await writeSettingsTomlAtRevision(next, expectedRevision);
 }
 
 export async function readLegacyOperatorDefaults(): Promise<string | null> {

@@ -149,6 +149,7 @@ fn pills_read_as_a_file_name_or_a_site() {
 pub(super) fn is_item(url: &str) -> bool {
     url.starts_with('#')
         || url.starts_with("file:")
+        || url.starts_with(crate::composer::mention::groups::PILL_SCHEME)
         || url.contains("/issues/")
         || url.contains("/pull/")
 }

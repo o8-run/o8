@@ -78,7 +78,7 @@ thread_local! {
     static PENDING_LINK: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// The `!` line a RunShellLine dispatch runs. Apart from links, so text
     /// from a reply can never reach a shell.
-    static PENDING_SHELL_LINE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    static PENDING_SHELL_LINE: std::cell::RefCell<Option<(String, gpui::WeakEntity<Surface>)>> = const { std::cell::RefCell::new(None) };
     /// The `!` line a StopShellLine dispatch interrupts.
     static PENDING_SHELL_STOP: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// The `!` line an AddShellOutput dispatch reads, and the view it goes to.
@@ -91,13 +91,18 @@ pub(crate) fn open_link(url: &str, window: &mut Window, cx: &mut App) {
     window.dispatch_action(Box::new(OpenTranscriptLink), cx);
 }
 
-/// Asks the shell to run a composer `!` line.
-pub(crate) fn run_shell_line(line: String, window: &mut Window, cx: &mut App) {
-    PENDING_SHELL_LINE.with(|pending| *pending.borrow_mut() = Some(line));
+/// Asks the shell to run a composer `!` line, and to report it to that view's card.
+pub(crate) fn run_shell_line(
+    line: String,
+    view: gpui::WeakEntity<Surface>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    PENDING_SHELL_LINE.with(|pending| *pending.borrow_mut() = Some((line, view)));
     window.dispatch_action(Box::new(RunShellLine), cx);
 }
 
-pub(crate) fn take_pending_shell_line() -> Option<String> {
+pub(crate) fn take_pending_shell_line() -> Option<(String, gpui::WeakEntity<Surface>)> {
     PENDING_SHELL_LINE.with(|pending| pending.borrow_mut().take())
 }
 
@@ -533,6 +538,10 @@ impl Surface {
                         match (queue, routing) {
                             (Ok(queue), Ok(routing)) => {
                                 this.queue = queue;
+                                for row in this.rows.iter() {
+                                    row.borrow_mut()
+                                        .attach_mission_card(&this.client, Some(routing.clone()));
+                                }
                                 this.routing = Some(routing);
                                 this.queue_ready = true;
                                 if this.fork_send.is_some() && this.fork_send == this.selected {
@@ -597,7 +606,9 @@ impl Surface {
                 state.attach_visualizations(&self.client);
                 if let Some(previous) = indexed.get(state.row.id()).and_then(|c| c.first()) {
                     state.keep_disclosure(&previous.borrow());
+                    state.mission_card = previous.borrow().mission_card.clone();
                 }
+                state.attach_mission_card(&self.client, self.routing.clone());
                 Rc::new(RefCell::new(state))
             }));
         }

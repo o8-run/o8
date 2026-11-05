@@ -1,0 +1,31 @@
+{
+  "name": "Harbor Night",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#1e2129",
+    "editor.foreground": "#d4d7de",
+    "sideBar.background": "#191c23",
+    "activityBar.background": "#15171d",
+    "activityBar.foreground": "#c0c4cc",
+    "statusBar.background": "#2f6fd6",
+    "statusBar.foreground": "#ffffff",
+    "button.background": "#3a7be0",
+    "input.background": "#252933",
+    "input.border": "#323745",
+    "input.placeholderForeground": "#7c8290",
+    "list.hoverBackground": "#2a2e38",
+    "list.activeSelectionBackground": "#2f6fd640",
+    "focusBorder": "#4c8df6",
+    "errorForeground": "#f06a6a",
+    "editorWarning.foreground": "#e0b450",
+    "gitDecoration.addedResourceForeground": "#6cc287",
+    "editorLineNumber.foreground": "#596070"
+  },
+  "tokenColors": [
+    { "scope": "comment", "settings": { "foreground": "#6b7280", "fontStyle": "italic" } },
+    { "scope": ["string", "string.quoted"], "settings": { "foreground": "#a6d08a" } },
+    { "scope": "keyword.control, storage.type", "settings": { "foreground": "#c792ea" } },
+    { "scope": "constant.numeric", "settings": { "foreground": "#f2a65a" } },
+    { "scope": "markup.underline.link", "settings": { "foreground": "#82aaff" } }
+  ]
+}

@@ -81,7 +81,8 @@ export async function runQueuedComposerSteer(item: QueuedComposerSendRecord): Pr
 /** User-requested next turns use saved routing, never whichever composer is currently open. */
 export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hooks: BoundChatContinuationHooks): Promise<void> {
   checkComposerQueueBinding(item);
-  const repoPath = readPersistedLlmChat(item.threadId)!.history.repoPath!;
+  // A chat with no project has no saved repository; its validated target is its scratch folder.
+  const repoPath = readPersistedLlmChat(item.threadId)!.history.repoPath || item.repoPath;
   if (findLeadThreadBinding(item.threadId)) {
     const origin = originFor(item);
     if (origin.permissionMode === 'outside-workspace') throw new Error('Outside workspace commands require the built-in lead.');

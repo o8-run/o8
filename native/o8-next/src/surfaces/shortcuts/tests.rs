@@ -4,6 +4,8 @@ mod review;
 use crate::shell::*;
 #[path = "binding_tests.rs"]
 mod bindings;
+#[path = "editor_tests.rs"]
+mod editor_tests;
 #[path = "modal_tests.rs"]
 mod modal;
 

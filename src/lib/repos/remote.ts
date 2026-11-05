@@ -1,12 +1,49 @@
 import 'server-only';
 import { execFile } from '@/lib/providers/child-process';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 interface Origin { config: string; stamp: string; remote: string | null; checkedAt: number }
 const origins = new Map<string, Origin>();
 const pending = new Map<string, Promise<string | null | undefined>>();
+
+/** File-only origin projection. Ambiguous config keeps the last explicit repair. */
+export async function readCurrentOriginReadOnly(root: string): Promise<string | null | undefined> {
+  try {
+    let gitDir = join(root, '.git');
+    const marker = await stat(gitDir);
+    if (marker.isFile()) {
+      const pointer = (await readFile(gitDir, 'utf8')).trim().match(/^gitdir: (.+)$/)?.[1];
+      if (!pointer) return undefined;
+      gitDir = resolve(root, pointer);
+    } else if (!marker.isDirectory()) return undefined;
+    const common = await readFile(join(gitDir, 'commondir'), 'utf8').catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    const config = await readFile(join(common === null ? gitDir : resolve(gitDir, common.trim()), 'config'), 'utf8');
+    // Git resolves includes, URL rewrites and per-worktree overrides on the write
+    // path. Never mistake an unsupported configuration for a removed origin.
+    if (/^\s*\[(?:include|includeIf|url|extensions)(?:\s|\])/im.test(config)) return undefined;
+    let origin = false;
+    for (const line of config.split(/\r?\n/)) {
+      if (/^\s*\[/.test(line)) {
+        origin = line.match(/^\s*\[remote\s+"([^"]+)"\]\s*(?:[#;].*)?$/i)?.[1] === 'origin';
+        continue;
+      }
+      if (!origin) continue;
+      const raw = line.match(/^\s*url\s*=\s*(.*?)\s*$/i)?.[1];
+      if (raw === undefined) continue;
+      // Quoting, escaping and comments need Git's full config parser. Preserve
+      // the saved value until write maintenance can resolve those forms.
+      if (/["\\#;]/.test(raw)) return undefined;
+      return raw || null;
+    }
+    return null;
+  } catch { return undefined; }
+}
 async function git(root: string, args: string[]) {
   return (await run('git', ['-C', root, ...args], { windowsHide: true, timeout: 2500, maxBuffer: 128 * 1024 })).stdout.trim();
 }

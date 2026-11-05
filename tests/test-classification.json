@@ -137,6 +137,12 @@
       ]
     },
     {
+      "path": "src/app/api/panel/resource-usage/route-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/panel/status/route.test.ts",
       "reasons": [
         "terminal-tool"
@@ -2671,6 +2677,14 @@
       ]
     },
     {
+      "path": "tests/comparison-diff-ref-guard-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/completion-ledger-model-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3843,6 +3857,14 @@
       ]
     },
     {
+      "path": "tests/lane-diff-stat-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-git-event-loop-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4521,6 +4543,14 @@
       ]
     },
     {
+      "path": "tests/mission-cards-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mission-cost-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -4686,10 +4716,26 @@
       ]
     },
     {
+      "path": "tests/mobile-pr-tab-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mobile-ripple-device-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
+    },
+    {
+      "path": "tests/mobile-visualizations-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "network-listener",
+        "real-path"
+      ],
+      "browser": true
     },
     {
       "path": "tests/mock-module-transport-real-path.test.ts",
@@ -5081,6 +5127,12 @@
       ]
     },
     {
+      "path": "tests/no-project-thread-send-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/npm-release-age-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5231,6 +5283,7 @@
       "path": "tests/o8d-next-surfaces-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
         "native-build",
         "process-signal",
         "real-path"
@@ -5747,6 +5800,15 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/panel-repos-create-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
       ]
     },
     {
@@ -7083,6 +7145,15 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/settings-scope-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
         "real-path"
       ]
     },
