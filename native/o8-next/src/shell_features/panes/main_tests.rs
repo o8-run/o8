@@ -84,3 +84,30 @@ fn closing_the_last_tab_brings_the_side_chat_into_the_main_pane(cx: &mut TestApp
         )
     );
 }
+
+#[gpui::test]
+fn offline_the_side_chat_waits_instead_of_being_closed(cx: &mut TestAppContext) {
+    let (_f, s, mut v) = setup(cx);
+    let count = tabs(&s, &v).0.len();
+    s.update_in(&mut v, |s, w, cx| {
+        s.connected = false;
+        for _ in 0..count {
+            super::super::header::close_tab(s, 0, w, cx);
+        }
+    });
+    // The panes' own tick, so no reconnect can land in between.
+    for _ in 0..5 {
+        s.update_in(&mut v, |s, w, cx| ensure(s, w, cx));
+        v.run_until_parked();
+    }
+    assert!(
+        s.read_with(&v, |s, _| side_chat(&saved(s)).is_some()),
+        "no tab can open offline, so the chat keeps its pane"
+    );
+    s.update_in(&mut v, |s, w, cx| {
+        s.connected = true;
+        ensure(s, w, cx)
+    });
+    ready(&s, &mut v);
+    assert!(s.read_with(&v, |s, _| s.current().unwrap().panes.is_none()));
+}

@@ -116,7 +116,9 @@ fn ensure(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     }
     // With its last tab closed, the main pane takes the chat beside it
     // instead of sitting empty next to it.
-    if previewing(s).is_none()
+    // Only once connected: offline, no tab can open to take it.
+    if s.connected
+        && previewing(s).is_none()
         && s.current().is_some_and(|w| w.tabs.is_empty())
         && side_chat(&saved(s)).is_some()
     {
@@ -309,14 +311,21 @@ fn close_main(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         _ => None,
     }
     .unwrap_or(session);
-    if !tree.close(&leaf) {
+    // A chat that isn't listed yet, or failed to start, would open blank.
+    if !s.sessions.iter().any(|x| x.id == shown) {
+        return;
+    }
+    s.capture(window, cx);
+    s.execute(Command::Session(shown.clone()), window, cx);
+    // The pane folds away only once its chat is a tab, so nothing is lost
+    // when the tab can't open.
+    let tab = Tab::Session(shown);
+    if !s.current().is_some_and(|w| w.tabs.contains(&tab)) || !tree.close(&leaf) {
         return;
     }
     let key = key(s, &leaf);
     s.content.remove(&key);
     save_saved(s, tree);
-    s.capture(window, cx);
-    s.execute(Command::Session(shown), window, cx);
     cx.notify();
 }
 
