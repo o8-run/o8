@@ -1,4 +1,4 @@
-/** Session-read oracle: real WS entry, persisted fixture, Next listener closed. */
+/** Domain-read oracle: real WS entry, persisted fixture, Next listener closed. */
 import { execFile } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { startParityReference } from '../../tests/fixtures/ws-parity-server';
+import { runRepositoryParity } from './repository-parity';
 
 // No patterns, suffix matching or semantic fields. The current fixture needs no exclusions.
 export const VOLATILE_FIELDS: readonly string[] = ['requestId', 'epoch', 'generatedAt'];
@@ -63,13 +64,13 @@ export async function startSessionServer(directory: string, nativeSessionReads: 
   return { ...server, origin: server.url.replace('ws:', 'http:').replace('/ws', '') };
 }
 type Server = Awaited<ReturnType<typeof startSessionServer>>;
-const IDLE_SETTLE_MS = 20_000;
+export const IDLE_SETTLE_MS = 20_000;
 export async function send(server: Server, path: string, headers: Record<string, string> = {}) {
   const response = await fetch(server.origin + path, { headers: { authorization: `Bearer ${server.token}`, ...headers } });
   return { status: response.status, body: await response.json() as unknown,
     native: response.headers.get('x-o8d-native-session-read') === '1' };
 }
-async function backendRss(pid: number) {
+export async function backendRss(pid: number) {
   const { stdout } = await promisify(execFile)('ps', ['-eo', 'pid=,ppid=,rss=']);
   const processes = stdout.trim().split('\n').map(line => line.trim().split(/\s+/).map(Number));
   const pids = new Set([pid]);
@@ -135,7 +136,13 @@ export async function runSessionParity(binary: string, benchmark = true, corpusF
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const binary = process.env.O8D_BINARY;
   if (!binary) throw new Error('Set O8D_BINARY to the o8d built with experimental-session-reads');
-  void runSessionParity(binary, true, process.argv.find(arg => arg.startsWith('--corpus='))?.slice(9)).then(report => {
+  const domain = process.argv.find(arg => arg.startsWith('--domain='))?.slice(9) ?? 'session';
+  if (!['session', 'repository'].includes(domain)) throw new Error(`Unknown parity domain: ${domain}`);
+  const corpus = process.argv.find(arg => arg.startsWith('--corpus='))?.slice(9);
+  const result = domain === 'repository'
+    ? runRepositoryParity(binary, true, corpus)
+    : runSessionParity(binary, true, corpus);
+  void result.then(report => {
     const output = process.argv.find(arg => arg.startsWith('--report='))?.slice(9);
     if (output) writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
     console.log(JSON.stringify(report, null, 2));

@@ -5306,6 +5306,24 @@
       ]
     },
     {
+      "path": "tests/o8d-repository-client-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-repository-parity-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-sidebar-mutations-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -23,7 +23,7 @@ async function freePort(): Promise<number> {
 
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
 export async function startParityReference(options: {
-  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean;
+  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean; nativeRepositoryReads?: boolean;
   inbox?: () => typeof fixtureInbox;
   sync?: (body: Record<string, unknown>) => unknown | Promise<unknown>;
 } = {}) {
@@ -86,6 +86,7 @@ export async function startParityReference(options: {
       O8_WS_O8D: (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
       O8_NEXT_O8D: options.nativeHttp ? '1' : '0',
       O8D_NATIVE_SESSION_READS: options.nativeSessionReads ? '1' : '0',
+      O8D_NATIVE_REPOSITORY_READS: options.nativeRepositoryReads ? '1' : '0',
       O8D_BINARY: options.binary ?? process.env.O8D_TEST_BINARY,
       O8_REALTIME_LOG_LIMIT: String(options.logLimit ?? 4), NEXT_ORIGIN: apiUrl },
   });

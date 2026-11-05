@@ -8,13 +8,30 @@ interface Route {
 }
 const route = (path: string, methods: string, load: Route['load']): Route => ({ path, methods: methods.split(' '), load });
 
+/** The public middleware still runs first; the private reader reuses its existing bearer gate. */
+const repositoryRead = (load: Route['load']): Route['load'] => async () => ({
+  GET: async (request: Request, context: unknown) => {
+    if (process.env.O8D_NATIVE_REPOSITORY_READS === '1') {
+      try {
+        const { readRepositoryRequest } = await import('./repository-http-client');
+        const response = await readRepositoryRequest(request);
+        if (response) return response;
+      } catch {
+        // Loading an optional reader can fail before its own request fallback.
+      }
+    }
+    const handlers = await load() as { GET: (request: Request, context: unknown) => Promise<Response> };
+    return handlers.GET(request, context);
+  },
+});
+
 // Keys mirror register_surfaces!, including surfaces whose transport is WebSocket-only.
 // Each route loads its own implementation; unrelated surfaces stay cold.
 export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
     route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
-    route('/api/panel/branches', 'GET', () => import('@/app/api/panel/branches/route')),
+    route('/api/panel/branches', 'GET', repositoryRead(() => import('@/app/api/panel/branches/route'))),
     route('/api/panel/files', 'GET', () => import('@/app/api/panel/files/route')),
     route('/api/panel/file-asset', 'GET', () => import('@/app/api/panel/file-asset/route')),
     route('/api/v2/files', 'GET', () => import('@/app/api/v2/files/route')),
