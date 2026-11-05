@@ -16,9 +16,13 @@ for package in "${packages[@]}"; do
     missing+=("$package")
   fi
 done
+# The runner's mirror list falls back to the next mirror only after a request
+# fails. apt's default timeout lets one stalled mirror hold every package for
+# minutes and run native shards into their job limit, so fail over quickly.
+apt_options=(-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=5)
 if (( ${#missing[@]} )); then
-  sudo apt-get update -qq
-  sudo apt-get install -y --no-install-recommends "${missing[@]}"
+  sudo apt-get "${apt_options[@]}" update -qq
+  sudo apt-get "${apt_options[@]}" install -y --no-install-recommends "${missing[@]}"
 else
   echo 'Native prerequisites already installed; no package download needed.'
 fi
