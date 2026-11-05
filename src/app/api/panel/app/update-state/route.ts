@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { getRequestedCheckTime } from '@/lib/app-update/fresh-check';
 import { controlAutoApply, getNativeApplyRequestTime } from '@/lib/app-update/auto-apply';
 import { updateCheckTicket } from '@/lib/app-update/check-order';
+import { normalizeReleaseVersion, persistReleaseNotes } from '@/lib/app-update/release-notes';
 
 import {
   getAppUpdateState,
@@ -89,5 +90,8 @@ export async function POST(request: Request) {
     info: isRecord(body.info) ? body.info : null,
     checkError: typeof body.checkError === 'string' ? body.checkError : null,
   });
+  // Save the found release's notes here; the summary GET only reads them.
+  const release = checkOutcome === 'available' && typeof body.version === 'string' ? normalizeReleaseVersion(body.version.trim()) : null;
+  if (release && release !== 'latest') void persistReleaseNotes(release).catch(() => {});
   return NextResponse.json({ ok: true, state }, { headers: NO_STORE_HEADERS });
 }
