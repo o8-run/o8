@@ -330,6 +330,9 @@ pub(super) fn menu(s: &mut Shell, lower: bool, window: &mut Window, cx: &mut Con
 pub(super) fn choose(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
     let lower = s.features.get::<Panel>().menu_lower;
     s.features.get::<Panel>().into_lower = lower;
+    if tool == Tool::Subagents {
+        subagents::all(s, window, cx);
+    }
     show(s, tool, window, cx);
     s.features.get::<Panel>().into_lower = false;
     save(s);

@@ -128,11 +128,23 @@ fn subagents_trace_opens_detail_without_replacing_steps_or_parent(cx: &mut TestA
 
 /// Opens every agent in the Subagents panel from the Activity dock's Agents pane.
 fn open_agents(s: &Entity<Shell>, v: &mut VisualTestContext) {
+    open_dock_agents(s, v);
+    click(v, "activity-agents-all");
+}
+/// Opens the dock's Agents card and waits out its height animation, so its
+/// last row, See all, is inside the card.
+fn open_dock_agents(s: &Entity<Shell>, v: &mut VisualTestContext) {
     click(v, "header-activity");
     wait(s, v, "activity-tab-agents");
     click(v, "activity-tab-agents");
     wait(s, v, "activity-agents-all");
-    click(v, "activity-agents-all");
+    let deadline = Instant::now() + Duration::from_millis(400);
+    while Instant::now() < deadline {
+        s.update_in(v, |s, w, cx| s.tick(false, w, cx));
+        v.run_until_parked();
+        draw(v);
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn wait_probe(s: &Entity<Shell>, v: &mut VisualTestContext, ready: impl Fn(&Value) -> bool) {
@@ -452,7 +464,8 @@ fn subagents_shared_results_keep_held_delivery_in_attention(cx: &mut TestAppCont
 fn subagents_shared_panel_refreshes_counts_and_keeps_error_recovery(cx: &mut TestAppContext) {
     let (f, s, mut v) = setup(cx);
     open_agents(&s, &mut v);
-    wait(&s, &mut v, "subagents-group-working-1");
+    // See all counts the other chat's running agent too.
+    wait(&s, &mut v, "subagents-group-working-2");
     let _: Value = f
         .client
         .get("/api/subagents-fixture", &[("mode", "done")])
@@ -483,12 +496,10 @@ fn subagents_shared_panel_refreshes_counts_and_keeps_error_recovery(cx: &mut Tes
 }
 
 #[gpui::test]
-fn each_opened_subagent_gets_a_tab_and_none_are_in_the_tools(cx: &mut TestAppContext) {
+fn each_opened_subagent_gets_a_tab_and_the_tools_list_them(cx: &mut TestAppContext) {
     assert!(
-        Tool::GROUPS
-            .iter()
-            .all(|(_, tools)| !tools.contains(&Tool::Subagents)),
-        "subagents open from a subagent, not from the tools"
+        Tool::GROUPS[0].1.contains(&Tool::Subagents),
+        "every worker is one tool button away"
     );
     let (_f, s, mut v) = setup(cx);
     wait(&s, &mut v, "subagent-trace-subagent-calculation");
@@ -573,4 +584,35 @@ fn native_agents_out_of_title_order_settle_after_one_notify(cx: &mut TestAppCont
     });
     assert_eq!(titles, ["Quick calculation", "Sort fruit"]);
     assert_eq!(notified.get(), 1, "the same agents must not notify again");
+}
+
+#[gpui::test]
+fn the_dock_lists_this_chats_agents_and_see_all_opens_the_workspace(cx: &mut TestAppContext) {
+    let (_f, s, mut v) = setup(cx);
+    open_dock_agents(&s, &mut v);
+    wait(&s, &mut v, "activity-agent-subagent-calculation");
+    assert!(
+        v.debug_bounds("activity-agent-subagent-unrelated")
+            .is_none(),
+        "another chat's agent waits behind See all"
+    );
+    click(&mut v, "activity-agents-all");
+    wait(&s, &mut v, "subagent-row-subagent-unrelated");
+    assert!(
+        v.debug_bounds("subagent-row-subagent-calculation")
+            .is_some()
+    );
+}
+
+#[gpui::test]
+fn the_subagents_tool_opens_every_agent(cx: &mut TestAppContext) {
+    let (_f, s, mut v) = setup(cx);
+    click(&mut v, "header-right-panel");
+    wait(&s, &mut v, "panel-tool-subagents");
+    click(&mut v, "panel-tool-subagents");
+    wait(&s, &mut v, "subagent-row-subagent-unrelated");
+    assert!(
+        v.debug_bounds("subagent-row-subagent-calculation")
+            .is_some()
+    );
 }

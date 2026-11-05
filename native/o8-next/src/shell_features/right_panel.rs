@@ -35,20 +35,39 @@ mod subagents_tests;
 // apps/web/src/components/ui/panel-tab-close-button.tsx at
 // 5b4f2aa1532730d4dd51d2cb48a57ff74a0f54eb.
 struct RightPanel;
-/// The agents the Subagents panel lists for the active chat or workspace.
+/// The agents the workspace's chat started: the active chat's, else the
+/// nearest chat tab's.
 pub(super) fn subagent_list(s: &Shell, cx: &App) -> Vec<crate::subagents::model::Agent> {
-    subagents::existing(s, cx).map_or_else(Vec::new, |view| view.read(cx).agents.clone())
+    subagents::chat(s, cx).map_or_else(Vec::new, |view| view.read(cx).agents.clone())
 }
-/// Opens one agent, or every agent with `None`, in the Subagents panel.
+/// How many agents the whole workspace has, whichever chat started them.
+pub(super) fn workspace_subagent_count(s: &Shell, cx: &App) -> usize {
+    s.state
+        .selected
+        .as_ref()
+        .and_then(|repo| {
+            s.features
+                .read::<subagents::Inspectors>()?
+                .workspace
+                .get(repo)
+        })
+        .map_or(0, |view| view.read(cx).agents.len())
+}
+/// Opens one of the chat's agents in the Subagents panel.
 pub(super) fn inspect_subagent(
     s: &mut Shell,
     id: Option<String>,
     window: &mut Window,
     cx: &mut Context<Shell>,
 ) {
-    if let Some(view) = subagents::current(s, cx) {
+    if let Some(view) = subagents::chat(s, cx).or_else(|| subagents::current(s, cx)) {
         view.update(cx, |view, cx| view.inspect(id, window, cx));
     }
+}
+/// Opens the Subagents panel on every agent in the workspace.
+pub(super) fn inspect_all_subagents(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    subagents::all(s, window, cx);
+    show(s, Tool::Subagents, window, cx);
 }
 register_shell_feature!(RightPanel);
 impl ShellFeature for RightPanel {
@@ -66,7 +85,7 @@ impl ShellFeature for RightPanel {
                 ensure_side_chat(s, window, cx);
                 move_inbox_tabs(s, window, cx);
                 resources::tick(s, cx);
-                subagents::tick(s, cx);
+                subagents::tick(s, super::activity_dock::is_shown(s), cx);
                 watch_shell_run(s, cx);
             },
         }]
@@ -162,6 +181,7 @@ impl Tool {
                 Tool::Devices,
                 Tool::Terminal,
                 Tool::Review,
+                Tool::Subagents,
                 Tool::Inbox,
                 Tool::Spec,
             ],
@@ -240,7 +260,7 @@ impl Tool {
             Tool::Issues => ISSUES,
             Tool::SideChat => SIDE_CHAT,
             Tool::Resources => RESOURCES,
-            Tool::Subagents => THREADS,
+            Tool::Subagents => AGENTS,
             Tool::Targeting => TARGETS,
             Tool::Prs => REVIEW,
             Tool::Compare => COLUMNS,
@@ -1202,6 +1222,7 @@ const SPEC: &str = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5 M14 3l5 5v3 M8 9h6 
 const DEVICES: &str =
     "M9 2h6a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z M10 5h4 M11 19h2";
 const THREADS: &str = "M4 4h16v13H9l-5 4V4Z M8 9h8 M8 13h5";
+const AGENTS: &str = "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75";
 const ACTIVITY: &str = "M2 12h4l3-9 6 18 3-9h4";
 const ISSUES: &str = "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18Z M12 8v5 M12 16h.01";
 const SIDE_CHAT: &str = "M11 5a8 8 0 1 0 0 16 8 8 0 1 0 0-16Z M19 2v6 M16 5h6";

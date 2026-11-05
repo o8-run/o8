@@ -2,8 +2,8 @@
 use super::*;
 use crate::subagents::{Inspector, model::Scope};
 #[derive(Default)]
-struct Inspectors {
-    workspace: std::collections::HashMap<String, Entity<Inspector>>,
+pub(super) struct Inspectors {
+    pub(super) workspace: std::collections::HashMap<String, Entity<Inspector>>,
     current: Option<Entity<Inspector>>,
     anchor: Option<(Option<String>, Option<Tab>, Option<gpui::EntityId>)>,
     return_panel: Option<ReturnPanel>,
@@ -92,6 +92,11 @@ pub(super) fn current(s: &mut Shell, cx: &mut Context<Shell>) -> Option<Entity<I
             return Some(inspector);
         }
     }
+    workspace(s, cx)
+}
+/// The workspace's own inspector: every agent it started, whichever chat
+/// started it.
+pub(super) fn workspace(s: &mut Shell, cx: &mut Context<Shell>) -> Option<Entity<Inspector>> {
     let repo = s.state.selected.clone()?;
     if let Some(view) = s.features.get::<Inspectors>().workspace.get(&repo) {
         return Some(view.clone());
@@ -171,7 +176,33 @@ pub(super) fn focus(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
         });
     }
 }
-pub(super) fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
+/// Points the panel at the workspace's whole list, as its tool buttons and
+/// the dock's See all open it.
+pub(super) fn all(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    let Some(view) = workspace(s, cx) else {
+        return;
+    };
+    view.update(cx, |view, cx| view.inspect(None, window, cx));
+    s.features.get::<Inspectors>().current = Some(view);
+}
+/// The chat the workspace is on: the active tab's, else the chat tab nearest
+/// it, so a pull request or file tab still reads that chat's agents.
+pub(super) fn chat(s: &Shell, cx: &App) -> Option<Entity<Inspector>> {
+    let workspace = s.current()?;
+    let inspector = |tab: &Tab| match s.content.get(&s.key(tab)) {
+        Some(Content::Grid(view)) => view.read(cx).shell_subagents(),
+        Some(Content::Session(view)) => view.read(cx).shell_subagents(),
+        _ => None,
+    };
+    let active = workspace.active.min(workspace.tabs.len().saturating_sub(1));
+    (0..workspace.tabs.len())
+        .flat_map(|step| [active.checked_sub(step), Some(active + step)])
+        .flatten()
+        .filter_map(|index| workspace.tabs.get(index))
+        .find_map(inspector)
+}
+/// `all` also keeps the workspace's whole list fresh, for the dock's count.
+pub(super) fn tick(s: &mut Shell, all: bool, cx: &mut Context<Shell>) {
     let primary = current(s, cx);
     let anchor = (
         s.state.selected.clone(),
@@ -185,12 +216,14 @@ pub(super) fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
         state.anchor = Some(anchor);
     }
     let mut views = primary.into_iter().collect::<Vec<_>>();
-    let state = s.features.get::<Inspectors>();
-    if let Some(view) = &state.current {
-        if !views.contains(view) {
-            views.push(view.clone());
-        }
+    if all {
+        views.extend(chat(s, cx));
+        views.extend(workspace(s, cx));
     }
+    let state = s.features.get::<Inspectors>();
+    views.extend(state.current.clone());
+    let mut seen = std::collections::HashSet::new();
+    views.retain(|view| seen.insert(view.entity_id()));
     for view in views {
         view.update(cx, |v, cx| v.tick(false, cx));
     }
