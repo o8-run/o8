@@ -32,6 +32,9 @@ pub(in crate::shell) trait Port: 'static {
     fn first(_choice: &Choice) -> bool {
         false
     }
+    /// Whether the own target replaces a requested target the list does not
+    /// hold. `false` keeps an explicit request: it shows the list instead.
+    const OWN_REPLACES_UNLISTED: bool = true;
     #[cfg(test)]
     fn ready(view: &Entity<Self::View>, cx: &App) -> bool;
 }
@@ -331,7 +334,12 @@ impl<P: Port> Render for Picker<P> {
                 OwnTarget::Ready(id) => Some(Ok(id.clone())),
                 _ => None,
             };
-            adopt(&mut self.choices, &mut self.requested, own);
+            adopt(
+                &mut self.choices,
+                &mut self.requested,
+                own,
+                P::OWN_REPLACES_UNLISTED,
+            );
             if let Some(id) = self.requested.take() {
                 self.attach(id, window, cx);
             }
@@ -348,38 +356,45 @@ impl<P: Port> Render for Picker<P> {
             .font_weight(gpui::FontWeight::LIGHT)
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key))
-            .when_some(self.child.clone(), |view, child| {
-                view.when_some(P::SWITCH, |view, label| {
-                    view.child(
-                        div()
-                            .flex()
-                            .flex_shrink_0()
-                            .justify_end()
-                            .px(px(8.))
-                            .py(px(4.))
-                            .border_b_1()
-                            .border_color(theme().border)
-                            .child(
-                                div()
-                                    .id("target-switch")
-                                    .debug_selector(|| "target-switch".into())
-                                    .cursor_pointer()
-                                    .px(px(8.))
-                                    .py(px(2.))
-                                    .rounded(px(6.))
-                                    .text_size(px(11.))
-                                    .text_color(theme().text_muted)
-                                    .hover(|v| v.bg(theme().hover).text_color(theme().text))
-                                    .child(label)
-                                    .on_click(cx.listener(|s, _, window, cx| {
-                                        s.list(window, cx);
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                })
-                .child(div().flex_1().min_h_0().child(child))
-            })
+            .when_some(
+                self.child.clone().filter(|_| P::SWITCH.is_none()),
+                |view, child| view.child(child),
+            )
+            .when_some(
+                self.child.clone().filter(|_| P::SWITCH.is_some()),
+                |view, child| {
+                    view.when_some(P::SWITCH, |view, label| {
+                        view.child(
+                            div()
+                                .flex()
+                                .flex_shrink_0()
+                                .justify_end()
+                                .px(px(8.))
+                                .py(px(4.))
+                                .border_b_1()
+                                .border_color(theme().border)
+                                .child(
+                                    div()
+                                        .id("target-switch")
+                                        .debug_selector(|| "target-switch".into())
+                                        .cursor_pointer()
+                                        .px(px(8.))
+                                        .py(px(2.))
+                                        .rounded(px(6.))
+                                        .text_size(px(11.))
+                                        .text_color(theme().text_muted)
+                                        .hover(|v| v.bg(theme().hover).text_color(theme().text))
+                                        .child(label)
+                                        .on_click(cx.listener(|s, _, window, cx| {
+                                            s.list(window, cx);
+                                            cx.notify();
+                                        })),
+                                ),
+                        )
+                    })
+                    .child(div().flex_1().min_h_0().child(child))
+                },
+            )
             .when(self.child.is_none(), |view| {
                 view.child(
                     div()
@@ -473,6 +488,7 @@ fn adopt(
     choices: &mut Vec<Choice>,
     requested: &mut Option<String>,
     own: Option<Result<String, String>>,
+    replace_unlisted: bool,
 ) {
     let Some(Ok(id)) = own else {
         return;
@@ -482,6 +498,9 @@ fn adopt(
             id: id.clone(),
             label: id.clone(),
         });
+    }
+    if requested.is_some() && !replace_unlisted {
+        return;
     }
     if !requested
         .as_ref()

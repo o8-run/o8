@@ -17,13 +17,13 @@ fn own_target_opens_when_the_saved_choice_is_not_listed() {
     // shell saved by an earlier view of the same surface.
     let mut choices = vec![];
     let mut requested = Some("owned".to_string());
-    adopt(&mut choices, &mut requested, Some(Ok("owned".into())));
+    adopt(&mut choices, &mut requested, Some(Ok("owned".into())), true);
     assert_eq!(choices.len(), 1);
     assert_eq!(requested.as_deref(), Some("owned"));
 
     let mut choices = vec![choice("other")];
     let mut requested = Some("gone".to_string());
-    adopt(&mut choices, &mut requested, Some(Ok("owned".into())));
+    adopt(&mut choices, &mut requested, Some(Ok("owned".into())), true);
     assert_eq!(requested.as_deref(), Some("owned"));
     assert_eq!(choices.len(), 2);
 }
@@ -32,16 +32,54 @@ fn own_target_opens_when_the_saved_choice_is_not_listed() {
 fn a_listed_saved_choice_stays_and_failures_change_nothing() {
     let mut choices = vec![choice("saved")];
     let mut requested = Some("saved".to_string());
-    adopt(&mut choices, &mut requested, Some(Ok("owned".into())));
+    adopt(&mut choices, &mut requested, Some(Ok("owned".into())), true);
     assert_eq!(requested.as_deref(), Some("saved"));
     assert!(choices.iter().any(|c| c.id == "owned"));
 
     let mut choices = vec![choice("saved")];
     let mut requested = None;
-    adopt(&mut choices, &mut requested, Some(Err("down".into())));
-    adopt(&mut choices, &mut requested, None);
+    adopt(&mut choices, &mut requested, Some(Err("down".into())), true);
+    adopt(&mut choices, &mut requested, None, true);
     assert_eq!(requested, None);
     assert_eq!(choices.len(), 1);
+}
+
+#[test]
+fn an_explicit_request_is_kept_when_the_own_target_must_not_replace_it() {
+    // Review: a packet asked for by name is not swapped for working changes.
+    let mut choices = vec![choice("listed")];
+    let mut requested = Some("archived-packet".to_string());
+    adopt(
+        &mut choices,
+        &mut requested,
+        Some(Ok("owned".into())),
+        false,
+    );
+    assert_eq!(requested.as_deref(), Some("archived-packet"));
+    assert!(choices.iter().any(|c| c.id == "owned"), "still listed");
+    // Nothing asked for: the own target opens.
+    let mut requested = None;
+    adopt(
+        &mut choices,
+        &mut requested,
+        Some(Ok("owned".into())),
+        false,
+    );
+    assert_eq!(requested.as_deref(), Some("owned"));
+}
+
+#[test]
+fn working_changes_stay_listed_when_packets_cannot_be_read() {
+    let dead = crate::shell::settings::machine_links::dead_client();
+    let choices = <crate::shell::diff::PacketDiff as Port>::choices(&dead, "/work/repo").unwrap();
+    assert_eq!(
+        choices.iter().map(|c| c.label.as_str()).collect::<Vec<_>>(),
+        ["Working changes"]
+    );
+    assert!(
+        <crate::shell::diff::PacketDiff as Port>::choices(&dead, "").is_err(),
+        "no workspace, nothing to list"
+    );
 }
 
 /// Scripted replies belong to one workspace; the real Picker owns scheduling.
@@ -519,4 +557,78 @@ fn review_opens_on_the_working_changes_and_switches_to_packets(cx: &mut TestAppC
     });
     assert_eq!(labels.first().map(String::as_str), Some("Working changes"));
     assert!(labels.len() > 1, "packets stay listed: {labels:?}");
+    // Picking a packet from the list opens its diff.
+    let packet = view.read_with(cx, |v, _| v.choices[1].id.clone());
+    let row = cx.debug_bounds("target-1").unwrap();
+    cx.simulate_click(row.center(), gpui::Modifiers::default());
+    settled(&shell, cx);
+    let (_, target) = review_target(&shell, cx);
+    assert!(
+        matches!(&target, Some(crate::diff::Target::Packet(id)) if *id == packet),
+        "{target:?}"
+    );
+}
+
+/// The Review view and its attached diff's target, once settled.
+fn review_target(
+    shell: &Entity<Shell>,
+    cx: &mut VisualTestContext,
+) -> (
+    Entity<Picker<crate::shell::diff::PacketDiff>>,
+    Option<crate::diff::Target>,
+) {
+    let view = shell.read_with(cx, |s, _| match &s.content[&s.key(&Tab::Diff)] {
+        Content::Diff(v) => v.clone(),
+        _ => panic!("diff"),
+    });
+    let target = view.read_with(cx, |v, cx| {
+        v.child.as_ref().map(|child| child.read(cx).target.clone())
+    });
+    (view, target)
+}
+
+#[gpui::test]
+fn review_opens_a_requested_packet_and_never_swaps_an_unlisted_one(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--review");
+    for (packet, listed) in [("next-review-approve", true), ("archived-elsewhere", false)] {
+        let (shell, mut visual) = open(
+            fixture.client.clone(),
+            fixture.root.join(format!("requested-{packet}.json")),
+            State::default(),
+            cx,
+        );
+        let cx = &mut visual;
+        ready(&shell, cx);
+        // A restored packet, or one Activity opens, arrives as the saved slice.
+        shell.update_in(cx, |s, window, cx| {
+            s.state
+                .workspaces
+                .get_mut(s.state.selected.as_deref().unwrap())
+                .unwrap()
+                .surfaces
+                .diff
+                .diff_packet = Some(packet.into());
+            s.execute(Command::Diff, window, cx);
+        });
+        settled(&shell, cx);
+        let (view, target) = review_target(&shell, cx);
+        if listed {
+            assert!(
+                matches!(&target, Some(crate::diff::Target::Packet(id)) if id == packet),
+                "a listed packet opens"
+            );
+        } else {
+            assert!(
+                target.is_none(),
+                "an unlisted packet is not swapped for working changes"
+            );
+            assert!(
+                cx.debug_bounds("target-picker").is_some(),
+                "the list shows instead"
+            );
+            assert!(view.read_with(cx, |v, _| {
+                v.choices.iter().any(|c| c.label == "Working changes")
+            }));
+        }
+    }
 }

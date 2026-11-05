@@ -61,10 +61,17 @@ impl Port for PacketDiff {
     const TITLE: &'static str = "Packets";
     const EMPTY: &'static str = "No packets";
     const SWITCH: Option<&'static str> = Some("Working changes and packets");
+    /// Working changes do not depend on packets: a failed packet read still
+    /// lists them.
     fn choices(client: &Client, workspace: &str) -> Result<Vec<Choice>, String> {
-        let mut choices = client.shell_packets(workspace)?;
-        choices.extend(working(workspace));
-        Ok(choices)
+        match (client.shell_packets(workspace), working(workspace)) {
+            (Ok(mut choices), working) => {
+                choices.extend(working);
+                Ok(choices)
+            }
+            (Err(_), Some(working)) => Ok(vec![working]),
+            (Err(error), None) => Err(error),
+        }
     }
     /// Review opens on the working changes when no packet is restored.
     fn own(_client: &Client, workspace: &str) -> Option<Result<String, String>> {
@@ -73,6 +80,9 @@ impl Port for PacketDiff {
     fn first(choice: &Choice) -> bool {
         choice.id.starts_with(WORKING)
     }
+    /// A packet asked for by name (restored, or opened from Activity) that
+    /// is not listed shows the list, never the working changes instead.
+    const OWN_REPLACES_UNLISTED: bool = false;
     fn create(
         client: Client,
         id: String,
