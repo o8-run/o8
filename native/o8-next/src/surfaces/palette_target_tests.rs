@@ -869,7 +869,7 @@ fn review_stack_fits_a_narrow_pane(cx: &mut TestAppContext) {
     );
     // Narrow, the drawer starts hidden and the stack has the pane.
     assert!(cx.debug_bounds("diff-drawer-column").is_none());
-    // Each row stays one line tall and scrolls sideways instead of wrapping.
+    // As in classic Review with Word wrap on, a long row wraps in the pane.
     let row = |n: usize| -> &'static str {
         Box::leak(format!("review-file-{i}-diff-row-{n}").into_boxed_str())
     };
@@ -897,10 +897,14 @@ fn review_stack_fits_a_narrow_pane(cx: &mut TestAppContext) {
         content.size.width,
         content.size.height
     );
-    assert!(hunk.size.height <= gpui::px(18.5) && content.size.height <= gpui::px(18.5));
+    assert!(hunk.size.height <= gpui::px(19.5), "the hunk header is one line");
     assert!(
-        content.size.width > stack.size.width,
-        "the row keeps its width"
+        content.size.height > gpui::px(40.),
+        "the long line wraps: {content:?}"
+    );
+    assert!(
+        content.size.width <= stack.size.width + gpui::px(1.),
+        "the row fits the stack, nothing scrolls sideways"
     );
     assert!(
         stack.size.width > drawer.size.width,
@@ -918,6 +922,42 @@ fn review_stack_fits_a_narrow_pane(cx: &mut TestAppContext) {
     settled(&shell, cx);
     assert!(cx.debug_bounds("diff-drawer-column").is_none());
     assert!(cx.debug_bounds(row(1)).is_some());
+    // Split wraps each side in its half too.
+    let split = cx.debug_bounds("diff-split").unwrap();
+    cx.simulate_click(split.center(), gpui::Modifiers::default());
+    settled(&shell, cx);
+    let stack = cx.debug_bounds("diff-stack").unwrap();
+    let side: &'static str = Box::leak(format!("review-file-{i}-diff-side").into_boxed_str());
+    let side = cx.debug_bounds(side).expect("split rows");
+    let content = cx.debug_bounds(row(1)).expect("split content row");
+    assert!(
+        side.size.width <= stack.size.width + gpui::px(1.),
+        "split fits the stack: {side:?} in {stack:?}"
+    );
+    assert!(
+        content.size.height > gpui::px(40.),
+        "the long line wraps in its half: {content:?}"
+    );
+    // Each side keeps exactly half the row, the empty one too, and fills the
+    // row's height, so the wrapped side never paints past its row.
+    for half in ["old", "new"] {
+        let id: &'static str =
+            Box::leak(format!("review-file-{i}-diff-row-1-{half}").into_boxed_str());
+        let half = cx.debug_bounds(id).expect("split half");
+        assert!(
+            (half.size.width - content.size.width / 2.).abs() <= gpui::px(1.),
+            "{id} is half the row: {half:?} of {content:?}"
+        );
+        assert!(
+            (half.size.height - content.size.height).abs() <= gpui::px(0.5),
+            "{id} fills the row: {half:?} of {content:?}"
+        );
+    }
+    let next = cx.debug_bounds(row(2)).expect("the row after it");
+    assert!(
+        next.top() >= content.bottom() - gpui::px(0.5),
+        "rows stack without overlapping: {content:?} then {next:?}"
+    );
 }
 
 #[gpui::test]

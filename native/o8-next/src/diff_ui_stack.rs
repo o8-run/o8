@@ -1,5 +1,6 @@
-//! Review's working changes: every changed file stacked as a collapsible card
-//! on the shared diff rows, beside a files drawer that jumps to a file.
+//! Review's working changes: every changed file stacked as a collapsible row
+//! on the shared diff rows, beside a files drawer that jumps to a file. As in
+//! classic Review, the files are a flat list and long lines wrap.
 //!
 //! Stacked rows are not virtualized, so the stack bounds what it draws: an
 //! open file draws at most `LARGE` rows, and files open by themselves only
@@ -19,10 +20,6 @@ pub(super) const DRAWER: gpui::Pixels = px(210.);
 const NARROW: gpui::Pixels = px(640.);
 /// The stack never gets narrower than this beside the drawer.
 const STACK_MIN: gpui::Pixels = px(220.);
-/// One monospace character of a diff row, with room to spare.
-const CHAR: f32 = 7.;
-/// A row's line-number gutter and padding.
-const GUTTER: f32 = 76.;
 
 /// Each file's hunks, in the order `diff::parse` lists the files: one entry
 /// per `diff --git` header, from its first hunk on. A file without hunks
@@ -94,11 +91,14 @@ pub(super) fn fits(rows: &[usize]) -> Vec<bool> {
         .collect()
 }
 
-fn status(file: &diff::File) -> String {
+/// What a file's row says besides its counts; a plain modification says
+/// nothing, as in classic.
+fn status(file: &diff::File) -> Option<String> {
     match file.status.as_str() {
-        "deleted" => "removed".into(),
-        "renamed" => format!("renamed from {}", file.old_path),
-        status => status.into(),
+        "modified" => None,
+        "deleted" => Some("removed".into()),
+        "renamed" => Some(format!("renamed from {}", file.old_path)),
+        status => Some(status.into()),
     }
 }
 
@@ -291,8 +291,6 @@ impl DiffSurface {
             .track_scroll(&self.stack_scroll)
             .flex()
             .flex_col()
-            .gap(px(6.))
-            .px(px(12.))
             .pb(px(18.));
         if shown.is_empty() && self.scope != Scope::All {
             cards = cards.child(note(
@@ -308,7 +306,8 @@ impl DiffSurface {
             let header = div()
                 .id(("diff-stack-file", i))
                 .debug_selector(move || format!("diff-stack-file-{i}"))
-                .px(px(10.))
+                .pl(px(12.))
+                .pr(px(14.))
                 .py(px(8.))
                 .flex()
                 .items_center()
@@ -327,16 +326,16 @@ impl DiffSurface {
                         .min_w_0()
                         .truncate()
                         .font_family(theme().font_mono)
-                        .text_size(px(11.5))
+                        .text_size(px(12.))
                         .child(file.path.clone()),
                 )
-                .child(
+                .children(status(file).map(|status| {
                     div()
                         .flex_shrink_0()
-                        .text_size(px(10.5))
-                        .text_color(theme().text_muted)
-                        .child(status(file)),
-                )
+                        .text_size(px(10.))
+                        .text_color(theme().text_faint)
+                        .child(status)
+                }))
                 .child(
                     div()
                         .text_size(px(11.))
@@ -355,10 +354,8 @@ impl DiffSurface {
                 }));
             let mut card = div()
                 .flex_shrink_0()
-                .rounded(px(10.))
-                .border_1()
+                .border_b_1()
                 .border_color(theme().border)
-                .overflow_hidden()
                 .child(header);
             let body = if lines.is_empty() {
                 open.then(|| {
@@ -371,20 +368,14 @@ impl DiffSurface {
                 })
             } else if open {
                 let shown = &lines[..lines.len().min(LARGE)];
-                let mut scroll = div().id(("diff-stack-body", i)).overflow_x_scroll();
-                // A vertical wheel over a wide file scrolls the stack.
-                scroll.style().restrict_scroll_to_axis = Some(true);
-                // Rows never wrap: they keep their full width and scroll
-                // sideways inside the card, however narrow the pane.
-                let chars = shown
-                    .iter()
-                    .map(|line| line.text.chars().count())
-                    .max()
-                    .unwrap_or(0) as f32;
-                let width = (chars * CHAR + GUTTER) * if self.split { 2. } else { 1. };
-                let rows = scroll.child(div().min_w(px(width)).whitespace_nowrap().child(
-                    file_diff::rows(shown, self.split, &format!("review-file-{i}")),
-                ));
+                // Long lines wrap inside the pane, so nothing scrolls sideways.
+                let rows = div()
+                    .id(("diff-stack-body", i))
+                    .child(file_diff::wrapped_rows(
+                        shown,
+                        self.split,
+                        &format!("review-file-{i}"),
+                    ));
                 Some(if shown.len() < lines.len() {
                     div()
                         .child(rows)

@@ -62,6 +62,24 @@ pub(crate) struct DiffSurface {
     /// The working changes to go back to from one file's full view.
     pub(crate) stack_target: Option<Target>,
 }
+/// The line under Review's header once a diff is read. Working changes
+/// are never approved, so a part that didn't read cleanly (a hunk read while
+/// a file was being rewritten falls short) still shows, with a Refresh hint;
+/// a packet keeps its approval gate.
+pub(crate) fn notice(target: &Target, document: &Document, label: String) -> String {
+    if document.truncated {
+        "Diff truncated by server. Approval disabled; inspect a smaller worktree diff.".into()
+    } else if !document.unsupported {
+        label
+    } else if let Target::Worktree { .. } = target {
+        format!(
+            "{label} · Part of this diff didn't read cleanly, so it shows as read. Refresh to read it again."
+        )
+    } else {
+        "Unsupported patch format. Review disabled; use a plain unified Git diff.".into()
+    }
+}
+
 impl DiffSurface {
     pub(crate) fn new(
         client: Client,
@@ -145,11 +163,7 @@ impl DiffSurface {
                         } else {
                             this.select_file(0, cx);
                         }
-                        this.notice = if this.document.truncated {
-                            "Diff truncated by server. Approval disabled; inspect a smaller worktree diff.".into()
-                        } else if this.document.unsupported {
-                            "Unsupported patch format. Review disabled; use a plain unified Git diff.".into()
-                        } else { this.state_label() };
+                        this.notice = notice(&this.target, &this.document, this.state_label());
                     }
                     Err(error) => {
                         this.notice = error;

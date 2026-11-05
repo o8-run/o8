@@ -358,3 +358,86 @@ fn diff_parser_highlights_languages_preserves_bytes_and_pairs_changes() {
         assert!(crate::diff::parse(patch).unsupported);
     }
 }
+
+/// A real `git diff` under `diff.suppressBlankEmpty` writes a blank context
+/// line as an empty line; it is still context, not an unsupported patch.
+#[test]
+fn a_blank_context_line_without_its_space_still_reads() {
+    let dir = std::env::temp_dir().join(format!("o8-diff-blank-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    git(&["init", "-q"]);
+    std::fs::write(dir.join("notes.md"), "# Notes\n\nfirst\n\nsecond\n").unwrap();
+    git(&["add", "-A"]);
+    git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-qm",
+        "init",
+    ]);
+    std::fs::write(dir.join("notes.md"), "# Notes\n\nfirst, edited\n\nsecond\n").unwrap();
+    let patch = git(&["-c", "diff.suppressBlankEmpty=true", "diff", "--no-color"]);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        patch.lines().any(str::is_empty),
+        "git wrote a bare blank line:\n{patch}"
+    );
+    let document = crate::diff::parse(&patch);
+    assert!(!document.unsupported, "{patch}");
+    let file = &document.files[0];
+    let blank: Vec<_> = file
+        .lines
+        .iter()
+        .filter(|line| line.kind == crate::diff::Kind::Context && line.text.is_empty())
+        .map(|line| (line.old, line.new))
+        .collect();
+    assert_eq!(blank, [(Some(2), Some(2)), (Some(4), Some(4))]);
+}
+
+/// A hunk whose header counts are off by one (read while the file was being
+/// rewritten) still shows every line, with line numbers that only go up. On
+/// working changes the notice offers Refresh; a packet stays unapprovable.
+#[test]
+fn a_hunk_with_counts_off_by_one_shows_in_order_and_offers_refresh() {
+    let patch = "diff --git a/o8.md b/o8.md\n--- a/o8.md\n+++ b/o8.md\n@@ -1,2 +1,2 @@\n keep\n-old\n+new\n tail\n";
+    let document = crate::diff::parse(patch);
+    assert!(document.unsupported, "the counts don't add up");
+    let lines = &document.files[0].lines;
+    let texts: Vec<_> = lines.iter().skip(1).map(|l| l.text.as_str()).collect();
+    assert_eq!(texts, ["keep", "old", "new", "tail"]);
+    let rising = |side: Vec<usize>| side.windows(2).all(|w| w[0] < w[1]);
+    assert!(rising(lines.iter().filter_map(|l| l.old).collect()));
+    assert!(rising(lines.iter().filter_map(|l| l.new).collect()));
+    // The stack's rows number the same way, old and new in their own columns.
+    let rows = crate::files_panel::file_diff::parse("@@ -1,2 +1,2 @@\n keep\n-old\n+new\n tail");
+    assert!(rising(rows.iter().filter_map(|l| l.old).collect()));
+    assert!(rising(rows.iter().filter_map(|l| l.new).collect()));
+
+    let working = Target::Worktree {
+        path: "/repo".into(),
+        base: None,
+        file: None,
+    };
+    let shown = crate::diff_ui::notice(&working, &document, "Working changes · 1 file".into());
+    assert!(!shown.contains("Review disabled"), "{shown}");
+    assert!(
+        shown.starts_with("Working changes · 1 file") && shown.contains("Refresh"),
+        "{shown}"
+    );
+    let packet = Target::Packet("p1".into());
+    let shown = crate::diff_ui::notice(&packet, &document, String::new());
+    assert!(shown.contains("Review disabled"), "{shown}");
+}

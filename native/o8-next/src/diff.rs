@@ -282,6 +282,14 @@ pub fn parse(patch: &str) -> Document {
                     new += 1;
                 }
                 Some(b'\\') => add(Kind::Meta, source, None, None),
+                // With `diff.suppressBlankEmpty`, Git writes an empty context
+                // line as an empty line rather than a lone space.
+                None if remaining.0 > 0 && remaining.1 > 0 => {
+                    remaining = (remaining.0 - 1, remaining.1 - 1);
+                    add(Kind::Context, "", Some(old), Some(new));
+                    old += 1;
+                    new += 1;
+                }
                 _ => document.unsupported |= !source.is_empty(),
             }
         } else if let Some(value) = source.strip_prefix("--- ") {
