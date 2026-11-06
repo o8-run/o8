@@ -466,6 +466,7 @@ impl Surface {
             self.drafts.insert(id.clone(), editor);
         }
         self.composer = self.drafts[&id].clone();
+        self.restore_shell_run(cx);
         self.following = None;
         self.routing = None;
         self.queue_ready = false;

@@ -68,6 +68,24 @@ pub(crate) fn take_prompt_draft(path: Option<&Path>) -> Result<Option<PromptDraf
         .map_err(|_| "The restored prompt could not be marked as opened.".to_owned())?;
     Ok(Some(draft))
 }
+/// The thread's last finished `!` card, beside its mode; none clears it.
+pub(crate) fn save_shell_run(
+    path: Option<&Path>,
+    run: Option<&super::shell::SavedRun>,
+) -> Result<(), String> {
+    let path = path.map(|p| p.with_extension("shell.json"));
+    let text = match run {
+        Some(run) => serde_json::to_string(run).map_err(|e| e.to_string())?,
+        None => String::new(),
+    };
+    save(path.as_deref(), &text)
+        .map_err(|_| "The shell card could not be kept for the next launch.".into())
+}
+pub(crate) fn load_shell_run(path: Option<&Path>) -> Option<super::shell::SavedRun> {
+    let path = path.map(|p| p.with_extension("shell.json"));
+    let text = load_text(path.as_deref(), 1024 * 1024).filter(|t| !t.is_empty())?;
+    serde_json::from_str(&text).ok()
+}
 /// Cmd-S drafts for this thread, oldest first, beside its mode and prelude.
 pub(crate) fn save_stash(
     path: Option<&Path>,
