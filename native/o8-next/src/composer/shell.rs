@@ -35,6 +35,24 @@ pub(crate) struct ShellRun {
     /// Its echo or terminal went away before its prompt came back; the card
     /// keeps what it last read and stops following.
     pub lost: bool,
+    /// The thread's store this card is saved beside once it finishes.
+    pub store: Option<std::path::PathBuf>,
+    /// Read back from the store after a relaunch: its terminal is gone, so
+    /// Add to chat uses the output kept with the card.
+    pub restored: bool,
+}
+
+/// A finished card as kept beside the thread's mode and drafts, so it is
+/// still there after the app restarts (#5304). Never sent to the agent.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SavedRun {
+    pub line: String,
+    pub output: Vec<String>,
+    pub took_ms: u64,
+    pub exit: Option<i32>,
+    pub stopped: bool,
+    pub lost: bool,
 }
 
 impl ShellRun {
@@ -49,6 +67,43 @@ impl ShellRun {
             exit: None,
             seen: false,
             lost: false,
+            store: None,
+            restored: false,
+        }
+    }
+    /// The card to keep once it has finished, with the same output bound as
+    /// Add to chat; none while it still runs.
+    pub fn saved(&self) -> Option<SavedRun> {
+        let took = self.took?;
+        let mut output = self.output[self.output.len().saturating_sub(OUTPUT_LINES)..].to_vec();
+        let mut chars: usize = output.iter().map(|line| line.chars().count() + 1).sum();
+        while chars > OUTPUT_CHARS && output.len() > 1 {
+            chars -= output.remove(0).chars().count() + 1;
+        }
+        Some(SavedRun {
+            line: self.line.clone(),
+            output,
+            took_ms: took.as_millis().min(u64::MAX as u128) as u64,
+            exit: self.exit,
+            stopped: self.stopped,
+            lost: self.lost,
+        })
+    }
+    /// A kept card, finished as it was saved.
+    pub fn restore(saved: SavedRun, store: Option<std::path::PathBuf>, now: Instant) -> Self {
+        let took = Duration::from_millis(saved.took_ms);
+        Self {
+            line: saved.line,
+            stopped: saved.stopped,
+            started: now.checked_sub(took).unwrap_or(now),
+            before: None,
+            output: saved.output,
+            took: Some(took),
+            exit: saved.exit,
+            seen: true,
+            lost: saved.lost,
+            store,
+            restored: true,
         }
     }
     pub fn running(&self) -> bool {

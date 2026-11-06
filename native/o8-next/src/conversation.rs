@@ -148,10 +148,10 @@ impl Surface {
                 && let Some(window) = input.controls.slash.window
             {
                 let line = line.to_owned();
-                self.shell_run = Some(crate::composer::shell::ShellRun::new(
-                    line.clone(),
-                    std::time::Instant::now(),
-                ));
+                let mut run =
+                    crate::composer::shell::ShellRun::new(line.clone(), std::time::Instant::now());
+                run.store = input.controls.prompt.store.clone();
+                self.shell_run = Some(run);
                 editor.update(cx, |i, cx| i.set_text("", cx));
                 let view = cx.entity().downgrade();
                 cx.defer(move |cx| {

@@ -497,6 +497,25 @@ fn follow(
 }
 
 #[gpui::test]
+fn panel_chrome_shell_card_is_kept_with_its_thread_once_it_finishes(cx: &mut TestAppContext) {
+    let root = crate::shell::test_support::scratch_path("o8-shell-card-kept");
+    cx.update(|cx| cx.set_global(crate::composer::mode_store::TestRoot(root)));
+    let (_f, s, composer, _pane, mut v) = bang_line(cx, "ticks");
+    assert!(
+        composer.read_with(&v, |c, cx| c.shell_saved(cx)).is_none(),
+        "nothing is kept while it runs"
+    );
+    follow(&s, &composer, &mut v, |run| !run.running());
+    let saved = composer
+        .read_with(&v, |c, cx| c.shell_saved(cx))
+        .expect("a finished card is kept for the next launch");
+    assert_eq!(saved.line, "ticks");
+    assert_eq!(saved.output, ["tick 1", "tick 2 on stderr", "tick 3"]);
+    assert_eq!(saved.exit, Some(3));
+    assert!(saved.took_ms >= 1_000, "{saved:?}");
+}
+
+#[gpui::test]
 fn panel_chrome_shell_card_streams_output_clock_and_exit(cx: &mut TestAppContext) {
     let (_f, s, composer, _pane, mut v) = bang_line(cx, "ticks");
     follow(&s, &composer, &mut v, |run| {

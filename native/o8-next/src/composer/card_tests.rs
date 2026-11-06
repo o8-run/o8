@@ -10,6 +10,8 @@ mod prompt_acceptance_tests;
 mod prompt_persistence_tests;
 #[path = "prompt_tests.rs"]
 mod prompt_tests;
+#[path = "shell_persist_tests.rs"]
+mod shell_persist_tests;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 
 #[test]

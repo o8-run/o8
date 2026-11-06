@@ -46,7 +46,15 @@ impl Surface {
         });
         let add =
             self.shell_run_button("composer-shell-add", "Add to chat", cx, |s, window, cx| {
-                if let Some(run) = &s.shell_run {
+                // After a relaunch the terminal is gone: use the kept output.
+                let kept = (s.shell_run.as_ref())
+                    .filter(|run| run.restored)
+                    .map(|run| chat_block(&run.line, &run.output, !run.lost));
+                if let Some(block) = kept {
+                    let draft = with_block(&s.composer.read(cx).text, &block);
+                    s.composer.update(cx, |i, cx| i.set_text(&draft, cx));
+                    s.clear_shell_run(cx);
+                } else if let Some(run) = &s.shell_run {
                     crate::ui::add_shell_output(
                         run.line.clone(),
                         cx.entity().downgrade(),
@@ -61,13 +69,16 @@ impl Surface {
             }
         });
         let dismiss = self.shell_run_button("composer-shell-dismiss", "Dismiss", cx, |s, _, cx| {
-            s.shell_run = None;
-            cx.notify();
+            s.clear_shell_run(cx);
         });
         let mono = |text: String, color| {
             div()
+                .w_full()
                 .min_w_0()
-                .truncate()
+                // Clip, not ellipsis: the ellipsis was measured at min-content
+                // width and left every short line as "…".
+                .overflow_hidden()
+                .whitespace_nowrap()
                 .font_family(theme().font_mono)
                 .text_size(px(11.5))
                 .text_color(color)
@@ -88,10 +99,14 @@ impl Surface {
                 .rounded(px(8.))
                 .bg(theme().surface_raised)
                 .child(
+                    // The status never shrinks: in a narrow column the buttons
+                    // wrap to their own row instead of clipping it.
                     div()
                         .flex()
+                        .flex_wrap()
                         .items_center()
-                        .gap(px(8.))
+                        .gap_x(px(8.))
+                        .gap_y(px(4.))
                         .child(crate::icon::stroke(
                             SHELL_GLYPH,
                             theme().text_muted,
@@ -108,23 +123,32 @@ impl Surface {
                         .child(
                             div()
                                 .debug_selector(move || format!("composer-shell-status-{state}"))
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
+                                .flex_shrink_0()
+                                .whitespace_nowrap()
                                 .text_size(px(11.))
                                 .text_color(theme().text_muted)
                                 .child(status),
                         )
-                        .children(stop)
-                        .child(add)
-                        .child(copy)
-                        .child(dismiss),
+                        .child(
+                            div()
+                                .debug_selector(|| "composer-shell-actions".into())
+                                .ml_auto()
+                                .flex_shrink_0()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .children(stop)
+                                .child(add)
+                                .child(copy)
+                                .child(dismiss),
+                        ),
                 )
                 .child(mono(format!("$ {}", run.line), theme().text_secondary))
                 .when(!tail.is_empty(), |card| {
                     card.child(
                         div()
                             .debug_selector(|| "composer-shell-output".into())
+                            .w_full()
                             .flex()
                             .flex_col()
                             .children(tail.into_iter().map(|line| mono(line, theme().text))),
@@ -179,7 +203,17 @@ impl Surface {
         let Some(run) = self.shell_run.as_mut().filter(|run| run.line == line) else {
             return false;
         };
+        let was_running = run.running();
         run.read(output, mark, std::time::Instant::now());
+        // A finished card is kept with its thread for the next launch.
+        if was_running && !run.running() {
+            let saved = run.saved();
+            if let Err(error) =
+                crate::composer::mode_store::save_shell_run(run.store.as_deref(), saved.as_ref())
+            {
+                self.notice = error;
+            }
+        }
         // The elapsed clock moves on every read while the line runs.
         cx.notify();
         run.running()
@@ -203,7 +237,36 @@ impl Surface {
         let block = chat_block(line, &output.lines, output.finished);
         let draft = with_block(&self.composer.read(cx).text, &block);
         self.composer.update(cx, |i, cx| i.set_text(&draft, cx));
-        self.shell_run = None;
+        self.clear_shell_run(cx);
+    }
+    /// The card goes away here and from the thread's store.
+    fn clear_shell_run(&mut self, cx: &mut Context<Self>) {
+        if let Some(run) = self.shell_run.take()
+            && let Err(error) =
+                crate::composer::mode_store::save_shell_run(run.store.as_deref(), None)
+        {
+            self.notice = error;
+        }
         cx.notify();
+    }
+    /// Selecting a thread brings back its kept card; a live run stays put.
+    pub(crate) fn restore_shell_run(&mut self, cx: &mut Context<Self>) {
+        let store = self.composer.read(cx).controls.prompt.store.clone();
+        if self
+            .shell_run
+            .as_ref()
+            .is_some_and(|run| run.running() || run.store == store)
+        {
+            return;
+        }
+        self.shell_run =
+            crate::composer::mode_store::load_shell_run(store.as_deref()).map(|saved| {
+                crate::composer::shell::ShellRun::restore(saved, store, std::time::Instant::now())
+            });
+    }
+    #[cfg(test)]
+    pub(crate) fn shell_saved(&self, cx: &gpui::App) -> Option<crate::composer::shell::SavedRun> {
+        let store = self.composer.read(cx).controls.prompt.store.clone();
+        crate::composer::mode_store::load_shell_run(store.as_deref())
     }
 }
