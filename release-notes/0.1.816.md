@@ -1,0 +1,16 @@
+- Workers show up beside your chat. Each working agent gets its own pane in an automatic grid with its live transcript and a steer box, and the grid drops columns to keep cards readable. Close a pane and that worker stays out.
+- Work without a project: pick it from the project menu or the palette, and agents start in your home folder instead of a repository.
+- Projects are cards. A project's page shows the instructions every agent in it reads, the repositories in it, and the ones you can add.
+- Review opens on your working changes, stacks every changed file with a files drawer, and scopes to all changes, the last turn, staged or unstaged. Long lines wrap, old and new line numbers have their own columns, and you can commit, push and open a pull request from there.
+- When the main pane's last tab closes, the chat beside it takes its place instead of leaving an empty pane you can't dismiss.
+- The Activity dock lists this chat's agents with See all, keeps steady icons, and scopes Ports and its badge to this workspace.
+- Composer: @ mentions files, threads, agents, worktrees, scripts and terminals; a ! line runs in the terminal with its output, clock and exit code; drafts survive a restart; and a changed-files pill sits above it.
+- Model pickers offer Sonnet 5.5 and Haiku 5.5.
+- Mission cards send your decisions back to the lead, and subagents read as a roster with what each is doing.
+- Mermaid diagrams render natively in replies, including ER, gitgraph, gantt, mindmap, state, class and pie, with zoom and pan.
+- Resources shows each saved machine's CPU, memory, disk and network, and a machine's threads and workers sit beside your own.
+- Appearance gains UI and code font pickers, a chat width, and themes with VS Code theme import. Shortcuts can be rebound per machine or everywhere.
+- Settings can be scoped per project and per machine, and has MCP and Mobile pages.
+- Open a thread or project in your editor from its header or the project menu.
+- The Files editor stays smooth on files with a million lines.
+- Cost estimates use Anthropic's current prices, including Sonnet 5.5, Haiku 5.5, Opus 5 and fast mode, from one shared price table across the app, the proxy and mobile.
