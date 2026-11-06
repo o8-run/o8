@@ -5359,6 +5359,12 @@
       ]
     },
     {
+      "path": "tests/o8d-tasks-read-only-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/onboarding-runtime-picker-real-path.test.ts",
       "reasons": [
         "real-path"

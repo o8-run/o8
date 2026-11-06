@@ -9645,6 +9645,8 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 // managed by the stall detector and lifecycle system.
 
 async function bootstrapWsServer() {
+  const { initializeProjectsLedger } = await import('@/lib/repos/projects');
+  await initializeProjectsLedger();
   if (o8dBridge) {
     await o8dBridge.start();
   } else {

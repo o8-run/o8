@@ -9,6 +9,7 @@ import { cutoverClient } from './fixtures/ws-cutover-client';
 const binary = process.env.O8D_BINARY ?? process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
 // A1 reads: exercise the gate and original handler through the public socket.
 const NATIVE_READS = [
+  ['session', '/api/tasks?includeDone=true&includeBrief=true', 200],
   ['session', '/api/panel/branches', 400],
   ['diff', '/api/panel/commits/[hash]', 400],
   ['session', '/api/panel/files', 200],
@@ -39,6 +40,9 @@ let origin: string;
 beforeAll(async () => {
   if (!process.env.O8D_BINARY && !process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
   server = await startParityReference({ o8d: true, binary, nativeHttp: true, startupTimeoutMs: 120_000 });
+  // The fixture Next server has no project route; startup must own this write.
+  expect(JSON.parse(readFileSync(join(server.directory, 'projects.json'), 'utf8')))
+    .toMatchObject({ activeProjectId: 'default', projects: [{ id: 'default' }] });
   origin = server.url.replace('ws:', 'http:').replace('/ws', '');
   await server.stopNext();
 }, 180_000);

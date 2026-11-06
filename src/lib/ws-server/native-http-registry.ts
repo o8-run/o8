@@ -29,6 +29,7 @@ const repositoryRead = (load: Route['load']): Route['load'] => async () => ({
 // Each route loads its own implementation; unrelated surfaces stay cold.
 export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
+    route('/api/tasks', 'GET', () => import('@/app/api/tasks/route')),
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
     route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/panel/branches', 'GET', repositoryRead(() => import('@/app/api/panel/branches/route'))),

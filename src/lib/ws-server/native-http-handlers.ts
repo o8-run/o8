@@ -1,4 +1,5 @@
 /** Named handler exports for the lazy native shell transport; retain existing route auth. */
+import { GET as api_tasks_GET } from '@/app/api/tasks/route';
 import { GET as api_mobile_orchestrator_threads_GET } from '@/app/api/mobile/orchestrator/threads/route';
 import { GET as api_orchestrator_state_GET, PATCH as api_orchestrator_state_PATCH } from '@/app/api/orchestrator/state/route';
 import { GET as api_lanes_GET } from '@/app/api/lanes/route';
@@ -96,6 +97,7 @@ import { GET as api_setup_cli_updates_GET } from '@/app/api/setup/cli-updates/ro
 import { GET as api_panel_o8_update_summary_GET } from '@/app/api/panel/o8-update-summary/route';
 import { GET as api_panel_problem_dossiers_GET } from '@/app/api/panel/problem-dossiers/route';
 
+export const api_tasks = { GET: api_tasks_GET };
 export const api_mobile_orchestrator_threads = { GET: api_mobile_orchestrator_threads_GET };
 export const api_orchestrator_state = { GET: api_orchestrator_state_GET, PATCH: api_orchestrator_state_PATCH };
 export const api_lanes = { GET: api_lanes_GET };

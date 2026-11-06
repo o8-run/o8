@@ -42,6 +42,7 @@ const { panelGateMiddleware } = await import('@/middleware');
 const { handleOperatorMcpMessage } = await import('@/lib/mcp/operator-mcp-host');
 const { setApiBase } = await import('@/lib/mcp/operator-handlers/shared');
 const { closeDb, getSqlite } = await import('@/lib/db');
+const { initializeProjectsLedger } = await import('@/lib/repos/projects');
 const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
 let port = 0;
 let repoId: string;
@@ -80,6 +81,8 @@ const create = (extra: Record<string, unknown> = {}) => call('create_mission', {
 });
 
 beforeAll(async () => {
+  // Match ws-server startup; project reads no longer bootstrap the ledger.
+  await initializeProjectsLedger();
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   port = (server.address() as { port: number }).port;
   setApiBase(`http://127.0.0.1:${port}`);
