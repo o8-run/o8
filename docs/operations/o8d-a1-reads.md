@@ -1,7 +1,7 @@
 # o8d A1 read registrations
 
 Scope: #5243 and #5422. The initial A1 slice registered seventeen GET paths.
-The follow-ups bring the table to twenty-five GET paths using the same production
+The follow-ups bring the table to twenty-six GET paths using the same production
 handlers. No new POST, PATCH, PUT or DELETE registration is included. Shared shell tools are
 assigned to `session`; duplicate entries name additional registered callers.
 The native source paths below are relative to `native/o8-next/src`.
@@ -32,6 +32,7 @@ No peer header grants local authority.
 | `/api/setup/cli-updates` | setup, settings | shell_features/update.rs | gate |
 | `/api/panel/o8-update-summary` | settings | shell_features/update.rs | gate |
 | `/api/cortex/proposals` | activity | surfaces/activity/proposals.rs | gate |
+| `/api/cortex/cross-repo-proposals` | activity | surfaces/activity/proposals.rs | gate |
 | `/api/panel/problem-dossiers` | activity | surfaces/activity/decisions.rs | gate + panel |
 | `/api/panel/file-asset` | session | files_panel/media.rs | gate |
 | `/api/v2/files` | session | files_panel/io.rs | gate |
@@ -74,15 +75,14 @@ the heal-bot is on, and skips the ticks the running heal-bot already covers.
 | `/api/orchestrator/pull-request-context` | GET accepts refresh queries that call `ensureGitHubPullRequest` and update the mirror. |
 | `/api/setup/identity` | `getInstanceIdentity` creates persisted instance/boot IDs when absent. Existing producer registration is preserved; no surface entry is added. |
 | `/api/cortex/diagnostics` | Timings are recorded in the Next process; the native process loads the disk snapshot once, so a native GET would omit them. |
-| `/api/cortex/codebase-memory` | GET calls `ensureCodebaseMemoryBootIndex`, starting indexing and persistent writes. |
+| `/api/cortex/codebase-memory` | GET calls `ensureCodebaseMemoryBootIndex`, starting indexing and persistent writes. Live progress and errors come from the Next process's module-local `stateByRepoId`, not the persisted HEAD receipts; a native GET would omit that state. |
 
-Two of the seven R1 candidates remain held after removing registry repair from
-`listRepos()`. These independent write paths are unchanged:
+One of the seven R1 candidates remains held after removing registry repair from
+`listRepos()` and separating signature computation from persistence:
 
 | Candidate | Auth basis | GET call chain that writes |
 | --- | --- | --- |
 | `/api/worktrees/retention-usage` | gate + panel | `GET` -> `resolveManagedWorktreeStorageTarget` creates the default root. Independently, host-volume and directory telemetry invokes subprocesses through the shared provider boundary, which creates `.provider-keys.lock` and prepares credential policy. Moving the root creation alone does not make this GET read-only; the credential boundary remains unchanged. |
-| `/api/cortex/cross-repo-proposals` | gate | `readCachedCrossRepoProposals` -> `runTick` -> `proposeAcrossRepos` -> `readOrComputeSignatures` -> `computeAllSignatures` -> `writeSignatureStore` -> `writeFileSync(stack-signatures.json)` on an empty cache with `O8_LEGACY_JACCARD_PROPOSER` enabled. |
 
 No eligible handler needs `next/headers`, cookie context or edge runtime.
 In-memory read caches and bounded observation processes remain in the production
@@ -336,3 +336,72 @@ failure reproduces on the isolated `origin/main` snapshot. That snapshot probe
 disables the filesystem module cache to avoid a separate shared-symlink cache
 `ENOENT`. Touched-file ESLint and `rule-check --base=origin/main` pass.
 The classification manifest check and final diff whitespace check also pass.
+
+## Cortex read follow-up
+
+`/api/cortex/cross-repo-proposals` now computes missing or empty legacy stack
+signatures in memory. It preserves proposal results, including `force=1` and
+`force=true`, without creating or replacing `stack-signatures.json`. Signature
+persistence belongs to the existing `ensureStackSignatureBoot` startup hook and
+registry add/remove/repoint recomputes. The startup hook is called by
+`startStatusBootHooks` during Next process initialization; a GET never starts it.
+The default project-membership path uses shared database bootstrap and reads
+project/membership rows without inserting any.
+
+`/api/cortex/codebase-memory` stays held. Next startup already calls
+`ensureCodebaseMemoryBootIndex` via `src/lib/startup/next.ts` and
+`src/lib/panel/status-boot.ts`. `getIndexState` reads the indexer's module-local
+`stateByRepoId` and `bootRan`, deriving in-flight status from those entries.
+The persisted
+`codebase-memory-state.json` contains successful HEAD receipts only, so it cannot
+reproduce pending, indexing, deferred, skipped, or error entries in the native
+process. Removing the GET trigger alone would return an empty native state;
+starting a second native indexer would duplicate indexing and diverge from Next.
+Moving ownership or adding a state bridge exceeds this side-effect-only slice.
+The production route remains unchanged and Next-only. Diagnostics stays held.
+
+Cortex verification receipt (all Vitest runs use `--maxWorkers=2`, serially):
+
+```text
+# Only src/lib/cortex/stack-signature.ts restored from HEAD; new tests retained.
+npx vitest run tests/o8d-cortex-reads-real-path.test.ts --maxWorkers=2 -t 'cold legacy GET'
+FAIL cold legacy GET returns proposals without creating or changing any owned file or directory
+AssertionError: GET must not create the signature cache: expected true to be false
+Tests 1 failed | 3 skipped (4)
+
+# Source fix restored.
+npx vitest run tests/o8d-cortex-reads-real-path.test.ts tests/o8d-native-route-inventory-real-path.test.ts tests/o8d-r2b-read-only-gets-real-path.test.ts --maxWorkers=2
+Cortex: 4 passed. Dossiers: 2 passed. Inventory: 2 passed, 1 failed.
+FAIL covers native client routes with their production registration owners
+AssertionError: diff_ui_scope.rs: /api/review/last-turn: expected false to be true
+
+# Inventory test and native registry temporarily restored from HEAD.
+npx vitest run tests/o8d-native-route-inventory-real-path.test.ts --maxWorkers=2
+Same /api/review/last-turn assertion: 1 failed | 2 passed (3).
+# Both files restored to the implementation after the baseline run.
+```
+
+The new Cortex tests call the production GET with three registered manifest
+fixtures and a repo-scoped directive. They check the absent and empty signature
+cache, forced reads, unchanged file bytes and nanosecond mtimes, no new project
+or membership rows on a cold database, and persistence through the existing
+startup hook. Shared SQLite files and migration markers are bootstrap artifacts
+under the cold-database rule above. All other files and directories are compared.
+The unrelated route-inventory drift is reproduced on the baseline registry and
+inventory test and is left outside this slice.
+
+Changed-file ESLint, `git diff --check`, and
+`node scripts/classify-tests.mjs --check-manifest` pass. No project typecheck or
+full suite was run under the task's explicit execution limits.
+
+```text
+npx vitest run tests/o8d-next-surfaces-real-path.test.ts --maxWorkers=2 -t 'serves A1'
+Tests 25 passed | 61 skipped (86)
+```
+
+The A1 socket matrix includes the new `activity` cross-repo proposals GET with
+Next stopped. It verifies missing/wrong bearer refusal, the authenticated
+production response, GET-only surface registration, and 405 refusal for all
+unregistered write methods. The earlier focused `-t 'cross-repo-proposals'` run
+also passed (1 passed, 85 skipped). Raw receipts are retained locally under
+`.o8-a1-evidence/cortex/`.

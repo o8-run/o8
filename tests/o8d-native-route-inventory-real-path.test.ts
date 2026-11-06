@@ -24,8 +24,7 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/runtime/acp-registry/prepare',
   '/api/runtime/provider-instances',
   '/api/setup/detect',
-  '/api/cortex/codebase-memory',
-  '/api/cortex/cross-repo-proposals', // Legacy readOrComputeSignatures writes the signature cache.
+  '/api/cortex/codebase-memory', // Live index progress belongs to the Next process.
   '/api/cortex/diagnostics',
   '/api/orchestrator/archive',
   '/api/orchestrator/backend-models',

@@ -255,18 +255,14 @@ function writeSignatureStore(store: SignatureStore): void {
   }
 }
 
-/**
- * Recompute signatures for every registered repo and overwrite the cache.
- * Called at boot + after any registry add/remove. Wraps in try/catch so a
- * single bad repo doesn't kill the sweep.
- */
-export async function computeAllSignatures(): Promise<SignatureStore> {
+/** Compute in memory so a cold proposer GET never writes the cache. */
+async function computeSignatureStore(): Promise<SignatureStore | null> {
   let entries: RepoRegistryEntry[] = [];
   try {
     entries = await listRepos();
   } catch (err) {
     console.warn('[stack-signature] listRepos failed:', err instanceof Error ? err.message : err);
-    return { version: 1, signatures: [] };
+    return null;
   }
 
   const now = new Date().toISOString();
@@ -290,20 +286,26 @@ export async function computeAllSignatures(): Promise<SignatureStore> {
     }
   }
 
-  const store: SignatureStore = { version: 1, signatures };
+  return { version: 1, signatures };
+}
+
+/** Recompute and persist only from boot and registry mutation maintenance. */
+export async function computeAllSignatures(): Promise<SignatureStore> {
+  const store = await computeSignatureStore();
+  if (!store) return { version: 1, signatures: [] };
   writeSignatureStore(store);
   return store;
 }
 
 /**
  * Read the cached store. If the cache is empty or the file doesn't exist,
- * trigger a recompute synchronously inline. Used by the cross-repo proposer
- * so a fresh-boot read still has data to work with.
+ * compute in memory inline. Boot and registry mutation hooks persist the
+ * cache; the cross-repo proposer still gets fresh-boot data without writing.
  */
 export async function readOrComputeSignatures(): Promise<SignatureStore> {
   const existing = readSignatureStore();
   if (existing.signatures.length > 0) return existing;
-  return computeAllSignatures();
+  return await computeSignatureStore() ?? { version: 1, signatures: [] };
 }
 
 // ── boot tick wiring ──────────────────────────────────────────────────────
