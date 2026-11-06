@@ -1,0 +1,31 @@
+{
+  "requests": 12,
+  "differences": 0,
+  "warmups": 10,
+  "samples": 100,
+  "idleSettleMs": 20000,
+  "off": {
+    "timings": [
+      {
+        "path": "/api/panel/branches",
+        "p50Ms": 8.636641999999483
+      }
+    ],
+    "rss": {
+      "kib": 279176,
+      "processes": 4
+    }
+  },
+  "on": {
+    "timings": [
+      {
+        "path": "/api/panel/branches",
+        "p50Ms": 4.321901999999682
+      }
+    ],
+    "rss": {
+      "kib": 235336,
+      "processes": 5
+    }
+  }
+}

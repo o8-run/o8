@@ -1,4 +1,4 @@
-# Experimental saved HTTP reads
+# Experimental native HTTP reads
 
 ## Native shell transport with Next stopped
 
@@ -148,6 +148,56 @@ B1's [verification receipt](evidence/session-reads-b1/verification.md) records
 route/auth coverage, residual failures and bundle sizes; its
 [measurement report](evidence/session-reads-b1/metrics.json) retains the p50 and
 backend RSS figures.
+
+The [session follow-up receipt](evidence/session-reads-b2/verification.md) and
+[measurements](evidence/session-reads-b2/metrics.json) cover request-local batching
+and current checkout-field parity. Git lookups run only for the returned page,
+once per repository path. Native preflight and projection share one fresh,
+read-only SQLite connection; no connection or result survives the request.
+The corpus adds real linked checkouts and nested working directories, and the
+benchmark waits 20 idle seconds before recording backend RSS. The original
+admission and profile guards are unchanged. The flag remains default off.
+
+This does not complete the whole-server port. The
+[Phase B ownership audit](../../docs/operations/o8d-phase-b-ownership.md) records
+the shared writers and protected transport/security boundaries that keep the
+remaining domains on TypeScript.
+
+## Flagged native repository reads
+
+`O8D_NATIVE_REPOSITORY_READS=1` enables `GET /api/panel/branches` through the
+native registry, independently of the session flag. It defaults off. Use the
+same `O8_NEXT_O8D=1 O8_WS_O8D=1` transport and an `O8D_BINARY` built with
+`experimental-session-reads`, which includes both transport and HTTP features.
+The registry keeps its original public middleware and method restrictions.
+
+The new loopback client starts one reusable standalone HTTP reader on an
+ephemeral port. It forwards the request's original bearer through the existing
+standalone authentication. It does not create credentials or change existing
+environment allowlists. The child uses the new `--exit-on-stdin-eof` lifecycle
+option; EOF cancels and reaps active repository commands before shutdown.
+Unavailable, unsupported or unmarked responses fall back to the original
+TypeScript handler. Flag-off requests do not start the private reader.
+
+The reader implements the existing branch snapshot fields, ordering, hidden
+branch rules and refresh behavior. Its bounded memory cache is an observation
+cache, not a persisted store or writer. It supports ordinary and bare
+repositories, linked checkouts, nested directories and symlink paths. The
+operator's requested repository path has the existing branch handler's meaning;
+the standalone profile still selects the credential, history and database.
+
+Configured diff helpers, promisor/partial-clone repositories and option-like
+default refs remain on TypeScript. Native commands disable external diff,
+textconv and lazy fetch, and cap projection time, output and branch count.
+Only one snapshot computation or refresh runs at a time; unsupported work uses
+the fallback. Commit/file viewers, contained file browsing, comparison-diff and
+live status are not ported by this flag. Repository/git remains a partial domain.
+
+Run `scripts/o8d/parity.ts --domain=repository --report=repository-parity.json
+--corpus=repository-corpus.json` with `O8D_BINARY` set. Every replay must carry
+`x-o8d-native-repository-read: 1`. The
+[repository receipt](evidence/repository-reads-b1/verification.md) records parity,
+fallback/lifecycle tests and measurements including the private daemon's RSS.
 
 ## Standalone persisted-read mode
 

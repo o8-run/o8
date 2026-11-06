@@ -1,0 +1,55 @@
+{
+  "requests": 20,
+  "differences": 0,
+  "warmups": 10,
+  "samples": 100,
+  "idleSettleMs": 20000,
+  "off": {
+    "timings": [
+      {
+        "path": "/api/mobile/orchestrator/threads",
+        "p50Ms": 2.5496470000002773
+      },
+      {
+        "path": "/api/mobile/history",
+        "p50Ms": 13.724930999999742
+      },
+      {
+        "path": "/api/v2/chat-history",
+        "p50Ms": 17.69271899999967
+      },
+      {
+        "path": "/api/orchestrator/composer-queue",
+        "p50Ms": 2.256745000000592
+      }
+    ],
+    "rss": {
+      "kib": 308292,
+      "processes": 2
+    }
+  },
+  "on": {
+    "timings": [
+      {
+        "path": "/api/mobile/orchestrator/threads",
+        "p50Ms": 9.893078000000969
+      },
+      {
+        "path": "/api/mobile/history",
+        "p50Ms": 5.818043999999645
+      },
+      {
+        "path": "/api/v2/chat-history",
+        "p50Ms": 6.5978860000032
+      },
+      {
+        "path": "/api/orchestrator/composer-queue",
+        "p50Ms": 5.148267999997188
+      }
+    ],
+    "rss": {
+      "kib": 199456,
+      "processes": 2
+    }
+  }
+}

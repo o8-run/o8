@@ -1,0 +1,38 @@
+{
+  "typescript": [
+    {
+      "path": "/api/mobile/orchestrator/threads",
+      "p50Ms": 2.765693000000283
+    },
+    {
+      "path": "/api/mobile/history",
+      "p50Ms": 26.724444000000403
+    },
+    {
+      "path": "/api/v2/chat-history",
+      "p50Ms": 15.011170000000675
+    },
+    {
+      "path": "/api/orchestrator/composer-queue",
+      "p50Ms": 2.0820719999992434
+    }
+  ],
+  "rust": [
+    {
+      "path": "/api/mobile/orchestrator/threads",
+      "p50Ms": 5.963835000000472
+    },
+    {
+      "path": "/api/mobile/history",
+      "p50Ms": 5.231299000000945
+    },
+    {
+      "path": "/api/v2/chat-history",
+      "p50Ms": 6.006332999999358
+    },
+    {
+      "path": "/api/orchestrator/composer-queue",
+      "p50Ms": 4.464918000001489
+    }
+  ]
+}
