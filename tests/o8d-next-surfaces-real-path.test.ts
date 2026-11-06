@@ -21,6 +21,7 @@ const NATIVE_READS = [
   ['session', '/api/repo-spec', 400],
   ['activity', '/api/review/workspace', 200],
   ['settings', '/api/runtime/capabilities', 200],
+  ['settings', '/api/runtime/acp-registry', 200],
   ['settings', '/api/runtime/capacity', 200],
   ['session', '/api/runtime/service-tiers', 200],
   ['session', '/api/runtime/telemetry', 400],
@@ -40,7 +41,8 @@ let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;
 beforeAll(async () => {
   if (!process.env.O8D_BINARY && !process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
-  server = await startParityReference({ o8d: true, binary, nativeHttp: true, startupTimeoutMs: 120_000 });
+  server = await startParityReference({ o8d: true, binary, nativeHttp: true, startupTimeoutMs: 120_000,
+    preload: './tests/fixtures/ws-parity-acp-registry.cjs' });
   // The fixture Next server has no project route; startup must own this write.
   expect(JSON.parse(readFileSync(join(server.directory, 'projects.json'), 'utf8')))
     .toMatchObject({ activeProjectId: 'default', projects: [{ id: 'default' }] });
@@ -119,7 +121,11 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   }
   const response = await fetch(origin + path, { headers: { authorization: `Bearer ${server.token}` } });
   expect(response.status).toBe(status);
-  expect(await response.text()).not.toContain('Native route unavailable');
+  const body = await response.text();
+  expect(body).not.toContain('Native route unavailable');
+  if (routePath === '/api/runtime/acp-registry') {
+    expect(JSON.parse(body)).toMatchObject({ stale: false, agents: [{ id: 'fixture-agent', version: '1.0.0' }] });
+  }
   // A2 adds POST to /api/cortex/proposals; every other A1 read stays GET-only.
   const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
   expect(methods).toEqual(routePath === '/api/cortex/proposals' ? ['GET', 'POST'] : ['GET']);

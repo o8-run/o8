@@ -1,7 +1,7 @@
 # o8d A1 read registrations
 
 Scope: #5243 and #5422. The initial A1 slice registered seventeen GET paths.
-The follow-ups bring the table to twenty-six GET paths using the same production
+The follow-ups bring the table to twenty-seven GET paths using the same production
 handlers. No new POST, PATCH, PUT or DELETE registration is included. Shared shell tools are
 assigned to `session`; duplicate entries name additional registered callers.
 The native source paths below are relative to `native/o8-next/src`.
@@ -25,6 +25,7 @@ No peer header grants local authority.
 | `/api/repo-spec` | session | files_panel/spec.rs, spec_actions.rs | gate; existing device/worker capabilities retained |
 | `/api/review/workspace` | session, activity | files_panel/changes.rs; shell_features/activity_dock.rs | gate |
 | `/api/runtime/capabilities` | settings | settings_connections.rs | gate + panel |
+| `/api/runtime/acp-registry` | settings | surfaces/settings/providers_add.rs | gate + panel |
 | `/api/runtime/capacity` | settings, usage, sidebar | surfaces/settings/limits.rs; surfaces/usage/view.rs; shell_rail.rs | gate + panel |
 | `/api/runtime/service-tiers` | session | composer/selector.rs | gate + panel |
 | `/api/runtime/telemetry` | session | composer/context.rs, command_client.rs | gate |
@@ -76,6 +77,9 @@ the heal-bot is on, and skips the ticks the running heal-bot already covers.
 | `/api/setup/identity` | `getInstanceIdentity` creates persisted instance/boot IDs when absent. Existing producer registration is preserved; no surface entry is added. |
 | `/api/cortex/diagnostics` | Timings are recorded in the Next process; the native process loads the disk snapshot once, so a native GET would omit them. |
 | `/api/cortex/codebase-memory` | GET calls `ensureCodebaseMemoryBootIndex`, starting indexing and persistent writes. Live progress and errors come from the Next process's module-local `stateByRepoId`, not the persisted HEAD receipts; a native GET would omit that state. |
+| `/api/orchestrator/packet-transcript` | Transcript lookup can call `getCodexRolloutPath` -> `queryCodexThreadByIdFromHome` -> the shared child-process boundary. That boundary refreshes credentials and takes `.provider-keys.lock`, even for a read-only SQLite query. Held at the credential boundary; no source or auth changes. |
+| `/api/setup/detect` | CLI detection launches probes through the shared child-process boundary and provider store lock, reads login material, and can repair CLI symlinks via `scanAndLink`. Held at the credential/process boundary. |
+| `/api/review/last-turn` | `getWorktreeManager(...).list()` -> `gitWorktreeList`/`getDirtyFiles` -> `materializationAwareExecFile` -> the shared child-process boundary, which refreshes credentials and takes `.provider-keys.lock`. Held at the credential boundary. |
 
 One of the seven R1 candidates remains held after removing registry repair from
 `listRepos()` and separating signature computation from persistence:
@@ -96,6 +100,46 @@ and setup mcp-config/claude-desktop/external-client. They are named explicitly i
 the hold list so the full scan can complete; no method is registered for them.
 They remain outside this slice. Revoked visualization workers retain the
 production handler's 404 refusal, with no document content.
+
+## A1 more-reads audit
+
+`/api/runtime/acp-registry` already writes no persistent state. Its production
+GET calls `readAcpRegistry`, which fetches bounded public catalog metadata with
+no credentials, redirects disabled and `cache: no-store`. The only cache is in
+memory. Refresh and stale fallback keep the same behavior in the native process.
+No write moved, no new trigger was needed, and the route source stays in place.
+The native caller is Settings' provider picker; the web picker uses the same GET
+and its separate existing preparation POST. That POST remains Next-only.
+
+The other three scoped paths remain held for the call chains in the table above.
+Fixing the credential boundary is outside this slice. Neither review commit nor
+review push is registered; both remain Next-only POSTs.
+
+More-reads verification receipt (`--maxWorkers=2` on every Vitest invocation):
+
+```text
+npx vitest run tests/o8d-more-reads-real-path.test.ts --maxWorkers=2
+Source registration changes only reverted; tests and fixture retained:
+FAIL registers the production ACP GET for the native settings caller
+AssertionError: ACP settings GET registration: expected undefined to be defined
+Tests 1 failed | 1 passed (2)
+
+npx vitest run tests/o8d-more-reads-real-path.test.ts tests/o8d-native-route-inventory-real-path.test.ts tests/o8d-next-surfaces-real-path.test.ts --maxWorkers=2
+Tests 91 passed (91), Test Files 3 passed (3)
+
+npx vitest run tests/o8d-more-reads-real-path.test.ts tests/o8d-native-route-inventory-real-path.test.ts --maxWorkers=2
+After restoring the source registrations: Tests 5 passed (5)
+
+node scripts/classify-tests.mjs --check-manifest
+Manifest matches resource-owning source markers.
+```
+
+The cold-directory test calls the production GET with only the public fetch
+boundary substituted. First read, cached read, forced refresh and stale fallback
+leave the directory empty, including no provider lock, token, catalog file or
+database. The socket fixture substitutes the same public catalog boundary;
+production middleware, handler and method refusal remain real with Next stopped.
+No persistence trigger test applies because this registration moves no write.
 
 ## Changed files
 
