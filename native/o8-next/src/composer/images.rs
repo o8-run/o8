@@ -18,7 +18,81 @@ enum Input {
     Path(PathBuf),
 }
 
+/// The bytes of a base64 image data URI.
+pub(crate) fn data_uri_bytes(uri: &str) -> Option<Vec<u8>> {
+    let (_, data) = uri.strip_prefix("data:")?.split_once(";base64,")?;
+    base64::engine::general_purpose::STANDARD.decode(data).ok()
+}
+
 impl Composer {
+    /// Opens the markup editor over the window for the attached image at `index`.
+    pub(crate) fn annotate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(uri) = self
+            .controls
+            .images
+            .get(index)
+            .and_then(|i| i["dataUri"].as_str())
+        else {
+            return;
+        };
+        let Some(preview) = self.controls.previews.get(uri).cloned() else {
+            return;
+        };
+        let uri = uri.to_owned();
+        let annotator = cx.new(|cx| super::annotate::Annotator::new(index, uri, preview, cx));
+        annotator.read(cx).focus.focus(window);
+        let subscription = cx.subscribe_in(&annotator, window, Self::annotated);
+        self.controls.annotator = Some((annotator, subscription));
+        cx.notify();
+    }
+    fn annotated(
+        &mut self,
+        _: &Entity<super::annotate::Annotator>,
+        finished: &super::annotate::Finished,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.controls.annotator = None;
+        self.focus.focus(window);
+        let super::annotate::Finished::Done { index, from, uri } = finished else {
+            cx.notify();
+            return;
+        };
+        let (index, from, uri) = (*index, from.clone(), uri.clone());
+        let Some(bytes) = data_uri_bytes(&uri) else {
+            return;
+        };
+        let format = if uri.starts_with("data:image/jpeg") {
+            ImageFormat::Jpeg
+        } else {
+            ImageFormat::Png
+        };
+        let renderer = cx.svg_renderer();
+        // Decode the new preview off the paint thread, as attaching does.
+        let task = cx
+            .background_executor()
+            .spawn(async move { Image::from_bytes(format, bytes).to_image_data(renderer) });
+        cx.spawn_in(window, async move |this, cx| {
+            let preview = task.await;
+            let _ = this.update(cx, |this, cx| {
+                let Ok(preview) = preview else {
+                    this.controls.error = "Could not decode the marked image.".into();
+                    return this.images_changed(cx);
+                };
+                // The attachment may have been removed or replaced meanwhile.
+                let Some(image) = this.controls.images.get_mut(index) else {
+                    return;
+                };
+                if image["dataUri"] != from.as_str() {
+                    return;
+                }
+                image["dataUri"] = json!(uri);
+                this.controls.previews.insert(uri, preview);
+                this.images_changed(cx);
+            });
+        })
+        .detach();
+    }
     pub(crate) fn attach_clipboard(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) {
         let inputs: Vec<_> = item
             .entries()
@@ -257,11 +331,15 @@ impl Composer {
                 .iter()
                 .any(|image| image["dataUri"] == *uri)
         });
+        let annotator = self.controls.annotator.as_ref().map(|(a, _)| a.clone());
         div()
             .flex()
             .flex_wrap()
             .gap(px(8.))
             .px(px(14.))
+            .when_some(annotator, |d, annotator| {
+                d.child(super::annotate::overlay(&annotator, cx))
+            })
             .children(
                 self.controls
                     .images
@@ -282,6 +360,13 @@ impl Composer {
                             .p(px(4.))
                             .rounded(px(6.))
                             .bg(crate::theme::current().surface)
+                            .cursor_pointer()
+                            .hover(|d| d.bg(crate::theme::current().hover))
+                            .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Mark up image".into())).into())
+                            // Clicking the image opens the markup editor.
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.annotate(index, window, cx)
+                            }))
                             .when_some(preview, |d, preview| {
                                 d.child(
                                     img(preview)
@@ -318,6 +403,8 @@ impl Composer {
                                     })
                                     .on_click(cx.listener(
                                         move |this, event: &ClickEvent, window, cx| {
+                                            // Removing never also opens the editor.
+                                            cx.stop_propagation();
                                             // KeyDown owns keyboard activation. GPUI also
                                             // synthesizes a keyboard click on KeyUp.
                                             if matches!(event, ClickEvent::Mouse(_)) {

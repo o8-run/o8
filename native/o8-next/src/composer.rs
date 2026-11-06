@@ -8,6 +8,8 @@ pub(crate) mod commands;
 pub(crate) mod mention;
 pub(crate) mod controls;
 pub(crate) mod images;
+pub(crate) mod annotate;
+pub(crate) mod annotate_raster;
 pub(crate) mod mode_store;
 pub(crate) mod prompt_state;
 pub(crate) mod stash;

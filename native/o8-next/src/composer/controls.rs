@@ -36,6 +36,8 @@ pub(crate) struct State {
     /// The latest stash load or write; each write waits for the one before it.
     pub stash_save: Option<gpui::Task<()>>,
     pub previews: HashMap<String, std::sync::Arc<RenderImage>>,
+    /// The image markup editor, open over the window for one attachment.
+    pub annotator: Option<(Entity<super::annotate::Annotator>, gpui::Subscription)>,
     pub attachment_target: bool,
     pub images_enabled: bool,
     pub pending_images: usize,
@@ -75,6 +77,7 @@ impl Default for State {
             stash_open: false,
             stash_save: None,
             previews: HashMap::new(),
+            annotator: None,
             attachment_target: false,
             images_enabled: false,
             pending_images: 0,

@@ -23,6 +23,9 @@ path = "src/bin/viz_render.rs"
 async-channel = "=2.5.0"
 alacritty_terminal = { version = "=0.26.0", default-features = false }
 base64 = "=0.22.1"
+# Image markup (composer/annotate_raster.rs): the versions gpui already locks.
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+resvg = { version = "=0.45.1", default-features = false, features = ["text", "system-fonts"] }
 qrcode = { version = "=0.14.1", default-features = false }
 getrandom = "=0.3.4"
 tungstenite = { version = "=0.28.0", default-features = false, features = ["handshake"] }

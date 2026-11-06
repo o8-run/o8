@@ -75,7 +75,9 @@ fn native_composer_stash_keeps_a_draft_with_its_attachments_and_restores_it(
         i.controls.files.clear();
         i.toggle_stash(cx);
     });
-    composer.read_with(cx, |i, _| assert!(i.controls.stash.is_empty() && i.text.is_empty()));
+    composer.read_with(cx, |i, _| {
+        assert!(i.controls.stash.is_empty() && i.text.is_empty())
+    });
 }
 
 fn png() -> Vec<u8> {
@@ -543,4 +545,96 @@ fn native_mixed_image_folder_drop_keeps_rejection_feedback(cx: &mut TestAppConte
         assert_eq!(controls.error, "Choose a file, not a folder.");
     });
     fs::remove_dir_all(dir).unwrap();
+}
+
+fn annotator_shapes(surface: &gpui::Entity<Surface>, cx: &VisualTestContext) -> Option<usize> {
+    surface.read_with(cx, |s, cx| {
+        let composer = s.composer.read(cx);
+        composer
+            .controls
+            .annotator
+            .as_ref()
+            .map(|(a, _)| a.read(cx).shapes.len())
+    })
+}
+/// Drags across the markup stage between two fractions of its size.
+fn drag_stage(from: (f32, f32), to: (f32, f32), cx: &mut VisualTestContext) {
+    draw(cx);
+    let stage = cx.debug_bounds("annotator-stage").expect("markup stage");
+    let at = |(fx, fy): (f32, f32)| {
+        gpui::point(
+            stage.origin.x + stage.size.width * fx,
+            stage.origin.y + stage.size.height * fy,
+        )
+    };
+    cx.simulate_mouse_down(at(from), gpui::MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_move(at(to), gpui::MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_up(at(to), gpui::MouseButton::Left, Modifiers::default());
+    cx.run_until_parked();
+    draw(cx);
+}
+
+#[gpui::test]
+fn native_image_markup_draws_undoes_and_replaces_the_attachment(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    image_session(cx, &surface);
+    paste(png(), cx);
+    let before = images(&surface, cx)[0]["dataUri"].clone();
+    click("composer-image-0", cx);
+    assert!(
+        cx.debug_bounds("composer-annotator").is_some(),
+        "clicking the chip opens markup"
+    );
+    assert_eq!(annotator_shapes(&surface, cx), Some(0));
+    click("annotator-tool-box", cx);
+    drag_stage((0.2, 0.2), (0.8, 0.8), cx);
+    assert_eq!(annotator_shapes(&surface, cx), Some(1));
+    cx.simulate_keystrokes("secondary-z");
+    draw(cx);
+    assert_eq!(
+        annotator_shapes(&surface, cx),
+        Some(0),
+        "undo drops the last mark"
+    );
+    click("annotator-tool-arrow", cx);
+    drag_stage((0.1, 0.9), (0.6, 0.3), cx);
+    assert_eq!(annotator_shapes(&surface, cx), Some(1));
+    click("annotator-done", cx);
+    cx.run_until_parked();
+    draw(cx);
+    let after = images(&surface, cx);
+    assert_eq!(after.len(), 1);
+    let uri = after[0]["dataUri"].as_str().unwrap().to_owned();
+    assert_ne!(json!(uri), before, "Done replaces the attachment");
+    assert!(uri.starts_with("data:image/png;base64,"));
+    assert!(crate::composer::images::data_uri_bytes(&uri).unwrap().len() <= 5_000_000);
+    assert_eq!(annotator_shapes(&surface, cx), None, "the editor closes");
+    assert!(cx.debug_bounds("composer-annotator").is_none());
+    // The new attachment has a decoded preview, so the chip still draws.
+    assert!(surface.read_with(cx, |s, cx| {
+        s.composer.read(cx).controls.previews.contains_key(&uri)
+    }));
+}
+
+#[gpui::test]
+fn native_image_markup_escape_cancels_without_changing_the_attachment(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    image_session(cx, &surface);
+    paste(png(), cx);
+    let before = images(&surface, cx);
+    click("composer-image-0", cx);
+    click("annotator-tool-pen", cx);
+    drag_stage((0.3, 0.3), (0.7, 0.4), cx);
+    assert_eq!(annotator_shapes(&surface, cx), Some(1));
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    draw(cx);
+    assert_eq!(annotator_shapes(&surface, cx), None);
+    assert_eq!(images(&surface, cx), before, "Esc keeps the original image");
+    // Removing an image never opens the editor.
+    click("composer-image-remove-0", cx);
+    assert_eq!(annotator_shapes(&surface, cx), None);
+    assert!(images(&surface, cx).is_empty());
 }
