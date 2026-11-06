@@ -47,6 +47,10 @@ pub(super) const HOUSES: &[(&str, &[(&str, &str, &str, &str)])] = &[
 ];
 
 const CHECK: &str = "M5 12l5 5L20 7";
+/// The model picker's height: its header, search and 320 px of rows.
+pub(super) const MODEL_HEIGHT: f32 = 396.;
+/// Space kept between the picker and the title bar's bottom when it is clamped.
+const TITLE_BAR_MARGIN: f32 = 8.;
 
 impl Surface {
     /// The floating menu above the composer card for the open chip.
@@ -95,6 +99,22 @@ impl Surface {
         if open == "context" {
             return self.context_popover(cx);
         }
+        // In a short window the model picker is clamped to the room between
+        // the title bar (the header band at the window's top) and the composer
+        // card, less the card's 8 px gap and a margin, so its heading, rail
+        // and search stay below the title bar. The room depends only on where
+        // the card sits, never on the inventory, so the size still holds
+        // while the rail fills in; the rows scroll inside.
+        let title_bar = crate::theme::GEOMETRY.header + TITLE_BAR_MARGIN;
+        let model_height = self
+            .composer
+            .read(cx)
+            .controls
+            .context
+            .card_bounds
+            .map_or(MODEL_HEIGHT, |card| {
+                MODEL_HEIGHT.min((f32::from(card.origin.y) - 8. - title_bar).max(0.))
+            });
         let mut menu = div()
             .id("composer-picker")
             .debug_selector(|| "composer-picker".into())
@@ -108,7 +128,11 @@ impl Surface {
                 "model" => 366.,
                 _ => 260.,
             }))
-            .max_h(px(if open == "model" { 470. } else { 520. }))
+            // The model picker keeps one size from its first frame: a rail
+            // that fills in as the inventory lands must not grow it upward
+            // under the pointer. Rail and rows scroll inside it.
+            .when(open == "model", |m| m.h(px(model_height)))
+            .when(open != "model", |m| m.max_h(px(520.)))
             .overflow_y_scroll()
             .p(px(if open == "model" { 0. } else { 6. }))
             .flex()

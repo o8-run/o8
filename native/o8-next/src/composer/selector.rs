@@ -896,7 +896,11 @@ impl Surface {
                     Some("needs_auth" | "needs_restart")
                 )
         };
-        let mut houses = vec![];
+        // The rail's first frame (before the inventory lands) keeps its
+        // places: the houses shown without the inventory come first, and the
+        // ones it reveals join below them, so nothing already drawn moves
+        // under the pointer.
+        let (mut houses, mut later) = (vec![], vec![]);
         for &(key, label, runtime, glyph, _) in &LEAD_HOUSES {
             let found = item(runtime);
             // Settings › Providers off: hidden for new sessions; a lead keeps it.
@@ -906,20 +910,34 @@ impl Surface {
             // Claude and Codex always hold the rail, as in the desktop
             // picker; other houses appear once installed.
             let core = matches!(key, "claude" | "codex");
-            let visible = key == lead || key == "o8" || core || found.as_ref().is_some_and(shown);
-            if visible {
+            let first = key == lead || key == "o8" || core;
+            if first || found.as_ref().is_some_and(shown) {
                 let ready = key == "o8"
                     || found
                         .as_ref()
                         .map_or(inventory.is_none() || core, |i| i["available"] == true);
-                houses.push((key.to_owned(), label.to_owned(), glyph, true, ready));
+                let house = (key.to_owned(), label.to_owned(), glyph, true, ready);
+                if first {
+                    houses.push(house)
+                } else {
+                    later.push(house)
+                }
             }
             // Settings › Providers instances of this runtime: "Codex · work".
-            for (id, name) in crate::shell::settings::providers::instances_of(inventory.as_deref(), runtime) {
+            for (id, name) in
+                crate::shell::settings::providers::instances_of(inventory.as_deref(), runtime)
+            {
                 let ready = found.as_ref().map_or(true, |i| i["available"] == true);
-                houses.push((format!("{key}@{id}"), format!("{label} · {name}"), glyph, true, ready));
+                later.push((
+                    format!("{key}@{id}"),
+                    format!("{label} · {name}"),
+                    glyph,
+                    true,
+                    ready,
+                ));
             }
         }
+        houses.extend(later);
         houses
     }
 
@@ -1234,6 +1252,7 @@ impl Surface {
             .pb(px(6.))
             .child(
                 div()
+                    .debug_selector(|| "composer-model-heading".into())
                     .flex()
                     .items_center()
                     .justify_between()
