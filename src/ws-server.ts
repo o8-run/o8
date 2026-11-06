@@ -9645,6 +9645,14 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 // managed by the stall detector and lifecycle system.
 
 async function bootstrapWsServer() {
+  // Persist the default project ledger once; project GETs only read it. A
+  // failed write must not stop the server: the GETs still project the default.
+  try {
+    const { initializeProjectsLedger } = await import('@/lib/repos/projects');
+    await initializeProjectsLedger();
+  } catch (error) {
+    console.warn('[ws-server] could not persist the default project ledger:', error);
+  }
   if (o8dBridge) {
     await o8dBridge.start();
   } else {

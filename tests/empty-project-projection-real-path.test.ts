@@ -16,6 +16,19 @@ vi.mock('@/lib/runtimes/shared/auth-detect', async (original) => ({
   assertRuntimeDispatchable: vi.fn(async () => undefined),
 }));
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
+// The effort check reads the model catalog from the installed Codex CLI, which
+// CI does not have. The requested and default worker models advertise the effort.
+vi.mock('@/lib/codex/service-tier-catalogue', async (original) => {
+  const { MODEL_IDS: ids } = await import('@/lib/models');
+  const models = [ids.raw.openAiGpt61Sol, ids.raw.openAiGpt56Terra];
+  return {
+    ...await original<typeof import('@/lib/codex/service-tier-catalogue')>(),
+    getCodexSpeedCatalogue: async () => ({
+      models: Object.fromEntries(models.map(model => [model, []])),
+      reasoningEfforts: Object.fromEntries(models.map(model => [model, ['low', 'medium', 'high']])),
+    }),
+  };
+});
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn() }));
 const forbiddenDispatch = vi.hoisted(() => vi.fn(() => { throw new Error('This fixture must never dispatch.'); }));
 vi.mock('@/lib/orchestrator/dispatch', async (original) => ({
@@ -42,6 +55,7 @@ const { panelGateMiddleware } = await import('@/middleware');
 const { handleOperatorMcpMessage } = await import('@/lib/mcp/operator-mcp-host');
 const { setApiBase } = await import('@/lib/mcp/operator-handlers/shared');
 const { closeDb, getSqlite } = await import('@/lib/db');
+const { initializeProjectsLedger } = await import('@/lib/repos/projects');
 const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
 let port = 0;
 let repoId: string;
@@ -80,6 +94,8 @@ const create = (extra: Record<string, unknown> = {}) => call('create_mission', {
 });
 
 beforeAll(async () => {
+  // Match ws-server startup; project reads no longer bootstrap the ledger.
+  await initializeProjectsLedger();
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   port = (server.address() as { port: number }).port;
   setApiBase(`http://127.0.0.1:${port}`);

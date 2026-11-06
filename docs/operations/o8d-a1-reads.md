@@ -1,8 +1,8 @@
 # o8d A1 read registrations
 
 Scope: #5243 and #5422. The initial A1 slice registered seventeen GET paths.
-R1 adds five GET surface registrations using the same production handlers. No new
-POST, PATCH, PUT or DELETE registration is included. Shared shell tools are
+The follow-ups bring the table to twenty-five GET paths using the same production
+handlers. No new POST, PATCH, PUT or DELETE registration is included. Shared shell tools are
 assigned to `session`; duplicate entries name additional registered callers.
 The native source paths below are relative to `native/o8-next/src`.
 
@@ -38,6 +38,7 @@ No peer header grants local authority.
 | `/api/v2/files/quick-docs` | session | files_panel/quick_docs.rs | gate |
 | `/api/visualizations` | session | transcript_visualizations.rs | gate + visualization |
 | `/api/panel/prs/[number]/timeline` | pull_requests | surfaces/pull_requests/model.rs | gate |
+| `/api/tasks` | session | browser_panel/remote/client.rs | gate + panel |
 
 `[hash]` uses the production parameter name for the native commit path
 inventoried as `[id]`. The timeline similarly uses production `[number]` for
@@ -66,7 +67,6 @@ the heal-bot is on, and skips the ticks the running heal-bot already covers.
 | Candidate | Reason |
 | --- | --- |
 | `/api/panel/devices` | Handler requires verified loopback in addition to operator authority. The adapter stamps `unverified-proxy`; a bearer cannot satisfy the local-peer condition. |
-| `/api/tasks` | `getTaskPool` calls `getProjectsLedger`, which bootstraps and writes the project ledger when absent; project context reads share that bootstrap path. |
 | `/api/tasks/[id]/preview` | Native client uses POST/DELETE; production route has no GET. |
 | `/api/repo-spec/asset` | Native client uploads with POST; production route has no GET. |
 | `/api/orchestrator/comparison-diff` | GET has a write path. Held; with the security lane. |
@@ -81,7 +81,7 @@ Two of the seven R1 candidates remain held after removing registry repair from
 
 | Candidate | Auth basis | GET call chain that writes |
 | --- | --- | --- |
-| `/api/worktrees/retention-usage` | gate + panel | `GET` -> `resolveManagedWorktreeStorageTarget` -> `mkdirSync(layout.configuredRoot, { recursive: true })` when `O8_WORKTREE_ROOT` is unset. |
+| `/api/worktrees/retention-usage` | gate + panel | `GET` -> `resolveManagedWorktreeStorageTarget` creates the default root. Independently, host-volume and directory telemetry invokes subprocesses through the shared provider boundary, which creates `.provider-keys.lock` and prepares credential policy. Moving the root creation alone does not make this GET read-only; the credential boundary remains unchanged. |
 | `/api/cortex/cross-repo-proposals` | gate | `readCachedCrossRepoProposals` -> `runTick` -> `proposeAcrossRepos` -> `readOrComputeSignatures` -> `computeAllSignatures` -> `writeSignatureStore` -> `writeFileSync(stack-signatures.json)` on an empty cache with `O8_LEGACY_JACCARD_PROPOSER` enabled. |
 
 No eligible handler needs `next/headers`, cookie context or edge runtime.
@@ -197,6 +197,56 @@ Classification is verified with
 `node scripts/classify-tests.mjs --check-manifest`. This slice introduces no
 fixed-date fixtures; optional dated-fixture probes from the initial broader
 classification command were stopped.
+
+## Task ledger follow-up
+
+`getProjectsLedger()` now builds the missing default ledger in memory, including
+the same SQLite and virtual-repository projections. Project context and task
+brief reads use that same read-only path. `initializeProjectsLedger()` persists
+the default ledger and its active-project metadata during ws-server startup,
+before the native bridge or HTTP listener starts. Existing ledgers are preserved;
+project mutation paths still persist their changes.
+
+`/api/tasks` uses the production Next GET under `session`, matching the shared
+browser-panel caller. The native registration permits GET only. The native
+surface test verifies startup persistence, stops Next, serves the task GET, and
+checks missing/wrong credentials and unsupported mutation methods.
+
+`tests/o8d-tasks-read-only-real-path.test.ts` compares non-database files and
+database rows before and after a cold GET, then a populated GET with project
+context and task briefs. It also verifies initialization persistence and
+idempotence. The first-run project fixture explicitly runs initialization,
+matching production startup rather than relying on a project-list GET write.
+
+Fail-before receipt, keeping the tests and reverting only the four implementation
+files to the branch base:
+
+```sh
+npx vitest run tests/o8d-tasks-read-only-real-path.test.ts tests/o8d-native-route-inventory-real-path.test.ts --maxWorkers=2 -t 'GET leaves|covers native client'
+```
+
+The task assertion fails with `GET must not create projects.json: expected true
+to be false`. The inventory also fails on the existing native caller
+`diff_ui_scope.rs: /api/review/last-turn: expected false to be true`, both with
+the implementation reverted and restored. That path remains outside this slice.
+
+After restoring the implementation, these focused commands pass:
+
+```sh
+npx vitest run tests/o8d-tasks-read-only-real-path.test.ts tests/task-pool-history-real-path.test.ts tests/empty-project-projection-real-path.test.ts --maxWorkers=2
+O8D_BINARY="$PWD/crates/o8d/target/debug/o8d" npx vitest run tests/o8d-next-surfaces-real-path.test.ts --maxWorkers=2 -t 'A1 session GET /api/tasks'
+```
+
+The first command passes seven tests across three files. The second passes the
+new native transport case, with the other eighty-five cases unselected. The
+daemon was built with `cargo build --locked --manifest-path crates/o8d/Cargo.toml
+--features experimental-ws`. No full suite or project typecheck ran in this slice.
+
+Retention usage remains held. A disposable production-GET probe on an empty
+temporary data directory, with no registered repositories, confirmed that
+telemetry creates `.provider-keys.lock` even while `worktrees` remains absent.
+The probe passed and was removed. Resolving that independent write requires a
+separate telemetry/provider-boundary decision; this slice leaves it unchanged.
 
 ## R1 follow-up
 

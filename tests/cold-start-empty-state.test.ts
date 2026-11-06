@@ -14,7 +14,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const setupRoute = await import('@/app/api/setup/config/route');
 const { getDataDir } = await import('@/lib/data-dir-migration');
-const { getProjectsLedger } = await import('@/lib/repos/projects');
+const { getProjectsLedger, initializeProjectsLedger } = await import('@/lib/repos/projects');
 const { listRepos } = await import('@/lib/repos/registry');
 const { ORCHESTRATOR_HISTORY_DIR } = await import('@/lib/mobile/orchestrator-thread-history');
 const { resolveRepoPath } = await import('@/lib/intake/resolve-repo');
@@ -40,6 +40,8 @@ describe('cold start with only CORTEX_IDE_DATA_DIR configured', () => {
     });
     await expect(listRepos()).resolves.toEqual([]);
 
+    // ws-server startup persists the default ledger; project reads only project it.
+    await initializeProjectsLedger();
     const projects = await getProjectsLedger();
     expect(projects.projects).toHaveLength(1);
     expect(projects.projects[0]).toMatchObject({

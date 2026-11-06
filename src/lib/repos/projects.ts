@@ -276,7 +276,7 @@ async function writeLedger(ledger: ProjectsLedger) {
   writeSqliteProjectMeta(persistable);
 }
 
-async function bootstrapDefaultLedger(): Promise<ProjectsLedger> {
+async function defaultLedger(): Promise<ProjectsLedger> {
   const registry = await readRepoPathRegistry();
   const repoPaths = registry.ok ? registry.repos.map((entry) => normalizeRepoPath(entry.path)) : [];
   const ledger: ProjectsLedger = {
@@ -289,13 +289,18 @@ async function bootstrapDefaultLedger(): Promise<ProjectsLedger> {
     }],
     activeProjectId: DEFAULT_PROJECT_ID,
   };
-  await writeLedger(ledger);
   return ledger;
+}
+
+/** Process startup owns persistence; GETs only project the default in memory. */
+export async function initializeProjectsLedger(): Promise<void> {
+  if (await readRawLedger()) return;
+  await writeLedger(await defaultLedger());
 }
 
 export async function getProjectsLedger(): Promise<ProjectsLedger> {
   const existing = await readRawLedger();
-  const base = existing ?? await bootstrapDefaultLedger();
+  const base = existing ?? await defaultLedger();
   const enriched = await enrichLedgerWithSqliteRepoPaths(base);
   // Finalize the active id against the FULL projected list (incl. appended +
   // virtual single-repo projects). If it's missing, or it's the legacy default
