@@ -2,6 +2,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { DEFAULT_GITHUB_REPO, fetchGitHubPullRequestComments, resolveRepoSlug } from '@/lib/github-broker';
+import { resolveGitLabProject } from '@/lib/git-providers/detect';
+import { gitlabProvider } from '@/lib/git-providers/gitlab';
 
 export async function GET(
   request: Request,
@@ -9,7 +11,8 @@ export async function GET(
 ) {
   const { number } = await params;
   const { searchParams } = new URL(request.url);
-  const repo = await resolveRepoSlug(searchParams.get('repo'), DEFAULT_GITHUB_REPO);
+  const gitlab = resolveGitLabProject(searchParams.get('repo'));
+  const repo = gitlab ? gitlab.slug : await resolveRepoSlug(searchParams.get('repo'), DEFAULT_GITHUB_REPO);
   const prNumber = parseInt(number, 10);
 
   if (isNaN(prNumber)) {
@@ -17,7 +20,7 @@ export async function GET(
   }
 
   try {
-    const data = await fetchGitHubPullRequestComments(repo, prNumber);
+    const data = gitlab ? await gitlabProvider.readDiscussion(repo, prNumber) : await fetchGitHubPullRequestComments(repo, prNumber);
     return NextResponse.json({ comments: data.comments, reviews: data.reviews, prNumber, repo });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';

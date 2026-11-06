@@ -130,6 +130,21 @@
       ]
     },
     {
+      "path": "src/app/api/panel/prs/github-panel-snapshot.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/app/api/panel/prs/gitlab-panel.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener"
+      ]
+    },
+    {
       "path": "src/app/api/panel/prs/route.test.ts",
       "reasons": [
         "child-process",
