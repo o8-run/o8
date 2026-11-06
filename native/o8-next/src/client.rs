@@ -43,6 +43,19 @@ pub(crate) fn transient(error: &str) -> bool {
             .any(|code| error.ends_with(&format!("Server returned HTTP {code}")))
 }
 
+/// A refusal's `error` text as one bounded line without its final period, so
+/// callers can append the status.
+pub(crate) fn server_reason(reply: &serde_json::Value) -> Option<String> {
+    let text = reply["error"]
+        .as_str()?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let text: String = text.chars().filter(|c| !c.is_control()).take(300).collect();
+    let text = text.trim_end_matches('.');
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
 /// The stale line shown over last good data (classic AgentPanel's stale strip).
 pub(crate) fn stale_notice(error: &str) -> String {
     let reason = error.rsplit(": ").next().unwrap_or(error);
@@ -210,11 +223,29 @@ impl Client {
     ) -> Result<T, String> {
         self.get_counted(path, query).map(|(value, _)| value)
     }
+    /// A read whose refusal keeps the server's `error` text, for reads that gate
+    /// an action (the composer's queue and routing). The status stays last, so
+    /// `transient` and the 404 checks still classify it.
+    pub(crate) fn get_explained<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> Result<T, String> {
+        self.get_reply(path, query, true).map(|(value, _)| value)
+    }
     /// The parsed reply and the size of its body.
     pub(crate) fn get_counted<T: DeserializeOwned>(
         &self,
         path: &str,
         query: &[(&str, &str)],
+    ) -> Result<(T, usize), String> {
+        self.get_reply(path, query, false)
+    }
+    fn get_reply<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+        explain: bool,
     ) -> Result<(T, usize), String> {
         let mut url = self.url(path).map_err(|_| "Invalid route")?;
         url.query_pairs_mut().extend_pairs(query.iter().copied());
@@ -224,9 +255,18 @@ impl Client {
                 .call()
         })
         .map_err(|error| {
-            let message = match &error {
-                ureq::Error::Status(code, _) => format!("Server returned HTTP {code}"),
-                _ if timed_out(&error) => "Request timed out".into(),
+            let message = match error {
+                ureq::Error::Status(code, response) => {
+                    let reason = explain
+                        .then(|| Self::read::<serde_json::Value>(response).ok())
+                        .flatten()
+                        .and_then(|reply| server_reason(&reply));
+                    match reason {
+                        Some(reason) => format!("{reason} · Server returned HTTP {code}"),
+                        None => format!("Server returned HTTP {code}"),
+                    }
+                }
+                error if timed_out(&error) => "Request timed out".into(),
                 _ => "Could not reach the selected server".into(),
             };
             format!("{}: {message}", url.path())
