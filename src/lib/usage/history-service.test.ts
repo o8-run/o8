@@ -85,3 +85,28 @@ it('skips oversized tool output without dropping later usage in the same rollout
   expect(result.sources.find(source => source.provider === 'codex')?.status).toBe('ready');
   expect(result.buckets[0].records).toBe(1);
 });
+
+it('scans saved before the 1-hour cache split are read again and price 1-hour writes', async () => {
+  const { gzipSync, gunzipSync } = await import('node:zlib');
+  const root = await mkdtemp(join(tmpdir(), 'o8-usage-memo-')); temporary.push(root);
+  const claudeDir = join(root, 'projects'); await mkdir(claudeDir);
+  const record = claude('one');
+  Object.assign(record.message.usage, { cache_creation_input_tokens: 1_000_000,
+    cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1_000_000 } });
+  await writeFile(join(claudeDir, 'session.jsonl'), line(record));
+  const table = createOverrideRateTable({ 'test-model': { inputCostPerMillionTokens: 2, outputCostPerMillionTokens: 8 } });
+  // A 1-hour write at $5 per million, against $2.50 for a 5-minute write.
+  const tiered = new Map([...table].map(([model, rate]) => [model, { ...rate, cacheCreationCostPerToken: 2.5e-6, cacheCreation1hCostPerToken: 5e-6 }]));
+  const options = { roots: async () => [{ provider: 'claude' as const, path: claudeDir, format: 'jsonl' as const }], cacheDirectory: join(root, 'cache'),
+    pricing: async () => ({ ...(await pricing()), table: tiered }), now: () => at + 10_000 };
+  const writeCost = (result: Awaited<ReturnType<ReturnType<typeof createHistoryReader>>>) => result.buckets[0].categoryCostUsd.cacheWrite;
+  expect(writeCost(await createHistoryReader(options)({ days: 30, timeZone: 'UTC' }))).toBeCloseTo(5, 9);
+  // The same scan as an older build saved it: schema 1, no 1-hour split.
+  const file = join(root, 'cache', 'scans-v1.json.gz');
+  const saved = JSON.parse(gunzipSync(await readFile(file)).toString());
+  for (const [, memo] of saved.files) for (const scanned of memo.records) delete scanned.cacheCreation1hTokens;
+  await writeFile(file, gzipSync(JSON.stringify({ ...saved, schema: 1 })));
+  const reopened = await createHistoryReader(options)({ days: 30, timeZone: 'UTC' });
+  expect(reopened.scan.bytesRead).toBeGreaterThan(0);
+  expect(writeCost(reopened)).toBeCloseTo(5, 9);
+});

@@ -28,8 +28,10 @@ it('reads a saved machine through the HTTP entry point, real probe process and p
     await writeFile(join(root, 'ssh'), `#!/bin/sh\nprintf '%s\\n' "$@" > "$O8_TEST_SSH_ARGS"\nexec "$O8_TEST_NODE" --no-warnings -\n`);
     await chmod(join(root, 'ssh'), 0o700);
     await writeFile(join(root, 'projects', 'external.jsonl'), JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), sessionId: 'external-session', requestId: 'external-request',
-      message: { id: 'external-message', model: 'fixture-model', content: 'PRIVATE-REMOTE-CHAT', usage: { input_tokens: 10, output_tokens: 20 } } }) + '\n');
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ 'fixture-model': { input_cost_per_token: 0.000002, output_cost_per_token: 0.000008 } })));
+      message: { id: 'external-message', model: 'fixture-model', content: 'PRIVATE-REMOTE-CHAT', usage: { input_tokens: 10, output_tokens: 20,
+        cache_creation_input_tokens: 1000, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1000 } } } }) + '\n');
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ 'fixture-model': { input_cost_per_token: 0.000002, output_cost_per_token: 0.000008,
+      cache_creation_input_token_cost: 0.0000025, cache_creation_input_token_cost_above_1hr: 0.000004 } })));
     const request = (query: string) => new NextRequest(`http://localhost/api/runtime/usage?${query}`, { headers: { host: 'localhost' } });
     const inventory = await GET(request('machines=1')); expect(inventory.status).toBe(200);
     expect((await inventory.json()).machines).toContainEqual({ id, label: 'Build host', enabled: true, local: false });
@@ -40,9 +42,10 @@ it('reads a saved machine through the HTTP entry point, real probe process and p
     await vi.waitFor(async () => {
       const response = await GET(request(query)); expect(response.status).toBe(200); snapshot = await response.json();
       expect(snapshot).toMatchObject({ machine: { id, label: 'Build host' }, providerSessions: { claude: 1 },
-        buckets: [{ totals: { uncachedInputTokens: 10, outputTokens: 20 } }] });
+        buckets: [{ totals: { uncachedInputTokens: 10, cacheCreationTokens: 1000, outputTokens: 20 } }] });
     }, { timeout: 15_000, interval: 100 });
-    expect((snapshot.buckets as { costUsd: number }[])[0].costUsd).toBeCloseTo(0.00018);
+    // The probe prices the 1-hour cache write at the 1-hour rate: $0.004, against $0.0025 at the 5-minute rate.
+    expect((snapshot.buckets as { costUsd: number }[])[0].costUsd).toBeCloseTo(0.00418, 8);
     expect(JSON.stringify(snapshot)).not.toContain('PRIVATE-REMOTE-CHAT'); expect(JSON.stringify(snapshot)).not.toContain(root);
     const actualArgs = await readFile(args, 'utf8'); expect(actualArgs).toContain('StrictHostKeyChecking=yes');
     expect(actualArgs).toContain('BatchMode=yes'); expect(actualArgs).toContain('\n2200\n--\nusagehost\n');
