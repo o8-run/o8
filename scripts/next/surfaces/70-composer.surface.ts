@@ -50,6 +50,10 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
             || /^thoughts-next-\d+$/.test(target.tabId);
           return owned && realpathSync(target.repoPath) === realpathSync(repo) ? 200 : 400;
         }
+        // The seeded no-project chat (--composer-scratch) sends with no
+        // repository; the queue resolves its own scratch folder.
+        if (target.threadId === 'thoughts-composer-scratch' && target.repoPath == null
+          && seeds.some(seed => seed.id === target.threadId)) return 200;
         return (target.threadId?.startsWith('thoughts-composer-') || /^thoughts-next-\d+$/.test(target.threadId)) && realpathSync(target.repoPath) === realpathSync(repo) ? 200 : 400;
       } catch { return 400; }
     },
