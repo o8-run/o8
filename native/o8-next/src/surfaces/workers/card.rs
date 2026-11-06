@@ -1,5 +1,6 @@
 #[path = "actions.rs"]
 mod actions;
+pub(crate) use actions::steer;
 use super::{model::Task, *};
 use crate::theme::current as theme;
 use crate::{

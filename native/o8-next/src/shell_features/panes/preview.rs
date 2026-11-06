@@ -5,7 +5,6 @@
 // listed as an agent; ending the preview puts the workspace's own panes back.
 use super::*;
 use crate::pane_tree::{Leaf, Node, Zone};
-use gpui::SharedString;
 use std::time::Duration;
 
 /// Classic's simulated workers: name, task, status and latest note.
@@ -75,8 +74,6 @@ const WORKERS: [(&str, &str, &str, &str); 10] = [
 const ARRIVAL: Duration = Duration::from_millis(180);
 /// Shows the preview's launch button over the panes in a dev window.
 const LAUNCH_ENV: &str = "O8_DEV_WORKER_PREVIEW";
-/// The narrowest a worker card gets before the grid drops a column.
-const CARD_MIN: f32 = 230.;
 
 pub(super) struct Preview {
     /// The workspace it shows in; switching away ends it.
@@ -116,9 +113,8 @@ impl Preview {
     }
     /// The panes are `width` wide: the grid keeps its cards at least
     /// CARD_MIN beside the main pane.
-    fn fit(&mut self, width: f32) -> bool {
-        let room = width - super::MAIN_MIN;
-        let columns = ((room / CARD_MIN).floor() as usize).clamp(1, 4);
+    pub(super) fn fit(&mut self, width: f32) -> bool {
+        let columns = super::columns(width);
         if columns == self.columns {
             return false;
         }
@@ -169,7 +165,7 @@ pub(super) fn start(s: &mut Shell, count: usize, cx: &mut Context<Shell>) {
         tree: Node::main(),
         focused: None,
         manual: false,
-        columns: 4,
+        columns: super::columns(state.width),
     });
     cx.notify();
     cx.spawn(async move |this, cx| {
@@ -257,36 +253,10 @@ pub(super) fn wrap(s: &Shell, panes: AnyElement, cx: &mut Context<Shell>) -> Any
         .min_w_0()
         .min_h_0();
     match shown {
-        Some((shown, target)) => {
-            let measured = cx.entity().downgrade();
-            let measure = gpui::canvas(
-                |_, _, _| (),
-                move |bounds, _, _, cx| {
-                    let width = f32::from(bounds.size.width);
-                    let _ = measured.update(cx, |s, cx| {
-                        let state = s.features.get::<State>();
-                        if state.preview.as_mut().is_some_and(|p| p.fit(width)) {
-                            cx.notify();
-                        }
-                    });
-                },
-            )
-            .absolute()
-            .size_full();
-            frame
-                .child(bar(shown, target, cx))
-                .child(
-                    div()
-                        .relative()
-                        .flex()
-                        .flex_1()
-                        .min_w_0()
-                        .min_h_0()
-                        .child(measure)
-                        .child(panes),
-                )
-                .into_any_element()
-        }
+        Some((shown, target)) => frame
+            .child(bar(shown, target, cx))
+            .child(panes)
+            .into_any_element(),
         None if std::env::var_os(LAUNCH_ENV).is_some() => frame
             .relative()
             .child(panes)
@@ -381,185 +351,87 @@ pub(super) fn card(s: &Shell, id: &str, agent: &str, cx: &mut Context<Shell>) ->
         "Idle" => theme().text_faint,
         _ => theme().success,
     };
-    let (focus, close) = (id.to_owned(), id.to_owned());
-    div()
-        .id(SharedString::from(format!("pane-worker-{id}")))
-        .debug_selector({
-            let id = id.to_owned();
-            move || format!("pane-worker-{id}")
-        })
-        .size_full()
-        .p(px(5.))
+    let body = div()
+        .flex_1()
+        .min_h_0()
+        .overflow_hidden()
+        .px(px(12.))
+        .py(px(10.))
+        .flex()
+        .flex_col()
+        .gap(px(4.))
         .child(
             div()
-                .size_full()
+                .text_size(px(10.))
+                .text_color(theme().text_faint)
+                .child("SIMULATED TASK"),
+        )
+        .child(
+            div()
+                .text_size(px(13.))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(theme().text)
+                .child(task),
+        )
+        .child(
+            div()
+                .mt(px(4.))
+                .px(px(10.))
+                .py(px(6.))
                 .flex()
-                .flex_col()
-                .overflow_hidden()
-                .rounded(px(12.))
-                .border_1()
-                .border_color(if focused {
-                    gpui::Rgba {
-                        a: 0.75,
-                        ..theme().accent
-                    }
-                } else {
-                    theme().border
-                })
-                .bg(theme().surface)
-                .when(focused, |card| card.shadow_md())
-                .child(
-                    div()
-                        .h(px(34.))
-                        .flex_shrink_0()
-                        .flex()
-                        .items_center()
-                        .gap(px(7.))
-                        .pl(px(11.))
-                        .pr(px(6.))
-                        .border_b_1()
-                        .border_color(theme().border)
-                        .text_size(px(12.))
-                        .child(
-                            div()
-                                .size(px(7.))
-                                .flex_shrink_0()
-                                .rounded_full()
-                                .bg(crate::subagents::trace::agent_color(name)),
-                        )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_shrink()
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .text_color(theme().text)
-                                .child(format!("@{name}")),
-                        )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .text_size(px(11.))
-                                .text_color(theme().text_faint)
-                                .child("Codex · GPT-6 Sol"),
-                        )
-                        .child(
-                            div()
-                                .flex_shrink_0()
-                                .flex()
-                                .items_center()
-                                .gap(px(5.))
-                                .text_size(px(11.))
-                                .text_color(theme().text_secondary)
-                                .child(div().size(px(5.)).rounded_full().bg(tone))
-                                .child(status),
-                        )
-                        .child(
-                            div()
-                                .id(SharedString::from(format!("pane-close-{id}")))
-                                .debug_selector({
-                                    let id = id.to_owned();
-                                    move || format!("pane-close-{id}")
-                                })
-                                .flex_shrink_0()
-                                .size(px(22.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(6.))
-                                .cursor_pointer()
-                                .text_color(theme().text_muted)
-                                .hover(|d| d.bg(theme().hover).text_color(theme().text))
-                                .child("×")
-                                .on_click(cx.listener(move |s, _, _, cx| {
-                                    cx.stop_propagation();
-                                    if let Some(preview) =
-                                        s.features.get::<State>().preview.as_mut()
-                                    {
-                                        preview.close(&close);
-                                    }
-                                    cx.notify();
-                                })),
-                        ),
-                )
+                .rounded(px(8.))
+                .bg(theme().hover)
                 .child(
                     div()
                         .flex_1()
-                        .min_h_0()
+                        .min_w_0()
                         .overflow_hidden()
-                        .px(px(12.))
-                        .py(px(10.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(4.))
-                        .child(
-                            div()
-                                .text_size(px(10.))
-                                .text_color(theme().text_faint)
-                                .child("SIMULATED TASK"),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(13.))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(theme().text)
-                                .child(task),
-                        )
-                        .child(
-                            div()
-                                .mt(px(4.))
-                                .px(px(10.))
-                                .py(px(6.))
-                                .flex()
-                                .rounded(px(8.))
-                                .bg(theme().hover)
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .overflow_hidden()
-                                        .whitespace_nowrap()
-                                        .text_ellipsis()
-                                        .text_size(px(12.))
-                                        .text_color(theme().text_secondary)
-                                        .child(note),
-                                ),
-                        ),
-                )
-                .child(
-                    div()
-                        .flex_shrink_0()
-                        .flex()
-                        .items_center()
-                        .px(px(12.))
-                        .py(px(8.))
-                        .border_t_1()
-                        .border_color(theme().border)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .text_size(px(11.))
-                                .text_color(theme().text_faint)
-                                .child(format!("To @{name} · simulated steer")),
-                        ),
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_size(px(12.))
+                        .text_color(theme().text_secondary)
+                        .child(note),
                 ),
-        )
-        .on_click(cx.listener(move |s, _, _, cx| {
-            if let Some(preview) = s.features.get::<State>().preview.as_mut() {
-                preview.focused = Some(focus.clone());
-            }
-            cx.notify();
-        }))
-        .into_any_element()
+        );
+    let footer = div()
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .px(px(12.))
+        .py(px(8.))
+        .border_t_1()
+        .border_color(theme().border)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_size(px(11.))
+                .text_color(theme().text_faint)
+                .child(format!("To @{name} · simulated steer")),
+        );
+    super::card(
+        id,
+        super::Header {
+            name: format!("@{name}"),
+            color: name.into(),
+            meta: "Codex · GPT-6 Sol".into(),
+            status: status.into(),
+            tone,
+        },
+        focused,
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(body)
+            .child(footer)
+            .into_any_element(),
+        cx,
+    )
 }
 
 #[cfg(test)]

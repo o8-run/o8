@@ -2,6 +2,8 @@
 use super::*;
 #[path = "workers/card.rs"]
 mod card;
+/// Steers a packet, as a worker pane beside the chat does too.
+pub(super) use card::steer as steer_packet;
 #[path = "workers/drafts.rs"]
 mod drafts;
 #[path = "workers/model.rs"]
