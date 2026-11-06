@@ -5,6 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
+import { DISCOVERED_IMPORT_TAB_PREFIX } from '@/lib/llm/chat-history-title';
 import { resolveCodexDiscoveredSessionHome } from '@/lib/codex/sessions';
 import { codexRuntime } from '@/lib/runtimes/codex';
 import { claudeCodeRuntime } from '@/lib/runtimes/claude-code';
@@ -64,7 +65,7 @@ export function importedSessionBindings(workspace: string | null | undefined): M
 }
 
 export function discoveredImportTabId(sessionKey: string): string {
-  return `thoughts-import-${createHash('sha256').update(sessionKey).digest('hex')}`;
+  return `${DISCOVERED_IMPORT_TAB_PREFIX}${createHash('sha256').update(sessionKey).digest('hex')}`;
 }
 
 export function existingImportedSession(sessionKey: string, bindings: Map<string, string>, workspace: string | null | undefined): string | undefined {

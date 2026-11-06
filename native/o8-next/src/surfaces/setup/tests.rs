@@ -7,6 +7,9 @@ mod correction_2;
 #[path = "final_tests.rs"]
 mod final_round;
 
+#[path = "import_tests.rs"]
+mod import;
+
 #[path = "new_project_tests.rs"]
 mod new_project;
 

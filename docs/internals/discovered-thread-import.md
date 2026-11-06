@@ -46,7 +46,8 @@ Duplicate keys are collapsed; an empty selection succeeds with empty arrays.
 The complete selection is checked before any chat is written. Malformed input
 returns 400, unknown sessions return 404 with `error.code` equal to
 `unknown_discovered_session`, and missing or ambiguous Codex rollouts return 409
-with `session_not_resumable`.
+with `session_not_resumable`. The 409 lists every such key in `error.sessionKeys`
+(`error.sessionKey` is the first), so a picker can drop them and retry once.
 
 Creation uses the existing chat-history POST handler, matching single-row
 Continue: an empty o8 chat with `orchestratorSessionIds.codex` or
@@ -63,4 +64,4 @@ chat IDs also prevent reimport after a continuation replaces its provider
 session ID. Retries preserve existing histories. If a storage failure interrupts
 a batch, retry the same selection to create only the remaining chats.
 
-The first-launch picker UI remains separate work under #5260.
+o8 next's Setup offers these sessions on first launch (#5260).
