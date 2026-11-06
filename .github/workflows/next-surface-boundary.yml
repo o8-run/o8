@@ -30,7 +30,7 @@ jobs:
     name: ${{ github.event_name == 'pull_request_target' && 'o8 next surface boundary' || 'o8 next surface boundary (bootstrap)' }}
     if: github.event_name == 'pull_request_target' || github.event.pull_request.base.sha == '417586b6b00e55f4759fc95a68091ffad7596213'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       BASE_REF: origin/main
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -67,6 +67,13 @@ jobs:
         if: steps.select.outputs.run == 'true'
         with:
           toolchain: stable
+      # The surface build links WebKitGTK and glib on Linux (#5529). The script
+      # comes from the base checkout above, never from the pull request.
+      - name: Install native Linux build prerequisites
+        if: steps.select.outputs.run == 'true'
+        env:
+          O8_NATIVE_HEADLESS_TESTS: 'true'
+        run: bash scripts/ci/install-native-linux-deps.sh
       # A target event must never save caches containing PR-owned source output
       # into main's cache namespace. Avoid that overhead as well as cache writes.
       - name: Check surface patch on main and report wall time

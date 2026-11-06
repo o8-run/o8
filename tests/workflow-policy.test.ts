@@ -163,7 +163,15 @@ describe('workflow policy — every workflow is classified from the filesystem',
         expect(checkouts).toHaveLength(1);
         expect(checkouts[0].with).toEqual({ ref: '${{ github.event.pull_request.base.sha }}', 'fetch-depth': 0, 'persist-credentials': false });
         expect(steps.some(step => String(step.uses).startsWith('actions/cache@'))).toBe(false);
-        const runs = steps.filter(step => typeof step.run === 'string').map(step => String(step.run));
+        // The build links WebKitGTK and glib, so the native prerequisites install
+        // first: the base checkout's own script, only for a selected build, just
+        // before it, with no inputs beyond the headless package set.
+        const install = steps.filter(step => step.run === 'bash scripts/ci/install-native-linux-deps.sh');
+        expect(install).toHaveLength(1);
+        expect(install[0].if).toBe("steps.select.outputs.run == 'true'");
+        expect(install[0].env).toEqual({ O8_NATIVE_HEADLESS_TESTS: 'true' });
+        expect(steps.indexOf(install[0])).toBe(steps.length - 2);
+        const runs = steps.filter(step => typeof step.run === 'string' && step !== install[0]).map(step => String(step.run));
         expect(runs).toHaveLength(3);
         expect(runs[0]).toContain('git show "$BASE_SHA:$CHECKER_PATH" > "$POLICY_PATH"');
         expect(runs[0]).toContain('git show "$POLICY_BOOTSTRAP_REF:$CHECKER_PATH" > "$POLICY_PATH"');
