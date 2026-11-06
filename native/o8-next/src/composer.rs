@@ -51,6 +51,8 @@ pub struct Composer {
     reveal_cursor: bool,
     typing: Option<std::time::Instant>,
     pub(crate) placeholder: String,
+    /// Text size and line height for this input; the theme body when unset.
+    pub(crate) type_size: Option<(f32, f32)>,
     pub(crate) framed: bool,
     /// One unpadded line, for a field inside a pill or row.
     pub(crate) inline: bool,
@@ -83,6 +85,7 @@ impl Composer {
             revision: 0,
             painted: 0,
             height: px(crate::theme::TYPE.body_line),
+            type_size: None,
             scroll: ScrollHandle::new(),
             reveal_cursor: true,
             typing: None,
@@ -247,6 +250,14 @@ impl Composer {
                 .map(str::len)
                 .unwrap_or(0)
     }
+    fn body(&self) -> f32 {
+        self.type_size
+            .map_or(crate::theme::TYPE.body, |(size, _)| size)
+    }
+    fn body_line(&self) -> f32 {
+        self.type_size
+            .map_or(crate::theme::TYPE.body_line, |(_, line)| line)
+    }
     fn index_at(&self, point: Point<Pixels>) -> usize {
         if self
             .layout
@@ -256,15 +267,11 @@ impl Composer {
             return 0;
         }
         for (offset, line, origin) in &self.layout {
-            let height = px(crate::theme::TYPE.body_line)
-                * line.wrap_boundaries.len().saturating_add(1) as f32;
+            let height = px(self.body_line()) * line.wrap_boundaries.len().saturating_add(1) as f32;
             if point.y < origin.y + height {
                 return (offset
                     + line
-                        .closest_index_for_position(
-                            point - *origin,
-                            px(crate::theme::TYPE.body_line),
-                        )
+                        .closest_index_for_position(point - *origin, px(self.body_line()))
                         .unwrap_or_else(|i| i))
                 .min(offset + line.len())
                 .min(self.text.len());
@@ -405,12 +412,7 @@ impl Composer {
             "up" | "down" => {
                 let position = self.layout.iter().find_map(|(offset, line, origin)| {
                     (cursor >= *offset && cursor <= offset + line.len())
-                        .then(|| {
-                            line.position_for_index(
-                                cursor - offset,
-                                px(crate::theme::TYPE.body_line),
-                            )
-                        })
+                        .then(|| line.position_for_index(cursor - offset, px(self.body_line())))
                         .flatten()
                         .map(|p| *origin + p)
                 });
@@ -560,11 +562,10 @@ impl EntityInputHandler for Composer {
             if index < *offset || index > offset + line.len() {
                 return None;
             }
-            let start =
-                line.position_for_index(index - offset, px(crate::theme::TYPE.body_line))?;
+            let start = line.position_for_index(index - offset, px(self.body_line()))?;
             let end = line.position_for_index(
                 range.end.min(offset + line.len()) - offset,
-                px(crate::theme::TYPE.body_line),
+                px(self.body_line()),
             )?;
             // The platform asks for the first visual line's rectangle. A range
             // can run in either direction after shaping, or cross a soft wrap.
@@ -575,10 +576,7 @@ impl EntityInputHandler for Composer {
             };
             Some(Bounds::new(
                 *origin + point(start.x.min(end_x), start.y),
-                size(
-                    (end_x - start.x).abs().max(px(1.)),
-                    px(crate::theme::TYPE.body_line),
-                ),
+                size((end_x - start.x).abs().max(px(1.)), px(self.body_line())),
             ))
         })
     }
@@ -602,6 +600,7 @@ impl Render for Composer {
         }
         let input = cx.entity();
         let height = self.height;
+        let (body, body_line) = (self.body(), self.body_line());
         let card_max = card_max(window);
         div()
             .id("composer-input")
@@ -620,14 +619,15 @@ impl Render for Composer {
             .when(!self.framed, |d| {
                 // Reserve two lines and their padding so the first wrap does not
                 // grow the card by 3px and invalidate the cached transcript.
-                d.min_h(px(2. * crate::theme::TYPE.body_line + 11. + 4.))
+                d.min_h(px(2. * self.body_line() + 11. + 4.))
                     .pt(px(11.))
                     .px(px(14.))
                     .pb(px(4.))
             })
             .when(self.inline, |d| {
+                // An inline input that takes newlines grows with them.
                 d.min_h_0()
-                    .max_h(px(crate::theme::TYPE.body_line))
+                    .when(!self.newline_on_enter, |d| d.max_h(px(self.body_line())))
                     .p_0()
                     .border_0()
             })
@@ -768,20 +768,14 @@ impl Render for Composer {
                                 .collect();
                             let lines = window
                                 .text_system()
-                                .shape_text(
-                                    display,
-                                    px(crate::theme::TYPE.body),
-                                    &runs,
-                                    Some(bounds.size.width),
-                                    None,
-                                )
+                                .shape_text(display, px(body), &runs, Some(bounds.size.width), None)
                                 .expect("shape input");
                             for line in lines {
                                 let origin = point(bounds.left(), y);
                                 let end = offset + part.len();
                                 line.paint_background(
                                     origin,
-                                    px(crate::theme::TYPE.body_line),
+                                    px(body_line),
                                     TextAlign::Left,
                                     Some(bounds),
                                     window,
@@ -790,7 +784,7 @@ impl Render for Composer {
                                 .expect("paint selection");
                                 line.paint(
                                     origin,
-                                    px(crate::theme::TYPE.body_line),
+                                    px(body_line),
                                     TextAlign::Left,
                                     Some(bounds),
                                     window,
@@ -798,27 +792,25 @@ impl Render for Composer {
                                 )
                                 .expect("paint input");
                                 if focus.is_focused(window) && cursor >= offset && cursor <= end {
-                                    if let Some(position) = line.position_for_index(
-                                        cursor - offset,
-                                        px(crate::theme::TYPE.body_line),
-                                    ) {
+                                    if let Some(position) =
+                                        line.position_for_index(cursor - offset, px(body_line))
+                                    {
                                         window.paint_quad(fill(
                                             Bounds::new(
                                                 origin + position,
-                                                size(px(1.), px(crate::theme::TYPE.body_line)),
+                                                size(px(1.), px(body_line)),
                                             ),
                                             theme().accent,
                                         ));
                                     }
                                 }
-                                y += px(crate::theme::TYPE.body_line)
-                                    * (line.wrap_boundaries.len() + 1) as f32;
+                                y += px(body_line) * (line.wrap_boundaries.len() + 1) as f32;
                                 layouts.push((offset, line, origin));
                             }
                             offset += part.len() + 1;
                         }
                         input.update(cx, |input, cx| {
-                            let height = (y - bounds.top()).max(px(crate::theme::TYPE.body_line));
+                            let height = (y - bounds.top()).max(px(body_line));
                             if input.height != height {
                                 input.height = height;
                                 cx.notify();
@@ -830,7 +822,7 @@ impl Render for Composer {
                                             .then(|| {
                                                 line.position_for_index(
                                                     cursor - offset,
-                                                    px(crate::theme::TYPE.body_line),
+                                                    px(body_line),
                                                 )
                                             })
                                             .flatten()
@@ -853,8 +845,8 @@ impl Render for Composer {
                                     let bottom = top + visible;
                                     let next = if cursor_y < top {
                                         -cursor_y
-                                    } else if cursor_y + px(crate::theme::TYPE.body_line) > bottom {
-                                        visible - px(crate::theme::TYPE.body_line) - cursor_y
+                                    } else if cursor_y + px(body_line) > bottom {
+                                        visible - px(body_line) - cursor_y
                                     } else {
                                         scroll.y
                                     };

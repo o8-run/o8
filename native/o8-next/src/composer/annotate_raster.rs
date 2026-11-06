@@ -157,6 +157,72 @@ fn shape_svg(out: &mut String, shape: &Shape) {
     }
 }
 
+/// A text card's look in image pixels, from the image width alone. The editor
+/// draws its cards from the same numbers times the stage scale, so a note
+/// bakes at exactly the size and place it showed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CardMetrics {
+    pub font: f32,
+    pub pad: f32,
+    pub line_h: f32,
+    pub radius: f32,
+    pub border: f32,
+}
+pub(crate) fn card_metrics(image_width: f32) -> CardMetrics {
+    let font = (image_width / 46.).round().max(20.);
+    CardMetrics {
+        font,
+        pad: (font * 0.55).round(),
+        line_h: (font * 1.32).round(),
+        radius: (font * 0.35).round(),
+        border: (font / 9.).round().max(2.),
+    }
+}
+fn options() -> usvg::Options<'static> {
+    let db = fonts();
+    let mut options = usvg::Options {
+        font_family: card_family(),
+        ..usvg::Options::default()
+    };
+    options.fontdb = db;
+    options
+}
+/// Loads the system fonts ahead of the first measure, off the paint thread.
+pub(crate) fn warm_fonts() {
+    card_family();
+}
+/// The family cards bake in; the editor draws its cards in it too.
+pub(crate) fn card_family() -> String {
+    static FAMILY: OnceLock<String> = OnceLock::new();
+    FAMILY.get_or_init(|| sans(&fonts())).clone()
+}
+/// A card's box (width, height) in image pixels: the text's measured width
+/// and its line count, plus padding. Blank text measures as one empty line.
+pub(crate) fn card_size(text: &str, image_width: f32) -> (f32, f32) {
+    let m = card_metrics(image_width);
+    let text = text.trim_end();
+    let lines = text.lines().count().max(1) as f32;
+    let height = (lines * m.line_h + m.pad * 2.).round();
+    // Blank needs no fonts, so a new card never waits on the font load.
+    if text.trim().is_empty() {
+        return ((1. + m.pad * 2.).round(), height);
+    }
+    let options = options();
+    let card = Card {
+        x: 0.,
+        y: 0.,
+        color: 0,
+        text: text.to_owned(),
+    };
+    let svg = card_text(&card, &options.font_family, m.font, m.pad, m.line_h);
+    let document = svg_document(image_width.max(1.), height, &svg);
+    let measured = usvg::Tree::from_str(&document, &options)
+        .map(|tree| tree.root().abs_bounding_box().width())
+        .unwrap_or(0.)
+        .max(1.);
+    ((measured + m.pad * 2.).round(), height)
+}
+
 /// A card's text as SVG lines, at the card's top-left padding.
 fn card_text(card: &Card, family: &str, font: f32, pad: f32, line_h: f32) -> String {
     let mut out = String::new();
@@ -190,43 +256,32 @@ pub(crate) fn composite(bytes: &[u8], shapes: &[Shape], cards: &[Card]) -> Resul
     }
     let mut pixmap = tiny_skia::Pixmap::from_vec(data, size).ok_or("The image is too large.")?;
 
-    let db = fonts();
-    let family = sans(&db);
-    let mut options = usvg::Options {
-        font_family: family.clone(),
-        ..usvg::Options::default()
-    };
-    options.fontdb = db;
+    let options = options();
+    let family = options.font_family.clone();
     let (w, h) = (width as f32, height as f32);
     let mut body = String::new();
     for shape in shapes {
         shape_svg(&mut body, shape);
     }
     // Cards match the desktop: a white rounded box, colored border, dark text.
-    let font = (w / 46.).round().max(20.);
-    let pad = (font * 0.55).round();
-    let line_h = (font * 1.32).round();
-    let radius = (font * 0.35).round();
-    let border = (font / 9.).round().max(2.);
+    let CardMetrics {
+        font,
+        pad,
+        line_h,
+        radius,
+        border,
+    } = card_metrics(w);
     for card in cards.iter().filter(|c| !c.text.trim().is_empty()) {
         let card = Card {
             text: card.text.trim_end().to_owned(),
             ..*card
         };
         let text = card_text(&card, &family, font, pad, line_h);
-        let measured = usvg::Tree::from_str(&svg_document(w, h, &text), &options)
-            .map(|tree| tree.root().abs_bounding_box().width())
-            .unwrap_or(0.)
-            .max(1.);
-        let lines = card.text.lines().count().max(1) as f32;
+        let (card_w, card_h) = card_size(&card.text, w);
         let _ = write!(
             body,
             r##"<rect x="{}" y="{}" width="{}" height="{}" rx="{radius}" fill="#ffffff" fill-opacity="0.96" stroke="{}" stroke-width="{border}"/>{text}"##,
-            card.x,
-            card.y,
-            (measured + pad * 2.).round(),
-            (lines * line_h + pad * 2.).round(),
-            COLORS[card.color]
+            card.x, card.y, card_w, card_h, COLORS[card.color]
         );
     }
     let tree = usvg::Tree::from_str(&svg_document(w, h, &body), &options)

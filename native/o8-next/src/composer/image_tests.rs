@@ -638,3 +638,77 @@ fn native_image_markup_escape_cancels_without_changing_the_attachment(cx: &mut T
     assert_eq!(annotator_shapes(&surface, cx), None);
     assert!(images(&surface, cx).is_empty());
 }
+
+fn solid_png(width: u32, height: u32) -> Vec<u8> {
+    let image = image::RgbaImage::from_pixel(width, height, image::Rgba([40, 60, 90, 255]));
+    let mut out = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+#[gpui::test]
+fn native_image_markup_text_card_bakes_the_box_it_showed(cx: &mut TestAppContext) {
+    const TEXT: &str = "Order must hold here";
+    const WIDTH: f32 = 920.;
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    image_session(cx, &surface);
+    paste(solid_png(WIDTH as u32, 600), cx);
+    click("composer-image-0", cx);
+    click("annotator-tool-text", cx);
+    let stage = cx.debug_bounds("annotator-stage").expect("markup stage");
+    let scale = f32::from(stage.size.width) / WIDTH;
+    let at = gpui::point(
+        stage.origin.x + stage.size.width * 0.1,
+        stage.origin.y + stage.size.height * 0.5,
+    );
+    cx.simulate_click(at, Modifiers::default());
+    cx.run_until_parked();
+    cx.simulate_input(TEXT);
+    cx.run_until_parked();
+    draw(cx);
+    // The editor's card box, in image pixels.
+    let card = cx.debug_bounds("annotator-card-0").expect("text card");
+    let shown = [
+        f32::from(card.origin.x - stage.origin.x) / scale,
+        f32::from(card.origin.y - stage.origin.y) / scale,
+        f32::from(card.size.width) / scale,
+        f32::from(card.size.height) / scale,
+    ];
+    let (w, h) = crate::composer::annotate_raster::card_size(TEXT, WIDTH);
+    let expected = [0.1 * WIDTH, 0.5 * 600., w, h];
+    for (shown, expected) in shown.iter().zip(expected) {
+        assert!(
+            (shown - expected).abs() <= 1.5,
+            "editor card {shown:?} must match the baked rect {expected:?}: {:?} vs {:?}",
+            shown,
+            expected
+        );
+    }
+    // The grip sits above the box, outside the text's rect.
+    let grip = cx.debug_bounds("annotator-card-grip-0").expect("grip");
+    assert!(grip.origin.y + grip.size.height <= card.origin.y + px(1.));
+
+    click("annotator-done", cx);
+    cx.run_until_parked();
+    draw(cx);
+    let uri = images(&surface, cx)[0]["dataUri"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let baked = image::load_from_memory(&crate::composer::images::data_uri_bytes(&uri).unwrap())
+        .unwrap()
+        .to_rgba8();
+    let border = crate::composer::annotate_raster::card_metrics(WIDTH).border;
+    let (x, y) = (expected[0], expected[1]);
+    let pixel = |px: f32, py: f32| baked.get_pixel(px.round() as u32, py.round() as u32).0;
+    // The baked border runs along the shown box's right edge, and just past
+    // it is the untouched image.
+    let edge = pixel(x + w - border / 2., y + h / 2.);
+    assert!(
+        edge[0] > 200 && edge[1] < 150 && edge[2] < 100,
+        "border at the edge: {edge:?}"
+    );
+    assert_eq!(pixel(x + w + border + 3., y + h / 2.), [40, 60, 90, 255]);
+    assert_eq!(pixel(x + w / 2., y + h + border + 3.), [40, 60, 90, 255]);
+}

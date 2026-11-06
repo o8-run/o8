@@ -96,6 +96,8 @@ struct Card {
     y: f32,
     color: usize,
     input: Entity<Composer>,
+    /// The baked box in image pixels, re-measured as the text changes.
+    size: (f32, f32),
 }
 
 /// How the editor closed.
@@ -108,6 +110,8 @@ pub(crate) enum Finished {
         uri: String,
     },
 }
+
+const PLACEHOLDER: &str = "Type here";
 
 pub(crate) struct Annotator {
     index: usize,
@@ -140,6 +144,10 @@ impl Annotator {
     ) -> Self {
         let size = preview.size(0);
         let (width, height) = (size.width.0.max(1) as f32, size.height.0.max(1) as f32);
+        // Cards measure with the bake's fonts; load them before the first note.
+        cx.background_executor()
+            .spawn(async { super::annotate_raster::warm_fonts() })
+            .detach();
         Self {
             index,
             uri,
@@ -182,14 +190,37 @@ impl Annotator {
             Tool::Text => {
                 let input = cx.new(|cx| {
                     let mut input = Composer::new(cx);
-                    input.placeholder = "Type here".into();
+                    input.placeholder = PLACEHOLDER.into();
                     input.newline_on_enter = true;
+                    // No frame: the card is the frame, as in the bake.
+                    input.inline = true;
                     input
                 });
                 input.read(cx).focus.focus(window);
                 // Typing re-measures the card.
-                cx.observe(&input, |_, _, cx| cx.notify()).detach();
-                self.cards.push(Card { x, y, color, input });
+                cx.observe(&input, |this: &mut Self, input, cx| {
+                    let text = input.read(cx).text.clone();
+                    // A blank card holds room for its placeholder.
+                    let text = if text.trim().is_empty() {
+                        PLACEHOLDER.into()
+                    } else {
+                        text
+                    };
+                    let width = this.width;
+                    if let Some(card) = this.cards.iter_mut().find(|c| c.input == input) {
+                        card.size = super::annotate_raster::card_size(&text, width);
+                    }
+                    cx.notify();
+                })
+                .detach();
+                let size = super::annotate_raster::card_size(PLACEHOLDER, self.width);
+                self.cards.push(Card {
+                    x,
+                    y,
+                    color,
+                    input,
+                    size,
+                });
                 None
             }
             Tool::Arrow => Some(Shape::Arrow {
@@ -428,33 +459,38 @@ impl Annotator {
     fn card(&self, index: usize, scale: f32, cx: &mut Context<Self>) -> AnyElement {
         let card = &self.cards[index];
         let color = rgb(COLOR_VALUES[card.color]);
-        // The input does not grow on its own: size the card to its longest
-        // line, so a note wraps where the saved card does.
-        let longest = (card.input.read(cx).text.lines())
-            .map(|line| line.chars().count())
-            .max()
-            .unwrap_or(0);
-        let width = (longest as f32 * 9.5 + 32.).clamp(104., 280.);
+        // The bake's own numbers times the stage scale: what shows is what saves.
+        let m = super::annotate_raster::card_metrics(self.width);
+        let (w, h) = card.size;
+        let border = m.border * scale;
+        // SVG text sits a font's ascent (0.8) below the padding; a line box of
+        // `line_h` centres the glyphs, so start it that much higher.
+        let lead = (m.line_h - m.font) / 2.;
         div()
             .id(("annotator-card", index))
             .debug_selector(move || format!("annotator-card-{index}"))
             .absolute()
             .left(px(card.x * scale))
             .top(px(card.y * scale))
-            .w(px(width))
-            .flex()
-            .flex_col()
-            .rounded(px(9.))
-            .border_2()
+            .w(px(w * scale))
+            .h(px(h * scale))
+            .rounded(px(m.radius * scale))
+            .border(px(border))
             .border_color(color)
-            .bg(rgba(0xFFFFFFFA))
+            .bg(rgba(0xFFFFFFF5))
             .shadow_lg()
-            .overflow_hidden()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
+                // Editor-only chrome above the box, so it never moves the text.
                 div()
                     .id(("annotator-card-grip", index))
                     .debug_selector(move || format!("annotator-card-grip-{index}"))
+                    .absolute()
+                    .left(px(-border))
+                    .bottom(px(h * scale - border + 2.))
+                    .min_w(px(56.))
+                    .w(px(w * scale))
+                    .rounded_t(px(6.))
                     .flex()
                     .items_center()
                     .justify_between()
@@ -497,9 +533,18 @@ impl Annotator {
             )
             .child(
                 div()
+                    .absolute()
+                    .left(px((m.pad * scale - border).max(0.)))
+                    .top(px(((m.pad - lead) * scale - border).max(0.)))
+                    // The input wraps at its own width: give it the rest of
+                    // the box, so the measured line never breaks early.
+                    .w(px((w * scale - border - m.pad * scale).max(1.)))
                     .text_color(rgb(0x161616))
-                    .text_size(px(14.))
+                    .font_family(SharedString::from(super::annotate_raster::card_family()))
+                    .text_size(px(m.font * scale))
+                    .line_height(px(m.line_h * scale))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .whitespace_nowrap()
                     .child(card.input.clone()),
             )
             .into_any_element()
@@ -598,6 +643,15 @@ impl Render for Annotator {
             .min(1.)
             .max(0.05);
         let (shown_w, shown_h) = (self.width * scale, self.height * scale);
+        // Card text uses the bake's size at this scale.
+        let metrics = super::annotate_raster::card_metrics(self.width);
+        let type_size = Some((metrics.font * scale, metrics.line_h * scale));
+        for card in &self.cards {
+            if card.input.read(cx).type_size != type_size {
+                card.input
+                    .update(cx, |input, _| input.type_size = type_size);
+            }
+        }
         let shapes: Vec<Shape> = self
             .shapes
             .iter()
