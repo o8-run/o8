@@ -248,8 +248,8 @@ describe('dated model rate table reproducibility', () => {
     ) / TOKENS_PER_MILLION);
 
     expect(modelRateTable).toMatchObject({
-      rateTableVersion: '2026-11-05.2',
-      observedOn: '2026-11-05',
+      rateTableVersion: '2026-11-06.1',
+      observedOn: '2026-11-06',
     });
   });
 

@@ -36,6 +36,8 @@ interface ModelBreakdown {
   model: string;
   cost: number;
   messages: number;
+  /** Messages whose model has no rate; their cost is not in `cost`. */
+  unpricedMessages: number;
   sessions: number;
 }
 
@@ -136,10 +138,10 @@ function hourKey(ts: number): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:00`;
 }
 
-/** A Claude Code line's cost from the shared rate table; an unknown model is unpriced, as in the session cost parser. */
-function claudeLineCost(model: string, usage: Record<string, unknown>): number {
+/** A Claude Code line's cost from the shared rate table, or null when its model has no rate. */
+function claudeLineCost(model: string, usage: Record<string, unknown>): number | null {
   const rate = claudeRequestRate(model, usage);
-  return rate ? claudeRequestCostUsd(rate, readClaudeRequestTokens(usage)) : 0;
+  return rate ? claudeRequestCostUsd(rate, readClaudeRequestTokens(usage)) : null;
 }
 
 function createBreakdown(): Breakdown {
@@ -158,7 +160,7 @@ function ensureBreakdown(map: Map<string, Breakdown>, key: string): Breakdown {
 function ensureModelBreakdown(map: Map<string, ModelBreakdown>, key: string): ModelBreakdown {
   let value = map.get(key);
   if (!value) {
-    value = { model: key, cost: 0, messages: 0, sessions: 0 };
+    value = { model: key, cost: 0, messages: 0, unpricedMessages: 0, sessions: 0 };
     map.set(key, value);
   }
   return value;
@@ -308,6 +310,7 @@ export async function GET(request: NextRequest) {
 
     let totalCost = 0;
     let totalMessages = 0;
+    let totalUnpriced = 0;
     let totalInput = 0;
     let totalOutput = 0;
     let totalCache = 0;
@@ -316,7 +319,8 @@ export async function GET(request: NextRequest) {
 
     const recordUsage = (args: {
       ts: number;
-      cost: number;
+      /** Null when the model has no rate: counted as unpriced, not as $0. */
+      cost: number | null;
       inputTokens: number;
       outputTokens: number;
       cacheTokens: number;
@@ -327,9 +331,11 @@ export async function GET(request: NextRequest) {
     }) => {
       const normalizedModel = normalizeModel(args.model);
       const tokens = tokenTotal(args.inputTokens, args.outputTokens, args.cacheTokens, args.cacheWriteTokens);
+      const cost = args.cost ?? 0;
 
-      totalCost += args.cost;
+      totalCost += cost;
       totalMessages += 1;
+      if (args.cost === null) totalUnpriced += 1;
       totalInput += args.inputTokens;
       totalOutput += args.outputTokens;
       totalCache += args.cacheTokens;
@@ -340,21 +346,22 @@ export async function GET(request: NextRequest) {
         hourlyMap.set(bucketKey, { hour: bucketKey, cost: 0, messages: 0, tokens: 0 });
       }
       const hourly = hourlyMap.get(bucketKey)!;
-      hourly.cost += args.cost;
+      hourly.cost += cost;
       hourly.messages += 1;
       hourly.tokens += tokens;
 
       const model = ensureModelBreakdown(modelMap, normalizedModel);
-      model.cost += args.cost;
+      model.cost += cost;
       model.messages += 1;
+      if (args.cost === null) model.unpricedMessages += 1;
 
       const agent = ensureBreakdown(agentMap, args.agent);
-      agent.cost += args.cost;
+      agent.cost += cost;
       agent.messages += 1;
       agent.tokens += tokens;
 
       const surface = ensureBreakdown(surfaceMap, args.surface);
-      surface.cost += args.cost;
+      surface.cost += cost;
       surface.messages += 1;
       surface.tokens += tokens;
 
@@ -538,7 +545,7 @@ export async function GET(request: NextRequest) {
                 surface: 'Claude Code',
               });
 
-              session.cost += cost;
+              session.cost += cost ?? 0;
               session.messages += 1;
               session.inputTokens += inputTokens;
               session.outputTokens += outputTokens;
@@ -613,6 +620,7 @@ export async function GET(request: NextRequest) {
       totals: {
         cost: totalCost,
         messages: totalMessages,
+        unpricedMessages: totalUnpriced,
         inputTokens: totalInput,
         outputTokens: totalOutput,
         cacheTokens: totalCache,
