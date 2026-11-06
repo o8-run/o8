@@ -8,6 +8,7 @@ import { sessionOutcomes, approvals } from '@/lib/db/schema';
 import { CLOSE_UNMERGED_DISPOSITIONS } from '@/lib/orchestrator/close-unmerged';
 import { gte, sql } from 'drizzle-orm';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { claudeRequestCostUsd, claudeRequestRate, readClaudeRequestTokens } from '@/lib/cost/rate-table';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -71,13 +72,6 @@ interface SessionAccumulator {
 
 const SURFACES: SurfaceKey[] = ['Codex CLI', 'Claude Code', 'OpenCode 2', 'IDE LLM Chat', 'Symon Voice'];
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
-const ANTHROPIC_DEFAULT_PRICING = {
-  inputPerToken: 3 / 1_000_000,
-  outputPerToken: 15 / 1_000_000,
-  cacheReadPerToken: 0.3 / 1_000_000,
-  cacheWritePerToken: 3.75 / 1_000_000,
-};
-
 function safeReadDir(dir: string): string[] {
   try {
     return readdirSync(dir);
@@ -142,13 +136,10 @@ function hourKey(ts: number): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:00`;
 }
 
-function estimateAnthropicCost(input: number, output: number, cacheRead: number, cacheWrite: number): number {
-  return (
-    input * ANTHROPIC_DEFAULT_PRICING.inputPerToken
-    + output * ANTHROPIC_DEFAULT_PRICING.outputPerToken
-    + cacheRead * ANTHROPIC_DEFAULT_PRICING.cacheReadPerToken
-    + cacheWrite * ANTHROPIC_DEFAULT_PRICING.cacheWritePerToken
-  );
+/** A Claude Code line's cost from the shared rate table; an unknown model is unpriced, as in the session cost parser. */
+function claudeLineCost(model: string, usage: Record<string, unknown>): number {
+  const rate = claudeRequestRate(model, usage);
+  return rate ? claudeRequestCostUsd(rate, readClaudeRequestTokens(usage)) : 0;
 }
 
 function createBreakdown(): Breakdown {
@@ -533,8 +524,8 @@ export async function GET(request: NextRequest) {
                 usage.cost_usd,
                 usage.costUsd,
               );
-              const cost = explicitCost ?? estimateAnthropicCost(inputTokens, outputTokens, cacheTokens, cacheWriteTokens);
               const model = String(message.model ?? parsed.model ?? 'claude');
+              const cost = explicitCost ?? claudeLineCost(model, usage);
               const normalizedModel = recordUsage({
                 ts,
                 cost,
