@@ -47,13 +47,13 @@ describe('Claude session cost attribution', () => {
     expect(billable).toMatchObject({
       inputTokens: 150,
       outputTokens: 15,
-      totalCostUsd: 0.000675,
+      totalCostUsd: 0.00045,
       model: 'claude-sonnet-5',
     });
     expect(contextOnly).toMatchObject({
       inputTokens: 100,
       outputTokens: 10,
-      totalCostUsd: 0.00045,
+      totalCostUsd: 0.0003,
     });
   });
 });
