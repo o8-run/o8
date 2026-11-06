@@ -85,23 +85,10 @@ fn home_works_without_a_project_and_stays_selected(cx: &mut TestAppContext) {
 fn an_older_no_project_chat_is_listed_under_home_and_sends_from_its_scratch_folder(
     cx: &mut TestAppContext,
 ) {
-    let fixture = Fixture::start_mode(true, "--shell --composer --parity");
-    let id = "thoughts-scratch-older";
-    // Saved the way #5503 saves it: a runtime and model, no repository.
-    let lead: serde_json::Value = fixture
-        .client
-        .get(
-            "/api/v2/chat-history",
-            &[("tabId", "thoughts-composer-first")],
-        )
-        .unwrap();
-    let url = fixture.client.url("/api/v2/chat-history").unwrap();
-    fixture
-        .client
-        .request("POST", &url)
-        .send_json(serde_json::json!({"tabId": id, "messages": [],
-            "backend": lead["backend"], "model": lead["model"], "title": "Older scratch chat"}))
-        .unwrap();
+    // The fixture saves this chat the way #5503 did: a runtime and model, no
+    // repository.
+    let fixture = Fixture::start_mode(true, "--shell --composer --parity --composer-scratch");
+    let id = "thoughts-composer-scratch";
     let file = fixture.root.join("home-scratch.json");
     let (shell, mut visual) = open(fixture.client.clone(), file, State::default(), cx);
     let cx = &mut visual;

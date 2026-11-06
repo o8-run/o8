@@ -74,6 +74,14 @@ async function main() {
           timestamp: 1790812800000, receipt: { permissionMode: 'plan' } }],
       }));
     }
+    // A chat saved with no project, as #5503 saved them before Home.
+    if (process.argv.includes('--composer-scratch')) {
+      writeFileSync(join(dataDir, 'chat-history', 'thoughts-composer-scratch.json'), JSON.stringify({
+        title: 'Older scratch chat', backend: 'pi', model: 'pi', orchestratorVisible: true,
+        savedAt: '2026-10-01T00:00:00.000Z', messages: [{ id: 'initial', role: 'assistant', content: 'Fixture ready',
+          timestamp: 1790812800000, receipt: { permissionMode: 'plan' } }],
+      }));
+    }
   }
   await isolateTranscriptDiscovery(transcriptFixtures);
   context.seeds = seeds;

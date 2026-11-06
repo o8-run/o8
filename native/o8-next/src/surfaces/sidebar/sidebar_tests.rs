@@ -292,15 +292,9 @@ fn assert_oracle(shell: &Entity<Shell>, cx: &VisualTestContext, expected: Value)
             .expect("desktop record must remain available");
         assert_eq!(row["title"], session.title);
         assert_eq!(row["status"], session.status);
-        // A chat with no project belongs to Home (#5611).
-        let home = crate::shell::session::home_workspace();
         assert_eq!(
             row["workspace"],
-            session
-                .repo_path
-                .as_deref()
-                .or(home.as_deref())
-                .unwrap_or("Unassigned")
+            session.repo_path.as_deref().unwrap_or("Unassigned")
         );
     }
 }
