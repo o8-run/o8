@@ -22,8 +22,25 @@ done
 # retry move each request to the next mirror in about a minute; more retries
 # keep hammering the stalled one.
 apt_options=(-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=1)
+# A mirror can also trickle: every request succeeds, so no timeout fires, and
+# the download outlasts the job. Bound the download, then drop the first
+# mirror and fetch the rest from the next one. Installation starts only after
+# every archive is local, so the bound never interrupts dpkg.
+download_limit="${O8_APT_DOWNLOAD_LIMIT:-480}"
+download() {
+  sudo timeout "$download_limit" apt-get "${apt_options[@]}" install -y --no-install-recommends --download-only "${missing[@]}"
+}
 if (( ${#missing[@]} )); then
   sudo apt-get "${apt_options[@]}" update -qq
+  if ! download; then
+    mirrors="${O8_APT_MIRRORS:-/etc/apt/apt-mirrors.txt}"
+    if [[ -f "$mirrors" ]] && (( $(grep -c . "$mirrors") > 1 )); then
+      echo "::warning::Package download exceeded ${download_limit}s; dropping mirror $(head -n 1 "$mirrors" | cut -f1)"
+      sudo sed -i '1d' "$mirrors"
+      sudo apt-get "${apt_options[@]}" update -qq
+    fi
+    sudo apt-get "${apt_options[@]}" install -y --no-install-recommends --download-only "${missing[@]}"
+  fi
   sudo apt-get "${apt_options[@]}" install -y --no-install-recommends "${missing[@]}"
 else
   echo 'Native prerequisites already installed; no package download needed.'
