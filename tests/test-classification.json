@@ -5291,6 +5291,12 @@
       ]
     },
     {
+      "path": "tests/o8d-more-reads-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-native-route-inventory-real-path.test.ts",
       "reasons": [
         "real-path"

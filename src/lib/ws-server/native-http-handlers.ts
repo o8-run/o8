@@ -97,6 +97,7 @@ import { GET as api_setup_cli_updates_GET } from '@/app/api/setup/cli-updates/ro
 import { GET as api_panel_o8_update_summary_GET } from '@/app/api/panel/o8-update-summary/route';
 import { GET as api_panel_problem_dossiers_GET } from '@/app/api/panel/problem-dossiers/route';
 import { GET as api_cortex_cross_repo_proposals_GET } from '@/app/api/cortex/cross-repo-proposals/route';
+import { GET as api_runtime_acp_registry_GET } from '@/app/api/runtime/acp-registry/route';
 
 export const api_tasks = { GET: api_tasks_GET };
 export const api_mobile_orchestrator_threads = { GET: api_mobile_orchestrator_threads_GET };
@@ -183,6 +184,7 @@ export const api_setup_cli_updates = { GET: api_setup_cli_updates_GET };
 export const api_panel_o8_update_summary = { GET: api_panel_o8_update_summary_GET };
 export const api_panel_problem_dossiers = { GET: api_panel_problem_dossiers_GET };
 export const api_cortex_cross_repo_proposals = { GET: api_cortex_cross_repo_proposals_GET };
+export const api_runtime_acp_registry = { GET: api_runtime_acp_registry_GET };
 export const api_orchestrator_handoff = { POST: api_orchestrator_handoff_POST };
 export const api_orchestrator_reset_session = { POST: api_orchestrator_reset_session_POST };
 export const api_orchestrator_compact = { POST: api_orchestrator_compact_POST };

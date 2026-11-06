@@ -15,15 +15,14 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/setup/mcp-config',
   '/api/setup/claude-desktop',
   '/api/setup/external-client',
-  '/api/orchestrator/packet-transcript',
+  '/api/orchestrator/packet-transcript', // Transcript discovery reaches credential refresh and the provider store lock.
   '/api/panel/connect',
   '/api/mcp',
   '/api/panel/ssh-machines',
   '/api/runtime/acp-connection',
-  '/api/runtime/acp-registry',
   '/api/runtime/acp-registry/prepare',
   '/api/runtime/provider-instances',
-  '/api/setup/detect',
+  '/api/setup/detect', // CLI probes, credential reads and CLI symlink repair.
   '/api/cortex/codebase-memory', // Live index progress belongs to the Next process.
   '/api/cortex/diagnostics',
   '/api/orchestrator/archive',
@@ -39,7 +38,7 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/task-artifacts/[id]/decision', // Mission card decision (#5516): a POST, outside the Phase A reads.
   '/api/tts',
   '/api/worktrees/retention-usage', // resolveManagedWorktreeStorageTarget creates the default root.
-  '/api/review/last-turn', // Review's last-turn scope (#5602): Next-only until its GET is audited for Phase A.
+  '/api/review/last-turn', // Worktree listing launches Git through credential refresh and the provider store lock.
   '/api/review/commit', // Review's commit button: a POST, outside the Phase A reads.
   '/api/review/push', // Review's push button: a POST, outside the Phase A reads.
 ]);
