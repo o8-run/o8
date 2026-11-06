@@ -1252,6 +1252,7 @@ impl Surface {
             .pb(px(6.))
             .child(
                 div()
+                    .debug_selector(|| "composer-model-heading".into())
                     .flex()
                     .items_center()
                     .justify_between()
