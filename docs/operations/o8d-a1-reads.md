@@ -71,8 +71,8 @@ the heal-bot is on, and skips the ticks the running heal-bot already covers.
 | `/api/tasks/[id]/preview` | Native client uses POST/DELETE; production route has no GET. |
 | `/api/repo-spec/asset` | Native client uploads with POST; production route has no GET. |
 | `/api/orchestrator/comparison-diff` | GET has a write path. Held; with the security lane. |
-| `/api/orchestrator/backend-models` | GET probes and writes model disk caches; key resolution also has side effects. |
-| `/api/orchestrator/pull-request-context` | GET accepts refresh queries that call `ensureGitHubPullRequest` and update the mirror. |
+| `/api/orchestrator/backend-models` | ACP probing writes the model cache and takes the credential-policy store lock before spawning. Moving the catalogue cache alone cannot make the GET read-only. See the orchestrator audit below. |
+| `/api/orchestrator/pull-request-context` | Refresh queries update the mirror through a reader shared with paired devices. The existing context POST is operator-only; moving all callers to it needs an authorization decision. See the orchestrator audit below. |
 | `/api/setup/identity` | `getInstanceIdentity` creates persisted instance/boot IDs when absent. Existing producer registration is preserved; no surface entry is added. |
 | `/api/cortex/diagnostics` | Timings are recorded in the Next process; the native process loads the disk snapshot once, so a native GET would omit them. |
 | `/api/cortex/codebase-memory` | GET calls `ensureCodebaseMemoryBootIndex`, starting indexing and persistent writes. Live progress and errors come from the Next process's module-local `stateByRepoId`, not the persisted HEAD receipts; a native GET would omit that state. |
@@ -405,3 +405,79 @@ production response, GET-only surface registration, and 405 refusal for all
 unregistered write methods. The earlier focused `-t 'cross-repo-proposals'` run
 also passed (1 passed, 85 skipped). Raw receipts are retained locally under
 `.o8-a1-evidence/cortex/`.
+
+## Orchestrator read audit
+
+Both orchestrator candidates remain held. No GET or mutation registration is
+added, and their `NEXT_ONLY_NATIVE_PATHS` entries remain in place.
+
+### Backend models
+
+`GET /api/orchestrator/backend-models` calls `probeAcpModels`, which creates
+`acp-models/<backend>.json` after a nonempty probe. Before that cache write,
+`new AcpClient` calls `withProviderStoreLock` during credential-policy
+validation and process creation. That boundary creates `.provider-keys.lock`
+and executes an exclusive SQLite transaction. It is separate from shared
+application database schema bootstrap. Removing the catalogue write would
+still leave this credential-policy write on a cold cache or `refresh=1`.
+
+The read also resolves provider credentials through `resolveOpenRouterKey`
+and the Local ACP launch/environment path. The existing fingerprint and
+output-redaction checks depend on that launch configuration. The audit stops
+at this boundary; credential resolution, locking and redaction are unchanged.
+A cache-only GET would lose the current cold-cache and forced-probe behavior.
+
+Native `composer/selector.rs` requests this path for the session model picker.
+Web callers include `AcpModelPicker.tsx`, `ComposerPicker.tsx`,
+`LocalAcpSection.tsx` and `MuseConnectionSection.tsx`; settings callers request
+`refresh=1`. A follow-up needs an agreed probe trigger that preserves those
+results while retaining credential-policy admission. No cache write has been
+moved in this slice.
+
+### Pull-request context
+
+`GET /api/orchestrator/pull-request-context` calls `readPullRequestContext`.
+For a repository/number query, `refresh=1`, or `refresh=missing` without a
+repository identity, calls `ensureGitHubPullRequest`. Its targeted
+`syncPullRequest` upserts the PR mirror. This supplies provider-backed immutable
+repository/PR IDs even for an external PR absent from the mirror.
+
+`ConversationPullRequests.tsx` and the operator MCP `conversation-prs.ts`
+handler resolve those IDs with `refresh=1` before sending the existing link
+POST. That POST currently requires the complete immutable identity; it does
+not accept a repository address as a refresh request. `PullRequestConversations.tsx`
+also requests `refresh=missing` for reverse lookup from both desktop and mobile.
+Its mobile endpoint calls the same reader and permits paired devices. The
+context POST permits only operators, and paired-device POSTs are denied by
+the existing middleware and handler. Moving refresh to that POST for every
+caller therefore needs an authorization decision or a separate maintenance
+design that covers previously unknown PRs. Dropping refresh would change the
+external-import and missing-identity results. The audit stops here without
+changing either authorization boundary or either GET's behavior.
+
+Native `surfaces/sidebar/pr_links.rs` only requests saved links by `threadId`;
+that caller does not use refresh. Registration still covers the entire
+production GET, including its repository/number refresh queries, so that
+read-only caller alone cannot justify registering the route. No mirror write
+has been moved in this slice.
+
+### Audit verification
+
+Only this document changed; production source and tests are unchanged.
+
+- `npx vitest run tests/conversation-pr-context-real-path.test.ts -t 'imports an accessible external PR|gives a paired mobile read|roundtrips the built CLI' --maxWorkers=2`:
+  external import and paired-device read/denied mutation passed (2 tests).
+  The CLI roundtrip failed during bundling because the supplied dependencies
+  cannot resolve `ink`, `@muse-code/sdk` and `@earendil-works/pi-durable`
+  (including its SQLite storage subpath). There were 24 filtered tests.
+- `npx vitest run tests/o8d-native-route-inventory-real-path.test.ts src/app/api/orchestrator/backend-models/route.test.ts --maxWorkers=2`:
+  4 tests passed, including both backend-model route tests. The inventory's
+  production-source scan failed with
+  `diff_ui_scope.rs: /api/review/last-turn: expected false to be true`.
+  That caller and its registration are outside this slice and unchanged.
+- `git diff --check`: passed.
+
+No source change was made, so there is no source-reversion fail-before/pass-after
+receipt or moved-write trigger to verify. No native socket registration test
+was added or run because both paths remain Next-only. No typecheck or full
+suite was run, following this worktree task's targeted-test restriction.
