@@ -1412,6 +1412,17 @@ impl Element for RetainedRow {
         for (card, hitbox) in cache.diagrams.iter().zip(hitboxes.iter()) {
             card.interact(origin, hitbox, window);
         }
+        // Native documents draw above the window; anything painted over these
+        // anchors later in the frame is clipped out of them.
+        #[cfg(target_os = "macos")]
+        for (id, placement) in &cache.cards {
+            if let Some(card) = state.cards.get(id) {
+                window.paint_native_anchor(
+                    card.as_ptr() as u64,
+                    Bounds::new(origin + placement.origin, placement.size),
+                );
+            }
+        }
         let fades = tail_fades(&state.fading, &cache.lines);
         if !fades.is_empty() {
             window.request_animation_frame();

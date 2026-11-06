@@ -21,6 +21,8 @@ mod inbox;
 mod lineage;
 #[cfg(test)]
 mod input_reuse_tests;
+#[cfg(test)]
+mod native_anchor_tests;
 mod issues;
 mod merge;
 mod mission_card;

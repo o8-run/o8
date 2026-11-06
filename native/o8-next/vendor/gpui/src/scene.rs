@@ -32,6 +32,8 @@ pub(crate) struct Scene {
     pub(crate) monochrome_sprites: Vec<MonochromeSprite>,
     pub(crate) polychrome_sprites: Vec<PolychromeSprite>,
     pub(crate) surfaces: Vec<PaintSurface>,
+    /// o8: native views drawn above the scene, keyed by the caller.
+    pub(crate) anchors: Vec<(u64, DrawOrder, Bounds<ScaledPixels>)>,
 }
 
 impl Scene {
@@ -46,6 +48,7 @@ impl Scene {
         self.monochrome_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
+        self.anchors.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -114,12 +117,47 @@ impl Scene {
             .push(PaintOperation::Primitive(primitive));
     }
 
+    /// o8: record where a native view sits in paint order without drawing.
+    /// Later primitives that overlap it receive a higher order.
+    pub fn insert_anchor(&mut self, key: u64, bounds: Bounds<ScaledPixels>) {
+        if bounds.is_empty() {
+            return;
+        }
+        let order = self
+            .layer_stack
+            .last()
+            .copied()
+            .unwrap_or_else(|| self.primitive_bounds.insert(bounds));
+        self.anchors.push((key, order, bounds));
+        self.paint_operations
+            .push(PaintOperation::Anchor(key, bounds));
+    }
+
+    /// o8: the visible quads painted above an anchor, clipped to it. `None`
+    /// when this scene did not paint the anchor.
+    pub fn covering(&self, key: u64) -> Option<Vec<Bounds<ScaledPixels>>> {
+        let &(_, order, bounds) = self.anchors.iter().rev().find(|anchor| anchor.0 == key)?;
+        Some(
+            self.quads
+                .iter()
+                .filter(|quad| quad.order > order && !quad.background.is_transparent())
+                .map(|quad| {
+                    quad.bounds
+                        .intersect(&quad.content_mask.bounds)
+                        .intersect(&bounds)
+                })
+                .filter(|covered| !covered.is_empty())
+                .collect(),
+        )
+    }
+
     pub fn replay(&mut self, range: Range<usize>, prev_scene: &Scene) {
         for operation in &prev_scene.paint_operations[range] {
             match operation {
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
                 PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
                 PaintOperation::EndLayer => self.pop_layer(),
+                PaintOperation::Anchor(key, bounds) => self.insert_anchor(*key, *bounds),
             }
         }
     }
@@ -193,6 +231,7 @@ pub(crate) enum PaintOperation {
     Primitive(Primitive),
     StartLayer(Bounds<ScaledPixels>),
     EndLayer,
+    Anchor(u64, Bounds<ScaledPixels>),
 }
 
 #[derive(Clone)]

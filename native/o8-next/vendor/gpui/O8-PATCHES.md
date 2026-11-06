@@ -48,6 +48,13 @@ Local changes:
   their advance and glue both adjoining glyphs, including at emergency widths.
   This matches classic WebKit wrapping while preserving source text and indices.
 
+- `src/scene.rs`, `src/window.rs`: native-view anchors. A native view such as a
+  WKWebView draws above the whole window, so window content painted later
+  (menus, tooltips, dialogs) used to fall beneath it. `paint_native_anchor`
+  records an invisible marker in paint order, replayed with cached views;
+  `native_anchor_cover` returns the visible quads the drawn frame placed above
+  it; `on_drawn` runs a hook after each drawn frame, before presentation.
+
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit
 probe live in the parent crate.
