@@ -276,10 +276,14 @@ export function stableReleaseEffects({ root, version, tag, range, notesRef }) {
   }
 
   function prepareNotes() {
+    const notesMarkdown = releaseNotesMarkdown();
     releaseSummary = prepareReleaseSummary(buildLatestShip({ version, tag, publishedAt: new Date().toISOString(),
       releaseUrl: `https://github.com/${REPO}/releases/tag/${tag}`, commits: releaseCommits(),
-      notesMarkdown: releaseNotesMarkdown() }));
-    return formatReleaseSummary(releaseSummary);
+      notesMarkdown }));
+    // The operator's reviewed next.md is the release body as written. The
+    // generated summary, capped at eight short entries, is only the fallback
+    // for a ship without notes; it still supplies the feed's summary line.
+    return notesMarkdown.trim() ? `${notesMarkdown.trim()}\n` : formatReleaseSummary(releaseSummary);
   }
   return { creditLine: () => contributorCreditLine(releaseCredits()), prepareFixed, complete, prepareNotes, publishPublicRelease, resolvePublishedAt,
     releaseCredits, composeReleaseAnnouncement, announceRelease, releaseMetadataRange };
