@@ -78,7 +78,15 @@ impl Session {
     /// The workspace this thread opens in. A machine's threads get their own,
     /// so the same path on two machines stays apart.
     pub(crate) fn workspace(&self) -> String {
-        let repo = self.repo_path.as_deref().unwrap_or("Unassigned");
+        // Home is the one place for work without a project: a chat saved with
+        // no project (#5503) belongs to it. Its agent still runs in that
+        // chat's own scratch folder, because its saved record is unchanged.
+        let home = self.machine.is_none().then(home_workspace).flatten();
+        let repo = self
+            .repo_path
+            .as_deref()
+            .or(home.as_deref())
+            .unwrap_or("Unassigned");
         match &self.machine {
             Some(machine) => format!("{MACHINE_WORKSPACE}{machine}|{repo}"),
             None => repo.to_owned(),

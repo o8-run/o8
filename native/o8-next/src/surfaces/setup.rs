@@ -72,10 +72,14 @@ impl Shell {
         self.subscriptions
             .push(cx.subscribe(&setup, |s, _, opened: &view::Opened, cx| {
                 if let Some(session) = &opened.0 {
-                    // A thread with no project opens in the "Unassigned" workspace.
+                    // A thread with no project opens in Home, which belongs to
+                    // no project and so is never added to the project list.
                     let path = session.workspace();
                     s.state.selected = Some(path.clone());
-                    if session.repo_path.is_some() && !s.workspaces.contains(&path) {
+                    if session.repo_path.is_some()
+                        && !crate::shell::session::is_home(&path)
+                        && !s.workspaces.contains(&path)
+                    {
                         s.workspaces.push(path.clone());
                     }
                     if !s.sessions.iter().any(|v| v.id == session.id) {

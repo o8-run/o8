@@ -184,11 +184,11 @@ impl Client {
             });
         }
         if let Some(workspace) = self.workspace() {
-            sessions.retain(|session| {
-                session
-                    .repo_path
-                    .as_deref()
-                    .is_some_and(|path| same_workspace(path, workspace))
+            // Home also lists the chats saved with no project (#5503).
+            let home = crate::shell::session::is_home(workspace);
+            sessions.retain(|session| match session.repo_path.as_deref() {
+                Some(path) => same_workspace(path, workspace),
+                None => home && session.machine.is_none(),
             });
         }
         Ok((sessions, state))

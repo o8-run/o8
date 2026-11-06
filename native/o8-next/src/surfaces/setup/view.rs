@@ -354,7 +354,8 @@ impl Setup {
         let mut session = None;
         let (backend, workers) = snapshot.recommendation();
         // Without a project, a first conversation starts once a lead and model
-        // are ready; it runs in its own scratch folder on the server.
+        // are ready. It starts in Home, the home folder, as Home's New chat
+        // does (#5611); with no home folder it runs in its own scratch folder.
         let first = match project {
             Some(_) => Some(
                 snapshot
@@ -369,7 +370,12 @@ impl Setup {
             if !current.ready(&backend, &workers) {
                 return Err("Connect a coding tool before opening this project.".into());
             }
-            client.setup_request("POST", "/api/v2/chat-history", &json!({"tabId":id,"messages":[],"backend":backend,"model":model,"repoPath":project.map(|p| &p.local_path),"repoName":project.map(|p| &p.name),"title":"New conversation"}))?;
+            let home = crate::shell::session::home_workspace().filter(|_| project.is_none());
+            let (repo_path, repo_name) = match project {
+                Some(project) => (Some(project.local_path.clone()), Some(project.name.clone())),
+                None => (home.clone(), home.as_ref().map(|_| "Home".to_owned())),
+            };
+            client.setup_request("POST", "/api/v2/chat-history", &json!({"tabId":id,"messages":[],"backend":backend,"model":model,"repoPath":repo_path,"repoName":repo_name,"title":"New conversation"}))?;
             let history: Value = client.get("/api/v2/chat-history", &[("tabId", id)])?;
             if let Some(project) = project {
                 completion["repoPath"] = json!(project.local_path);

@@ -132,12 +132,20 @@ pub(super) fn by_repo(
         .iter()
         .map(|(path, name)| (path.clone(), name.clone(), vec![]))
         .collect();
+    // Home and chats saved with no project (#5503) share one "No project"
+    // folder, keyed to Home so its New thread starts there.
+    let home = crate::shell::session::home_workspace().unwrap_or_default();
+    let no_project = |path: &str| path.is_empty() || path == home;
     for session in live {
-        let path = session.repo_path.clone().unwrap_or_default();
+        let path = match session.repo_path.clone() {
+            Some(path) => path,
+            None if session.machine.is_none() => home.clone(),
+            None => String::new(),
+        };
         match folders.iter_mut().find(|folder| folder.0 == path) {
             Some(folder) => folder.2.push(session),
             None => {
-                let name = if path.is_empty() {
+                let name = if no_project(&path) {
                     "No project".into()
                 } else {
                     label(&path)
@@ -146,7 +154,7 @@ pub(super) fn by_repo(
             }
         }
     }
-    if let Some(index) = folders.iter().position(|folder| folder.0.is_empty()) {
+    if let Some(index) = folders.iter().position(|folder| no_project(&folder.0)) {
         let unassigned = folders.remove(index);
         folders.push(unassigned);
     }
