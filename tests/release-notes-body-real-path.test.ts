@@ -70,6 +70,32 @@ describe('release notes reach the release body and feed whole', () => {
     expect(items[3]).toBe('Review opens on your working changes, stacks every changed file with a files drawer, and scopes to all changes, the last turn, staged or unstaged.');
   });
 
+  function feed(markdown: string) {
+    return buildLatestShip({ version: '0.1.816', tag: 'v0.1.816', publishedAt: '2026-11-06T10:20:00.000Z',
+      releaseUrl: 'https://github.com/o8-run/o8/releases/tag/v0.1.816', commits: [{ sha: 'abcdef1', subject: 'chore: release' }],
+      notesMarkdown: markdown }).sections[0].items;
+  }
+
+  it('keeps a sentence that ends exactly at the limit', () => {
+    const first = `Panes ${'k'.repeat(213)}.`;
+    expect(first).toHaveLength(220);
+    expect(feed(`- ${first} Then more words carry the bullet past the limit.\n`)).toEqual([first]);
+  });
+
+  it('does not end a sentence at an abbreviation', () => {
+    const rest = ' the ones pinned to the composer, from the slash menu, the palette or the thread header, while a turn runs, '
+      + 'and saved prompts sit beside them so each thread remembers the mode it last used and the next send starts there.';
+    for (const abbreviation of ['e.g.', 'i.e.', 'vs.', 'etc.', 'approx.']) {
+      // The abbreviation is the only period under the limit: the bullet stays out, not "Use quick actions, e.g."
+      const bullet = `Use quick actions, ${abbreviation}${rest}`;
+      expect(bullet.length, abbreviation).toBeGreaterThan(220);
+      expect(feed(`- ${bullet}\n- Short note.\n`), abbreviation).toEqual(['Short note.']);
+      // A real sentence end after it still counts.
+      const first = `Use quick actions, ${abbreviation} pinned ones.`;
+      expect(feed(`- ${first}${rest}\n`), abbreviation).toEqual([first]);
+    }
+  });
+
   it('leaves a bullet with no sentence end under the limit out of the feed', () => {
     const long = `- ${'Long running work '.repeat(15)}stays readable\n- Short note.\n`;
     const ship = buildLatestShip({ version: '0.1.816', tag: 'v0.1.816', publishedAt: '2026-11-06T10:20:00.000Z',

@@ -63,6 +63,8 @@ function bounded(value, maxLength) {
   return value.length <= maxLength ? value : value.slice(0, maxLength).trimEnd();
 }
 
+const ABBREVIATION_BEFORE_PERIOD = /\b(?:e\.g|i\.e|vs|etc|approx)$/i;
+
 /**
  * A release-note bullet whole, or its leading whole sentences when it is too
  * long. Null when even its first sentence is too long: the bullet then stays
@@ -73,6 +75,8 @@ function sentenceBounded(value, maxLength) {
   let end = 0;
   for (const match of value.matchAll(/[.!?](?=\s|$)/g)) {
     if (match.index + 1 > maxLength) break;
+    // The period of "e.g." or "etc." does not end a sentence.
+    if (match[0] === '.' && ABBREVIATION_BEFORE_PERIOD.test(value.slice(0, match.index))) continue;
     end = match.index + 1;
   }
   return end ? value.slice(0, end) : null;
