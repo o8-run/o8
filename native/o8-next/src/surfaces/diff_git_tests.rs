@@ -1,4 +1,4 @@
-use super::{GitActions, can_open_pull_request, pull_request_url};
+use super::{GitActions, RELEASE_POST_TIMEOUT, can_open_pull_request, pull_request_url};
 use crate::shell::palette::tests::{run, settled};
 use crate::shell::test_support::*;
 use crate::shell::{Content, Shell, State, Tab};
@@ -33,6 +33,17 @@ fn a_pull_request_needs_a_feature_branch_and_a_github_repository() {
     );
     assert_eq!(pull_request_url(None, Some("fix/thing")), None);
     assert_eq!(pull_request_url(Some(""), Some("fix/thing")), None);
+}
+
+/// Commit's hooks may run 15 s and push 30 s on the server
+/// (`src/app/api/review/commit/route.ts`, `push/route.ts`), so the app waits
+/// at least as long as both before it calls an outcome unknown.
+#[test]
+fn the_release_deadline_outlasts_the_hooks_and_the_push() {
+    assert!(
+        RELEASE_POST_TIMEOUT >= Duration::from_secs(15 + 30),
+        "{RELEASE_POST_TIMEOUT:?}"
+    );
 }
 
 fn git(path: &std::path::Path, args: &[&str]) -> String {
@@ -349,5 +360,81 @@ fn escape_closes_the_menu_and_the_message_box(cx: &mut TestAppContext) {
         actions.read_with(cx, |a, cx| a.input.read(cx).text.clone()),
         "kept",
         "the message stays for next time"
+    );
+}
+
+/// After a commit, Review reads Git's current branch, not the workspace
+/// snapshot the server keeps for up to 20 s.
+#[gpui::test]
+fn the_branch_after_a_commit_is_read_from_git_now(cx: &mut TestAppContext) {
+    let (rig, mut visual) = rig("--review --review-git", cx);
+    let cx = &mut visual;
+    let actions = rig.actions(cx);
+    assert_eq!(
+        actions.read_with(cx, |a, _| a.branch.clone()).as_deref(),
+        Some("fixture-review")
+    );
+    // A branch switch outside the app, inside the snapshot's 20 s.
+    git(&rig.path, &["checkout", "-qb", "fix/outside"]);
+    rig.click(cx, "review-commit");
+    rig.type_message(cx, "Commit on the new branch");
+    rig.click(cx, "review-commit-submit");
+    rig.wait(cx, "commit reply", &|_, cx| {
+        actions.read_with(cx, |a, _| a.busy.is_none() && a.toast.is_some())
+    });
+    let started = Instant::now();
+    loop {
+        settled(&rig.shell, cx);
+        let branch = actions.read_with(cx, |a, _| a.branch.clone());
+        if branch.as_deref() == Some("fix/outside") {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the branch is still {branch:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Branch reads can answer out of order: a slower, older read never
+/// overwrites a newer one.
+#[gpui::test]
+fn an_older_branch_read_never_overwrites_a_newer_one(cx: &mut TestAppContext) {
+    let (rig, mut visual) = rig("--review --review-git", cx);
+    let cx = &mut visual;
+    let actions = rig.actions(cx);
+    actions.update(cx, |a, cx| {
+        let older = a.branch_reads + 1;
+        let newer = a.branch_reads + 2;
+        a.branch_reads = newer;
+        a.apply_branch(
+            newer,
+            Some("fix/newer".into()),
+            Some("o8-fixture/review".into()),
+            cx,
+        );
+        a.apply_branch(
+            older,
+            Some("fix/older".into()),
+            Some("o8-fixture/old".into()),
+            cx,
+        );
+    });
+    let (branch, slug) = actions.read_with(cx, |a, _| (a.branch.clone(), a.slug.clone()));
+    assert_eq!(branch.as_deref(), Some("fix/newer"));
+    assert_eq!(slug.as_deref(), Some("o8-fixture/review"));
+    // An older read that lands first still shows until the newer one lands.
+    actions.update(cx, |a, cx| {
+        let older = a.branch_reads + 1;
+        let newer = a.branch_reads + 2;
+        a.branch_reads = newer;
+        a.apply_branch(older, Some("fix/first".into()), None, cx);
+        assert_eq!(a.branch.as_deref(), Some("fix/first"));
+        a.apply_branch(newer, Some("fix/second".into()), None, cx);
+    });
+    assert_eq!(
+        actions.read_with(cx, |a, _| a.branch.clone()).as_deref(),
+        Some("fix/second")
     );
 }

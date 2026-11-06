@@ -16,10 +16,12 @@ const NOT_A_BRANCH: [&str; 3] = ["HEAD", "(detached)", "unknown"];
 const TOAST: Duration = Duration::from_millis(4500);
 /// Commit runs hooks for up to 15 s and push may take 30 s on the server, so
 /// the client's 5 s agent deadline would give up on a commit that lands.
+const RELEASE_POST_TIMEOUT: Duration = crate::client::LOAD_REQUEST_TIMEOUT;
+/// Tests use a short deadline so a slow hook outlasts it quickly.
 const POST_TIMEOUT: Duration = if cfg!(test) {
     Duration::from_secs(2)
 } else {
-    crate::client::LOAD_REQUEST_TIMEOUT
+    RELEASE_POST_TIMEOUT
 };
 
 fn can_open_pull_request(branch: Option<&str>) -> bool {
@@ -137,6 +139,10 @@ pub(crate) struct GitActions {
     /// The last outcome, and whether it failed.
     pub(crate) toast: Option<(String, bool)>,
     toast_generation: u64,
+    /// The last branch read started, and the newest one applied: a slower,
+    /// older read never overwrites a newer one.
+    branch_reads: u64,
+    branch_applied: u64,
     _submit: Subscription,
 }
 
@@ -169,6 +175,8 @@ impl GitActions {
             error: None,
             toast: None,
             toast_generation: 0,
+            branch_reads: 0,
+            branch_applied: 0,
             _submit,
         };
         actions.read_branch(cx);
@@ -177,6 +185,8 @@ impl GitActions {
 
     /// Reads the branch again: on opening, and after every commit or push.
     fn read_branch(&mut self, cx: &mut Context<Self>) {
+        self.branch_reads += 1;
+        let read = self.branch_reads;
         let (client, workspace) = (self.client.clone(), self.workspace.clone());
         let task = cx
             .background_executor()
@@ -185,13 +195,26 @@ impl GitActions {
             let Some((branch, slug)) = task.await else {
                 return;
             };
-            let _ = this.update(cx, |this, cx| {
-                this.branch = branch;
-                this.slug = slug;
-                cx.notify();
-            });
+            let _ = this.update(cx, |this, cx| this.apply_branch(read, branch, slug, cx));
         })
         .detach();
+    }
+
+    /// Applies read number `read` unless a later read has already landed.
+    fn apply_branch(
+        &mut self,
+        read: u64,
+        branch: Option<String>,
+        slug: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if read <= self.branch_applied {
+            return;
+        }
+        self.branch_applied = read;
+        self.branch = branch;
+        self.slug = slug;
+        cx.notify();
     }
 
     fn say(&mut self, text: String, failed: bool, cx: &mut Context<Self>) {
