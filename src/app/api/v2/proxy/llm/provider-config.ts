@@ -4,6 +4,7 @@ import { O8_MANAGED_TEXT_MODEL, O8_MANAGED_ZERO_COST_MODEL } from '@/lib/cortex/
 import { parseInlineMarkdownDataImages } from '@/lib/llm/inline-images';
 import { toolsForAnthropic, toolsForOpenAI } from '@/lib/llm/tools';
 import { chatGPTPlanProvider } from '@/lib/chatgpt-plan/responses-provider';
+import { anthropicPricingForModel } from '@/lib/llm/pricing';
 
 export type Provider = 'anthropic' | 'openai' | 'google' | 'operator' | 'chatgpt';
 
@@ -66,13 +67,6 @@ const PRICING: Record<string, { input: number; output: number }> = {
   'gemini-2.5-pro': { input: 1.25, output: 10 },
   'gemini-2.5-flash': { input: 0.15, output: 0.60 },
   'gemini-2.5-flash-lite': { input: 0.04, output: 0.15 },
-  'claude-opus-4-8': { input: 5, output: 25 },
-  'claude-opus-4-7': { input: 5, output: 25 },
-  'claude-opus-4-6': { input: 15, output: 75 },
-  'claude-sonnet-5': { input: 3, output: 15 },
-  'claude-sonnet-4-6': { input: 3, output: 15 },
-  'claude-sonnet-4-5': { input: 3, output: 15 },
-  'claude-haiku-4-5': { input: 0.80, output: 4 },
   'gpt-5.5': { input: 2.50, output: 10 },
   'gpt-5.4': { input: 2.50, output: 10 },
   o3: { input: 10, output: 40 },
@@ -269,7 +263,8 @@ export const PROVIDERS: Record<Exclude<Provider, 'google' | 'operator'>, Provide
 };
 
 export function computeCost(model: string, inputTokens: number, outputTokens: number): number {
-  const price = PRICING[model];
+  // Claude prices come from the one rate table.
+  const price = PRICING[model] ?? anthropicPricingForModel(model);
   if (!price) return 0;
   return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
 }

@@ -19,11 +19,12 @@ export interface ModelRateTable {
  * were added from https://platform.claude.com/docs/en/about-claude/pricing
  * on 2026-09-26. GPT-6.1 Sol was added on 2026-09-29 (#2950).
  * Sonnet 5.5 and Haiku 5.5 were added, and Sonnet 5 and Haiku 4.5 corrected,
- * from the same page on 2026-11-05. This does not claim the other entries
- * were refreshed.
+ * from the same page on 2026-11-05. Opus 4.8 fast mode was corrected and
+ * Opus 5.5 fast mode added from its fast mode table the same day. This does
+ * not claim the other entries were refreshed.
  */
 export const modelRateTable = {
-  rateTableVersion: '2026-11-05.1',
+  rateTableVersion: '2026-11-05.2',
   observedOn: '2026-11-05',
   rates: {
     'claude-opus-5-5': {
@@ -32,6 +33,14 @@ export const modelRateTable = {
       cacheReadUsdPerMillion: 0.2,
       cacheWriteUsdPerMillion: 5,
       cacheWrite1hUsdPerMillion: 8,
+    },
+    // Fast mode; caching multipliers apply on top, cache reads at 0.05x as in Opus 5.5.
+    'claude-opus-5-5-fast': {
+      inputUsdPerMillion: 8,
+      outputUsdPerMillion: 40,
+      cacheReadUsdPerMillion: 0.4,
+      cacheWriteUsdPerMillion: 10,
+      cacheWrite1hUsdPerMillion: 16,
     },
     'claude-fable-5-1': {
       inputUsdPerMillion: 10,
@@ -48,11 +57,11 @@ export const modelRateTable = {
       cacheWrite1hUsdPerMillion: 10,
     },
     'claude-opus-4-8-fast': {
-      inputUsdPerMillion: 30,
-      outputUsdPerMillion: 150,
-      cacheReadUsdPerMillion: 3,
-      cacheWriteUsdPerMillion: 37.5,
-      cacheWrite1hUsdPerMillion: 60,
+      inputUsdPerMillion: 10,
+      outputUsdPerMillion: 50,
+      cacheReadUsdPerMillion: 1,
+      cacheWriteUsdPerMillion: 12.5,
+      cacheWrite1hUsdPerMillion: 20,
     },
     'claude-opus-4-7': {
       inputUsdPerMillion: 5,
@@ -261,10 +270,11 @@ function resolved(modelKey: keyof typeof modelRateTable.rates): ResolvedRate {
 }
 
 function resolveAnthropicRate(model: string): ResolvedRate | null {
-  const normalized = model.trim().toLowerCase();
+  // Ids, dotted ids (`claude-haiku-4.5`) and names (`Claude Sonnet 5.5`) read alike.
+  const normalized = model.trim().toLowerCase().replace(/\s+/g, '-').replace(/(\d)\.(?=\d)/g, '$1-');
   if (!normalized || normalized === '<synthetic>') return null;
   const fast = normalized.includes('fast');
-  if (normalized.includes('opus-5-5')) return fast ? null : resolved('claude-opus-5-5');
+  if (normalized.includes('opus-5-5')) return resolved(fast ? 'claude-opus-5-5-fast' : 'claude-opus-5-5');
   if (normalized.includes('fable-5-1')) return fast ? null : resolved('claude-fable-5-1');
   if (normalized.includes('opus-4-8')) return resolved(fast ? 'claude-opus-4-8-fast' : 'claude-opus-4-8');
   if (normalized.includes('opus-4-7')) return resolved(fast ? 'claude-opus-4-7-fast' : 'claude-opus-4-7');
