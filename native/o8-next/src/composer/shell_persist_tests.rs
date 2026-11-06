@@ -109,3 +109,44 @@ fn a_kept_card_holds_the_add_to_chat_tail_of_its_output() {
         crate::composer::shell::ShellRun::restore(saved.clone(), None, std::time::Instant::now());
     assert_eq!(back.saved(), Some(saved));
 }
+
+#[gpui::test]
+fn native_shell_card_status_never_clips_and_actions_wrap_when_narrow(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let root = crate::shell::test_support::scratch_path("o8-shell-card-header");
+    cx.update(|cx| cx.set_global(mode_store::TestRoot(root)));
+    let path = store(&fixture, THREAD, cx);
+    mode_store::save_shell_run(path.as_deref(), Some(&kept())).unwrap();
+    let (_surface, cx) = open(cx, &fixture);
+    let layout = |cx: &mut VisualTestContext, width: f32| {
+        cx.simulate_resize(gpui::size(px(width), px(900.)));
+        draw(cx);
+        let card = cx.debug_bounds("composer-shell-run").expect("card");
+        let status = cx
+            .debug_bounds("composer-shell-status-finished")
+            .expect("status");
+        let actions = cx.debug_bounds("composer-shell-actions").expect("actions");
+        (card, status, actions)
+    };
+    let (card, status, actions) = layout(cx, 1400.);
+    assert!(status.right() <= card.right());
+    assert!(
+        actions.top() < status.bottom(),
+        "a wide card keeps one header row"
+    );
+    let wide_status = status.size.width;
+    let (card, status, actions) = layout(cx, 520.);
+    assert!(
+        status.right() <= card.right(),
+        "the status stays inside the card"
+    );
+    assert_eq!(
+        status.size.width, wide_status,
+        "the status keeps its full text"
+    );
+    assert!(
+        actions.top() >= status.bottom(),
+        "narrow, the buttons take their own row"
+    );
+    assert!(actions.right() <= card.right());
+}

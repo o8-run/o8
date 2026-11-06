@@ -99,10 +99,14 @@ impl Surface {
                 .rounded(px(8.))
                 .bg(theme().surface_raised)
                 .child(
+                    // The status never shrinks: in a narrow column the buttons
+                    // wrap to their own row instead of clipping it.
                     div()
                         .flex()
+                        .flex_wrap()
                         .items_center()
-                        .gap(px(8.))
+                        .gap_x(px(8.))
+                        .gap_y(px(4.))
                         .child(crate::icon::stroke(
                             SHELL_GLYPH,
                             theme().text_muted,
@@ -119,17 +123,25 @@ impl Surface {
                         .child(
                             div()
                                 .debug_selector(move || format!("composer-shell-status-{state}"))
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
+                                .flex_shrink_0()
+                                .whitespace_nowrap()
                                 .text_size(px(11.))
                                 .text_color(theme().text_muted)
                                 .child(status),
                         )
-                        .children(stop)
-                        .child(add)
-                        .child(copy)
-                        .child(dismiss),
+                        .child(
+                            div()
+                                .debug_selector(|| "composer-shell-actions".into())
+                                .ml_auto()
+                                .flex_shrink_0()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .children(stop)
+                                .child(add)
+                                .child(copy)
+                                .child(dismiss),
+                        ),
                 )
                 .child(mono(format!("$ {}", run.line), theme().text_secondary))
                 .when(!tail.is_empty(), |card| {
