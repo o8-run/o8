@@ -6,7 +6,7 @@ use std::{
     net::SocketAddr,
     sync::{Arc, RwLock},
 };
-pub(crate) use transport::{LOAD_REQUEST_TIMEOUT, get_with_retry, same_workspace, stale_notice, transient};
+pub(crate) use transport::{LOAD_REQUEST_TIMEOUT, get_with_retry, same_workspace, server_reason, stale_notice, transient};
 pub(crate) use transport::Tunnel;
 pub use transport::{QueueError, Session};
 use url::Url;
@@ -112,6 +112,14 @@ impl Client {
     ) -> Result<T, String> {
         // Do not hold a refresh lock across network I/O.
         self.snapshot().get(path, query)
+    }
+    /// A read that keeps the server's reason when it refuses.
+    pub(crate) fn get_explained<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> Result<T, String> {
+        self.snapshot().get_explained(path, query)
     }
     pub(crate) fn get_counted<T: DeserializeOwned>(
         &self,
