@@ -178,6 +178,7 @@ pub(super) fn absolute(cx: &mut TestAppContext) {
 pub(super) fn truncated(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let path = PathBuf::from(&fixture.repo).join("large.txt");
+    // The files fixture lowers the server's editor cap to 1 MiB.
     fs::write(path, "x".repeat(1024 * 1024 + 1)).unwrap();
     let (_, cx) = test_panel(&fixture, cx);
     click(cx, "files-row-large.txt");

@@ -26,6 +26,7 @@ import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 import { isWorkspaceFileError, writeWorkspaceFile } from '@/lib/fs/workspace-file';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { isPathInRegisteredRepo } from '@/lib/llm/repo-scope';
+import { FILE_EDIT_MAX_BYTES } from '@/lib/fs/file-size-caps';
 
 /**
  * A dispatched worker (local-worker token) may only touch files inside a
@@ -46,7 +47,7 @@ async function authorizeFileAccess(request: Request, absPath: string): Promise<N
   );
 }
 
-const MAX_EDIT_BYTES = 2 * 1024 * 1024;
+const MAX_EDIT_BYTES = FILE_EDIT_MAX_BYTES;
 
 function resolveAbsolute(raw: string): string | null {
   if (!raw.trim()) return null;

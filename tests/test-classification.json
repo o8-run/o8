@@ -3324,6 +3324,12 @@
       ]
     },
     {
+      "path": "tests/file-size-caps-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/finished-packet-retirement-cli-real-path.test.ts",
       "reasons": [
         "apfs-tool",
