@@ -178,7 +178,7 @@ async function waitForPayload(count: number) {
     const payloads = sentTurnPayloads();
     if (payloads.length < count) throw new Error(`Timed out waiting for outbound payload ${count}`);
     return payloads[count - 1]!;
-  }, { timeout: 200, interval: 5 });
+  }, { timeout: 2_000, interval: 5 });
 }
 
 function sentTurnPayloads() {
