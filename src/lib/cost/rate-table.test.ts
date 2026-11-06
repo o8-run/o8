@@ -94,6 +94,9 @@ describe('dated model rate table reproducibility', () => {
     ['Claude Opus 4.8', 'claude-opus-4-8'],
     ['claude-opus-4-8-fast', 'claude-opus-4-8-fast'],
     ['claude-opus-5-5-fast', 'claude-opus-5-5-fast'],
+    ['claude-opus-5', 'claude-opus-5'],
+    ['Claude Opus 5', 'claude-opus-5'],
+    ['claude-opus-5-fast', 'claude-opus-5-fast'],
   ])('resolves %s to %s', (name, modelKey) => {
     expect(resolveRate('claude-code', name)).toMatchObject({ modelKey });
   });
@@ -106,6 +109,19 @@ describe('dated model rate table reproducibility', () => {
     expect(resolveRate('claude-code', 'claude-opus-5-5-fast')).toMatchObject({
       inputUsdPerMillion: 8, outputUsdPerMillion: 40,
     });
+    expect(resolveRate('claude-code', 'claude-opus-5-fast')).toMatchObject({
+      inputUsdPerMillion: 10, outputUsdPerMillion: 50,
+      cacheReadUsdPerMillion: 1, cacheWriteUsdPerMillion: 12.5, cacheWrite1hUsdPerMillion: 20,
+    });
+    expect(resolveRate('claude-code', 'claude-opus-5')).toMatchObject({
+      inputUsdPerMillion: 5, outputUsdPerMillion: 25,
+      cacheReadUsdPerMillion: 0.5, cacheWriteUsdPerMillion: 6.25, cacheWrite1hUsdPerMillion: 10,
+    });
+    // No fast mode is listed for Opus 4.7 or 4.6, so those runs stay unpriced.
+    for (const model of ['claude-opus-4-7-fast', 'claude-opus-4-6-fast']) {
+      expect(resolveRate('claude-code', model), model).toBeNull();
+      expect(anthropicPricingForModel(model), model).toBeNull();
+    }
   });
 
   it('gives every estimator the rate table\'s Claude prices', () => {
