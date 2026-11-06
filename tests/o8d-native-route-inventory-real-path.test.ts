@@ -41,6 +41,9 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/task-artifacts/[id]/decision', // Mission card decision (#5516): a POST, outside the Phase A reads.
   '/api/tts',
   '/api/worktrees/retention-usage', // resolveManagedWorktreeStorageTarget creates the default root.
+  '/api/review/last-turn', // Review's last-turn scope (#5602): Next-only until its GET is audited for Phase A.
+  '/api/review/commit', // Review's commit button: a POST, outside the Phase A reads.
+  '/api/review/push', // Review's push button: a POST, outside the Phase A reads.
 ]);
 function checkInventory(directory: string) {
   const files = readdirSync(directory, { recursive: true }).map(String)
