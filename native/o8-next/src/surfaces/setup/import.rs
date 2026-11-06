@@ -284,7 +284,12 @@ fn checkbox(id: String, on: bool, partial: bool) -> gpui::Div {
             v.child(
                 div()
                     .debug_selector(move || selector.clone())
-                    .child(crate::icon::stroke(path, gpui::rgb(0xFFFFFF), 12., 3.)),
+                    .child(crate::icon::stroke(
+                        path,
+                        crate::theme::on_accent(),
+                        12.,
+                        3.,
+                    )),
             )
         })
 }
@@ -487,5 +492,5 @@ fn primary(
     control(id, label, enabled)
         .bg(theme().accent)
         .border_color(theme().accent)
-        .text_color(gpui::rgb(0xFFFFFF))
+        .text_color(crate::theme::on_accent())
 }
