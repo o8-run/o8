@@ -227,6 +227,7 @@ impl Card {
         changed
     }
     /// Names this card's place in the window's paint order.
+    #[cfg(target_os = "macos")]
     pub fn key(&self) -> u64 {
         self as *const Self as u64
     }

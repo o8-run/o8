@@ -351,6 +351,7 @@ pub struct Host {
     nonce: String,
     key: u64,
     visible: Cell<Option<gpui::Bounds<gpui::Pixels>>>,
+    masked: RefCell<Option<(gpui::Bounds<gpui::Pixels>, Vec<gpui::Bounds<gpui::Pixels>>)>>,
 }
 impl Host {
     pub fn new(
@@ -450,6 +451,7 @@ impl Host {
                 nonce: nonce.into(),
                 key: 0,
                 visible: Cell::new(None),
+                masked: RefCell::default(),
             })
         }
     }
@@ -495,6 +497,11 @@ impl Host {
         let Some(visible) = self.visible.get() else {
             return;
         };
+        let mask = (visible, covered.to_vec());
+        if self.masked.borrow().as_ref() == Some(&mask) {
+            return;
+        }
+        *self.masked.borrow_mut() = Some(mask);
         unsafe {
             let layer: id = msg_send![self.clip, layer];
             if covered.is_empty() {

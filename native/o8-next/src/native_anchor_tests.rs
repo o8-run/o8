@@ -64,8 +64,8 @@ impl Render for Root {
 }
 
 fn cover(cx: &mut gpui::VisualTestContext) -> Option<Vec<Bounds<gpui::Pixels>>> {
+    // No refresh: views that were not notified reuse their cached paint.
     cx.update(|window, cx| {
-        window.refresh();
         window.draw(cx).clear();
         window.native_anchor_cover(KEY)
     })
@@ -105,7 +105,6 @@ fn drawn_hook_runs_after_each_frame(cx: &mut TestAppContext) {
     let hook = seen.clone();
     cx.update(|window, cx| {
         window.on_drawn(move |window, _| hook.set(window.native_anchor_cover(KEY)));
-        window.refresh();
         window.draw(cx).clear();
     });
     let covered = seen.take().expect("the hook saw the drawn frame");
@@ -124,8 +123,8 @@ fn uncovered_parts_leave_out_every_cover() {
         .iter()
         .map(|part| f32::from(part.size.width) * f32::from(part.size.height))
         .sum();
-    // 10000 minus the menu (800) minus the tooltip outside the menu (50 x 10).
-    assert_eq!(area, 10000. - 800. - 500.);
+    // 10000 minus the menu (800) minus the tooltip outside the menu (40 x 10).
+    assert_eq!(area, 10000. - 800. - 400.);
     for part in &parts {
         assert!(part.intersect(&menu).is_empty() && part.intersect(&tooltip).is_empty());
         assert_eq!(part.intersect(&visible), *part);
