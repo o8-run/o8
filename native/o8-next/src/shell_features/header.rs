@@ -452,7 +452,7 @@ fn tabs(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
 }
 
 /// A tab's pill label: its rename, the chat's title, or the surface name.
-fn tab_label(s: &Shell, t: &Tab) -> String {
+pub(super) fn tab_label(s: &Shell, t: &Tab) -> String {
     super::header_tabs::label(s, t).unwrap_or_else(|| match t {
         Tab::Session(id) => {
             let selected = s.current().and_then(|w| w.selections.get(id)).unwrap_or(id);

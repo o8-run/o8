@@ -16,8 +16,11 @@ use std::{
     rc::Rc,
 };
 
+#[path = "diff_ui_scope.rs"]
+mod scope;
 #[path = "diff_ui_stack.rs"]
 mod stack;
+pub(crate) use scope::Scope;
 
 pub(crate) struct DiffSurface {
     client: Client,
@@ -44,6 +47,12 @@ pub(crate) struct DiffSurface {
     pub(crate) chosen: HashMap<String, bool>,
     /// Said beside the notice when Expand all left files closed.
     limit_note: Option<String>,
+    /// Which working changes the stack shows.
+    pub(crate) scope: Scope,
+    /// The paths the scope keeps; `None` until its first read lands.
+    scope_paths: Option<Rc<BTreeSet<String>>>,
+    scope_error: Option<String>,
+    scope_generation: u64,
     /// The files list beside the stack: the reader's choice, or else shown
     /// unless the surface is narrow.
     pub(crate) drawer: Option<bool>,
@@ -81,6 +90,10 @@ impl DiffSurface {
             stack: Rc::new(vec![]),
             chosen: HashMap::new(),
             limit_note: None,
+            scope: Scope::All,
+            scope_paths: None,
+            scope_error: None,
+            scope_generation: 0,
             drawer: None,
             width: px(0.),
             stack_scroll: gpui::ScrollHandle::new(),
@@ -99,6 +112,9 @@ impl DiffSurface {
         self.failed = false;
         self.pending = None;
         self.notice = "Reading diff…".into();
+        if self.stacked() {
+            self.read_scope(cx);
+        }
         let client = self.client.clone();
         let target = self.target.clone();
         let task = cx
@@ -343,12 +359,15 @@ impl Render for DiffSurface {
             && matches!(self.target, Target::Packet(_));
         let stacked = self.stacked();
         let all_open = stacked && self.all_open();
+        let shown = Rc::new(self.shown());
+        let listed = shown.clone();
         let files = uniform_list(
             "diff-files",
-            doc.files.len(),
-            cx.processor(|s, range: std::ops::Range<usize>, _, cx| {
+            shown.len(),
+            cx.processor(move |s, range: std::ops::Range<usize>, _, cx| {
                 range
-                    .map(|i| {
+                    .map(|position| {
+                        let i = listed[position];
                         let f = &s.document.files[i];
                         div()
                             .id(i)
@@ -455,12 +474,35 @@ impl Render for DiffSurface {
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 match event.keystroke.key.as_str() {
-                    "home" if this.stacked() => this.select_file(0, cx),
-                    "end" if this.stacked() => {
-                        this.select_file(this.document.files.len().saturating_sub(1), cx)
+                    key @ ("home" | "end") if this.stacked() => {
+                        let shown = this.shown();
+                        let first = if key == "home" {
+                            shown.first()
+                        } else {
+                            shown.last()
+                        };
+                        if let Some(&index) = first {
+                            this.select_file(index, cx);
+                        }
                     }
                     "home" => this.scroll_to(0, cx),
                     "end" => this.scroll_to(this.row_count().saturating_sub(1), cx),
+                    key @ ("up" | "down") if event.keystroke.modifiers.alt && this.stacked() => {
+                        // Steps through the files the scope shows.
+                        let shown = this.shown();
+                        let at = shown.iter().position(|i| *i >= this.selected);
+                        let next = match (key, at) {
+                            ("up", Some(at)) => at.checked_sub(1).map(|at| shown[at]),
+                            ("down", Some(at)) if shown[at] > this.selected => Some(shown[at]),
+                            ("down", Some(at)) => shown.get(at + 1).copied(),
+                            // Nothing shown follows a hidden selection: stay.
+                            ("down", None) => None,
+                            _ => shown.last().copied(),
+                        };
+                        if let Some(index) = next {
+                            this.select_file(index, cx);
+                        }
+                    }
                     "up" | "down" if event.keystroke.modifiers.alt => {
                         let index = if event.keystroke.key == "up" {
                             this.selected.saturating_sub(1)
@@ -509,27 +551,34 @@ impl Render for DiffSurface {
                                 }),
                             ),
                         )
-                        .child(
-                            button(
-                                "diff-collapse",
-                                if all_open {
-                                    "Collapse all"
-                                } else {
-                                    "Expand all"
-                                },
-                                false,
-                            )
-                            .on_click(cx.listener(
-                                move |s, _, _, cx| {
+                        // An empty scope has nothing to open or close.
+                        .when(!shown.is_empty(), |bar| {
+                            bar.child(
+                                button(
+                                    "diff-collapse",
                                     if all_open {
-                                        s.collapse_all();
+                                        "Collapse all"
                                     } else {
-                                        s.expand_all();
-                                    }
-                                    cx.notify();
-                                },
-                            )),
-                        )
+                                        "Expand all"
+                                    },
+                                    false,
+                                )
+                                .on_click(cx.listener(
+                                    move |s, _, _, cx| {
+                                        if all_open {
+                                            s.collapse_all();
+                                        } else {
+                                            s.expand_all();
+                                        }
+                                        cx.notify();
+                                    },
+                                )),
+                            )
+                        })
+                        .children(Scope::ORDER.map(|scope| {
+                            button(scope.id(), scope.label(), self.scope == scope)
+                                .on_click(cx.listener(move |s, _, _, cx| s.set_scope(scope, cx)))
+                        }))
                     })
                     .when(self.stack_target.is_some(), |bar| {
                         bar.child(
@@ -563,7 +612,18 @@ impl Render for DiffSurface {
                     .child(match &self.limit_note {
                         Some(note) => format!("{} · {note}", self.notice),
                         None => self.notice.clone(),
-                    }),
+                    })
+                    .when_some(
+                        stacked.then(|| self.scope_stale()).flatten(),
+                        |row, stale| {
+                            row.child(
+                                div()
+                                    .debug_selector(|| "diff-scope-stale".into())
+                                    .text_color(theme().danger)
+                                    .child(stale),
+                            )
+                        },
+                    ),
             )
             .child(body)
     }

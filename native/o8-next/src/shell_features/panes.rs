@@ -2,6 +2,9 @@ use super::*;
 use crate::pane_tree::{Leaf, MAIN, Node, Zone};
 use gpui::{DragMoveEvent, SharedString};
 use std::collections::{HashMap, HashSet};
+#[cfg(test)]
+#[path = "panes/main_tests.rs"]
+mod main_tests;
 #[path = "panes/preview.rs"]
 mod preview;
 #[path = "panes/worker.rs"]
@@ -154,6 +157,16 @@ fn ensure(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         preview::end(s, cx);
     }
     join(s, cx);
+    // With its last tab closed, the main pane takes the chat beside it
+    // instead of sitting empty next to it.
+    // Only once connected: offline, no tab can open to take it.
+    if s.connected
+        && previewing(s).is_none()
+        && s.current().is_some_and(|w| w.tabs.is_empty())
+        && side_chat(&saved(s)).is_some()
+    {
+        close_main(s, window, cx);
+    }
     let Some(panes) = s.current().and_then(|w| w.panes.clone()) else {
         return;
     };
@@ -399,6 +412,45 @@ fn move_pane(s: &mut Shell, leaf: &str, target: &str, zone: Zone, cx: &mut Conte
     if tree.split(target, zone, leaf.to_owned(), content) {
         save_tree(s, tree);
     }
+    cx.notify();
+}
+
+/// The first chat pane beside the main one: its leaf and conversation.
+fn side_chat(tree: &Node) -> Option<(String, String)> {
+    tree.leaves().into_iter().find_map(|(id, leaf)| match leaf {
+        Leaf::Chat { session } => Some((id.to_owned(), session.clone())),
+        _ => None,
+    })
+}
+
+/// The main pane's close: the chat beside it takes its place as the active
+/// tab. The main pane's own tab stays in the header.
+fn close_main(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    let mut tree = saved(s);
+    let Some((leaf, session)) = side_chat(&tree) else {
+        return;
+    };
+    // The pane's view may have moved off its own thread.
+    let shown = match s.content.get(&key(s, &leaf)) {
+        Some(Content::Session(view)) => view.read(cx).shown_thread(),
+        _ => None,
+    }
+    .unwrap_or(session);
+    // A chat that isn't listed yet, or failed to start, would open blank.
+    if !s.sessions.iter().any(|x| x.id == shown) {
+        return;
+    }
+    s.capture(window, cx);
+    s.execute(Command::Session(shown.clone()), window, cx);
+    // The pane folds away only once its chat is a tab, so nothing is lost
+    // when the tab can't open.
+    let tab = Tab::Session(shown);
+    if !s.current().is_some_and(|w| w.tabs.contains(&tab)) || !tree.close(&leaf) {
+        return;
+    }
+    let key = key(s, &leaf);
+    s.content.remove(&key);
+    save_saved(s, tree);
     cx.notify();
 }
 
@@ -674,7 +726,13 @@ fn leaf(
             }),
     };
     let title = match content {
-        Leaf::Main => None,
+        // Beside a chat pane, the main pane shows its tab's name and a close
+        // that hands its place to that chat.
+        Leaf::Main => (previewing(s).is_none() && side_chat(&saved(s)).is_some()).then(|| {
+            s.active()
+                .map(|tab| super::header::tab_label(s, &tab))
+                .unwrap_or_else(|| "New chat".into())
+        }),
         Leaf::Chat { session } => Some(
             s.sessions
                 .iter()
@@ -856,6 +914,8 @@ fn thread_tab(s: &Shell, index: usize, cx: &gpui::App) -> Option<super::RailPane
 /// moves the pane, as ThreadChatPane's header does.
 fn header(id: &str, title: String, terminal: bool, cx: &mut Context<Shell>) -> impl IntoElement {
     let leaf = id.to_owned();
+    // The main pane stays put; only the panes beside it move.
+    let movable = id != MAIN;
     let moved = super::RailPane::Move {
         leaf: id.to_owned(),
         title: title.clone().into(),
@@ -867,7 +927,9 @@ fn header(id: &str, title: String, terminal: bool, cx: &mut Context<Shell>) -> i
             let id = id.to_owned();
             move || format!("pane-header-{id}")
         })
-        .on_drag(moved, |drag, _, _, cx| cx.new(|_| drag.clone()))
+        .when(movable, |d| {
+            d.on_drag(moved, |drag, _, _, cx| cx.new(|_| drag.clone()))
+        })
         .flex()
         .items_center()
         .gap(px(6.))
@@ -900,7 +962,13 @@ fn header(id: &str, title: String, terminal: bool, cx: &mut Context<Shell>) -> i
                 .rounded(px(4.))
                 .hover(|d| d.bg(theme().hover))
                 .child("×")
-                .on_click(cx.listener(move |s, _, _, cx| close(s, &leaf, cx))),
+                .on_click(cx.listener(move |s, _, window, cx| {
+                    if leaf == MAIN {
+                        close_main(s, window, cx)
+                    } else {
+                        close(s, &leaf, cx)
+                    }
+                })),
         )
 }
 
