@@ -26,6 +26,7 @@ import {
 } from '@/lib/files/operator-config-docs';
 import { contentHash } from '@/lib/markdown/transport';
 import { assertNotKnowledgeSource, KnowledgeSourceWriteError, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
+import { FILE_EDIT_MAX_BYTES } from '@/lib/fs/file-size-caps';
 
 async function resolveRoot(workspace?: string | null) {
   if (!workspace) return getDefaultLlmRepoRoot();
@@ -97,7 +98,8 @@ export async function GET(request: NextRequest) {
       const opened = await openWorkspaceFile(target.root, target.relativePath, 'read');
       try {
         const size = Number(opened.stat.size);
-        const buffer = Buffer.alloc(Math.min(size, 1024 * 1024));
+        // Up to the editor's cap; above it the preview is truncated and opens read-only.
+        const buffer = Buffer.alloc(Math.min(size, FILE_EDIT_MAX_BYTES));
         let offset = 0;
         while (offset < buffer.length) {
           const { bytesRead } = await opened.handle.read(buffer, offset, buffer.length - offset, offset);
