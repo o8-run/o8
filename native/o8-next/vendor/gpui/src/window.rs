@@ -878,6 +878,7 @@ pub struct Window {
     pub(crate) next_tooltip_id: TooltipId,
     pub(crate) tooltip_bounds: Option<TooltipBounds>,
     next_frame_callbacks: Rc<RefCell<Vec<FrameCallback>>>,
+    drawn_hook: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     #[cfg(feature = "frame-diagnostics")]
     frame_requests: Rc<Cell<u64>>,
     pub(crate) dirty_views: FxHashSet<EntityId>,
@@ -1277,6 +1278,7 @@ impl Window {
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame_callbacks,
+            drawn_hook: None,
             #[cfg(feature = "frame-diagnostics")]
             frame_requests,
             next_hitbox_id: HitboxId(0),
@@ -2055,8 +2057,41 @@ impl Window {
         self.refreshing = false;
         self.invalidator.set_phase(DrawPhase::None);
         self.needs_present.set(true);
+        if let Some(hook) = self.drawn_hook.clone() {
+            hook(self, cx);
+        }
 
         ArenaClearNeeded
+    }
+
+    /// o8: run after every drawn frame, before it is presented. Replaces any
+    /// previous hook.
+    pub fn on_drawn(&mut self, hook: impl Fn(&mut Window, &mut App) + 'static) {
+        self.drawn_hook = Some(Rc::new(hook));
+    }
+
+    /// o8: mark a native view's place in paint order. It draws nothing.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_native_anchor(&mut self, key: u64, bounds: Bounds<Pixels>) {
+        self.invalidator.debug_assert_paint();
+        let clipped = bounds.intersect(&self.content_mask().bounds);
+        let scale_factor = self.scale_factor();
+        self.next_frame
+            .scene
+            .insert_anchor(key, clipped.scale(scale_factor));
+    }
+
+    /// o8: the parts of a native anchor that the last drawn frame painted
+    /// over, in window coordinates. `None` when that frame did not paint it.
+    pub fn native_anchor_cover(&self, key: u64) -> Option<Vec<Bounds<Pixels>>> {
+        let scale_factor = self.scale_factor();
+        self.rendered_frame.scene.covering(key).map(|covered| {
+            covered
+                .into_iter()
+                .map(|bounds| bounds.map(|value| px(value.0 / scale_factor)))
+                .collect()
+        })
     }
 
     fn record_entities_accessed(&mut self, cx: &mut App) {

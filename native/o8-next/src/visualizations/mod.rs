@@ -226,11 +226,15 @@ impl Card {
         }
         changed
     }
+    /// Names this card's place in the window's paint order.
+    pub fn key(&self) -> u64 {
+        self as *const Self as u64
+    }
     pub fn paint(
         &mut self,
         bounds: gpui::Bounds<gpui::Pixels>,
         clip: gpui::Bounds<gpui::Pixels>,
-        window: &gpui::Window,
+        window: &mut gpui::Window,
     ) {
         self.bounds = Some(bounds);
         self.start();
@@ -252,15 +256,16 @@ impl Card {
                 && let Some(source) = &self.source
             {
                 let client = self.client.clone();
+                let wake = Rc::new(move || client.wake());
                 self.host =
-                    macos::Host::new(source, &self.nonce, window, Rc::new(move || client.wake()))
-                        .map(Rc::new);
-                if self.host.is_none() {
+                    macos::Host::new(source, &self.nonce, self.key(), window, wake).map(Rc::new);
+                if let Some(host) = &self.host {
+                    macos::track(host, window);
+                    self.started = Some(Instant::now());
+                } else {
                     self.error = Some(UNAVAILABLE.into());
                     self.dirty = true;
                     self.client.wake();
-                } else {
-                    self.started = Some(Instant::now());
                 }
             }
             if let Some(host) = &self.host {
@@ -324,6 +329,53 @@ fn document(client: &Client, reference: &Reference, nonce: &str) -> Result<Strin
         .filter(|html| html.len() <= 12 * 1024 * 1024)
         .map(str::to_owned)
         .ok_or_else(|| UNAVAILABLE.into())
+}
+/// The parts of `visible` that no `covered` region paints over.
+#[cfg(any(target_os = "macos", test))]
+pub fn uncovered(
+    visible: gpui::Bounds<gpui::Pixels>,
+    covered: &[gpui::Bounds<gpui::Pixels>],
+) -> Vec<gpui::Bounds<gpui::Pixels>> {
+    use gpui::{Bounds, point};
+    let mut parts = vec![visible];
+    for cover in covered {
+        parts = parts
+            .into_iter()
+            .flat_map(|part| {
+                let overlap = part.intersect(cover);
+                if overlap.is_empty() {
+                    return vec![part];
+                }
+                let mut rest = vec![];
+                if overlap.top() > part.top() {
+                    rest.push(Bounds::from_corners(
+                        part.origin,
+                        point(part.right(), overlap.top()),
+                    ));
+                }
+                if overlap.bottom() < part.bottom() {
+                    rest.push(Bounds::from_corners(
+                        point(part.left(), overlap.bottom()),
+                        part.bottom_right(),
+                    ));
+                }
+                if overlap.left() > part.left() {
+                    rest.push(Bounds::from_corners(
+                        point(part.left(), overlap.top()),
+                        point(overlap.left(), overlap.bottom()),
+                    ));
+                }
+                if overlap.right() < part.right() {
+                    rest.push(Bounds::from_corners(
+                        point(overlap.right(), overlap.top()),
+                        point(part.right(), overlap.bottom()),
+                    ));
+                }
+                rest
+            })
+            .collect();
+    }
+    parts
 }
 // GPUI retains this lease with the rendered element state, including cached scenes.
 // Removing the card, tab, pane or window drops the lease and hides its native pixels.

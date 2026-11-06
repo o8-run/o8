@@ -15,7 +15,25 @@ use objc::{
 };
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use serde_json::{Value, json};
-use std::{cell::RefCell, ffi::CStr, rc::Rc, sync::OnceLock};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::{CStr, c_void},
+    rc::{Rc, Weak},
+    sync::OnceLock,
+};
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGPathCreateMutable() -> *mut c_void;
+    fn CGPathAddRect(path: *mut c_void, transform: *const c_void, rect: NSRect);
+    fn CGPathContainsPoint(
+        path: *const c_void,
+        transform: *const c_void,
+        point: NSPoint,
+        even_odd: bool,
+    ) -> bool;
+    fn CGPathRelease(path: *mut c_void);
+}
 
 #[derive(Default)]
 pub struct Events {
@@ -41,6 +59,26 @@ fn clip_class() -> &'static Class {
         extern "C" fn flipped(_: &Object, _: Sel) -> BOOL {
             YES
         }
+        // Presses over window content painted above the document reach the window.
+        extern "C" fn hit(this: &Object, _: Sel, point: NSPoint) -> id {
+            unsafe {
+                let layer: id = msg_send![this, layer];
+                let mask: id = if layer == nil {
+                    nil
+                } else {
+                    msg_send![layer, mask]
+                };
+                if mask != nil {
+                    let parent: id = msg_send![this, superview];
+                    let local: NSPoint = msg_send![this, convertPoint:point fromView:parent];
+                    let path: *const c_void = msg_send![mask, path];
+                    if !CGPathContainsPoint(path, std::ptr::null(), local, false) {
+                        return nil;
+                    }
+                }
+                msg_send![super(this, class!(NSView)), hitTest: point]
+            }
+        }
         extern "C" fn scroll(this: &Object, _: Sel, event: id) {
             unsafe {
                 let parent: id = msg_send![this, superview];
@@ -52,6 +90,10 @@ fn clip_class() -> &'static Class {
             decl.add_method(
                 sel!(isFlipped),
                 flipped as extern "C" fn(&Object, Sel) -> BOOL,
+            );
+            decl.add_method(
+                sel!(hitTest:),
+                hit as extern "C" fn(&Object, Sel, NSPoint) -> id,
             );
             decl.add_method(
                 sel!(scrollWheel:),
@@ -268,15 +310,56 @@ fn ns(value: &str) -> id {
     }
 }
 
+thread_local! {
+    static HOSTS: RefCell<Vec<Weak<Host>>> = RefCell::default();
+}
+/// The document draws above the whole window, so after each frame it gives up
+/// the parts that later window content painted over: menus, tooltips, dialogs.
+pub fn track(host: &Rc<Host>, window: &mut gpui::Window) {
+    HOSTS.with(|hosts| hosts.borrow_mut().push(Rc::downgrade(host)));
+    window.on_drawn(|window, _| {
+        let Ok(handle) = HasWindowHandle::window_handle(&*window) else {
+            return;
+        };
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+            return;
+        };
+        let view = handle.ns_view.as_ptr() as id;
+        HOSTS.with(|hosts| {
+            hosts.borrow_mut().retain(|host| {
+                let Some(host) = host.upgrade() else {
+                    return false;
+                };
+                let parent: id = unsafe { msg_send![host.clip, superview] };
+                if parent == view {
+                    match window.native_anchor_cover(host.key) {
+                        Some(covered) => host.cover(&covered),
+                        None => host.hide(),
+                    }
+                }
+                true
+            })
+        });
+    });
+}
+
 pub struct Host {
     web: id,
     clip: id,
     delegate: id,
     pub events: Rc<RefCell<Events>>,
     nonce: String,
+    key: u64,
+    visible: Cell<Option<gpui::Bounds<gpui::Pixels>>>,
 }
 impl Host {
-    pub fn new(html: &str, nonce: &str, window: &gpui::Window, wake: Rc<dyn Fn()>) -> Option<Self> {
+    pub fn new(
+        html: &str,
+        nonce: &str,
+        key: u64,
+        window: &gpui::Window,
+        wake: Rc<dyn Fn()>,
+    ) -> Option<Self> {
         let Ok(handle) = HasWindowHandle::window_handle(window) else {
             return None;
         };
@@ -284,7 +367,8 @@ impl Host {
             return None;
         };
         unsafe {
-            let host = Self::in_view(html, nonce, handle.ns_view.as_ptr() as id)?;
+            let mut host = Self::in_view(html, nonce, handle.ns_view.as_ptr() as id)?;
+            host.key = key;
             context(&*host.delegate).wake = Some(wake);
             Some(host)
         }
@@ -364,6 +448,8 @@ impl Host {
                 delegate,
                 events,
                 nonce: nonce.into(),
+                key: 0,
+                visible: Cell::new(None),
             })
         }
     }
@@ -378,6 +464,7 @@ impl Host {
             self.hide();
             return;
         }
+        self.visible.set(Some(visible));
         unsafe {
             let parent: id = msg_send![self.clip, superview];
             let flipped: BOOL = msg_send![parent, isFlipped];
@@ -400,6 +487,38 @@ impl Host {
             );
             let _: () = msg_send![self.web, setFrame:web_frame];
             let _: () = msg_send![self.clip, setHidden:NO];
+        }
+    }
+    /// Clip away the covered parts of the visible document. Its own scrolling
+    /// and hover keep working everywhere else.
+    pub fn cover(&self, covered: &[gpui::Bounds<gpui::Pixels>]) {
+        let Some(visible) = self.visible.get() else {
+            return;
+        };
+        unsafe {
+            let layer: id = msg_send![self.clip, layer];
+            if covered.is_empty() {
+                let _: () = msg_send![layer, setMask: nil];
+                return;
+            }
+            let x = |v: gpui::Pixels| f64::from(f32::from(v));
+            let path = CGPathCreateMutable();
+            for part in super::uncovered(visible, covered) {
+                let rect = NSRect::new(
+                    NSPoint::new(
+                        x(part.left() - visible.left()),
+                        x(part.top() - visible.top()),
+                    ),
+                    NSSize::new(x(part.size.width), x(part.size.height)),
+                );
+                CGPathAddRect(path, std::ptr::null(), rect);
+            }
+            let mask: id = msg_send![class!(CAShapeLayer), layer];
+            let bounds: NSRect = msg_send![self.clip, bounds];
+            let _: () = msg_send![mask, setFrame: bounds];
+            let _: () = msg_send![mask, setPath: path];
+            CGPathRelease(path);
+            let _: () = msg_send![layer, setMask: mask];
         }
     }
     pub fn hide(&self) {
