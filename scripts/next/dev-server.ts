@@ -76,6 +76,7 @@ async function main() {
     }
     // A chat saved with no project, as #5503 saved them before Home.
     if (process.argv.includes('--composer-scratch')) {
+      seeds.push({ id: 'thoughts-composer-scratch', title: 'Older scratch chat', messages: [] });
       writeFileSync(join(dataDir, 'chat-history', 'thoughts-composer-scratch.json'), JSON.stringify({
         title: 'Older scratch chat', backend: 'pi', model: 'pi', orchestratorVisible: true,
         savedAt: '2026-10-01T00:00:00.000Z', messages: [{ id: 'initial', role: 'assistant', content: 'Fixture ready',
