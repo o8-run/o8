@@ -70,6 +70,12 @@ it('lists three real sessions, refuses an unknown selection atomically, imports 
   expect(unknown.status).toBe(404);
   expect(await unknown.json()).toMatchObject({ error: { code: 'unknown_discovered_session' } });
   expect(histories()).toEqual([]);
+  // Bulk rows have no rollout file: every one is named, and nothing is written.
+  const stale = await importSessions([codex, 'codex:bulk-0000', 'codex:bulk-0001']);
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toMatchObject({ error: { code: 'session_not_resumable', sessionKey: 'codex:bulk-0000',
+    sessionKeys: ['codex:bulk-0000', 'codex:bulk-0001'] } });
+  expect(histories()).toEqual([]);
 
   const responses = await Promise.all([importSessions([codex, claude, codex]), importSessions([codex, claude])]);
   expect(responses.map(response => response.status)).toEqual([200, 200]);

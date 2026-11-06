@@ -15,6 +15,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[path = "import.rs"]
+mod import;
 #[cfg(test)]
 #[path = "view_lifecycle_tests.rs"]
 mod lifecycle_tests;
@@ -30,6 +32,8 @@ struct Project {
 }
 #[derive(Clone, Copy, PartialEq)]
 enum Step {
+    /// Existing Codex and Claude Code threads to bring in, before projects.
+    Import,
     Projects,
     Folder,
     Tools,
@@ -103,6 +107,9 @@ impl Snapshot {
 }
 pub struct Opened(pub Option<Session>);
 impl EventEmitter<Opened> for Setup {}
+/// Imported chats exist now; the shell reloads its sessions.
+pub struct Imported;
+impl EventEmitter<Imported> for Setup {}
 pub struct Setup {
     client: Client,
     snapshot: Option<Snapshot>,
@@ -114,6 +121,7 @@ pub struct Setup {
     model: Entity<Composer>,
     name: Entity<Composer>,
     form: new_project::Form,
+    import: import::Picker,
     session_id: String,
     busy: bool,
     error: Option<String>,
@@ -127,6 +135,7 @@ enum Action {
     Choose(Option<Project>),
     Add(String),
     Create(Value),
+    Import(Vec<String>),
     Use,
     Consent,
 }
@@ -135,11 +144,14 @@ struct ResultState {
     step: Step,
     project: Option<Project>,
     opened: Option<Option<Session>>,
+    discovered: Option<import::Discovered>,
+    imported: Option<(usize, usize)>,
 }
 impl Setup {
     #[cfg(test)]
     pub fn painted_page(&self) -> Option<&'static str> {
         (self.painted.get() == self.revision).then_some(match self.step {
+            Step::Import => "import",
             Step::Projects => "projects",
             Step::Folder => "folder",
             Step::Tools => "tools",
@@ -150,6 +162,15 @@ impl Setup {
     #[cfg(test)]
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
+    }
+    /// Each import group's folder and thread count, and how many are selected.
+    #[cfg(test)]
+    pub fn import_state(&self) -> (Vec<(String, usize)>, usize, Option<String>) {
+        (
+            self.import.groups(),
+            self.import.selected(),
+            self.import.note.clone(),
+        )
     }
     pub fn busy(&self) -> bool {
         self.busy
@@ -166,6 +187,7 @@ impl Setup {
             model: cx.new(Composer::new),
             name: cx.new(Composer::new),
             form: new_project::Form::default(),
+            import: import::Picker::default(),
             session_id: format!(
                 "thoughts-next-{}",
                 SystemTime::now()
@@ -212,8 +234,19 @@ impl Setup {
             let mut selected = project;
             let mut target = step;
             let mut finish = false;
+            let (mut discovered, mut imported) = (None, None);
             match action {
-                Action::Load(refresh) => { next = Some(Snapshot::load(&client, refresh)?); }
+                Action::Load(refresh) => {
+                    next = Some(Snapshot::load(&client, refresh)?);
+                    // An older server without the routes just skips the offer.
+                    discovered = import::Discovered::load(&client).ok();
+                    if !refresh && step == Step::Projects && discovered.as_ref().is_some_and(import::Discovered::pending) { target = Step::Import; }
+                }
+                Action::Import(keys) => {
+                    imported = Some(import::Picker::import(&client, keys)?);
+                    discovered = import::Discovered::load(&client).ok();
+                    next = Some(Snapshot::load(&client, false)?); target = Step::Projects;
+                }
                 Action::Add(path) => {
                     let added = client.setup_request("POST", "/api/panel/repos", &json!({"action":"add", "localPath":path.trim()}))?;
                     selected = Some(serde_json::from_value::<Project>(added["repo"].clone()).map_err(|_| "Invalid project response")?);
@@ -248,7 +281,7 @@ impl Setup {
             }
             let loaded = next.ok_or("Setup has not loaded. Try again.")?;
             let opened = if finish { Some(Self::finish(&client, &loaded, selected.as_ref(), &id, &model)?) } else { None };
-            Ok::<_, String>(ResultState { snapshot: loaded, step: target, project: selected, opened })
+            Ok::<_, String>(ResultState { snapshot: loaded, step: target, project: selected, opened, discovered, imported })
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -263,6 +296,15 @@ impl Setup {
                         this.snapshot = Some(result.snapshot);
                         this.project = result.project;
                         this.step = result.step;
+                        if let Some(discovered) = result.discovered {
+                            this.import.replace(discovered);
+                        }
+                        if let Some((imported, skipped)) = result.imported {
+                            this.import.note = Some(import::note(imported, skipped));
+                            if imported > 0 {
+                                cx.emit(Imported);
+                            }
+                        }
                         if let Some(session) = result.opened {
                             cx.emit(Opened(session));
                         }
@@ -494,6 +536,9 @@ impl Render for Setup {
                         .child(error),
                 )
             })
+            .when(self.step == Step::Import, |v| {
+                v.child(import::page(self, busy, cx))
+            })
             .when(self.step == Step::Projects, |v| {
                 v.child(
                     div()
@@ -502,6 +547,22 @@ impl Render for Setup {
                         .flex_col()
                         .gap(px(10.))
                         .child(div().text_size(px(24.)).child("Open a project"))
+                        .when_some(self.import.note.clone(), |v, note| {
+                            v.child(
+                                div()
+                                    .debug_selector(|| "setup-import-note".into())
+                                    .text_color(theme().text_secondary)
+                                    .child(note),
+                            )
+                        })
+                        .when(self.import.pending(), |v| {
+                            v.child(
+                                control("setup-import-open", "Bring in existing threads", !busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.navigate(Step::Import, cx)
+                                    })),
+                            )
+                        })
                         .child(
                             control("setup-folder", "Open folder", !busy).on_click(cx.listener(
                                 |this, _, window, cx| {

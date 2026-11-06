@@ -34,10 +34,14 @@ export async function POST(request: NextRequest) {
       if (unknown.length) {
         return NextResponse.json({ error: { code: 'unknown_discovered_session', message: 'Selection contains unknown sessions.', sessionKeys: unknown } }, { status: 404 });
       }
+      // Name every session that cannot resume, so a picker can drop them all in one retry.
+      const notResumable: string[] = [];
       for (const key of sessionKeys) {
-        if (!bindings.has(key) && !await canImportDiscoveredSession(discovered.get(key)!)) {
-          return NextResponse.json({ error: { code: 'session_not_resumable', message: 'The provider rollout is missing or ambiguous.', sessionKey: key } }, { status: 409 });
-        }
+        if (!bindings.has(key) && !await canImportDiscoveredSession(discovered.get(key)!)) notResumable.push(key);
+      }
+      if (notResumable.length) {
+        return NextResponse.json({ error: { code: 'session_not_resumable', message: 'The provider rollout is missing or ambiguous.',
+          sessionKey: notResumable[0], sessionKeys: notResumable } }, { status: 409 });
       }
       const created: ImportedSession[] = [];
       const existing: ImportedSession[] = [];
