@@ -13,7 +13,7 @@ import {
 } from '@/lib/llm/anthropic-task-budget';
 import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
 import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
-import { requestRate, resolveRate } from '@/lib/cost/rate-table';
+import { claudeRequestCostUsd, resolveRate } from '@/lib/cost/rate-table';
 import { LLM_REPO_PATH_HEADER } from '@/lib/llm/repo-scope';
 import { resolvePromptCachingEnabledSync } from '@/lib/operator/defaults';
 import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
@@ -39,7 +39,6 @@ import { isOpenRouterEnabled } from '@/lib/providers/openrouter-connection';
 import { applyNativeApiEffort, nativeApiEffortError } from './effort-contract';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
-const TOKENS_PER_MILLION = 1_000_000;
 
 function jsonError(message: string, status: number, code?: string) {
   return new Response(
@@ -115,14 +114,10 @@ function computeUsageCost(
   if (!resolved) {
     return computeCost(model, usage.inputTokens, usage.outputTokens);
   }
-  // The rate table's own cache rates, and Haiku 5.5's long-prompt tier.
-  const rate = requestRate(resolved, usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens);
-  return (
-    usage.inputTokens * rate.inputUsdPerMillion
-    + usage.outputTokens * rate.outputUsdPerMillion
-    + usage.cacheReadTokens * (rate.cacheReadUsdPerMillion ?? rate.inputUsdPerMillion)
-    + usage.cacheWriteTokens * (rate.cacheWriteUsdPerMillion ?? rate.inputUsdPerMillion)
-  ) / TOKENS_PER_MILLION;
+  // The proxy marks its cache breakpoints with the default 5-minute TTL and
+  // never requests fast mode, so every write is a 5-minute write at the
+  // standard rate.
+  return claudeRequestCostUsd(resolved, { ...usage, cacheWrite1hTokens: 0 });
 }
 
 function parseRequestedThinkingEffort(value: unknown): ThinkingEffort | null {

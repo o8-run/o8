@@ -2,13 +2,11 @@ import { createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import { requestRate, resolveRate, type ResolvedRate } from '@/lib/cost/rate-table';
+import { claudeRequestCostUsd, claudeRequestRate, readClaudeRequestTokens } from '@/lib/cost/rate-table';
 import { registerCostParser } from './shared/cost-parser-registry';
 
 export type { SessionCostData } from './shared/cost-parser-registry';
 import type { SessionCostData } from './shared/cost-parser-registry';
-
-const TOKENS_PER_MILLION = 1_000_000;
 
 interface ClaudeUsagePayload {
   input_tokens?: number;
@@ -46,69 +44,24 @@ interface ParsedUsageEntry {
   totalCostUsd: number;
 }
 
-function toTokenCount(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? value
-    : 0;
-}
-
-function detectPricingModel(rawModel: string | null | undefined, usage: ClaudeUsagePayload): ResolvedRate | null {
-  const normalizedModel = rawModel?.trim().toLowerCase();
-  if (!normalizedModel || normalizedModel === '<synthetic>') {
-    return null;
-  }
-
-  const normalizedTier = usage.service_tier?.trim().toLowerCase();
-  const normalizedSpeed = usage.speed?.trim().toLowerCase();
-  const isFastTier = normalizedTier === 'fast'
-    || normalizedTier === 'priority'
-    || normalizedSpeed === 'fast'
-    || normalizedModel.includes('fast');
-  const lookupModel = isFastTier && !normalizedModel.includes('fast')
-    ? `${normalizedModel}-fast`
-    : normalizedModel;
-  return resolveRate('anthropic', lookupModel);
-}
-
 function buildParsedUsageEntry(
   usage: ClaudeUsagePayload,
   rawModel: string | null | undefined,
   fallbackModel: string | null,
 ): ParsedUsageEntry {
-  const inputTokens = toTokenCount(usage.input_tokens);
-  const outputTokens = toTokenCount(usage.output_tokens);
-  const cacheReadTokens = toTokenCount(usage.cache_read_input_tokens);
-  const cacheWrite5mTokens = toTokenCount(usage.cache_creation?.ephemeral_5m_input_tokens);
-  const cacheWrite1hTokens = toTokenCount(usage.cache_creation?.ephemeral_1h_input_tokens);
-  const cacheWriteTokens = Math.max(
-    toTokenCount(usage.cache_creation_input_tokens),
-    cacheWrite5mTokens + cacheWrite1hTokens,
-  );
-  const cacheWriteRemainder = Math.max(0, cacheWriteTokens - cacheWrite5mTokens - cacheWrite1hTokens);
-  const normalizedCacheWrite5mTokens = cacheWrite5mTokens + cacheWriteRemainder;
-  const resolved = detectPricingModel(rawModel, usage);
-  // Haiku 5.5 prices a request whose prompt (input, cache reads and cache
-  // writes) passes 100K tokens at its long-prompt rates.
-  const pricing = resolved && requestRate(resolved, inputTokens + cacheReadTokens + cacheWriteTokens);
+  const tokens = readClaudeRequestTokens(usage);
+  const pricing = claudeRequestRate(rawModel, usage);
   const model = pricing?.modelKey ?? fallbackModel ?? rawModel?.trim() ?? null;
 
-  const totalCostUsd = (
-    (inputTokens * (pricing?.inputUsdPerMillion ?? 0))
-    + (outputTokens * (pricing?.outputUsdPerMillion ?? 0))
-    + (cacheReadTokens * (pricing?.cacheReadUsdPerMillion ?? 0))
-    + (normalizedCacheWrite5mTokens * (pricing?.cacheWriteUsdPerMillion ?? 0))
-    + (cacheWrite1hTokens * (pricing?.cacheWrite1hUsdPerMillion ?? 0))
-  ) / TOKENS_PER_MILLION;
-
   return {
-    cacheReadTokens,
-    cacheWrite1hTokens,
-    cacheWrite5mTokens: normalizedCacheWrite5mTokens,
-    cacheWriteTokens,
-    inputTokens,
+    cacheReadTokens: tokens.cacheReadTokens,
+    cacheWrite1hTokens: tokens.cacheWrite1hTokens,
+    cacheWrite5mTokens: tokens.cacheWriteTokens - tokens.cacheWrite1hTokens,
+    cacheWriteTokens: tokens.cacheWriteTokens,
+    inputTokens: tokens.inputTokens,
     model,
-    outputTokens,
-    totalCostUsd,
+    outputTokens: tokens.outputTokens,
+    totalCostUsd: pricing ? claudeRequestCostUsd(pricing, tokens) : 0,
   };
 }
 

@@ -254,6 +254,68 @@ export function requestRate(rate: ResolvedRate, promptTokens: number): ResolvedR
   return { ...rates, longPrompt: long, modelKey: rate.modelKey };
 }
 
+/** One Claude request's billable tokens, as its Messages API usage object reports them. */
+export interface ClaudeRequestTokens {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  /** Every cache write; `cacheWrite1hTokens` of them went to the 1-hour cache. */
+  cacheWriteTokens: number;
+  cacheWrite1hTokens: number;
+}
+
+const tokenCount = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
+
+/** Reads a Claude usage object (`input_tokens`, `cache_creation.ephemeral_1h_input_tokens`, ...). */
+export function readClaudeRequestTokens(payload: object): ClaudeRequestTokens {
+  const usage = payload as Record<string, unknown>;
+  const split = (usage.cache_creation ?? {}) as Record<string, unknown>;
+  const write5m = tokenCount(split.ephemeral_5m_input_tokens);
+  const write1h = tokenCount(split.ephemeral_1h_input_tokens);
+  return {
+    inputTokens: tokenCount(usage.input_tokens),
+    outputTokens: tokenCount(usage.output_tokens),
+    cacheReadTokens: tokenCount(usage.cache_read_input_tokens),
+    cacheWriteTokens: Math.max(tokenCount(usage.cache_creation_input_tokens), write5m + write1h),
+    cacheWrite1hTokens: write1h,
+  };
+}
+
+/**
+ * A Claude request's rate. Fast mode is its own rate, reported as the usage
+ * object's `speed: "fast"`. Priority Tier (`service_tier: "priority"`) is a
+ * capacity commitment, not fast mode, and Anthropic publishes no separate
+ * per-token price for it, so it bills at the model's standard rate.
+ */
+export function claudeRequestRate(
+  model: string | null | undefined,
+  usage: { speed?: unknown; service_tier?: unknown },
+): ResolvedRate | null {
+  const normalized = model?.trim().toLowerCase();
+  if (!normalized) return null;
+  const flag = (value: unknown) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+  const fast = flag(usage.speed) === 'fast' || flag(usage.service_tier) === 'fast';
+  return resolveRate('anthropic', fast && !normalized.includes('fast') ? `${normalized}-fast` : normalized);
+}
+
+/**
+ * A Claude request's list cost: its long-prompt rates once the prompt (input,
+ * cache reads and cache writes) passes their threshold, and 5-minute and
+ * 1-hour cache writes at their own rates.
+ */
+export function claudeRequestCostUsd(rate: ResolvedRate, tokens: ClaudeRequestTokens): number {
+  const r = requestRate(rate, tokens.inputTokens + tokens.cacheReadTokens + tokens.cacheWriteTokens);
+  const write1h = Math.min(tokens.cacheWrite1hTokens, tokens.cacheWriteTokens);
+  const write5mRate = r.cacheWriteUsdPerMillion ?? r.inputUsdPerMillion;
+  return (
+    tokens.inputTokens * r.inputUsdPerMillion
+    + tokens.outputTokens * r.outputUsdPerMillion
+    + tokens.cacheReadTokens * (r.cacheReadUsdPerMillion ?? r.inputUsdPerMillion)
+    + (tokens.cacheWriteTokens - write1h) * write5mRate
+    + write1h * (r.cacheWrite1hUsdPerMillion ?? write5mRate)
+  ) / 1_000_000;
+}
+
 /** Codex usage includes cached input in inputTokens; the surcharge is per request. */
 export function codexUsageCostUsd(rate: ResolvedRate, usage: {
   inputTokens: number; cachedInputTokens: number; outputTokens: number;
