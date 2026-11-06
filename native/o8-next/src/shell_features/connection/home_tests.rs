@@ -149,10 +149,15 @@ fn an_older_no_project_chat_is_listed_under_home_and_sends_from_its_scratch_fold
         {
             break item.clone();
         }
-        assert!(
-            Instant::now() < deadline,
-            "the older chat's send was not queued"
-        );
+        if Instant::now() >= deadline {
+            let state = shell.read_with(cx, |s, cx| {
+                match s.content.get(&s.key(&Tab::Session(id.into()))) {
+                    Some(Content::Session(view)) => view.read(cx).shell_issue_state(cx).to_string(),
+                    _ => "no session view".into(),
+                }
+            });
+            panic!("the older chat's send was not queued: {state}");
+        }
         std::thread::sleep(Duration::from_millis(50));
     };
     assert!(
