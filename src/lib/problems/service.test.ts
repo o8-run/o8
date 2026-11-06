@@ -160,7 +160,7 @@ describe('problem dossier remedy lifecycle', () => {
     const dossier = createDossier('route visible failure', 'pkt-route');
     const getResponse = await problemDossierRoute.GET(new NextRequest(
       'http://localhost/api/panel/problem-dossiers?includeSuppressed=true',
-      { headers: { 'x-o8-client-addr': '127.0.0.1' } },
+      { headers: { host: '127.0.0.1', 'x-o8-client-addr': '127.0.0.1' } },
     ));
     expect(getResponse.status).toBe(200);
     await expect(getResponse.json()).resolves.toMatchObject({
@@ -174,7 +174,7 @@ describe('problem dossier remedy lifecycle', () => {
       'http://localhost/api/panel/problem-dossiers',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-o8-client-addr': '127.0.0.1' },
+        headers: { host: '127.0.0.1', 'Content-Type': 'application/json', 'x-o8-client-addr': '127.0.0.1' },
         body: JSON.stringify({
           action: 'suppress',
           dossierId: dossier.id,
@@ -190,6 +190,7 @@ describe('problem dossier remedy lifecycle', () => {
       {
         method: 'POST',
         headers: {
+          host: '127.0.0.1',
           'Content-Type': 'application/json',
           'x-o8-client-addr': '127.0.0.1',
           authorization: operatorAuthorization,
@@ -212,6 +213,7 @@ describe('problem dossier remedy lifecycle', () => {
       {
         method: 'POST',
         headers: {
+          host: '127.0.0.1',
           'Content-Type': 'application/json',
           'x-o8-client-addr': '127.0.0.1',
           authorization: operatorAuthorization,
@@ -237,6 +239,7 @@ describe('problem dossier remedy lifecycle', () => {
       {
         method: 'POST',
         headers: {
+          host: '127.0.0.1',
           'Content-Type': 'application/json',
           'x-o8-client-addr': '127.0.0.1',
           authorization: operatorAuthorization,
