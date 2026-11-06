@@ -11,11 +11,7 @@ use gpui::{
 };
 use std::{cell::Cell, rc::Rc, sync::Arc};
 
-/// The desktop annotator's palette: orange, red, blue, green, ink and white.
-pub(crate) const COLORS: [&str; 6] = [
-    "#FF5A1F", "#EF4444", "#3B82F6", "#22C55E", "#111827", "#FFFFFF",
-];
-const COLOR_VALUES: [u32; 6] = [0xFF5A1F, 0xEF4444, 0x3B82F6, 0x22C55E, 0x111827, 0xFFFFFF];
+use crate::theme::annotate::{CARD_INK, CARD_PAPER, GRIP_BUTTON, GRIP_MARK, HINT, PALETTE, SCRIM};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum Tool {
@@ -413,14 +409,14 @@ impl Annotator {
                     .flex()
                     .gap(px(8.))
                     .px(px(8.))
-                    .children((0..COLORS.len()).map(|color| {
+                    .children((0..PALETTE.len()).map(|color| {
                         let on = self.color == color;
                         div()
                             .id(("annotator-color", color))
                             .debug_selector(move || format!("annotator-color-{color}"))
                             .size(px(20.))
                             .rounded_full()
-                            .bg(rgb(COLOR_VALUES[color]))
+                            .bg(rgb(PALETTE[color]))
                             .when(on, |d| d.border_2().border_color(theme().text))
                             .when(!on, |d| d.border_1().border_color(theme().border))
                             .cursor_pointer()
@@ -449,7 +445,7 @@ impl Annotator {
                     .child(
                         Self::button("annotator-done", false)
                             .bg(theme().accent)
-                            .text_color(rgb(0xFFFFFF))
+                            .text_color(crate::theme::on_accent())
                             .opacity(if self.busy { 0.6 } else { 1. })
                             .child(if self.busy { "Saving…" } else { "Done" })
                             .on_click(cx.listener(|this, _, _, cx| this.done(cx))),
@@ -458,7 +454,7 @@ impl Annotator {
     }
     fn card(&self, index: usize, scale: f32, cx: &mut Context<Self>) -> AnyElement {
         let card = &self.cards[index];
-        let color = rgb(COLOR_VALUES[card.color]);
+        let color = rgb(PALETTE[card.color]);
         // The bake's own numbers times the stage scale: what shows is what saves.
         let m = super::annotate_raster::card_metrics(self.width);
         let (w, h) = card.size;
@@ -477,7 +473,7 @@ impl Annotator {
             .rounded(px(m.radius * scale))
             .border(px(border))
             .border_color(color)
-            .bg(rgba(0xFFFFFFF5))
+            .bg(rgba(CARD_PAPER))
             .shadow_lg()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
@@ -508,7 +504,7 @@ impl Annotator {
                             }
                         }),
                     )
-                    .child(crate::icon::stroke(GRIP, rgba(0xFFFFFFE6), 13., 2.4))
+                    .child(crate::icon::stroke(GRIP, rgba(GRIP_MARK), 13., 2.4))
                     .child(
                         div()
                             .id(("annotator-card-delete", index))
@@ -518,7 +514,7 @@ impl Annotator {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .bg(rgba(0xFFFFFF47))
+                            .bg(rgba(GRIP_BUTTON))
                             .cursor_pointer()
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -528,7 +524,12 @@ impl Annotator {
                                     cx.notify();
                                 }
                             }))
-                            .child(crate::icon::stroke(CLOSE, rgba(0xFFFFFFFF), 9., 3.)),
+                            .child(crate::icon::stroke(
+                                CLOSE,
+                                crate::theme::on_accent(),
+                                9.,
+                                3.,
+                            )),
                     ),
             )
             .child(
@@ -539,7 +540,7 @@ impl Annotator {
                     // The input wraps at its own width: give it the rest of
                     // the box, so the measured line never breaks early.
                     .w(px((w * scale - border - m.pad * scale).max(1.)))
-                    .text_color(rgb(0x161616))
+                    .text_color(rgb(CARD_INK))
                     .font_family(SharedString::from(super::annotate_raster::card_family()))
                     .text_size(px(m.font * scale))
                     .line_height(px(m.line_h * scale))
@@ -553,7 +554,7 @@ impl Annotator {
 
 fn paint_shape(shape: &Shape, origin: Point<Pixels>, scale: f32, window: &mut Window) {
     let at = |x: f32, y: f32| point(origin.x + px(x * scale), origin.y + px(y * scale));
-    let color = |c: usize| rgb(COLOR_VALUES[c]);
+    let color = |c: usize| rgb(PALETTE[c]);
     match shape {
         Shape::Box {
             x1,
@@ -677,7 +678,7 @@ impl Render for Annotator {
             .justify_center()
             .gap(px(16.))
             .p(px(16.))
-            .bg(rgba(0x140F0C9E))
+            .bg(rgba(SCRIM))
             // Blocks hover and clicks for everything under the editor.
             .occlude()
             .font_family(theme().font_ui)
@@ -729,12 +730,7 @@ impl Render for Annotator {
                         .child(error),
                 )
             })
-            .child(
-                div()
-                    .text_size(px(11.))
-                    .text_color(rgba(0xFFFFFFCC))
-                    .child(hint),
-            )
+            .child(div().text_size(px(11.)).text_color(rgba(HINT)).child(hint))
     }
 }
 

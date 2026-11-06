@@ -2,7 +2,12 @@
 //! Marks and text cards become one SVG layer that resvg draws over the decoded
 //! pixels; the result is a PNG, or a JPEG when the PNG's data URI would pass
 //! the server's 5 MB attachment cap.
-use super::annotate::{COLORS, Shape};
+use super::annotate::Shape;
+
+/// A palette color as SVG paint.
+fn paint(index: usize) -> String {
+    format!("#{:06x}", crate::theme::annotate::PALETTE[index])
+}
 use base64::Engine;
 use resvg::{tiny_skia, usvg};
 use std::{fmt::Write, io::Cursor, sync::Arc, sync::OnceLock};
@@ -103,7 +108,7 @@ fn shape_svg(out: &mut String, shape: &Shape) {
                 y1.min(*y2),
                 (x2 - x1).abs(),
                 (y2 - y1).abs(),
-                COLORS[*color]
+                paint(*color)
             );
         }
         Shape::Highlight {
@@ -120,7 +125,7 @@ fn shape_svg(out: &mut String, shape: &Shape) {
                 y1.min(*y2),
                 (x2 - x1).abs(),
                 (y2 - y1).abs(),
-                COLORS[*color]
+                paint(*color)
             );
         }
         Shape::Arrow {
@@ -132,7 +137,7 @@ fn shape_svg(out: &mut String, shape: &Shape) {
             width,
         } => {
             let [(ax, ay), (bx, by)] = arrow_head(*x1, *y1, *x2, *y2, *width);
-            let color = COLORS[*color];
+            let color = paint(*color);
             let _ = write!(
                 out,
                 r#"<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{color}" stroke-width="{width}" {line}/><polygon points="{x2},{y2} {ax},{ay} {bx},{by}" fill="{color}"/>"#
@@ -151,7 +156,7 @@ fn shape_svg(out: &mut String, shape: &Shape) {
             let _ = write!(
                 out,
                 r#"<polyline points="{points}" stroke="{}" stroke-width="{width}" {line}/>"#,
-                COLORS[*color]
+                paint(*color)
             );
         }
     }
@@ -281,7 +286,11 @@ pub(crate) fn composite(bytes: &[u8], shapes: &[Shape], cards: &[Card]) -> Resul
         let _ = write!(
             body,
             r##"<rect x="{}" y="{}" width="{}" height="{}" rx="{radius}" fill="#ffffff" fill-opacity="0.96" stroke="{}" stroke-width="{border}"/>{text}"##,
-            card.x, card.y, card_w, card_h, COLORS[card.color]
+            card.x,
+            card.y,
+            card_w,
+            card_h,
+            paint(card.color)
         );
     }
     let tree = usvg::Tree::from_str(&svg_document(w, h, &body), &options)

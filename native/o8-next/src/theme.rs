@@ -668,6 +668,23 @@ pub const CLEAR: Rgba = Rgba {
     a: 0.,
 };
 
+/// The image markup editor's fixed colors (#5576). Marks and note cards bake
+/// into the PNG exactly as drawn, so they stay the same on every appearance,
+/// as in the desktop annotator.
+pub mod annotate {
+    /// Orange, red, blue, green, ink and white.
+    pub const PALETTE: [u32; 6] = [0xff5a1f, 0xef4444, 0x3b82f6, 0x22c55e, 0x111827, 0xffffff];
+    /// A note card's paper and ink.
+    pub const CARD_PAPER: u32 = 0xfffffff5;
+    pub const CARD_INK: u32 = 0x161616;
+    /// The marks on a card's colored grip, and its delete button's disc.
+    pub const GRIP_MARK: u32 = 0xffffffe6;
+    pub const GRIP_BUTTON: u32 = 0xffffff47;
+    /// The dimmed window behind the editor, and the hint drawn on it.
+    pub const SCRIM: u32 = 0x140f0c9e;
+    pub const HINT: u32 = 0xffffffcc;
+}
+
 /// Activity's fixed tints, the same on every appearance: classic
 /// ACTIVITY_COLORS (o8-activity-helpers.tsx) and orchestratorStatusTone
 /// (src/lib/orchestrator/display.ts).
