@@ -22,8 +22,14 @@ use std::{
     sync::OnceLock,
 };
 
-#[link(name = "CoreGraphics", kind = "framework")]
-unsafe extern "C" {
+// The source checks parse with a grammar that predates `unsafe extern`.
+macro_rules! graphics_abi {
+    ($($declaration:tt)*) => {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        unsafe extern "C" { $($declaration)* }
+    };
+}
+graphics_abi! {
     fn CGPathCreateMutable() -> *mut c_void;
     fn CGPathAddRect(path: *mut c_void, transform: *const c_void, rect: NSRect);
     fn CGPathContainsPoint(

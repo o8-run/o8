@@ -2,7 +2,7 @@
 //! view which parts later window content (menus, tooltips, dialogs) painted over.
 use gpui::{
     AppContext, Bounds, Context, Entity, IntoElement, Render, Styled, TestAppContext, Window,
-    canvas, div, point, prelude::*, px, rgb, size,
+    canvas, div, point, prelude::*, px, size,
 };
 use std::{cell::Cell, rc::Rc};
 
@@ -16,7 +16,7 @@ impl Render for Card {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let painted = self.painted;
         // Drawn before the anchor: never counts as covering it.
-        div().size_full().bg(rgb(0x202020)).child(
+        div().size_full().bg(gpui::black()).child(
             canvas(
                 |_, _, _| {},
                 move |bounds, _, window, _| {
@@ -57,7 +57,7 @@ impl Render for Root {
                         .top(px(60.))
                         .w(px(100.))
                         .h(px(100.))
-                        .bg(rgb(0xffffff)),
+                        .bg(gpui::white()),
                 )
             })
     }
