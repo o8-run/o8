@@ -133,14 +133,20 @@ fn setup_without_project_opens_a_thread_that_sends(cx: &mut TestAppContext) {
     click(cx, "setup-explore");
     click(cx, "setup-consent");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
+    // Home is the one place for work without a project (#5611): the first
+    // thread starts there, in the home folder, and Home joins no project list.
+    let home = crate::shell::session::home_workspace().expect("HOME is set");
     let session = active_session(&shell, cx);
-    assert_eq!(session.repo_path, None, "the thread starts with no project");
     assert_eq!(
-        shell
-            .read_with(cx, |s, _| s.state.selected.clone())
-            .as_deref(),
-        Some("Unassigned")
+        session.repo_path.as_deref(),
+        Some(home.as_str()),
+        "the thread starts in Home"
     );
+    assert_eq!(
+        shell.read_with(cx, |s, _| s.state.selected.clone()),
+        Some(home.clone())
+    );
+    assert!(!shell.read_with(cx, |s, _| s.workspaces.contains(&home)));
     click(cx, "composer-input");
     cx.simulate_input("No project first message");
     cx.simulate_keystrokes("enter");
@@ -153,19 +159,11 @@ fn setup_without_project_opens_a_thread_that_sends(cx: &mut TestAppContext) {
         .iter()
         .find(|item| item["payload"]["text"] == "No project first message")
         .expect("a no-project send persists through the production queue");
+    let real_home = std::fs::canonicalize(&home).unwrap();
     assert!(
         item["repoPath"]
             .as_str()
-            .is_some_and(|p| p.ends_with(&format!("/thread-scratch/{}", session.id))),
-        "the agent runs in the thread's scratch folder: {item}"
-    );
-    let history: Value = fixture
-        .client
-        .get("/api/v2/chat-history", &[("tabId", &session.id)])
-        .unwrap();
-    assert!(
-        history["repoPath"].is_null(),
-        "the thread keeps no project: {}",
-        history["repoPath"]
+            .is_some_and(|p| std::path::Path::new(p) == real_home),
+        "the agent runs in the home folder: {item}"
     );
 }
