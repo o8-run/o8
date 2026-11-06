@@ -367,7 +367,8 @@ fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
         layouts.push(json!({"viewport":[width,height], "switcher":[f32::from(bounds.origin.x),f32::from(bounds.origin.y),f32::from(bounds.size.width),f32::from(bounds.size.height)]}));
         open_workspace_picker(&shell, cx);
         draw(cx);
-        assert_eq!(shell.read_with(cx, |s, _| s.commands().len()), 15);
+        // Fifteen workspaces, then Work without a project.
+        assert_eq!(shell.read_with(cx, |s, _| s.commands().len()), 16);
         cx.simulate_keystrokes("escape");
     }
     if let Ok(file) = std::env::var("O8_NEXT_CHROME_EVIDENCE") {

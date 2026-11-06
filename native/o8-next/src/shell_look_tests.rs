@@ -261,10 +261,10 @@ fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
         layouts.push(json!({"viewport":[width,height], "switcher":[f32::from(bounds.origin.x),f32::from(bounds.origin.y),f32::from(bounds.size.width),f32::from(bounds.size.height)]}));
         open_workspace_picker(&shell, cx);
         draw(cx);
-        assert!(cx.debug_bounds("command-14").is_some());
+        assert!(cx.debug_bounds("command-15").is_some());
         assert!(
-            cx.debug_bounds("command-15").is_none(),
-            "the workspace switcher renders only its fifteen workspace rows"
+            cx.debug_bounds("command-16").is_none(),
+            "the workspace switcher renders only its fifteen workspace rows and Home"
         );
         cx.simulate_keystrokes("escape");
     }

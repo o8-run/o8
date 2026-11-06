@@ -169,6 +169,16 @@ fn landing(s: &Shell, frame: &Frame, cx: &mut Context<Shell>) -> AnyElement {
         return div().p(px(24.)).child(frame.empty).into_any_element();
     };
     let name = repo.rsplit('/').next().unwrap_or(&repo).to_owned();
+    // Working without a project (classic's home mode).
+    let home = crate::shell::session::is_home(&repo);
+    let (title, detail) = if home {
+        (
+            "What should we do?".to_owned(),
+            "No project · agents start in your home folder".to_owned(),
+        )
+    } else {
+        (format!("What should we build in {name}?"), repo)
+    };
     let action = |id: &'static str, label: &'static str| {
         div()
             .id(id)
@@ -205,14 +215,14 @@ fn landing(s: &Shell, frame: &Frame, cx: &mut Context<Shell>) -> AnyElement {
                         .font_weight(gpui::FontWeight::EXTRA_LIGHT)
                         .text_color(theme().text)
                         .text_center()
-                        .child(format!("What should we build in {name}?")),
+                        .child(title),
                 )
                 .child(
                     div()
                         .mt(px(10.))
                         .text_size(px(11.))
                         .text_color(theme().text_muted)
-                        .child(repo),
+                        .child(detail),
                 )
                 .child(
                     div()

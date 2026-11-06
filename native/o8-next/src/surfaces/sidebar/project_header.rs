@@ -505,6 +505,32 @@ impl ThreadList {
                             })),
                     );
                 }
+                // Classic's "Work without a project": the home folder.
+                if let Some(home) = super::super::session::home_workspace() {
+                    menu = menu.child(
+                        div()
+                            .id("sidebar-work-without-project")
+                            .debug_selector(|| "sidebar-work-without-project".into())
+                            .h(px(34.))
+                            .px(px(9.))
+                            .flex()
+                            .items_center()
+                            .rounded(px(9.))
+                            .text_size(px(12.))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(theme().hover))
+                            .child("Work without a project")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.header_menu = None;
+                                this.workspace = Some(home.clone());
+                                cx.emit(Event::Workspace(
+                                    Some(home.clone()),
+                                    this.header.ledger.clone(),
+                                ));
+                                cx.notify();
+                            })),
+                    );
+                }
                 menu = menu.child(
                     div()
                         .id("sidebar-workspace-picker")

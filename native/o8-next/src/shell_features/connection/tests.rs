@@ -5,6 +5,8 @@ use crate::shell_state::State;
 mod maintenance;
 #[path = "timeout_tests.rs"]
 mod timeouts;
+#[path = "home_tests.rs"]
+mod home;
 // Drive main's retained sidebar lifecycle too: a streamed update can fence an
 // in-flight HTTP load, which is retried by the normal shell tick.
 #[track_caller]

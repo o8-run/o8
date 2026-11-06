@@ -489,7 +489,9 @@ impl Shell {
                 .selected
                 .as_ref()
                 .is_some_and(|w| self.workspaces.contains(w));
-            if bootstrap || missing {
+            // Home belongs to no project, so a refresh keeps it selected.
+            let home = self.state.selected.as_deref().is_some_and(session::is_home);
+            if !home && (bootstrap || missing) {
                 let active = self
                     .surfaces
                     .sidebar

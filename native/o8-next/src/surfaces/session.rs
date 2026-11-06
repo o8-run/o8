@@ -32,6 +32,18 @@ pub(super) const REGISTRATION: Registration = Registration {
         _ => unreachable!(),
     })
 };
+/// Classic's "work without a project" (ORCHESTRATOR_HOME_REPO_SENTINEL):
+/// the home folder as a workspace, so agents can start anywhere, not only in
+/// a registered repository. The server resolves it as the orchestrator home.
+pub(crate) fn home_workspace() -> Option<String> {
+    std::env::var("HOME")
+        .ok()
+        .filter(|home| home.starts_with('/') && home.len() > 1)
+        .map(|home| home.trim_end_matches('/').to_owned())
+}
+pub(crate) fn is_home(workspace: &str) -> bool {
+    home_workspace().is_some_and(|home| home == workspace)
+}
 /// The path a workspace has on its own machine.
 pub(crate) fn workspace_path(workspace: &str) -> &str {
     machine_workspace(workspace).map_or(workspace, |(_, path)| path)

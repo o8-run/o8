@@ -154,12 +154,19 @@ impl ShellExtension for Connection {
                         s.workspaces = load.paths.into_iter().collect();
                         s.connected = true;
                         let active = load.active_project.as_ref().unwrap_or(&s.workspaces);
-                        if bootstrap
-                            || !s
-                                .state
-                                .selected
-                                .as_ref()
-                                .is_some_and(|w| s.workspaces.contains(w))
+                        // Home stays selected: it belongs to no project.
+                        let home = s
+                            .state
+                            .selected
+                            .as_deref()
+                            .is_some_and(crate::shell::session::is_home);
+                        if !home
+                            && (bootstrap
+                                || !s
+                                    .state
+                                    .selected
+                                    .as_ref()
+                                    .is_some_and(|w| s.workspaces.contains(w)))
                         {
                             if !s
                                 .state

@@ -1,6 +1,7 @@
 /** Production continuation routes, limited to the composer's disposable records. */
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 import { realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export default async function register({ seeds, repo, dataDir }: SurfaceContext): Promise<SurfaceRoutes> {
@@ -42,8 +43,10 @@ export default async function register({ seeds, repo, dataDir }: SurfaceContext)
         const value = JSON.parse(body);
         const id = value.tabId;
         const owned = seeds.some(seed => seed.id === id);
+        // New chats start in the fixture repository or, without a project,
+        // in the home folder.
         return owned || route === history.POST && /^thoughts-next-\d+$/.test(id)
-          && realpathSync(value.repoPath) === realpathSync(repo) ? 200 : 404;
+          && [repo, homedir()].some(root => realpathSync(value.repoPath) === realpathSync(root)) ? 200 : 404;
       } catch { return 400; }
     },
     run: async (route, request) => {
