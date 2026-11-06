@@ -240,12 +240,21 @@ pub(crate) fn rows(lines: &[Line], split: bool, key: &str) -> gpui::AnyElement {
 /// old and the new line number in their own columns, so the numbers never
 /// read as a jump back; split keeps one number per side.
 pub(crate) fn wrapped_rows(lines: &[Line], split: bool, key: &str) -> gpui::AnyElement {
-    const NUMBER: f32 = 32.;
+    // Wide enough for the file's longest line number, so a number never
+    // wraps onto a second line (about 7 px a digit at 11 px mono).
+    let digits = lines
+        .iter()
+        .flat_map(|l| [l.old, l.new])
+        .flatten()
+        .max()
+        .map_or(1, |n| n.to_string().len());
+    let width = 32_f32.max(digits as f32 * 7. + 4.);
     let selector = format!("{key}-diff-{}", if split { "side" } else { "unified" });
     let number = |n: Option<usize>| {
         div()
-            .w(px(NUMBER))
+            .w(px(width))
             .flex_shrink_0()
+            .whitespace_nowrap()
             .text_align(gpui::TextAlign::Right)
             .text_color(theme().text_faint)
             .child(n.map(|n| n.to_string()).unwrap_or_default())

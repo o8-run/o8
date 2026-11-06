@@ -842,6 +842,37 @@ fn review_stack_fits_a_narrow_pane(cx: &mut TestAppContext) {
     // One line far wider than the pane.
     let wide = "# A long line that would wrap one character per line ".repeat(6);
     fs::write(path.join("narrow.md"), format!("{wide}\nsecond\n")).unwrap();
+    // A change past line 100,000, as in a lock or generated file.
+    let deep = |changed: &str| {
+        let mut text = "x\n".repeat(100_004);
+        text.push_str(changed);
+        text.push_str(&"x\n".repeat(5));
+        text
+    };
+    fs::write(path.join("deep.md"), deep("old\n")).unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&path)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["add", "deep.md"]);
+    git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.invalid",
+        "commit",
+        "-qm",
+        "deep",
+    ]);
+    fs::write(path.join("deep.md"), deep("new\n")).unwrap();
     cx.simulate_resize(gpui::size(gpui::px(680.), gpui::px(800.)));
     run(cx, "d i f f");
     let started = Instant::now();
@@ -873,6 +904,22 @@ fn review_stack_fits_a_narrow_pane(cx: &mut TestAppContext) {
     let row = |n: usize| -> &'static str {
         Box::leak(format!("review-file-{i}-diff-row-{n}").into_boxed_str())
     };
+    // Six-digit line numbers keep to one line, so short rows stay one line.
+    let j = child.read_with(cx, |d, _| {
+        d.document
+            .files
+            .iter()
+            .position(|f| f.path == "deep.md")
+            .unwrap()
+    });
+    for n in 1..=7 {
+        let id: &'static str = Box::leak(format!("review-file-{j}-diff-row-{n}").into_boxed_str());
+        let deep = cx.debug_bounds(id).unwrap_or_else(|| panic!("{id} shown"));
+        assert!(
+            deep.size.height <= gpui::px(19.5),
+            "{id} is one line: {deep:?}"
+        );
+    }
     let (hunk, content) = (
         cx.debug_bounds(row(0)).expect("hunk row"),
         cx.debug_bounds(row(1)).expect("content row"),
@@ -897,7 +944,10 @@ fn review_stack_fits_a_narrow_pane(cx: &mut TestAppContext) {
         content.size.width,
         content.size.height
     );
-    assert!(hunk.size.height <= gpui::px(19.5), "the hunk header is one line");
+    assert!(
+        hunk.size.height <= gpui::px(19.5),
+        "the hunk header is one line"
+    );
     assert!(
         content.size.height > gpui::px(40.),
         "the long line wraps: {content:?}"

@@ -395,7 +395,9 @@ fn a_blank_context_line_without_its_space_still_reads() {
         patch.lines().any(str::is_empty),
         "git wrote a bare blank line:\n{patch}"
     );
-    let document = crate::diff::parse(&patch);
+    // A packet keeps the strict read; a working-tree diff reads it.
+    assert!(crate::diff::parse(&patch).unsupported, "{patch}");
+    let document = crate::diff::parse_worktree(&patch);
     assert!(!document.unsupported, "{patch}");
     let file = &document.files[0];
     let blank: Vec<_> = file
@@ -440,4 +442,17 @@ fn a_hunk_with_counts_off_by_one_shows_in_order_and_offers_refresh() {
     let packet = Target::Packet("p1".into());
     let shown = crate::diff_ui::notice(&packet, &document, String::new());
     assert!(shown.contains("Review disabled"), "{shown}");
+}
+
+#[test]
+fn a_bare_blank_line_never_fills_a_short_packet_hunk() {
+    // Each hunk is short of its header's count, with a bare blank line where
+    // a line is missing. A packet stays unsupported.
+    for patch in [
+        "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,3 +1,3 @@\n x\n y\n\ndiff --git a/b b/b\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n-p\n+q\n",
+        "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,4 +1,4 @@\n x\n y\n\n\n",
+        "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,2 +1,2 @@\n-a\n+b\n\n",
+    ] {
+        assert!(crate::diff::parse(patch).unsupported, "{patch}");
+    }
 }
