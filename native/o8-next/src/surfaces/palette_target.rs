@@ -35,6 +35,16 @@ pub(in crate::shell) trait Port: 'static {
     /// Whether the own target replaces a requested target the list does not
     /// hold. `false` keeps an explicit request: it shows the list instead.
     const OWN_REPLACES_UNLISTED: bool = true;
+    /// Controls shown beside the switch over an attached target, such as
+    /// Review's Git actions over the working changes.
+    fn bar(
+        _client: &Client,
+        _id: &str,
+        _child: &Entity<Self::View>,
+        _cx: &mut App,
+    ) -> Option<gpui::AnyView> {
+        None
+    }
     #[cfg(test)]
     fn ready(view: &Entity<Self::View>, cx: &App) -> bool;
 }
@@ -57,6 +67,8 @@ pub(in crate::shell) struct Picker<P: Port> {
     workspace: String,
     pub selected: Option<String>,
     pub child: Option<Entity<P::View>>,
+    /// The attached target's own controls, from [`Port::bar`].
+    pub bar: Option<gpui::AnyView>,
     /// A command line waiting for a target to attach.
     waiting_line: Option<String>,
     choices: Vec<Choice>,
@@ -89,6 +101,7 @@ impl<P: Port> Picker<P> {
             workspace,
             selected: selected.clone(),
             child: None,
+            bar: None,
             waiting_line: None,
             choices: vec![],
             focus: cx.focus_handle(),
@@ -113,6 +126,7 @@ impl<P: Port> Picker<P> {
             workspace,
             selected: Some(id.clone()),
             child: None,
+            bar: None,
             waiting_line: None,
             choices: vec![Choice {
                 id: id.clone(),
@@ -256,6 +270,7 @@ impl<P: Port> Picker<P> {
         if let Some(line) = self.waiting_line.take() {
             P::run(&child, line, cx);
         }
+        self.bar = P::bar(&self.client, &id, &child, cx);
         self.child = Some(child);
         self.child_focus = window.focused(cx);
         if let Some(focus) = restore_focus {
@@ -267,6 +282,7 @@ impl<P: Port> Picker<P> {
     /// Detaches the current target and shows the list again.
     fn list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.child = None;
+        self.bar = None;
         self.open_own = false;
         self.requested = None;
         self.child_focus = None;
@@ -369,10 +385,13 @@ impl<P: Port> Render for Picker<P> {
                                 .flex()
                                 .flex_shrink_0()
                                 .justify_end()
+                                .items_center()
+                                .gap(px(8.))
                                 .px(px(8.))
                                 .py(px(4.))
                                 .border_b_1()
                                 .border_color(theme().border)
+                                .children(self.bar.clone())
                                 .child(
                                     div()
                                         .id("target-switch")

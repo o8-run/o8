@@ -1,12 +1,12 @@
 use super::*;
 use crate::shell::test_support::*;
 
-pub(super) fn run(cx: &mut VisualTestContext, keys: &str) {
+pub(in crate::shell) fn run(cx: &mut VisualTestContext, keys: &str) {
     cx.simulate_keystrokes("ctrl-shift-p");
     cx.simulate_keystrokes(keys);
     cx.simulate_keystrokes("enter");
 }
-pub(super) fn settled(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
+pub(in crate::shell) fn settled(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     let deadline = Instant::now() + Duration::from_secs(25);
     loop {
         cx.run_until_parked();
