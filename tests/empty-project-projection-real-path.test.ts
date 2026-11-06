@@ -16,6 +16,19 @@ vi.mock('@/lib/runtimes/shared/auth-detect', async (original) => ({
   assertRuntimeDispatchable: vi.fn(async () => undefined),
 }));
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
+// The effort check reads the model catalog from the installed Codex CLI, which
+// CI does not have. The requested and default worker models advertise the effort.
+vi.mock('@/lib/codex/service-tier-catalogue', async (original) => {
+  const { MODEL_IDS: ids } = await import('@/lib/models');
+  const models = [ids.raw.openAiGpt61Sol, ids.raw.openAiGpt56Terra];
+  return {
+    ...await original<typeof import('@/lib/codex/service-tier-catalogue')>(),
+    getCodexSpeedCatalogue: async () => ({
+      models: Object.fromEntries(models.map(model => [model, []])),
+      reasoningEfforts: Object.fromEntries(models.map(model => [model, ['low', 'medium', 'high']])),
+    }),
+  };
+});
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn() }));
 const forbiddenDispatch = vi.hoisted(() => vi.fn(() => { throw new Error('This fixture must never dispatch.'); }));
 vi.mock('@/lib/orchestrator/dispatch', async (original) => ({
