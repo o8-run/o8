@@ -252,11 +252,22 @@ pub(super) fn note(imported: usize, skipped: usize) -> String {
     }
 }
 
-fn checkbox(on: bool, partial: bool) -> gpui::Div {
+/// Unchecked, checked (✓) or mixed (–) for a partly chosen folder. The marks
+/// are drawn white over the accent so they show on every appearance.
+fn checkbox(id: String, on: bool, partial: bool) -> gpui::Div {
+    const CHECK: &str = "M5 12.5 10 17.5 19 7";
+    const MIXED: &str = "M6 12h12";
     let filled = on || partial;
+    let mark = if on {
+        Some((CHECK, "check"))
+    } else if partial {
+        Some((MIXED, "mixed"))
+    } else {
+        None
+    };
     div()
         .flex_shrink_0()
-        .size(px(14.))
+        .size(px(16.))
         .rounded(px(3.))
         .border_1()
         .border_color(if filled {
@@ -268,14 +279,13 @@ fn checkbox(on: bool, partial: bool) -> gpui::Div {
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(10.))
-        .text_color(theme().background)
-        .child(if on {
-            "✓"
-        } else if partial {
-            "–"
-        } else {
-            ""
+        .when_some(mark, |v, (path, name)| {
+            let selector = format!("{id}-{name}");
+            v.child(
+                div()
+                    .debug_selector(move || selector.clone())
+                    .child(crate::icon::stroke(path, gpui::rgb(0xFFFFFF), 12., 3.)),
+            )
         })
 }
 
@@ -333,7 +343,11 @@ fn row(this: &Setup, row: Row, cx: &mut Context<Setup>) -> AnyElement {
                             cx.notify();
                         })),
                 )
-                .child(checkbox(chosen == total, chosen > 0 && chosen < total))
+                .child(checkbox(
+                    format!("setup-import-mark-{index}"),
+                    chosen == total,
+                    chosen > 0 && chosen < total,
+                ))
                 .child(div().flex_1().min_w_0().truncate().child(name))
                 .child(
                     div()
@@ -358,7 +372,11 @@ fn row(this: &Setup, row: Row, cx: &mut Context<Setup>) -> AnyElement {
                         cx.notify();
                     }
                 }))
-                .child(checkbox(on, false))
+                .child(checkbox(
+                    format!("setup-import-mark-{group}-{n}"),
+                    on,
+                    false,
+                ))
                 .child(div().flex_1().min_w_0().truncate().child(title))
                 .child(div().text_color(theme().text_muted).child(label))
                 .into_any_element()
@@ -437,7 +455,7 @@ pub(super) fn page(this: &Setup, busy: bool, cx: &mut Context<Setup>) -> impl In
                 .flex()
                 .gap(px(8.))
                 .child(
-                    control(
+                    primary(
                         "setup-import-confirm",
                         match chosen {
                             0 => "Import".to_owned(),
@@ -458,4 +476,16 @@ pub(super) fn page(this: &Setup, busy: bool, cx: &mut Context<Setup>) -> impl In
                         .on_click(cx.listener(|this, _, _, cx| this.navigate(Step::Projects, cx))),
                 ),
         )
+}
+
+/// The step's main action: accent fill and white label, as the editor's Done.
+fn primary(
+    id: &str,
+    label: impl Into<gpui::SharedString>,
+    enabled: bool,
+) -> gpui::Stateful<gpui::Div> {
+    control(id, label, enabled)
+        .bg(theme().accent)
+        .border_color(theme().accent)
+        .text_color(gpui::rgb(0xFFFFFF))
 }

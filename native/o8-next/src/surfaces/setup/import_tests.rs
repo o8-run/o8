@@ -97,6 +97,16 @@ fn setup_offers_discovered_threads_imports_a_selection_and_reruns_idempotently(
     assert_eq!(state(&shell, cx).2, 3);
     tap(cx, format!("setup-import-thread-{bulk}-0"));
     assert_eq!(state(&shell, cx).2, 4);
+    // A whole folder shows a check, a partly chosen one the mixed mark.
+    let mark = |cx: &mut VisualTestContext, selector: String| {
+        cx.debug_bounds(Box::leak(selector.into_boxed_str()))
+            .is_some()
+    };
+    assert!(mark(cx, format!("setup-import-mark-{repo}-check")));
+    assert!(mark(cx, format!("setup-import-mark-{bulk}-mixed")));
+    assert!(!mark(cx, format!("setup-import-mark-{bulk}-check")));
+    assert!(mark(cx, format!("setup-import-mark-{bulk}-0-check")));
+    assert!(!mark(cx, format!("setup-import-mark-{bulk}-1-check")));
     click(cx, "setup-import-confirm");
     let (page, _, _, note) = state(&shell, cx);
     assert_eq!(page, Some("projects"));
@@ -109,6 +119,26 @@ fn setup_offers_discovered_threads_imports_a_selection_and_reruns_idempotently(
         imported(&shell, cx),
         3,
         "the shell lists the imported chats"
+    );
+    // Each keeps its discovered title instead of listing as untitled.
+    let titles: Vec<String> = shell.read_with(cx, |s, _| {
+        s.sessions
+            .iter()
+            .filter(|session| session.id.starts_with("thoughts-import-"))
+            .map(|session| session.title.clone())
+            .collect()
+    });
+    assert!(
+        titles
+            .iter()
+            .all(|title| !title.is_empty() && !title.contains("Untitled")),
+        "{titles:?}"
+    );
+    assert!(
+        titles
+            .iter()
+            .any(|title| title == "Continue the Claude fixture task"),
+        "{titles:?}"
     );
     let pending: Value = fixture
         .client

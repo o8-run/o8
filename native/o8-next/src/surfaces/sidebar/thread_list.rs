@@ -186,6 +186,8 @@ pub struct ThreadList {
     pending_archives: HashMap<String, String>,
     pending_workspace_restores: HashMap<String, String>,
     dirty: Option<Instant>,
+    /// The next dirty reload skips the stream gap: the user just changed the list.
+    urgent: bool,
     generation: u64,
     last_load: Instant,
     last_inventory: Instant,
@@ -301,6 +303,7 @@ impl ThreadList {
             pending_archives: HashMap::new(),
             pending_workspace_restores: HashMap::new(),
             dirty: None,
+            urgent: false,
             generation: 0,
             last_load: Instant::now(),
             last_attempt: Instant::now(),
@@ -455,6 +458,17 @@ impl ThreadList {
         self.generation += 1;
         self.dirty.get_or_insert_with(Instant::now);
     }
+    /// Reloads now for a change the user just made, such as imported threads.
+    /// An in-flight read is fenced as stale and a fresh one follows it at once.
+    pub fn refresh_now(&mut self, cx: &mut Context<Self>) {
+        self.generation += 1;
+        if self.loading || self.saving {
+            self.dirty.get_or_insert_with(Instant::now);
+            self.urgent = true;
+        } else {
+            self.load(cx);
+        }
+    }
     pub fn load(&mut self, cx: &mut Context<Self>) {
         if self.loading {
             return;
@@ -467,6 +481,7 @@ impl ThreadList {
         }
         self.loading = true;
         self.dirty = None;
+        self.urgent = false;
         let generation = self.generation;
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
@@ -819,7 +834,7 @@ impl ThreadList {
         if self
             .dirty
             .is_some_and(|time| time.elapsed() >= Duration::from_millis(300))
-            && self.last_attempt.elapsed() >= DIRTY_RELOAD_GAP
+            && (self.urgent || self.last_attempt.elapsed() >= DIRTY_RELOAD_GAP)
             || self.last_load.elapsed() >= Duration::from_secs(300)
         {
             self.load(cx);

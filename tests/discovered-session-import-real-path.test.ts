@@ -90,11 +90,24 @@ it('lists three real sessions, refuses an unknown selection atomically, imports 
     const result = imported.created.find((row: { sessionKey: string }) => row.sessionKey === sessionKey);
     expect(result.tabId).toMatch(/^thoughts-/);
     const history = await (await fetch(`${origin}/api/v2/chat-history?tabId=${result.tabId}`, { headers })).json();
-    expect(history).toMatchObject({ repoPath: repo, backend, messages: [], orchestratorVisible: true,
+    // The discovered thread's own title is kept, not left as untitled.
+    const title = pending.sessions.find((row: { sessionKey: string }) => row.sessionKey === sessionKey).title;
+    expect(title).toBeTruthy();
+    expect(history).toMatchObject({ repoPath: repo, backend, messages: [], orchestratorVisible: true, title,
       orchestratorSessionIds: { [backend]: sessionKey.split(':')[1] } });
   }
   const visible = await (await fetch(`${origin}/api/v2/chat-history/list?include=orchestrator`, { headers })).json();
   expect(visible.conversations.map((chat: { tabId: string }) => chat.tabId).sort()).toEqual(imported.created.map((row: { tabId: string }) => row.tabId).sort());
+  const titleOf = (sessionKey: string) => pending.sessions.find((row: { sessionKey: string }) => row.sessionKey === sessionKey).title;
+  const tabTitles = Object.fromEntries(imported.created.map((row: { sessionKey: string; tabId: string }) => [row.tabId, titleOf(row.sessionKey)]));
+  for (const chat of visible.conversations) expect(chat.title).toBe(tabTitles[chat.tabId]);
+  // The native sidebar's list carries the same titles, trimmed to its row length.
+  const threads = await (await fetch(`${origin}/api/mobile/orchestrator/threads?limit=50`, { headers })).json();
+  for (const [tabId, title] of Object.entries(tabTitles)) {
+    const listed: string = threads.threads.find((thread: { id: string }) => thread.id === tabId)?.title ?? '';
+    expect(listed.length).toBeGreaterThan(20);
+    expect(String(title).startsWith(listed.replace(/…$/, ''))).toBe(true);
+  }
   expect((await list()).sessions.map((row: { sessionKey: string }) => row.sessionKey)).toEqual([otherCodex]);
   const rerun = await (await importSessions([codex, claude])).json();
   expect(rerun.created).toEqual([]);

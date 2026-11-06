@@ -96,9 +96,14 @@ impl Shell {
                 s.revision += 1;
                 cx.notify();
             }));
-        // Imported chats join the sidebar while Setup stays open.
+        // Imported chats join the sidebar at once, while Setup stays open.
         self.subscriptions
-            .push(cx.subscribe(&setup, |s, _, _: &view::Imported, cx| s.load(cx)));
+            .push(cx.subscribe(&setup, |s, _, _: &view::Imported, cx| {
+                match s.surfaces.sidebar.view.clone() {
+                    Some(sidebar) => sidebar.update(cx, |sidebar, cx| sidebar.refresh_now(cx)),
+                    None => s.load(cx),
+                }
+            }));
         self.surfaces.setup.view = Some(setup);
         self.revision += 1;
         cx.notify();
