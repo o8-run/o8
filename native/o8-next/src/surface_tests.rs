@@ -112,7 +112,7 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
         for denied in [&anonymous, &invalid] {
             assert_eq!(
                 denied.mutate_queue(method, &body).unwrap_err().message,
-                "Queue rejected the request (HTTP 401). Draft retained."
+                "Unauthorized (HTTP 401). Draft retained."
             );
         }
     }
@@ -480,6 +480,20 @@ fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
     assert_eq!(
         surface.read_with(cx, |s, cx| s.composer.read(cx).text.clone()),
         "Rejected draft"
+    );
+    // The route's own reason reaches the composer, not only its status.
+    assert_eq!(
+        surface.read_with(cx, |s, _| s.notice.clone()),
+        "The queued message needs a complete routing snapshot (HTTP 400). Draft retained."
+    );
+    // A refused queue read, which disables sending, also says why.
+    let moved = crate::client::Session {
+        repo_path: Some("/".into()),
+        ..second.clone()
+    };
+    assert_eq!(
+        saved.queue(&moved).unwrap_err(),
+        "/api/orchestrator/composer-queue: The queued message must target its saved chat repository · Server returned HTTP 400"
     );
     assert!(
         surface.read_with(cx, |s, _| !s.pending.contains_key(&second.id)),

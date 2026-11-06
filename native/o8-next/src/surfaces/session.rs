@@ -299,7 +299,7 @@ impl Client {
         self.sidebar_threads()
     }
     pub fn context(&self, session: &Session) -> Result<Value, String> {
-        let record: Value = self.get(
+        let record: Value = self.get_explained(
             "/api/v2/chat-history",
             &[("tabId", &session.id), ("limit", "100")],
         )?;
@@ -356,7 +356,7 @@ impl Client {
         if let Some(repo) = session.repo_path.as_deref() {
             query.insert(0, ("repoPath", repo));
         }
-        self.get("/api/orchestrator/composer-queue", &query)
+        self.get_explained("/api/orchestrator/composer-queue", &query)
     }
     pub fn mutate_queue(
         &self,
@@ -379,7 +379,14 @@ impl Client {
                         "{} Draft retained.",
                         record["error"].as_str().unwrap_or("This send was refused.")
                     ),
-                    _ => format!("Queue rejected the request (HTTP {code}). Draft retained."),
+                    // The route says why it refused (for example an incomplete
+                    // routing snapshot); show that rather than the bare status.
+                    _ => match crate::client::server_reason(&record) {
+                        Some(reason) => format!("{reason} (HTTP {code}). Draft retained."),
+                        None => {
+                            format!("Queue rejected the request (HTTP {code}). Draft retained.")
+                        }
+                    },
                 };
                 QueueError {
                     message,
