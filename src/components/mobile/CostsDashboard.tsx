@@ -4,6 +4,7 @@ import { memo, useMemo, type ReactNode } from 'react';
 import { useTheme } from './ThemeContext';
 import type { CostsDashboardProps } from './types';
 import { PullToRefresh } from './PullToRefresh';
+import { anthropicPricingForModel } from '@/lib/llm/pricing';
 
 type ThemeColors = ReturnType<typeof useTheme>['colors'];
 
@@ -14,13 +15,7 @@ function fmtTokens(n: number): string {
 }
 
 function fmtCost(tokens: number, model: string): string {
-  const rates: Record<string, { input: number; output: number }> = {
-    'claude-opus-4-6': { input: 15, output: 75 },
-    'claude-sonnet-4-20250514': { input: 3, output: 15 },
-    'claude-sonnet-4-5-20250929': { input: 3, output: 15 },
-    'claude-haiku-4-5-20251001': { input: 1, output: 5 },
-  };
-  const rate = rates[model];
+  const rate = anthropicPricingForModel(model);
   if (!rate) return '';
   const cost = tokens * ((rate.input * 0.6 + rate.output * 0.4) / 1_000_000);
   return cost < 0.01 ? '<$0.01' : `~$${cost.toFixed(2)}`;

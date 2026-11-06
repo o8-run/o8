@@ -13,7 +13,7 @@ import {
 } from '@/lib/llm/anthropic-task-budget';
 import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
 import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
-import { anthropicPricingForModel } from '@/lib/llm/pricing';
+import { requestRate, resolveRate } from '@/lib/cost/rate-table';
 import { LLM_REPO_PATH_HEADER } from '@/lib/llm/repo-scope';
 import { resolvePromptCachingEnabledSync } from '@/lib/operator/defaults';
 import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
@@ -40,8 +40,6 @@ import { applyNativeApiEffort, nativeApiEffortError } from './effort-contract';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
 const TOKENS_PER_MILLION = 1_000_000;
-const ANTHROPIC_CACHE_READ_MULTIPLIER = 0.1;
-const ANTHROPIC_CACHE_WRITE_MULTIPLIER = 1.25;
 
 function jsonError(message: string, status: number, code?: string) {
   return new Response(
@@ -113,16 +111,17 @@ function computeUsageCost(
     return computeCost(model, usage.inputTokens, usage.outputTokens);
   }
 
-  const pricing = anthropicPricingForModel(model);
-  if (!pricing) {
+  const resolved = resolveRate('anthropic', model);
+  if (!resolved) {
     return computeCost(model, usage.inputTokens, usage.outputTokens);
   }
-
+  // The rate table's own cache rates, and Haiku 5.5's long-prompt tier.
+  const rate = requestRate(resolved, usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens);
   return (
-    usage.inputTokens * pricing.input
-    + usage.outputTokens * pricing.output
-    + usage.cacheReadTokens * pricing.input * ANTHROPIC_CACHE_READ_MULTIPLIER
-    + usage.cacheWriteTokens * pricing.input * ANTHROPIC_CACHE_WRITE_MULTIPLIER
+    usage.inputTokens * rate.inputUsdPerMillion
+    + usage.outputTokens * rate.outputUsdPerMillion
+    + usage.cacheReadTokens * (rate.cacheReadUsdPerMillion ?? rate.inputUsdPerMillion)
+    + usage.cacheWriteTokens * (rate.cacheWriteUsdPerMillion ?? rate.inputUsdPerMillion)
   ) / TOKENS_PER_MILLION;
 }
 

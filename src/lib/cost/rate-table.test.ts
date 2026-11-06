@@ -10,6 +10,7 @@ import { parseGeminiSessionCost } from '@/lib/runtimes/gemini-cost-parser';
 import { parseOpencodeSessionCost } from '@/lib/runtimes/opencode-cost-parser';
 import { modelRateTable, resolveRate } from './rate-table';
 import { anthropicPricingForModel } from '@/lib/llm/pricing';
+import { computeCost } from '@/app/api/v2/proxy/llm/provider-config';
 
 const fixtureRoot = mkdtempSync(join(tmpdir(), 'o8-rate-table-'));
 const TOKENS_PER_MILLION = 1_000_000;
@@ -81,6 +82,55 @@ describe('dated model rate table reproducibility', () => {
     expect(anthropicPricingForModel(name)).toEqual({ input, output });
     expect(anthropicPricingForModel(id)).toEqual({ input, output });
     expect(resolveRate('claude-code', id)).toMatchObject({ modelKey });
+  });
+
+  it.each([
+    // Dotted OpenRouter-style ids and display names.
+    ['claude-haiku-5.5', 'claude-haiku-5-5'],
+    ['Claude Haiku 5.5', 'claude-haiku-5-5'],
+    ['claude-sonnet-5.5', 'claude-sonnet-5-5'],
+    ['Claude Sonnet 5.5', 'claude-sonnet-5-5'],
+    ['anthropic/claude-haiku-4.5', 'claude-haiku-4-5'],
+    ['Claude Opus 4.8', 'claude-opus-4-8'],
+    ['claude-opus-4-8-fast', 'claude-opus-4-8-fast'],
+    ['claude-opus-5-5-fast', 'claude-opus-5-5-fast'],
+    ['claude-opus-5', 'claude-opus-5'],
+    ['Claude Opus 5', 'claude-opus-5'],
+    ['claude-opus-5-fast', 'claude-opus-5-fast'],
+  ])('resolves %s to %s', (name, modelKey) => {
+    expect(resolveRate('claude-code', name)).toMatchObject({ modelKey });
+  });
+
+  it('prices fast mode from the pricing page', () => {
+    // Fast mode table, https://platform.claude.com/docs/en/about-claude/pricing, read 2026-11-05.
+    expect(resolveRate('claude-code', 'claude-opus-4-8-fast')).toMatchObject({
+      inputUsdPerMillion: 10, outputUsdPerMillion: 50,
+    });
+    expect(resolveRate('claude-code', 'claude-opus-5-5-fast')).toMatchObject({
+      inputUsdPerMillion: 8, outputUsdPerMillion: 40,
+    });
+    expect(resolveRate('claude-code', 'claude-opus-5-fast')).toMatchObject({
+      inputUsdPerMillion: 10, outputUsdPerMillion: 50,
+      cacheReadUsdPerMillion: 1, cacheWriteUsdPerMillion: 12.5, cacheWrite1hUsdPerMillion: 20,
+    });
+    expect(resolveRate('claude-code', 'claude-opus-5')).toMatchObject({
+      inputUsdPerMillion: 5, outputUsdPerMillion: 25,
+      cacheReadUsdPerMillion: 0.5, cacheWriteUsdPerMillion: 6.25, cacheWrite1hUsdPerMillion: 10,
+    });
+    // No fast mode is listed for Opus 4.7 or 4.6, so those runs stay unpriced.
+    for (const model of ['claude-opus-4-7-fast', 'claude-opus-4-6-fast']) {
+      expect(resolveRate('claude-code', model), model).toBeNull();
+      expect(anthropicPricingForModel(model), model).toBeNull();
+    }
+  });
+
+  it('gives every estimator the rate table\'s Claude prices', () => {
+    for (const [model, rate] of Object.entries(modelRateTable.rates)) {
+      if (!model.startsWith('claude-')) continue;
+      const price = { input: rate.inputUsdPerMillion, output: rate.outputUsdPerMillion };
+      expect(anthropicPricingForModel(model), model).toEqual(price);
+      expect(computeCost(model, 1_000_000, 1_000_000), model).toBeCloseTo(price.input + price.output, 9);
+    }
   });
 
   it('prices Haiku 5.5 by prompt length, cache reads and writes included', async () => {
@@ -198,7 +248,7 @@ describe('dated model rate table reproducibility', () => {
     ) / TOKENS_PER_MILLION);
 
     expect(modelRateTable).toMatchObject({
-      rateTableVersion: '2026-11-05.1',
+      rateTableVersion: '2026-11-05.2',
       observedOn: '2026-11-05',
     });
   });
