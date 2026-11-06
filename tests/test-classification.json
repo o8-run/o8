@@ -6487,6 +6487,15 @@
       ]
     },
     {
+      "path": "tests/release-notes-body-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/release-output-delete-ownership-real-path.test.ts",
       "reasons": [
         "child-process",

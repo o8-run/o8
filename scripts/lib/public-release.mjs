@@ -63,6 +63,25 @@ function bounded(value, maxLength) {
   return value.length <= maxLength ? value : value.slice(0, maxLength).trimEnd();
 }
 
+const ABBREVIATION_BEFORE_PERIOD = /\b(?:e\.g|i\.e|vs|etc|approx)$/i;
+
+/**
+ * A release-note bullet whole, or its leading whole sentences when it is too
+ * long. Null when even its first sentence is too long: the bullet then stays
+ * out of the feed rather than stopping mid-sentence.
+ */
+function sentenceBounded(value, maxLength) {
+  if (value.length <= maxLength) return value;
+  let end = 0;
+  for (const match of value.matchAll(/[.!?](?=\s|$)/g)) {
+    if (match.index + 1 > maxLength) break;
+    // The period of "e.g." or "etc." does not end a sentence.
+    if (match[0] === '.' && ABBREVIATION_BEFORE_PERIOD.test(value.slice(0, match.index))) continue;
+    end = match.index + 1;
+  }
+  return end ? value.slice(0, end) : null;
+}
+
 function capitalize(value) {
   return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
 }
@@ -159,7 +178,8 @@ export function parseReleaseNotes(markdown) {
       throw new Error('release-notes/next.md must contain Markdown bullets only');
     }
     const item = scrubPublicText(match[1]);
-    if (item) items.push(bounded(capitalize(item), MAX_SECTION_ITEM_LENGTH));
+    const kept = item && sentenceBounded(capitalize(item), MAX_SECTION_ITEM_LENGTH);
+    if (kept) items.push(kept);
   }
   return [...new Set(items)].slice(0, 8);
 }
