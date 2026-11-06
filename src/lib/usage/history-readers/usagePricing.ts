@@ -310,7 +310,9 @@ function resolveRate(table: RateTable, model: string): ModelRate | null {
   const key = stripVariantSuffix(normalizeRateKey(model));
   const bareName = bareModelName(key);
   if (bareName.length === 0 || UNPRICEABLE_MODELS.has(bareName)) return null;
-  return table.get(key) ?? null;
+  // A dated id (`claude-opus-4-5-20251101`) falls back to its base name, which
+  // is all o8's bundled table lists.
+  return table.get(key) ?? table.get(key.replace(/-\d{8}$/, "")) ?? null;
 }
 
 /** The parts of a transcript record that decide its price. */

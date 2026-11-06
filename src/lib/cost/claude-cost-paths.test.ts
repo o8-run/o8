@@ -51,22 +51,31 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function writeTranscript(usage: object): Promise<{ dir: string; file: string }> {
+async function writeTranscript(usage: object, model = 'claude-opus-5-5'): Promise<{ dir: string; file: string }> {
   const dir = path.join(root, 'home', '.claude', 'projects', 'project');
   await mkdir(dir, { recursive: true });
   const file = path.join(dir, 'session.jsonl');
   await writeFile(file, `${JSON.stringify({
     type: 'assistant', timestamp: new Date().toISOString(), sessionId: 'session', requestId: 'request',
-    message: { id: 'message', model: 'claude-opus-5-5', usage },
+    message: { id: 'message', model, usage },
   })}\n`);
   return { dir, file };
 }
 
-async function analyticsCost(): Promise<number> {
+interface AnalyticsBody {
+  totals: { cost: number; messages: number; unpricedMessages?: number };
+  bySurface: Record<string, { cost: number }>;
+  byModel: Array<{ model: string; cost: number; messages: number; unpricedMessages?: number }>;
+}
+
+async function analytics(): Promise<AnalyticsBody> {
   const { GET } = await import('@/app/api/panel/analytics/route');
   const response = await GET(new NextRequest('http://localhost/api/panel/analytics?hours=24'));
-  const body = await response.json() as { bySurface: Record<string, { cost: number }> };
-  return body.bySurface['Claude Code'].cost;
+  return await response.json() as AnalyticsBody;
+}
+
+async function analyticsCost(): Promise<number> {
+  return (await analytics()).bySurface['Claude Code'].cost;
 }
 
 async function parserCost(file: string): Promise<number> {
@@ -74,7 +83,7 @@ async function parserCost(file: string): Promise<number> {
   return (await parseSessionCost(file))!.totalCostUsd;
 }
 
-async function historyCost(dir: string, cache: string): Promise<number> {
+async function readHistory(dir: string, cache: string) {
   const { createHistoryReader } = await import('@/lib/usage/history-service');
   const { createBundledRateTable } = await import('@/lib/usage/bundled-rates');
   const at = Date.now();
@@ -86,11 +95,14 @@ async function historyCost(dir: string, cache: string): Promise<number> {
     pricing: async () => ({ table: createBundledRateTable(modelRateTable.rates), at,
       meta: { source: 'Bundled model rates', observedAt: modelRateTable.observedOn, status: 'bundled' as const } }),
   });
-  const history = await read({ days: 1, timeZone: 'UTC' });
-  return history.buckets.reduce((sum, bucket) => sum + bucket.costUsd, 0);
+  return await read({ days: 1, timeZone: 'UTC' });
 }
 
-async function proxyCost(usage: Record<string, unknown>): Promise<number> {
+async function historyCost(dir: string, cache: string): Promise<number> {
+  return (await readHistory(dir, cache)).buckets.reduce((sum, bucket) => sum + bucket.costUsd, 0);
+}
+
+async function proxyCost(usage: Record<string, unknown>, model = 'claude-opus-5-5'): Promise<number> {
   const { output_tokens: outputTokens, ...start } = usage;
   const events = [
     { type: 'message_start', message: { usage: { ...start, output_tokens: 1 } } },
@@ -105,7 +117,7 @@ async function proxyCost(usage: Record<string, unknown>): Promise<number> {
   const response = await POST(new NextRequest('http://localhost/api/v2/proxy/llm', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-opus-5-5', provider: 'anthropic', messages: [{ role: 'user', content: 'Hi' }], disableTools: true }),
+    body: JSON.stringify({ model, provider: 'anthropic', messages: [{ role: 'user', content: 'Hi' }], disableTools: true }),
   }));
   expect(response.status).toBe(200);
   const usageEvent = (await response.text()).split('\n')
@@ -115,18 +127,52 @@ async function proxyCost(usage: Record<string, unknown>): Promise<number> {
   return usageEvent!.costUsd!;
 }
 
+// Rounded to a billionth of a dollar, so one diff shows every path.
+const round = (value: number) => Math.round(value * 1e9) / 1e9;
+const samePrice = (costs: Record<string, number>, usd: number) =>
+  expect(Object.fromEntries(Object.entries(costs).map(([pathName, cost]) => [pathName, round(cost)])))
+    .toEqual(Object.fromEntries(Object.keys(costs).map((pathName) => [pathName, round(usd)])));
+
 describe('one Claude Opus 5.5 request costs the same on every path', () => {
   it.each(scenarios)('$name', async ({ name, usage, usd, proxy }) => {
     const { dir, file } = await writeTranscript(usage);
-    const costs = {
+    samePrice({
       analytics: await analyticsCost(),
       parser: await parserCost(file),
       history: await historyCost(dir, name),
       ...(proxy ? { proxy: await proxyCost(usage) } : {}),
-    };
-    // Rounded to a billionth of a dollar, so one diff shows every path.
-    const round = (value: number) => Math.round(value * 1e9) / 1e9;
-    expect(Object.fromEntries(Object.entries(costs).map(([pathName, cost]) => [pathName, round(cost)])))
-      .toEqual(Object.fromEntries(Object.keys(costs).map((pathName) => [pathName, round(usd)])));
+    }, usd);
+  }, 60_000);
+});
+
+// Older models the app still offers, priced from the pricing page (2026-11-06).
+const offered = [
+  // Fable 5: $10 input, $50 output, $1 cache read, $12.50 5-minute write.
+  { model: 'claude-fable-5[1m]', usd: (1_000 * 10 + 2_000 * 50 + 10_000 * 1 + 4_000 * 12.5) / 1_000_000 },
+  // Opus 4.5, by its dated id: $5, $25, $0.50, $6.25.
+  { model: 'claude-opus-4-5-20251101', usd: (1_000 * 5 + 2_000 * 25 + 10_000 * 0.5 + 4_000 * 6.25) / 1_000_000 },
+] as const;
+
+describe('models the app still offers are priced on every path', () => {
+  it.each(offered)('$model', async ({ model, usd }) => {
+    const { dir, file } = await writeTranscript(tokens, model);
+    samePrice({
+      analytics: await analyticsCost(),
+      parser: await parserCost(file),
+      history: await historyCost(dir, model),
+      proxy: await proxyCost(tokens, model),
+    }, usd);
+  }, 60_000);
+});
+
+describe('a Claude model without a rate', () => {
+  it('is counted as unpriced in analytics, as in history, rather than added as $0', async () => {
+    const { dir, file } = await writeTranscript(tokens, 'claude-3-7-sonnet-20250219');
+    const body = await analytics();
+    expect(body.totals).toMatchObject({ cost: 0, messages: 1, unpricedMessages: 1 });
+    expect(body.byModel).toEqual([expect.objectContaining({ model: 'claude-3-7-sonnet', cost: 0, messages: 1, unpricedMessages: 1 })]);
+    expect(await parserCost(file)).toBe(0);
+    const history = await readHistory(dir, 'unpriced');
+    expect(history.buckets).toEqual([expect.objectContaining({ records: 1, unpricedRecords: 1, costUsd: 0 })]);
   }, 60_000);
 });
