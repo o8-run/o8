@@ -276,3 +276,31 @@ fn native_composer_model_picker_keeps_its_size_and_rail_while_the_inventory_land
     // The new houses join below the ones already drawn.
     assert!(bounds(cx, "lead-house-opencode").top() > after[3].top());
 }
+
+#[gpui::test]
+fn native_composer_model_picker_fits_a_short_window(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (_surface, cx) = open(cx, &fixture);
+    // 480 points tall: the fixed picker would run off the window's top.
+    cx.simulate_resize(gpui::size(gpui::px(1200.), gpui::px(480.)));
+    draw(cx);
+    click("composer-model", cx);
+    draw(cx);
+    let bounds = |cx: &mut VisualTestContext, id: &'static str| {
+        cx.debug_bounds(id).unwrap_or_else(|| panic!("{id}"))
+    };
+    let picker = bounds(cx, "composer-picker");
+    let search = bounds(cx, "composer-model-input");
+    assert!(
+        picker.top() >= gpui::px(0.),
+        "the picker's top stays inside the window: {picker:?}"
+    );
+    assert!(
+        search.top() >= picker.top() && search.bottom() <= picker.bottom(),
+        "the search field stays visible: {search:?} in {picker:?}"
+    );
+    assert!(
+        picker.size.height < gpui::px(super::composer_picker::MODEL_HEIGHT),
+        "the picker is clamped: {picker:?}"
+    );
+}
