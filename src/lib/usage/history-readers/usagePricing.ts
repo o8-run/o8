@@ -24,6 +24,8 @@ export interface TokenRates {
   readonly outputCostPerToken: number;
   readonly cacheReadCostPerToken: number;
   readonly cacheCreationCostPerToken: number;
+  /** Writes to Anthropic's 1-hour cache; the 5-minute rate when none is published. */
+  readonly cacheCreation1hCostPerToken: number;
 }
 
 /**
@@ -31,8 +33,11 @@ export interface TokenRates {
  * for each faster speed the model publishes. A request at a speed with no
  * published rates bills at the standard rates.
  *
- * LiteLLM also publishes `*_above_272k_tokens`, `*_flex`, and `*_batches`
- * variants. Transcripts don't record those, so we don't price them.
+ * LiteLLM also publishes `*_flex` and `*_batches` variants, which transcripts
+ * don't record, and other long-prompt tiers (`*_above_200k_tokens`,
+ * `*_above_272k_tokens`). Of those, only `*_above_100k_tokens` (Claude Haiku
+ * 5.5) is priced: Anthropic bills Claude 4.6 and later at standard rates
+ * across the whole 1M window, and a Codex record can span several requests.
  */
 export interface ModelRate extends TokenRates {
   /**
@@ -42,7 +47,16 @@ export interface ModelRate extends TokenRates {
   readonly fast: TokenRates | null;
   /** From LiteLLM's `*_ultrafast` rates (Codex `ultrafast`). */
   readonly ultrafast: TokenRates | null;
+  /**
+   * From LiteLLM's `*_above_100k_tokens` rates: every rate for a request whose
+   * prompt (input, cache reads and cache writes) passes `aboveTokens`.
+   */
+  readonly longPrompt: (TokenRates & { readonly aboveTokens: number }) | null;
 }
+
+/** Where a long prompt starts, for LiteLLM's `*_above_100k_tokens` rates. */
+const LONG_PROMPT_SUFFIX = "_above_100k_tokens";
+const LONG_PROMPT_TOKENS = 100_000;
 
 export type RateTable = ReadonlyMap<string, ModelRate>;
 
@@ -54,19 +68,24 @@ export function createOverrideRateTable(
   overrides: Readonly<Record<string, UsageModelPriceOverride>>,
 ): RateTable {
   return new Map(
-    Object.entries(overrides).map(([model, prices]) => [
-      model.trim(),
-      {
-        inputCostPerToken: prices.inputCostPerMillionTokens / 1_000_000,
-        outputCostPerToken: prices.outputCostPerMillionTokens / 1_000_000,
-        cacheReadCostPerToken:
-          (prices.cacheReadCostPerMillionTokens ?? prices.inputCostPerMillionTokens) / 1_000_000,
-        cacheCreationCostPerToken:
-          (prices.cacheWriteCostPerMillionTokens ?? prices.inputCostPerMillionTokens) / 1_000_000,
-        fast: null,
-        ultrafast: null,
-      },
-    ]),
+    Object.entries(overrides).map(([model, prices]) => {
+      const cacheCreationCostPerToken =
+        (prices.cacheWriteCostPerMillionTokens ?? prices.inputCostPerMillionTokens) / 1_000_000;
+      return [
+        model.trim(),
+        {
+          inputCostPerToken: prices.inputCostPerMillionTokens / 1_000_000,
+          outputCostPerToken: prices.outputCostPerMillionTokens / 1_000_000,
+          cacheReadCostPerToken:
+            (prices.cacheReadCostPerMillionTokens ?? prices.inputCostPerMillionTokens) / 1_000_000,
+          cacheCreationCostPerToken,
+          cacheCreation1hCostPerToken: cacheCreationCostPerToken,
+          fast: null,
+          ultrafast: null,
+          longPrompt: null,
+        },
+      ];
+    }),
   );
 }
 
@@ -94,18 +113,30 @@ function readTokenRates(
   const input = finiteNumber(entry[`input_cost_per_token${suffix}`]);
   const output = finiteNumber(entry[`output_cost_per_token${suffix}`]);
   if (input === null || output === null) return null;
-  const cacheRate = (name: string, field: "cacheReadCostPerToken" | "cacheCreationCostPerToken") =>
+  const cacheRate = (
+    name: string,
+    field: "cacheReadCostPerToken" | "cacheCreationCostPerToken" | "cacheCreation1hCostPerToken",
+    fallback: number,
+  ) =>
     finiteNumber(entry[`${name}${suffix}`]) ??
     (standard !== undefined && standard.inputCostPerToken > 0
       ? (standard[field] / standard.inputCostPerToken) * input
-      : input);
+      : fallback);
+  const cacheCreationCostPerToken = cacheRate(
+    "cache_creation_input_token_cost",
+    "cacheCreationCostPerToken",
+    input,
+  );
   return {
     inputCostPerToken: input,
     outputCostPerToken: output,
-    cacheReadCostPerToken: cacheRate("cache_read_input_token_cost", "cacheReadCostPerToken"),
-    cacheCreationCostPerToken: cacheRate(
-      "cache_creation_input_token_cost",
-      "cacheCreationCostPerToken",
+    cacheReadCostPerToken: cacheRate("cache_read_input_token_cost", "cacheReadCostPerToken", input),
+    cacheCreationCostPerToken,
+    // Without a published 1-hour rate, 1-hour writes bill as 5-minute writes.
+    cacheCreation1hCostPerToken: cacheRate(
+      "cache_creation_input_token_cost_above_1hr",
+      "cacheCreation1hCostPerToken",
+      cacheCreationCostPerToken,
     ),
   };
 }
@@ -116,6 +147,7 @@ function scaleTokenRates(rates: TokenRates, multiple: number): TokenRates {
     outputCostPerToken: rates.outputCostPerToken * multiple,
     cacheReadCostPerToken: rates.cacheReadCostPerToken * multiple,
     cacheCreationCostPerToken: rates.cacheCreationCostPerToken * multiple,
+    cacheCreation1hCostPerToken: rates.cacheCreation1hCostPerToken * multiple,
   };
 }
 
@@ -150,6 +182,7 @@ export function parseRateTable(document: unknown): RateTable {
     const key = normalizeRateKey(name);
     if (key.length === 0) continue;
     const multiple = fastMultiplier(entry);
+    const longPrompt = readTokenRates(entry, LONG_PROMPT_SUFFIX, standard);
     table.set(key, {
       ...standard,
       fast:
@@ -157,6 +190,7 @@ export function parseRateTable(document: unknown): RateTable {
           ? readTokenRates(entry, "_priority", standard)
           : scaleTokenRates(standard, multiple),
       ultrafast: readTokenRates(entry, "_ultrafast", standard),
+      longPrompt: longPrompt && { ...longPrompt, aboveTokens: LONG_PROMPT_TOKENS },
     });
   }
 
@@ -185,7 +219,8 @@ function sameTokenRates(a: TokenRates | null, b: TokenRates | null): boolean {
     a.inputCostPerToken === b.inputCostPerToken &&
     a.outputCostPerToken === b.outputCostPerToken &&
     a.cacheReadCostPerToken === b.cacheReadCostPerToken &&
-    a.cacheCreationCostPerToken === b.cacheCreationCostPerToken
+    a.cacheCreationCostPerToken === b.cacheCreationCostPerToken &&
+    a.cacheCreation1hCostPerToken === b.cacheCreation1hCostPerToken
   );
 }
 
@@ -193,13 +228,27 @@ function sameRate(a: ModelRate, b: ModelRate): boolean {
   return (
     sameTokenRates(a, b) &&
     sameTokenRates(a.fast, b.fast) &&
-    sameTokenRates(a.ultrafast, b.ultrafast)
+    sameTokenRates(a.ultrafast, b.ultrafast) &&
+    sameTokenRates(a.longPrompt, b.longPrompt) &&
+    a.longPrompt?.aboveTokens === b.longPrompt?.aboveTokens
   );
 }
 
-/** The rates a request at `speed` bills at. */
-function ratesAt(rate: ModelRate, speed: UsageSpeed): TokenRates {
-  return (speed === "standard" ? null : rate[speed]) ?? rate;
+/** The tokens a request's prompt counts toward a long-prompt tier. */
+function promptTokens(totals: UsageTokenTotals): number {
+  return totals.uncachedInputTokens + totals.cachedInputTokens + totals.cacheCreationTokens;
+}
+
+/**
+ * The rates a request at `speed` bills at. A prompt past the long-prompt
+ * threshold bills every token at the long-prompt rates; no published faster
+ * speed has a long-prompt tier.
+ */
+function ratesAt(rate: ModelRate, speed: UsageSpeed, totals: UsageTokenTotals): TokenRates {
+  const fast = speed === "standard" ? null : rate[speed];
+  if (fast) return fast;
+  const long = rate.longPrompt;
+  return long !== null && promptTokens(totals) > long.aboveTokens ? long : rate;
 }
 
 function normalizeRateKey(model: string): string {
@@ -267,7 +316,7 @@ function resolveRate(table: RateTable, model: string): ModelRate | null {
 /** The parts of a transcript record that decide its price. */
 export type PricedRecord = Pick<
   UsageRecord,
-  "model" | "rateModel" | "totals" | "speed" | "reportedCostUsd"
+  "model" | "rateModel" | "totals" | "speed" | "reportedCostUsd" | "cacheCreation1hTokens"
 >;
 
 export interface PricedUsage {
@@ -279,11 +328,15 @@ export interface PricedUsage {
   readonly speedPremiumUsd: number;
 }
 
-function costByCategory(totals: UsageTokenTotals, rates: TokenRates): UsageCategoryCost {
+function costByCategory(record: PricedRecord, rates: TokenRates): UsageCategoryCost {
+  const { totals } = record;
+  const oneHour = Math.min(record.cacheCreation1hTokens ?? 0, totals.cacheCreationTokens);
   return {
     input: totals.uncachedInputTokens * rates.inputCostPerToken,
     cacheRead: totals.cachedInputTokens * rates.cacheReadCostPerToken,
-    cacheWrite: totals.cacheCreationTokens * rates.cacheCreationCostPerToken,
+    cacheWrite:
+      (totals.cacheCreationTokens - oneHour) * rates.cacheCreationCostPerToken +
+      oneHour * rates.cacheCreation1hCostPerToken,
     output: totals.outputTokens * rates.outputCostPerToken,
   };
 }
@@ -323,11 +376,13 @@ export function priceUsage(
     return reported === null ? unsplit(0, "unpriced") : unsplit(reported, "providerReported");
   }
 
-  const listCost = costByCategory(totals, ratesAt(rate, record.speed));
+  const listCost = costByCategory(record, ratesAt(rate, record.speed, totals));
   const listCostUsd = sumCategories(listCost);
   if (reported !== null && listCostUsd <= 0) return unsplit(reported, "providerReported");
   const premiumUsd =
-    record.speed === "standard" ? 0 : listCostUsd - sumCategories(costByCategory(totals, rate));
+    record.speed === "standard"
+      ? 0
+      : listCostUsd - sumCategories(costByCategory(record, ratesAt(rate, "standard", totals)));
   const scale = reported === null ? 1 : reported / listCostUsd;
   return {
     costUsd: reported ?? listCostUsd,
@@ -354,6 +409,6 @@ export function cacheSavingsUsd(
   const rate =
     overrides?.get(record.model.trim()) ?? lookupRate(table, record.rateModel ?? record.model);
   if (rate === null) return 0;
-  const rates = ratesAt(rate, record.speed);
+  const rates = ratesAt(rate, record.speed, record.totals);
   return record.totals.cachedInputTokens * (rates.inputCostPerToken - rates.cacheReadCostPerToken);
 }

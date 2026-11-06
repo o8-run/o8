@@ -32,6 +32,11 @@ export interface UsageRecord {
   /** Only Claude Code and Codex record a speed; other providers are `standard`. */
   readonly speed: UsageSpeed;
   /**
+   * The part of `totals.cacheCreationTokens` written to Anthropic's 1-hour
+   * cache, which bills higher than the 5-minute cache. Claude Code only.
+   */
+  readonly cacheCreation1hTokens?: number;
+  /**
    * Key for cross-file de-duplication, or `null` when the record is inherently
    * unique and needs no dedup.
    */
@@ -140,6 +145,11 @@ export function parseClaudeRecord(parsed: unknown): UsageRecord | null {
     messageId === null && requestId === null ? null : `${messageId ?? ""}:${requestId ?? ""}`;
 
   const cost = record["costUSD"];
+  const cacheCreation = usageRecord["cache_creation"];
+  const oneHour =
+    typeof cacheCreation === "object" && cacheCreation !== null
+      ? int((cacheCreation as Record<string, unknown>)["ephemeral_1h_input_tokens"])
+      : 0;
 
   return {
     provider: "claude",
@@ -156,6 +166,7 @@ export function parseClaudeRecord(parsed: unknown): UsageRecord | null {
     },
     reportedCostUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : null,
     speed: usageRecord["speed"] === "fast" ? "fast" : "standard",
+    ...(oneHour > 0 ? { cacheCreation1hTokens: oneHour } : {}),
     dedupeKey,
   };
 }

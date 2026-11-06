@@ -15,6 +15,8 @@ import type { HistoryBucket, HistorySource, UsageHistorySummary, UsageProviderKi
 
 const zip = promisify(gzip); const unzip = promisify(gunzip);
 const RETENTION = 92 * 86_400_000;
+/** Saved scans from an older schema are read again; 2 added Claude's 1-hour cache writes. */
+const MEMO_SCHEMA = 2;
 const PROVIDERS: UsageProviderKind[] = ['codex', 'claude', 'grok', 'opencode', 'antigravity'];
 
 export function aggregateHistory(records: readonly UsageRecord[], options: {
@@ -74,7 +76,7 @@ export function createHistoryReader(options: { roots: () => Promise<HistoryRoot[
         loaded = true;
         try {
           const saved = JSON.parse((await unzip(await readFile(cacheFile), { maxOutputLength: 256 * 1024 * 1024 })).toString());
-          if (saved.schema === 1 && Array.isArray(saved.files)) for (const [path, memo] of saved.files) {
+          if (saved.schema === MEMO_SCHEMA && Array.isArray(saved.files)) for (const [path, memo] of saved.files) {
             if (typeof path === 'string' && Array.isArray(memo.records) && typeof memo.offset === 'number' && memo.state) memos.set(path, memo);
           }
         } catch { /* An absent or invalid metadata cache is rebuilt from the native stores. */ }
@@ -126,7 +128,7 @@ export function createHistoryReader(options: { roots: () => Promise<HistoryRoot[
       for (const [path, memo] of memos) if (memo.mtimeMs < since) memos.delete(path);
       if (cacheFile && options.cacheDirectory) try {
         await mkdir(options.cacheDirectory, { recursive: true, mode: 0o700 });
-        const bytes = await zip(JSON.stringify({ schema: 1, files: [...memos] }));
+        const bytes = await zip(JSON.stringify({ schema: MEMO_SCHEMA, files: [...memos] }));
         await writeFile(`${cacheFile}.tmp`, bytes, { mode: 0o600 }); await rename(`${cacheFile}.tmp`, cacheFile);
       } catch { /* Scan results remain usable when the disposable cache cannot be written. */ }
       last = { since: windowSince, at: now(), records, sources: [...sources.values()], scan: { filesRead, bytesRead, durationMs: Date.now() - started } };

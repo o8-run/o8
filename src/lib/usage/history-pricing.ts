@@ -3,7 +3,8 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { modelRateTable } from '@/lib/cost/rate-table';
-import { createOverrideRateTable, parseRateTable, type RateTable } from './history-readers/usagePricing';
+import { parseRateTable, type RateTable } from './history-readers/usagePricing';
+import { createBundledRateTable } from './bundled-rates';
 import type { UsageHistorySummary } from './history-types';
 
 const URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
@@ -11,11 +12,7 @@ const TTL = 24 * 60 * 60 * 1000;
 export interface HistoryPricing { table: RateTable; meta: UsageHistorySummary['pricing']; at: number }
 let current: HistoryPricing | null = null;
 let inflight: Promise<HistoryPricing> | null = null;
-const bundled = () => createOverrideRateTable(Object.fromEntries(Object.entries(modelRateTable.rates).map(([model, value]) => {
-  const rate = value as { inputUsdPerMillion: number; outputUsdPerMillion: number; cacheReadUsdPerMillion?: number; cacheWriteUsdPerMillion?: number };
-  return [model, { inputCostPerMillionTokens: rate.inputUsdPerMillion, outputCostPerMillionTokens: rate.outputUsdPerMillion,
-    cacheReadCostPerMillionTokens: rate.cacheReadUsdPerMillion, cacheWriteCostPerMillionTokens: rate.cacheWriteUsdPerMillion }];
-})));
+const bundled = () => createBundledRateTable(modelRateTable.rates);
 
 export async function readHistoryPricing(fresh = false) {
   if (inflight) return inflight;
