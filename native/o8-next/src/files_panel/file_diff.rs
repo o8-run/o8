@@ -235,6 +235,110 @@ pub(crate) fn rows(lines: &[Line], split: bool, key: &str) -> gpui::AnyElement {
     body.into_any_element()
 }
 
+/// Review's rows, as classic Review draws them with Word wrap on: the
+/// text wraps inside the pane, so nothing scrolls sideways. Unified keeps the
+/// old and the new line number in their own columns, so the numbers never
+/// read as a jump back; split keeps one number per side.
+pub(crate) fn wrapped_rows(lines: &[Line], split: bool, key: &str) -> gpui::AnyElement {
+    // Wide enough for the file's longest line number, so a number never
+    // wraps onto a second line (about 7 px a digit at 11 px mono).
+    let digits = lines
+        .iter()
+        .flat_map(|l| [l.old, l.new])
+        .flatten()
+        .max()
+        .map_or(1, |n| n.to_string().len());
+    let width = 32_f32.max(digits as f32 * 7. + 4.);
+    let selector = format!("{key}-diff-{}", if split { "side" } else { "unified" });
+    let number = |n: Option<usize>| {
+        div()
+            .w(px(width))
+            .flex_shrink_0()
+            .whitespace_nowrap()
+            .text_align(gpui::TextAlign::Right)
+            .text_color(theme().text_faint)
+            .child(n.map(|n| n.to_string()).unwrap_or_default())
+    };
+    let text = |line: Option<&Line>, color| {
+        div()
+            .flex_1()
+            .min_w_0()
+            .text_color(color)
+            // An empty row keeps its height.
+            .child(line.map_or(" ".into(), |l| {
+                if l.text.is_empty() {
+                    " ".into()
+                } else {
+                    l.text.clone()
+                }
+            }))
+    };
+    let row = |i: usize| {
+        let key = key.to_owned();
+        div()
+            .debug_selector(move || format!("{key}-diff-row-{i}"))
+            .w_full()
+            .min_w_0()
+            .flex()
+    };
+    let mut body = div()
+        .id(gpui::SharedString::from(selector.clone()))
+        .debug_selector(move || selector.clone())
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .font_family(theme().font_mono)
+        .text_size(px(11.))
+        .line_height(px(17.));
+    if split {
+        for (i, (left, right)) in pair(lines).into_iter().enumerate() {
+            let half = |at: Option<usize>, before: bool| {
+                let line = at.map(|i| &lines[i]);
+                let side = format!("{key}-diff-row-{i}-{}", if before { "old" } else { "new" });
+                let (background, color) = line
+                    .map(|l| tone(l.kind))
+                    .unwrap_or((crate::theme::CLEAR, theme().text_faint));
+                // Each side keeps exactly half, empty or not, so both sides
+                // wrap at the same width and the row takes the taller one.
+                div()
+                    .debug_selector(move || side.clone())
+                    .w(gpui::relative(0.5))
+                    .flex_shrink_0()
+                    .min_w_0()
+                    .flex()
+                    .items_start()
+                    .gap(px(8.))
+                    .py(px(1.))
+                    .pr(px(8.))
+                    .bg(background)
+                    .child(number(
+                        line.and_then(|l| if before { l.old } else { l.new }),
+                    ))
+                    .child(text(line, color))
+            };
+            body = body.child(row(i).child(half(left, true)).child(half(right, false)));
+        }
+    } else {
+        for (i, line) in lines.iter().enumerate() {
+            let (background, color) = tone(line.kind);
+            body = body.child(
+                row(i)
+                    .items_start()
+                    .gap(px(8.))
+                    .py(px(1.))
+                    .pl(px(6.))
+                    .pr(px(12.))
+                    .bg(background)
+                    .child(number(line.old))
+                    .child(number(line.new))
+                    .child(text(Some(line), color)),
+            );
+        }
+    }
+    body.into_any_element()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

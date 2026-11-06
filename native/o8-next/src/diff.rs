@@ -130,7 +130,11 @@ impl Target {
             Self::Packet(id) => client.review_state(id)?,
             _ => Value::Null,
         };
-        let mut document = parse(&response.diff);
+        let mut document = if matches!(self, Self::Worktree { .. }) {
+            parse_worktree(&response.diff)
+        } else {
+            parse(&response.diff)
+        };
         document.head = response.head_sha;
         document.truncated = response.truncated;
         document.revision = response.revision;
@@ -190,6 +194,16 @@ fn file_path(source: &str) -> String {
 }
 
 pub fn parse(patch: &str) -> Document {
+    read(patch, false)
+}
+
+/// A working-tree diff, which may come from a Git configured with
+/// `diff.suppressBlankEmpty`. Packets keep the strict read.
+pub fn parse_worktree(patch: &str) -> Document {
+    read(patch, true)
+}
+
+fn read(patch: &str, worktree: bool) -> Document {
     static HUNK: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@").unwrap());
     let mut document = Document::default();
@@ -282,6 +296,14 @@ pub fn parse(patch: &str) -> Document {
                     new += 1;
                 }
                 Some(b'\\') => add(Kind::Meta, source, None, None),
+                // With `diff.suppressBlankEmpty`, Git writes an empty context
+                // line as an empty line rather than a lone space.
+                None if worktree && remaining.0 > 0 && remaining.1 > 0 => {
+                    remaining = (remaining.0 - 1, remaining.1 - 1);
+                    add(Kind::Context, "", Some(old), Some(new));
+                    old += 1;
+                    new += 1;
+                }
                 _ => document.unsupported |= !source.is_empty(),
             }
         } else if let Some(value) = source.strip_prefix("--- ") {
