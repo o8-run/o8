@@ -23,7 +23,9 @@ const repo = join(root, 'repo');
 const home = join(root, 'home');
 const data = join(root, 'data');
 for (const path of [join(repo, 'src'), join(home, '.codex'), data]) mkdirSync(path, { recursive: true });
-Object.assign(process.env, { HOME: home, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: join(data, 'fixture.db'), NODE_ENV: 'test', WS_TOKEN: randomBytes(32).toString('hex') });
+Object.assign(process.env, { HOME: home, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: join(data, 'fixture.db'), NODE_ENV: 'test', WS_TOKEN: randomBytes(32).toString('hex'),
+  // A 1 MiB editor cap: the read-only guard test truncates without writing 128 MiB.
+  O8_FILE_EDIT_MAX_BYTES: String(1024 * 1024) });
 for (const key of ['O8_WORKER_TOKEN', 'O8_API_TOKEN', 'O8_SPECTATOR_TOKEN']) delete process.env[key];
 writeFileSync(join(data, 'repos.json'), JSON.stringify({ version: 1, repos: [{ id: 'files-fixture', localPath: repo, name: 'files-fixture', createdAt: '2026-10-29', updatedAt: '2026-10-29' }] }));
 for (const [path, content] of [

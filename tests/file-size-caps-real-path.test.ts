@@ -42,7 +42,7 @@ describe('file routes serve files up to the editor cap', () => {
     if (ORIGINAL_REPO_ROOT === undefined) delete process.env.CORTEX_IDE_REVIEW_REPO_ROOT;
     else process.env.CORTEX_IDE_REVIEW_REPO_ROOT = ORIGINAL_REPO_ROOT;
     rmSync(root, { recursive: true, force: true });
-    vi.doUnmock('@/lib/fs/file-size-caps');
+    vi.unstubAllEnvs();
     vi.resetModules();
   });
 
@@ -58,8 +58,8 @@ describe('file routes serve files up to the editor cap', () => {
     expect(body.content).toBe(content);
   });
 
-  it('truncates a preview above the cap and reads only the cap', async () => {
-    vi.doMock('@/lib/fs/file-size-caps', () => ({ FILE_EDIT_MAX_BYTES: MiB }));
+  it('truncates a preview above a fixture-lowered cap and reads only the cap', async () => {
+    vi.stubEnv('O8_FILE_EDIT_MAX_BYTES', String(MiB));
     const content = source(3 * MiB);
     writeFileSync(join(root, 'larger.ts'), content);
     const { GET } = await import('@/app/api/v2/files/route');
@@ -83,6 +83,11 @@ describe('file routes serve files up to the editor cap', () => {
     const saved = await PUT(request(url, 'PUT', { path, content: edited, expectedMtimeMs: body.mtimeMs }));
     expect(saved.status).toBe(200);
     expect(readFileSync(path, 'utf8')).toBe(edited);
+  });
+
+  it('never lets the override raise the cap', async () => {
+    vi.stubEnv('O8_FILE_EDIT_MAX_BYTES', String(1024 * MiB));
+    expect((await import('@/lib/fs/file-size-caps')).FILE_EDIT_MAX_BYTES).toBe(128 * MiB);
   });
 
   it('still refuses to open an absolute file above the cap for editing', async () => {
