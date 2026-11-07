@@ -1,8 +1,7 @@
-name: o8 next Windows compile
+name: o8 next Windows build
 
-# Measures how far o8 next (GPUI) is from compiling on Windows. The vendored
-# GPUI carries its Windows backend; o8 next's own unix-only calls are the
-# expected gap. Not a required check until it is green.
+# Builds o8 next (GPUI) for Windows x64, starts the release exe, and runs the
+# native CLI tests. Not a required check yet; packaging is separate.
 
 on:
   pull_request:
@@ -19,7 +18,7 @@ concurrency:
 
 jobs:
   check:
-    name: Windows x64 cargo check
+    name: Windows x64 build and start
     runs-on: windows-latest
     timeout-minutes: 90
     env:
@@ -37,40 +36,12 @@ jobs:
         shell: pwsh
         run: Get-Item native/o8-next/target/release/o8-next.exe | Select-Object Name, Length
       - name: Start the release binary with --help
-        continue-on-error: true
         shell: pwsh
         run: |
           $out = & native/o8-next/target/release/o8-next.exe --help 2>&1
-          "exit code: $LASTEXITCODE"
           $out | Select-Object -First 40
-      - name: Name the import the loader cannot resolve
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $exe = (Resolve-Path native/o8-next/target/release/o8-next.exe).Path
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Where-Object FullName -like '*Hostx64\x64*' | Select-Object -First 1
-          "== dependents"
-          & $dumpbin.FullName /nologo /dependents $exe
-          $dbg = "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64"
-          "== debuggers present: $(Test-Path "$dbg\cdb.exe")"
-          & "$dbg\gflags.exe" /i o8-next.exe +sls | Out-Null
-          $snaps = & "$dbg\cdb.exe" -g -G -c "q" $exe --help 2>&1
-          "== loader errors"
-          $snaps | Select-String -CaseSensitive -Pattern 'ERROR|WARNING|could not be located|Unable to' | Where-Object { $_ -notmatch 'ActivationContext' } | Select-Object -First 30
-          "== last loader lines"
-          $snaps | Select-Object -Last 40
-          "== icuuc.dll imports"
-          $imports = & $dumpbin.FullName /nologo /imports:icuuc.dll $exe
-          $imports | Select-Object -First 60
-          "== system icuuc.dll exports matching those names"
-          $sys = & $dumpbin.FullName /nologo /exports C:\Windows\System32\icuuc.dll
-          ($imports | Select-String -Pattern '^\s+[0-9A-F]+\s+(\S+)$' | ForEach-Object { $_.Matches[0].Groups[1].Value }) | ForEach-Object {
-            if (-not ($sys | Select-String -SimpleMatch " $_")) { "MISSING from system icuuc.dll: $_" }
-          }
-          [System.Environment]::OSVersion.VersionString
+          if ($LASTEXITCODE -ne 0) { throw "o8-next.exe --help exited $LASTEXITCODE" }
       - name: Compile the native tests
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-run
       - name: Run the native CLI tests
-        continue-on-error: true
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-fail-fast --test shell_cli --test pane_grid_cli --test terminal_cli --test diff_cli
