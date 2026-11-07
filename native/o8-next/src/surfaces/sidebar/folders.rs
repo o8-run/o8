@@ -481,12 +481,11 @@ impl ThreadList {
                                 cx,
                             );
                         }
-                        // The shell opens threads from the list it was sent,
-                        // so the new thread opens after the next load.
+                        // Open once the catalog carries the saved thread,
+                        // whether it arrives through a load or the live stream.
                         if open {
-                            this.selected = Some(id.clone());
-                            this.follow_selection = true;
                             this.pending_open = Some(id);
+                            this.open_pending(cx);
                         }
                         this.load(cx);
                     }
@@ -509,6 +508,18 @@ impl ThreadList {
         .detach();
         cx.notify();
         started
+    }
+    /// Publish selection only once the shell has been sent the created thread.
+    pub(super) fn open_pending(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self
+            .pending_open
+            .take_if(|id| self.sessions.iter().any(|s| &s.id == id))
+        {
+            self.selected = Some(id.clone());
+            self.follow_selection = true;
+            self.rebuild();
+            cx.emit(Event::Selected(id));
+        }
     }
     /// A New thread whose POST has returned and whose load has not.
     #[cfg(test)]

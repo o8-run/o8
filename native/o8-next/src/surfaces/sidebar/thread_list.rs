@@ -541,12 +541,7 @@ impl ThreadList {
                         this.notice.clear();
                         this.ledger = ledger.clone();
                         cx.emit(Event::Refreshed(this.sessions.clone(), ledger));
-                        if let Some(id) = this
-                            .pending_open
-                            .take_if(|id| this.sessions.iter().any(|s| &s.id == id))
-                        {
-                            cx.emit(Event::Selected(id));
-                        }
+                        this.open_pending(cx);
                     }
                     // Keep the last good list, but finish the shell's connection
                     // check even when the list can retain its stale data.
@@ -615,12 +610,7 @@ impl ThreadList {
         }
         self.rebuild();
         cx.emit(Event::Refreshed(self.sessions.clone(), self.ledger.clone()));
-        if let Some(id) = self
-            .pending_open
-            .take_if(|id| self.sessions.iter().any(|s| &s.id == id))
-        {
-            cx.emit(Event::Selected(id));
-        }
+        self.open_pending(cx);
         cx.notify();
     }
     /// The client that owns a sidebar id, and that server's id for the thread.
@@ -789,6 +779,7 @@ impl ThreadList {
             }
             self.rebuild();
             cx.emit(Event::Loaded(self.sessions.clone()));
+            self.open_pending(cx);
             cx.notify();
         }
         if self.rename.is_none()
