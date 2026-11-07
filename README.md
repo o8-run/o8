@@ -14,7 +14,7 @@ o8 is an open-source control room for one person running several AI coding agent
 
 The download page identifies the current Mac installer. A universal DMG runs natively on Apple Silicon and Intel; an Intel-only DMG needs Rosetta on Apple Silicon.
 
-macOS today. Linux compiles in CI, but nobody has yet installed it, launched it, and merged a packet on a mainstream distro. Windows is help wanted. Both are on the [roadmap](./ROADMAP.md).
+macOS has the installer. Linux runs from source: o8 was installed and ran agent turns on Ubuntu 26.04 in November 2026, but there is no Linux package yet. Windows is help wanted. Both are on the [roadmap](./ROADMAP.md).
 
 ![One ask, three workers: the orchestrator splits the task into packets, each worker builds its page in its own worktree, and the plan and every tile report as they go](./assets/three-workers.gif)
 
