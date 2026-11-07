@@ -499,6 +499,14 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
     layout::sync(s, window, cx);
 }
 
+/// A panel chrome button (tab, close, New tab) has focus. Buttons own no
+/// keys, so Cmd-K still opens the palette from one.
+pub(crate) fn chrome_focused(s: &Shell, window: &Window) -> bool {
+    s.features
+        .read::<Panel>()
+        .is_some_and(|panel| panel.focus.values().any(|f| f.is_focused(window)))
+}
+
 pub(super) fn is_open(s: &Shell) -> bool {
     s.features
         .read::<Panel>()
