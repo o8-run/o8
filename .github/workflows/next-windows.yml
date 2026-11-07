@@ -43,6 +43,21 @@ jobs:
           $out = & native/o8-next/target/release/o8-next.exe --help 2>&1
           "exit code: $LASTEXITCODE"
           $out | Select-Object -First 40
+      - name: Name the import the loader cannot resolve
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path native/o8-next/target/release/o8-next.exe).Path
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Where-Object FullName -like '*Hostx64\x64*' | Select-Object -First 1
+          "== dependents"
+          & $dumpbin.FullName /nologo /dependents $exe
+          $dbg = "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64"
+          "== debuggers present: $(Test-Path "$dbg\cdb.exe")"
+          & "$dbg\gflags.exe" /i o8-next.exe +sls | Out-Null
+          $snaps = & "$dbg\cdb.exe" -g -G -c "q" $exe --help 2>&1
+          $snaps | Select-String -Pattern 'ERROR|could not be located|STATUS_|0xc0000139' | Select-Object -First 30
+          [System.Environment]::OSVersion.VersionString
       - name: Compile the native tests
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-run
       - name: Run the native CLI tests
