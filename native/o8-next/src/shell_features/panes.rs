@@ -114,6 +114,12 @@ fn previewing(s: &Shell) -> Option<&preview::Preview> {
         .as_ref()
         .filter(|preview| preview.workspace == ws)
 }
+/// Each split pane's header height.
+pub(super) const HEADER: f32 = 34.;
+/// The workspace shows more than one pane, each under its own header.
+pub(super) fn is_split(s: &Shell) -> bool {
+    tree(s) != Node::main()
+}
 fn tree(s: &Shell) -> Node {
     match previewing(s) {
         Some(preview) => preview.tree.clone(),
@@ -933,7 +939,7 @@ fn header(id: &str, title: String, terminal: bool, cx: &mut Context<Shell>) -> i
         .flex()
         .items_center()
         .gap(px(6.))
-        .h(px(34.))
+        .h(px(HEADER))
         .flex_shrink_0()
         .pl(px(12.))
         .pr(px(8.))

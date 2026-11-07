@@ -224,7 +224,15 @@ pub(super) fn render(
                     + 16.)
                     .min((f32::from(viewport.width) - width - 16.).max(16.))
                     - 8.)),
-            _ => stack.top(px(44.)).right(px(8.)),
+            // Split panes put their own headers under the window's; the
+            // stack starts below them so it never covers their controls.
+            _ => stack
+                .top(px(if super::super::panes::is_split(s) {
+                    44. + super::super::panes::HEADER
+                } else {
+                    44.
+                }))
+                .right(px(8.)),
         };
         host = host.child(stack.children(items.into_iter().map(card)));
     }
