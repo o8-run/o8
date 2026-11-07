@@ -33,6 +33,7 @@ export default async function register({ dataDir, repo, seeds }: SurfaceContext)
   seeds.splice(0);
   const github = process.argv.includes('--onboarding-github');
   const signedOut = process.argv.includes('--onboarding-github-signed-out');
+  const unreachable = process.argv.includes('--onboarding-github-unreachable');
   if (process.argv.includes('--onboarding-new-project') || github || signedOut) {
     // New project's `gh repo create`, the GitHub list and clones run a fake gh on PATH; HOME keeps
     // projects and clones in the fixture.
@@ -121,5 +122,9 @@ require('node:child_process').execFileSync('git', ['init', '-q'], { cwd: dest })
     ...(github || signedOut ? { 'GET /api/panel/github-status': async () => Response.json({
       authenticated: github, username: github ? 'fixture' : '', repos: 0, deviceFlowEnabled: false,
     }) } : {}),
+    // The status answer breaks off mid-body, as a dropped connection does.
+    ...(unreachable ? { 'GET /api/panel/github-status': async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode('{"authenti')); controller.error(new Error('dropped')); },
+    }), { headers: { 'Content-Type': 'application/json' } }) } : {}),
   } };
 }

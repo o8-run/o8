@@ -39,7 +39,7 @@ fn saved_step(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> String {
 }
 
 #[gpui::test]
-fn onboarding_repos_signed_out_points_to_settings(cx: &mut TestAppContext) {
+fn onboarding_repos_signed_out_names_the_github_cli(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(
         false,
         "--onboarding --onboarding-github-signed-out --transcript",
@@ -213,4 +213,30 @@ fn onboarding_repos_folder_comes_back_selected(cx: &mut TestAppContext) {
             .project
             .is_none()
     );
+}
+
+#[gpui::test]
+fn onboarding_repos_status_that_breaks_off_offers_retry(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(
+        false,
+        "--onboarding --onboarding-github-unreachable --transcript",
+    );
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("repos-unreachable.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    draw(cx);
+    click(cx, "setup-clone");
+    assert_eq!(page(&shell, cx), Some("repos"));
+    // As on the desktop: not "not connected", but a load that can be retried.
+    assert!(cx.debug_bounds("setup-github-signed-out").is_none());
+    assert!(cx.debug_bounds("setup-repos-error").is_some());
+    assert!(cx.debug_bounds("setup-repos-retry").is_some());
+    click(cx, "setup-repos-retry");
+    assert!(cx.debug_bounds("setup-repos-error").is_some());
+    assert!(cx.debug_bounds("setup-repo-0-local").is_some());
 }
