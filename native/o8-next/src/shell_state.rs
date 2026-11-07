@@ -135,10 +135,30 @@ pub struct State {
     /// live in shared settings.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub keybindings: BTreeMap<String, String>,
+    /// Where first-run setup stopped, so a relaunch resumes there (#5303).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub onboarding: Option<OnboardingProgress>,
+    /// Setup sounds; off until the person turns them on, as on the desktop.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub onboarding_sounds: bool,
     #[serde(skip)]
     pub(crate) retain_file: bool,
     #[serde(skip)]
     pub(crate) backup_file: Arc<Mutex<bool>>,
+}
+/// The desktop's saved onboarding progress (`o8:onboarding-progress:v1`):
+/// its step name, the chosen project, whether tools were set and the first
+/// task. Read back through the setup module, which drops anything unknown.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnboardingProgress {
+    pub step: String,
+    #[serde(default)]
+    pub project: Option<serde_json::Value>,
+    #[serde(default)]
+    pub tools_configured: bool,
+    #[serde(default)]
+    pub task: String,
 }
 impl Default for State {
     fn default() -> Self {
@@ -166,6 +186,8 @@ impl Default for State {
             sidebar_working_section: false,
             notes: Default::default(),
             keybindings: BTreeMap::new(),
+            onboarding: None,
+            onboarding_sounds: false,
             retain_file: false,
             backup_file: Arc::default(),
         }

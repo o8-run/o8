@@ -11,10 +11,13 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     cell::Cell,
+    path::PathBuf,
     rc::Rc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[path = "frame.rs"]
+mod frame;
 #[path = "import.rs"]
 mod import;
 #[cfg(test)]
@@ -22,6 +25,10 @@ mod import;
 mod lifecycle_tests;
 #[path = "new_project.rs"]
 mod new_project;
+#[path = "progress.rs"]
+mod progress;
+#[path = "sound.rs"]
+pub(crate) mod sound;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +117,12 @@ impl EventEmitter<Opened> for Setup {}
 /// Imported chats exist now; the shell reloads its sessions.
 pub struct Imported;
 impl EventEmitter<Imported> for Setup {}
+/// Where setup stands now, saved so a relaunch resumes there.
+pub struct Progressed(pub crate::shell_state::OnboardingProgress);
+impl EventEmitter<Progressed> for Setup {}
+/// The sounds switch changed.
+pub struct Sounds(pub bool);
+impl EventEmitter<Sounds> for Setup {}
 pub struct Setup {
     client: Client,
     snapshot: Option<Snapshot>,
@@ -127,6 +140,11 @@ pub struct Setup {
     error: Option<String>,
     telemetry: bool,
     crashes: bool,
+    /// Saved with progress, as on the desktop.
+    tools_configured: bool,
+    task: String,
+    /// The progress last saved, so only changes are written.
+    saved: Option<crate::shell_state::OnboardingProgress>,
     revision: u64,
     painted: Rc<Cell<u64>>,
 }
@@ -159,6 +177,16 @@ impl Setup {
             Step::NewProject => "new-project",
         })
     }
+    /// The progress rail's parts (label, detail, done) and the current one.
+    #[cfg(test)]
+    pub fn rail(&self) -> (Vec<(&'static str, String, bool)>, usize) {
+        let (parts, current) = frame::rail(self);
+        let parts = parts
+            .into_iter()
+            .map(|p| (p.label, p.detail, p.done))
+            .collect();
+        (parts, current)
+    }
     #[cfg(test)]
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
@@ -175,12 +203,22 @@ impl Setup {
     pub fn busy(&self) -> bool {
         self.busy
     }
-    pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
+    /// `saved` is where an earlier launch stopped; `sounds_dir` is the
+    /// app's data folder for the cue files.
+    pub fn new(
+        client: Client,
+        saved: Option<&crate::shell_state::OnboardingProgress>,
+        sounds_on: bool,
+        sounds_dir: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        sound::configure(sounds_on, sounds_dir);
+        let resume = progress::read(saved);
         let mut this = Self {
             client,
             snapshot: None,
-            step: Step::Projects,
-            project: None,
+            step: resume.step,
+            project: resume.project,
             backend: String::new(),
             workers: vec![],
             folder: cx.new(Composer::new),
@@ -199,6 +237,9 @@ impl Setup {
             error: None,
             telemetry: false,
             crashes: false,
+            tools_configured: resume.tools_configured,
+            task: resume.task,
+            saved: saved.cloned(),
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
         };
@@ -229,6 +270,7 @@ impl Setup {
         let crashes = self.crashes;
         let step = self.step;
         let id = self.session_id.clone();
+        let used = matches!(action, Action::Use);
         let task = cx.background_executor().spawn(async move {
             let mut next = snapshot;
             let mut selected = project;
@@ -238,6 +280,10 @@ impl Setup {
             match action {
                 Action::Load(refresh) => {
                     next = Some(Snapshot::load(&client, refresh)?);
+                    // A resumed project that is gone sends setup back to projects.
+                    if !refresh && Self::registered(next.as_ref().unwrap(), selected.as_ref()).is_err() {
+                        (selected, target) = (None, Step::Projects);
+                    }
                     // An older server without the routes just skips the offer.
                     discovered = import::Discovered::load(&client).ok();
                     if !refresh && step == Step::Projects && discovered.as_ref().is_some_and(import::Discovered::pending) { target = Step::Import; }
@@ -305,8 +351,14 @@ impl Setup {
                                 cx.emit(Imported);
                             }
                         }
+                        if used {
+                            this.tools_configured = true;
+                        }
                         if let Some(session) = result.opened {
+                            sound::play(sound::Cue::Complete);
                             cx.emit(Opened(session));
+                        } else {
+                            this.remember(cx);
                         }
                     }
                     Err(error) => this.error = Some(error),
@@ -437,6 +489,30 @@ impl Setup {
         }
         self.step = step;
         self.error = None;
+        self.remember(cx);
+        self.revision += 1;
+        cx.notify();
+    }
+    /// Save where setup stands when that changed.
+    fn remember(&mut self, cx: &mut Context<Self>) {
+        let now = progress::write(
+            self.step,
+            self.project.as_ref(),
+            self.tools_configured,
+            &self.task,
+        );
+        if self.saved.as_ref() != Some(&now) {
+            self.saved = Some(now.clone());
+            cx.emit(Progressed(now));
+        }
+    }
+    /// Turn sounds on or off; turning them on by pointer previews a tick.
+    fn set_sounds(&mut self, on: bool, preview: bool, cx: &mut Context<Self>) {
+        sound::set_on(on);
+        if on && preview {
+            sound::play(sound::Cue::Tick);
+        }
+        cx.emit(Sounds(on));
         self.revision += 1;
         cx.notify();
     }
@@ -472,8 +548,27 @@ impl Setup {
         }
     }
 }
+/// Controls that move setup forward chime; the rest tick, as on the desktop.
+const ADVANCE: [&str; 8] = [
+    "setup-folder",
+    "setup-add",
+    "setup-explore",
+    "setup-create",
+    "setup-use",
+    "setup-consent",
+    "setup-import",
+    "setup-project-",
+];
 fn control(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Stateful<gpui::Div> {
     let selector = id.to_owned();
+    let cue = if ADVANCE
+        .iter()
+        .any(|advance| id == *advance || (advance.ends_with('-') && id.starts_with(advance)))
+    {
+        sound::Cue::Advance
+    } else {
+        sound::Cue::Tick
+    };
     div()
         .id(SharedString::from(id.to_owned()))
         .debug_selector(move || selector.clone())
@@ -484,6 +579,14 @@ fn control(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Sta
         .border_color(theme().border)
         .opacity(if enabled { 1. } else { 0.45 })
         .when(enabled, |v| v.cursor_pointer())
+        // A pointer click on an enabled control cues before its own action.
+        .when(enabled, |v| {
+            v.on_click(move |event, _, _| {
+                if !event.is_keyboard() {
+                    sound::play(cue);
+                }
+            })
+        })
         .child(label.into())
 }
 impl Render for Setup {
@@ -495,17 +598,10 @@ impl Render for Setup {
             .is_some_and(|s| s.ready(&self.backend, &self.workers));
         let painted = self.painted.clone();
         let revision = self.revision;
-        div()
-            .id("setup")
-            .size_full()
-            .overflow_y_scroll()
-            .p(px(24.))
+        let body = div()
             .flex()
             .flex_col()
             .gap(px(12.))
-            .bg(theme().background)
-            .text_color(theme().text)
-            .font_family(theme().font_ui)
             .child(
                 div()
                     .flex()
@@ -671,8 +767,11 @@ impl Render for Setup {
                                         .to_owned();
                                     let enabled = runtime["available"] == true && !busy;
                                     let lead_enabled = enabled
-                                        && (["codex", "claude", "opencode", "muse", "fable", "o8", "pi"]
-                                            .contains(&backend.as_str())
+                                        && ([
+                                            "codex", "claude", "opencode", "muse", "fable", "o8",
+                                            "pi",
+                                        ]
+                                        .contains(&backend.as_str())
                                             || runtime["builtIn"].is_object());
                                     div()
                                         .flex()
@@ -706,7 +805,9 @@ impl Render for Setup {
                                                     .on_click(cx.listener(move |this, _, _, cx| {
                                                         if lead_enabled {
                                                             this.backend = backend.clone();
-                                                            this.model.update(cx, |model, cx| model.clear(cx));
+                                                            this.model.update(cx, |model, cx| {
+                                                                model.clear(cx)
+                                                            });
                                                             this.workers = vec![id.clone()];
                                                             this.revision += 1;
                                                             cx.notify();
@@ -749,16 +850,24 @@ impl Render for Setup {
                             }) && !busy,
                             |v| v.child("No coding tools found"),
                         )
-                        .when(snapshot.as_ref().is_some_and(|s| {
-                            s.setup["setupRecommendation"]["backend"] == self.backend
-                                && s.model("").is_none()
-                        }), |v| {
-                            v.child("Choose a model ID for this runtime to continue.")
-                                .child(div().id("setup-model-input")
-                                    .debug_selector(|| "setup-model-input".into())
-                                    .on_click(cx.listener(|s, _, window, cx| s.model.read(cx).focus.focus(window)))
-                                    .child(self.model.clone()))
-                        })
+                        .when(
+                            snapshot.as_ref().is_some_and(|s| {
+                                s.setup["setupRecommendation"]["backend"] == self.backend
+                                    && s.model("").is_none()
+                            }),
+                            |v| {
+                                v.child("Choose a model ID for this runtime to continue.")
+                                    .child(
+                                        div()
+                                            .id("setup-model-input")
+                                            .debug_selector(|| "setup-model-input".into())
+                                            .on_click(cx.listener(|s, _, window, cx| {
+                                                s.model.read(cx).focus.focus(window)
+                                            }))
+                                            .child(self.model.clone()),
+                                    )
+                            },
+                        )
                         .child(
                             control("setup-use", "Use this setup", ready && !busy)
                                 .on_click(cx.listener(|this, _, _, cx| this.act(Action::Use, cx))),
@@ -815,24 +924,42 @@ impl Render for Setup {
                             ),
                         ),
                 )
-            })
-            .child(canvas(|_, _, _| (), move |_, _, window, _| {
-                painted.set(revision);
-                // A busy setup is modal, including shell navigation outside its
-                // content bounds. These listeners live for this painted frame.
-                if busy {
-                    window.on_mouse_event(|_: &gpui::MouseDownEvent, phase, window, cx| {
-                        if phase == gpui::DispatchPhase::Capture {
-                            window.prevent_default();
-                            cx.stop_propagation();
+            });
+        div()
+            .id("setup")
+            .size_full()
+            .overflow_y_scroll()
+            .p(px(24.))
+            .flex()
+            .flex_col()
+            .items_center()
+            .bg(theme().background)
+            .text_color(theme().text)
+            .font_family(theme().font_ui)
+            .child(frame::frame(self, body, cx))
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    move |_, _, window, _| {
+                        painted.set(revision);
+                        // A busy setup is modal, including shell navigation outside its
+                        // content bounds. These listeners live for this painted frame.
+                        if busy {
+                            window.on_mouse_event(|_: &gpui::MouseDownEvent, phase, window, cx| {
+                                if phase == gpui::DispatchPhase::Capture {
+                                    window.prevent_default();
+                                    cx.stop_propagation();
+                                }
+                            });
+                            window.on_mouse_event(|_: &gpui::MouseUpEvent, phase, _, cx| {
+                                if phase == gpui::DispatchPhase::Capture {
+                                    cx.stop_propagation();
+                                }
+                            });
                         }
-                    });
-                    window.on_mouse_event(|_: &gpui::MouseUpEvent, phase, _, cx| {
-                        if phase == gpui::DispatchPhase::Capture {
-                            cx.stop_propagation();
-                        }
-                    });
-                }
-            }).size(px(1.)))
+                    },
+                )
+                .size(px(1.)),
+            )
     }
 }
