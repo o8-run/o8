@@ -103,17 +103,27 @@ impl Setup {
                     .child("Use your coding tools in one workspace."),
             )
             .child(
-                div().flex().flex_wrap().items_center().gap(px(12.)).child(
-                    primary("setup-folder", "", !busy)
-                        .px(px(22.))
-                        .justify_center()
-                        .child(crate::icon::stroke(FOLDER, theme().background, 16., 1.6))
-                        .child("Open a folder")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.navigate(Step::Folder, cx);
-                            this.folder.read(cx).focus.focus(window);
-                        })),
-                ),
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(12.))
+                    .child(
+                        primary("setup-folder", "", !busy)
+                            .px(px(22.))
+                            .justify_center()
+                            .child(crate::icon::stroke(FOLDER, theme().background, 16., 1.6))
+                            .child("Open a folder")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.repos.folder_return = false;
+                                this.navigate(Step::Folder, cx);
+                                this.folder.read(cx).focus.focus(window);
+                            })),
+                    )
+                    .child(
+                        quiet("setup-clone", "Clone from GitHub", !busy)
+                            .on_click(cx.listener(|this, _, _, cx| this.open_repos(cx))),
+                    ),
             )
             .child(
                 div()

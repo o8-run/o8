@@ -17,6 +17,12 @@ const NO_TOOLS: SetupRuntime[] = FIXTURE_TOOLS.map((tool) => ({
   ...tool, available: false, installed: false, unavailableReason: 'not_installed',
   detail: `${tool.label} was not found on this computer.`, fix: '',
 }));
+/** `--onboarding-github`: a connected account's repositories, in GitHub's shape. */
+const GITHUB_REPOS = [
+  { id: 1, full_name: 'fixture-org/fixture-app', name: 'fixture-app', description: 'A public fixture project.', language: 'TypeScript', stargazers_count: 0, updated_at: '2026-11-01T00:00:00Z', private: false, default_branch: 'main', clone_url: 'https://github.com/fixture-org/fixture-app.git' },
+  { id: 2, full_name: 'fixture-org/fixture-private', name: 'fixture-private', description: 'A private fixture project.', language: 'Rust', stargazers_count: 0, updated_at: '2026-11-01T00:00:00Z', private: true, default_branch: 'main', clone_url: 'https://github.com/fixture-org/fixture-private.git' },
+  { id: 3, full_name: 'fixture-org/fixture-unreachable', name: 'fixture-unreachable', description: null, language: null, stargazers_count: 0, updated_at: '2026-11-01T00:00:00Z', private: false, default_branch: 'main', clone_url: 'https://github.com/fixture-org/fixture-unreachable.git' },
+];
 export async function prepare(): Promise<SurfaceRoutes> {
   if (process.argv.includes('--onboarding')) createRequire(import.meta.url)('./setup/discovery.cjs');
   return {};
@@ -25,8 +31,11 @@ export default async function register({ dataDir, repo, seeds }: SurfaceContext)
   if (!process.argv.includes('--onboarding')) return {};
   for (const file of readdirSync(join(dataDir, 'chat-history'))) rmSync(join(dataDir, 'chat-history', file));
   seeds.splice(0);
-  if (process.argv.includes('--onboarding-new-project')) {
-    // New project's `gh repo create` runs a fake gh on PATH; HOME keeps its projects folder in the fixture.
+  const github = process.argv.includes('--onboarding-github');
+  const signedOut = process.argv.includes('--onboarding-github-signed-out');
+  if (process.argv.includes('--onboarding-new-project') || github || signedOut) {
+    // New project's `gh repo create`, the GitHub list and clones run a fake gh on PATH; HOME keeps
+    // projects and clones in the fixture.
     const home = join(dataDir, 'home');
     const bin = join(dataDir, 'bin');
     mkdirSync(home, { recursive: true }); mkdirSync(bin, { recursive: true });
@@ -35,6 +44,16 @@ export default async function register({ dataDir, repo, seeds }: SurfaceContext)
     writeFileSync(join(bin, 'gh'), `#!/usr/bin/env node
 const args = process.argv.slice(2);
 require('node:fs').appendFileSync(${JSON.stringify(join(dataDir, 'gh-argv.jsonl'))}, JSON.stringify({ args, cwd: process.cwd() }) + '\\n');
+if (args[0] === 'api') { process.stdout.write(${JSON.stringify(JSON.stringify(GITHUB_REPOS))}); process.exit(0); }
+if (args[0] === 'repo' && args[1] === 'clone') {
+  // The private one takes a while, so a check can see a clone in progress.
+  if (args[2].includes('fixture-private')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000);
+  if (args[2].includes('fixture-unreachable')) { process.stderr.write('fatal: could not read from remote repository.\\n'); process.exit(1); }
+  require('node:fs').mkdirSync(args[3], { recursive: true });
+  require('node:child_process').execFileSync('git', ['init', '-q'], { cwd: args[3] });
+  require('node:child_process').execFileSync('git', ['remote', 'add', 'origin', args[2]], { cwd: args[3] });
+  process.exit(0);
+}
 if (args[2] === 'taken-name') { process.stderr.write('GraphQL: Name already exists on this account (createRepository)\\n'); process.exit(1); }
 const dest = require('node:path').join(process.cwd(), args[2]);
 require('node:fs').mkdirSync(dest);
@@ -98,5 +117,9 @@ require('node:child_process').execFileSync('git', ['init', '-q'], { cwd: dest })
     'POST /api/orchestrator/composer-queue': queue.POST, 'GET /api/panel/ws-info': wsInfo.GET,
     'GET /api/mobile/orchestrator/threads': sessions, 'GET /api/orchestrator/state': state,
     'GET /api/runtime/inventory': inventory, 'GET /api/panel/ssh-machines': machines.GET,
+    // A fixed answer, so the fixture never reads this machine's GitHub sign-in.
+    ...(github || signedOut ? { 'GET /api/panel/github-status': async () => Response.json({
+      authenticated: github, username: github ? 'fixture' : '', repos: 0, deviceFlowEnabled: false,
+    }) } : {}),
   } };
 }
