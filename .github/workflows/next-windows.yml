@@ -56,7 +56,16 @@ jobs:
           "== debuggers present: $(Test-Path "$dbg\cdb.exe")"
           & "$dbg\gflags.exe" /i o8-next.exe +sls | Out-Null
           $snaps = & "$dbg\cdb.exe" -g -G -c "q" $exe --help 2>&1
-          $snaps | Select-String -Pattern 'ERROR|could not be located|STATUS_|0xc0000139' | Select-Object -First 30
+          "== loader errors"
+          $snaps | Select-String -CaseSensitive -Pattern 'ERROR:|could not be located|Unable to|failed' | Select-Object -First 30
+          "== icuuc.dll imports"
+          $imports = & $dumpbin.FullName /nologo /imports:icuuc.dll $exe
+          $imports | Select-Object -First 60
+          "== system icuuc.dll exports matching those names"
+          $sys = & $dumpbin.FullName /nologo /exports C:\Windows\System32\icuuc.dll
+          ($imports | Select-String -Pattern '^\s+[0-9A-F]+\s+(\S+)$' | ForEach-Object { $_.Matches[0].Groups[1].Value }) | ForEach-Object {
+            if (-not ($sys | Select-String -SimpleMatch " $_")) { "MISSING from system icuuc.dll: $_" }
+          }
           [System.Environment]::OSVersion.VersionString
       - name: Compile the native tests
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-run
