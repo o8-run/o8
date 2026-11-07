@@ -118,6 +118,10 @@ pub struct State {
     /// Threads left in Terminal View (#5309), so they reopen in it.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub terminal_views: BTreeSet<String>,
+    /// When each thread's CLI was last launched in Terminal View (Unix ms), so
+    /// newer chat turns can be told apart, including for an adopted shell.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub terminal_launched: BTreeMap<String, u64>,
     /// Detailed three-line chat rows (opt-in; compact when absent).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sidebar_detailed_rows: bool,
@@ -157,6 +161,7 @@ impl Default for State {
             sidebar_closed_folders: BTreeSet::new(),
             sidebar_snoozes: BTreeMap::new(),
             terminal_views: BTreeSet::new(),
+            terminal_launched: BTreeMap::new(),
             sidebar_detailed_rows: false,
             sidebar_working_section: false,
             notes: Default::default(),
@@ -234,6 +239,7 @@ impl State {
             || self.sidebar_closed_folders.len() > 2_000
             || self.sidebar_snoozes.len() > 2_000
             || self.terminal_views.len() > 2_000
+            || self.terminal_launched.len() > 2_000
             || self.tab_labels.len() > 16_000
             || self
                 .tab_labels

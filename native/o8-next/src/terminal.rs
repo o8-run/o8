@@ -81,6 +81,9 @@ pub struct Pane {
     composition: String,
     /// A command waiting for the shell to attach.
     waiting_line: Option<String>,
+    /// Every input sent to the shell, for tests that assert what was typed.
+    #[cfg(test)]
+    pub sent: Vec<String>,
 }
 impl Pane {
     pub fn new(
@@ -114,6 +117,8 @@ impl Pane {
             paints: Rc::new(Cell::new(0)),
             composition: String::new(),
             waiting_line: None,
+            #[cfg(test)]
+            sent: vec![],
         }
     }
     /// Runs a command line in this shell, as if it were typed and entered.
@@ -137,6 +142,10 @@ impl Pane {
         {
             self.input("\x03".into(), cx);
         }
+    }
+    /// Sends one Ctrl-C to whatever runs in this shell.
+    pub fn send_interrupt(&mut self, cx: &mut Context<Self>) {
+        self.input("\x03".into(), cx);
     }
     pub fn command_output(&self, line: &str) -> Option<crate::terminal_grid::CommandOutput> {
         self.grid.lock().unwrap().command_output(line)
@@ -194,6 +203,8 @@ impl Pane {
         if !self.ready {
             return;
         }
+        #[cfg(test)]
+        self.sent.push(text.clone());
         if !self.link.input(text) {
             self.notice = "Terminal input unavailable · retry after reconnect";
         } else {

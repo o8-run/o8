@@ -1,10 +1,13 @@
 // Thread › View (#5309): a thread's provider CLI, resumed on the thread's own
 // session in the native terminal, shown in the chat's place. The chat surface
 // stays open behind it and keeps its live transcript, so switching back shows
-// what was typed in the terminal.
+// what was typed in the terminal. A CLI started before newer chat turns is
+// resumed again, so it reads them.
 use super::*;
 use crate::terminal::Pane;
+use gpui::WeakEntity;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 struct ThreadView;
 register_shell_feature!(ThreadView);
@@ -45,8 +48,10 @@ impl ShellFeature for ThreadView {
 impl registry::ShellExtension for ThreadView {
     fn overlay(&self, s: &mut Shell) -> Option<AnyElement> {
         let key = s.key(&s.active()?);
-        let view = s.features.read::<Views>()?.threads.get(&key)?;
-        view.terminal.then(|| element(&view.state))
+        let views = s.features.read::<Views>()?;
+        let view = views.threads.get(&key)?;
+        view.terminal
+            .then(|| element(&view.state, view.stale, views.shell.clone()))
     }
 }
 
@@ -103,6 +108,28 @@ pub(super) enum State {
     Open(Entity<Pane>),
 }
 
+/// Whether the running CLI has read the chat's newest turns.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Stale {
+    Current,
+    /// Chat has turns newer than the CLI's launch, and the CLI is running.
+    Newer,
+    /// Reopen was pressed: Ctrl-C until the CLI exits, then resume again.
+    Reopening {
+        sent: u8,
+        at: Instant,
+    },
+    /// The CLI kept running after the last Ctrl-C.
+    Stuck,
+}
+
+/// Reopen sends at most this many Ctrl-Cs, this far apart.
+const REOPEN_INTERRUPTS: u8 = 3;
+const REOPEN_GAP: Duration = Duration::from_secs(1);
+pub(super) const NEWER_TURNS: &str = "Chat has newer turns";
+const EXITED: &str = "Terminal exited";
+pub(super) const DID_NOT_EXIT: &str = "The CLI didn't exit. Quit it, then press Reopen.";
+
 pub(super) struct Thread {
     /// The conversation this view resumes; the chat can move to another.
     pub id: String,
@@ -111,6 +138,7 @@ pub(super) struct Thread {
     pub launch: Option<Launch>,
     /// The shell was already running, so its CLI was left as it was.
     pub adopted: bool,
+    pub stale: Stale,
 }
 
 #[derive(Default)]
@@ -118,6 +146,8 @@ pub(super) struct Views {
     /// By the thread tab's content key.
     pub threads: HashMap<String, Thread>,
     pub menu: bool,
+    /// The shell, for the overlay's Reopen button.
+    shell: Option<WeakEntity<Shell>>,
 }
 
 /// The thread a session tab shows, when its runtime has a terminal view.
@@ -166,7 +196,7 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
                 || match &t.state {
                     State::Open(pane) => {
                         let pane = pane.read(cx);
-                        pane.ready || pane.notice != "Terminal exited"
+                        pane.ready || pane.notice != EXITED
                     }
                     State::Opening => true,
                     State::Unavailable(_) => false,
@@ -179,17 +209,35 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
             State::Open(pane) => Some(pane.clone()),
             _ => None,
         };
-        match pane.filter(|_| terminal) {
+        let shown = pane.filter(|_| terminal);
+        match &shown {
             Some(pane) => pane.read(cx).focus_handle().focus(window),
             None if !terminal => s.restore_focus(window, cx),
             // Nothing to type into yet: the shell keeps keys, so ⌃⌥V still works.
             None => s.focus.focus(window),
         }
         remember(s, &session.id, terminal);
+        if shown.is_some() {
+            check(s, key, window, cx);
+        }
         cx.notify();
         return true;
     }
-    views.threads.insert(
+    remember(s, &session.id, true);
+    open(s, key, session, window, cx);
+    true
+}
+
+/// Opens the thread's shell and resumes its CLI there, or adopts the shell
+/// still running under the thread's owner key.
+fn open(
+    s: &mut Shell,
+    key: String,
+    session: Session,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    s.features.get::<Views>().threads.insert(
         key.clone(),
         Thread {
             id: session.id.clone(),
@@ -197,9 +245,9 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
             state: State::Opening,
             launch: None,
             adopted: false,
+            stale: Stale::Current,
         },
     );
-    remember(s, &session.id, true);
     s.focus.focus(window);
     cx.notify();
     let workspace = session.workspace();
@@ -264,6 +312,11 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
                         return;
                     };
                     thread.state = State::Open(pane);
+                    if adopted {
+                        check(s, key, window, cx);
+                    } else {
+                        launched(s, &session.id);
+                    }
                 }
                 Err(error) => thread.state = State::Unavailable(error),
             }
@@ -271,7 +324,138 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
         });
     })
     .detach();
-    true
+}
+
+/// The CLI line was typed now.
+fn launched(s: &mut Shell, id: &str) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    s.state.terminal_launched.insert(id.to_owned(), now);
+    s.persist();
+}
+
+/// The newest chat turn's time, leaving out turns imported from the terminal.
+pub(super) fn newest_chat_turn(record: &serde_json::Value) -> Option<u64> {
+    record["messages"]
+        .as_array()?
+        .iter()
+        .filter(|m| !m["id"].as_str().is_some_and(|id| id.starts_with("cli-")))
+        .filter_map(|m| m["timestamp"].as_f64())
+        .map(|t| t as u64)
+        .max()
+}
+
+/// Compares the chat's newest turn with the CLI's launch, and offers Reopen
+/// when chat is newer. Nothing is typed into the running shell: an idle CLI
+/// cannot be told from one mid-turn, or from a prompt of its own.
+fn check(s: &mut Shell, key: String, window: &mut Window, cx: &mut Context<Shell>) {
+    let Some(thread) = s.features.read::<Views>().and_then(|v| v.threads.get(&key)) else {
+        return;
+    };
+    let id = thread.id.clone();
+    let Some(&launched_at) = s.state.terminal_launched.get(&id) else {
+        return;
+    };
+    let workspace = s
+        .sessions
+        .iter()
+        .find(|session| session.id == id)
+        .map(|session| session.workspace())
+        .unwrap_or_default();
+    let client = s.panel_client(&workspace);
+    let tab = id.clone();
+    let task = cx.background_executor().spawn(async move {
+        client
+            .get::<serde_json::Value>("/api/v2/chat-history", &[("tabId", &tab), ("limit", "20")])
+            .ok()
+            .and_then(|record| newest_chat_turn(&record))
+    });
+    cx.spawn_in(window, async move |this, cx| {
+        let newest = task.await;
+        let _ = this.update_in(cx, |s, _, cx| {
+            if newest.is_none_or(|newest| newest <= launched_at) {
+                return;
+            }
+            let Some(thread) = s.features.get::<Views>().threads.get_mut(&key) else {
+                return;
+            };
+            if thread.id == id
+                && thread.stale == Stale::Current
+                && matches!(&thread.state, State::Open(pane) if pane.read(cx).notice != EXITED)
+            {
+                thread.stale = Stale::Newer;
+                cx.notify();
+            }
+        });
+    })
+    .detach();
+}
+
+/// Reopen: stop the running CLI so it can resume with the newer turns.
+fn reopen(s: &mut Shell, cx: &mut Context<Shell>) {
+    let Some(key) = s.active().map(|tab| s.key(&tab)) else {
+        return;
+    };
+    if let Some(thread) = s.features.get::<Views>().threads.get_mut(&key) {
+        thread.stale = Stale::Reopening {
+            sent: 0,
+            at: Instant::now() - REOPEN_GAP,
+        };
+        cx.notify();
+    }
+}
+
+/// Moves each Reopen along. The resume line is `exec`ed, so the shell ends
+/// with the CLI; only then is the CLI resumed, in a new shell. Until then it
+/// gets Ctrl-C, at most [`REOPEN_INTERRUPTS`] times.
+fn reopening(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    let keys: Vec<String> = s
+        .features
+        .get::<Views>()
+        .threads
+        .iter()
+        .filter(|(_, t)| matches!(t.stale, Stale::Reopening { .. }))
+        .map(|(key, _)| key.clone())
+        .collect();
+    for key in keys {
+        let views = s.features.get::<Views>();
+        let Some(thread) = views.threads.get_mut(&key) else {
+            continue;
+        };
+        let Stale::Reopening { sent, at } = thread.stale else {
+            continue;
+        };
+        let State::Open(pane) = &thread.state else {
+            thread.stale = Stale::Current;
+            continue;
+        };
+        let pane = pane.clone();
+        let exited = pane.read(cx).notice == EXITED;
+        let id = thread.id.clone();
+        if exited {
+            // The exec'd CLI took its shell with it: a new shell resumes it.
+            let terminal = thread.terminal;
+            views.threads.remove(&key);
+            if let Some(session) = s.sessions.iter().find(|x| x.id == id).cloned() {
+                open(s, key.clone(), session, window, cx);
+                if let Some(thread) = s.features.get::<Views>().threads.get_mut(&key) {
+                    thread.terminal = terminal;
+                }
+            }
+        } else if at.elapsed() < REOPEN_GAP {
+            continue;
+        } else if sent < REOPEN_INTERRUPTS {
+            thread.stale = Stale::Reopening {
+                sent: sent + 1,
+                at: Instant::now(),
+            };
+            pane.update(cx, |pane, cx| pane.send_interrupt(cx));
+        } else {
+            thread.stale = Stale::Stuck;
+        }
+        cx.notify();
+    }
 }
 
 /// The view choice, kept per thread across launches.
@@ -293,6 +477,12 @@ fn open_terminal(client: &Client, launch: &Launch) -> Result<String, String> {
 }
 
 fn tick(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    if s.features
+        .read::<Views>()
+        .is_some_and(|v| v.shell.is_none())
+    {
+        s.features.get::<Views>().shell = Some(cx.entity().downgrade());
+    }
     // A thread left in Terminal View opens in it again, as after a relaunch.
     if let Some((key, session)) = active_thread(s, cx)
         && s.state.terminal_views.contains(&session.id)
@@ -305,6 +495,7 @@ fn tick(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     if s.features.read::<Views>().is_none() {
         return;
     }
+    reopening(s, window, cx);
     let active = s.active().map(|tab| s.key(&tab));
     // The chat moved to another conversation, or the tab has no thread view:
     // the view returns to chat and the menu closes.
@@ -340,16 +531,63 @@ fn tick(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     }
 }
 
-fn element(state: &State) -> AnyElement {
+fn element(state: &State, stale: Stale, shell: Option<WeakEntity<Shell>>) -> AnyElement {
     match state {
         State::Open(pane) => div()
             .debug_selector(|| "thread-terminal-view".into())
             .size_full()
-            .child(pane.clone())
+            .flex()
+            .flex_col()
+            .when_some(banner(stale, shell), |d, banner| d.child(banner))
+            .child(div().flex_1().min_h_0().child(pane.clone()))
             .into_any_element(),
         State::Opening => notice("Opening terminal view…"),
         State::Unavailable(text) => notice(text),
     }
+}
+
+/// The strip over a CLI that has not read the chat's newest turns.
+fn banner(stale: Stale, shell: Option<WeakEntity<Shell>>) -> Option<AnyElement> {
+    let (text, button) = match stale {
+        Stale::Current => return None,
+        Stale::Newer => (NEWER_TURNS, true),
+        Stale::Reopening { .. } => ("Reopening…", false),
+        Stale::Stuck => (DID_NOT_EXIT, true),
+    };
+    Some(
+        div()
+            .debug_selector(|| "thread-terminal-stale".into())
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .px(px(12.))
+            .py(px(6.))
+            .border_b_1()
+            .border_color(theme().border)
+            .text_size(px(12.))
+            .text_color(theme().text_secondary)
+            .child(text)
+            .when(button, |d| {
+                d.child(
+                    div()
+                        .id("thread-terminal-reopen")
+                        .debug_selector(|| "thread-terminal-reopen".into())
+                        .px(px(8.))
+                        .py(px(2.))
+                        .rounded(px(6.))
+                        .cursor_pointer()
+                        .text_color(theme().text)
+                        .hover(|row| row.bg(theme().hover))
+                        .child("Reopen")
+                        .on_click(move |_, _, cx| {
+                            if let Some(shell) = shell.as_ref().and_then(|s| s.upgrade()) {
+                                shell.update(cx, |s, cx| reopen(s, cx));
+                            }
+                        }),
+                )
+            })
+            .into_any_element(),
+    )
 }
 
 fn notice(text: &str) -> AnyElement {
