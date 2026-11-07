@@ -8,17 +8,23 @@
 
 **Run a fleet of coding agents. Approve what ships.**
 
-o8 is an open-source control room for one person running several AI coding agents across their repositories, the governance layer above them. Claude Code, Codex, Grok Build, DeepSeek Harness, OpenCode, Gemini, and twelve more do the work in isolated git worktrees; o8 brings the work, the reviews, and the decisions into one place so you can direct the agents without following every terminal.
+o8 is a free, open-source control room for the coding agents you already use. Claude Code, Codex, Grok Build, OpenCode, Gemini and thirteen more work in parallel, each in its own git worktree. You read the diffs and decide what merges.
 
-[**Download for macOS**](https://o8.run/download) · [Build from source](#get-it)
-
-The download page identifies the current Mac installer. A universal DMG runs natively on Apple Silicon and Intel; an Intel-only DMG needs Rosetta on Apple Silicon.
-
-macOS today. Linux compiles in CI, but nobody has yet installed it, launched it, and merged a packet on a mainstream distro. Windows is help wanted. Both are on the [roadmap](./ROADMAP.md).
+[**Download for macOS**](https://o8.run/download) · [Linux](#linux) · [Build from source](#from-source)
 
 ![One ask, three workers: the orchestrator splits the task into packets, each worker builds its page in its own worktree, and the plan and every tile report as they go](./assets/three-workers.gif)
 
-The aim is that you can hand out several pieces of work, look away, and come back to a readable account of what finished, what is blocked, and what needs your decision. The roadmap says how far along that is.
+- **Bring your own agents.** o8 drives the CLIs already on your machine, on your own subscriptions or keys. It is not in the path between your agents and their providers.
+- **Parallel work that stays apart.** Every packet gets its own worktree. Workers never merge their own work.
+- **You approve what ships.** Each result lands as a diff with receipts. Approve, reject, steer or rerun it from the app, the `o8` CLI, any MCP client or your phone.
+
+Hand out several pieces of work, look away, and come back to a readable account of what finished, what is blocked and what needs your decision. The [roadmap](./ROADMAP.md) says how far along that is.
+
+| Platform | Status |
+|---|---|
+| macOS 14+ | Signed, auto-updating universal installer: [download](https://o8.run/download) |
+| Linux | Preview packages (AppImage, DEB, RPM) from 0.1.810 on [Releases](https://github.com/o8-run/o8/releases/tag/v0.1.810), or [run from source](#linux). Packages of the native app are built in CI and not published yet. |
+| Windows | Not yet. [Help wanted](./ROADMAP.md). |
 
 ## What happens when you dispatch
 
@@ -46,9 +52,17 @@ o8 finds the coding-agent CLIs you already have installed and runs them behind o
 
 ## Get it
 
-**Easiest:** the latest signed build from [Releases](https://github.com/o8-run/o8/releases). It auto-updates.
+### macOS
 
-**From source** needs Node 22.x (native modules are built against the Node 22 ABI), Rust stable, and Xcode Command Line Tools.
+Download the signed universal DMG from [o8.run/download](https://o8.run/download) or [Releases](https://github.com/o8-run/o8/releases/latest). It runs natively on Apple Silicon and Intel, needs macOS 14 or later, and updates itself.
+
+### Linux
+
+The 0.1.810 [preview packages](https://github.com/o8-run/o8/releases/tag/v0.1.810) (AppImage, DEB, RPM, with checksums) use the older WebKit shell. The native app's packages are built on Ubuntu 24.04 in CI ([details](./docs/internals/linux-download-packages.md)) and are not published yet. Until they are, run o8 from source: the steps below work on Linux without the Xcode tools, and `npm run dev` serves the app at `http://localhost:47120`.
+
+### From source
+
+You need Node 22.x (native modules are built against the Node 22 ABI), Rust stable, and on macOS the Xcode Command Line Tools.
 
 Install `nvm` before using the commands below. If Node 22.x is already installed another way, verify it with `node --version` and skip the two `nvm` commands.
 
@@ -94,11 +108,9 @@ The read-only [daily product numbers command](docs/operations/daily-product-metr
 
 Each desktop update check sends a random device identifier, app version, target, chip architecture, macOS version (on macOS), and release channel to o8's update service, as described on the [privacy page](https://o8.run/privacy). The identifier is saved locally at first launch and is separate from sign-in and hosted-model identifiers. The ping is always on as part of checking for updates, independent of the usage-analytics toggle. It sends no code, paths, repository names, prompts, or account details. The service contract prohibits storing IP addresses or linking the identifier to an account. GitHub remains the fallback, and update signature verification stays the same.
 
-The update service and active-install counts are tracked separately. This change implements the desktop client only.
+## Free and open source
 
-## Free and paid
-
-Everything that runs on your machine is free and open source: the app, every runtime it detects, governance, memory, the Brain, mobile, and voice with your own keys. Pro is the optional managed edition for the things that run on our servers: higher daily managed-inference limits, early access to experimental features, and remote access to up to 10 Macs from a browser. Convenience, never capability. [Pro · Lifetime](docs/founding-operator-tier.md) is the one-time purchase that keeps its included benefits for life. The future monthly plan is called Pro: [o8.run/pro](https://o8.run/pro).
+o8 is MIT licensed and free, with no paid plan. Every feature is unlocked. The agents run on your own subscriptions or API keys, and you can use o8 without an account.
 
 ## Voice
 
