@@ -21,7 +21,7 @@ jobs:
   check:
     name: Windows x64 cargo check
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: never
     steps:
@@ -31,3 +31,13 @@ jobs:
           toolchain: stable
       - name: Check the app binary
         run: cargo check --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next --message-format short
+      - name: Build the release binary
+        run: cargo build --release --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next
+      - name: Release binary size
+        shell: pwsh
+        run: Get-Item native/o8-next/target/release/o8-next.exe | Select-Object Name, Length
+      - name: Compile the native tests
+        run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-run
+      - name: Run the native CLI tests
+        continue-on-error: true
+        run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --test shell_cli --test pane_grid_cli --test terminal_cli --test diff_cli
