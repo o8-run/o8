@@ -7,7 +7,7 @@ name: o8 next Windows compile
 on:
   pull_request:
     branches: [main]
-    paths: ['.github/workflows/next-windows.yml']
+    paths: ['native/o8-next/**', '.github/workflows/next-windows.yml']
   workflow_dispatch:
 
 permissions:
