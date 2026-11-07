@@ -21,7 +21,8 @@ export interface SharedCheckoutMember {
   clientMutationId: string;
   launchedAt: string;
   paths: string[];
-  state: 'reserved' | 'running' | 'failed';
+  state: 'reserved' | 'running' | 'failed' | 'settled';
+  settledOutcome?: 'finished' | 'interrupted' | 'failed';
 }
 
 export interface SharedCheckoutTeam {
@@ -155,7 +156,7 @@ async function withLock<T>(lock: string, operation: () => Promise<T>): Promise<T
 function assertOwner(team: SharedCheckoutTeam, input: TeamInput, path: string, branch: string): void {
   if (team.path !== path) throw new Error('Shared checkout path changed; refusing launch.');
   if (team.parentThreadId !== input.parentThreadId) {
-    throw new Error('This checkout is owned by another orchestrator. Open a separate worktree or return to its owner.');
+    throw new Error(`This checkout is owned by orchestrator ${team.parentThreadId}. Return to its owner.`);
   }
   if (team.branch !== branch) throw new Error('Shared checkout branch changed; refusing launch.');
 }
@@ -315,8 +316,7 @@ export async function reserveSharedCheckoutMember(input: TeamInput & {
       throw new Error('Shared mode requires a durable orchestrator chat.');
     }
     const checkout = currentCheckout(location.path);
-    const existingTeam = readFile(location.file);
-    if (existingTeam) assertOwner(existingTeam, input, location.path, checkout.branch);
+    const existingTeam = await admitExistingTeam(input, location, checkout.branch);
     const initialChangedPaths = existingTeam ? [] : changedPaths(location.path);
     const team = existingTeam ?? {
       id: location.id,
@@ -345,9 +345,8 @@ export async function reserveSharedCheckoutMember(input: TeamInput & {
     if (paths.some((path) => team.initialChangedPaths.some((changed) => pathsOverlap(path, changed)))) {
       throw new Error('Shared worker scope overlaps files that were dirty before the team started. Assign a clean scope.');
     }
-    // A failed launch with a created surface may still be running after an
-    // unknown post-effect. Hold its scope until the entire team is reviewed.
-    for (const member of team.members.filter((candidate) => candidate.state !== 'failed' || candidate.surfaceId)) {
+    // Only a matching terminal owned receipt releases a created surface's claim.
+    for (const member of team.members.filter(holdsPathClaim)) {
       if (paths.some((path) => member.paths.some((claimed) => pathsOverlap(path, claimed)))) {
         throw new Error(`Shared checkout path overlaps worker ${member.taskName}; assign separate paths or wait for group review.`);
       }
@@ -387,11 +386,8 @@ export async function ensureSharedCheckoutTeam(input: TeamInput): Promise<Shared
   const location = teamLocation(input);
   return withLock(location.lock, async () => {
     const checkout = currentCheckout(location.path);
-    const existing = readFile(location.file);
-    if (existing) {
-      assertOwner(existing, input, location.path, checkout.branch);
-      return existing;
-    }
+    const existing = await admitExistingTeam(input, location, checkout.branch);
+    if (existing) return existing;
     const team: SharedCheckoutTeam = {
       id: location.id,
       path: location.path,
@@ -426,25 +422,99 @@ export async function recordSharedCheckoutMember(input: TeamInput & {
     existing.surfaceId = input.surfaceId;
     if (input.parentTurnId && !existing.parentTurnId) existing.parentTurnId = input.parentTurnId;
     existing.state = 'running';
+    delete existing.settledOutcome;
     writeTeam(location.file, team);
     return team;
   });
 }
 
-async function assertMembersSettled(team: SharedCheckoutTeam): Promise<void> {
-  const { findOwnedLaunchByMutationId, lookupOwnedActiveRunFresh } = await import('@/lib/runtimes/shared/owned-session-index');
+function holdsPathClaim(member: SharedCheckoutMember): boolean {
+  return member.state !== 'failed' || Boolean(member.surfaceId && !member.settledOutcome);
+}
+
+/** Refresh from the owned index only. Unknown or contradictory evidence holds ownership. */
+async function refreshMembers(team: SharedCheckoutTeam): Promise<string[]> {
+  const owned = await import('@/lib/runtimes/shared/owned-session-index');
+  const blockers: string[] = [];
   for (const member of team.members) {
-    if (member.state === 'failed' && !member.surfaceId) continue;
-    if (!member.surfaceId) throw new Error(`Worker ${member.taskName} has no settled launch receipt.`);
-    const launch = await findOwnedLaunchByMutationId(member.clientMutationId);
-    if (!launch || launch.surfaceId !== member.surfaceId || launch.cwd !== team.path) {
-      throw new Error(`Worker ${member.taskName} has no matching owned runtime completion receipt.`);
+    const launch = await owned.findOwnedLaunchByMutationId(member.clientMutationId);
+    // A rejected foreign mutation never launched a member in this checkout.
+    if (member.state === 'failed' && !member.surfaceId && (!launch || launch.cwd !== team.path)) continue;
+    if (!launch || (member.surfaceId && launch.surfaceId !== member.surfaceId) || launch.cwd !== team.path) {
+      delete member.settledOutcome;
+      blockers.push(`Worker ${member.taskName} has no matching owned runtime completion receipt.`);
+      continue;
     }
-    const active = await lookupOwnedActiveRunFresh(member.surfaceId);
+    member.surfaceId = launch.surfaceId;
+    const active = await owned.lookupOwnedActiveRunFresh(launch.surfaceId);
     if (launch.outcome === 'running' || active?.pid !== undefined || active?.tmuxSession !== undefined) {
-      throw new Error(`Worker ${member.taskName} is still active. Wait for it to finish or interrupt it first.`);
+      member.state = 'running';
+      delete member.settledOutcome;
+      blockers.push(`live worker ${member.taskName} is still active. Wait for it to finish or interrupt it first.`);
+      continue;
+    }
+    member.state = launch.outcome === 'finished' ? 'settled' : 'failed';
+    member.settledOutcome = launch.outcome;
+  }
+  return blockers;
+}
+
+async function refreshTeam(file: string, team: SharedCheckoutTeam): Promise<string[]> {
+  const before = JSON.stringify(team.members);
+  const blockers = await refreshMembers(team);
+  if (JSON.stringify(team.members) !== before) writeTeam(file, team);
+  return blockers;
+}
+
+/** Repair membership even if the checkout branch drifted; never change checkout files. */
+export async function settleSharedCheckoutTeam(input: TeamInput): Promise<void> {
+  const location = teamLocation(input);
+  await withLock(location.lock, async () => {
+    const team = readFile(location.file);
+    if (team) await refreshTeam(location.file, team);
+  });
+}
+
+function archiveTeam(file: string, team: SharedCheckoutTeam, receipt: Record<string, unknown>): void {
+  const archive = join(file, '..', 'archive');
+  mkdirSync(archive, { recursive: true });
+  // Keep the active receipt until its complete archive is written.
+  // Exclusive creation also prevents two releases in one millisecond colliding.
+  let suffix = Date.now();
+  for (;;) {
+    try {
+      writeFileSync(join(archive, `${team.id}-${suffix}.json`), `${JSON.stringify({ ...team, ...receipt }, null, 2)}\n`,
+        { mode: 0o600, flag: 'wx' });
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      suffix += 1;
     }
   }
+}
+
+/** Called inside the checkout receipt lock before either admission entry point. */
+async function admitExistingTeam(input: TeamInput, location: ReturnType<typeof teamLocation>, branch: string): Promise<SharedCheckoutTeam | null> {
+  const team = readFile(location.file);
+  if (!team) return null;
+  assertOwner(team, { ...input, parentThreadId: team.parentThreadId }, location.path, branch);
+  const blockers = await refreshTeam(location.file, team);
+  if (team.parentThreadId === input.parentThreadId) return team;
+  const refusal = `This checkout is owned by orchestrator ${team.parentThreadId}: `;
+  if (blockers.length) throw new Error(`${refusal}${blockers.join(' ')}`);
+  const status = inspectSharedCheckoutTeam({ ...input, parentThreadId: team.parentThreadId });
+  if (!status) throw new Error(`${refusal}ownership inspection is unavailable.`);
+  const uncommitted = [...new Set([...status.newPaths, ...status.baselineDrift, ...status.baselineUnverifiable])].sort();
+  if (uncommitted.length) throw new Error(`${refusal}uncommitted paths ${uncommitted.join(', ')}.`);
+  archiveTeam(location.file, team, { releasedAt: new Date().toISOString(), releasedBy: input.parentThreadId,
+    reason: 'settled-clean-takeover', reviewedHead: status.currentHead, committedPaths: status.committedPaths });
+  await rm(location.file);
+  return null;
+}
+
+async function assertMembersSettled(team: SharedCheckoutTeam, file: string): Promise<void> {
+  const blockers = await refreshTeam(file, team);
+  if (blockers.length) throw new Error(blockers.join(' '));
 }
 
 /** Acknowledge only an exact, explicitly reviewed checkout state. No Git or
@@ -461,7 +531,7 @@ export async function reconcileSharedCheckoutTeam(input: TeamInput & {
     const team = readFile(location.file);
     if (!team) throw new Error('There is no active Shared team in this checkout.');
     assertOwner(team, input, location.path, currentCheckout(location.path).branch);
-    await assertMembersSettled(team);
+    await assertMembersSettled(team, location.file);
     const status = inspectSharedCheckoutTeam(input);
     if (!status || status.review.id !== input.reviewId || status.review.head !== input.reviewedHead) {
       throw new Error('Checkout review is stale. Inspect and review the current changes before reconciling.');
@@ -502,7 +572,7 @@ export async function finishSharedCheckoutTeam(input: TeamInput & {
     if (!team) throw new Error('There is no active Shared team in this checkout.');
     const checkout = currentCheckout(location.path);
     assertOwner(team, input, location.path, checkout.branch);
-    await assertMembersSettled(team);
+    await assertMembersSettled(team, location.file);
     const status = inspectSharedCheckoutTeam(input);
     if (!status) throw new Error('Shared team review state disappeared.');
     if (status.unsupportedReviewPaths.length) {
@@ -521,16 +591,15 @@ export async function finishSharedCheckoutTeam(input: TeamInput & {
     if (uncommitted.length > 0) {
       throw new Error(`Team edits are still uncommitted: ${uncommitted.join(', ')}`);
     }
-    const archive = join(location.file, '..', 'archive');
-    mkdirSync(archive, { recursive: true });
-    writeFileSync(join(archive, `${team.id}-${Date.now()}.json`), `${JSON.stringify({
-      ...team,
+    archiveTeam(location.file, team, {
       finishedAt: new Date().toISOString(),
+      releasedBy: input.parentThreadId,
+      reason: 'finished',
       reviewedHead: status.currentHead,
       committedPaths: status.committedPaths,
       reviewSummary: input.reviewSummary.trim(),
       verification: input.verification.trim(),
-    }, null, 2)}\n`, { mode: 0o600 });
+    });
     await rm(location.file);
     return { team, reviewedHead: status.currentHead, committedPaths: status.committedPaths };
   });

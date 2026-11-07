@@ -404,7 +404,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string, i
     console.error('[orchestrator-delegate]', err);
     return NextResponse.json({
       ok: false,
-      error: 'Delegation failed',
+      error: checkoutMode === 'shared' && err instanceof Error ? err.message : 'Delegation failed',
     }, { status: checkoutMode === 'shared' ? 422 : 500 });
   }
 }

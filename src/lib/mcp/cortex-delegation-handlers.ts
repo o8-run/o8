@@ -71,7 +71,7 @@ export function createCortexDelegationHandlers(config: {
         note: result.note ?? 'Approval required before this agent can be launched.',
         status: 'awaiting_approval',
       });
-      if (!result.ok) return textResult(`Delegation failed: ${safeErrorText(result)}`, true);
+      if (!result.ok) return textResult(safeErrorText(result), true);
 
       const surfaceId = result.surfaceId as string;
       try {
@@ -105,7 +105,7 @@ export function createCortexDelegationHandlers(config: {
         note: result.note,
       });
     } catch (error) {
-      return textResult(`Failed to launch agent: ${safeErrorText(error)}`, true);
+      return textResult(safeErrorText(error), true);
     }
   };
 

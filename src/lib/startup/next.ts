@@ -11,6 +11,14 @@ function warn(stage: 'telemetry' | 'transcript-repair'): void {
 }
 
 async function initialize(): Promise<void> {
+  if (process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
+    try {
+      const { settleSharedCheckoutTeams } = await import('@/lib/orchestrator/shared-worker-recovery');
+      await settleSharedCheckoutTeams();
+    } catch {
+      console.warn('[shared-checkout] Startup membership repair failed.');
+    }
+  }
   if (process.env.O8_PACKAGED_APP === '1' && process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
     try {
       const { ensureReviewQueueDrainStarted } = await import('@/lib/lane/review-drain-bootstrap');
