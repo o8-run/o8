@@ -2770,6 +2770,12 @@
       ]
     },
     {
+      "path": "tests/composer-queue-mentions-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/composer-queue-real-path.test.ts",
       "reasons": [
         "real-path"

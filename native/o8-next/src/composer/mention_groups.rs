@@ -299,17 +299,21 @@ impl super::Composer {
 }
 
 /// A mention as the sent message shows it: the pill's preview card and the
-/// thread a click opens, or else the place it jumps to.
-#[derive(Clone, Debug, PartialEq)]
+/// thread a click opens, or else the place it jumps to. The queue saves it
+/// with the message, so the pill reads the same after a restart.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Sent {
     pub label: String,
     pub title: String,
     pub lines: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jump: Option<Jump>,
 }
 /// Where a sent pill that names no thread goes on click.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "target", rename_all = "lowercase")]
 pub(crate) enum Jump {
     /// The worktree's files.
     Worktree(String),
@@ -377,6 +381,76 @@ impl Sent {
             open,
             jump,
         }
+    }
+    /// As the queue saves it with the message, inside the queue's limits so
+    /// the send is never refused: a terminal's output stays in this window
+    /// and never goes into the chat's history. None when it has no label.
+    pub(crate) fn saved(&self) -> Option<Self> {
+        let label = within(&self.label, 200);
+        if label.trim().is_empty() {
+            return None;
+        }
+        let title = Some(within(&self.title, 4096))
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or_else(|| label.clone());
+        let terminal = matches!(self.jump, Some(Jump::Terminal(_)));
+        let target = |target: &str| {
+            (!target.trim().is_empty() && target.encode_utf16().count() <= 4096)
+                .then(|| target.to_owned())
+        };
+        Some(Self {
+            label,
+            title,
+            lines: if terminal {
+                vec![]
+            } else {
+                self.lines
+                    .iter()
+                    .take(6)
+                    .map(|line| within(line, 400))
+                    .collect()
+            },
+            open: self
+                .open
+                .clone()
+                .filter(|open| !open.trim().is_empty() && open.encode_utf16().count() <= 200),
+            jump: match &self.jump {
+                Some(Jump::Worktree(path)) => target(path).map(Jump::Worktree),
+                Some(Jump::Script(name)) => target(name).map(Jump::Script),
+                Some(Jump::Terminal(session)) => target(session).map(Jump::Terminal),
+                None => None,
+            },
+        })
+    }
+}
+/// A message's pills as the queue saves them: at most 20.
+pub(crate) fn saved_all(sent: &[Sent]) -> Vec<Sent> {
+    sent.iter().filter_map(Sent::saved).take(20).collect()
+}
+/// `text` cut on a character boundary to at most `max` UTF-16 units, the
+/// length the queue measures.
+fn within(text: &str, max: usize) -> String {
+    let mut used = 0;
+    text.chars()
+        .take_while(|c| {
+            used += c.len_utf16();
+            used <= max
+        })
+        .collect()
+}
+thread_local! {
+    /// History entries whose saved pills were already read.
+    static READ: RefCell<std::collections::HashSet<String>> = RefCell::default();
+}
+/// The pills a user message was saved with, kept so they read as sent. Each
+/// entry's pills are read once.
+pub(crate) fn remember_saved(entry: &str, mentions: Option<&Value>) {
+    let Some(mentions) = mentions else { return };
+    if !READ.with(|read| read.borrow_mut().insert(entry.to_owned())) {
+        return;
+    }
+    if let Ok(mentions) = serde_json::from_value::<Vec<Sent>>(mentions.clone()) {
+        mentions.into_iter().for_each(remember_sent);
     }
 }
 /// A preview shows a terminal's newest lines, at most this many.

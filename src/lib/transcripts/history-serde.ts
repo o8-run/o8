@@ -3,6 +3,7 @@ import { readVoiceCaption } from './voice-captions';
 
 export type StoredTranscriptMessage = {
   steerAnchor?: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor;
+  mentions?: MobileTranscriptEntry['mentions'];
 
   voice?: MobileTranscriptEntry['voice'];
   deliveryConfirmed?: boolean;
@@ -115,6 +116,7 @@ function deserializeMessage(value: unknown, dropInvalid: boolean): MobileTranscr
     command: message.command,
     handoff: message.handoff,
     steerAnchor: message.steerAnchor,
+    mentions: message.mentions,
     compaction: message.compaction,
     statusEvent: message.statusEvent,
   };
@@ -150,6 +152,7 @@ export function serializeTranscriptForStorage(
     command: entry.command,
     handoff: entry.handoff,
     steerAnchor: entry.steerAnchor,
+    mentions: entry.mentions,
     compaction: entry.compaction,
     statusEvent: entry.statusEvent,
   }));

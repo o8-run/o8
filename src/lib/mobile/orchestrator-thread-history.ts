@@ -426,6 +426,7 @@ export function appendMobileOrchestratorUserMessage(input: {
   timestampMs?: number;
   handoff?: MobileTranscriptEntry['handoff'];
   steerAnchor?: MobileTranscriptEntry['steerAnchor'];
+  mentions?: MobileTranscriptEntry['mentions'];
 }): MobileOrchestratorThread | null {
   const tabId = input.tabId;
   if (!tabId?.startsWith('thoughts-')) return null;
@@ -456,7 +457,7 @@ export function appendMobileOrchestratorUserMessage(input: {
   const nextMessages = appendUserHistoryMessage({
     messages: Array.isArray(existing.messages) ? existing.messages : [],
     content, messageId: input.messageId, media: input.media,
-    handoff: input.handoff, steerAnchor: input.steerAnchor, timestamp,
+    handoff: input.handoff, steerAnchor: input.steerAnchor, mentions: input.mentions, timestamp,
   });
   writeHistoryRecord(tabId, {
     ...existing,
