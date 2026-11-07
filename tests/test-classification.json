@@ -932,6 +932,13 @@
       ]
     },
     {
+      "path": "src/lib/providers/child-sqlite-module-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/providers/embedded-child-policy.test.ts",
       "reasons": [
         "child-process",

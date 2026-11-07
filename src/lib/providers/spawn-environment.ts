@@ -4,6 +4,7 @@ import { deferredMcpArgumentsForCheck } from './deferred-mcp-arguments';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { isAbsolute } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { credentialPolicyFingerprint } from './credential-policy';
 import { PROVIDER_ENV_KEYS, PROVIDER_KEY_ALIASES, providerCredentialMaterials, resolveProviderKey, type ProviderCredentialMaterials } from './key-store';
@@ -167,6 +168,25 @@ export function internalBrokerEnvironment(input?: Record<string, string | undefi
   return result;
 }
 
+// The child relay opens .provider-keys.lock through this module, so the stamped path must be an
+// absolute string a plain-Node child can require. The Next (webpack) server build statically rewrites
+// require.resolve('better-sqlite3') to a numeric module id; __non_webpack_require__ is webpack's
+// escape hatch to the real runtime require, which keeps a filesystem path. esbuild (ws-server) and
+// dev/test have no such global, where createRequire(import.meta.url) already resolves correctly.
+declare const __non_webpack_require__: NodeRequire | undefined;
+export function resolveChildSqliteModule(): unknown {
+  const resolver = typeof __non_webpack_require__ !== 'undefined' ? __non_webpack_require__ : createRequire(import.meta.url);
+  return resolver.resolve('better-sqlite3');
+}
+
+/** Fail closed if a bundler rewrote the module reference, with a clear message at stamp time. */
+export function requireAbsoluteSqliteModule(resolved: unknown): string {
+  if (typeof resolved !== 'string' || !isAbsolute(resolved)) {
+    throw new Error('Child credential policy could not resolve better-sqlite3 to an absolute module path; a bundler may have rewritten the module reference. Launch refused.');
+  }
+  return resolved;
+}
+
 /** Non-secret generation stamp for our delayed nested-execution helpers. */
 export function stampChildPolicy(env: NodeJS.ProcessEnv): void {
   const context = childEnvironmentContext(env);
@@ -175,5 +195,5 @@ export function stampChildPolicy(env: NodeJS.ProcessEnv): void {
   const approvedCredentials = Object.fromEntries(Object.entries(env).filter(([name, value]) => providerCredentialName(name) && value?.trim()).map(([name, value]) => [name, digest(value!)]));
   env.O8_CHILD_CREDENTIAL_POLICY = JSON.stringify({ runtimeId: context.runtimeId, directory, ...ensureLaunchPolicy(),
     apiAllowed: permitsApiCredentials(context.runtimeId), approvedCredentials,
-    sqliteModule: createRequire(import.meta.url).resolve('better-sqlite3') });
+    sqliteModule: requireAbsoluteSqliteModule(resolveChildSqliteModule()) });
 }
