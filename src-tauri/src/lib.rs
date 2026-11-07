@@ -8941,6 +8941,13 @@ pub fn run() {
             }
             log::info!("[boot] setup() entered at {}ms (Builder + plugins done)", boot_ms());
             boot_trace("setup() entered (plugins INITIALISED)");
+            // Project existing non-secret voice preferences into the native app's
+            // read-only store (#5667). Idempotent; secrets are never copied; must
+            // not block boot.
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            if let Err(err) = crate::stt::keys::project_voice_prefs() {
+                log::warn!("[voice-prefs] projection to voice-prefs.json failed: {}", err);
+            }
             match desktop_attach.decision {
                 DesktopAttachDecision::Attach => {
                     log::info!("[desktop-attach] attached: {}", desktop_attach.reason);

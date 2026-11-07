@@ -27,6 +27,67 @@ const SECRET_PREF_KEYS: [&str; 5] = [
     "groq_api_key",
 ];
 
+/// Non-secret voice-preference keys the native app (o8-next, #5667) may read and
+/// write through `~/.o8/voice-prefs.json`.
+///
+/// This is a POSITIVE allowlist, deliberately NOT the inverse of
+/// `SECRET_PREF_KEYS`. A denylist at this cross-process boundary would fail
+/// open: a future secret-bearing key added to the store but forgotten in the
+/// denylist would leak into a file the native app reads. Only keys named here
+/// are ever written to `voice-prefs.json`; everything else (provider secrets,
+/// legacy keys) stays in `dictation.json` / the OS secret store, which the
+/// native app never reads.
+///
+/// Every entry maps to a Settings → Voice control (see `src/app/voice-settings`).
+/// This list is the single chokepoint and the frozen native contract: to expose
+/// a new non-secret pref to the native app, add it here AND extend the published
+/// `voice-prefs.json` contract. The native app must never persist a key that is
+/// not on this list. A test asserts this set is disjoint from `SECRET_PREF_KEYS`.
+const VOICE_PREFS_ALLOWLIST: [&str; 33] = [
+    // Text + select controls.
+    "polish_instructions",
+    "dictation_microphone_uid",
+    "dictation_locale",
+    "output_tone",
+    "tts_provider",
+    "tts_voice_id",
+    "dictation_partials_surface",
+    "polish_model",
+    "elevenlabs_voice_id",
+    "elevenlabs_model_id",
+    "symon_brain_provider",
+    "symon_brain_tier",
+    "symon_brain_model",
+    "linux_ptt_shortcut",
+    // Numeric controls.
+    "reading_speed",
+    "elevenlabs_stability",
+    "elevenlabs_similarity_boost",
+    "elevenlabs_style",
+    // Boolean toggles.
+    "ducking_enabled",
+    "sounds_enabled",
+    "whisper_stt_enabled",
+    "local_stt_enabled",
+    "voice_callouts",
+    "workspace_context_enabled",
+    "agent_can_warp_cursor",
+    "elevenlabs_use_speaker_boost",
+    "dictation_top_pill",
+    "external_symon_left_control",
+    "main_process_capture",
+    "linux_ptt_enabled",
+    // Collections.
+    "dictionary",
+    "replacements",
+    "voice_library",
+];
+
+/// Whether `key` is a non-secret pref the native app owns in `voice-prefs.json`.
+fn is_voice_pref_allowlisted(key: &str) -> bool {
+    VOICE_PREFS_ALLOWLIST.contains(&key)
+}
+
 #[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "ai.o8.desktop.voice-provider-keys";
 
@@ -64,9 +125,18 @@ fn o8_data_dir() -> PathBuf {
     PathBuf::from(home).join(".o8")
 }
 
-/// Path to the optional STT config file: `~/.o8/dictation.json`.
+/// Path to the optional STT config file: `~/.o8/dictation.json`. Holds non-secret
+/// prefs plus, on platforms without an OS secret store (and for un-migrated legacy
+/// installs), provider secrets — so the native app must never read it directly.
 fn config_path() -> PathBuf {
     o8_data_dir().join("dictation.json")
+}
+
+/// Path to the non-secret voice-preferences store: `~/.o8/voice-prefs.json`
+/// (#5667). Only `VOICE_PREFS_ALLOWLIST` keys are ever written here, so the
+/// native app can read it directly with no possibility of loading a secret.
+fn voice_prefs_path() -> PathBuf {
+    o8_data_dir().join("voice-prefs.json")
 }
 
 /// mtime-keyed cache of `~/.o8/dictation.json`. Unlike the old process-lifetime
@@ -76,22 +146,60 @@ fn config_path() -> PathBuf {
 /// the file is unchanged.
 static CONFIG_CACHE: Mutex<Option<(Option<SystemTime>, serde_json::Value)>> = Mutex::new(None);
 
-/// Load `~/.o8/dictation.json` as a JSON value, reloading on mtime change.
-fn config() -> serde_json::Value {
-    let path = config_path();
-    let current_mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
-    let mut guard = CONFIG_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+/// mtime-keyed cache of `~/.o8/voice-prefs.json`, mirroring `CONFIG_CACHE` so a
+/// write from either surface takes effect on the next read without a relaunch.
+static VOICE_PREFS_CACHE: Mutex<Option<(Option<SystemTime>, serde_json::Value)>> =
+    Mutex::new(None);
+
+/// Read a JSON file into a value, reloading only when its mtime changes. Missing
+/// or unparseable files read as `Null`. Shared by both pref stores.
+fn read_json_cached(
+    path: &std::path::Path,
+    cache: &Mutex<Option<(Option<SystemTime>, serde_json::Value)>>,
+) -> serde_json::Value {
+    let current_mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    let mut guard = cache.lock().unwrap_or_else(|p| p.into_inner());
     if let Some((cached_mtime, value)) = guard.as_ref() {
         if *cached_mtime == current_mtime {
             return value.clone();
         }
     }
-    let value = std::fs::read_to_string(&path)
+    let value = std::fs::read_to_string(path)
         .ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
         .unwrap_or(serde_json::Value::Null);
     *guard = Some((current_mtime, value.clone()));
     value
+}
+
+/// The raw `~/.o8/dictation.json` value, reloading on mtime change.
+fn dictation_config() -> serde_json::Value {
+    read_json_cached(&config_path(), &CONFIG_CACHE)
+}
+
+/// The effective voice-preference view: `dictation.json` as the base, with the
+/// allowlisted non-secret keys from `voice-prefs.json` overlaid on top (#5667).
+/// `voice-prefs.json` is the single source of truth for those keys once the
+/// native app or the settings panel has written them; everything else — provider
+/// secrets, legacy keys — still resolves from `dictation.json`. Only allowlisted
+/// keys are ever pulled from the overlay, so a stray value in `voice-prefs.json`
+/// can never surface a secret through this path.
+fn config() -> serde_json::Value {
+    let base = dictation_config();
+    let overlay = read_json_cached(&voice_prefs_path(), &VOICE_PREFS_CACHE);
+    let Some(overlay_obj) = overlay.as_object() else {
+        return base;
+    };
+    if !overlay_obj.keys().any(|k| is_voice_pref_allowlisted(k)) {
+        return base;
+    }
+    let mut merged = base.as_object().cloned().unwrap_or_default();
+    for key in VOICE_PREFS_ALLOWLIST {
+        if let Some(value) = overlay_obj.get(key) {
+            merged.insert(key.to_string(), value.clone());
+        }
+    }
+    serde_json::Value::Object(merged)
 }
 
 /// Read a string value from `~/.o8/dictation.json`, empty strings filtered out.
@@ -301,10 +409,103 @@ pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
             // behavior here, but the file writer below constrains access.
             obj.insert(key.to_string(), serde_json::Value::String(secret.to_string()));
         }
+    } else if is_voice_pref_allowlisted(key) {
+        // Non-secret and native-visible (#5667): the single source of truth is
+        // voice-prefs.json, which the native app reads directly. Never written
+        // to dictation.json, so classic and native cannot diverge on this key.
+        let mut prefs = read_voice_prefs_object();
+        prefs.insert(key.to_string(), value);
+        return write_voice_prefs_object(prefs);
     } else {
         obj.insert(key.to_string(), value);
     }
     write_config_object(obj)
+}
+
+/// Read `~/.o8/voice-prefs.json` as an object (empty when absent/invalid), for
+/// read-modify-write.
+fn read_voice_prefs_object() -> serde_json::Map<String, serde_json::Value> {
+    std::fs::read_to_string(voice_prefs_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+/// Atomically write the non-secret voice-preferences store at mode 0600: write a
+/// sibling temp file, fsync it, then rename into place. A crash leaves either the
+/// old file or the complete new one, never a truncated file. Drops the cache so
+/// the next read reloads.
+fn write_voice_prefs_object(
+    obj: serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let path = voice_prefs_path();
+    let serialized = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
+        .map_err(|e| e.to_string())?;
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = path.with_extension("json.tmp");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::fs::PermissionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(&tmp)
+            .map_err(|e| format!("open voice-prefs.json.tmp: {e}"))?;
+        file.write_all(serialized.as_bytes())
+            .map_err(|e| format!("write voice-prefs.json.tmp: {e}"))?;
+        file.sync_all()
+            .map_err(|e| format!("sync voice-prefs.json.tmp: {e}"))?;
+        std::fs::rename(&tmp, &path).map_err(|e| format!("rename voice-prefs.json: {e}"))?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("secure voice-prefs.json permissions: {e}"))?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&tmp, serialized.as_bytes())
+            .map_err(|e| format!("write voice-prefs.json.tmp: {e}"))?;
+        std::fs::rename(&tmp, &path).map_err(|e| format!("rename voice-prefs.json: {e}"))?;
+    }
+    if let Ok(mut guard) = VOICE_PREFS_CACHE.lock() {
+        *guard = None;
+    }
+    Ok(())
+}
+
+/// Project the allowlisted non-secret preferences from `dictation.json` into
+/// `voice-prefs.json` so the native app (#5667) sees the operator's existing
+/// settings. Called once at host startup.
+///
+/// Idempotent and non-destructive: only `VOICE_PREFS_ALLOWLIST` keys are copied,
+/// so a secret is structurally never read or written here; a value already in
+/// `voice-prefs.json` (a newer native/panel edit) is NOT overwritten by the older
+/// `dictation.json` copy; and `dictation.json` is left untouched, so rolling back
+/// to an older build still reads its own store.
+pub fn project_voice_prefs() -> Result<(), String> {
+    let base = dictation_config();
+    let Some(base_obj) = base.as_object() else {
+        return Ok(());
+    };
+    let mut prefs = read_voice_prefs_object();
+    let mut changed = false;
+    for key in VOICE_PREFS_ALLOWLIST {
+        if prefs.contains_key(key) {
+            continue; // never clobber a newer overlay value
+        }
+        if let Some(value) = base_obj.get(key) {
+            prefs.insert(key.to_string(), value.clone());
+            changed = true;
+        }
+    }
+    if changed {
+        write_voice_prefs_object(prefs)?;
+    }
+    Ok(())
 }
 
 /// Drop a plaintext secret from `dictation.json` after it was verified in the
@@ -670,5 +871,116 @@ mod public_recovery_tests {
     #[test]
     fn public_read_recovers_object_preferences() {
         check_public_read("object", Some(r#"{"gemini_api_key":" fixture-secret ","groq_api_key":" ","groq_api_key_set":true,"language":"en","reading_speed":1.5}"#));
+    }
+}
+
+#[cfg(test)]
+mod voice_prefs_split_tests {
+    use super::{
+        config, config_public, project_voice_prefs, set_pref, SECRET_PREF_KEYS,
+        VOICE_PREFS_ALLOWLIST,
+    };
+
+    /// The native allowlist must never name a provider secret, and must have no
+    /// duplicate. This is the compile-adjacent guard that keeps the positive
+    /// allowlist from ever overlapping the secret set (a denylist's fail-open
+    /// mode), so projection cannot copy a secret into the native-readable file.
+    #[test]
+    fn allowlist_is_disjoint_from_secrets_and_has_no_duplicates() {
+        for secret in SECRET_PREF_KEYS {
+            assert!(
+                !VOICE_PREFS_ALLOWLIST.contains(&secret),
+                "{secret} is a provider secret and must never be on the native allowlist",
+            );
+        }
+        let mut seen = std::collections::HashSet::new();
+        for key in VOICE_PREFS_ALLOWLIST {
+            assert!(seen.insert(key), "duplicate allowlist key: {key}");
+        }
+    }
+
+    /// Real-path regression for #5667: drive the actual projection, write and read
+    /// paths against a persisted `~/.o8` fixture (isolated in a child process, as
+    /// the pref caches are process-global and not path-keyed). Proves a secret
+    /// never reaches `voice-prefs.json`, an off-allowlist key is not projected,
+    /// an allowlisted write lands in `voice-prefs.json` (not `dictation.json`),
+    /// and the overlay is authoritative while secrets stay redacted.
+    #[test]
+    fn split_keeps_secrets_out_of_voice_prefs_and_makes_overlay_authoritative() {
+        const CHILD: &str = "O8_TEST_VOICE_PREFS_SPLIT_CHILD";
+        if std::env::var(CHILD).as_deref() == Ok("1") {
+            let data_dir = std::path::PathBuf::from(std::env::var_os("O8_DATA_DIR").unwrap());
+            let dictation = data_dir.join("dictation.json");
+            let voice_prefs = data_dir.join("voice-prefs.json");
+            let dictation_before = std::fs::read_to_string(&dictation).unwrap();
+
+            // Projection copies ONLY allowlisted non-secret keys — never the
+            // secret (key or value), never the off-allowlist key — and never
+            // mutates dictation.json.
+            project_voice_prefs().unwrap();
+            let vp_raw = std::fs::read_to_string(&voice_prefs).unwrap();
+            let vp: serde_json::Value = serde_json::from_str(&vp_raw).unwrap();
+            assert_eq!(vp["output_tone"], "formal");
+            assert!(vp.get("gemini_api_key").is_none(), "secret key leaked into voice-prefs.json");
+            assert!(!vp_raw.contains("fixture-secret"), "secret VALUE leaked into voice-prefs.json");
+            assert!(vp.get("language").is_none(), "off-allowlist key was projected");
+            assert_eq!(
+                std::fs::read_to_string(&dictation).unwrap(),
+                dictation_before,
+                "projection must not mutate dictation.json",
+            );
+
+            // An allowlisted write lands in voice-prefs.json, NOT dictation.json.
+            set_pref("output_tone", serde_json::json!("casual")).unwrap();
+            assert!(std::fs::read_to_string(&voice_prefs).unwrap().contains("casual"));
+            let dictation_after = std::fs::read_to_string(&dictation).unwrap();
+            assert!(!dictation_after.contains("casual"), "allowlisted write leaked into dictation.json");
+            assert!(dictation_after.contains("fixture-secret"), "secret must remain in dictation.json");
+
+            // Overlay is authoritative for the allowlisted key; a non-allowlisted
+            // key still resolves from dictation.json; the public read reflects the
+            // overlay and still redacts the secret.
+            assert_eq!(config()["output_tone"], "casual");
+            assert_eq!(config()["language"], "en");
+            let public = config_public();
+            assert_eq!(public["output_tone"], "casual");
+            assert_eq!(public["gemini_api_key_set"], true);
+            assert!(public.get("gemini_api_key").is_none());
+            assert!(!public.to_string().contains("fixture-secret"));
+            return;
+        }
+
+        let dir = std::env::temp_dir().join(format!(
+            "o8-voice-prefs-split-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct RemoveFixture(std::path::PathBuf);
+        impl Drop for RemoveFixture {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let _fixture = RemoveFixture(dir.clone());
+        std::fs::write(
+            dir.join("dictation.json"),
+            br#"{"gemini_api_key":" fixture-secret ","output_tone":"formal","language":"en"}"#,
+        ).unwrap();
+        let module = module_path!().split_once("::").unwrap().1;
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!("{module}::split_keeps_secrets_out_of_voice_prefs_and_makes_overlay_authoritative"),
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("O8_DATA_DIR", &dir)
+            .env("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS", "1")
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "voice-prefs split real-path test failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 }
