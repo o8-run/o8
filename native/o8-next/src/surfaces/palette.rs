@@ -99,7 +99,7 @@ pub(super) fn open_workspaces(shell: &mut Shell, window: &mut Window, cx: &mut C
 }
 /// Whether a focused control keeps Cmd/Ctrl+K. `cmd` is Cmd+K rather than Ctrl+K.
 fn focused_control_owns_keys(shell: &Shell, window: &Window, cx: &App, cmd: bool) -> bool {
-    if shell.focus.is_focused(window) {
+    if shell.focus.is_focused(window) || super::features::panel_chrome_focused(shell, window) {
         return false;
     }
     match shell

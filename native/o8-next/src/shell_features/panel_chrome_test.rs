@@ -594,3 +594,18 @@ fn panel_chrome_shell_card_stop_interrupts_the_run(cx: &mut TestAppContext) {
     assert_eq!((run.state(), run.exit), ("stopped", Some(130)));
     bounds(&mut v, "composer-shell-status-stopped");
 }
+#[gpui::test]
+fn panel_chrome_cmd_k_opens_the_palette_after_closing_the_last_tab(cx: &mut TestAppContext) {
+    // Was #5154: the close leaves focus on New tab (+), which kept Cmd-K.
+    let (_f, s, mut v) = setup(cx);
+    click(&mut v, "panel-tool-devices");
+    click(&mut v, "panel-tab-close-devices");
+    bounds(&mut v, "panel-launcher-more");
+    assert!(!s.read_with(&v, |s, _| s.palette));
+    v.simulate_keystrokes("cmd-k");
+    settle(&mut v);
+    assert!(
+        s.read_with(&v, |s, _| s.palette),
+        "Cmd-K opens the palette from panel chrome"
+    );
+}
