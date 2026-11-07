@@ -74,7 +74,8 @@ export async function runQueuedComposerSteer(item: QueuedComposerSendRecord): Pr
   // A relay owner may already have saved its exact boundary before replying.
   if (item.payload.images.length || !readPersistedLlmChat(item.threadId)?.history.messages.some(message => message.id === `composer-steer-${item.id}`)) appendMobileOrchestratorUserMessage({ tabId: item.threadId, repoPath: item.repoPath, message: item.payload.text,
     ...(item.payload.images.length ? { media: persistComposerImages(item.payload.images) } : {}),
-    messageId: `composer-steer-${item.id}`, backend: item.payload.routing.backend, timestampMs: admittedAt ?? item.createdAt, steerAnchor });
+    messageId: `composer-steer-${item.id}`, backend: item.payload.routing.backend, timestampMs: admittedAt ?? item.createdAt, steerAnchor,
+    mentions: item.payload.mentions });
   settleComposerSend(item.id, { status: 'applied' });
 }
 
@@ -102,7 +103,7 @@ export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hook
     return;
   }
   await runBoundChatContinuation({ repoPath, source: 'user', origin: originFor(item), message: item.payload.wireMessage,
-    displayMessage: item.payload.text, images: item.payload.images, assistantMessageId: `assistant-queued-${item.id}`,
+    displayMessage: item.payload.text, mentions: item.payload.mentions, images: item.payload.images, assistantMessageId: `assistant-queued-${item.id}`,
     serviceTier: item.payload.routing.serviceTier,
     handoff: item.payload.routing.handoffMode === 'handoff',
     collideBaseBackend: originFor(item).backend === 'collide' ? item.payload.routing.backend : undefined,

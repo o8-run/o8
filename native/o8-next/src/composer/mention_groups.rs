@@ -299,17 +299,21 @@ impl super::Composer {
 }
 
 /// A mention as the sent message shows it: the pill's preview card and the
-/// thread a click opens, or else the place it jumps to.
-#[derive(Clone, Debug, PartialEq)]
+/// thread a click opens, or else the place it jumps to. The queue saves it
+/// with the message, so the pill reads the same after a restart.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Sent {
     pub label: String,
     pub title: String,
     pub lines: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jump: Option<Jump>,
 }
 /// Where a sent pill that names no thread goes on click.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "target", rename_all = "lowercase")]
 pub(crate) enum Jump {
     /// The worktree's files.
     Worktree(String),
@@ -378,6 +382,24 @@ impl Sent {
             jump,
         }
     }
+    /// As the queue saves it with the message: a terminal's output stays in
+    /// this window and never goes into the chat's history.
+    pub(crate) fn saved(&self) -> Self {
+        let mut sent = self.clone();
+        if matches!(sent.jump, Some(Jump::Terminal(_))) {
+            sent.lines.clear();
+        }
+        sent
+    }
+}
+/// The pills a user message was saved with, kept so they read as sent.
+pub(crate) fn remember_saved(mentions: Option<&Value>) {
+    let Some(mentions) =
+        mentions.and_then(|mentions| serde_json::from_value::<Vec<Sent>>(mentions.clone()).ok())
+    else {
+        return;
+    };
+    mentions.into_iter().for_each(remember_sent);
 }
 /// A preview shows a terminal's newest lines, at most this many.
 const PREVIEW_LINES: usize = 6;

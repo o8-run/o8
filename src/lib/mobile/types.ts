@@ -373,6 +373,8 @@ export interface MobileTranscriptEntry {
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
   steerAnchor?: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor;
+  /** A user message's pills, as sent. */
+  mentions?: import('@/lib/orchestrator/composer-queue-types').ComposerMention[];
   /** Monotonic server persistence revision for this message. */
   persistedVersion?: number;
   pinned?: boolean;

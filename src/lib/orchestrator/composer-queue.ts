@@ -9,7 +9,7 @@ import { isOrchestratorServiceTier } from './service-tier';
 import { isThinkingEffort } from './thinking-effort';
 import { isComposerWireMode } from './composer-wire';
 import { assertOrchestratorPermissionMode, isOrchestratorPermissionMode } from './permission-mode';
-import { type ComposerQueuePayload, type ComposerQueueTarget, type QueuedComposerSendRecord } from './composer-queue-types';
+import { type ComposerMention, type ComposerQueuePayload, type ComposerQueueTarget, type QueuedComposerSendRecord } from './composer-queue-types';
 import { ensureThreadScratch, threadScratchPath } from './thread-scratch';
 import { compactComposerPayload, composerPayloadHash, withComposerPayloadRemoval } from './composer-queue-ledger';
 
@@ -53,6 +53,28 @@ function noProjectScratch(target: Partial<ComposerQueueTarget> | null, requireSa
   return { repoPath: requireSaved ? ensureThreadScratch(target.threadId) : composerQueueRepoKey(threadScratchPath(target.threadId)), threadId: target.threadId };
 }
 
+const MENTION_KINDS = ['worktree', 'script', 'terminal'];
+const text = (value: unknown, max: number, empty = false): value is string =>
+  typeof value === 'string' && value.length <= max && (empty || value.trim().length > 0);
+
+/** At most 20 pills, each as sent; a terminal pill carries no terminal output. */
+export function validateComposerMentions(input: unknown): ComposerMention[] | undefined {
+  if (input === undefined) return undefined;
+  if (!Array.isArray(input) || input.length > 20) throw new Error('A message carries at most 20 mentions.');
+  return input.map((value) => {
+    const mention = value as Partial<ComposerMention> | null;
+    const jump = mention?.jump;
+    if (!mention || !text(mention.label, 200) || !text(mention.title, 4096)
+      || !Array.isArray(mention.lines) || mention.lines.length > 6 || !mention.lines.every(line => text(line, 400, true))
+      || (mention.open !== undefined && !text(mention.open, 200))
+      || (jump !== undefined && (!jump || !MENTION_KINDS.includes(jump.kind) || !text(jump.target, 4096)))
+      || (jump?.kind === 'terminal' && mention.lines.length > 0)) throw new Error('A mention is malformed.');
+    return { label: mention.label, title: mention.title, lines: [...mention.lines],
+      ...(mention.open !== undefined ? { open: mention.open } : {}),
+      ...(jump ? { jump: { kind: jump.kind, target: jump.target } } : {}) };
+  });
+}
+
 export function validateComposerQueuePayload(input: unknown): ComposerQueuePayload {
   const payload = input as Partial<ComposerQueuePayload> | null;
   const routing = payload?.routing;
@@ -70,7 +92,9 @@ export function validateComposerQueuePayload(input: unknown): ComposerQueuePaylo
     || (routing.pinBackend && routing.collide)) throw new Error('A bound follow-up requires an exact task and runtime.');
   if (routing.handoffMode !== undefined && routing.handoffMode !== 'handoff') throw new Error('Unknown handoff mode.');
   if (images.length && !composerBackendSupportsImages(routing.backend)) throw new Error('The selected runtime cannot receive these images.');
+  const mentions = validateComposerMentions(payload.mentions);
   return { text: payload.text, wireMessage: payload.wireMessage,
+    ...(mentions?.length ? { mentions } : {}),
     ...(payload.afterTaskId ? { afterTaskId: payload.afterTaskId } : {}),
     images: images.map(image => ({ name: image.name ?? 'Image', dataUri: image.dataUri })),
     routing: { backend: routing.backend, model: routing.model, effort: routing.effort,

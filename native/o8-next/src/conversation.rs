@@ -520,6 +520,16 @@ impl Surface {
             Vec::new()
         };
         let sent_mentions = self.sent_mentions(&picks, &objects);
+        // The pills are saved with the message, so a restart still shows them.
+        let mut body = body;
+        if !sent_mentions.is_empty() {
+            body["payload"]["mentions"] = json!(
+                sent_mentions
+                    .iter()
+                    .map(crate::composer::mention::groups::Sent::saved)
+                    .collect::<Vec<_>>()
+            );
+        }
         let context = if picks.is_empty() && objects.is_empty() {
             None
         } else {
