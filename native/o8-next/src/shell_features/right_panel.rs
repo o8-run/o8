@@ -7,6 +7,9 @@ mod chrome;
 mod contextual;
 #[path = "right_panel/layout.rs"]
 mod layout;
+#[cfg(test)]
+#[path = "right_panel/mention_jump_tests.rs"]
+mod mention_jump_tests;
 #[path = "../files_panel/spec_shell.rs"]
 mod notes;
 #[path = "right_panel/resources.rs"]
@@ -376,6 +379,28 @@ fn key(s: &Shell, tool: Tool) -> String {
 }
 
 impl Shell {
+    /// A sent worktree pill: Files for that worktree.
+    pub(crate) fn open_worktree_files(
+        &mut self,
+        root: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        open_files(self, Some(root), window, cx);
+    }
+    /// A sent terminal pill: the panel's Terminal, attached to that session.
+    pub(crate) fn open_terminal_session(
+        &mut self,
+        session: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        show(self, Tool::Terminal, window, cx);
+        if let Some(Content::Terminal(view)) = self.content.get(&key(self, Tool::Terminal)) {
+            view.clone()
+                .update(cx, |view, cx| view.open_target(session, window, cx));
+        }
+    }
     pub(crate) fn open_file_link(
         &mut self,
         path: String,

@@ -280,3 +280,37 @@ fn a_terminal_tail_is_its_newest_lines() {
     assert!(!crate::terminal::open_sessions().contains(&"o8-shell-tail".to_owned()));
     assert_eq!(crate::terminal::tail("o8-shell-tail", 40), None);
 }
+
+#[test]
+fn worktree_script_and_terminal_pills_jump_and_threads_open() {
+    use super::{Jump, script_line};
+    let worktree = Sent::object(&Mentioned::Worktree {
+        label: "feature".into(),
+        path: "/repo/.worktrees/feature".into(),
+        branch: None,
+    });
+    assert_eq!(
+        worktree.jump,
+        Some(Jump::Worktree("/repo/.worktrees/feature".into()))
+    );
+    let script = Sent::object(&Mentioned::Script {
+        name: "test:unit".into(),
+        command: "vitest".into(),
+    });
+    assert_eq!(script.jump, Some(Jump::Script("test:unit".into())));
+    let agent = Sent::object(&Mentioned::Agent {
+        id: "a".into(),
+        label: "Fix".into(),
+        status: "Working".into(),
+        activity: String::new(),
+        session: Some("thoughts-a".into()),
+    });
+    assert_eq!(agent.jump, None);
+    assert_eq!(Sent::thread("T", "thoughts-t", "idle", None).jump, None);
+    let package = "{\n  \"test\": \"top-level\",\n  \"scripts\": {\n    \"build\": \"tsc\",\n    \"test:unit\" : \"vitest\"\n  },\n  \"other\": {\"lint\": 1}\n}\n";
+    assert_eq!(script_line(package, "test:unit"), Some(5));
+    assert_eq!(script_line(package, "build"), Some(4));
+    // Keys outside `scripts` are not scripts.
+    assert_eq!(script_line(package, "test"), None);
+    assert_eq!(script_line(package, "lint"), None);
+}

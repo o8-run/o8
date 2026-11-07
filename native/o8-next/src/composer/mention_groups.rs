@@ -299,13 +299,24 @@ impl super::Composer {
 }
 
 /// A mention as the sent message shows it: the pill's preview card and the
-/// thread a click opens.
+/// thread a click opens, or else the place it jumps to.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Sent {
     pub label: String,
     pub title: String,
     pub lines: Vec<String>,
     pub open: Option<String>,
+    pub jump: Option<Jump>,
+}
+/// Where a sent pill that names no thread goes on click.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Jump {
+    /// The worktree's files.
+    Worktree(String),
+    /// The script's line in the project's package.json.
+    Script(String),
+    /// The terminal itself.
+    Terminal(String),
 }
 impl Sent {
     pub(crate) fn thread(title: &str, id: &str, status: &str, branch: Option<&str>) -> Self {
@@ -316,9 +327,16 @@ impl Sent {
             title: title.into(),
             lines,
             open: Some(id.into()),
+            jump: None,
         }
     }
     pub(crate) fn object(object: &Mentioned) -> Self {
+        let jump = match object {
+            Mentioned::Agent { .. } => None,
+            Mentioned::Worktree { path, .. } => Some(Jump::Worktree(path.clone())),
+            Mentioned::Script { name, .. } => Some(Jump::Script(name.clone())),
+            Mentioned::Terminal { session, .. } => Some(Jump::Terminal(session.clone())),
+        };
         let (title, lines, open) = match object {
             Mentioned::Agent {
                 label,
@@ -357,6 +375,7 @@ impl Sent {
                 .map(|line| trimmed(&line, 160))
                 .collect(),
             open,
+            jump,
         }
     }
 }
@@ -391,6 +410,31 @@ pub(crate) fn sent_preview(url: &str) -> Option<(String, Vec<String>)> {
 /// The thread link a sent pill opens, for the transcript's link action.
 pub(crate) fn sent_link(url: &str) -> Option<String> {
     sent(url)?.open.map(|thread| crate::lineage::link(&thread))
+}
+/// Where a sent worktree, script or terminal pill jumps.
+pub(crate) fn sent_jump(url: &str) -> Option<Jump> {
+    sent(url).filter(|sent| sent.open.is_none())?.jump
+}
+/// The 1-based line of `name` under package.json's `scripts`, for a script
+/// pill's jump; the file's top when the script is not found.
+pub(crate) fn script_line(package: &str, name: &str) -> Option<usize> {
+    let key = format!("{:?}", name);
+    let mut scripts = false;
+    for (index, line) in package.lines().enumerate() {
+        let line = line.trim_start();
+        if line.starts_with("\"scripts\"") {
+            scripts = true;
+        } else if scripts && line.starts_with('}') {
+            return None;
+        } else if scripts
+            && line
+                .strip_prefix(&key)
+                .is_some_and(|rest| rest.trim_start().starts_with(':'))
+        {
+            return Some(index + 1);
+        }
+    }
+    None
 }
 /// A user message's sent mentions read as pills; its words stay as typed.
 pub(crate) fn pill_nodes(nodes: &mut [Node]) {
