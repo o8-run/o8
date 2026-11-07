@@ -11,6 +11,7 @@ import { attachReplaySocket } from './replay-socket';
 import { isolateTranscriptDiscovery, seedTranscriptFixtures } from './transcript-fixtures';
 import { attachTranscriptSocket } from './transcript-socket';
 import { startTerminalFixture } from './terminal-fixture';
+import { prepareCliShim } from './cli-shim';
 import { surfaceEntries, type SurfaceContext, type SurfaceRoutes } from './surface-routes';
 
 async function main() {
@@ -127,6 +128,8 @@ async function main() {
     } catch { res.writeHead(500).end('fixture route failed'); }
   });
   const terminal = process.argv.includes('--terminal');
+  // Terminal shells run stand-ins, never the machine's provider CLIs.
+  const cliShim = terminal && process.argv.includes('--cli-shim') ? prepareCliShim(dataDir) : undefined;
   const wsToken = getOrCreateWsToken();
   const surfaceSocket = surfaces.find(surface => surface.socket)?.socket;
   const closeSockets = terminal ? () => {}
@@ -137,7 +140,7 @@ async function main() {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing fixture port');
     Object.assign(process.env, { O8_WS_PORT:String(address.port), WS_PORT:String(address.port), O8_API_PORT:String(address.port) });
-    const peer = terminal ? await startTerminalFixture(dataDir, repo, address.port, wsToken) : null;
+    const peer = terminal ? await startTerminalFixture(dataDir, repo, address.port, wsToken, undefined, cliShim) : null;
     if (peer) {
       closeTerminal = peer.close;
       process.env.O8_WS_PORT = String(peer.port); process.env.WS_PORT = String(peer.port);
@@ -149,7 +152,7 @@ async function main() {
     }
     process.stdout.write(`${JSON.stringify({ origin: `http://127.0.0.1:${address.port}`,
       ...Object.assign({}, ...surfaces.map(surface => surface.receipt)),
-      ...(peer ? { terminalSession: peer.sessionName } : {}) })}\n`);
+      ...(peer ? { terminalSession: peer.sessionName } : {}), ...(cliShim ? { cliShim: cliShim.bin } : {}) })}\n`);
   });
   let closing = false;
   async function close() {

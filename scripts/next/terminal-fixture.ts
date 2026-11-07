@@ -4,8 +4,9 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
+import { cliShimEnvironment, type CliShim } from './cli-shim';
 
-export async function startTerminalFixture(dataDir: string, repo: string, apiPort: number, token: string, sessionNames = ['cortex-next-terminal-fixture']) {
+export async function startTerminalFixture(dataDir: string, repo: string, apiPort: number, token: string, sessionNames = ['cortex-next-terminal-fixture'], cliShim?: CliShim) {
   const reservation = createServer();
   await new Promise<void>(ready => reservation.listen(0, '127.0.0.1', ready));
   const address = reservation.address();
@@ -18,7 +19,7 @@ export async function startTerminalFixture(dataDir: string, repo: string, apiPor
       CORTEX_IDE_DB_PATH: join(dataDir, 'fixture.db'), CORTEX_IDE_REVIEW_REPO_ROOT: repo,
       O8_WS_PORT: String(port), WS_PORT: String(port), O8_API_PORT: String(apiPort),
       NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`, O8_PERSISTENT_TERMINALS: '0',
-      O8_TERMINAL_HOST: 'inline', WS_TOKEN: token },
+      O8_TERMINAL_HOST: 'inline', WS_TOKEN: token, ...(cliShim ? cliShimEnvironment(cliShim) : {}) },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout.resume(); child.stderr.resume();
