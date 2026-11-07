@@ -1,4 +1,6 @@
 //! Inline transcript documents. The host never exposes application requests to HTML.
+#[cfg(any(target_os = "macos", test))]
+mod cover;
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "linux")]
@@ -10,6 +12,8 @@ mod linux_protocol;
 mod linux_tests;
 #[cfg(test)]
 mod load_tests;
+#[cfg(any(target_os = "macos", test))]
+pub use cover::uncovered;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod protocol;
@@ -330,53 +334,6 @@ fn document(client: &Client, reference: &Reference, nonce: &str) -> Result<Strin
         .filter(|html| html.len() <= 12 * 1024 * 1024)
         .map(str::to_owned)
         .ok_or_else(|| UNAVAILABLE.into())
-}
-/// The parts of `visible` that no `covered` region paints over.
-#[cfg(any(target_os = "macos", test))]
-pub fn uncovered(
-    visible: gpui::Bounds<gpui::Pixels>,
-    covered: &[gpui::Bounds<gpui::Pixels>],
-) -> Vec<gpui::Bounds<gpui::Pixels>> {
-    use gpui::{Bounds, point};
-    let mut parts = vec![visible];
-    for cover in covered {
-        parts = parts
-            .into_iter()
-            .flat_map(|part| {
-                let overlap = part.intersect(cover);
-                if overlap.is_empty() {
-                    return vec![part];
-                }
-                let mut rest = vec![];
-                if overlap.top() > part.top() {
-                    rest.push(Bounds::from_corners(
-                        part.origin,
-                        point(part.right(), overlap.top()),
-                    ));
-                }
-                if overlap.bottom() < part.bottom() {
-                    rest.push(Bounds::from_corners(
-                        point(part.left(), overlap.bottom()),
-                        part.bottom_right(),
-                    ));
-                }
-                if overlap.left() > part.left() {
-                    rest.push(Bounds::from_corners(
-                        point(part.left(), overlap.top()),
-                        point(overlap.left(), overlap.bottom()),
-                    ));
-                }
-                if overlap.right() < part.right() {
-                    rest.push(Bounds::from_corners(
-                        point(overlap.right(), overlap.top()),
-                        point(part.right(), overlap.bottom()),
-                    ));
-                }
-                rest
-            })
-            .collect();
-    }
-    parts
 }
 // GPUI retains this lease with the rendered element state, including cached scenes.
 // Removing the card, tab, pane or window drops the lease and hides its native pixels.

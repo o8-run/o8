@@ -1,10 +1,15 @@
 //! Private fixture-runner executable. Exercises the production WebKit host on its main thread.
 #[cfg(target_os = "macos")]
+#[path = "../src/visualizations/cover.rs"]
+mod cover;
+#[cfg(target_os = "macos")]
 #[path = "../src/visualizations/macos.rs"]
 mod macos;
 #[cfg(target_os = "macos")]
 #[path = "../src/visualizations/protocol.rs"]
 mod protocol;
+#[cfg(target_os = "macos")]
+use cover::uncovered;
 #[cfg(target_os = "macos")]
 fn main() {
     use cocoa::{
