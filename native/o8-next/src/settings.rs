@@ -118,6 +118,12 @@ struct Editor {
     input: Input,
 }
 pub(crate) struct Close;
+/// The Voice tab's parts: classic's Voice settings, then the voice window's tabs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum VoicePanel {
+    Attention,
+    History,
+}
 pub(crate) enum Action {
     Appearance(String),
     Shortcuts,
@@ -134,6 +140,10 @@ pub(crate) struct Settings {
     pub machines: Option<gpui::AnyView>,
     pub mcp: Option<gpui::AnyView>,
     pub mobile: Option<Entity<crate::shell::settings::mobile::Mobile>>,
+    /// Voice › History, from the desktop voice window.
+    pub voice_history: Option<Entity<crate::shell::settings::voice_history::VoiceHistory>>,
+    /// Which part of the Voice tab is open.
+    pub voice_panel: VoicePanel,
     section: &'static str,
     search: Entity<Composer>,
     editor: Option<Editor>,
@@ -202,6 +212,8 @@ impl Settings {
             mcp: None,
             mobile: None,
             machines: None,
+            voice_history: None,
+            voice_panel: VoicePanel::Attention,
             section: "general",
             search,
             editor: None,
@@ -422,6 +434,7 @@ impl Settings {
         self.conflict = false;
         self.navigation.remember(section);
         self.section = section;
+        self.voice_panel = VoicePanel::Attention;
         self.search.update(cx, |s, cx| s.clear(cx));
         self.scroll
             .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
@@ -447,6 +460,22 @@ impl Settings {
         if self.section == "indexing" {
             self.load_indexing(force, cx);
         }
+        if self.section == "voice" && self.voice_panel == VoicePanel::History {
+            if let Some(history) = &self.voice_history {
+                history.update(cx, |history, cx| history.load(cx));
+            }
+        }
+    }
+    /// Opens one part of the Voice tab; History rereads its file on the way in.
+    pub(crate) fn show_voice_panel(&mut self, panel: VoicePanel, cx: &mut Context<Self>) {
+        if self.busy {
+            return;
+        }
+        self.voice_panel = panel;
+        self.scroll
+            .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
+        self.load_panel(false, cx);
+        self.changed(cx);
     }
     fn locked(&self, field: &Field) -> bool {
         self.busy
@@ -657,6 +686,10 @@ mod navigation;
 
 #[path = "settings_nav_groups.rs"]
 mod nav_groups;
+
+#[cfg(test)]
+#[path = "settings_voice_history_tests.rs"]
+mod voice_history_tests;
 
 #[path = "settings_bots.rs"]
 mod bots;

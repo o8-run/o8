@@ -55,6 +55,10 @@ const PANEL_GROUPS: &[(&str, &[&str])] = &[
     ("mobile", &["Remote access", "Pairing", "Paired devices"]),
 ];
 
+/// Parts of a tab that open in place of its fields, listed after them.
+pub(super) const VOICE_HISTORY: &str = "History";
+const TRAILING_PANELS: &[(&str, &[&str])] = &[("voice", &[VOICE_HISTORY])];
+
 /// The headings a tab's page shows, in page order.
 pub(super) fn groups_of(section: &str) -> Vec<&'static str> {
     let mut groups: Vec<&'static str> = PANEL_GROUPS
@@ -65,6 +69,9 @@ pub(super) fn groups_of(section: &str) -> Vec<&'static str> {
         if !groups.contains(&field.group()) {
             groups.push(field.group());
         }
+    }
+    if let Some((_, trailing)) = TRAILING_PANELS.iter().find(|(id, _)| *id == section) {
+        groups.extend_from_slice(trailing);
     }
     groups
 }
@@ -300,7 +307,14 @@ impl Settings {
     ) {
         self.close_flyout(cx);
         self.select(id, cx);
-        if let Some(field) = fields().find(|f| f.section == id && f.group() == group) {
+        if id == "voice" && group == VOICE_HISTORY {
+            // select() has just started reading settings, so it's busy; the
+            // panel switch reads only the local file and needs no wait.
+            if self.section == "voice" {
+                self.voice_panel = VoicePanel::History;
+                self.load_panel(false, cx);
+            }
+        } else if let Some(field) = fields().find(|f| f.section == id && f.group() == group) {
             self.navigation.aim_group(field.id);
         }
         self.focus.focus(window);

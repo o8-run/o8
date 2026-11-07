@@ -95,6 +95,9 @@ impl Shell {
         settings.update(cx, |s, _| s.mcp = Some(mcp.into()));
         let mobile = cx.new(|cx| mobile::Mobile::new(self.client.clone(), cx));
         settings.update(cx, |s, _| s.mobile = Some(mobile));
+        let history = cx
+            .new(|cx| voice_history::VoiceHistory::new(voice_history::history_path(), window, cx));
+        settings.update(cx, |s, _| s.voice_history = Some(history));
         self.surfaces.settings.view = Some(settings);
         self.revision += 1;
         cx.notify();
@@ -209,6 +212,9 @@ pub(crate) mod mcp;
 pub(crate) mod mobile;
 #[path = "settings/machine_links.rs"]
 pub(crate) mod machine_links;
+// Settings › Voice › History reads the desktop recorder's file on this Mac.
+#[path = "settings/voice_history.rs"]
+pub(crate) mod voice_history;
 
 #[cfg(test)]
 #[path = "settings_shell_tests.rs"]
