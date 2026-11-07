@@ -15,8 +15,8 @@ use crate::theme::current as theme;
 use gpui::{AnyElement, div, px};
 
 /// How long a created thread may take to reach the catalog before New
-/// gives up opening it.
-const PENDING_OPEN_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+/// gives up opening it: as long as a catalog load may take.
+const PENDING_OPEN_TTL: std::time::Duration = crate::client::LOAD_REQUEST_TIMEOUT;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum View {
