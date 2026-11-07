@@ -165,10 +165,20 @@ export function flushTimingBuffer(): void {
 /** No cached hydrate: a native reader sees samples recorded after its first GET. */
 export function readTimingBuffer(): RecallTimingSample[] {
   if (!existsSync(databasePath())) return loadFromDisk();
+  const path = databasePath();
   let database: Database.Database | undefined;
   try {
-    database = new Database(databasePath(), { readonly: true, fileMustExist: true });
-    database.pragma('busy_timeout = 1000');
+    if (existsSync(`${path}-wal`)) {
+      // A live writer already holds the -wal/-shm pair, so this adds no files.
+      database = new Database(path, { readonly: true, fileMustExist: true });
+      database.pragma('busy_timeout = 1000');
+    } else {
+      // No writer: read a copy so a GET never creates -wal/-shm, even in a
+      // read-only data dir. Deserializing needs the rollback header bytes.
+      const bytes = readFileSync(path);
+      if (bytes.length >= 100) bytes[18] = bytes[19] = 1;
+      database = new Database(bytes, { readonly: true });
+    }
     return readSamples(database);
   } catch {
     return [];

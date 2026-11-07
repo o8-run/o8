@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it, vi } from 'vitest';
@@ -255,6 +255,36 @@ it('records 1000 timings with a cached WAL writer, bounded cost and at most 1000
     vi.stubEnv('O8_DATA_DIR', directory);
     vi.stubEnv('CORTEX_IDE_DB_PATH', join(directory, 'cortex-ide.db'));
     rmSync(timings, { recursive: true, force: true });
+  }
+});
+
+it('a timings GET with no live writer creates no -wal/-shm and reads from a read-only dir', async () => {
+  const warm = join(directory, 'warm-timings');
+  mkdirSync(warm);
+  // Another process recorded these timings in WAL mode and has exited cleanly.
+  const previous = new Database(join(warm, 'recall-metrics.db'));
+  previous.pragma('journal_mode = WAL');
+  previous.exec('CREATE TABLE samples (id INTEGER PRIMARY KEY, label TEXT, duration_ms REAL, timestamp REAL, errored INTEGER)');
+  previous.prepare('INSERT INTO samples (label, duration_ms, timestamp, errored) VALUES (?, ?, ?, 0)').run('fixture.warm-read', 41, Date.now());
+  previous.close();
+  vi.stubEnv('O8_DATA_DIR', warm);
+  vi.stubEnv('CORTEX_IDE_DB_PATH', join(warm, 'cortex-ide.db'));
+  try {
+    const before = readdirSync(warm).sort();
+    expect(before).toEqual(['recall-metrics.db']);
+    const bytes = readFileSync(join(warm, 'recall-metrics.db'));
+    expect((await (await diagnostics.GET()).json()).timing).toMatchObject({ totalSamples: 1, p95Ms: 41 });
+    expect(readdirSync(warm).sort(), 'a timings GET must not create -wal/-shm beside the DB').toEqual(before);
+    expect(readFileSync(join(warm, 'recall-metrics.db')).equals(bytes)).toBe(true);
+    chmodSync(warm, 0o555);
+    try {
+      expect((await (await diagnostics.GET()).json()).timing, 'a read-only data dir still reports its samples')
+        .toMatchObject({ totalSamples: 1 });
+    } finally { chmodSync(warm, 0o755); }
+  } finally {
+    vi.stubEnv('O8_DATA_DIR', directory);
+    vi.stubEnv('CORTEX_IDE_DB_PATH', join(directory, 'cortex-ide.db'));
+    rmSync(warm, { recursive: true, force: true });
   }
 });
 
