@@ -24,7 +24,7 @@ Hand out several pieces of work, look away, and come back to a readable account 
 |---|---|
 | macOS 14+ | Signed, auto-updating universal installer: [download](https://o8.run/download) |
 | Linux | Preview packages (AppImage, DEB, RPM) from 0.1.810 on [Releases](https://github.com/o8-run/o8/releases/tag/v0.1.810), or [run from source](#linux). Full Linux support is [in progress](https://github.com/o8-run/o8/issues/1672). |
-| Windows | Not yet. [Help wanted](./ROADMAP.md). |
+| Windows | An early x64 preview (0.1.664, August 2026) is on [Releases](https://github.com/o8-run/o8/releases/tag/v0.1.664). A Windows build of the current app is in progress. |
 
 ## What happens when you dispatch
 
@@ -112,7 +112,7 @@ Each desktop update check sends a random device identifier, app version, target,
 
 ## Free and open source
 
-o8 is MIT licensed and free, and there is nothing to buy. The agents run on your own subscriptions or API keys, and you can use o8 without an account. A few hosted features from the old paid plan (managed inference, off-network phone relay and live voice) still check for its license until they are removed.
+o8 is MIT licensed and free, and there is nothing to buy. The agents run on your own subscriptions or API keys, and you can use o8 without an account.
 
 ## Voice
 

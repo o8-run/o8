@@ -112,9 +112,9 @@ These pillars are what o8 is. They don't change month to month. Each open arc li
 
 | Platform | State | Detail |
 | --- | --- | --- |
-| macOS (Apple Silicon) | supported | Signed and notarized; o8 next is the only window since 0.1.815. An installed run on physical Apple Silicon is still unverified. Intel delivery stays off until Intel acceptance passes |
+| macOS | supported | One universal build (x86_64 and arm64), signed and notarized; o8 next is the only window since 0.1.815. It runs installed on Intel every day; an installed run on physical Apple Silicon is still unverified |
 | Linux (Ubuntu) | active | The o8 next GPUI app and packages are in progress; install-to-merge proof is open in [#1672](https://github.com/o8-run/o8/issues/1672) |
-| Windows | parked, help wanted | Port audit with file-and-line evidence in `docs/internals/port-audit-windows.md`; tracked in [#2204](https://github.com/o8-run/o8/issues/2204) |
+| Windows | active | An x64 preview of the older shell (0.1.664) is on Releases. Compiling o8 next on Windows is measured in [#5649](https://github.com/o8-run/o8/pull/5649); port audit in `docs/internals/port-audit-windows.md`; tracked in [#2204](https://github.com/o8-run/o8/issues/2204) |
 
 ### Speed targets
 
