@@ -18,6 +18,7 @@ mod new_project;
 
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
+    reveal(cx, selector);
     let bounds = cx
         .debug_bounds(selector)
         .unwrap_or_else(|| panic!("missing control: {selector}"));
@@ -140,7 +141,26 @@ fn onboarding_project_tools_privacy_and_workspace(cx: &mut TestAppContext) {
     click(cx, "setup-worker-claude-code");
     click(cx, "setup-use");
     assert!(cx.debug_bounds("setup-privacy").is_some());
+    // As on the desktop, saving waits for a crash-report choice, and the
+    // usage analytics choice is saved as soon as it changes.
+    click(cx, "setup-consent");
+    assert!(
+        cx.debug_bounds("setup-privacy").is_some(),
+        "no crash choice yet"
+    );
     click(cx, "setup-telemetry");
+    let usage: Value = fixture
+        .client
+        .get("/api/panel/operator-defaults", &[("include", "values")])
+        .unwrap();
+    assert_eq!(usage["values"]["productTelemetryEnabled"], false);
+    assert_ne!(usage["values"]["telemetryConsentAnswered"], true);
+    scroll_privacy(cx);
+    assert!(cx.debug_bounds("setup-crash-sample-payload").is_none());
+    click(cx, "setup-crash-sample");
+    assert!(cx.debug_bounds("setup-crash-sample-payload").is_some());
+    scroll_privacy(cx);
+    click(cx, "setup-crashes-share");
     click(cx, "setup-consent");
     cx.run_until_parked();
     draw(cx);
@@ -153,8 +173,8 @@ fn onboarding_project_tools_privacy_and_workspace(cx: &mut TestAppContext) {
         saved["values"]["workerRuntimes"],
         json!(["codex", "claude-code"])
     );
-    assert_eq!(saved["values"]["productTelemetryEnabled"], true);
-    assert_eq!(saved["values"]["crashReportsEnabled"], false);
+    assert_eq!(saved["values"]["productTelemetryEnabled"], false);
+    assert_eq!(saved["values"]["crashReportsEnabled"], true);
     assert_eq!(saved["values"]["telemetryConsentAnswered"], true);
     let config: Value = fixture.client.get("/api/setup/config", &[]).unwrap();
     assert_eq!(config["setupComplete"], true);
@@ -245,6 +265,8 @@ fn onboarding_opencode_keeps_selected_model_for_first_send(cx: &mut TestAppConte
     click(cx, "setup-refresh");
     click(cx, "setup-lead-opencode");
     click(cx, "setup-use");
+    scroll_privacy(cx);
+    click(cx, "setup-crashes-off");
     click(cx, "setup-consent");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
     let session = shell.read_with(cx, |s, _| {
@@ -358,4 +380,50 @@ fn onboarding_operator_auth_error_retry(cx: &mut TestAppContext) {
     click(cx, "setup-refresh");
     assert!(cx.debug_bounds("setup-error").is_some());
     assert!(cx.debug_bounds("setup-project-0").is_none());
+}
+
+/// Scroll the privacy choices to their end, where the crash-report choice
+/// sits, as a person would before choosing.
+pub(super) fn scroll_privacy(cx: &mut VisualTestContext) {
+    draw(cx);
+    let bounds = cx
+        .debug_bounds("setup-privacy-scroll")
+        .expect("privacy choices");
+    cx.simulate_event(gpui::ScrollWheelEvent {
+        position: bounds.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-5000.))),
+        ..Default::default()
+    });
+    cx.run_until_parked();
+    draw(cx);
+}
+
+/// Scroll setup's page until a control is inside the window, as a person
+/// would before clicking it. Setup pages taller than the window scroll.
+fn reveal(cx: &mut VisualTestContext, selector: &'static str) {
+    for _ in 0..4 {
+        let (Some(window), Some(target), Some(page)) = (
+            cx.debug_bounds("setup-window"),
+            cx.debug_bounds(selector),
+            cx.debug_bounds("setup-content"),
+        ) else {
+            return;
+        };
+        let below = target.bottom() - window.bottom() + gpui::px(48.);
+        let above = window.top() + gpui::px(52.) - target.top();
+        let delta = if below > gpui::px(0.) {
+            -below
+        } else if above > gpui::px(0.) {
+            above
+        } else {
+            return;
+        };
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: page.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), delta)),
+            ..Default::default()
+        });
+        cx.run_until_parked();
+        draw(cx);
+    }
 }

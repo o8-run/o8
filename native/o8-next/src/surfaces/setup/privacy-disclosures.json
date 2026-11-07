@@ -1,0 +1,42 @@
+{
+  "events": [
+    {
+      "event": "app.opened",
+      "fields": "no properties"
+    },
+    {
+      "event": "brain.asked",
+      "fields": "no properties"
+    },
+    {
+      "event": "orchestrator.message",
+      "fields": "no properties"
+    },
+    {
+      "event": "dispatch.started",
+      "fields": "runtime — known worker-runtime enum"
+    },
+    {
+      "event": "merge.approved",
+      "fields": "runtime — known worker-runtime enum; pushed — boolean"
+    },
+    {
+      "event": "repo.added",
+      "fields": "hasRemote — boolean; isGitRepo — boolean"
+    },
+    {
+      "event": "worker.first_launched",
+      "fields": "no properties"
+    },
+    {
+      "event": "merge.first_completed",
+      "fields": "no properties"
+    },
+    {
+      "event": "session.ended",
+      "fields": "clean — boolean"
+    }
+  ],
+  "examplePayload": "{\n  \"event\": \"repo.added\",\n  \"props\": {\n    \"hasRemote\": true,\n    \"isGitRepo\": true\n  }\n}",
+  "crashSample": "{\n  \"message\": \"TypeError: lane state was unavailable at /Users/…/private-repo/src/app.tsx\",\n  \"exception\": {\n    \"values\": [\n      {\n        \"value\": \"Cannot resume lane from /Users/…/private-repo/src/lib/lane/commands.ts\",\n        \"stacktrace\": {\n          \"frames\": [\n            {\n              \"filename\": \"/Users/…/private-repo/src/lib/lane/commands.ts\",\n              \"abs_path\": \"/Users/…/private-repo/src/lib/lane/commands.ts\",\n              \"function\": \"resumeLane\",\n              \"module\": \"lane.commands\"\n            }\n          ]\n        }\n      }\n    ]\n  },\n  \"request\": {\n    \"url\": \"http://127.0.0.1:47120/api/lane/resume\"\n  },\n  \"breadcrumbs\": [\n    {\n      \"message\": \"clicked resume\",\n      \"data\": {\n        \"count\": 1\n      }\n    }\n  ],\n  \"extra\": {\n    \"surface\": \"orchestrator\"\n  },\n  \"tags\": {\n    \"app_version\": \"0.1.x\",\n    \"plan\": \"free\",\n    \"founder\": false,\n    \"surface\": \"webview\"\n  }\n}"
+}

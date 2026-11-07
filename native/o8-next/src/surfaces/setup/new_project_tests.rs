@@ -1,5 +1,5 @@
 //! New project and no-project threads through the production setup routes.
-use super::click;
+use super::{click, scroll_privacy};
 use crate::shell::test_support::*;
 use crate::shell::*;
 
@@ -104,6 +104,8 @@ fn setup_new_project_states_create_register_and_open(cx: &mut TestAppContext) {
     // A fresh machine still connects tools and answers privacy before the first thread.
     assert_eq!(page(&shell, cx), Some("tools"));
     connect_tools(cx);
+    scroll_privacy(cx);
+    click(cx, "setup-crashes-off");
     click(cx, "setup-consent");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
     assert_eq!(
@@ -131,6 +133,8 @@ fn setup_without_project_opens_a_thread_that_sends(cx: &mut TestAppContext) {
     connect_tools(cx);
     assert_eq!(page(&shell, cx), Some("projects"));
     click(cx, "setup-explore");
+    scroll_privacy(cx);
+    click(cx, "setup-crashes-off");
     click(cx, "setup-consent");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
     // Home is the one place for work without a project (#5611): the first

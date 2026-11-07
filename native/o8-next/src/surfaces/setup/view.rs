@@ -18,13 +18,19 @@ use std::{
 
 #[path = "frame.rs"]
 mod frame;
+#[path = "home.rs"]
+mod home;
 #[path = "import.rs"]
 mod import;
 #[cfg(test)]
 #[path = "view_lifecycle_tests.rs"]
 mod lifecycle_tests;
+#[path = "look.rs"]
+mod look;
 #[path = "new_project.rs"]
 mod new_project;
+#[path = "privacy.rs"]
+mod privacy;
 #[path = "progress.rs"]
 mod progress;
 #[path = "sound.rs"]
@@ -138,8 +144,12 @@ pub struct Setup {
     session_id: String,
     busy: bool,
     error: Option<String>,
-    telemetry: bool,
-    crashes: bool,
+    /// Usage analytics: None until chosen, which the server reads as on.
+    telemetry: Option<bool>,
+    /// Crash reports: None until the person chooses, as on the desktop.
+    crashes: Option<bool>,
+    /// Whether the sample crash report is shown.
+    crash_sample: bool,
     /// Saved with progress, as on the desktop.
     tools_configured: bool,
     task: String,
@@ -157,6 +167,8 @@ enum Action {
     Create(Value),
     Import(Vec<String>),
     Use,
+    /// Save the usage analytics choice as soon as it changes.
+    Usage(bool),
     Consent,
 }
 struct ResultState {
@@ -237,8 +249,9 @@ impl Setup {
             ),
             busy: false,
             error: None,
-            telemetry: false,
-            crashes: false,
+            telemetry: None,
+            crashes: None,
+            crash_sample: false,
             tools_configured: resume.tools_configured,
             task: resume.task,
             saved: saved.cloned(),
@@ -322,7 +335,12 @@ impl Setup {
                         else { target = Step::Privacy; }
                     } else { target = Step::Projects; }
                 }
+                Action::Usage(enabled) => {
+                    let response = client.setup_request("POST", "/api/panel/operator-defaults", &json!({"productTelemetryEnabled":enabled}))?;
+                    if response["values"]["productTelemetryEnabled"] != enabled { return Err("Your usage choice could not be saved.".into()); }
+                }
                 Action::Consent => {
+                    let crashes = crashes.ok_or("Choose whether to share crash reports to continue.")?;
                     let response = client.setup_request("POST", "/api/panel/operator-defaults", &json!({"productTelemetryEnabled":telemetry,"crashReportsEnabled":crashes,"telemetryConsentAnswered":true}))?;
                     if response["values"]["telemetryConsentAnswered"] != true { return Err("Privacy choices could not be confirmed. Try again.".into()); }
                     finish = true;
@@ -342,6 +360,12 @@ impl Setup {
                             this.model.update(cx, |model, cx| model.clear(cx));
                         }
                         (this.backend, this.workers) = result.snapshot.recommendation();
+                        // Privacy opens with any earlier choices, as on the desktop.
+                        if result.step == Step::Privacy
+                            && (this.step != Step::Privacy || this.snapshot.is_none())
+                        {
+                            this.privacy_choices(&result.snapshot.setup["values"]);
+                        }
                         this.snapshot = Some(result.snapshot);
                         this.project = result.project;
                         this.step = result.step;
@@ -486,6 +510,13 @@ impl Setup {
         client.setup_request("POST", "/api/setup/config", &completion)?;
         Ok(session)
     }
+    /// Earlier choices: usage analytics when one was saved, and crash
+    /// reports only when the combined choice was answered.
+    fn privacy_choices(&mut self, values: &Value) {
+        let answered = values["telemetryConsentAnswered"] == true;
+        self.telemetry = values["productTelemetryEnabled"].as_bool();
+        self.crashes = values["crashReportsEnabled"].as_bool().filter(|_| answered);
+    }
     fn navigate(&mut self, step: Step, cx: &mut Context<Self>) {
         if self.busy {
             return;
@@ -551,39 +582,17 @@ impl Setup {
         }
     }
 }
-/// Controls that chime advance; the rest tick. On the desktop only the
-/// optional voice and iPhone offers and the permissions Continue chime, and
-/// those pages come later, so every setup control ticks for now.
-const ADVANCE: [&str; 0] = [];
+/// A bordered setup control (`onboardingButtonStyle`).
 fn control(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Stateful<gpui::Div> {
-    let selector = id.to_owned();
-    let cue = if ADVANCE
-        .iter()
-        .any(|advance| id == *advance || (advance.ends_with('-') && id.starts_with(advance)))
-    {
-        sound::Cue::Advance
-    } else {
-        sound::Cue::Tick
-    };
-    div()
-        .id(SharedString::from(id.to_owned()))
-        .debug_selector(move || selector.clone())
-        .p(px(8.))
-        .rounded(px(6.))
-        .bg(theme().surface_raised)
-        .border_1()
-        .border_color(theme().border)
-        .opacity(if enabled { 1. } else { 0.45 })
-        .when(enabled, |v| v.cursor_pointer())
-        // A pointer click on an enabled control cues before its own action.
-        .when(enabled, |v| {
-            v.on_click(move |event, _, _| {
-                if !event.is_keyboard() {
-                    sound::play(cue);
-                }
-            })
-        })
-        .child(label.into())
+    look::button(id, label, enabled, look::Look::Bordered)
+}
+/// The step's main action (`renderButton`).
+fn primary(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Stateful<gpui::Div> {
+    look::button(id, label, enabled, look::Look::Primary)
+}
+/// A quiet setup control (`onboardingQuietButtonStyle`).
+fn quiet(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Stateful<gpui::Div> {
+    look::button(id, label, enabled, look::Look::Quiet)
 }
 impl Render for Setup {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -594,141 +603,85 @@ impl Render for Setup {
             .is_some_and(|s| s.ready(&self.backend, &self.workers));
         let painted = self.painted.clone();
         let revision = self.revision;
+        let width = f32::from(window.viewport_size().width);
+        let home = self.step == Step::Projects;
+        let privacy = self.step == Step::Privacy;
         let body = div()
             .flex()
             .flex_col()
-            .gap(px(12.))
-            .child(
-                div()
-                    .flex()
-                    .gap(px(12.))
-                    .child(
-                        control("setup-back", "Projects", !busy).on_click(
-                            cx.listener(|this, _, _, cx| this.navigate(Step::Projects, cx)),
-                        ),
-                    )
-                    .child(
-                        control("setup-refresh", "Check again", !busy).on_click(
-                            cx.listener(|this, _, _, cx| this.act(Action::Load(true), cx)),
-                        ),
-                    ),
-            )
-            .when(busy, |v| {
+            .gap(px(20.))
+            .when(privacy, |v| v.flex_1().min_h_0())
+            // Away from home: back to projects and the project being set up.
+            .when(!home, |v| {
                 v.child(
                     div()
-                        .debug_selector(|| "setup-loading".into())
-                        .child("Checking setup…"),
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(12.))
+                        .child(quiet("setup-back", "← Projects", !busy).pl_0().on_click(
+                            cx.listener(|this, _, _, cx| this.navigate(Step::Projects, cx)),
+                        ))
+                        .when_some(self.project.as_ref(), |v, project| {
+                            v.child(
+                                div()
+                                    .flex()
+                                    .gap(px(4.))
+                                    .text_size(px(12.))
+                                    .line_height(gpui::relative(1.5))
+                                    .text_color(theme().text_secondary)
+                                    .child("Setting up")
+                                    .child(
+                                        div().text_color(theme().text).child(project.name.clone()),
+                                    ),
+                            )
+                        }),
                 )
             })
-            .when_some(self.error.clone(), |v, error| {
-                v.child(
-                    div()
-                        .debug_selector(|| "setup-error".into())
-                        .text_color(theme().danger)
-                        .child(error),
-                )
+            .when(home, |v| {
+                v.child(self.home(busy, snapshot.as_ref(), width, cx))
             })
             .when(self.step == Step::Import, |v| {
                 v.child(import::page(self, busy, cx))
-            })
-            .when(self.step == Step::Projects, |v| {
-                v.child(
-                    div()
-                        .debug_selector(|| "setup-projects".into())
-                        .flex()
-                        .flex_col()
-                        .gap(px(10.))
-                        .child(div().text_size(px(24.)).child("Open a project"))
-                        .when_some(self.import.note.clone(), |v, note| {
-                            v.child(
-                                div()
-                                    .debug_selector(|| "setup-import-note".into())
-                                    .text_color(theme().text_secondary)
-                                    .child(note),
-                            )
-                        })
-                        .when(self.import.pending(), |v| {
-                            v.child(
-                                control("setup-import-open", "Bring in existing threads", !busy)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.navigate(Step::Import, cx)
-                                    })),
-                            )
-                        })
-                        .child(
-                            control("setup-folder", "Open folder", !busy).on_click(cx.listener(
-                                |this, _, window, cx| {
-                                    this.navigate(Step::Folder, cx);
-                                    this.folder.read(cx).focus.focus(window);
-                                },
-                            )),
-                        )
-                        .children(
-                            snapshot
-                                .as_ref()
-                                .map(|s| s.projects.clone())
-                                .unwrap_or_default()
-                                .into_iter()
-                                .enumerate()
-                                .map(|(i, project)| {
-                                    control(
-                                        &format!("setup-project-{i}"),
-                                        project.name.clone(),
-                                        !busy,
-                                    )
-                                    .on_click(cx.listener(
-                                        move |this, _, _, cx| {
-                                            this.act(Action::Choose(Some(project.clone())), cx)
-                                        },
-                                    ))
-                                }),
-                        )
-                        .when(
-                            snapshot.as_ref().is_some_and(|s| s.projects.is_empty()) && !busy,
-                            |v| v.child("No projects yet"),
-                        )
-                        .child(control("setup-new-project", "New project", !busy).on_click(
-                            cx.listener(|this, _, window, cx| this.open_new_project(window, cx)),
-                        ))
-                        .child(
-                            control("setup-change-tools", "Set up tools", !busy).on_click(
-                                cx.listener(|this, _, _, cx| this.navigate(Step::Tools, cx)),
-                            ),
-                        )
-                        .child(
-                            control("setup-explore", "Start without a project", !busy).on_click(
-                                cx.listener(|this, _, _, cx| this.act(Action::Choose(None), cx)),
-                            ),
-                        ),
-                )
             })
             .when(self.step == Step::Folder, |v| {
                 v.child(
                     div()
                         .flex()
                         .flex_col()
-                        .gap(px(10.))
-                        .child("Folder path")
+                        .gap(px(12.))
+                        .child(look::title("Open a folder"))
+                        .child(
+                            div()
+                                .text_size(px(12.))
+                                .text_color(theme().text_secondary)
+                                .child("Folder path"),
+                        )
                         .child(
                             div()
                                 .debug_selector(|| "setup-folder-input".into())
                                 .child(self.folder.clone()),
                         )
-                        .child(
-                            control("setup-add", "Open folder", !busy).on_click(cx.listener(
-                                |this, _, _, cx| {
-                                    let path = this.folder.read(cx).text.clone();
-                                    this.act(Action::Add(path), cx);
-                                },
-                            )),
-                        )
-                        .child(control("setup-cancel-folder", "Cancel", !busy).on_click(
-                            cx.listener(|this, _, _, cx| {
-                                if !this.busy {
-                                    this.folder.update(cx, |input, cx| input.clear(cx));
-                                    this.navigate(Step::Projects, cx);
-                                }
-                            }),
+                        .child(look::actions(
+                            vec![
+                                quiet("setup-cancel-folder", "Cancel", !busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if !this.busy {
+                                            this.folder.update(cx, |input, cx| input.clear(cx));
+                                            this.navigate(Step::Projects, cx);
+                                        }
+                                    }))
+                                    .into_any_element(),
+                            ],
+                            vec![
+                                primary("setup-add", "Open folder", !busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        let path = this.folder.read(cx).text.clone();
+                                        this.act(Action::Add(path), cx);
+                                    }))
+                                    .into_any_element(),
+                            ],
                         )),
                 )
             })
@@ -742,7 +695,18 @@ impl Render for Setup {
                         .flex()
                         .flex_col()
                         .gap(px(10.))
-                        .child(div().text_size(px(24.)).child("Coding tools"))
+                        .child(look::title("Choose your agent"))
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .font_weight(gpui::FontWeight::LIGHT)
+                                .line_height(gpui::relative(1.6))
+                                .text_color(theme().text_secondary)
+                                .child(
+                                    "Start with an agent. You can add coding tools and adjust \
+                                     your setup later.",
+                                ),
+                        )
                         .children(
                             snapshot
                                 .as_ref()
@@ -773,15 +737,22 @@ impl Render for Setup {
                                         .flex()
                                         .flex_col()
                                         .gap(px(4.))
-                                        .child(
+                                        .pt(px(6.))
+                                        .font_weight(gpui::FontWeight::LIGHT)
+                                        .child(div().text_size(px(13.5)).child(
                                             runtime["label"].as_str().unwrap_or("Tool").to_owned(),
-                                        )
+                                        ))
                                         .when(!enabled, |v| {
                                             v.child(
-                                                runtime["detail"]
-                                                    .as_str()
-                                                    .unwrap_or("Unavailable")
-                                                    .to_owned(),
+                                                div()
+                                                    .text_size(px(12.))
+                                                    .text_color(theme().text_secondary)
+                                                    .child(
+                                                        runtime["detail"]
+                                                            .as_str()
+                                                            .unwrap_or("Unavailable")
+                                                            .to_owned(),
+                                                    ),
                                             )
                                         })
                                         .child(
@@ -864,62 +835,44 @@ impl Render for Setup {
                                     )
                             },
                         )
-                        .child(
-                            control("setup-use", "Use this setup", ready && !busy)
-                                .on_click(cx.listener(|this, _, _, cx| this.act(Action::Use, cx))),
-                        ),
+                        .child(look::actions(
+                            vec![
+                                quiet("setup-refresh", "Check again", !busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.act(Action::Load(true), cx)
+                                    }))
+                                    .into_any_element(),
+                            ],
+                            vec![
+                                primary("setup-use", "Use this setup", ready && !busy)
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.act(Action::Use, cx)),
+                                    )
+                                    .into_any_element(),
+                            ],
+                        )),
                 )
             })
             .when(self.step == Step::Privacy, |v| {
+                v.child(privacy::page(self, busy, cx))
+            })
+            // Away from home, progress and errors follow the page.
+            .when(!home && busy, |v| {
                 v.child(
                     div()
-                        .debug_selector(|| "setup-privacy".into())
-                        .flex()
-                        .flex_col()
-                        .gap(px(10.))
-                        .child(div().text_size(px(24.)).child("Privacy"))
-                        .child(
-                            control(
-                                "setup-telemetry",
-                                if self.telemetry {
-                                    "Product analytics: on"
-                                } else {
-                                    "Product analytics: off"
-                                },
-                                !busy,
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if !this.busy {
-                                    this.telemetry = !this.telemetry;
-                                    this.revision += 1;
-                                    cx.notify();
-                                }
-                            })),
-                        )
-                        .child(
-                            control(
-                                "setup-crashes",
-                                if self.crashes {
-                                    "Crash reports: on"
-                                } else {
-                                    "Crash reports: off"
-                                },
-                                !busy,
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if !this.busy {
-                                    this.crashes = !this.crashes;
-                                    this.revision += 1;
-                                    cx.notify();
-                                }
-                            })),
-                        )
-                        .child(
-                            control("setup-consent", "Save and continue", !busy).on_click(
-                                cx.listener(|this, _, _, cx| this.act(Action::Consent, cx)),
-                            ),
-                        ),
+                        .debug_selector(|| "setup-loading".into())
+                        .text_size(px(12.))
+                        .text_color(theme().text_secondary)
+                        .child("Checking setup…"),
                 )
+            })
+            .when_some(self.error.clone().filter(|_| !home), |v, error| {
+                v.child(look::feedback(
+                    "setup-error",
+                    error,
+                    "Your saved choices are kept. You can retry or return to projects.",
+                    None,
+                ))
             });
         // The desktop's full-window surface: a drag strip under the traffic
         // lights, the frame centred in a scrolling area on the window's own
@@ -946,6 +899,7 @@ impl Render for Setup {
             .child(
                 div()
                     .id("setup-content")
+                    .debug_selector(|| "setup-content".into())
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
@@ -959,7 +913,12 @@ impl Render for Setup {
                             .flex_col()
                             .items_center()
                             .justify_center()
-                            .child(frame::frame(self, body, viewport)),
+                            .child(frame::frame(
+                                self,
+                                body,
+                                viewport,
+                                privacy.then_some((area - 24.).max(320.)),
+                            )),
                     ),
             )
             .child(frame::footer(cx))

@@ -1,6 +1,6 @@
 //! New project: name, visibility and target machine for `gh repo create`.
 //! The server runs gh on the chosen machine and registers the clone.
-use super::{Setup, Step, control};
+use super::{Setup, Step, control, look, primary, quiet};
 use crate::client::Client;
 use gpui::{Context, IntoElement, div, prelude::*, px};
 use serde::Deserialize;
@@ -90,8 +90,13 @@ pub(super) fn page(this: &Setup, busy: bool, cx: &mut Context<Setup>) -> impl In
         .flex()
         .flex_col()
         .gap(px(10.))
-        .child(div().text_size(px(24.)).child("New project"))
-        .child("Repository name")
+        .child(look::title("New project"))
+        .child(
+            div()
+                .text_size(px(12.))
+                .text_color(crate::theme::current().text_secondary)
+                .child("Repository name"),
+        )
         .child(
             div()
                 .id("setup-new-project-name")
@@ -127,7 +132,12 @@ pub(super) fn page(this: &Setup, busy: bool, cx: &mut Context<Setup>) -> impl In
                     }))
                 })),
         )
-        .child("Create on")
+        .child(
+            div()
+                .text_size(px(12.))
+                .text_color(crate::theme::current().text_secondary)
+                .child("Create on"),
+        )
         .child(
             control(
                 "setup-machine-local",
@@ -167,20 +177,23 @@ pub(super) fn page(this: &Setup, busy: bool, cx: &mut Context<Setup>) -> impl In
                 }
             }))
         }))
-        .child(
-            control("setup-create", "Create and open", creatable && !busy)
-                .on_click(cx.listener(|this, _, _, cx| this.create(cx))),
-        )
-        .child(
-            control("setup-cancel-new-project", "Cancel", !busy).on_click(cx.listener(
-                |this, _, _, cx| {
-                    if !this.busy {
-                        this.name.update(cx, |input, cx| input.clear(cx));
-                        this.navigate(Step::Projects, cx);
-                    }
-                },
-            )),
-        )
+        .child(look::actions(
+            vec![
+                quiet("setup-cancel-new-project", "Cancel", !busy)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if !this.busy {
+                            this.name.update(cx, |input, cx| input.clear(cx));
+                            this.navigate(Step::Projects, cx);
+                        }
+                    }))
+                    .into_any_element(),
+            ],
+            vec![
+                primary("setup-create", "Create and open", creatable && !busy)
+                    .on_click(cx.listener(|this, _, _, cx| this.create(cx)))
+                    .into_any_element(),
+            ],
+        ))
 }
 
 #[cfg(test)]

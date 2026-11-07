@@ -50,6 +50,9 @@ fn onboarding_frame_resumes_where_it_stopped_and_cues_only_when_on(cx: &mut Test
     ] {
         assert!(cx.debug_bounds(selector).is_some(), "{selector}");
     }
+    // Home, as on the desktop: no back link, and Check again only with an error.
+    assert!(cx.debug_bounds("setup-back").is_none());
+    assert!(cx.debug_bounds("setup-refresh").is_none());
     // Setup is its own full-window page: no workspace chrome behind it.
     for selector in CHROME {
         assert!(
@@ -82,6 +85,8 @@ fn onboarding_frame_resumes_where_it_stopped_and_cues_only_when_on(cx: &mut Test
     assert_eq!(current, 1);
     assert_eq!(parts[0], ("Project", project.clone(), true));
     assert_eq!(parts[1].1, "Choose a tool");
+    // Away from home: "← Projects" and the project being set up.
+    assert!(cx.debug_bounds("setup-back").is_some());
     let saved = shell
         .read_with(cx, |s, _| s.state.onboarding.clone())
         .unwrap();
@@ -136,6 +141,8 @@ fn onboarding_frame_resumes_where_it_stopped_and_cues_only_when_on(cx: &mut Test
     draw(cx);
     assert_eq!(page(&again, cx), Some("privacy"));
     assert_eq!(rail(&again, cx).0[0], ("Project", project, true));
+    scroll_privacy(cx);
+    click(cx, "setup-crashes-off");
     sound::played();
     std::thread::sleep(std::time::Duration::from_millis(80));
     // Finishing ticks, plays complete and clears the saved progress.

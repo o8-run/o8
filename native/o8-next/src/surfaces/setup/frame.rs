@@ -117,6 +117,7 @@ pub(super) fn frame(
     setup: &Setup,
     body: impl IntoElement,
     viewport: Size<Pixels>,
+    fill: Option<f32>,
 ) -> impl IntoElement {
     let (parts, current) = rail(setup);
     // The desktop's clamp(20px, 4vw, 32px) across and clamp(20px, 3vh, 32px) down.
@@ -134,12 +135,17 @@ pub(super) fn frame(
         .w_full()
         .max_w(px(800.))
         .flex_none()
+        .flex()
+        .flex_col()
+        // A page whose content scrolls inside the frame fills the window.
+        .when_some(fill, |v, height| v.h(px(height)))
         .border_1()
         .border_color(theme().border)
         .rounded(px(16.))
         .bg(theme().surface)
         .child(
             inset(div())
+                .flex_none()
                 .pb(px(20.))
                 .border_b_1()
                 .border_color(theme().border)
@@ -222,5 +228,12 @@ pub(super) fn frame(
                         })),
                 ),
         )
-        .child(inset(div()).flex().flex_col().gap(px(20.)).child(body))
+        .child(
+            inset(div())
+                .flex()
+                .flex_col()
+                .gap(px(20.))
+                .when(fill.is_some(), |v| v.flex_1().min_h_0())
+                .child(body),
+        )
 }
