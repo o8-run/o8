@@ -202,6 +202,16 @@ fn config() -> serde_json::Value {
     serde_json::Value::Object(merged)
 }
 
+/// The effective voice-preference view for readers outside this module — the
+/// macOS planner brain seat (#5667). Identical to the internal `config()`
+/// overlay: `dictation.json` with the allowlisted `voice-prefs.json` keys on
+/// top, so an edit from the native app (which writes only `voice-prefs.json`)
+/// is honored by every reader, not just the ones that already went through
+/// `config()`. Secrets never appear here: only allowlisted keys are overlaid.
+pub fn effective_voice_prefs() -> serde_json::Value {
+    config()
+}
+
 /// Read a string value from `~/.o8/dictation.json`, empty strings filtered out.
 pub fn config_string(key: &str) -> Option<String> {
     config()
@@ -437,15 +447,29 @@ fn read_voice_prefs_object() -> serde_json::Map<String, serde_json::Value> {
 /// old file or the complete new one, never a truncated file. Drops the cache so
 /// the next read reloads.
 fn write_voice_prefs_object(
-    obj: serde_json::Map<String, serde_json::Value>,
+    mut obj: serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
+    // Defense in depth: the file physically holds ONLY allowlisted keys, so even
+    // a hand-edited or native-written stray key (a mistakenly placed secret) is
+    // stripped on the next host write rather than preserved.
+    obj.retain(|key, _| is_voice_pref_allowlisted(key));
     let path = voice_prefs_path();
     let serialized = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
         .map_err(|e| e.to_string())?;
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let tmp = path.with_extension("json.tmp");
+    // Per-process + per-call unique temp name so two concurrent writes (or a
+    // write racing the startup projection) cannot open the same temp inode and
+    // rename a half-written file into place.
+    let tmp = path.with_extension(format!(
+        "json.tmp.{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    ));
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -877,8 +901,8 @@ mod public_recovery_tests {
 #[cfg(test)]
 mod voice_prefs_split_tests {
     use super::{
-        config, config_public, project_voice_prefs, set_pref, SECRET_PREF_KEYS,
-        VOICE_PREFS_ALLOWLIST,
+        config, config_bool, config_public, effective_voice_prefs, project_voice_prefs, set_pref,
+        SECRET_PREF_KEYS, VOICE_PREFS_ALLOWLIST,
     };
 
     /// The native allowlist must never name a provider secret, and must have no
@@ -947,6 +971,20 @@ mod voice_prefs_split_tests {
             assert_eq!(public["gemini_api_key_set"], true);
             assert!(public.get("gemini_api_key").is_none());
             assert!(!public.to_string().contains("fixture-secret"));
+
+            // Readers that previously bypassed config() (the macOS planner brain
+            // seat via effective_voice_prefs, and the ducker gate via config_bool)
+            // must now see an overlay value, so a native-app edit takes effect —
+            // and it must not leak back into dictation.json.
+            set_pref("ducking_enabled", serde_json::json!(false)).unwrap();
+            assert!(!config_bool("ducking_enabled", true), "ducker gate ignored the overlay");
+            set_pref("symon_brain_provider", serde_json::json!("anthropic")).unwrap();
+            assert_eq!(
+                effective_voice_prefs()["symon_brain_provider"], "anthropic",
+                "planner brain seat ignored the overlay",
+            );
+            let dictation_now = std::fs::read_to_string(&dictation).unwrap();
+            assert!(!dictation_now.contains("anthropic"), "allowlisted write leaked into dictation.json");
             return;
         }
 

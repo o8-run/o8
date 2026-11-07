@@ -438,13 +438,15 @@ fn read_operator_defaults() -> Option<Value> {
     serde_json::from_str::<Value>(&raw).ok()
 }
 
-/// `~/.o8/dictation.json` — the voice-pref store `voice_prefs_set` writes. Read
-/// straight off disk rather than through `stt::keys`' mtime cache: the planner
-/// resolves once per task, and a plain read keeps one file as the truth with no
-/// second cached copy to go stale.
+/// The effective voice-pref view the brain seat resolves from. Goes through the
+/// `stt::keys` overlay (`dictation.json` with the allowlisted `voice-prefs.json`
+/// keys on top, #5667) rather than reading `dictation.json` straight off disk:
+/// `symon_brain_*` are now written to `voice-prefs.json` (by the panel and by
+/// the native app), so a plain `dictation.json` read would silently resolve the
+/// stale value. The overlay's mtime cache reloads on change, so this stays live.
 pub(crate) fn read_voice_prefs() -> Option<Value> {
-    let raw = std::fs::read_to_string(super::agent_data_dir().join("dictation.json")).ok()?;
-    serde_json::from_str::<Value>(&raw).ok()
+    let prefs = crate::stt::keys::effective_voice_prefs();
+    prefs.is_object().then_some(prefs)
 }
 
 pub(crate) fn read_brain_setting() -> BrainSetting {
