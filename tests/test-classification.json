@@ -939,6 +939,14 @@
       ]
     },
     {
+      "path": "src/lib/providers/readonly-child-exec-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/repos/project-icon-resolver.test.ts",
       "reasons": [
         "executable-fixture"

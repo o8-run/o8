@@ -16,7 +16,8 @@ vi.mock('@/lib/providers/child-process', async () => {
       return run(file, args, options);
     },
   });
-  return { execFile: tracked };
+  // committedDiff runs only read-only git (rev-parse, diff), so it uses the read-only boundary.
+  return { execFileReadOnly: tracked };
 });
 
 import { committedDiff } from './committed-diff';

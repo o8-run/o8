@@ -2720,6 +2720,7 @@ export class WorktreeManager {
         windowsHide: true,
         cwd: this.repoRoot,
         timeout: 5000,
+        readOnly: true,
       });
 
       const entries: Array<{ path: string; branch?: string }> = [];
@@ -2763,6 +2764,7 @@ export class WorktreeManager {
           windowsHide: true,
           cwd: worktreePath,
           timeout: 5000,
+          readOnly: true,
         }).then((r) => r.stdout),
 
         // Staged changes (index vs HEAD)
@@ -2770,6 +2772,7 @@ export class WorktreeManager {
           windowsHide: true,
           cwd: worktreePath,
           timeout: 5000,
+          readOnly: true,
         }).then((r) => r.stdout),
 
         // Committed changes since base (if base provided)

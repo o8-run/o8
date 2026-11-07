@@ -74,7 +74,7 @@ export function runSecretTool(args: readonly string[], input = ''): Promise<Secr
 }
 
 type Operation = 'spawn' | 'spawnSync' | 'execFile' | 'execFileSync' | 'exec' | 'execSync' | 'fork';
-function invoke(name: Operation, supplied: unknown[], asPromise = false): unknown {
+function invoke(name: Operation, supplied: unknown[], asPromise = false, readOnly = false): unknown {
   const args = [...supplied];
   const hasArgs = Array.isArray(args[1]) || args[1] == null && args.length > 2;
   const index = name === 'exec' || name === 'execSync' ? 1 : hasArgs ? 2 : 1;
@@ -88,11 +88,11 @@ function invoke(name: Operation, supplied: unknown[], asPromise = false): unknow
     options.env = env;
     const operation = asPromise ? (processApi[name] as unknown as { [promisify.custom]: (...values: unknown[]) => unknown })[promisify.custom] : processApi[name];
     return Reflect.apply(operation, processApi, args);
-  }, !options.shell && name !== 'exec' && name !== 'execSync', options.cwd instanceof URL ? fileURLToPath(options.cwd) : options.cwd as string | undefined);
+  }, !options.shell && name !== 'exec' && name !== 'execSync', options.cwd instanceof URL ? fileURLToPath(options.cwd) : options.cwd as string | undefined, readOnly);
 }
 
 /** Node and native PTY creation share the same synchronous policy boundary. */
-export function withChildEnvironment<T>(input: Record<string, string | undefined> | undefined, args: readonly string[], create: (env: Record<string, string>) => T, allowDeferredMcp = false, cwd?: string): T {
+export function withChildEnvironment<T>(input: Record<string, string | undefined> | undefined, args: readonly string[], create: (env: Record<string, string>) => T, allowDeferredMcp = false, cwd?: string, readOnly = false): T {
   const context = childEnvironmentContext(input);
   const launch = () => {
     if (context?.runtimeId && context.policy !== credentialPolicyFingerprint(context.runtimeId)) {
@@ -107,6 +107,23 @@ export function withChildEnvironment<T>(input: Record<string, string | undefined
     recordRuntimeProfileChild(result, context?.runtimeId, profiles, env, context?.metadataRedaction);
     return result;
   };
+  if (readOnly) {
+    // A read-only child (a git read, a `sqlite3 -readonly` query, a version probe) carries no
+    // runtime identity and no injected credentials. On that path the provider-store lock and the
+    // credential refresh guard nothing: credential injection, the policy stamp and the fingerprint
+    // check are all gated on a runtimeId, and the environment scrub in refreshChildEnvironment is
+    // unconditional and in-memory (it reads .env.local, not the advisory .provider-keys.lock, which
+    // is a separate mutex that gives no isolation over the key store). Skipping the lock lets
+    // read-only GETs move to the native transport without serializing on .provider-keys.lock, while
+    // the same scrub and argument-denial assertion still run, so credential isolation is unchanged.
+    // Fail closed: this path must never be used to skip the lock for a credential-bearing launch.
+    // That means not only a runtime identity, but also a broker-key or explicit-transport context,
+    // since refreshChildEnvironment re-adds O8_MASTER_KEY / transport credentials for those.
+    if (context?.runtimeId || context?.runtimeLaunch || context?.brokerKey || context?.transport) {
+      throw new Error('Read-only child path rejects a credential-bearing runtime context; use the locked boundary.');
+    }
+    return launch();
+  }
   return withProviderStoreLock(launch);
 }
 
@@ -115,17 +132,27 @@ export const spawnSync = ((...args: unknown[]) => invoke('spawnSync', args)) as 
 export const execFileSync = ((...args: unknown[]) => invoke('execFileSync', args)) as typeof processApi.execFileSync;
 export const execSync = ((...args: unknown[]) => invoke('execSync', args)) as typeof processApi.execSync;
 export const fork = ((...args: unknown[]) => invoke('fork', args)) as typeof processApi.fork;
-function promised(name: 'execFile' | 'exec', args: unknown[]): Promise<{ stdout: unknown; stderr: unknown }> {
+function promised(name: 'execFile' | 'exec', args: unknown[], readOnly = false): Promise<{ stdout: unknown; stderr: unknown }> {
   const custom = (processApi[name] as unknown as { [promisify.custom]?: unknown })[promisify.custom];
-  if (typeof custom === 'function') return invoke(name, args, true) as Promise<{ stdout: unknown; stderr: unknown }>;
+  if (typeof custom === 'function') return invoke(name, args, true, readOnly) as Promise<{ stdout: unknown; stderr: unknown }>;
   return new Promise((resolve, reject) => {
     invoke(name, [...args, (error: Error | null, stdout: unknown, stderr: unknown) => {
       if (error) reject(Object.assign(error, { stdout, stderr }));
       else resolve({ stdout, stderr });
-    }]);
+    }], false, readOnly);
   });
 }
 export const execFile: typeof processApi.execFile = ((...args: unknown[]) => invoke('execFile', args)) as typeof processApi.execFile;
 Object.defineProperty(execFile, promisify.custom, { value: (...args: unknown[]) => promised('execFile', args) });
 export const exec: typeof processApi.exec = ((...args: unknown[]) => invoke('exec', args)) as typeof processApi.exec;
 Object.defineProperty(exec, promisify.custom, { value: (...args: unknown[]) => promised('exec', args) });
+
+// Read-only siblings for credential-less children (git reads, `sqlite3 -readonly`, version probes).
+// Identical scrub and argument-denial assertion as the locked boundary, but no .provider-keys.lock;
+// each refuses a credential-bearing runtime context (see withChildEnvironment). These exist so
+// read-only GETs can run on the native transport without serializing on the provider-store lock.
+export const spawnReadOnly = ((...args: unknown[]) => invoke('spawn', args, false, true)) as typeof processApi.spawn;
+export const spawnSyncReadOnly = ((...args: unknown[]) => invoke('spawnSync', args, false, true)) as typeof processApi.spawnSync;
+export const execFileSyncReadOnly = ((...args: unknown[]) => invoke('execFileSync', args, false, true)) as typeof processApi.execFileSync;
+export const execFileReadOnly: typeof processApi.execFile = ((...args: unknown[]) => invoke('execFile', args, false, true)) as typeof processApi.execFile;
+Object.defineProperty(execFileReadOnly, promisify.custom, { value: (...args: unknown[]) => promised('execFile', args, true) });
