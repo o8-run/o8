@@ -746,6 +746,29 @@ pub fn glass_muted() -> Rgba {
 pub fn symon_glow() -> Rgba {
     gpui::rgba(0x88d1f173)
 }
+/// Symon's palette, SymonVisuals' SYMON_GRADIENT_STOPS.
+const SYMON_STOPS: [(f32, u32); 4] = [
+    (0., 0x88d1f1eb),
+    (0.42, 0xb1b4e5f2),
+    (0.72, 0xf5b8c4eb),
+    (1., 0xf4c977eb),
+];
+pub fn symon_color(at: f32) -> Rgba {
+    let at = at.clamp(0., 1.);
+    let pair = SYMON_STOPS
+        .windows(2)
+        .find(|w| at <= w[1].0)
+        .unwrap_or(&SYMON_STOPS[2..4]);
+    let (a, b) = (gpui::rgba(pair[0].1), gpui::rgba(pair[1].1));
+    let t = (at - pair[0].0) / (pair[1].0 - pair[0].0);
+    let mix = |x: f32, y: f32| x + (y - x) * t;
+    Rgba {
+        r: mix(a.r, b.r),
+        g: mix(a.g, b.g),
+        b: mix(a.b, b.b),
+        a: mix(a.a, b.a),
+    }
+}
 /// The sidebar's fill. In light it stays flush with the rail (Q 2026-11-01).
 pub fn sidebar_fill() -> Rgba {
     if light() {

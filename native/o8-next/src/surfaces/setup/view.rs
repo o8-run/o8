@@ -13,6 +13,7 @@ use std::{
     cell::Cell,
     path::PathBuf,
     rc::Rc,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -29,6 +30,8 @@ mod lifecycle_tests;
 mod look;
 #[path = "new_project.rs"]
 mod new_project;
+#[path = "permissions.rs"]
+pub(crate) mod permissions;
 #[path = "privacy.rs"]
 mod privacy;
 #[path = "progress.rs"]
@@ -54,6 +57,8 @@ enum Step {
     Tools,
     Privacy,
     NewProject,
+    /// The optional voice step: Symon and its macOS permissions.
+    Permissions,
 }
 #[derive(Clone)]
 struct Snapshot {
@@ -179,6 +184,17 @@ pub struct Setup {
     copied: Option<String>,
     /// Tools were saved without a project; projects says so.
     setup_saved: bool,
+    /// Reads and asks for the voice step's macOS permissions.
+    permission_client: Arc<dyn permissions::Client>,
+    permissions: permissions::Snapshot,
+    /// The first read has answered.
+    permissions_checked: bool,
+    /// The permission being asked for or opened.
+    permission_busy: Option<permissions::Perm>,
+    permission_error: Option<String>,
+    permission_generation: u64,
+    /// The desktop controls section is open.
+    controls_open: bool,
 }
 enum Action {
     Load(bool),
@@ -209,6 +225,7 @@ impl Setup {
             Step::Tools => "tools",
             Step::Privacy => "privacy",
             Step::NewProject => "new-project",
+            Step::Permissions => "permissions",
         })
     }
     /// The progress rail's parts (label, detail, done) and the current one.
@@ -305,7 +322,17 @@ impl Setup {
             saving: false,
             copied: None,
             setup_saved: false,
+            permission_client: Self::permission_default(),
+            permissions: permissions::EMPTY,
+            permissions_checked: false,
+            permission_busy: None,
+            permission_error: None,
+            permission_generation: 0,
+            controls_open: false,
         };
+        if this.step == Step::Permissions {
+            this.watch_permissions(cx);
+        }
         this.act(Action::Load(false), cx);
         this
     }
@@ -605,6 +632,13 @@ impl Setup {
         if step != Step::Projects {
             self.setup_saved = false;
         }
+        if step == Step::Permissions {
+            // The voice step checks again each time it opens.
+            self.permissions = permissions::EMPTY;
+            self.permissions_checked = false;
+            self.permission_error = None;
+            self.controls_open = false;
+        }
         if step == Step::Tools {
             // The tools step opens fresh each time, as on the desktop.
             self.panel = None;
@@ -614,8 +648,34 @@ impl Setup {
         self.step = step;
         self.error = None;
         self.remember(cx);
+        if step == Step::Permissions {
+            self.watch_permissions(cx);
+        }
         self.revision += 1;
         cx.notify();
+    }
+    /// The running Mac's permission checks; tests start with none, so no
+    /// test can reach a real macOS prompt.
+    fn permission_default() -> Arc<dyn permissions::Client> {
+        #[cfg(test)]
+        {
+            Arc::new(permissions::Unsupported)
+        }
+        #[cfg(not(test))]
+        {
+            #[cfg(debug_assertions)]
+            if let Ok(value) = std::env::var("O8_NEXT_PERMISSIONS_FIXTURE") {
+                return match permissions::Fixture::parse(&value) {
+                    Some(fixture) => Arc::new(fixture),
+                    None => {
+                        // Set but unreadable: stay inert rather than reach macOS.
+                        eprintln!("o8 next: ignoring O8_NEXT_PERMISSIONS_FIXTURE={value:?}");
+                        Arc::new(permissions::Unsupported)
+                    }
+                };
+            }
+            Arc::new(permissions::Native)
+        }
     }
     /// Save where setup stands when that changed.
     fn remember(&mut self, cx: &mut Context<Self>) {
@@ -701,7 +761,8 @@ impl Render for Setup {
             .gap(px(20.))
             .when(docked, |v| v.w_full().flex_1().min_h_0())
             // Away from home: back to projects and the project being set up.
-            .when(!home, |v| {
+            // The voice step has its own way back, as on the desktop.
+            .when(!home && self.step != Step::Permissions, |v| {
                 v.child(
                     div()
                         .flex()
@@ -780,6 +841,9 @@ impl Render for Setup {
             .when(self.step == Step::Tools, |v| v.child(self.tools_page(cx)))
             .when(self.step == Step::Privacy, |v| {
                 v.child(privacy::page(self, busy, cx))
+            })
+            .when(self.step == Step::Permissions, |v| {
+                v.child(self.permissions_page(cx))
             })
             // Away from home, progress and errors follow the page. Pages with
             // a docked action row show their own.

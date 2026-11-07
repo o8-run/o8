@@ -19,6 +19,9 @@ mod new_project;
 #[path = "tools_tests.rs"]
 mod tools;
 
+#[path = "permissions_tests.rs"]
+mod permissions;
+
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
     reveal(cx, selector);

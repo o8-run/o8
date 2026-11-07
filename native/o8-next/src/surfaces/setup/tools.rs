@@ -502,6 +502,22 @@ impl Setup {
         self.revision += 1;
         cx.notify();
     }
+    /// Set up later saves nothing, so the unsaved choice goes back to the
+    /// server's recommendation, which home and Change show.
+    fn set_up_later(&mut self, cx: &mut Context<Self>) {
+        if self.busy {
+            return;
+        }
+        if let Some(snapshot) = &self.snapshot {
+            let (backend, workers) = snapshot.recommendation();
+            if self.backend != backend {
+                self.model.update(cx, |model, cx| model.clear(cx));
+            }
+            (self.backend, self.workers) = (backend, workers);
+        }
+        self.choice_made = false;
+        self.navigate(Step::Projects, cx);
+    }
     fn set_panel(&mut self, panel: Panel, cx: &mut Context<Self>) {
         if self.busy {
             return;
@@ -602,15 +618,24 @@ impl Setup {
 
         // The scrolling part of the page, above the docked action row.
         let mut scroll = div().w_full().flex().flex_col().gap(px(16.)).child(
-            div().child(look::title(heading)).child(
-                div()
-                    .mt(px(12.))
-                    .text_size(px(13.))
-                    .font_weight(FontWeight::LIGHT)
-                    .line_height(relative(1.6))
-                    .text_color(theme().text_secondary)
-                    .child(intro),
-            ),
+            div()
+                .debug_selector(move || {
+                    if needs_connection && show_tools {
+                        "setup-connect-tool".into()
+                    } else {
+                        "setup-tools-heading".into()
+                    }
+                })
+                .child(look::title(heading))
+                .child(
+                    div()
+                        .mt(px(12.))
+                        .text_size(px(13.))
+                        .font_weight(FontWeight::LIGHT)
+                        .line_height(relative(1.6))
+                        .text_color(theme().text_secondary)
+                        .child(intro),
+                ),
         );
         if show_tools {
             scroll =
@@ -802,7 +827,7 @@ impl Setup {
             quiet("setup-later", "Set up later", !saving)
                 .text_size(px(12.))
                 .text_color(theme().text_faint)
-                .on_click(cx.listener(|this, _, _, cx| this.navigate(Step::Projects, cx)))
+                .on_click(cx.listener(|this, _, _, cx| this.set_up_later(cx)))
                 .into_any_element(),
         );
         let mut right = vec![];
@@ -1312,4 +1337,20 @@ impl Setup {
                     .child(status),
             )
     }
+}
+
+#[cfg(test)]
+#[test]
+fn install_table_parses_with_the_desktop_commands() {
+    // The table falls back to empty at runtime; a broken copy must fail here.
+    let table: HashMap<String, Install> =
+        serde_json::from_str(include_str!("runtime-install.json")).expect("runtime-install.json");
+    assert!(table.len() >= 10);
+    let codex = install("codex").expect("codex install info");
+    assert_eq!(codex.command.as_deref(), Some("npm i -g @openai/codex"));
+    assert!(
+        install("antigravity")
+            .and_then(|info| info.link.as_deref())
+            .is_some()
+    );
 }
