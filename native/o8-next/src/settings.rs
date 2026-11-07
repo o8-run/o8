@@ -435,6 +435,7 @@ impl Settings {
         self.navigation.remember(section);
         self.section = section;
         self.voice_panel = VoicePanel::Attention;
+        self.sync_voice_history(cx);
         self.search.update(cx, |s, cx| s.clear(cx));
         self.scroll
             .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
@@ -460,10 +461,17 @@ impl Settings {
         if self.section == "indexing" {
             self.load_indexing(force, cx);
         }
-        if self.section == "voice" && self.voice_panel == VoicePanel::History {
+        if force && self.section == "voice" && self.voice_panel == VoicePanel::History {
             if let Some(history) = &self.voice_history {
                 history.update(cx, |history, cx| history.load(cx));
             }
+        }
+    }
+    /// Tells History whether it's on screen, so it reads only while it is.
+    pub(crate) fn sync_voice_history(&mut self, cx: &mut Context<Self>) {
+        let shown = self.section == "voice" && self.voice_panel == VoicePanel::History;
+        if let Some(history) = &self.voice_history {
+            history.update(cx, |history, cx| history.set_shown(shown, cx));
         }
     }
     /// Opens one part of the Voice tab; History rereads its file on the way in.
@@ -474,7 +482,7 @@ impl Settings {
         self.voice_panel = panel;
         self.scroll
             .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
-        self.load_panel(false, cx);
+        self.sync_voice_history(cx);
         self.changed(cx);
     }
     fn locked(&self, field: &Field) -> bool {

@@ -175,3 +175,75 @@ fn settings_voice_history_leaves_a_file_it_cannot_read(cx: &mut TestAppContext) 
     tap(cx, "settings-voice-history-refresh");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
 }
+
+#[gpui::test]
+fn settings_voice_history_jump_while_busy_repaints_and_reads(cx: &mut TestAppContext) {
+    let path = scratch("busy");
+    std::fs::write(
+        &path,
+        r#"[{"id":"1","ts":1,"mode":"dictation","text":"Hello","app":""}]"#,
+    )
+    .unwrap();
+    let (_peer, view, cx) = open_history(path, cx);
+    // A save in flight: the section can't change, but Voice's own parts can.
+    let before = view.update(cx, |s, _| {
+        s.busy = true;
+        s.revision
+    });
+    view.update_in(cx, |s, window, cx| {
+        s.jump_to_group("voice", nav_groups::VOICE_HISTORY, window, cx)
+    });
+    cx.run_until_parked();
+    view.read_with(cx, |s, _| {
+        assert_eq!(s.voice_panel, VoicePanel::History);
+        assert!(s.revision > before, "the switch must repaint Settings");
+    });
+    assert_eq!(ids(&view, cx), ["1"], "showing History reads its file");
+    view.update(cx, |s, _| s.busy = false);
+}
+
+#[gpui::test]
+fn settings_voice_history_reads_on_activation_only_while_shown(cx: &mut TestAppContext) {
+    let path = scratch("activation");
+    let write = |text: &str| {
+        std::fs::write(
+            &path,
+            format!(r#"[{{"id":"1","ts":1,"mode":"dictation","text":"{text}","app":""}}]"#),
+        )
+        .unwrap()
+    };
+    write("First");
+    let (_peer, view, cx) = open_history(path.clone(), cx);
+    let text = |view: &Entity<Settings>, cx: &mut VisualTestContext| {
+        view.read_with(cx, |s, cx| {
+            s.voice_history
+                .as_ref()
+                .unwrap()
+                .read(cx)
+                .entries
+                .first()
+                .map(|e| e.text.clone())
+        })
+    };
+    let refocus = |cx: &mut VisualTestContext| {
+        cx.deactivate_window();
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+    };
+    // On Voice's fields, coming forward reads nothing.
+    refocus(cx);
+    assert_eq!(text(&view, cx), None);
+    click(cx, "settings-voice-tab-history");
+    wait(&view, cx, |s| s.voice_panel == VoicePanel::History);
+    assert_eq!(text(&view, cx).as_deref(), Some("First"));
+    // On screen, coming forward rereads.
+    write("Second");
+    refocus(cx);
+    assert_eq!(text(&view, cx).as_deref(), Some("Second"));
+    // Off screen again, it doesn't.
+    click(cx, "settings-voice-tab-attention");
+    wait(&view, cx, |s| s.voice_panel == VoicePanel::Attention);
+    write("Third");
+    refocus(cx);
+    assert_eq!(text(&view, cx).as_deref(), Some("Second"));
+}

@@ -298,7 +298,7 @@ impl Settings {
         }
     }
 
-    fn jump_to_group(
+    pub(super) fn jump_to_group(
         &mut self,
         id: &'static str,
         group: &'static str,
@@ -312,7 +312,8 @@ impl Settings {
             // panel switch reads only the local file and needs no wait.
             if self.section == "voice" {
                 self.voice_panel = VoicePanel::History;
-                self.load_panel(false, cx);
+                self.sync_voice_history(cx);
+                self.changed(cx);
             }
         } else if let Some(field) = fields().find(|f| f.section == id && f.group() == group) {
             self.navigation.aim_group(field.id);

@@ -10,6 +10,7 @@ use gpui::{
 };
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -33,7 +34,11 @@ pub(crate) struct Entry {
 }
 
 /// The file the host's recorder writes, resolved as the host resolves it.
+/// Tests never resolve it: this Mac's dictations are private text.
 pub(crate) fn history_path() -> Option<PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
     path_from(|key| std::env::var_os(key))
 }
 
@@ -84,7 +89,32 @@ fn rewrite(path: &Path, keep: impl Fn(&Value) -> bool) -> bool {
         return false;
     };
     let temp = path.with_extension("json.next.tmp");
-    std::fs::write(&temp, text).is_ok() && std::fs::rename(&temp, path).is_ok()
+    if std::fs::write(&temp, text).is_ok() && std::fs::rename(&temp, path).is_ok() {
+        return true;
+    }
+    let _ = std::fs::remove_file(&temp);
+    false
+}
+
+/// One change to the file. Each runs off the UI thread, one at a time.
+enum Op {
+    Read,
+    Delete(String),
+    Clear,
+}
+
+/// Applies `op`, then reads the list as it now stands.
+fn run(path: &Path, op: &Op) -> Vec<Entry> {
+    match op {
+        Op::Read => {}
+        Op::Delete(id) => {
+            rewrite(path, |item| item["id"].as_str() != Some(id.as_str()));
+        }
+        Op::Clear => {
+            rewrite(path, |_| false);
+        }
+    }
+    read(path)
 }
 
 fn now() -> i64 {
@@ -137,6 +167,11 @@ pub(crate) fn app_name(bundle: &str) -> String {
 pub(crate) struct VoiceHistory {
     path: Option<PathBuf>,
     pub entries: Vec<Entry>,
+    /// The History panel is on screen; only then does activation reread.
+    shown: bool,
+    /// File operations wait here and run in order, one at a time.
+    queue: VecDeque<Op>,
+    running: bool,
     copied: Option<String>,
     copied_turn: u64,
     _activation: Option<gpui::Subscription>,
@@ -144,26 +179,71 @@ pub(crate) struct VoiceHistory {
 
 impl VoiceHistory {
     pub(crate) fn new(path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // The desktop reloads when its window comes forward; so does this.
+        // The desktop reloads when its window comes forward; so does this,
+        // while the panel is on screen.
         let activation = cx.observe_window_activation(window, |this, window, cx| {
-            if window.is_window_active() {
+            if this.shown && window.is_window_active() {
                 this.load(cx);
             }
         });
-        let mut history = Self {
+        Self {
             path,
             entries: vec![],
+            shown: false,
+            queue: VecDeque::new(),
+            running: false,
             copied: None,
             copied_turn: 0,
             _activation: Some(activation),
-        };
-        history.entries = history.path.as_deref().map(read).unwrap_or_default();
-        history
+        }
+    }
+
+    /// Settings reports whether the panel is on screen; coming on screen rereads.
+    pub(crate) fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        let appearing = shown && !self.shown;
+        self.shown = shown;
+        if appearing {
+            self.load(cx);
+        }
     }
 
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
-        self.entries = self.path.as_deref().map(read).unwrap_or_default();
-        cx.notify();
+        self.apply(Op::Read, cx);
+    }
+
+    fn apply(&mut self, op: Op, cx: &mut Context<Self>) {
+        self.queue.push_back(op);
+        self.next(cx);
+    }
+
+    fn next(&mut self, cx: &mut Context<Self>) {
+        if self.running {
+            return;
+        }
+        let Some(path) = self.path.clone() else {
+            self.queue.clear();
+            return;
+        };
+        let Some(op) = self.queue.pop_front() else {
+            return;
+        };
+        self.running = true;
+        let work = cx
+            .background_executor()
+            .spawn(async move { run(&path, &op) });
+        cx.spawn(async move |this, cx| {
+            let entries = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.running = false;
+                // A queued change will read again; show only the latest list.
+                if this.queue.is_empty() {
+                    this.entries = entries;
+                    cx.notify();
+                }
+                this.next(cx);
+            });
+        })
+        .detach();
     }
 
     fn copy(&mut self, id: String, text: String, cx: &mut Context<Self>) {
@@ -188,17 +268,11 @@ impl VoiceHistory {
     }
 
     fn delete(&mut self, id: String, cx: &mut Context<Self>) {
-        if let Some(path) = &self.path {
-            rewrite(path, |item| item["id"].as_str() != Some(id.as_str()));
-        }
-        self.load(cx);
+        self.apply(Op::Delete(id), cx);
     }
 
     fn clear(&mut self, cx: &mut Context<Self>) {
-        if let Some(path) = &self.path {
-            rewrite(path, |_| false);
-        }
-        self.load(cx);
+        self.apply(Op::Clear, cx);
     }
 
     fn button(
