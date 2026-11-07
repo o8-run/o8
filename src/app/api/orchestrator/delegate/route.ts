@@ -26,7 +26,7 @@ import {
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { listLanes } from '@/lib/lane/registry';
 import { launchSharedCheckoutWorker } from '@/lib/orchestrator/shared-checkout-launch';
-import { findSharedCheckoutMemberByMutation, readSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
+import { SharedCheckoutError, SHARED_CHECKOUT_LAUNCH_FAILURE, findSharedCheckoutMemberByMutation, readSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
 import { DelegationSelectionError, resolveDelegationSelection } from '@/lib/orchestrator/delegation-selection';
 import { resolveEffortAliases } from '@/lib/orchestrator/effort-pin';
 import { getWorkerCatalog, WorkerCatalogReadError, WorkerCatalogSelectionError } from '@/lib/orchestrator/worker-catalog';
@@ -193,7 +193,10 @@ async function performDelegate(request: NextRequest, clientMutationId: string, i
         repoInProject: projectContext.repoInProject,
         assignedPaths,
       });
-      if (!shared.ok) return NextResponse.json(shared, { status: 422 });
+      if (!shared.ok) {
+        console.warn('[orchestrator-delegate] Shared worker launch failed:', shared.error);
+        return NextResponse.json({ ...shared, error: SHARED_CHECKOUT_LAUNCH_FAILURE }, { status: 422 });
+      }
       invalidateCommandCenterSnapshotCaches();
       invalidateInboxCache();
       await publishRealtimeMutation({
@@ -397,6 +400,13 @@ async function performDelegate(request: NextRequest, clientMutationId: string, i
       note: launchResult.note,
     });
   } catch (err) {
+    if (checkoutMode === 'shared') {
+      if (err instanceof SharedCheckoutError) {
+        return NextResponse.json({ ok: false, code: 'shared_checkout_refusal', error: err.message }, { status: 422 });
+      }
+      console.warn('[orchestrator-delegate] Shared worker launch failed:', err);
+      return NextResponse.json({ ok: false, error: SHARED_CHECKOUT_LAUNCH_FAILURE }, { status: 422 });
+    }
     if (err instanceof PrRepairOwnerError) return NextResponse.json({ ok: false, code: err.code, ownerLaneId: err.ownerLaneId, error: err.message }, { status: 409 });
     if (err instanceof StaleRepairHeadError) return NextResponse.json({ ok: false, code: err.code, error: err.message }, { status: 409 });
     if (err instanceof ReviewerPrSourceError) return NextResponse.json({ ok: false, code: 'review_source_unavailable', error: err.message }, { status: 422 });
@@ -404,8 +414,8 @@ async function performDelegate(request: NextRequest, clientMutationId: string, i
     console.error('[orchestrator-delegate]', err);
     return NextResponse.json({
       ok: false,
-      error: checkoutMode === 'shared' && err instanceof Error ? err.message : 'Delegation failed',
-    }, { status: checkoutMode === 'shared' ? 422 : 500 });
+      error: 'Delegation failed',
+    }, { status: 500 });
   }
 }
 
@@ -561,6 +571,14 @@ async function postDelegate(request: NextRequest) {
       }, { status: 409 });
     }
     return NextResponse.json({ ok: true, inProgress: true, status: 'in_progress' }, { status: 202 });
+  }
+  // Older persisted failures predate the typed refusal boundary. Replays must
+  // follow the same disclosure policy as a fresh launch.
+  if (body?.checkoutMode === 'shared' && outcome.result.payload.ok === false
+    && outcome.result.payload.code !== 'shared_checkout_refusal') {
+    console.warn('[orchestrator-delegate] Shared worker failure receipt:', outcome.result.payload);
+    return NextResponse.json({ ok: false, error: SHARED_CHECKOUT_LAUNCH_FAILURE,
+      replayed: outcome.replayed || undefined }, { status: outcome.result.status });
   }
   return NextResponse.json({
     ...outcome.result.payload,

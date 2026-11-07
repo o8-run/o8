@@ -1,14 +1,19 @@
 import { apiError, safeErrorText } from '@/lib/mcp/api-error';
-import { sharedCheckoutControlFailure } from '@/lib/mcp/shared-checkout-control-error';
 import { DEFAULT_WS_PORT } from '@/lib/panel/api-port';
 import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
-import { finishSharedCheckoutTeam, inspectSharedCheckoutTeam, reconcileSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
+import { SharedCheckoutError, SHARED_CHECKOUT_LAUNCH_FAILURE, finishSharedCheckoutTeam, inspectSharedCheckoutTeam, reconcileSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
 import { findOwnedLaunchByMutationId, lookupOwnedActiveRunFresh } from '@/lib/runtimes/shared/owned-session-index';
 
 type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean };
 
 function textResult(message: string, isError = false): ToolResult {
   return { content: [{ type: 'text', text: message }], ...(isError ? { isError: true } : {}) };
+}
+
+function sharedCheckoutFailure(error: unknown): ToolResult {
+  if (error instanceof SharedCheckoutError) return textResult(error.message, true);
+  console.warn('[mcp] Shared checkout failed:', error);
+  return textResult(SHARED_CHECKOUT_LAUNCH_FAILURE, true);
 }
 
 function jsonResult(value: unknown): ToolResult {
@@ -40,7 +45,16 @@ export function createCortexDelegationHandlers(config: {
       const result = await pollCorrelatedMcpApiMutation<Record<string, unknown>>({
         url: `${config.apiBase}/api/orchestrator/delegate`,
         authorization: `Bearer ${config.wsToken}`,
-        parseError: (response, payload) => apiError('/api/orchestrator/delegate', response.status, JSON.stringify(payload)),
+        parseError: (response, payload) => {
+          if (checkoutMode === 'shared') {
+            if (payload?.code === 'shared_checkout_refusal' && typeof payload.error === 'string') {
+              return new SharedCheckoutError(payload.error);
+            }
+            console.warn('[mcp] Shared worker launch failed:', payload);
+            return new Error(SHARED_CHECKOUT_LAUNCH_FAILURE);
+          }
+          return apiError('/api/orchestrator/delegate', response.status, JSON.stringify(payload));
+        },
         correlationField: 'clientMutationId',
         body: {
           prompt,
@@ -71,7 +85,13 @@ export function createCortexDelegationHandlers(config: {
         note: result.note ?? 'Approval required before this agent can be launched.',
         status: 'awaiting_approval',
       });
-      if (!result.ok) return textResult(safeErrorText(result), true);
+      if (!result.ok) {
+        if (checkoutMode === 'shared') {
+          console.warn('[mcp] Shared worker launch failed:', result);
+          return textResult(SHARED_CHECKOUT_LAUNCH_FAILURE, true);
+        }
+        return textResult(safeErrorText(result), true);
+      }
 
       const surfaceId = result.surfaceId as string;
       try {
@@ -105,6 +125,9 @@ export function createCortexDelegationHandlers(config: {
         note: result.note,
       });
     } catch (error) {
+      if (args.checkoutMode === 'shared') {
+        return sharedCheckoutFailure(error);
+      }
       return textResult(safeErrorText(error), true);
     }
   };
@@ -152,6 +175,7 @@ export function createCortexDelegationHandlers(config: {
       const status = inspectSharedCheckoutTeam({ repoPath: config.repoPath, parentThreadId: config.parentThreadId });
       if (!status) return jsonResult({ team: null, note: 'No Shared workers have been launched from this chat.' });
       const memberOutcomes = await Promise.all(status.team.members.map(async (member) => {
+        if (member.state === 'lost') return { taskName: member.taskName, surfaceId: member.surfaceId, outcome: 'lost', activeProcess: false };
         if (!member.surfaceId) return { taskName: member.taskName, surfaceId: null, outcome: member.state };
         const launch = await findOwnedLaunchByMutationId(member.clientMutationId);
         const active = await lookupOwnedActiveRunFresh(member.surfaceId);
@@ -164,7 +188,7 @@ export function createCortexDelegationHandlers(config: {
       }));
       return jsonResult({ ...status, memberOutcomes });
     } catch (error) {
-      return textResult(`Shared team review unavailable: ${safeErrorText(error)}`, true);
+      return sharedCheckoutFailure(error);
     }
   };
 
@@ -184,7 +208,7 @@ export function createCortexDelegationHandlers(config: {
       return jsonResult({ ok: true, teamId: result.team.id, reviewedHead: result.reviewedHead,
         committedPaths: result.committedPaths, note: 'Shared team review was archived and checkout ownership was released.' });
     } catch (error) {
-      return textResult(sharedCheckoutControlFailure('cortex_finish_shared_team', error), true);
+      return sharedCheckoutFailure(error);
     }
   };
 
@@ -202,7 +226,7 @@ export function createCortexDelegationHandlers(config: {
         reviewId: args.reviewId, reviewedHead: args.reviewedHead, acknowledgedPaths: args.acknowledgedPaths,
         reviewSummary: args.reviewSummary });
       return jsonResult({ ok: true, receipt, note: 'Reviewed checkout state recorded. Source is unchanged; Finish must still verify settled workers and this exact state.' });
-    } catch (error) { return textResult(sharedCheckoutControlFailure('cortex_reconcile_shared_team', error), true); }
+    } catch (error) { return sharedCheckoutFailure(error); }
   };
 
   async function handleCorrectWorkers(args: Record<string, unknown>): Promise<ToolResult> {

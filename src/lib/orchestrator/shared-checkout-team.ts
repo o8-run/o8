@@ -8,6 +8,16 @@ import type { WorkerRouting } from './types';
 import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { archiveRootForOwnedSessionRoot } from '@/lib/runtimes/shared/owned-session/archive';
+
+export class SharedCheckoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SharedCheckoutError';
+  }
+}
+
+export const SHARED_CHECKOUT_LAUNCH_FAILURE = 'Delegation failed: the shared checkout could not start this worker. Details are in the o8 server log.';
 
 export interface SharedCheckoutMember {
   /** Exact assistant turn that launched this worker; absent on older receipts. */
@@ -21,8 +31,8 @@ export interface SharedCheckoutMember {
   clientMutationId: string;
   launchedAt: string;
   paths: string[];
-  state: 'reserved' | 'running' | 'failed' | 'settled';
-  settledOutcome?: 'finished' | 'interrupted' | 'failed';
+  state: 'reserved' | 'running' | 'failed' | 'settled' | 'interrupted' | 'completed' | 'exited' | 'lost';
+  settledOutcome?: 'finished' | 'interrupted' | 'failed' | 'lost';
 }
 
 export interface SharedCheckoutTeam {
@@ -105,13 +115,13 @@ function teamLocation(input: TeamInput): { id: string; file: string; lock: strin
 
 function currentCheckout(path: string): { branch: string; head: string } {
   if (realpathSync(git(path, 'rev-parse', '--show-toplevel')) !== path) {
-    throw new Error('Shared mode requires the exact checkout root.');
+    throw new SharedCheckoutError('Shared mode requires the exact checkout root.');
   }
   let branch: string;
   try {
     branch = git(path, 'symbolic-ref', '--quiet', '--short', 'HEAD');
   } catch {
-    throw new Error('Shared checkout branch changed or is detached; refusing launch.');
+    throw new SharedCheckoutError('Shared checkout branch changed or is detached; refusing launch.');
   }
   return { branch, head: git(path, 'rev-parse', 'HEAD') };
 }
@@ -120,7 +130,7 @@ function readFile(file: string): SharedCheckoutTeam | null {
   if (!existsSync(file)) return null;
   const value = JSON.parse(readFileSync(file, 'utf8')) as SharedCheckoutTeam;
   if (!value || !Array.isArray(value.members) || typeof value.parentThreadId !== 'string') {
-    throw new Error('Shared checkout ownership receipt is invalid.');
+    throw new SharedCheckoutError('Shared checkout ownership receipt is invalid.');
   }
   return value;
 }
@@ -141,8 +151,8 @@ async function withLock<T>(lock: string, operation: () => Promise<T>): Promise<T
         if ((statError as NodeJS.ErrnoException).code === 'ENOENT') continue;
         throw statError;
       }
-      if (age > 30_000) throw new Error('Shared checkout lock is stale; inspect the owner before retrying.');
-      if (Date.now() - started > 10_000) throw new Error('Shared checkout is busy; retry after its current operation.');
+      if (age > 30_000) throw new SharedCheckoutError('Shared checkout lock is stale; inspect the owner before retrying.');
+      if (Date.now() - started > 10_000) throw new SharedCheckoutError('Shared checkout is busy; retry after its current operation.');
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
@@ -154,11 +164,11 @@ async function withLock<T>(lock: string, operation: () => Promise<T>): Promise<T
 }
 
 function assertOwner(team: SharedCheckoutTeam, input: TeamInput, path: string, branch: string): void {
-  if (team.path !== path) throw new Error('Shared checkout path changed; refusing launch.');
+  if (team.path !== path) throw new SharedCheckoutError('Shared checkout path changed; refusing launch.');
   if (team.parentThreadId !== input.parentThreadId) {
-    throw new Error(`This checkout is owned by orchestrator ${team.parentThreadId}. Return to its owner.`);
+    throw new SharedCheckoutError(`This checkout is owned by orchestrator ${team.parentThreadId}. Return to its owner.`);
   }
-  if (team.branch !== branch) throw new Error('Shared checkout branch changed; refusing launch.');
+  if (team.branch !== branch) throw new SharedCheckoutError('Shared checkout branch changed; refusing launch.');
 }
 
 function writeTeam(file: string, team: SharedCheckoutTeam): void {
@@ -206,7 +216,7 @@ export function readActiveSharedCheckoutTeam(repoPath: string): SharedCheckoutTe
 export function assertSharedCheckoutOwner(input: TeamInput): void {
   const location = teamLocation(input);
   const team = readFile(location.file);
-  if (!team) throw new Error('Shared checkout ownership is no longer active.');
+  if (!team) throw new SharedCheckoutError('Shared checkout ownership is no longer active.');
   assertOwner(team, input, location.path, currentCheckout(location.path).branch);
 }
 
@@ -276,7 +286,7 @@ function normalizeClaim(path: string): string {
   const normalized = path.trim().replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/+$/, '');
   if (!normalized || normalized.startsWith('/') || normalized.includes('\0') || normalized.includes(':')
     || normalized.split('/').some((part) => !part || part === '..' || part === '.' || part === '.git')) {
-    throw new Error(`Invalid shared worker path claim: ${path}`);
+    throw new SharedCheckoutError('Invalid shared worker path claim; use a checkout-relative scope.');
   }
   return normalized;
 }
@@ -286,7 +296,7 @@ function assertScopeInsideCheckout(root: string, scope: string): void {
   while (!existsSync(candidate) && candidate !== root) candidate = dirname(candidate);
   const resolved = realpathSync(candidate);
   if (resolved !== root && !resolved.startsWith(`${root}${sep}`)) {
-    throw new Error(`Shared worker scope escapes the checkout through a symlink: ${scope}`);
+    throw new SharedCheckoutError(`Shared worker scope escapes the checkout through a symlink: ${scope}`);
   }
 }
 
@@ -296,7 +306,7 @@ function pathsOverlap(left: string, right: string): boolean {
 
 export function validateSharedCheckoutPaths(paths: string[]): string[] {
   const normalized = [...new Set(paths.map(normalizeClaim))];
-  if (normalized.length === 0) throw new Error('Shared workers need explicit, non-overlapping file or directory scopes.');
+  if (normalized.length === 0) throw new SharedCheckoutError('Shared workers need explicit, non-overlapping file or directory scopes.');
   return normalized;
 }
 
@@ -313,7 +323,7 @@ export async function reserveSharedCheckoutMember(input: TeamInput & {
   return withLock(location.lock, async () => {
     const paths = validateSharedCheckoutPaths(input.paths);
     if (!/^thoughts-[A-Za-z0-9_-]{1,80}$/.test(input.parentThreadId)) {
-      throw new Error('Shared mode requires a durable orchestrator chat.');
+      throw new SharedCheckoutError('Shared mode requires a durable orchestrator chat.');
     }
     const checkout = currentCheckout(location.path);
     const existingTeam = await admitExistingTeam(input, location, checkout.branch);
@@ -338,17 +348,17 @@ export async function reserveSharedCheckoutMember(input: TeamInput & {
         || existing.workerRouting?.requestedEffort !== input.workerRouting?.requestedEffort
         || (existing.carrier ?? null) !== (input.carrier ?? null)
         || (existing.executionCarrier ?? null) !== (input.executionCarrier ?? null)) {
-        throw new Error('Shared worker mutation was reused with different scope or runtime.');
+        throw new SharedCheckoutError('Shared worker mutation was reused with different scope or runtime.');
       }
       return team;
     }
     if (paths.some((path) => team.initialChangedPaths.some((changed) => pathsOverlap(path, changed)))) {
-      throw new Error('Shared worker scope overlaps files that were dirty before the team started. Assign a clean scope.');
+      throw new SharedCheckoutError('Shared worker scope overlaps files that were dirty before the team started. Assign a clean scope.');
     }
-    // Only a matching terminal owned receipt releases a created surface's claim.
+    // Terminal owned receipts or confirmed lost members release a surface's claim.
     for (const member of team.members.filter(holdsPathClaim)) {
       if (paths.some((path) => member.paths.some((claimed) => pathsOverlap(path, claimed)))) {
-        throw new Error(`Shared checkout path overlaps worker ${member.taskName}; assign separate paths or wait for group review.`);
+        throw new SharedCheckoutError(`Shared checkout path overlaps worker ${member.taskName}; assign separate paths or wait for group review.`);
       }
     }
     team.members.push({
@@ -381,7 +391,7 @@ export async function failSharedCheckoutMember(input: TeamInput & { clientMutati
 
 export async function ensureSharedCheckoutTeam(input: TeamInput): Promise<SharedCheckoutTeam> {
   if (!/^thoughts-[A-Za-z0-9_-]{1,80}$/.test(input.parentThreadId)) {
-    throw new Error('Shared mode requires a durable orchestrator chat.');
+    throw new SharedCheckoutError('Shared mode requires a durable orchestrator chat.');
   }
   const location = teamLocation(input);
   return withLock(location.lock, async () => {
@@ -414,11 +424,11 @@ export async function recordSharedCheckoutMember(input: TeamInput & {
   const location = teamLocation(input);
   return withLock(location.lock, async () => {
     const team = readFile(location.file);
-    if (!team) throw new Error('Shared checkout team was not created.');
+    if (!team) throw new SharedCheckoutError('Shared checkout team was not created.');
     assertOwner(team, input, location.path, currentCheckout(location.path).branch);
     const existing = team.members.find((member) => member.clientMutationId === input.clientMutationId);
-    if (!existing) throw new Error('Shared worker has no path reservation.');
-    if (existing.surfaceId && existing.surfaceId !== input.surfaceId) throw new Error('Shared worker mutation was reused for another surface.');
+    if (!existing) throw new SharedCheckoutError('Shared worker has no path reservation.');
+    if (existing.surfaceId && existing.surfaceId !== input.surfaceId) throw new SharedCheckoutError('Shared worker mutation was reused for another surface.');
     existing.surfaceId = input.surfaceId;
     if (input.parentTurnId && !existing.parentTurnId) existing.parentTurnId = input.parentTurnId;
     existing.state = 'running';
@@ -429,10 +439,28 @@ export async function recordSharedCheckoutMember(input: TeamInput & {
 }
 
 function holdsPathClaim(member: SharedCheckoutMember): boolean {
-  return member.state !== 'failed' || Boolean(member.surfaceId && !member.settledOutcome);
+  return member.state !== 'lost' && (member.state !== 'failed' || Boolean(member.surfaceId && !member.settledOutcome));
 }
 
-/** Refresh from the owned index only. Unknown or contradictory evidence holds ownership. */
+/** Missing means absent, not unreadable or an unrecognized completion outcome. */
+async function missingOwnedRecord(surfaceId: string): Promise<boolean> {
+  const { ownedRoots } = await import('@/lib/runtimes/shared/owned-session-index');
+  const root = ownedRoots().find(entry => surfaceId.startsWith(entry.marker));
+  if (!root) return false;
+  const directory = surfaceId.slice(root.marker.length);
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(directory)) return false;
+  for (const base of [root.root, archiveRootForOwnedSessionRoot(root.root)]) {
+    try {
+      await stat(join(base, directory, 'session.json'));
+      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  return true;
+}
+
+/** Refresh owned evidence, allowing absent records to settle after launch grace. */
 async function refreshMembers(team: SharedCheckoutTeam): Promise<string[]> {
   const owned = await import('@/lib/runtimes/shared/owned-session-index');
   const blockers: string[] = [];
@@ -440,6 +468,17 @@ async function refreshMembers(team: SharedCheckoutTeam): Promise<string[]> {
     const launch = await owned.findOwnedLaunchByMutationId(member.clientMutationId);
     // A rejected foreign mutation never launched a member in this checkout.
     if (member.state === 'failed' && !member.surfaceId && (!launch || launch.cwd !== team.path)) continue;
+    if (!launch && member.surfaceId && await missingOwnedRecord(member.surfaceId)) {
+      const terminal = ['failed', 'interrupted', 'completed', 'exited', 'settled', 'lost'].includes(member.state);
+      if (terminal || Date.now() - Date.parse(member.launchedAt) > 15 * 60_000) {
+        member.state = 'lost';
+        member.settledOutcome = 'lost';
+      } else {
+        delete member.settledOutcome;
+        blockers.push(`Worker ${member.taskName} may be lost; its launch record grace window has not elapsed.`);
+      }
+      continue;
+    }
     if (!launch || (member.surfaceId && launch.surfaceId !== member.surfaceId) || launch.cwd !== team.path) {
       delete member.settledOutcome;
       blockers.push(`Worker ${member.taskName} has no matching owned runtime completion receipt.`);
@@ -501,11 +540,11 @@ async function admitExistingTeam(input: TeamInput, location: ReturnType<typeof t
   const blockers = await refreshTeam(location.file, team);
   if (team.parentThreadId === input.parentThreadId) return team;
   const refusal = `This checkout is owned by orchestrator ${team.parentThreadId}: `;
-  if (blockers.length) throw new Error(`${refusal}${blockers.join(' ')}`);
+  if (blockers.length) throw new SharedCheckoutError(`${refusal}${blockers.join(' ')}`);
   const status = inspectSharedCheckoutTeam({ ...input, parentThreadId: team.parentThreadId });
-  if (!status) throw new Error(`${refusal}ownership inspection is unavailable.`);
+  if (!status) throw new SharedCheckoutError(`${refusal}ownership inspection is unavailable.`);
   const uncommitted = [...new Set([...status.newPaths, ...status.baselineDrift, ...status.baselineUnverifiable])].sort();
-  if (uncommitted.length) throw new Error(`${refusal}uncommitted paths ${uncommitted.join(', ')}.`);
+  if (uncommitted.length) throw new SharedCheckoutError(`${refusal}uncommitted paths ${uncommitted.join(', ')}.`);
   archiveTeam(location.file, team, { releasedAt: new Date().toISOString(), releasedBy: input.parentThreadId,
     reason: 'settled-clean-takeover', reviewedHead: status.currentHead, committedPaths: status.committedPaths });
   await rm(location.file);
@@ -514,7 +553,7 @@ async function admitExistingTeam(input: TeamInput, location: ReturnType<typeof t
 
 async function assertMembersSettled(team: SharedCheckoutTeam, file: string): Promise<void> {
   const blockers = await refreshTeam(file, team);
-  if (blockers.length) throw new Error(blockers.join(' '));
+  if (blockers.length) throw new SharedCheckoutError(blockers.join(' '));
 }
 
 /** Acknowledge only an exact, explicitly reviewed checkout state. No Git or
@@ -525,29 +564,29 @@ export async function reconcileSharedCheckoutTeam(input: TeamInput & {
   acknowledgedPaths: string[];
   reviewSummary: string;
 }): Promise<SharedCheckoutReconciliation> {
-  if (!input.reviewSummary.trim()) throw new Error('Reconciliation requires an explicit review summary.');
+  if (!input.reviewSummary.trim()) throw new SharedCheckoutError('Reconciliation requires an explicit review summary.');
   const location = teamLocation(input);
   return withLock(location.lock, async () => {
     const team = readFile(location.file);
-    if (!team) throw new Error('There is no active Shared team in this checkout.');
+    if (!team) throw new SharedCheckoutError('There is no active Shared team in this checkout.');
     assertOwner(team, input, location.path, currentCheckout(location.path).branch);
     await assertMembersSettled(team, location.file);
     const status = inspectSharedCheckoutTeam(input);
     if (!status || status.review.id !== input.reviewId || status.review.head !== input.reviewedHead) {
-      throw new Error('Checkout review is stale. Inspect and review the current changes before reconciling.');
+      throw new SharedCheckoutError('Checkout review is stale. Inspect and review the current changes before reconciling.');
     }
     if (status.unsupportedReviewPaths.length) {
-      throw new Error(`Nested repositories or special files need separate review: ${status.unsupportedReviewPaths.join(', ')}`);
+      throw new SharedCheckoutError(`Nested repositories or special files need separate review: ${status.unsupportedReviewPaths.join(', ')}`);
     }
     const acknowledged = [...input.acknowledgedPaths].sort();
     if (JSON.stringify(acknowledged) !== JSON.stringify(status.review.paths)) {
-      throw new Error('Acknowledge every exact path in the reviewed checkout, without omissions or extra paths.');
+      throw new SharedCheckoutError('Acknowledge every exact path in the reviewed checkout, without omissions or extra paths.');
     }
     const workerEdits = status.newPaths.filter((path) => !status.outsideClaims.includes(path));
-    if (workerEdits.length) throw new Error(`Team edits are still uncommitted: ${workerEdits.join(', ')}`);
+    if (workerEdits.length) throw new SharedCheckoutError(`Team edits are still uncommitted: ${workerEdits.join(', ')}`);
     if (status.reconciliation) return status.reconciliation;
     if (!status.outsideClaims.length && !status.baselineDrift.length && !status.baselineUnverifiable.length) {
-      throw new Error('No independent checkout changes need reconciliation. Use Finish after reviewing the team.');
+      throw new SharedCheckoutError('No independent checkout changes need reconciliation. Use Finish after reviewing the team.');
     }
     const receipt: SharedCheckoutReconciliation = { ...status.review,
       reviewedAt: new Date().toISOString(), reviewSummary: input.reviewSummary.trim() };
@@ -564,32 +603,32 @@ export async function finishSharedCheckoutTeam(input: TeamInput & {
   verification: string;
 }): Promise<{ team: SharedCheckoutTeam; reviewedHead: string; committedPaths: string[] }> {
   if (!input.reviewSummary.trim() || !input.verification.trim()) {
-    throw new Error('Finishing a Shared team requires a review summary and verification receipt.');
+    throw new SharedCheckoutError('Finishing a Shared team requires a review summary and verification receipt.');
   }
   const location = teamLocation(input);
   return withLock(location.lock, async () => {
     const team = readFile(location.file);
-    if (!team) throw new Error('There is no active Shared team in this checkout.');
+    if (!team) throw new SharedCheckoutError('There is no active Shared team in this checkout.');
     const checkout = currentCheckout(location.path);
     assertOwner(team, input, location.path, checkout.branch);
     await assertMembersSettled(team, location.file);
     const status = inspectSharedCheckoutTeam(input);
-    if (!status) throw new Error('Shared team review state disappeared.');
+    if (!status) throw new SharedCheckoutError('Shared team review state disappeared.');
     if (status.unsupportedReviewPaths.length) {
-      throw new Error(`Nested repositories or special files need separate review: ${status.unsupportedReviewPaths.join(', ')}`);
+      throw new SharedCheckoutError(`Nested repositories or special files need separate review: ${status.unsupportedReviewPaths.join(', ')}`);
     }
     if (status.outsideClaims.length > 0 && !status.reconciliation) {
-      throw new Error(`Changes outside worker scopes need review: ${status.outsideClaims.join(', ')}`);
+      throw new SharedCheckoutError(`Changes outside worker scopes need review: ${status.outsideClaims.join(', ')}`);
     }
     if (status.baselineUnverifiable.length > 0 && !status.reconciliation) {
-      throw new Error(`Pre-existing operator edit fingerprints cannot be verified: ${status.baselineUnverifiable.join(', ')}. Review the original baseline before finishing.`);
+      throw new SharedCheckoutError(`Pre-existing operator edit fingerprints cannot be verified: ${status.baselineUnverifiable.join(', ')}. Review the original baseline before finishing.`);
     }
     if (status.baselineDrift.length > 0 && !status.reconciliation) {
-      throw new Error(`Pre-existing operator edits changed during this team: ${status.baselineDrift.join(', ')}`);
+      throw new SharedCheckoutError(`Pre-existing operator edits changed during this team: ${status.baselineDrift.join(', ')}`);
     }
     const uncommitted = status.newPaths.filter((path) => !status.reconciliation || !status.outsideClaims.includes(path));
     if (uncommitted.length > 0) {
-      throw new Error(`Team edits are still uncommitted: ${uncommitted.join(', ')}`);
+      throw new SharedCheckoutError(`Team edits are still uncommitted: ${uncommitted.join(', ')}`);
     }
     archiveTeam(location.file, team, {
       finishedAt: new Date().toISOString(),

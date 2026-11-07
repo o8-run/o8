@@ -523,21 +523,13 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
           run.interruptRequestedAt = run.finishedAt;
           replaceRun(current, run);
         }
-        current.activeRun = undefined;
-        current.rpcPid = undefined;
+        // Keep the process identity until recordProcessExit confirms exit.
         await saveSession(current);
       });
-      activeProcesses.delete(surfaceId);
       await active.client.close();
     } else {
       await retireUnattachedProcess(session);
     }
-    await withSession(surfaceId, async () => {
-      const current = await findSession(surfaceId, false);
-      if (!current) return;
-      current.rpcPid = undefined;
-      await saveSession(current);
-    });
     return {
       interrupted: true,
       note: session.supportsResume

@@ -7272,9 +7272,20 @@
       ]
     },
     {
+      "path": "tests/shared-team-interrupt-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/shared-team-life-real-path.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "git-cli",
         "real-path"
       ]

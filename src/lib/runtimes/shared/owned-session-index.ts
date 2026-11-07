@@ -187,7 +187,7 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
   await Promise.all(entries.map(async (entry) => {
     if (!entry.isDirectory()) return;
     const metadataPath = path.join(root, entry.name, 'session.json');
-    let parsed: { surfaceId?: string; packetId?: string; activeRun?: OwnedActiveRun };
+    let parsed: { surfaceId?: string; packetId?: string; activeRun?: OwnedActiveRun; rpcPid?: number };
     try {
       parsed = await readRewrittenOwnedMetadata(metadataPath);
       if (!parsed || typeof parsed.surfaceId !== 'string') throw new Error('Missing owned session identity.');
@@ -217,7 +217,8 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
             ? parsed.activeRun.processMarker
             : undefined,
         }
-      : {});
+      // Pi/ACP RPC children can outlive a turn or its interrupt acknowledgement.
+      : typeof parsed.rpcPid === 'number' ? { pid: parsed.rpcPid } : {});
   }));
   return index;
 }

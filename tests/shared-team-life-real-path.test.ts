@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -19,9 +19,9 @@ vi.mock('@/lib/panel/status-boot', () => ({ startStatusBootHooks: () => {} }));
 vi.mock('@/lib/search/backfill', () => ({ runUnifiedSearchBackfills: async () => {} }));
 
 import { POST } from '@/app/api/orchestrator/delegate/route';
-import { closeDb } from '@/lib/db';
+import { closeDb, getSqlite } from '@/lib/db';
 import { fastDelegationCapability } from '@/lib/orchestrator/fast-delegation-auth';
-import { readSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
+import { finishSharedCheckoutTeam, readSharedCheckoutTeam, settleSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
 import { readSharedTeamsForThread } from '@/lib/orchestrator/shared-team-history';
 import { createCortexDelegationHandlers } from '@/lib/mcp/cortex-delegation-handlers';
 import { createSharedWorkerHeartbeat } from '@/lib/ws-server/shared-worker-heartbeat';
@@ -59,6 +59,18 @@ function dispatch(id: string, thread = owner, path = 'src/task.ts') {
 }
 
 function team(thread = owner) { return readSharedCheckoutTeam({ repoPath, parentThreadId: thread }); }
+function editTeam(edit: (receipt: NonNullable<ReturnType<typeof team>>) => void) {
+  const receipt = team()!;
+  edit(receipt);
+  writeFileSync(join(data, 'shared-checkout-teams', `${receipt.id}.json`), JSON.stringify(receipt));
+}
+function mcp() {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) =>
+    POST(new NextRequest(url, { ...init, signal: init.signal ?? undefined }))));
+  return createCortexDelegationHandlers({ apiFetch: vi.fn(), apiBase: 'http://localhost', repoPath,
+    parentThreadId: owner, fastCapability: fastDelegationCapability(repoPath, owner), wsToken: 'fixture' });
+}
+const sharedFailure = 'Delegation failed: the shared checkout could not start this worker. Details are in the o8 server log.';
 function archives() {
   const dir = join(data, 'shared-checkout-teams', 'archive');
   return existsSync(dir) ? readdirSync(dir).map(file => JSON.parse(readFileSync(join(dir, file), 'utf8'))) : [];
@@ -98,6 +110,114 @@ afterEach(() => {
 });
 
 describe('shared team lifecycle through delegate and persisted owned receipts', () => {
+  it('takes over two lost codex members and releases both claims', async () => {
+    expect((await dispatch('failed')).status).toBe(200);
+    expect((await dispatch('old', owner, 'src/second.ts')).status).toBe(200);
+    for (const id of ['failed', 'old']) rmSync(join(data, 'owned-codex', mutation(id)), { recursive: true });
+    editTeam(receipt => {
+      receipt.members[0].state = 'failed';
+      receipt.members[1].launchedAt = new Date(Date.now() - 20 * 60_000).toISOString();
+    });
+    expect((await dispatch('takeover', next)).status).toBe(200);
+    expect((await dispatch('second-claim', next, 'src/second.ts')).status).toBe(200);
+    expect(archives()[0].members.map((member: { state: string }) => member.state)).toEqual(['lost', 'lost']);
+    expect((await readSharedTeamsForThread(repoPath, owner))[0].members.map(member => member.state)).toEqual(['lost', 'lost']);
+  });
+
+  it('holds a missing running record inside the two-minute launch grace window', async () => {
+    expect((await dispatch('young')).status).toBe(200);
+    rmSync(join(data, 'owned-codex', mutation('young')), { recursive: true });
+    editTeam(receipt => { receipt.members[0].launchedAt = new Date(Date.now() - 2 * 60_000).toISOString(); });
+    const response = await dispatch('takeover', next);
+    expect(response.status).toBe(422);
+    expect((await response.json()).error).toMatch(/worker-young.*lost.*grace/);
+    expect(team()?.members[0].state).toBe('running');
+    expect((await dispatch('overlap')).status).toBe(422);
+    expect(archives()).toEqual([]);
+  });
+
+  it.each(['failed', 'interrupted', 'completed', 'exited'])('lets the owner finish a lost member recorded as %s', async state => {
+    expect((await dispatch('gone')).status).toBe(200);
+    rmSync(join(data, 'owned-codex', mutation('gone')), { recursive: true });
+    // Old receipts can carry runtime terminal names directly.
+    editTeam(receipt => { Object.assign(receipt.members[0], { state }); });
+    await settleSharedCheckoutTeam({ repoPath, parentThreadId: owner });
+    expect(team()?.members[0].state).toBe('lost');
+    const result = await finishSharedCheckoutTeam({ repoPath, parentThreadId: owner,
+      reviewSummary: 'Clean checkout reviewed', verification: 'Fixture Git snapshot' });
+    expect(result.team.members[0].state).toBe('lost');
+    expect(team()).toBeNull();
+    expect(archives()[0].members[0].state).toBe('lost');
+  });
+
+  it('releases a lost claim to the same owner without weakening dirty takeover holds', async () => {
+    expect((await dispatch('gone')).status).toBe(200);
+    rmSync(join(data, 'owned-codex', mutation('gone')), { recursive: true });
+    editTeam(receipt => { receipt.members[0].state = 'failed'; });
+    mkdirSync(join(repoPath, 'src'));
+    writeFileSync(join(repoPath, 'src/task.ts'), 'preserve lost worker edit\n');
+    const response = await dispatch('foreign', next);
+    expect(response.status).toBe(422);
+    expect((await response.json()).error).toContain('uncommitted paths src/task.ts');
+    expect(team()?.members[0].state).toBe('lost');
+    expect((await dispatch('retry')).status).toBe(200);
+  });
+
+  it('uses an archived owned receipt instead of declaring its member lost', async () => {
+    expect((await dispatch('archived')).status).toBe(200);
+    session('archived', 'finished');
+    mkdirSync(join(data, 'owned-codex-archive'));
+    renameSync(join(data, 'owned-codex', mutation('archived')), join(data, 'owned-codex-archive', mutation('archived')));
+    expect((await dispatch('takeover', next)).status).toBe(200);
+    expect(archives()[0].members[0]).toMatchObject({ state: 'settled', settledOutcome: 'finished' });
+  });
+
+  it('masks filesystem failures through HTTP and MCP, and logs the real cause', async () => {
+    const directory = join(data, 'shared-checkout-teams');
+    mkdirSync(directory);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    chmodSync(directory, 0o555);
+    try {
+      const response = await dispatch('unwritable');
+      expect(response.status).toBe(422);
+      const body = await response.text();
+      expect(JSON.parse(body).error).toBe(sharedFailure);
+      expect(body).not.toContain('/');
+      const result = await mcp().handleLaunchAgent({ prompt: 'Inspect', taskName: 'unwritable-mcp', runtime: 'codex',
+        model: 'gpt-5.6-terra', checkoutMode: 'shared', assignedPaths: ['src/task.ts'] });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toBe(sharedFailure);
+      expect(result.content[0]?.text).not.toContain('/');
+      expect(warning.mock.calls.some(call => call.some(value => value instanceof Error && value.message.includes('EACCES')))).toBe(true);
+    } finally { chmodSync(directory, 0o755); warning.mockRestore(); }
+  });
+
+  it('masks an untyped shared runtime exception and an untyped HTTP error in MCP', async () => {
+    launchRuntimeSurface.mockRejectedValueOnce(new Error(`EACCES ${data}/private`));
+    expect((await (await dispatch('unexpected')).json()).error).toBe(sharedFailure);
+    const handlers = mcp();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: false, error: `EACCES ${data}/private` }), { status: 422 })));
+    const result = await handlers.handleLaunchAgent({ prompt: 'Inspect', runtime: 'codex', checkoutMode: 'shared', assignedPaths: ['src/task.ts'] });
+    expect(result.content[0]?.text).toBe(sharedFailure);
+  });
+
+  it('masks a raw failure persisted before the typed refusal boundary on HTTP replay', async () => {
+    expect((await dispatch('old')).status).toBe(200);
+    expect((await dispatch('overlap')).status).toBe(422);
+    const db = getSqlite();
+    const row = db.prepare('SELECT key FROM idempotency_keys WHERE key LIKE ?').get(`%${mutation('overlap')}%`) as { key: string };
+    expect(row).toBeDefined();
+    db.prepare('UPDATE idempotency_keys SET result_json = ? WHERE key = ?').run(JSON.stringify({
+      status: 422, payload: { ok: false, error: `EACCES: permission denied, mkdir '${data}/private.lock'` },
+    }), row.key);
+    const response = await dispatch('overlap');
+    expect(response.status).toBe(422);
+    const body = await response.text();
+    expect(JSON.parse(body)).toMatchObject({ error: sharedFailure, replayed: true });
+    expect(body).not.toContain('/');
+    expect(launchRuntimeSurface).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['finished', 'failed', 'interrupted'])('archives a clean terminal %s team before a new thread launches', async outcome => {
     expect((await dispatch('old')).status).toBe(200);
     session('old', outcome);
