@@ -111,3 +111,38 @@ fn offline_the_side_chat_waits_instead_of_being_closed(cx: &mut TestAppContext) 
     ready(&s, &mut v);
     assert!(s.read_with(&v, |s, _| s.current().unwrap().panes.is_none()));
 }
+
+#[gpui::test]
+fn an_info_toast_sits_below_the_split_pane_headers(cx: &mut TestAppContext) {
+    // From #5580: the stack covered the right pane's header controls.
+    let (_f, s, mut v) = setup(cx);
+    let id = s.update_in(&mut v, |_, _, cx| {
+        crate::shell::toasts::show(
+            crate::shell::toasts::Kind::Info,
+            "Copied.",
+            vec![],
+            None,
+            cx,
+        )
+    });
+    v.run_until_parked();
+    v.cx.executor().advance_clock(Duration::from_millis(250));
+    v.run_until_parked();
+    draw(&mut v);
+    let header = v
+        .debug_bounds("pane-header-main")
+        .expect("split panes show headers");
+    let toast = v
+        .debug_bounds(Box::leak(format!("toast-{id}").into_boxed_str()))
+        .expect("the toast shows");
+    assert!(
+        toast.right() > header.left(),
+        "the toast is over the right pane"
+    );
+    assert!(
+        toast.top() >= header.bottom(),
+        "the toast starts below the pane header ({:?} vs {:?})",
+        toast.top(),
+        header.bottom()
+    );
+}
