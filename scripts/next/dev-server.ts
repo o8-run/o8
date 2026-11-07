@@ -130,6 +130,9 @@ async function main() {
   const terminal = process.argv.includes('--terminal');
   // Terminal shells run stand-ins, never the machine's provider CLIs.
   const cliShim = terminal && process.argv.includes('--cli-shim') ? prepareCliShim(dataDir) : undefined;
+  // The stand-ins' home holds the session files they write and Terminal
+  // View's import reads, whether or not the shell keeps CLAUDE_HOME.
+  if (cliShim) process.env.CLAUDE_HOME = join(cliShim.home, '.claude');
   const wsToken = getOrCreateWsToken();
   const surfaceSocket = surfaces.find(surface => surface.socket)?.socket;
   const closeSockets = terminal ? () => {}

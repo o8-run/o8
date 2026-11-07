@@ -407,3 +407,125 @@ fn thread_view_newest_chat_turn_leaves_out_terminal_imports() {
     assert_eq!(newest_chat_turn(&json!({"messages": []})), None);
     assert_eq!(newest_chat_turn(&Value::Null), None);
 }
+
+/// Saves the thread on a Claude Code session, with an optional newer chat turn.
+fn bind_claude(f: &Fixture, id: &str, turn: Option<&str>) {
+    let mut record: Value = f
+        .client
+        .get("/api/v2/chat-history", &[("tabId", id)])
+        .unwrap();
+    let messages = record["messages"].as_array_mut().unwrap();
+    if let Some(text) = turn {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        messages.push(json!({"role": "user", "content": text, "timestamp": now + 1_000}));
+    }
+    let url = f.client.url("/api/v2/chat-history").unwrap();
+    f.client
+        .request("POST", &url)
+        .send_json(json!({
+            "tabId": id, "messages": messages, "backend": "claude",
+            "orchestratorSessionIds": {"claude": "fixture-claude-session"},
+        }))
+        .unwrap();
+}
+
+#[gpui::test]
+fn thread_view_carries_turns_both_ways_on_one_session(cx: &mut TestAppContext) {
+    // The stand-in CLIs only: a resume line never reaches a CLI on the machine.
+    let f = Fixture::start_mode(false, "--terminal --cli-shim");
+    let (s, mut v) = open(
+        f.client.clone(),
+        f.root.join("thread-view.json"),
+        crate::shell_state::State::default(),
+        cx,
+    );
+    ready(&s, &mut v);
+    let id = s.read_with(&v, |s, _| match s.active() {
+        Some(Tab::Session(id)) => id,
+        _ => panic!("a thread opens first"),
+    });
+    bind_claude(&f, &id, None);
+    let resumed = "fixture claude stand-in: --resume fixture-claude-session";
+    let pane = |s: &Entity<Shell>, v: &VisualTestContext| {
+        s.read_with(v, |s, cx| match &thread(s, cx).unwrap().state {
+            State::Open(pane) => Some(pane.clone()),
+            _ => None,
+        })
+    };
+    let shows = |pane: &Entity<crate::terminal::Pane>, v: &VisualTestContext, text: &str| {
+        pane.read_with(v, |pane, _| pane.grid.lock().unwrap().text().contains(text))
+    };
+    let history = |f: &Fixture| -> Value {
+        f.client
+            .get("/api/v2/chat-history", &[("tabId", &id)])
+            .unwrap()
+    };
+
+    // Terminal to chat: a turn typed into the CLI is in the chat on leaving.
+    v.simulate_keystrokes("ctrl-alt-v");
+    until(&mut v, "the stand-in resumed", |v| {
+        pane(&s, v).is_some_and(|p| shows(&p, v, resumed))
+    });
+    let first = pane(&s, &v).unwrap();
+    first.update(&mut v, |pane, cx| {
+        pane.run_line("hello from the terminal".into(), cx)
+    });
+    until(&mut v, "the stand-in's reply", |v| {
+        shows(&first, v, "stand-in reply")
+    });
+    v.simulate_keystrokes("ctrl-alt-v");
+    until(&mut v, "the terminal turn in the chat", |v| {
+        v.update(|_, cx| crate::shell::toasts::texts(cx))
+            .contains(&"1 turn from the terminal".to_owned())
+    });
+    let record = history(&f);
+    let imported: Vec<(&str, &str)> = record["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| {
+            m["id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("cli-claude-"))
+        })
+        .map(|m| (m["role"].as_str().unwrap(), m["content"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        imported,
+        [
+            ("user", "hello from the terminal"),
+            ("assistant", "stand-in reply")
+        ]
+    );
+    assert_eq!(
+        record["orchestratorSessionIds"],
+        json!({"claude": "fixture-claude-session"})
+    );
+
+    // Chat to terminal: a newer chat turn resumes the CLI again, on the
+    // same session, once Reopen has stopped it.
+    bind_claude(&f, &id, Some("A turn sent from chat"));
+    v.simulate_keystrokes("ctrl-alt-v");
+    until(&mut v, "the newer-turns notice", |v| {
+        s.read_with(v, |s, cx| thread(s, cx).unwrap().stale) == Stale::Newer
+    });
+    click(&mut v, "thread-terminal-reopen");
+    until(&mut v, "the stand-in resumed in a new shell", |v| {
+        pane(&s, v).is_some_and(|p| p.entity_id() != first.entity_id() && shows(&p, v, resumed))
+    });
+    let launch = s.read_with(&v, |s, cx| thread(s, cx).unwrap().launch.clone().unwrap());
+    assert_eq!(launch.line, "exec claude --resume fixture-claude-session");
+    assert_eq!(
+        history(&f)["orchestratorSessionIds"],
+        json!({"claude": "fixture-claude-session"})
+    );
+    // Leaving again imports nothing twice.
+    let count = history(&f)["messages"].as_array().unwrap().len();
+    v.simulate_keystrokes("ctrl-alt-v");
+    settle(&mut v);
+    settle(&mut v);
+    assert_eq!(history(&f)["messages"].as_array().unwrap().len(), count);
+}
