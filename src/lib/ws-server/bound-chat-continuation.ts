@@ -32,6 +32,8 @@ export async function runBoundChatContinuation(
     /** Queued user sends carry explicit routing; automatic continuations inherit it. */
     source?: 'user' | 'system';
     displayMessage?: string; images?: ComposerImageAttachment[]; admit?: () => boolean;
+    /** The sent message's pills, saved on its user message. */
+    mentions?: import('@/lib/orchestrator/composer-queue-types').ComposerMention[];
     /** The operator changed this chat's runtime; open the turn with the handoff packet. */
     handoff?: boolean;
     serviceTier?: OrchestratorTurnOptions['serviceTier']; collideBaseBackend?: OrchestratorTurnOptions['collideBaseBackend'] },
@@ -95,7 +97,7 @@ export async function runBoundChatContinuation(
       ...(handoff ? { handoff: { handoffId: handoff.packet.handoffId, from: handoff.seam.from, to: handoff.seam.to,
         lossless: handoff.seam.lossless, carries: handoff.packet.carries,
         packet: handoff.packet as unknown as Record<string, unknown> } } : {}),
-      messageId: `review-user-${assistantMessageId}`, backend: backend.id, timestampMs: startedAt });
+      messageId: `review-user-${assistantMessageId}`, backend: backend.id, timestampMs: startedAt, mentions: input.mentions });
     if (handoff) recordBackendSwitchHandoffAudit(handoff);
     persist(null);
     hooks.publish(session.sessionName, 'turn-start', { ...data, userMessageId: `review-user-${assistantMessageId}`,

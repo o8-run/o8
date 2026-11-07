@@ -26,6 +26,7 @@ const historyLockWaiter = new Int32Array(new SharedArrayBuffer(4));
 
 export interface PersistedLlmChatMessage {
   steerAnchor?: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor;
+  mentions?: import('@/lib/orchestrator/composer-queue-types').ComposerMention[];
 
   id: string;
   role: MobileTranscriptEntry['role'];
@@ -323,6 +324,7 @@ export function mapLlmHistoryToMobileTranscript(
     command: message.command,
     handoff: message.handoff,
     steerAnchor: message.steerAnchor,
+    mentions: message.mentions,
     compaction: message.compaction,
   }));
 }

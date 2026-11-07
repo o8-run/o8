@@ -89,7 +89,8 @@ export function createCodexSteerRelay(target: Target, steer: LiveSteer, running:
           if (result.accepted && anchor) {
             const item = readComposerSend(message.options.clientUserMessageId!)!;
             appendMobileOrchestratorUserMessage({ tabId: target.threadId, repoPath: target.repoPath,
-              messageId: `composer-steer-${item.id}`, message: item.payload.text, backend: 'codex', timestampMs: admittedAt, steerAnchor: anchor });
+              messageId: `composer-steer-${item.id}`, message: item.payload.text, backend: 'codex', timestampMs: admittedAt, steerAnchor: anchor,
+              mentions: item.payload.mentions });
           }
           socket.end(`${JSON.stringify(result)}\n`);
         } catch { socket.end(`${JSON.stringify({ unconfirmed: true })}\n`); }

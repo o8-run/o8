@@ -155,6 +155,21 @@ fn workspace_mentions_group_the_menu_and_send_a_context_block_per_pick(cx: &mut 
         assert_eq!(lines.len(), 40);
         assert_eq!(lines[0], "build step 11");
         assert_eq!(lines[39], "build step 50");
+        // The server saved the pills with the message; the terminal's output
+        // went to the agent but stays out of the saved pill.
+        let mentions = payload["mentions"].as_array().expect("saved pills");
+        let kinds: Vec<_> = mentions
+            .iter()
+            .map(|m| (m["label"].as_str().unwrap(), m["jump"]["kind"].as_str()))
+            .collect();
+        assert_eq!(kinds.len(), 4, "{mentions:?}");
+        let terminal = mentions
+            .iter()
+            .find(|m| m["jump"]["kind"] == "terminal")
+            .expect("terminal pill");
+        assert_eq!(terminal["jump"]["target"], "o8-shell-dev");
+        assert_eq!(terminal["lines"], json!([]));
+        assert!(kinds.contains(&("test:unit", Some("script"))));
     });
     // The sent message's pills preview what was sent and open the agent's thread.
     assert_eq!(
@@ -162,6 +177,57 @@ fn workspace_mentions_group_the_menu_and_send_a_context_block_per_pick(cx: &mut 
         Some("o8://thread/thoughts-composer-second")
     );
     drop(grid);
+}
+
+#[gpui::test]
+fn many_pills_and_a_long_label_still_send_with_the_pills_capped(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    focus(&surface, cx);
+    // A 300-unit label (150 characters plus 75 emoji) and 20 more pills.
+    let long = format!("{}{}", "界".repeat(150), "😀".repeat(75));
+    let labels: Vec<String> = std::iter::once(long)
+        .chain((0..20).map(|n| format!("tree-{n}")))
+        .collect();
+    let typed = format!(
+        "Look at {}",
+        labels
+            .iter()
+            .map(|label| format!("@{label}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    cx.simulate_input(&typed);
+    surface.update(cx, |s, cx| {
+        s.composer.update(cx, |i, _| {
+            i.controls.mention.objects = labels
+                .iter()
+                .map(|label| Mentioned::Worktree {
+                    label: label.clone(),
+                    path: "/missing/tree".into(),
+                    branch: None,
+                })
+                .collect();
+        });
+        s.queue_prompt(cx);
+    });
+    wait(&surface, cx, |s, _| {
+        !s.saving
+            && s.queue["items"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+    });
+    surface.read_with(cx, |s, _| {
+        // The message went through the real queue and its receipt matched.
+        let payload = &s.queue["items"][0]["payload"];
+        assert_eq!(payload["text"], typed);
+        let mentions = payload["mentions"].as_array().expect("saved pills");
+        assert_eq!(mentions.len(), 20);
+        assert_eq!(
+            mentions[0]["label"],
+            format!("{}{}", "界".repeat(150), "😀".repeat(25))
+        );
+    });
 }
 
 #[gpui::test]

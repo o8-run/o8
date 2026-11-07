@@ -4,6 +4,17 @@ import type { OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 
+/**
+ * A pill in a sent message: its visible `@label`, its hover card, and the
+ * thread it opens or the place it jumps to. A terminal pill keeps no lines.
+ */
+export interface ComposerMention {
+  label: string;
+  title: string;
+  lines: string[];
+  open?: string;
+  jump?: { kind: 'worktree' | 'script' | 'terminal'; target: string };
+}
 export type ComposerQueueStatus = 'queued' | 'dispatching' | 'applied' | 'held' | 'cancelled';
 export interface ComposerQueuePayload {
   /** A deliberate follow-up may run only after this exact task settles. */
@@ -11,6 +22,8 @@ export interface ComposerQueuePayload {
   text: string;
   wireMessage: string;
   images: Array<{ name: string; dataUri: string }>;
+  /** The message's pills, saved with it so they read the same after a restart. */
+  mentions?: ComposerMention[];
   /** Compact receipts can reference delivered steer media without inline bytes. */
   deliveredMedia?: import('@/lib/mobile/types').MobileTranscriptMedia[];
   routing: {
