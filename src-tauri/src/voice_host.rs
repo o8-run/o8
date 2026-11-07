@@ -26,6 +26,9 @@ pub(crate) fn classic_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWi
 
 pub(crate) fn state_denylist(next: bool) -> Vec<&'static str> {
     let mut labels = crate::window_state_sanitizer::DERIVED_OVERLAY_WINDOW_LABELS.to_vec();
+    // Voice Settings opens centered at its builder size. A restored size
+    // skipped its minimum and reopened it at 360x280 on a Retina display.
+    labels.push("voice-settings");
     if next {
         labels.push("main");
     }
@@ -134,6 +137,8 @@ mod tests {
         assert!(config.skip_taskbar && !config.decorations && !config.resizable);
         assert!(state_denylist(true).contains(&"main"));
         assert!(!state_denylist(false).contains(&"main"));
+        assert!(state_denylist(true).contains(&"voice-settings"));
+        assert!(state_denylist(false).contains(&"voice-settings"));
     }
     #[test]
     fn only_the_original_voice_route_can_load() {
