@@ -68,6 +68,18 @@ let lastProbeAt: number | null = null;
 let lastDurationMs: number | null = null;
 let lastRowCount = 0;
 
+let diagnosticsObserver: ((probe: ProcessCwdProbeDiagnostics) => void) | undefined;
+
+/** Installed by the Next startup owner; readers and the native process do not publish. */
+export function setProcessCwdProbeDiagnosticsObserver(observer: (probe: ProcessCwdProbeDiagnostics) => void): void {
+  diagnosticsObserver = observer;
+  publishDiagnostics();
+}
+
+function publishDiagnostics(): void {
+  diagnosticsObserver?.(readProcessCwdProbeDiagnostics());
+}
+
 function outputText(value: string | Buffer): string {
   return typeof value === 'string' ? value : value.toString('utf8');
 }
@@ -179,11 +191,13 @@ async function readNativeProcessCwdSnapshot(options: ProcessCwdSnapshotOptions):
   const requestedAt = now();
   if (!options.forceRefresh && cachedSnapshot && requestedAt < cachedSnapshot.expiresAt) {
     cacheHits += 1;
+    publishDiagnostics();
     return cachedSnapshot.value;
   }
   while (snapshotInflight) {
     if (!options.forceRefresh) {
       singleFlightJoins += 1;
+      publishDiagnostics();
       return snapshotInflight;
     }
     // An older scan may predate a new holder. Settle it without consuming its
@@ -232,10 +246,12 @@ async function readNativeProcessCwdSnapshot(options: ProcessCwdSnapshotOptions):
   })();
 
   snapshotInflight = promise;
+  publishDiagnostics();
   try {
     return await promise;
   } finally {
     if (snapshotInflight === promise) snapshotInflight = null;
+    publishDiagnostics();
   }
 }
 
@@ -247,6 +263,7 @@ export async function readProcessCwdsForPids(
   const wanted = new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0));
   if (wanted.size === 0) {
     emptyRequestSkips += 1;
+    publishDiagnostics();
     return new Map();
   }
   const snapshot = await readProcessCwdSnapshot(options);

@@ -5272,6 +5272,25 @@
       ]
     },
     {
+      "path": "tests/o8d-cortex-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-cortex-owner-transport-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-cortex-reads-real-path.test.ts",
       "reasons": [
         "real-path"

@@ -23,8 +23,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/runtime/acp-registry/prepare',
   '/api/runtime/provider-instances',
   '/api/setup/detect', // CLI probes, credential reads and CLI symlink repair.
-  '/api/cortex/codebase-memory', // Live index progress belongs to the Next process.
-  '/api/cortex/diagnostics',
   '/api/orchestrator/archive',
   '/api/orchestrator/backend-models',
   '/api/orchestrator/comparison-diff', // GET has a write path; held for review.

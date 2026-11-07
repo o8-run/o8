@@ -26,17 +26,14 @@ import { NextResponse } from 'next/server';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { getSqlite } from '@/lib/db';
+import Database from 'better-sqlite3';
 import { getDataDir } from '@/lib/data-dir-migration';
 import {
-  flushTimingBuffer,
   summarizeTimings,
   type RecallTimingSummary,
 } from '@/lib/cortex/diagnostics';
-import {
-  readProcessCwdProbeDiagnostics,
-  type ProcessCwdProbeDiagnostics,
-} from '@/lib/runtime/process-cwd-snapshot';
+import type { ProcessCwdProbeDiagnostics } from '@/lib/runtime/process-cwd-snapshot';
+import { readPersistedProcessCwdProbeDiagnostics } from '@/lib/cortex/diagnostics-state';
 import { SUBSTRATE_EVAL_THRESHOLDS } from '@/lib/cortex/substrate-eval-thresholds';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -58,6 +55,7 @@ interface DiagnosticsResponse {
 }
 
 function countOutcomes(): number {
+  let sqlite: Database.Database | undefined;
   try {
     // Drizzle's COUNT helper has historically been finicky against the
     // boolean column on older sqlite builds (#747). Drop down to raw SQL
@@ -76,8 +74,9 @@ function countOutcomes(): number {
     // after the o8 process started) would otherwise count as "live"
     // here but be excluded from recall, silently inflating the
     // substrate-eval gate.
-    const sqlite = getSqlite();
-    if (!sqlite || typeof sqlite.prepare !== 'function') return 0;
+    const path = process.env.CORTEX_IDE_DB_PATH || join(getDataDir({ ...process.env }), 'cortex-ide.db');
+    if (!existsSync(path)) return 0;
+    sqlite = new Database(path, { readonly: true, fileMustExist: true });
     const row = sqlite
       .prepare(
         "SELECT COUNT(*) AS n FROM session_outcomes WHERE valid_from IS NOT NULL AND (valid_to IS NULL OR valid_to > datetime('now'))",
@@ -87,12 +86,14 @@ function countOutcomes(): number {
   } catch (error) {
     console.warn('[cortex-diagnostics] outcomes count failed:', error instanceof Error ? error.message : error);
     return 0;
+  } finally {
+    sqlite?.close();
   }
 }
 
 function countDirectives(): number {
   try {
-    const dir = join(getDataDir(), 'directives');
+    const dir = join(getDataDir({ ...process.env }), 'directives');
     if (!existsSync(dir)) return 0;
     return readdirSync(dir).filter((name) => name.endsWith('.md')).length;
   } catch (error) {
@@ -128,10 +129,6 @@ function classifyHealth(outcomes: number, p95Ms: number): { health: 'green' | 'a
 }
 
 export async function GET() {
-  // Best-effort flush so concurrent recall queries land on disk before we
-  // serialize the buffer. The endpoint never errors on flush failure.
-  try { flushTimingBuffer(); } catch { /* swallow */ }
-
   const outcomesCount = countOutcomes();
   const directivesCount = countDirectives();
   const timing = summarizeTimings(DAY_MS);
@@ -145,7 +142,7 @@ export async function GET() {
     timing,
     timing7d,
     thresholds: SUBSTRATE_EVAL_THRESHOLDS,
-    processCwdProbe: readProcessCwdProbeDiagnostics(),
+    processCwdProbe: readPersistedProcessCwdProbeDiagnostics(),
     health,
     notes,
   };
