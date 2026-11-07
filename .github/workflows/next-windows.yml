@@ -57,7 +57,9 @@ jobs:
           & "$dbg\gflags.exe" /i o8-next.exe +sls | Out-Null
           $snaps = & "$dbg\cdb.exe" -g -G -c "q" $exe --help 2>&1
           "== loader errors"
-          $snaps | Select-String -CaseSensitive -Pattern 'ERROR:|could not be located|Unable to|failed' | Select-Object -First 30
+          $snaps | Select-String -CaseSensitive -Pattern 'ERROR|WARNING|could not be located|Unable to' | Where-Object { $_ -notmatch 'ActivationContext' } | Select-Object -First 30
+          "== last loader lines"
+          $snaps | Select-Object -Last 40
           "== icuuc.dll imports"
           $imports = & $dumpbin.FullName /nologo /imports:icuuc.dll $exe
           $imports | Select-Object -First 60
