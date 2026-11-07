@@ -11,8 +11,8 @@
  *   4. Persist the new HEAD on success so the next boot is a no-op.
  *
  * The boot pass is fire-and-forget: it returns immediately and runs in the
- * background. Callers (status route, status-bar UI) read the live state via
- * `getIndexState()`.
+ * background. Each transition publishes the shared read-only snapshot used
+ * by both transports.
  *
  * Failure policy: every error is logged with the [codebase-memory] prefix
  * and recorded on the per-repo entry. Nothing here can block the Next.js
@@ -31,6 +31,8 @@ import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { resolveCodebaseMemoryBin, waitForCodebaseMemoryBin } from './binary';
 import { callCodebaseMemoryTool } from './mcp-client';
 import { getRecordedHead, recordIndexedHead } from './state-store';
+import { INDEX_STATE_PUBLISH_INTERVAL_MS, publishIndexState, readIndexState } from './live-state';
+import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import type { IndexState, RepoIndexEntry, RepoIndexStatus } from './types';
 
 /**
@@ -87,6 +89,7 @@ function logWarn(msg: string, ...rest: unknown[]) {
 
 function setEntry(entry: RepoIndexEntry) {
   stateByRepoId.set(entry.repoId, entry);
+  publishIndexState(getIndexState());
 }
 
 function patchEntry(repoId: string, patch: Partial<RepoIndexEntry>) {
@@ -419,11 +422,15 @@ export interface IndexAllOpts {
  * Resolves when every repo's index attempt has settled.
  */
 export async function indexAllRepos(opts: IndexAllOpts = {}): Promise<IndexState> {
+  if (isNativeCortexReader()) return readIndexState();
   if (bootInFlight) {
     return getIndexState();
   }
   bootInFlight = true;
   bootRan = true;
+  publishIndexState(getIndexState());
+  const heartbeat = setInterval(() => publishIndexState(getIndexState()), INDEX_STATE_PUBLISH_INTERVAL_MS);
+  heartbeat.unref();
 
   const concurrency = opts.concurrency ?? DEFAULT_INDEX_CONCURRENCY;
   const maxSizeBytes = opts.maxRepoSizeBytes ?? DEFAULT_MAX_REPO_SIZE_BYTES;
@@ -488,20 +495,23 @@ export async function indexAllRepos(opts: IndexAllOpts = {}): Promise<IndexState
     );
     return state;
   } finally {
+    clearInterval(heartbeat);
     bootInFlight = false;
+    publishIndexState(getIndexState());
   }
 }
 
 let bootHookFired = false;
 
 /**
- * Idempotent boot trigger. Call from any route that the Tauri shell hits
- * early (we use /api/panel/status). Spawns indexAllRepos on a microtask
- * so the route handler returns immediately.
+ * Idempotent trigger owned by Next startup through startStatusBootHooks.
+ * Spawns indexAllRepos on setImmediate so startup returns immediately.
+ * Read handlers must never call this trigger.
  *
  * Mirrors the `ensureBooted()` pattern in src/lib/skeleton/autoscan.ts.
  */
 export function ensureCodebaseMemoryBootIndex(): void {
+  if (isNativeCortexReader()) return;
   if (bootHookFired) return;
   bootHookFired = true;
   setImmediate(() => {

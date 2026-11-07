@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 import { panelGateMiddleware } from '@/middleware';
 import { mutationWorkspace } from '@/lib/repos/mutation-workspace';
 import { matchNativeHttpRoute } from './native-http-registry';
+import { markNativeCortexReader } from '@/lib/cortex/owner-process';
 export { nativeSurfaceRoutes } from './native-http-registry';
 
 type Handler = (request: NextRequest, context: { params: Promise<Record<string, string>> }) => Promise<Response>;
@@ -12,6 +13,7 @@ const REQUEST_LIMIT = 16 * 1024 * 1024;
 
 /** Returns false for unregistered paths so the existing listener keeps its behavior. */
 export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse, publicPort = req.socket.localPort, authenticatedBridge = false): Promise<boolean> {
+  markNativeCortexReader();
   if (!req.url?.startsWith('/api/')) return false;
   const abort = new AbortController();
   const disconnected = () => { if (!res.writableEnded) abort.abort(); };
