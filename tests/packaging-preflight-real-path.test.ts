@@ -226,7 +226,7 @@ describe('packaging preflight through real filesystem and script entry points', 
       mkdirSync(join(root, 'out'));
       writeFileSync(join(root, 'out/keep'), 'previous staging');
       for (const script of ['tauri-export.mjs', 'native-bundle.mjs', 'tauri-hook-resources.mjs', 'run-lib.mjs',
-        'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs',
+        'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs', 'lib/packaged-cli-shim.mjs',
         'next/verify-app-bundle.mjs', 'next/build-identity.mjs', 'lib/macos-release-artifacts.mjs',
         'lib/build-channel.mjs', 'lib/updater-signature.mjs']) {
         const destination = join(root, 'scripts', script);
@@ -366,7 +366,7 @@ export function spawnSync(command, args) {
     mkdirSync(dirname(sentinel), { recursive: true });
     writeFileSync(sentinel, 'previous-output');
     for (const file of ['tauri-export.mjs', 'native-bundle.mjs', 'tauri-hook-resources.mjs',
-      'run-lib.mjs', 'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs',
+      'run-lib.mjs', 'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs', 'lib/packaged-cli-shim.mjs',
       'next/verify-app-bundle.mjs', 'next/build-identity.mjs', 'lib/macos-release-artifacts.mjs',
       'lib/build-channel.mjs', 'lib/updater-signature.mjs']) {
       const destination = join(f.root, 'scripts', file);
