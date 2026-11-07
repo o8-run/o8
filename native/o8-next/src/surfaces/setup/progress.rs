@@ -22,6 +22,7 @@ const PLAN_CHANGE: &str = "Help me plan a change to this project. Read the proje
 pub(super) fn step_name(step: Step) -> &'static str {
     match step {
         Step::Import | Step::Projects | Step::Folder | Step::NewProject => "open",
+        Step::Repos => "repos",
         Step::Tools => "dispatch",
         Step::Privacy => "privacy",
         Step::Permissions => "permissions",
@@ -31,6 +32,7 @@ pub(super) fn step_name(step: Step) -> &'static str {
 /// (mobile) reopens the last one it has.
 fn page(name: &str) -> Step {
     match name {
+        "repos" => Step::Repos,
         "dispatch" => Step::Tools,
         "permissions" => Step::Permissions,
         "privacy" | "mobile" => Step::Privacy,
@@ -119,7 +121,9 @@ fn saved_progress_reads_by_the_desktop_rules() {
     assert!(
         unknown.step == Step::Projects && unknown.project.is_none() && !unknown.tools_configured
     );
-    // The voice step resumes where it stopped; mobile has no page here yet.
+    // The project and voice steps resume where they stopped; mobile has no page here yet.
+    assert!(read(Some(&saved("repos", good.clone(), ""))).step == Step::Repos);
+    assert_eq!(write(Step::Repos, None, false, "").step, "repos");
     assert!(read(Some(&saved("permissions", good.clone(), ""))).step == Step::Permissions);
     assert!(read(Some(&saved("mobile", good.clone(), ""))).step == Step::Privacy);
     // An incomplete project is dropped; built-in prompts and long tasks are not kept as typed.

@@ -22,6 +22,9 @@ mod tools;
 #[path = "permissions_tests.rs"]
 mod permissions;
 
+#[path = "repos_tests.rs"]
+mod repos;
+
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
     reveal(cx, selector);

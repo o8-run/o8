@@ -36,6 +36,8 @@ pub(crate) mod permissions;
 mod privacy;
 #[path = "progress.rs"]
 mod progress;
+#[path = "repos.rs"]
+mod repos;
 #[path = "sound.rs"]
 pub(crate) mod sound;
 #[path = "tools.rs"]
@@ -59,6 +61,8 @@ enum Step {
     NewProject,
     /// The optional voice step: Symon and its macOS permissions.
     Permissions,
+    /// Choose a project: a folder, a project in o8, or a GitHub clone.
+    Repos,
 }
 #[derive(Clone)]
 struct Snapshot {
@@ -195,11 +199,17 @@ pub struct Setup {
     permission_generation: u64,
     /// The desktop controls section is open.
     controls_open: bool,
+    /// The project step: GitHub list, selection and clone progress.
+    repos: repos::Repos,
+    repo_search: Entity<Composer>,
 }
 enum Action {
     Load(bool),
     Choose(Option<Project>),
-    Add(String),
+    /// A folder path; true when the project step opened the folder page.
+    Add(String, bool),
+    /// A GitHub repository's clone URL and name, cloned by the server.
+    Clone(String, String),
     Create(Value),
     Import(Vec<String>),
     Use,
@@ -214,6 +224,8 @@ struct ResultState {
     opened: Option<Option<Session>>,
     discovered: Option<import::Discovered>,
     imported: Option<(usize, usize)>,
+    /// A folder added from the project step, selected there.
+    added: Option<Project>,
 }
 impl Setup {
     #[cfg(test)]
@@ -226,6 +238,7 @@ impl Setup {
             Step::Privacy => "privacy",
             Step::NewProject => "new-project",
             Step::Permissions => "permissions",
+            Step::Repos => "repos",
         })
     }
     /// The progress rail's parts (label, detail, done) and the current one.
@@ -329,9 +342,24 @@ impl Setup {
             permission_error: None,
             permission_generation: 0,
             controls_open: false,
+            repos: repos::Repos::default(),
+            repo_search: cx.new(|cx| {
+                let mut input = Composer::new(cx);
+                input.placeholder = "Search repos...".into();
+                input
+            }),
         };
+        // Filtering follows each keystroke.
+        cx.observe(&this.repo_search, |this, _, cx| {
+            this.revision += 1;
+            cx.notify();
+        })
+        .detach();
         if this.step == Step::Permissions {
             this.watch_permissions(cx);
+        }
+        if this.step == Step::Repos {
+            this.open_repos(cx);
         }
         this.act(Action::Load(false), cx);
         this
@@ -367,12 +395,15 @@ impl Setup {
         let step = self.step;
         let id = self.session_id.clone();
         let used = matches!(action, Action::Use);
+        let cloning = matches!(action, Action::Clone(..));
+        let to_repos = matches!(action, Action::Add(_, true));
         let task = cx.background_executor().spawn(async move {
             let mut next = snapshot;
             let mut selected = project;
             let mut target = step;
             let mut finish = false;
             let (mut discovered, mut imported) = (None, None);
+            let mut added = None;
             match action {
                 Action::Load(refresh) => {
                     next = Some(Snapshot::load(&client, refresh)?);
@@ -389,10 +420,18 @@ impl Setup {
                     discovered = import::Discovered::load(&client).ok();
                     next = Some(Snapshot::load(&client, false)?); target = Step::Projects;
                 }
-                Action::Add(path) => {
-                    let added = client.setup_request("POST", "/api/panel/repos", &json!({"action":"add", "localPath":path.trim()}))?;
-                    selected = Some(serde_json::from_value::<Project>(added["repo"].clone()).map_err(|_| "Invalid project response")?);
-                    next = Some(Snapshot::load(&client, true)?); target = Step::Tools;
+                Action::Add(path, back) => {
+                    let response = client.setup_request("POST", "/api/panel/repos", &json!({"action":"add", "localPath":path.trim()}))?;
+                    let project = serde_json::from_value::<Project>(response["repo"].clone()).map_err(|_| "Invalid project response")?;
+                    // From the project step the folder returns there, selected.
+                    if back { added = Some(project); target = Step::Repos; next = Some(Snapshot::load(&client, false)?); }
+                    else { selected = Some(project); next = Some(Snapshot::load(&client, true)?); target = Step::Tools; }
+                }
+                Action::Clone(url, name) => {
+                    // The server's own refusal text is never shown.
+                    let cloned = client.setup_request("POST", "/api/panel/repos", &json!({"action":"clone", "cloneUrl":url, "name":name})).map_err(|_| repos::CLONE_FAILED.to_owned())?;
+                    selected = Some(serde_json::from_value::<Project>(cloned["repo"].clone()).map_err(|_| repos::CLONE_FAILED.to_owned())?);
+                    (next, target, finish) = Self::proceed(&client, selected.as_ref(), &model)?;
                 }
                 Action::Choose(project) => {
                     selected = project;
@@ -428,7 +467,7 @@ impl Setup {
             }
             let loaded = next.ok_or("Setup has not loaded. Try again.")?;
             let opened = if finish { Some(Self::finish(&client, &loaded, selected.as_ref(), &id, &model)?) } else { None };
-            Ok::<_, String>(ResultState { snapshot: loaded, step: target, project: selected, opened, discovered, imported })
+            Ok::<_, String>(ResultState { snapshot: loaded, step: target, project: selected, opened, discovered, imported, added })
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -438,6 +477,16 @@ impl Setup {
                 this.scan_slow = false;
                 this.saving = false;
                 this.scan_failed = scan && result.is_err();
+                if cloning && let Some((_, row)) = this.repos.status.as_mut() {
+                    *row = match &result {
+                        Err(error) if error == repos::CLONE_FAILED => repos::Row::Failed,
+                        _ => repos::Row::Done,
+                    };
+                }
+                if to_repos && result.is_ok() {
+                    this.repos.folder_return = false;
+                    this.folder.update(cx, |input, cx| input.clear(cx));
+                }
                 match result {
                     Ok(result) => {
                         // A rescan can finish initial setup, but never replaces a choice.
@@ -456,6 +505,9 @@ impl Setup {
                         this.snapshot = Some(result.snapshot);
                         this.project = result.project;
                         this.step = result.step;
+                        if let Some(project) = &result.added {
+                            this.select_repo(project);
+                        }
                         if let Some(discovered) = result.discovered {
                             this.import.replace(discovered);
                         }
@@ -755,6 +807,8 @@ impl Render for Setup {
         let privacy = self.step == Step::Privacy;
         // Pages with a docked action row fill the frame and scroll inside it.
         let docked = privacy || self.step == Step::Tools;
+        // Pages that show their own progress and errors.
+        let own = docked || self.step == Step::Repos;
         let body = div()
             .flex()
             .flex_col()
@@ -819,7 +873,12 @@ impl Render for Setup {
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if !this.busy {
                                             this.folder.update(cx, |input, cx| input.clear(cx));
-                                            this.navigate(Step::Projects, cx);
+                                            let back =
+                                                std::mem::take(&mut this.repos.folder_return);
+                                            this.navigate(
+                                                if back { Step::Repos } else { Step::Projects },
+                                                cx,
+                                            );
                                         }
                                     }))
                                     .into_any_element(),
@@ -828,7 +887,8 @@ impl Render for Setup {
                                 primary("setup-add", "Open folder", !busy)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         let path = this.folder.read(cx).text.clone();
-                                        this.act(Action::Add(path), cx);
+                                        let back = this.repos.folder_return;
+                                        this.act(Action::Add(path, back), cx);
                                     }))
                                     .into_any_element(),
                             ],
@@ -845,9 +905,12 @@ impl Render for Setup {
             .when(self.step == Step::Permissions, |v| {
                 v.child(self.permissions_page(cx))
             })
+            .when(self.step == Step::Repos, |v| {
+                v.child(self.repos_page(window, cx))
+            })
             // Away from home, progress and errors follow the page. Pages with
             // a docked action row show their own.
-            .when(!home && !docked && busy, |v| {
+            .when(!home && !own && busy, |v| {
                 v.child(
                     div()
                         .debug_selector(|| "setup-loading".into())
@@ -856,17 +919,14 @@ impl Render for Setup {
                         .child("Checking setup…"),
                 )
             })
-            .when_some(
-                self.error.clone().filter(|_| !home && !docked),
-                |v, error| {
-                    v.child(look::feedback(
-                        "setup-error",
-                        error,
-                        "Your saved choices are kept. You can retry or return to projects.",
-                        None,
-                    ))
-                },
-            );
+            .when_some(self.error.clone().filter(|_| !home && !own), |v, error| {
+                v.child(look::feedback(
+                    "setup-error",
+                    error,
+                    "Your saved choices are kept. You can retry or return to projects.",
+                    None,
+                ))
+            });
         // The desktop's full-window surface: a drag strip under the traffic
         // lights, the frame centred in a scrolling area on the window's own
         // material, and the footer.
