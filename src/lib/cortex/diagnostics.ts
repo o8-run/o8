@@ -2,14 +2,14 @@
  * #749 — Substrate eval gate (read-only instrumentation).
  *
  * Wraps recall-path queries with `performance.now()` timing and pushes each
- * sample into a bounded persisted buffer. Each recording transaction owns
- * the shared metrics file; readers never initialize or flush it.
+ * sample into a bounded persisted buffer. A cached WAL writer owns the
+ * shared metrics file; readers never initialize or flush it.
  *
  * The recall substrate is unchanged. Instrumentation records timings so we can answer "is SQLite still fine, or is it time to
  * evaluate a swap?" without guessing.
  *
  * Storage: `<dataDir>/recall-metrics.db`; legacy JSON remains readable.
- * FIFO eviction at `MAX_SAMPLES` bounds retained observations.
+ * Periodic FIFO eviction reserves headroom below `MAX_SAMPLES`.
  *
  * No-throw policy: timing must never affect recall behaviour. Every helper
  * swallows IO errors and logs with the `[recall-metrics]` prefix.
@@ -45,8 +45,13 @@ interface PersistedFile {
   samples: RecallTimingSample[];
 }
 
+function metricsDirectory(): string {
+  // Pure resolution without cloning the entire environment on the recall path.
+  return getDataDir({ O8_DATA_DIR: process.env.O8_DATA_DIR, CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR });
+}
+
 function metricsFilePath(): string {
-  return join(getDataDir({ ...process.env }), METRICS_FILE);
+  return join(metricsDirectory(), METRICS_FILE);
 }
 
 function loadFromDisk(): RecallTimingSample[] {
@@ -85,7 +90,7 @@ function loadFromDisk(): RecallTimingSample[] {
 }
 
 function databasePath(): string {
-  return join(getDataDir({ ...process.env }), 'recall-metrics.db');
+  return join(metricsDirectory(), 'recall-metrics.db');
 }
 
 function readSamples(database: Database.Database): RecallTimingSample[] {
@@ -96,34 +101,60 @@ function readSamples(database: Database.Database): RecallTimingSample[] {
     });
 }
 
-/** Recording owns initialization and the transaction, including legacy import. */
-function writeSamples(sample?: RecallTimingSample): void {
-  let database: Database.Database | undefined;
+const PRUNE_INTERVAL = 100;
+let writer: { path: string; database: Database.Database; insert: Database.Statement;
+  prune: Database.Statement; inserts: number } | undefined;
+let writeFailureLogged = false;
+
+/** Only recording opens a writer; initialization and legacy import happen once. */
+function getWriter(): NonNullable<typeof writer> {
+  const path = databasePath();
+  if (writer?.path === path) return writer;
+  writer?.database.close();
+  writer = undefined;
+  mkdirSync(metricsDirectory(), { recursive: true });
+  const database = new Database(path);
   try {
-    mkdirSync(getDataDir({ ...process.env }), { recursive: true });
-    database = new Database(databasePath());
-    database.pragma('busy_timeout = 1000');
+    database.pragma('busy_timeout = 100');
+    database.pragma('journal_mode = WAL');
+    database.pragma('synchronous = NORMAL');
+    let insert!: Database.Statement;
     database.transaction(() => {
-      const initialized = database!.prepare("SELECT 1 FROM sqlite_master WHERE name = 'samples'").get();
-      database!.exec('CREATE TABLE IF NOT EXISTS samples (id INTEGER PRIMARY KEY, label TEXT, duration_ms REAL, timestamp REAL, errored INTEGER)');
-      const insert = database!.prepare('INSERT INTO samples (label, duration_ms, timestamp, errored) VALUES (?, ?, ?, ?)');
+      const initialized = database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'samples'").get();
+      database.exec('CREATE TABLE IF NOT EXISTS samples (id INTEGER PRIMARY KEY, label TEXT, duration_ms REAL, timestamp REAL, errored INTEGER)');
+      insert = database.prepare('INSERT INTO samples (label, duration_ms, timestamp, errored) VALUES (?, ?, ?, ?)');
       if (!initialized) {
         for (const legacy of loadFromDisk()) insert.run(legacy.label, legacy.durationMs, legacy.timestamp, legacy.errored ? 1 : 0);
       }
-      if (sample) insert.run(sample.label, sample.durationMs, sample.timestamp, sample.errored ? 1 : 0);
-      database!.prepare('DELETE FROM samples WHERE id NOT IN (SELECT id FROM samples ORDER BY id DESC LIMIT ?)').run(MAX_SAMPLES);
     }).immediate();
-  } catch {
-    console.warn('[recall-metrics] Could not persist timing.');
-  } finally {
-    database?.close();
+    const prune = database.prepare('DELETE FROM samples WHERE id < (SELECT id FROM samples ORDER BY id DESC LIMIT 1 OFFSET ?)');
+    writer = { path, database, insert, prune, inserts: 0 };
+    return writer;
+  } catch (error) {
+    database.close();
+    throw error;
   }
 }
 
-/** Persist each sample before returning; transactions serialize existing producers. */
+/** Reuse the writer and statements; prune every 100 inserts with room for the next batch. */
 export function recordTiming(sample: RecallTimingSample): void {
   if (!Number.isFinite(sample.durationMs) || !Number.isFinite(sample.timestamp)) return;
-  writeSamples(sample);
+  try {
+    const current = getWriter();
+    const insert = () => current.insert.run(sample.label, sample.durationMs, sample.timestamp, sample.errored ? 1 : 0);
+    if (current.inserts % PRUNE_INTERVAL === 0) {
+      current.database.transaction(() => {
+        current.prune.run(MAX_SAMPLES - PRUNE_INTERVAL - 1);
+        insert();
+      }).immediate();
+    } else insert();
+    current.inserts++;
+  } catch {
+    if (!writeFailureLogged) {
+      writeFailureLogged = true;
+      console.warn('[recall-metrics] Could not persist timing.');
+    }
+  }
 }
 
 /** Compatibility for callers that previously forced the buffered JSON flush. */
@@ -137,6 +168,7 @@ export function readTimingBuffer(): RecallTimingSample[] {
   let database: Database.Database | undefined;
   try {
     database = new Database(databasePath(), { readonly: true, fileMustExist: true });
+    database.pragma('busy_timeout = 1000');
     return readSamples(database);
   } catch {
     return [];
@@ -147,9 +179,9 @@ export function readTimingBuffer(): RecallTimingSample[] {
 
 /** Test-only reset. */
 export function __resetTimingBuffer(): void {
-  writeSamples();
-  const database = new Database(databasePath());
-  try { database.exec('DELETE FROM samples'); } finally { database.close(); }
+  const current = getWriter();
+  current.database.exec('DELETE FROM samples');
+  current.inserts = 0;
 }
 
 // ── timing wrappers ───────────────────────────────────────────────────────

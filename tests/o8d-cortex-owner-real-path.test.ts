@@ -30,7 +30,8 @@ function snapshot() {
   return readdirSync(directory, { recursive: true }).map(String).sort().map(name => {
     const path = join(directory, name);
     const stat = statSync(path, { bigint: true });
-    return { name, mtime: stat.mtimeNs, bytes: stat.isFile() ? readFileSync(path) : null };
+    // WAL readers may update shared reader marks; the DB and WAL must stay unchanged.
+    return { name, mtime: stat.mtimeNs, bytes: stat.isFile() && !name.endsWith('recall-metrics.db-shm') ? readFileSync(path) : null };
   });
 }
 
@@ -70,6 +71,43 @@ it('registers both production GET handlers and no mutation methods', async () =>
     expect(await route!.load()).toMatchObject({ GET });
     for (const method of ['POST', 'PATCH', 'PUT', 'DELETE']) expect(matchNativeHttpRoute(path, method)).toBeUndefined();
   }
+});
+
+it('native GET clears dead, expired and replaced index owners while keeping a live owner in flight', async () => {
+  const { probeMetadataLockProcessIdentitySync } = await import('@/lib/worktree/metadata-lock-process-identity');
+  const owner = probeMetadataLockProcessIdentitySync(process.pid);
+  expect(owner.state).toBe('live');
+  if (owner.state !== 'live') throw new Error('Fixture process identity unavailable');
+  const deadPid = Number(execFileSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }));
+  const path = join(directory, 'codebase-memory-live.json');
+  const route = matchNativeHttpRoute('/api/cortex/codebase-memory', 'GET')!;
+  const native = await route.route.load() as typeof codebase;
+  const state = { version: 1, bootRan: true, inFlight: true,
+    ownerPid: process.pid, ownerIdentity: owner.identity, updatedAt: Date.now(), entries: [
+      { repoId: 'active', repoName: 'Active', localPath: '/fixture', status: 'indexing' },
+      { repoId: 'queued', repoName: 'Queued', localPath: '/fixture', status: 'pending' },
+      { repoId: 'done', repoName: 'Done', localPath: '/fixture', status: 'ready' },
+    ] };
+  try {
+    writeFileSync(path, JSON.stringify(state));
+    expect((await (await native.GET()).json()).inFlight, 'live owner must remain in flight').toBe(true);
+    for (const [reason, patch] of [
+      ['dead owner', { ownerPid: deadPid }],
+      ['expired snapshot', { updatedAt: Date.now() - 60_000 }],
+      ['replaced owner', { ownerIdentity: { ...owner.identity, startId: `${owner.identity.startId}-old` } }],
+    ] as const) {
+      writeFileSync(path, JSON.stringify({ ...state, ...patch }));
+      const before = readFileSync(path, 'utf8');
+      const result = await (await native.GET()).json();
+      expect(result.inFlight, `${reason} must not remain in flight`).toBe(false);
+      expect(result.entries.slice(0, 2)).toEqual([
+        expect.objectContaining({ status: 'error', error: expect.stringMatching(/stale/i) }),
+        expect.objectContaining({ status: 'error', error: expect.stringMatching(/stale/i) }),
+      ]);
+      expect(result.entries[2]).toEqual(state.entries[2]);
+      expect(readFileSync(path, 'utf8'), 'GET must not mutate the snapshot').toBe(before);
+    }
+  } finally { rmSync(path, { force: true }); }
 });
 
 it('counts persisted live outcomes and directives through a read-only connection', async () => {
@@ -135,6 +173,8 @@ it('startup kicks exactly one real boot pass and publishes pending, indexing and
   let finish!: (value: { ok: boolean; error: string; durationMs: number }) => void;
   tool.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   const indexer = await import('@/lib/codebase-memory/indexer');
+  const abandoned = join(directory, 'codebase-memory-live.json.2147483647.tmp');
+  writeFileSync(abandoned, 'Interrupted publish');
   let releaseBinary!: (path: string) => void;
   binaryWait.mockImplementationOnce(() => new Promise(resolve => { releaseBinary = resolve; }));
   indexer.ensureCodebaseMemoryBootIndex();
@@ -144,6 +184,11 @@ it('startup kicks exactly one real boot pass and publishes pending, indexing and
     entries: [{ repoId: 'fixture-repo', status: 'pending' }] });
   releaseBinary('fixture-indexer');
   await vi.waitFor(() => expect(tool).toHaveBeenCalledTimes(1));
+  const live = JSON.parse(readFileSync(join(directory, 'codebase-memory-live.json'), 'utf8'));
+  expect(live).toMatchObject({ ownerPid: process.pid, ownerIdentity: { version: 1 }, updatedAt: expect.any(Number) });
+  expect(readdirSync(directory)).not.toContain('codebase-memory-live.json.2147483647.tmp');
+  await vi.waitFor(() => expect(JSON.parse(readFileSync(join(directory, 'codebase-memory-live.json'), 'utf8')).updatedAt)
+    .toBeGreaterThan(live.updatedAt), { timeout: 7_000, interval: 100 });
   const route = matchNativeHttpRoute('/api/cortex/codebase-memory', 'GET')!;
   const native = await route.route.load() as typeof codebase;
   expect(await (await native.GET()).json()).toEqual(indexer.getIndexState());
@@ -173,10 +218,83 @@ it('native diagnostics sees each newly recorded timing without a GET flush', asy
   expect(snapshot()).toEqual(before);
 });
 
+it('records 1000 timings with a cached WAL writer, bounded cost and at most 1000 persisted rows', async () => {
+  const timings = join(directory, 'bounded-timings');
+  vi.stubEnv('O8_DATA_DIR', timings);
+  vi.stubEnv('CORTEX_IDE_DB_PATH', join(timings, 'cortex-ide.db'));
+  const recorder = await import('@/lib/cortex/diagnostics');
+  let close: ReturnType<typeof vi.spyOn> | undefined;
+  let prepare: ReturnType<typeof vi.spyOn> | undefined;
+  try {
+    recorder.recordTiming({ label: 'fixture.warm', durationMs: 1, timestamp: Date.now() });
+    close = vi.spyOn(Database.prototype, 'close');
+    prepare = vi.spyOn(Database.prototype, 'prepare');
+    const started = performance.now();
+    for (let index = 0; index < 1000; index++) {
+      recorder.recordTiming({ label: `fixture.bounded.${index}`, durationMs: index, timestamp: Date.now() });
+    }
+    const elapsed = performance.now() - started;
+    expect(close.mock.calls.length, '1000 recordings must reuse the open write handle').toBe(0);
+    expect(prepare.mock.calls.length, 'hot recordings must reuse prepared statements').toBe(0);
+    expect(elapsed, '1000 hot timing recordings must finish within 500ms').toBeLessThan(500);
+    console.info(`[timing-writer] 1000 hot recordings: ${elapsed.toFixed(1)}ms`);
+    close.mockRestore();
+    prepare.mockRestore();
+    const database = new Database(join(timings, 'recall-metrics.db'), { readonly: true, fileMustExist: true });
+    try {
+      expect(database.pragma('journal_mode', { simple: true })).toBe('wal');
+      expect((database.prepare('SELECT COUNT(*) AS count FROM samples').get() as { count: number }).count).toBeLessThanOrEqual(1000);
+      expect(database.prepare('SELECT label FROM samples ORDER BY id DESC LIMIT 1').get()).toEqual({ label: 'fixture.bounded.999' });
+    } finally { database.close(); }
+    const result = await (await diagnostics.GET()).json();
+    expect(result.timing.totalSamples).toBeGreaterThanOrEqual(900);
+    expect(result.timing.totalSamples).toBeLessThanOrEqual(1000);
+  } finally {
+    close?.mockRestore();
+    prepare?.mockRestore();
+    vi.stubEnv('O8_DATA_DIR', directory);
+    vi.stubEnv('CORTEX_IDE_DB_PATH', join(directory, 'cortex-ide.db'));
+    rmSync(timings, { recursive: true, force: true });
+  }
+});
+
+it('drops busy timing writes without throwing, logs once and recovers after the lock clears', async () => {
+  const timings = join(directory, 'busy-timings');
+  vi.stubEnv('O8_DATA_DIR', timings);
+  vi.stubEnv('CORTEX_IDE_DB_PATH', join(timings, 'cortex-ide.db'));
+  const recorder = await import('@/lib/cortex/diagnostics');
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  let lock: Database.Database | undefined;
+  try {
+    recorder.recordTiming({ label: 'fixture.before-lock', durationMs: 1, timestamp: Date.now() });
+    lock = new Database(join(timings, 'recall-metrics.db'));
+    lock.exec('BEGIN IMMEDIATE');
+    for (let index = 0; index < 2; index++) {
+      expect(() => recorder.recordTiming({ label: 'fixture.dropped', durationMs: 1, timestamp: Date.now() })).not.toThrow();
+    }
+    expect(warn).toHaveBeenCalledExactlyOnceWith('[recall-metrics] Could not persist timing.');
+    lock.exec('ROLLBACK');
+    recorder.recordTiming({ label: 'fixture.after-lock', durationMs: 1, timestamp: Date.now() });
+    expect((await (await diagnostics.GET()).json()).timing).toMatchObject({ totalSamples: 2 });
+  } finally {
+    if (lock?.inTransaction) lock.exec('ROLLBACK');
+    lock?.close();
+    warn.mockRestore();
+    vi.stubEnv('O8_DATA_DIR', directory);
+    vi.stubEnv('CORTEX_IDE_DB_PATH', join(directory, 'cortex-ide.db'));
+    rmSync(timings, { recursive: true, force: true });
+  }
+});
+
 it('native diagnostics reads probe counters published by the Next startup owner', async () => {
   const { startCortexDiagnosticsPublisher } = await import('@/lib/cortex/diagnostics-state');
   const { readProcessCwdsForPids, readProcessCwdProbeDiagnostics } = await import('@/lib/runtime/process-cwd-snapshot');
+  writeFileSync(join(directory, 'cortex-process-cwd.json.2147483647.tmp'), 'Interrupted publish');
   startCortexDiagnosticsPublisher();
+  expect(readdirSync(directory)).not.toContain('cortex-process-cwd.json.2147483647.tmp');
+  const before = snapshot();
+  startCortexDiagnosticsPublisher();
+  expect(snapshot(), 'unchanged probe counters must not rewrite the snapshot').toEqual(before);
   await readProcessCwdsForPids([]);
   expect((await (await diagnostics.GET()).json()).processCwdProbe).toEqual(readProcessCwdProbeDiagnostics());
   expect((await (await diagnostics.GET()).json()).processCwdProbe.emptyRequestSkips).toBe(1);

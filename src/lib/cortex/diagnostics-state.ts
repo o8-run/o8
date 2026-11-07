@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { isNativeCortexReader } from './owner-process';
@@ -10,6 +10,7 @@ const emptyProbe: ProcessCwdProbeDiagnostics = {
   lsofInvocations: 0, cacheHits: 0, singleFlightJoins: 0, emptyRequestSkips: 0,
   failures: 0, inflight: false, lastProbeAt: null, lastDurationMs: null, lastRowCount: 0,
 };
+let lastPublished: { path: string; contents: string } | undefined;
 
 function probePath(): string {
   return join(getDataDir({ ...process.env }), 'cortex-process-cwd.json');
@@ -20,11 +21,20 @@ export function startCortexDiagnosticsPublisher(): void {
   if (isNativeCortexReader()) return;
   setProcessCwdProbeDiagnosticsObserver(probe => {
     try {
-      mkdirSync(getDataDir({ ...process.env }), { recursive: true });
       const path = probePath();
+      const contents = JSON.stringify({ version: 1, probe });
+      if (lastPublished?.path === path && lastPublished.contents === contents) return;
+      const directory = getDataDir({ ...process.env });
+      mkdirSync(directory, { recursive: true });
+      if (lastPublished?.path !== path) {
+        for (const name of readdirSync(directory)) {
+          if (/^cortex-process-cwd\.json\.\d+\.tmp$/.test(name)) rmSync(join(directory, name), { force: true });
+        }
+      }
       const temporary = `${path}.${process.pid}.tmp`;
-      writeFileSync(temporary, JSON.stringify({ version: 1, probe }));
+      writeFileSync(temporary, contents);
       renameSync(temporary, path);
+      lastPublished = { path, contents };
     } catch {
       console.warn('[cortex-diagnostics] Could not publish probe counters.');
     }

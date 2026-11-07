@@ -31,7 +31,7 @@ import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { resolveCodebaseMemoryBin, waitForCodebaseMemoryBin } from './binary';
 import { callCodebaseMemoryTool } from './mcp-client';
 import { getRecordedHead, recordIndexedHead } from './state-store';
-import { publishIndexState, readIndexState } from './live-state';
+import { INDEX_STATE_PUBLISH_INTERVAL_MS, publishIndexState, readIndexState } from './live-state';
 import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import type { IndexState, RepoIndexEntry, RepoIndexStatus } from './types';
 
@@ -429,6 +429,8 @@ export async function indexAllRepos(opts: IndexAllOpts = {}): Promise<IndexState
   bootInFlight = true;
   bootRan = true;
   publishIndexState(getIndexState());
+  const heartbeat = setInterval(() => publishIndexState(getIndexState()), INDEX_STATE_PUBLISH_INTERVAL_MS);
+  heartbeat.unref();
 
   const concurrency = opts.concurrency ?? DEFAULT_INDEX_CONCURRENCY;
   const maxSizeBytes = opts.maxRepoSizeBytes ?? DEFAULT_MAX_REPO_SIZE_BYTES;
@@ -493,7 +495,9 @@ export async function indexAllRepos(opts: IndexAllOpts = {}): Promise<IndexState
     );
     return state;
   } finally {
+    clearInterval(heartbeat);
     bootInFlight = false;
+    publishIndexState(getIndexState());
   }
 }
 
