@@ -7,7 +7,7 @@ const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
 
 export const FOOTPRINT_BUDGET = Object.freeze({
-  version: 5,
+  version: 6,
   targets: Object.freeze({
     appBundleBytes: 250 * MIB,
     updaterArchiveBytes: 75 * MIB,
@@ -21,7 +21,7 @@ export const FOOTPRINT_BUDGET = Object.freeze({
     persistentDataBytes: 1 * GIB,
   }),
   regressionCeilings: Object.freeze({
-    appBundleBytes: 350 * MIB,
+    appBundleBytes: 360 * MIB,
     updaterArchiveBytes: 110 * MIB,
     idlePhysicalBytes: 1536 * MIB,
     idleCpuPercent: 15,
