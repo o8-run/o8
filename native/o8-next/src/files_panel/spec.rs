@@ -1,4 +1,5 @@
 //! Workspace Notes: the classic repo-spec read, 800ms autosave and conflict contract.
+macro_rules! strace { ($($t:tt)*) => { eprintln!("[spec-trace {:?}] {}", std::time::Instant::now(), format!($($t)*)); } }
 use super::{editor::Editor, io};
 use crate::{client::Client, theme::current as theme};
 use gpui::{prelude::*, *};
@@ -175,6 +176,9 @@ impl Spec {
         });
     }
     pub(super) fn load(&mut self, background: bool, cx: &mut Context<Self>) {
+        strace!("load bg={background} active={} loading={} task={} pending={} saving={} reviewing={} busy={} dirty={} gen={}",
+            self.active, self.loading, self.load_task.is_some(), self.pending, self.saving, self.reviewing,
+            self.editor.read(cx).rail.busy.is_some(), self.content != self.server, self.generation);
         if background
             && (!self.active
                 || self.loading
@@ -213,6 +217,9 @@ impl Spec {
         self.load_task = Some(cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
+                strace!("load-result bg={background} gen={generation}/{} active={} pending={} saving={} dirty={} ok={:?}",
+                    this.generation, this.active, this.pending, this.saving, this.content != this.server,
+                    result.as_ref().map(|(s, b)| (*s, b["content"].as_str().map(|c| c.to_owned()))));
                 this.load_task = None;
                 if generation != this.generation {
                     return;
@@ -380,6 +387,7 @@ impl Spec {
     }
     pub(super) fn active(&mut self, active: bool, cx: &mut Context<Self>) {
         if self.active != active {
+            strace!("active {} -> {active} started={} loaded_once={}", self.active, self.started, self.loaded_once);
             self.active = active;
             if !active {
                 // A pre-hide read must neither suppress nor overwrite the
@@ -419,6 +427,7 @@ impl Spec {
                 let visible = handle
                     .update(cx, |_, window, _| window.is_window_active())
                     .unwrap_or(false);
+                strace!("poll visible={visible}");
                 if this
                     .update(cx, |this, cx| {
                         if visible {

@@ -32,6 +32,20 @@ pub(super) fn cover(s: &Shell, cx: &mut Context<Shell>) {
     };
     let active =
         (panel.current() == Tool::Spec && panel.motion.is_open()).then(|| key(s, Tool::Spec));
+    thread_local!(static LAST: std::cell::RefCell<String> = Default::default());
+    let seen = format!(
+        "cover current={:?} open={} files={} key_match={}",
+        panel.current(),
+        panel.motion.is_open(),
+        panel.files.len(),
+        active.as_ref().is_some_and(|k| panel.files.contains_key(k))
+    );
+    LAST.with(|last| {
+        if *last.borrow() != seen {
+            eprintln!("[spec-trace {:?}] {seen}", std::time::Instant::now());
+            *last.borrow_mut() = seen;
+        }
+    });
     let workspace = s.state.selected.as_deref().unwrap_or("");
     for (key, view) in panel.files.clone() {
         view.update(cx, |view, cx| {

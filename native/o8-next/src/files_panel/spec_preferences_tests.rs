@@ -180,10 +180,31 @@ fn spec_saved_override_loads_before_active_repo_and_poll_stops_when_hidden(
         "hidden panes must stop polling"
     );
     fs::write(alternate.join("o8.md"), "External while hidden\n").unwrap();
+    eprintln!("[spec-trace] test: wrote file, showing");
     click(&mut cx, "header-right-panel");
     std::thread::sleep(Duration::from_millis(250));
     draw(&mut cx);
-    until(&mut cx, |cx| content(cx) == "External while hidden\n");
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let mut iterations = 0;
+    loop {
+        draw(&mut cx);
+        if content(&mut cx) == "External while hidden\n" {
+            break;
+        }
+        iterations += 1;
+        if std::time::Instant::now() >= deadline {
+            // Method and route only: query strings carry fixture paths.
+            let requests: Vec<String> = f
+                .requests()
+                .iter()
+                .map(|r| r.split('?').next().unwrap_or("").to_owned())
+                .collect();
+            eprintln!("[spec-trace] test: timeout after {iterations} iterations; requests tail {:?}", &requests[requests.len().saturating_sub(16)..]);
+            panic!("notes operation timed out: {:?}", content(&mut cx));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        cx.cx.executor().advance_clock(Duration::from_millis(10));
+    }
 }
 #[gpui::test]
 fn spec_settings_hue_neutrals_reset_and_keyboard_close(cx: &mut TestAppContext) {

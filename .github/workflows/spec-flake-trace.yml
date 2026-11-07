@@ -1,0 +1,47 @@
+name: spec flake trace (draft only, never merge)
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/spec-flake-trace.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    name: Notes preferences module, traced, repeated
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+      O8_NATIVE_REAL_WINDOW_TESTS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/next-linux-setup
+        with:
+          headless-tests: 'true'
+      - name: Build the test binary
+        run: cargo test --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next --no-run
+      - name: Run the preferences module 10 times, as the shard runs it
+        run: |
+          unset DISPLAY WAYLAND_DISPLAY
+          cd native/o8-next
+          bin=$(ls -t target/debug/deps/o8_next-* | grep -v '\.d$' | head -1)
+          mkdir -p ../../work/trace
+          fails=0
+          for i in $(seq 1 10); do
+            if "$bin" files_panel::tests::spec_tests::preferences --test-threads=4 > ../../work/trace/run-$i.log 2>&1; then
+              echo "run $i ok"
+            else
+              echo "run $i FAILED"; fails=$((fails+1))
+              grep -E 'spec-trace|panicked|timed out' ../../work/trace/run-$i.log | tail -80
+            fi
+          done
+          echo "failures: $fails/10"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spec-flake-trace
+          path: work/trace
