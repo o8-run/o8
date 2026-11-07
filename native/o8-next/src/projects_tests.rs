@@ -86,7 +86,7 @@ fn project(fixture: &Fixture, id: &str) -> Value {
 #[gpui::test]
 fn projects_first_run_crud_membership_and_focus(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(true, "");
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("projects.json"),
         State::default(),
@@ -224,7 +224,7 @@ fn projects_first_run_crud_membership_and_focus(cx: &mut TestAppContext) {
 fn projects_auth_refusal_and_retry(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(true, "");
     let client = Client::authenticated(&fixture.origin, Some("fixture-invalid".into())).unwrap();
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         client,
         fixture.root.join("denied.json"),
         State::default(),
@@ -308,7 +308,7 @@ fn projects_switch_active_without_saved_sessions(cx: &mut TestAppContext) {
             &json!({"projectId":alpha["id"]}),
         )
         .unwrap();
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("active.json"),
         State::default(),
@@ -359,7 +359,7 @@ fn projects_switch_active_without_saved_sessions(cx: &mut TestAppContext) {
     );
     click(cx, "project-activate-empty-beta");
     let saved = State::load(&fixture.root.join("active.json")).unwrap();
-    let (restarted, mut restart_visual) = open(
+    let (restarted, mut restart_visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("active.json"),
         saved,
@@ -375,7 +375,7 @@ fn projects_switch_active_without_saved_sessions(cx: &mut TestAppContext) {
 #[gpui::test]
 fn projects_palette_loading_and_cancel(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(true, "");
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("palette.json"),
         State::default(),
@@ -415,7 +415,7 @@ fn projects_reconnect_and_runtime_removal_refusal(cx: &mut TestAppContext) {
             &json!({"action":"add","localPath":fixture.folders[0]}),
         )
         .unwrap();
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("refusal.json"),
         State::default(),
@@ -468,7 +468,7 @@ fn projects_lost_registration_response_preserves_membership_role(cx: &mut TestAp
             &json!({"name":"Recovery project","slug":"recovery-project"}),
         )
         .unwrap();
-    let (_, mut visual) = open(
+    let (_, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("recovery.json"),
         State::default(),
@@ -508,7 +508,7 @@ fn projects_lost_registration_response_preserves_membership_role(cx: &mut TestAp
 #[gpui::test]
 fn projects_preserve_session_focus_and_allow_inbox_navigation(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(true, "--shell --inbox --composer");
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("navigation.json"),
         State::default(),

@@ -3,7 +3,7 @@
 use super::super::*;
 use crate::{
     client::Client,
-    shell::test_support::{draw, open},
+    shell::test_support::{draw, open_past_setup},
     shell_state::State,
 };
 use gpui::{TestAppContext, VisualTestContext};
@@ -241,7 +241,7 @@ fn respond(socket: &mut TcpStream, status: u16, body: &Value) {
     );
 }
 fn start(f: &Fixture, cx: &mut TestAppContext) -> (gpui::Entity<Shell>, VisualTestContext) {
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         f.client.clone(),
         f.root.join("shell.json"),
         State::default(),

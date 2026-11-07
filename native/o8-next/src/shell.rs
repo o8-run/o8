@@ -602,5 +602,8 @@ pub(crate) fn notes_test_window(
     state: State,
     cx: &mut gpui::App,
 ) -> gpui::AnyWindowHandle {
-    view::open_window(client, file, state, true, cx).into()
+    let handle = view::open_window(client, file, state, true, cx);
+    // Notes tests start past first-run setup, which covers the whole window.
+    let _ = handle.update(cx, |s, _, _| s.surfaces.setup.skip_first_run());
+    handle.into()
 }

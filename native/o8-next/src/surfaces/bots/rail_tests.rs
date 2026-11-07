@@ -78,7 +78,8 @@ fn bots_rail_no_bot_fixed_navigation_baseline(cx: &mut TestAppContext) {
 fn bots_without_a_workspace_open_by_click_and_restore(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(true, "--shell --bots --inbox-empty");
     let file = fixture.root.join("global-bot.json");
-    let (shell, mut visual) = open(fixture.client.clone(), file.clone(), State::default(), cx);
+    let (shell, mut visual) =
+        open_past_setup(fixture.client.clone(), file.clone(), State::default(), cx);
     settle(&shell, &mut visual);
     assert!(shell.read_with(&visual, |s, _| s.connected && s.state.selected.is_none()));
     click(&mut visual, "rail-bot-grok:agent-1");

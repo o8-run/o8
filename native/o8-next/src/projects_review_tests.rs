@@ -36,7 +36,7 @@ fn review_p1_rejects_duplicate_rename_before_deleting_alpha(cx: &mut TestAppCont
     let fixture = Fixture::start_mode(true, "");
     let (alpha, _) = seed_project(&fixture, "Review alpha", "review-alpha", 0);
     let (beta, beta_repo) = seed_project(&fixture, "Review beta", "review-beta", 1);
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("duplicate.json"),
         State::default(),
@@ -93,7 +93,7 @@ fn review_p1_deletes_existing_duplicate_by_stable_id(cx: &mut TestAppContext) {
             &json!({"name":"Review beta"}),
         )
         .unwrap();
-    let (_, mut visual) = open(
+    let (_, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("existing-duplicate.json"),
         State::default(),
@@ -155,7 +155,7 @@ fn review_p1_deletes_existing_duplicate_by_stable_id(cx: &mut TestAppContext) {
 fn repointed_open(cx: &mut TestAppContext, selector: &'static str) {
     let fixture = Fixture::start_mode(true, "");
     let (_, repo_id) = seed_project(&fixture, "Review alpha", "review-alpha", 0);
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("repoint.json"),
         State::default(),
@@ -216,7 +216,7 @@ fn round2_project_delete_refuses_unconfirmed_runtime(cx: &mut TestAppContext) {
         .project_request("DELETE", "/api/panel/repos", &json!({"id":alpha_repo}))
         .unwrap_err();
     assert!(direct.contains("repo_runtime_stop_unconfirmed (HTTP 409)"));
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("delete-runtime.json"),
         State::default(),
@@ -268,7 +268,7 @@ fn legacy_shell(cx: &mut TestAppContext) -> (Fixture, Entity<Shell>, VisualTestC
             .iter()
             .any(|p| p["id"] == "legacy-alpha-id")
     );
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("legacy.json"),
         State::default(),
@@ -365,7 +365,7 @@ fn round2_legacy_desktop_rename_before_native_read_keeps_one_pair(cx: &mut TestA
             &json!({"name":"Legacy moved"}),
         )
         .unwrap();
-    let (_, mut visual) = open(
+    let (_, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("legacy-desktop-rename.json"),
         State::default(),

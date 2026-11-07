@@ -9,6 +9,13 @@ pub(super) struct Runtime {
     pub view: Option<Entity<view::Setup>>,
     first_run_checked: Cell<bool>,
 }
+impl Runtime {
+    /// Start this window past first-run setup, which covers the whole window.
+    #[cfg(test)]
+    pub(crate) fn skip_first_run(&self) {
+        self.first_run_checked.set(true);
+    }
+}
 pub(super) const REGISTRATION: Registration = Registration {
     key_down: |s, _, _, cx| {
         if s.surfaces

@@ -30,7 +30,7 @@ fn projects_repository_icon_picker_saves_each_choice(cx: &mut TestAppContext) {
         )
         .unwrap();
     let name = repos(&fixture)[0]["name"].as_str().unwrap().to_owned();
-    let (_shell, mut visual) = open(
+    let (_shell, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("icons.json"),
         State::default(),
