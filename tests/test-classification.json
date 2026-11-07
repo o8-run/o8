@@ -5909,6 +5909,12 @@
       ]
     },
     {
+      "path": "tests/panel-repos-clone-stderr-redaction-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/panel-repos-clone.test.ts",
       "reasons": [
         "child-process",
