@@ -36,8 +36,15 @@ jobs:
       - name: Release binary size
         shell: pwsh
         run: Get-Item native/o8-next/target/release/o8-next.exe | Select-Object Name, Length
+      - name: Start the release binary with --help
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $out = & native/o8-next/target/release/o8-next.exe --help 2>&1
+          "exit code: $LASTEXITCODE"
+          $out | Select-Object -First 40
       - name: Compile the native tests
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-run
       - name: Run the native CLI tests
         continue-on-error: true
-        run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --test shell_cli --test pane_grid_cli --test terminal_cli --test diff_cli
+        run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-fail-fast --test shell_cli --test pane_grid_cli --test terminal_cli --test diff_cli
