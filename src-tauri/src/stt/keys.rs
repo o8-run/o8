@@ -505,28 +505,37 @@ fn write_voice_prefs_object(
 /// `voice-prefs.json` so the native app (#5667) sees the operator's existing
 /// settings. Called once at host startup.
 ///
+/// Always ensures `voice-prefs.json` exists, writing an empty `{}` when there is
+/// nothing to migrate. Its presence is the native app's signal that a host ran
+/// on THIS machine (local-host only; the native app never creates it and shows
+/// "unavailable" until it appears). Without this, a fresh/default install with
+/// no customized voice keys would never get the file, and the local native app
+/// would wrongly read as remote.
+///
 /// Idempotent and non-destructive: only `VOICE_PREFS_ALLOWLIST` keys are copied,
 /// so a secret is structurally never read or written here; a value already in
 /// `voice-prefs.json` (a newer native/panel edit) is NOT overwritten by the older
 /// `dictation.json` copy; and `dictation.json` is left untouched, so rolling back
 /// to an older build still reads its own store.
 pub fn project_voice_prefs() -> Result<(), String> {
-    let base = dictation_config();
-    let Some(base_obj) = base.as_object() else {
-        return Ok(());
-    };
+    let file_absent = !voice_prefs_path().exists();
     let mut prefs = read_voice_prefs_object();
     let mut changed = false;
-    for key in VOICE_PREFS_ALLOWLIST {
-        if prefs.contains_key(key) {
-            continue; // never clobber a newer overlay value
-        }
-        if let Some(value) = base_obj.get(key) {
-            prefs.insert(key.to_string(), value.clone());
-            changed = true;
+    if let Some(base_obj) = dictation_config().as_object() {
+        for key in VOICE_PREFS_ALLOWLIST {
+            if prefs.contains_key(key) {
+                continue; // never clobber a newer overlay value
+            }
+            if let Some(value) = base_obj.get(key) {
+                prefs.insert(key.to_string(), value.clone());
+                changed = true;
+            }
         }
     }
-    if changed {
+    // Write when there is something to migrate, OR to create the beacon file the
+    // first time (even empty). On later runs the file exists and nothing changed,
+    // so this is a no-op — no needless rewrite.
+    if changed || file_absent {
         write_voice_prefs_object(prefs)?;
     }
     Ok(())
@@ -921,6 +930,74 @@ mod voice_prefs_split_tests {
         for key in VOICE_PREFS_ALLOWLIST {
             assert!(seen.insert(key), "duplicate allowlist key: {key}");
         }
+    }
+
+    /// The committed `voice-prefs-allowlist.json` is the single source the native
+    /// app imports instead of hand-mirroring the key list (#5667). This keeps it
+    /// in lockstep with the host authority (`VOICE_PREFS_ALLOWLIST`) so the two
+    /// can never drift: add/remove/reorder a key in the const and this fails until
+    /// the JSON is updated to match.
+    #[test]
+    fn allowlist_json_export_matches_const() {
+        let exported: Vec<String> = serde_json::from_str(include_str!("voice-prefs-allowlist.json"))
+            .expect("voice-prefs-allowlist.json must be a JSON array of strings");
+        let expected: Vec<String> = VOICE_PREFS_ALLOWLIST.iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            exported, expected,
+            "voice-prefs-allowlist.json is out of sync with VOICE_PREFS_ALLOWLIST",
+        );
+    }
+
+    /// `voice-prefs.json` existence is the native app's local-host beacon, so the
+    /// host must create it even when there is nothing to migrate (a fresh/default
+    /// install with no customized voice keys, or no dictation.json at all).
+    /// Isolated in a child process because the pref caches are process-global.
+    #[test]
+    fn projection_always_creates_the_beacon_file_even_with_nothing_to_migrate() {
+        const CHILD: &str = "O8_TEST_VOICE_PREFS_BEACON_CHILD";
+        if std::env::var(CHILD).as_deref() == Ok("1") {
+            let data_dir = std::path::PathBuf::from(std::env::var_os("O8_DATA_DIR").unwrap());
+            let voice_prefs = data_dir.join("voice-prefs.json");
+            // Fresh install: no dictation.json, no voice-prefs.json.
+            assert!(!voice_prefs.exists(), "fixture should start without the beacon file");
+            project_voice_prefs().unwrap();
+            assert!(voice_prefs.exists(), "beacon file not created on a fresh install");
+            let value: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&voice_prefs).unwrap()).unwrap();
+            assert!(value.is_object(), "beacon file must be a JSON object");
+            // Idempotent: a second run succeeds and keeps the file.
+            project_voice_prefs().unwrap();
+            assert!(voice_prefs.exists());
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "o8-voice-prefs-beacon-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct RemoveFixture(std::path::PathBuf);
+        impl Drop for RemoveFixture {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let _fixture = RemoveFixture(dir.clone());
+        let module = module_path!().split_once("::").unwrap().1;
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!("{module}::projection_always_creates_the_beacon_file_even_with_nothing_to_migrate"),
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("O8_DATA_DIR", &dir)
+            .env("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS", "1")
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "beacon-file real-path test failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 
     /// Real-path regression for #5667: drive the actual projection, write and read
