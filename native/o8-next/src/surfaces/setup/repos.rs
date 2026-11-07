@@ -2,7 +2,7 @@
 //! this Mac, reopen a project already in o8, or clone one from GitHub.
 //! Setup never signs in to GitHub. It asks the server whether GitHub is
 //! connected, lists and clones through the server's own routes, and when
-//! GitHub is not connected it says so and points to Settings.
+//! GitHub is not connected it says so and names the GitHub CLI as text.
 use super::look::{self, Look};
 use super::{Action, Project, Setup, Step, primary, quiet};
 use crate::client::Client;
@@ -89,10 +89,13 @@ fn load(client: &Client) -> Result<(bool, Vec<GithubRepo>), ()> {
         #[serde(default)]
         repos: Vec<GithubRepo>,
     }
-    // As on the desktop, a refused status reads as not connected.
-    let connected = client
-        .get::<Status>("/api/panel/github-status", &[])
-        .is_ok_and(|status| status.authenticated);
+    // As on the desktop, a status the server refuses reads as not connected;
+    // one that never arrives whole is a failed load, with Retry.
+    let connected = match client.get::<Status>("/api/panel/github-status", &[]) {
+        Ok(status) => status.authenticated,
+        Err(error) if error.contains("Server returned HTTP") => false,
+        Err(_) => return Err(()),
+    };
     if !connected {
         return Ok((false, vec![]));
     }
@@ -488,12 +491,14 @@ impl Setup {
                             .child(
                                 div()
                                     .flex_1()
+                                    .min_w_0()
                                     .text_size(px(12.5))
                                     .line_height(relative(1.5))
                                     .text_color(theme().text_secondary)
                                     .child(
                                         "GitHub isn’t connected on this machine yet. Choose a \
-                                         local folder, or connect GitHub later in Settings.",
+                                         local folder, or sign in with the GitHub CLI (gh auth \
+                                         login) and open Clone from GitHub again.",
                                     ),
                             ),
                     )
@@ -515,6 +520,7 @@ impl Setup {
                             .child(
                                 div()
                                     .flex_1()
+                                    .min_w_0()
                                     .text_size(px(12.5))
                                     .line_height(relative(1.5))
                                     .text_color(theme().text_secondary)
