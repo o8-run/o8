@@ -65,6 +65,15 @@ describe('lookupOwnedActiveRun', () => {
     expect(await lookupOwnedActiveRun('codex-owned:cleared', 1000)).toEqual({});
   });
 
+  it('does not treat a finished Pi session\'s persisted RPC pid as an active run', async () => {
+    const d = join(root, 'pi-idle');
+    mkdirSync(d, { recursive: true });
+    // An idle RPC child, or a stale pid left by a restart: no activeRun.
+    writeFileSync(join(d, 'session.json'), JSON.stringify({ surfaceId: 'pi-owned:idle', rpcPid: process.pid }));
+    expect(await lookupOwnedActiveRunFresh('pi-owned:idle')).toEqual({});
+    expect((await listOwnedActiveRuns(Date.now(), true)).map(run => run.surfaceId)).not.toContain('pi-owned:idle');
+  });
+
   it('returns the run (pid/tmux) when present with an active run', async () => {
     writeSession('s2', 'codex-owned:live', { pid: 4242, tmuxSession: 'sess-x' });
     resetOwnedSessionIndex();

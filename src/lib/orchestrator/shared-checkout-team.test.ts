@@ -65,8 +65,10 @@ describe('shared checkout team', () => {
     const { root, repoPath } = fixture();
     const dataDir = join(root, 'state');
     const first = await ensureSharedCheckoutTeam({ repoPath, parentThreadId: 'thoughts-a', dataDir });
+    await reserveSharedCheckoutMember({ repoPath, parentThreadId: 'thoughts-a', dataDir,
+      runtime: 'codex', taskName: 'Unconfirmed launch', clientMutationId: 'unconfirmed', paths: ['src/a'] });
     await expect(ensureSharedCheckoutTeam({ repoPath, parentThreadId: 'thoughts-b', dataDir }))
-      .rejects.toThrow(/owned by another orchestrator/);
+      .rejects.toThrow(/owned by orchestrator thoughts-a/);
     git(first.path, 'checkout', '--detach');
     await expect(ensureSharedCheckoutTeam({ repoPath, parentThreadId: 'thoughts-a', dataDir }))
       .rejects.toThrow(/branch changed/);

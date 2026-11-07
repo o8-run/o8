@@ -8,7 +8,7 @@ import type { ThinkingEffort } from './thinking-effort';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { WorkerRouting, WorkerLaunchContext } from '@/lib/orchestrator/types';
 
-import { failSharedCheckoutMember, recordSharedCheckoutMember, reserveSharedCheckoutMember, validateSharedCheckoutPaths } from './shared-checkout-team';
+import { SharedCheckoutError, failSharedCheckoutMember, recordSharedCheckoutMember, reserveSharedCheckoutMember, validateSharedCheckoutPaths } from './shared-checkout-team';
 import { captureSharedWorkerOrigin } from './shared-worker-origin';
 import { registerSharedWorkerParent } from './shared-worker-returns';
 
@@ -51,7 +51,7 @@ export async function launchSharedCheckoutWorker(input: {
   try {
     const recovered = await findOwnedLaunchByMutationId(input.clientMutationId);
     if (recovered && recovered.cwd !== team.path) {
-      throw new Error('Worker mutation already belongs to another checkout.');
+      throw new SharedCheckoutError('Worker mutation already belongs to another checkout.');
     }
     result = recovered ? {
       ok: recovered.outcome !== 'failed',
