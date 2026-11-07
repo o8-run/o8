@@ -133,7 +133,6 @@ pub(crate) mod fake_code {
     pub(crate) fn install() -> (MutexGuard<'static, ()>, PathBuf) {
         let guard = LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         let bin = BIN.get_or_init(|| {
-            use std::os::unix::fs::PermissionsExt;
             let bin = crate::shell::test_support::scratch_path("o8-fake-code");
             std::fs::create_dir_all(&bin).unwrap();
             let script = bin.join("code");
@@ -142,7 +141,11 @@ pub(crate) mod fake_code {
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$(dirname \"$0\")/argv.log\"\n",
             )
             .unwrap();
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
             let path = std::env::var_os("PATH").unwrap_or_default();
             let mut dirs = vec![bin.clone()];
             dirs.extend(std::env::split_paths(&path));

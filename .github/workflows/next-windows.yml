@@ -1,0 +1,47 @@
+name: o8 next Windows build
+
+# Builds o8 next (GPUI) for Windows x64, starts the release exe, and runs the
+# native CLI tests. Not a required check yet; packaging is separate.
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['native/o8-next/**', '.github/workflows/next-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: next-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Windows x64 build and start
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: stable
+      - name: Check the app binary
+        run: cargo check --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next --message-format short
+      - name: Build the release binary
+        run: cargo build --release --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next
+      - name: Release binary size
+        shell: pwsh
+        run: Get-Item native/o8-next/target/release/o8-next.exe | Select-Object Name, Length
+      - name: Start the release binary with --help
+        shell: pwsh
+        run: |
+          $out = & native/o8-next/target/release/o8-next.exe --help 2>&1
+          $out | Select-Object -First 40
+          if ($LASTEXITCODE -ne 0) { throw "o8-next.exe --help exited $LASTEXITCODE" }
+      - name: Compile the native tests
+        run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-run
+      - name: Run the native CLI tests
+        run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-fail-fast --test shell_cli --test pane_grid_cli --test terminal_cli --test diff_cli
