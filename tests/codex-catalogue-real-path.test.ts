@@ -59,17 +59,30 @@ describe.skipIf(process.platform === 'win32')('installed Codex catalogue process
     await expect(getCodexSpeedCatalogue(home)).rejects.toThrow('timed out');
     expect(warning).not.toHaveBeenCalled();
   }, 20_000);
-  it('keeps the five-minute cache and fresh override, and retries after a failed refresh', async () => {
+  it('keeps the five-minute cache and fresh override, and retries a failed refresh after a minute', async () => {
     const good = await getCodexSpeedCatalogue(home);
     now += 4 * 60_000; mode('invalid');
     expect(await getCodexSpeedCatalogue(home)).toEqual(good); expect(reads()).toBe(1);
     expect(await getCodexSpeedCatalogue(home, true)).toEqual(good); expect(reads()).toBe(2);
     expect(warning).toHaveBeenCalledTimes(1);
     mode('good');
+    // Within the minute the fallback is served without another Codex process.
+    now += 30_000;
+    expect(await getCodexSpeedCatalogue(home)).toEqual(good); expect(reads()).toBe(2);
+    now += 31_000;
     expect(await getCodexSpeedCatalogue(home)).toEqual(good); expect(reads()).toBe(3);
     now += 5 * 60_000;
     expect(await getCodexSpeedCatalogue(home)).toEqual(good); expect(reads()).toBe(4);
   });
+  it('serves the fallback without waiting out the timeout again while Codex hangs', async () => {
+    const good = await getCodexSpeedCatalogue(home);
+    now += 6 * 60_000; mode('never');
+    expect(await getCodexSpeedCatalogue(home)).toEqual(good); expect(reads()).toBe(2);
+    const started = performance.now();
+    expect(await getCodexSpeedCatalogue(home)).toEqual(good);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(reads()).toBe(2);
+  }, 40_000);
   it('does not refresh the age of a fallback or reuse it for another account', async () => {
     const good = await getCodexSpeedCatalogue(home);
     now += 23 * 60 * 60_000; mode('invalid');

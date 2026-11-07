@@ -20,33 +20,39 @@ FOUND_VERSION=""
 try_node() {
   CANDIDATE="$1"
   shift
+  # Only absolute paths: a relative override or PATH entry would run a
+  # \`node\` planted in whatever directory o8 was invoked from.
+  case "$CANDIDATE" in /*) ;; *) return 0 ;; esac
   [ -x "$CANDIDATE" ] || return 0
   VERSION="$("$CANDIDATE" --version 2>/dev/null)" || return 0
   [ -n "$FOUND_VERSION" ] || FOUND_VERSION="$VERSION"
   MAJOR="\${VERSION#v}"
   MAJOR="\${MAJOR%%.*}"
   case " $SUPPORTED_MAJORS " in
-    *" $MAJOR "*) exec "$CANDIDATE" "$DIR/o8.mjs" "$@" ;;
+    *" $MAJOR "*) exec "$CANDIDATE" "$DIR/o8.mjs" "$@" 3<&- ;;
   esac
 }
 try_node "\${O8_NODE_BIN:-}" "$@"
 # The desktop's existing probe cache records paths, not a guaranteed last
 # server selection. Re-probe them; never trust the cached version or stamp.
 if [ -n "\${HOME:-}" ] && [ -r "$HOME/.o8/node-abi-cache" ]; then
-  while IFS="$(printf '\t')" read -r CACHED_NODE REST || [ -n "$CACHED_NODE" ]; do
+  # Read on fd 3 so a selected Node keeps the caller's stdin.
+  while IFS="$(printf '\t')" read -r CACHED_NODE REST <&3 || [ -n "$CACHED_NODE" ]; do
     try_node "$CACHED_NODE" "$@"
-  done < "$HOME/.o8/node-abi-cache"
+  done 3< "$HOME/.o8/node-abi-cache"
 fi
 for LOGIN_SHELL in zsh bash sh; do
-  LOGIN_NODE="$("$LOGIN_SHELL" -l -c 'command -v node' 2>/dev/null || true)"
+  # From / so an empty or "." PATH entry cannot resolve the caller's directory.
+  LOGIN_NODE="$(cd / && "$LOGIN_SHELL" -l -c 'command -v node' 2>/dev/null || true)"
   try_node "$LOGIN_NODE" "$@"
 done
-# Walk every PATH directory, including paths containing spaces and empty entries.
-NODE_PATH="\${PATH:-}:"
-while [ -n "$NODE_PATH" ]; do
-  NODE_DIR="\${NODE_PATH%%:*}"
-  NODE_PATH="\${NODE_PATH#*:}"
-  try_node "\${NODE_DIR:-.}/node" "$@"
+# Walk every PATH directory, including paths containing spaces. Empty and
+# relative entries are skipped, and Node's own NODE_PATH is left alone.
+SEARCH_PATH="\${PATH:-}:"
+while [ -n "$SEARCH_PATH" ]; do
+  NODE_DIR="\${SEARCH_PATH%%:*}"
+  SEARCH_PATH="\${SEARCH_PATH#*:}"
+  if [ -n "$NODE_DIR" ]; then try_node "$NODE_DIR/node" "$@"; fi
 done
 if [ -n "\${HOME:-}" ]; then
   NVM_ROOT="\${NVM_DIR:-$HOME/.nvm}"
@@ -69,7 +75,11 @@ for BREW_ROOT in "\${HOMEBREW_PREFIX:-/opt/homebrew}" "\${HOMEBREW_PREFIX:-/usr/
     try_node "$CANDIDATE" "$@"
   done
 done
-printf 'o8: Found Node.js %s; supported majors: %s. Set O8_NODE_BIN to a supported Node.js binary.\n' "\${FOUND_VERSION:-none}" "$SUPPORTED_MAJORS" >&2
+if [ -n "$FOUND_VERSION" ]; then
+  printf 'o8: Found Node.js %s; supported majors: %s. Set O8_NODE_BIN to a supported Node.js binary.\n' "$FOUND_VERSION" "$SUPPORTED_MAJORS" >&2
+else
+  printf 'o8: No Node.js found; supported majors: %s. Set O8_NODE_BIN to a supported Node.js binary.\n' "$SUPPORTED_MAJORS" >&2
+fi
 exit 127
 `;
 }

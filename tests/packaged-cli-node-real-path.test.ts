@@ -97,7 +97,26 @@ describe.skipIf(process.platform === 'win32')('packaged CLI Node selection', () 
   it('reports a missing runtime without shell errors', () => {
     const result = run();
     expect(result.status).toBe(127); expect(result.stdout).toBe('');
-    expect(result.stderr.trim().split('\n')).toEqual(['o8: Found Node.js none; supported majors: 22 24. Set O8_NODE_BIN to a supported Node.js binary.']);
+    expect(result.stderr.trim().split('\n')).toEqual(['o8: No Node.js found; supported majors: 22 24. Set O8_NODE_BIN to a supported Node.js binary.']);
+  });
+  it('keeps the caller stdin and NODE_PATH when a probe record selects Node', () => {
+    const recorded = script(join(root, 'recorded node'), `if [ "\${1:-}" = --version ]; then echo v22.1.0; else printf 'NODE_PATH=%s\\n' "\${NODE_PATH:-}"; cat; fi`);
+    mkdirSync(join(root, '.o8'));
+    writeFileSync(join(root, '.o8/node-abi-cache'), `${recorded}\t0\t0\t22\tv22.1.0\n`);
+    symlinkSync('/bin/cat', join(tools, 'cat'));
+    env.NODE_PATH = '/caller/modules';
+    const result = spawnSync(shim, ['status'], { env, input: 'piped\n', encoding: 'utf8', timeout: 5000 });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('NODE_PATH=/caller/modules\npiped\n');
+  });
+  it('never runs a node from the working directory through a relative override or empty PATH entry', () => {
+    const cwd = join(root, 'untrusted'); mkdirSync(cwd);
+    node(join(cwd, 'node'), 'v22.1.0', 'HIJACKED');
+    env.O8_NODE_BIN = './node';
+    env.PATH = `${tools}::.`;
+    const result = spawnSync(shim, ['status'], { env, cwd, encoding: 'utf8', timeout: 5000 });
+    expect(result.stdout).not.toContain('HIJACKED');
+    expect(result.status).toBe(127);
   });
   it('uses the packaged manifest rather than accepting an unshipped major', () => {
     writeFileSync(join(root, 'server/native-addon-abis.json'), JSON.stringify({ nodeAbis: { 22: '127' } }));

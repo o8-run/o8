@@ -18,9 +18,13 @@ export interface CodexSpeedCatalogue {
   nativeDefaultModel?: string;
   defaultModel?: string;
 }
-let cache: { key: string; at: number; promise: Promise<CodexSpeedCatalogue> } | null = null;
+let cache: { key: string; at: number; ttl: number; promise: Promise<CodexSpeedCatalogue> } | null = null;
 let lastGood: { key: string; at: number; catalogue: CodexSpeedCatalogue } | null = null;
 const STALE_CATALOGUE_MAX_AGE_MS = 24 * 60 * 60_000;
+const CATALOGUE_TTL_MS = 5 * 60_000;
+// While Codex is not answering, serve the fallback instead of waiting out the
+// read timeout on every call.
+const FAILED_REFRESH_RETRY_MS = 60_000;
 
 /** Read-only model/list and config/read; never creates a thread or a provider turn. */
 export async function getCodexSpeedCatalogue(home = path.join(homedir(), '.codex'), fresh = false): Promise<CodexSpeedCatalogue> {
@@ -29,22 +33,28 @@ export async function getCodexSpeedCatalogue(home = path.join(homedir(), '.codex
   const authStat = await stat(path.join(home, 'auth.json')).catch(() => null);
   const configStat = await stat(path.join(home, 'config.toml')).catch(() => null);
   const key = `${binary.path}:${binary.version}:${home}:${authStat?.mtimeMs}:${configStat?.mtimeMs}:${credentialPolicyFingerprint('codex')}`;
-  if (!fresh && cache?.key === key && Date.now() - cache.at < 5 * 60_000) return cache.promise;
+  if (!fresh && cache?.key === key && Date.now() - cache.at < cache.ttl) return cache.promise;
   const promise = readCodexSpeedCatalogue(binary.path, childEnvironment({ runtimeId: 'codex', env: { CODEX_HOME: home, PATH: pathWithNodeRuntime() } }))
     .then(catalogue => {
       lastGood = { key, at: Date.now(), catalogue };
       return catalogue;
     })
     .catch(error => {
-      if (cache?.promise === promise) cache = null;
       // A failed refresh must not renew the age of the last successful read.
-      if (lastGood?.key === key && Date.now() - lastGood.at <= STALE_CATALOGUE_MAX_AGE_MS) {
+      const fallback = lastGood?.key === key && Date.now() - lastGood.at <= STALE_CATALOGUE_MAX_AGE_MS
+        ? lastGood.catalogue : null;
+      if (cache?.promise === promise) {
+        cache = fallback
+          ? { key, at: Date.now(), ttl: FAILED_REFRESH_RETRY_MS, promise: Promise.resolve(fallback) }
+          : null;
+      }
+      if (fallback) {
         console.warn('[codex] Fresh speed catalogue read failed; using the last successful catalogue.');
-        return lastGood.catalogue;
+        return fallback;
       }
       throw error;
     });
-  cache = { key, at: Date.now(), promise };
+  cache = { key, at: Date.now(), ttl: CATALOGUE_TTL_MS, promise };
   return promise;
 }
 
