@@ -842,14 +842,24 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
         out.push(Line {
             key: "done".into(),
             rail: Rail::Main,
-            icon: Icon::Check,
-            label: if trace.thinking {
+            icon: if trace.stopped {
+                Icon::Cross
+            } else {
+                Icon::Check
+            },
+            label: if trace.stopped {
+                "Stopped".into()
+            } else if trace.thinking {
                 "Finished thinking".into()
             } else {
                 "Finished".into()
             },
             detail: timed.then(|| tally(steps)),
-            tone: Tone::Primary,
+            tone: if trace.stopped {
+                Tone::Muted
+            } else {
+                Tone::Primary
+            },
             live: false,
             chips: vec![],
             more: 0,
@@ -878,7 +888,14 @@ fn title(steps: &[Step], trace: &Trace, now: f64) -> (String, Option<String>) {
         (Some(start), Some(end)) => end - start,
         _ => 0.,
     };
-    let title = if elapsed >= 1000. {
+    let title = if trace.stopped && steps.is_empty() && !trace.thinking {
+        // Stopped before any output: the header is the whole row.
+        if elapsed >= 1000. {
+            format!("Stopped after {}", seconds(elapsed))
+        } else {
+            "Stopped".into()
+        }
+    } else if elapsed >= 1000. {
         let verb = if trace.thinking { "Thought" } else { "Worked" };
         format!("{verb} for {}", seconds(elapsed))
     } else if steps.is_empty() {
@@ -1163,7 +1180,12 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
     let settled = !known && !trace.live;
     seen(&format!("trace:{id}"), true);
     let now = now_ms();
-    let timed = clock(trace.turn.as_deref().unwrap_or(&id), &trace, now);
+    // A turn stopped before any output times itself from its saved stamps.
+    let timed = if trace.stopped && steps.is_empty() && !trace.thinking {
+        trace.clone()
+    } else {
+        clock(trace.turn.as_deref().unwrap_or(&id), &trace, now)
+    };
     // While a turn runs its agents show as cards; the finished trace lists them.
     let timeline: Vec<Step> = steps
         .iter()
@@ -1383,7 +1405,9 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
         .iter()
         .flat_map(|step| step.messages.iter())
         .enumerate()
-        .map(|(n, bubble)| crate::thread_messages::element(bubble, format!("trace-message-{index}-{n}")))
+        .map(|(n, bubble)| {
+            crate::thread_messages::element(bubble, format!("trace-message-{index}-{n}"))
+        })
         .collect();
     // Reading column and insets match the transcript's message rows.
     let column = crate::retained::reading_column();
@@ -1821,5 +1845,39 @@ mod tests {
     fn durations_read_as_seconds_then_minutes() {
         assert_eq!(seconds(14_200.), "14s");
         assert_eq!(seconds(65_000.), "1m 5s");
+    }
+
+    fn activity(entries: serde_json::Value) -> (Vec<Step>, Trace) {
+        let entries: Vec<crate::model::Entry> = serde_json::from_value(entries).unwrap();
+        crate::model::render_tree(&entries)
+            .into_iter()
+            .find_map(|row| match row {
+                crate::model::Row::Activity { steps, trace, .. } => Some((steps, trace)),
+                _ => None,
+            })
+            .expect("an activity row")
+    }
+
+    #[test]
+    fn a_stopped_turn_ends_its_trace_with_stopped_not_finished() {
+        let (steps, trace) = activity(serde_json::json!([
+            {"id":"ask","role":"user","text":"Run it","timestamp":"1000"},
+            {"id":"reply","role":"assistant","text":"","timestamp":"1001",
+             "receipt":{"terminal":{"userMessageId":"ask","outcome":"interrupted"}},
+             "toolCalls":[{"id":"b","name":"Bash","args":{"command":"sleep 25"},"status":"done"}]}
+        ]));
+        assert!(trace.stopped && !trace.live);
+        assert_eq!(labels(&lines(&steps, &trace)).last().unwrap(), "Stopped");
+    }
+
+    #[test]
+    fn a_turn_stopped_before_any_output_reads_stopped_under_its_prompt() {
+        let (steps, trace) = activity(serde_json::json!([
+            {"id":"ask","role":"user","text":"Run sleep 25","timestamp":"1000"},
+            {"id":"ask:stopped","role":"assistant","text":"","timestamp":"9000",
+             "receipt":{"terminal":{"outcome":"interrupted"}}}
+        ]));
+        assert!(steps.is_empty() && trace.stopped && !trace.live);
+        assert_eq!(title(&steps, &trace, 0.).0, "Stopped after 8s");
     }
 }

@@ -77,6 +77,8 @@ pub struct Trace {
     pub helpers: Vec<Step>,
     /// A later row of the running turn shows this block's subagents.
     pub helpers_below: bool,
+    /// The turn was stopped while this block was its last work.
+    pub stopped: bool,
 }
 
 impl Trace {
@@ -94,6 +96,16 @@ fn stamp(entry: &Entry) -> Option<f64> {
         Value::String(text) => text.parse().ok(),
         value => value.as_f64(),
     }
+}
+
+/// The reply's turn ended on a stop.
+fn interrupted(entry: &Entry) -> bool {
+    entry.role == "assistant"
+        && entry
+            .extra
+            .get("receipt")
+            .and_then(|receipt| receipt["terminal"]["outcome"].as_str())
+            == Some("interrupted")
 }
 
 /// When the server recorded the turn's outcome, epoch ms.
@@ -184,13 +196,14 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
     let mut trace = Trace::default();
     let mut trace_id = String::new();
     let mut reasoning = false;
+    let mut turn_start = None;
     let flush = |rows: &mut Vec<Row>,
                  pending: &mut Vec<usize>,
                  steps: &[Step],
                  trace: &mut Trace,
                  trace_id: &str,
                  ended: Option<f64>| {
-        if !pending.is_empty() || trace.thinking {
+        if !pending.is_empty() || trace.thinking || trace.stopped {
             let mut trace = std::mem::take(trace);
             if let Some(ended) = ended {
                 trace.ended = Some(trace.ended.map_or(ended, |e| e.max(ended)));
@@ -257,6 +270,20 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                 pending.push(steps.len());
                 steps.push(step);
             }
+        }
+        if interrupted(entry) {
+            if !pending.is_empty() || trace.thinking {
+                trace.stopped = true;
+            } else if entry.text.trim().is_empty() {
+                // A turn stopped before any output still says so under its prompt.
+                trace_id = entry.id.clone();
+                trace.stopped = true;
+                trace.include(turn_start);
+                trace.include(completed(entry).or(stamp(entry)));
+            }
+        }
+        if entry.role == "user" {
+            turn_start = stamp(entry);
         }
         let extras = ["media", "claudeCodeEvents"].iter().any(|key| {
             entry
