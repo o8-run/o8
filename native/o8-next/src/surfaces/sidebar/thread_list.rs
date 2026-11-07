@@ -121,8 +121,9 @@ pub struct ThreadList {
     /// The press that last closed a menu from outside it; when that press
     /// lands on the menu's trigger, its click must not reopen the menu.
     menu_press: Option<gpui::Point<gpui::Pixels>>,
-    /// A thread New thread created; the shell opens it once the list has it.
-    pending_open: Option<String>,
+    /// A thread New thread created and when; the shell opens it once the list
+    /// has it, unless that takes longer than `PENDING_OPEN_TTL`.
+    pending_open: Option<(String, std::time::Instant)>,
     /// Threads whose start failed, so a pane waiting on one can say so.
     pub failed_starts: HashSet<String>,
     /// Closed By repo folders, by repository path.
@@ -541,12 +542,7 @@ impl ThreadList {
                         this.notice.clear();
                         this.ledger = ledger.clone();
                         cx.emit(Event::Refreshed(this.sessions.clone(), ledger));
-                        if let Some(id) = this
-                            .pending_open
-                            .take_if(|id| this.sessions.iter().any(|s| &s.id == id))
-                        {
-                            cx.emit(Event::Selected(id));
-                        }
+                        this.open_pending(cx);
                     }
                     // Keep the last good list, but finish the shell's connection
                     // check even when the list can retain its stale data.
@@ -615,12 +611,7 @@ impl ThreadList {
         }
         self.rebuild();
         cx.emit(Event::Refreshed(self.sessions.clone(), self.ledger.clone()));
-        if let Some(id) = self
-            .pending_open
-            .take_if(|id| self.sessions.iter().any(|s| &s.id == id))
-        {
-            cx.emit(Event::Selected(id));
-        }
+        self.open_pending(cx);
         cx.notify();
     }
     /// The client that owns a sidebar id, and that server's id for the thread.
@@ -789,6 +780,7 @@ impl ThreadList {
             }
             self.rebuild();
             cx.emit(Event::Loaded(self.sessions.clone()));
+            self.open_pending(cx);
             cx.notify();
         }
         if self.rename.is_none()

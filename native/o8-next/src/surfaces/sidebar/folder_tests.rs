@@ -275,4 +275,22 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
         sidebar.read_with(&visual, |s, _| s.selected.clone()),
         Some(first.to_owned())
     );
+
+    // A created thread that missed its window never pulls focus later, for
+    // example after its load failed or the user went elsewhere.
+    sidebar.update(&mut visual, |s, cx| {
+        s.expect_open_since(
+            &created,
+            std::time::Instant::now() - std::time::Duration::from_secs(46),
+        );
+        s.load(cx);
+    });
+    for _ in 0..3 {
+        visual.run_until_parked();
+        draw(&mut visual);
+    }
+    assert_eq!(
+        sidebar.read_with(&visual, |s, _| s.selected.clone()),
+        Some(first.to_owned())
+    );
 }
