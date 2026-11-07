@@ -115,6 +115,9 @@ pub struct State {
     /// Snoozed inbox threads: thread id to the Unix second they come back.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sidebar_snoozes: BTreeMap<String, u64>,
+    /// Threads left in Terminal View (#5309), so they reopen in it.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub terminal_views: BTreeSet<String>,
     /// Detailed three-line chat rows (opt-in; compact when absent).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sidebar_detailed_rows: bool,
@@ -153,6 +156,7 @@ impl Default for State {
             sidebar_view: BTreeMap::new(),
             sidebar_closed_folders: BTreeSet::new(),
             sidebar_snoozes: BTreeMap::new(),
+            terminal_views: BTreeSet::new(),
             sidebar_detailed_rows: false,
             sidebar_working_section: false,
             notes: Default::default(),
@@ -229,6 +233,7 @@ impl State {
             || self.sidebar_view.len() > 500
             || self.sidebar_closed_folders.len() > 2_000
             || self.sidebar_snoozes.len() > 2_000
+            || self.terminal_views.len() > 2_000
             || self.tab_labels.len() > 16_000
             || self
                 .tab_labels

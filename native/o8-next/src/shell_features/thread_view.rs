@@ -15,7 +15,7 @@ impl ShellFeature for ThreadView {
     fn ticks(&self) -> &'static [TickHook] {
         &[TickHook {
             order: 210,
-            run: |s, _, _, cx| tick(s, cx),
+            run: |s, _, window, cx| tick(s, window, cx),
         }]
     }
     fn keys(&self) -> &'static [KeyContext] {
@@ -185,6 +185,7 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
             // Nothing to type into yet: the shell keeps keys, so ⌃⌥V still works.
             None => s.focus.focus(window),
         }
+        remember(s, &session.id, terminal);
         cx.notify();
         return true;
     }
@@ -198,6 +199,7 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
             adopted: false,
         },
     );
+    remember(s, &session.id, true);
     s.focus.focus(window);
     cx.notify();
     let workspace = session.workspace();
@@ -272,13 +274,34 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
     true
 }
 
+/// The view choice, kept per thread across launches.
+fn remember(s: &mut Shell, id: &str, terminal: bool) {
+    let changed = if terminal {
+        s.state.terminal_views.insert(id.to_owned())
+    } else {
+        s.state.terminal_views.remove(id)
+    };
+    if changed {
+        s.persist();
+    }
+}
+
 /// The workspace's terminal harness: `terminal-create` with the thread's
 /// owner key reserves its shell, or adopts it after a restart.
 fn open_terminal(client: &Client, launch: &Launch) -> Result<String, String> {
     client.create_terminal(&launch.cwd, &launch.owner)
 }
 
-fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
+fn tick(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    // A thread left in Terminal View opens in it again, as after a relaunch.
+    if let Some((key, session)) = active_thread(s, cx)
+        && s.state.terminal_views.contains(&session.id)
+        && s.features
+            .read::<Views>()
+            .is_none_or(|v| v.threads.get(&key).is_none_or(|t| t.id != session.id))
+    {
+        toggle(s, window, cx);
+    }
     if s.features.read::<Views>().is_none() {
         return;
     }
