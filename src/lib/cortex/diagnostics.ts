@@ -2,16 +2,14 @@
  * #749 — Substrate eval gate (read-only instrumentation).
  *
  * Wraps recall-path queries with `performance.now()` timing and pushes each
- * sample into an in-memory ring buffer. The buffer is hydrated from disk on
- * first import and lazily flushed back on every Nth append, plus on demand
- * via `flushTimingBuffer()`.
+ * sample into a bounded persisted buffer. A cached WAL writer owns the
+ * shared metrics file; readers never initialize or flush it.
  *
- * No code changes to the substrate itself — this module is pure read-only
- * observability so we can answer "is SQLite still fine, or is it time to
+ * The recall substrate is unchanged. Instrumentation records timings so we can answer "is SQLite still fine, or is it time to
  * evaluate a swap?" without guessing.
  *
- * Storage: `<dataDir>/recall-metrics.json` — buffer is FIFO-evicted at
- * `MAX_SAMPLES` so the file stays small (< 200 KB) regardless of uptime.
+ * Storage: `<dataDir>/recall-metrics.db`; legacy JSON remains readable.
+ * Periodic FIFO eviction reserves headroom below `MAX_SAMPLES`.
  *
  * No-throw policy: timing must never affect recall behaviour. Every helper
  * swallows IO errors and logs with the `[recall-metrics]` prefix.
@@ -19,20 +17,15 @@
 
 import 'server-only';
 
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import Database from 'better-sqlite3';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
+import { openSqliteForRead, type ReadOnlySqlite } from '@/lib/cortex/read-only-sqlite';
 
 /** Max number of samples kept in the ring buffer. FIFO eviction beyond this. */
 export const MAX_SAMPLES = 1000;
-
-/**
- * Persist to disk after every N appends. Trades a tiny bit of crash-safety
- * (the last <10 samples may be lost on a hard kill) for not slamming the FS
- * on every recall query.
- */
-const FLUSH_EVERY_N_SAMPLES = 10;
 
 const METRICS_FILE = 'recall-metrics.json';
 
@@ -53,14 +46,13 @@ interface PersistedFile {
   samples: RecallTimingSample[];
 }
 
-// ── module-local state ────────────────────────────────────────────────────
-
-let _buffer: RecallTimingSample[] | null = null;
-let _appendsSinceFlush = 0;
-let _lastFileFailure = 0;
+function metricsDirectory(): string {
+  // Pure resolution without cloning the entire environment on the recall path.
+  return getDataDir({ O8_DATA_DIR: process.env.O8_DATA_DIR, CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR });
+}
 
 function metricsFilePath(): string {
-  return join(getDataDir(), METRICS_FILE);
+  return join(metricsDirectory(), METRICS_FILE);
 }
 
 function loadFromDisk(): RecallTimingSample[] {
@@ -98,79 +90,98 @@ function loadFromDisk(): RecallTimingSample[] {
   }
 }
 
-function ensureBuffer(): RecallTimingSample[] {
-  if (_buffer === null) {
-    _buffer = loadFromDisk();
-  }
-  return _buffer;
+function databasePath(): string {
+  return join(metricsDirectory(), 'recall-metrics.db');
 }
 
-function flushToDisk(buffer: RecallTimingSample[]): void {
-  // Backoff after a failure — once /min, not on every append.
-  const now = Date.now();
-  if (_lastFileFailure > 0 && now - _lastFileFailure < 60_000) return;
+function readSamples(database: ReadOnlySqlite): RecallTimingSample[] {
+  return database.prepare('SELECT label, duration_ms AS durationMs, timestamp, errored FROM samples ORDER BY id')
+    .all().map(row => {
+      const sample = row as RecallTimingSample;
+      return { ...sample, errored: sample.errored ? true : undefined };
+    });
+}
 
-  const path = metricsFilePath();
-  const tmp = `${path}.tmp-${process.pid}`;
-  const payload: PersistedFile = { version: 1, samples: buffer };
+const PRUNE_INTERVAL = 100;
+let writer: { path: string; database: Database.Database; insert: Database.Statement;
+  prune: Database.Statement; inserts: number } | undefined;
+let writeFailureLogged = false;
+
+/** Only recording opens a writer; initialization and legacy import happen once. */
+function getWriter(): NonNullable<typeof writer> {
+  const path = databasePath();
+  if (writer?.path === path) return writer;
+  writer?.database.close();
+  writer = undefined;
+  mkdirSync(metricsDirectory(), { recursive: true });
+  const database = new Database(path);
   try {
-    writeFileSync(tmp, JSON.stringify(payload), 'utf-8');
-    renameSync(tmp, path);
-    _lastFileFailure = 0;
-  } catch (err) {
-    _lastFileFailure = now;
-    console.warn('[recall-metrics] flush failed:', err instanceof Error ? err.message : err);
+    database.pragma('busy_timeout = 100');
+    database.pragma('journal_mode = WAL');
+    database.pragma('synchronous = NORMAL');
+    let insert!: Database.Statement;
+    database.transaction(() => {
+      const initialized = database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'samples'").get();
+      database.exec('CREATE TABLE IF NOT EXISTS samples (id INTEGER PRIMARY KEY, label TEXT, duration_ms REAL, timestamp REAL, errored INTEGER)');
+      insert = database.prepare('INSERT INTO samples (label, duration_ms, timestamp, errored) VALUES (?, ?, ?, ?)');
+      if (!initialized) {
+        for (const legacy of loadFromDisk()) insert.run(legacy.label, legacy.durationMs, legacy.timestamp, legacy.errored ? 1 : 0);
+      }
+    }).immediate();
+    const prune = database.prepare('DELETE FROM samples WHERE id < (SELECT id FROM samples ORDER BY id DESC LIMIT 1 OFFSET ?)');
+    writer = { path, database, insert, prune, inserts: 0 };
+    return writer;
+  } catch (error) {
+    database.close();
+    throw error;
   }
 }
 
-/**
- * Append a sample. Drops oldest entries past MAX_SAMPLES (FIFO).
- *
- * The same logical operation can append multiple samples — each call records
- * a single observation. Lazy disk flush every N appends.
- */
+/** Reuse the writer and statements; prune every 100 inserts with room for the next batch. */
 export function recordTiming(sample: RecallTimingSample): void {
-  const buf = ensureBuffer();
-  buf.push(sample);
-  if (buf.length > MAX_SAMPLES) {
-    // FIFO eviction — drop the oldest entries.
-    buf.splice(0, buf.length - MAX_SAMPLES);
-  }
-  _appendsSinceFlush += 1;
-  if (_appendsSinceFlush >= FLUSH_EVERY_N_SAMPLES) {
-    _appendsSinceFlush = 0;
-    flushToDisk(buf);
-  }
-}
-
-/**
- * Force a flush to disk. Useful for the API endpoint so the buffer caller
- * sees fresh-on-disk data, and during tests.
- */
-export function flushTimingBuffer(): void {
-  const buf = ensureBuffer();
-  _appendsSinceFlush = 0;
-  flushToDisk(buf);
-}
-
-/**
- * Read-only view of the current buffer. Returns a defensive copy so callers
- * can sort / filter without mutating module state.
- */
-export function readTimingBuffer(): RecallTimingSample[] {
-  return [...ensureBuffer()];
-}
-
-/** Reset the in-memory buffer + clear the on-disk file. Test-only. */
-export function __resetTimingBuffer(): void {
-  _buffer = [];
-  _appendsSinceFlush = 0;
-  _lastFileFailure = 0;
+  if (!Number.isFinite(sample.durationMs) || !Number.isFinite(sample.timestamp)) return;
   try {
-    flushToDisk([]);
+    const current = getWriter();
+    const insert = () => current.insert.run(sample.label, sample.durationMs, sample.timestamp, sample.errored ? 1 : 0);
+    if (current.inserts % PRUNE_INTERVAL === 0) {
+      current.database.transaction(() => {
+        current.prune.run(MAX_SAMPLES - PRUNE_INTERVAL - 1);
+        insert();
+      }).immediate();
+    } else insert();
+    current.inserts++;
   } catch {
-    // ignore — best-effort cleanup
+    if (!writeFailureLogged) {
+      writeFailureLogged = true;
+      console.warn('[recall-metrics] Could not persist timing.');
+    }
   }
+}
+
+/** Compatibility for callers that previously forced the buffered JSON flush. */
+export function flushTimingBuffer(): void {
+  // Every recording is already persisted. Reads never flush.
+}
+
+/** No cached hydrate: a native reader sees samples recorded after its first GET. */
+export function readTimingBuffer(): RecallTimingSample[] {
+  if (!existsSync(databasePath())) return loadFromDisk();
+  let database: ReadOnlySqlite | undefined;
+  try {
+    database = openSqliteForRead(databasePath());
+    return readSamples(database);
+  } catch {
+    return [];
+  } finally {
+    database?.close();
+  }
+}
+
+/** Test-only reset. */
+export function __resetTimingBuffer(): void {
+  const current = getWriter();
+  current.database.exec('DELETE FROM samples');
+  current.inserts = 0;
 }
 
 // ── timing wrappers ───────────────────────────────────────────────────────
@@ -269,7 +280,7 @@ const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24h
  * pass a wider window for that lookup.
  */
 export function summarizeTimings(windowMs = DEFAULT_WINDOW_MS): RecallTimingSummary {
-  const all = ensureBuffer();
+  const all = readTimingBuffer();
   const cutoff = Date.now() - Math.max(0, windowMs);
   const windowed = windowMs > 0
     ? all.filter((s) => s.timestamp >= cutoff)

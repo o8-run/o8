@@ -314,3 +314,106 @@ fn worktree_script_and_terminal_pills_jump_and_threads_open() {
     assert_eq!(script_line(package, "test"), None);
     assert_eq!(script_line(package, "lint"), None);
 }
+
+#[test]
+fn saved_pills_read_as_sent_after_a_restart() {
+    // The saved shape, as the queue echoes it and history returns it.
+    let saved: Vec<Sent> = [
+        Sent::object(&Mentioned::Script {
+            name: "test".into(),
+            command: "vitest run".into(),
+        }),
+        Sent::object(&Mentioned::Terminal {
+            session: "shell-1".into(),
+            lines: vec!["token=abc".into()],
+        }),
+        Sent::thread("Fix the build", "thoughts-9", "ready", None),
+    ]
+    .iter()
+    .filter_map(Sent::saved)
+    .collect();
+    assert_eq!(
+        serde_json::to_value(&saved).unwrap(),
+        json!([
+            {"label": "test", "title": "test", "lines": ["Script · vitest run"],
+             "jump": {"kind": "script", "target": "test"}},
+            {"label": "shell-1", "title": "shell-1", "lines": [],
+             "jump": {"kind": "terminal", "target": "shell-1"}},
+            {"label": "Fix the build", "title": "Fix the build", "lines": ["Thread · ready"],
+             "open": "thoughts-9"},
+        ])
+    );
+    // A fresh window has no pills in memory; the history entry brings them back.
+    SENT.with(|all| all.borrow_mut().clear());
+    let entry: crate::model::Entry = serde_json::from_value(json!({
+        "id": "composer-steer-1", "role": "user",
+        "text": "Run @test, see @shell-1 and @Fix the build",
+        "mentions": saved,
+    }))
+    .unwrap();
+    let rows = crate::model::render_tree(&[entry]);
+    let crate::model::Row::Message { nodes, .. } = &rows[0] else {
+        panic!("a message row");
+    };
+    let links: Vec<_> = nodes[0]
+        .runs
+        .iter()
+        .filter(|run| run.style.starts_with("link:"))
+        .map(|run| (run.style.as_str(), run.text.as_str()))
+        .collect();
+    assert_eq!(
+        links,
+        [
+            ("link:o8://mention/0", "@test"),
+            ("link:o8://mention/1", "@shell-1"),
+            ("link:o8://mention/2", "@Fix the build"),
+        ]
+    );
+    assert_eq!(
+        sent_jump("o8://mention/0"),
+        Some(Jump::Script("test".into()))
+    );
+    assert_eq!(
+        sent_jump("o8://mention/1"),
+        Some(Jump::Terminal("shell-1".into()))
+    );
+    assert_eq!(
+        sent_link("o8://mention/2").as_deref(),
+        Some("o8://thread/thoughts-9")
+    );
+    // Malformed saved pills are ignored, never a crash.
+    remember_saved("composer-steer-bad", Some(&json!([{"label": 3}])));
+}
+
+#[test]
+fn saved_pills_fit_the_queue_limits() {
+    // 150 one-unit characters and 75 two-unit emoji, measured as the queue
+    // measures, in UTF-16 units.
+    let long = format!("{}{}", "界".repeat(150), "😀".repeat(75));
+    assert_eq!(long.encode_utf16().count(), 300);
+    let mut pills: Vec<Sent> = std::iter::once(long.clone())
+        .chain((0..21).map(|n| format!("tree-{n}")))
+        .map(|label| {
+            Sent::object(&Mentioned::Worktree {
+                label,
+                path: "/work/tree".into(),
+                branch: None,
+            })
+        })
+        .collect();
+    pills[1].open = Some(" ".into());
+    pills[2].label = "  ".into();
+    let saved = saved_all(&pills);
+    assert_eq!(saved.len(), 20, "at most 20 pills");
+    // Cut to 200 units on a character boundary: 150 + 25 emoji (50 units).
+    assert_eq!(
+        saved[0].label,
+        format!("{}{}", "界".repeat(150), "😀".repeat(25))
+    );
+    assert!(saved[0].title.encode_utf16().count() <= 4096);
+    assert_eq!(saved[1].open, None, "an empty thread id is never sent");
+    assert!(
+        saved.iter().all(|pill| pill.label != "  "),
+        "an empty label is dropped"
+    );
+}

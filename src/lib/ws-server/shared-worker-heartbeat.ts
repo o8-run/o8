@@ -1,5 +1,5 @@
 import { reconcileSharedWorkerReturns, recoverSharedWorkerReturns, type SharedWorkerReturnHooks } from '@/lib/orchestrator/shared-worker-returns';
-import { recoverSharedWorkerParentBindings } from '@/lib/orchestrator/shared-worker-recovery';
+import { recoverSharedWorkerParentBindings, settleSharedCheckoutTeams } from '@/lib/orchestrator/shared-worker-recovery';
 import type { BoundChatContinuationHooks } from './bound-chat-continuation';
 import { runSharedWorkerChatReturn } from './shared-worker-chat-return';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
@@ -11,7 +11,13 @@ export type SharedWorkerHeartbeatHooks = Pick<SharedWorkerReturnHooks, 'readTran
 export function createSharedWorkerHeartbeat(input: SharedWorkerHeartbeatHooks): () => void {
   recoverSharedWorkerParentBindings();
   recoverSharedWorkerReturns();
+  let settling: Promise<void> | undefined;
+  const settle = () => settling ??= settleSharedCheckoutTeams()
+    .catch(() => console.warn('[shared-checkout] Membership repair failed.'))
+    .finally(() => { settling = undefined; });
+  void settle();
   return () => {
+    void settle();
     void reconcileSharedWorkerReturns({ ...input, changed: surfaceId => {
       void publishRealtimeMutation({ mutation: { mutationId: `worker-return-${surfaceId}-${Date.now()}`,
         source: 'server', action: 'worker-return', status: 'completed', surfaceId,

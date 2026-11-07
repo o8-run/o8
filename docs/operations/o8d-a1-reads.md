@@ -1,7 +1,7 @@
 # o8d A1 read registrations
 
 Scope: #5243 and #5422. The initial A1 slice registered seventeen GET paths.
-The follow-ups bring the table to twenty-seven GET paths using the same production
+The follow-ups bring the table to twenty-nine GET paths using the same production
 handlers. No new POST, PATCH, PUT or DELETE registration is included. Shared shell tools are
 assigned to `session`; duplicate entries name additional registered callers.
 The native source paths below are relative to `native/o8-next/src`.
@@ -41,6 +41,8 @@ No peer header grants local authority.
 | `/api/visualizations` | session | transcript_visualizations.rs | gate + visualization |
 | `/api/panel/prs/[number]/timeline` | pull_requests | surfaces/pull_requests/model.rs | gate |
 | `/api/tasks` | session | browser_panel/remote/client.rs | gate + panel |
+| `/api/cortex/codebase-memory` | settings | settings_indexing.rs | gate |
+| `/api/cortex/diagnostics` | settings | settings_indexing.rs | gate |
 
 `[hash]` uses the production parameter name for the native commit path
 inventoried as `[id]`. The timeline similarly uses production `[number]` for
@@ -75,8 +77,6 @@ the heal-bot is on, and skips the ticks the running heal-bot already covers.
 | `/api/orchestrator/backend-models` | ACP probing writes the model cache and takes the credential-policy store lock before spawning. Moving the catalogue cache alone cannot make the GET read-only. See the orchestrator audit below. |
 | `/api/orchestrator/pull-request-context` | Refresh queries update the mirror through a reader shared with paired devices. The existing context POST is operator-only; moving all callers to it needs an authorization decision. See the orchestrator audit below. |
 | `/api/setup/identity` | `getInstanceIdentity` creates persisted instance/boot IDs when absent. Existing producer registration is preserved; no surface entry is added. |
-| `/api/cortex/diagnostics` | Timings are recorded in the Next process; the native process loads the disk snapshot once, so a native GET would omit them. |
-| `/api/cortex/codebase-memory` | GET calls `ensureCodebaseMemoryBootIndex`, starting indexing and persistent writes. Live progress and errors come from the Next process's module-local `stateByRepoId`, not the persisted HEAD receipts; a native GET would omit that state. |
 | `/api/orchestrator/packet-transcript` | Transcript lookup can call `getCodexRolloutPath` -> `queryCodexThreadByIdFromHome` -> the shared child-process boundary. That boundary refreshes credentials and takes `.provider-keys.lock`, even for a read-only SQLite query. Held at the credential boundary; no source or auth changes. |
 | `/api/setup/detect` | CLI detection launches probes through the shared child-process boundary and provider store lock, reads login material, and can repair CLI symlinks via `scanAndLink`. Held at the credential/process boundary. |
 | `/api/review/last-turn` | `getWorktreeManager(...).list()` -> `gitWorktreeList`/`getDirtyFiles` -> `materializationAwareExecFile` -> the shared child-process boundary, which refreshes credentials and takes `.provider-keys.lock`. Held at the credential boundary. |
@@ -392,17 +392,101 @@ registry add/remove/repoint recomputes. The startup hook is called by
 The default project-membership path uses shared database bootstrap and reads
 project/membership rows without inserting any.
 
-`/api/cortex/codebase-memory` stays held. Next startup already calls
-`ensureCodebaseMemoryBootIndex` via `src/lib/startup/next.ts` and
-`src/lib/panel/status-boot.ts`. `getIndexState` reads the indexer's module-local
-`stateByRepoId` and `bootRan`, deriving in-flight status from those entries.
-The persisted
-`codebase-memory-state.json` contains successful HEAD receipts only, so it cannot
-reproduce pending, indexing, deferred, skipped, or error entries in the native
-process. Removing the GET trigger alone would return an empty native state;
-starting a second native indexer would duplicate indexing and diverge from Next.
-Moving ownership or adding a state bridge exceeds this side-effect-only slice.
-The production route remains unchanged and Next-only. Diagnostics stays held.
+`/api/cortex/codebase-memory` and `/api/cortex/diagnostics` are registered
+for Settings using the production GETs. The design uses a persisted state bridge:
+Next remains the sole boot-indexer owner through `src/lib/startup/next.ts` and
+`startStatusBootHooks`. The existing one-shot guard is unchanged. The native
+HTTP entry point marks its process as a Cortex reader before loading any handler. If the existing
+bootstrap POST loads Next startup hooks there, both the indexer and probe
+publisher refuse ownership. Every boot or repo transition atomically replaces `codebase-memory-live.json`, including
+pending, indexing, cached, ready, deferred, skipped and error entries.
+Successful HEAD receipts remain in `codebase-memory-state.json`. Neither GET
+imports or starts the indexer, and the native process has no indexer trigger.
+A cold read returns the empty state without creating a directory or file.
+
+Timing producers persist each sample in `recall-metrics.db`. An immediate SQLite
+transaction owns each append, legacy import and FIFO eviction; existing Next
+and native timing producers cannot overwrite one another's snapshots. Retention
+stays capped at 1,000 samples. The legacy `recall-metrics.json` is read without
+mutation until the first recording transaction imports it once. GETs open only
+existing files in read-only mode and reload timings on every request. Outcomes
+are counted through a read-only connection without schema bootstrap. Next also
+publishes its process-cwd counters on each counter/in-flight transition to
+`cortex-process-cwd.json`, so the extra diagnostics field agrees across readers.
+GET performs no flush, migration, database creation or background work. The
+existing bearer gate and method policy are unchanged.
+
+The owner transport fixture runs the real indexer against an owned Git repo and
+an MCP stdio fixture that holds its response until released. With the fixture
+Next server stopped, the public native socket observes indexing, then ready,
+the successful HEAD receipt, the owner's timing and its process-cwd counters.
+The native process first reads empty state before the separate owner starts,
+which also proves that reads do not retain a first-load snapshot.
+
+Cortex owner fail-before receipt (all source changes restored from HEAD;
+new tests, fixtures, inventory edits and documentation retained):
+
+```text
+npx vitest run tests/o8d-cortex-owner-real-path.test.ts tests/o8d-next-surfaces-real-path.test.ts --maxWorkers=2 -t 'cold-data-dir GETs|registers both production|serves A1 settings GET /api/cortex/'
+FAIL cold-data-dir GETs create nothing and never kick the indexer
+AssertionError: GET must leave a cold data directory empty: expected [ …(66) ] to deeply equal []
+FAIL registers both production GET handlers and no mutation methods
+AssertionError: /api/cortex/codebase-memory production GET registration: expected undefined to be defined
+FAIL serves A1 settings GET /api/cortex/codebase-memory with its production auth and Next stopped
+FAIL serves A1 settings GET /api/cortex/diagnostics with its production auth and Next stopped
+AssertionError: expected 404 to be 401
+Tests 4 failed | 94 skipped (98)
+```
+
+All source changes were then restored. The focused owner tests also cover a
+missing data directory, pending and error snapshots, unchanged bytes and mtimes
+across GETs, legacy metrics import exactly once, live-outcome filtering and
+native bootstrap refusing indexer ownership. Two concurrent recorder processes
+retain all 50 samples in the native reader. No new credential, auth, redaction,
+network-bind or mutation registration changes are included.
+
+Owner verification after source restoration:
+
+```text
+npx vitest run tests/o8d-cortex-owner-real-path.test.ts tests/o8d-cortex-owner-transport-real-path.test.ts tests/o8d-native-route-inventory-real-path.test.ts tests/startup-stage-diagnostics.test.ts src/app/api/panel/status/route.test.ts src/lib/supervisor/process-cwd-budget-real-path.test.ts --maxWorkers=2
+Test Files 6 passed (6); Tests 40 passed (40)
+
+O8D_TEST_BINARY="$CARGO_TARGET_DIR/debug/o8d" npx vitest run tests/o8d-next-surfaces-real-path.test.ts --maxWorkers=2
+Test Files 1 passed (1); Tests 90 passed (90)
+
+node scripts/check-server-bundle-size.mjs
+Total 12,507,942 bytes; budget 11,674,791; delta +833,151; check passed
+
+node scripts/classify-tests.mjs --check-manifest
+Manifest matches resource-owning source markers
+
+npm run rule-check -- --base=HEAD
+Zero violations
+```
+
+Changed-file ESLint and `git diff --check` also pass.
+
+Owner source files:
+
+- Codebase-memory: `src/app/api/cortex/codebase-memory/route.ts`,
+  `src/lib/codebase-memory/indexer.ts`, `src/lib/codebase-memory/live-state.ts`.
+- Diagnostics: `src/app/api/cortex/diagnostics/route.ts`,
+  `src/lib/cortex/diagnostics.ts`, `src/lib/cortex/diagnostics-state.ts`,
+  `src/lib/runtime/process-cwd-snapshot.ts`, `src/lib/panel/status-boot.ts`.
+- Shared process and transport: `src/lib/cortex/owner-process.ts`,
+  `src/lib/ws-server/native-http-registry.ts`,
+  `src/lib/ws-server/native-http-handlers.ts`,
+  `src/lib/ws-server/native-http-routes.ts`.
+- Proof and inventory: `tests/o8d-cortex-owner-real-path.test.ts`,
+  `tests/o8d-cortex-owner-transport-real-path.test.ts`,
+  `tests/fixtures/cortex-state-owner.ts`, `tests/fixtures/cortex-index-mcp.mjs`,
+  `tests/o8d-native-route-inventory-real-path.test.ts`,
+  `tests/o8d-next-surfaces-real-path.test.ts`, `tests/test-classification.json`,
+  and this operations note.
+
+The transport tests select the locally built o8d fixture binary with
+`O8D_TEST_BINARY`. No project
+typecheck or full test suite was run under the explicit box limits.
 
 Cortex verification receipt (all Vitest runs use `--maxWorkers=2`, serially):
 

@@ -6,10 +6,6 @@
  * polls this to render the "Indexing 2/4 repos…" chip and to know when
  * the index is ready for dispatch.
  *
- * Side-effect: also kicks the boot pass if it hasn't fired yet — the
- * regular hook is /api/panel/status but the UI may render before that
- * route gets hit, so we double-trigger here. Both are idempotent.
- *
  * Response shape: see IndexState in src/lib/codebase-memory/types.ts.
  */
 
@@ -17,13 +13,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import {
-  ensureCodebaseMemoryBootIndex,
-  getIndexState,
-} from '@/lib/codebase-memory/indexer';
+import { readIndexState } from '@/lib/codebase-memory/live-state';
 
 export async function GET() {
-  ensureCodebaseMemoryBootIndex();
-  const state = getIndexState();
-  return NextResponse.json(state);
+  return NextResponse.json(readIndexState());
 }

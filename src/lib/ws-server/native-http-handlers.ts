@@ -1,3 +1,5 @@
+import { GET as api_cortex_codebase_memory_GET } from '@/app/api/cortex/codebase-memory/route';
+import { GET as api_cortex_diagnostics_GET } from '@/app/api/cortex/diagnostics/route';
 /** Named handler exports for the lazy native shell transport; retain existing route auth. */
 import { GET as api_tasks_GET } from '@/app/api/tasks/route';
 import { GET as api_mobile_orchestrator_threads_GET } from '@/app/api/mobile/orchestrator/threads/route';
@@ -198,3 +200,6 @@ export const api_orchestrator_workspace = { POST: api_orchestrator_workspace_POS
 export const api_orchestrator_steer_packet = { POST: api_orchestrator_steer_packet_POST };
 export const api_cortex_reingest = { POST: api_cortex_reingest_POST };
 export const api_orchestrator_stop_packet = { POST: api_orchestrator_stop_packet_POST };
+
+export const api_cortex_codebase_memory = { GET: api_cortex_codebase_memory_GET };
+export const api_cortex_diagnostics = { GET: api_cortex_diagnostics_GET };

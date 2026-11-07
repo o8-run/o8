@@ -21,6 +21,7 @@ const DEFAULT_MODEL = 'claude-code';
 
 export type ChatHistoryMessage = {
   steerAnchor?: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor;
+  mentions?: MobileTranscriptEntry['mentions'];
 
   id?: string;
   role?: string;
