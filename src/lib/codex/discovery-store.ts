@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { execFile } from '@/lib/providers/child-process';
+import { execFileReadOnly } from '@/lib/providers/child-process';
 import { access, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,7 +8,10 @@ import { promisify } from 'node:util';
 
 import { listRuntimeIdentitiesForServer } from '@/lib/runtime/identity-catalog';
 
-const execFileAsync = promisify(execFile);
+// These are all `sqlite3 -readonly` reads of the Codex state DB: a credential-less child, so it
+// runs on the read-only boundary and never takes the provider-store lock (unblocks native
+// registration of /api/orchestrator/packet-transcript, see docs/operations/o8d-a1-reads.md).
+const execFileAsync = promisify(execFileReadOnly);
 
 export type CodexThreadRow = {
   id: string;

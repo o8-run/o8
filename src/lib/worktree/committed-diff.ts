@@ -1,8 +1,10 @@
 import { resolveGitBinary } from '@/lib/git/binary';
-import { execFile } from '@/lib/providers/child-process';
+import { execFileReadOnly } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
+// Only `git rev-parse` and `git diff` here: credential-less reads, so they run on the read-only
+// boundary and never take the provider-store lock (part of the /api/review/last-turn read chain).
+const execFileAsync = promisify(execFileReadOnly);
 const KEPT_DIFFS = 256;
 const TIMEOUT_MS = 5000;
 

@@ -1,4 +1,4 @@
-import { spawn, execFile, type ChildProcess, type ExecFileOptions } from '@/lib/providers/child-process';
+import { spawn, execFile, execFileReadOnly, type ChildProcess, type ExecFileOptions } from '@/lib/providers/child-process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
 import { resolveGitBinary } from '@/lib/git/binary';
@@ -100,17 +100,22 @@ export function materializationAwareInvocation(
 export function materializationAwareExecFile(
   command: string,
   args: readonly string[],
-  options: ExecFileOptions & { cwd?: string | URL } = {},
+  options: ExecFileOptions & { cwd?: string | URL; readOnly?: boolean } = {},
 ): Promise<{ stdout: string; stderr: string }> {
-  const resolved = typeof options.cwd === 'string' ? path.resolve(options.cwd) : null;
+  // `readOnly` opts a credential-less git read (worktree list, status/diff --name-only) onto the
+  // read-only boundary so it never takes .provider-keys.lock. It is defaulted off and stripped
+  // before the options reach execFile or tryPinnedWorkspaceGitRead (which rejects unknown keys).
+  const { readOnly = false, ...fileOptions } = options;
+  const resolved = typeof fileOptions.cwd === 'string' ? path.resolve(fileOptions.cwd) : null;
   const identity = resolved ? materializationContext.getStore()?.get(resolved) : null;
   if (command === 'git' && identity && resolved) {
-    const pending = tryPinnedWorkspaceGitRead(resolved, identity, args, options);
+    const pending = tryPinnedWorkspaceGitRead(resolved, identity, args, fileOptions);
     if (pending) return pending;
   }
-  const invocation = materializationAwareInvocation(command, args, options.cwd);
+  const invocation = materializationAwareInvocation(command, args, fileOptions.cwd);
+  const runExecFile = readOnly ? execFileReadOnly : execFile;
   return new Promise((resolve, reject) => {
-    const { signal, ...execOptions } = options;
+    const { signal, ...execOptions } = fileOptions;
     let child: ChildProcess | null = null;
     let settled = false;
     const cleanup = () => signal?.removeEventListener('abort', abort);
@@ -124,7 +129,7 @@ export function materializationAwareExecFile(
       Object.assign(error, { code: 'ABORT_ERR' });
       reject(error);
     };
-    child = execFile(invocation.command, invocation.args, execOptions, (error, stdout, stderr) => {
+    child = runExecFile(invocation.command, invocation.args, execOptions, (error, stdout, stderr) => {
       if (settled) return;
       settled = true;
       cleanup();
