@@ -8,7 +8,7 @@ use super::{Action, Setup, Snapshot, Step, primary, quiet};
 use crate::theme::current as theme;
 use gpui::{
     AnyElement, Context, Div, FontWeight, Image, ImageFormat, ObjectFit, SharedString, div, img,
-    prelude::*, px, relative, rgb,
+    prelude::*, px, relative,
 };
 use serde::Deserialize;
 use std::{
@@ -192,7 +192,7 @@ pub(super) fn identity(id: &str, built_in: bool) -> Div {
                 .get_or_init(|| {
                     Arc::new(Image::from_bytes(
                         ImageFormat::Webp,
-                        include_bytes!("../../../../../public/logos/codex.webp").to_vec(),
+                        include_bytes!("codex.webp").to_vec(),
                     ))
                 })
                 .clone())
@@ -203,18 +203,18 @@ pub(super) fn identity(id: &str, built_in: bool) -> Div {
                 .get_or_init(|| {
                     Arc::new(Image::from_bytes(
                         ImageFormat::Png,
-                        include_bytes!("../../../../../public/logos/claude.png").to_vec(),
+                        include_bytes!("claude.png").to_vec(),
                     ))
                 })
                 .clone())
             .size(px(24.))
             .object_fit(ObjectFit::Contain)
             .into_any_element(),
-            // The desktop's mark is a gradient; this is its middle stop.
             "gemini" | "antigravity" => {
-                crate::icon::fill(GEMINI, rgb(0x9b72ff), 24.).into_any_element()
+                crate::icon::fill(GEMINI, crate::theme::gemini_mark(), 24.).into_any_element()
             }
-            "opencode" => crate::icon::stroke(OPENCODE, rgb(0xfb923c), 24., 2.4).into_any_element(),
+            "opencode" => crate::icon::stroke(OPENCODE, crate::theme::opencode_mark(), 24., 2.4)
+                .into_any_element(),
             other => div()
                 .text_size(px(11.))
                 .text_color(theme().text_secondary)

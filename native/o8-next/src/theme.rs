@@ -721,6 +721,14 @@ pub fn update_ready() -> Rgba {
 pub fn pull_merged() -> Rgba {
     rgb(0x8957e5)
 }
+/// GeminiIcon's mark: its gradient's middle stop, since the mark is filled flat.
+pub fn gemini_mark() -> Rgba {
+    rgb(0x9b72ff)
+}
+/// OpenCodeIcon's orange bracket mark.
+pub fn opencode_mark() -> Rgba {
+    rgb(0xfb923c)
+}
 
 /// The right panel column: 30% of the window, at most GEOMETRY.right_width.
 pub fn right_panel_width(viewport: f32) -> f32 {
