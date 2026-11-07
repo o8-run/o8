@@ -1,9 +1,12 @@
 //! The desktop's onboarding frame (OnboardingFrame.tsx): the o8 wordmark,
-//! "Local workspace", the sounds switch, and the three-part progress rail
-//! (Project, Agent, Workspace) above the current page.
+//! "Local workspace" and the three-part progress rail (Project, Agent,
+//! Workspace) above the current page, plus the footer's sounds switch and
+//! Privacy link (Onboarding.tsx).
 use super::{Setup, progress, sound};
 use crate::theme::current as theme;
-use gpui::{AnyElement, Context, SharedString, div, prelude::*, px, relative};
+use gpui::{
+    AnyElement, Context, FontWeight, Pixels, SharedString, Size, div, prelude::*, px, relative,
+};
 
 /// One rail entry: its label, the line under it, and whether it is done.
 pub(super) struct Part {
@@ -74,19 +77,58 @@ fn sounds(cx: &mut Context<Setup>) -> AnyElement {
         .cursor_pointer()
         .hover(|v| v.bg(theme().hover))
         .child(if on { "Sounds on" } else { "Sounds off" })
-        .on_click(cx.listener(move |this, event: &gpui::ClickEvent, _, cx| {
-            this.set_sounds(!on, !event.is_keyboard(), cx)
-        }))
+        .on_click(cx.listener(move |this, _, _, cx| this.set_sounds(!on, true, cx)))
         .into_any_element()
+}
+
+/// The footer's height, so the page above can centre in what is left.
+pub(super) const FOOTER: f32 = 40.;
+/// The footer under the frame: the sounds switch beside Privacy.
+pub(super) fn footer(cx: &mut Context<Setup>) -> impl IntoElement {
+    div()
+        .flex_none()
+        .h(px(FOOTER))
+        .w_full()
+        .flex()
+        .items_center()
+        .justify_end()
+        .gap(px(8.))
+        .px(px(24.))
+        .pb(px(12.))
+        .font_weight(FontWeight::LIGHT)
+        .child(sounds(cx))
+        .child(
+            div()
+                .id("setup-privacy-link")
+                .debug_selector(|| "setup-privacy-link".into())
+                .px(px(8.))
+                .py(px(4.))
+                .rounded(px(6.))
+                .text_size(px(11.))
+                .text_color(theme().text_secondary)
+                .cursor_pointer()
+                .hover(|v| v.bg(theme().hover))
+                .child("Privacy")
+                .on_click(|_, _, cx| cx.open_url("https://o8.run/privacy")),
+        )
 }
 
 pub(super) fn frame(
     setup: &Setup,
     body: impl IntoElement,
-    cx: &mut Context<Setup>,
+    viewport: Size<Pixels>,
 ) -> impl IntoElement {
     let (parts, current) = rail(setup);
-    let inset = |v: gpui::Div| v.px(px(32.)).py(px(28.));
+    // The desktop's clamp(20px, 4vw, 32px) across and clamp(20px, 3vh, 32px) down.
+    let across = (f32::from(viewport.width) * 0.04).clamp(20., 32.);
+    let down = (f32::from(viewport.height) * 0.03).clamp(20., 32.);
+    let inset = move |v: gpui::Div| v.px(px(across)).py(px(down));
+    let mut wordmark = div();
+    wordmark
+        .style()
+        .text
+        .get_or_insert_with(Default::default)
+        .letter_spacing = Some(px(-2.));
     div()
         .debug_selector(|| "setup-frame".into())
         .w_full()
@@ -109,25 +151,20 @@ pub(super) fn frame(
                         .gap(px(16.))
                         .mb(px(16.))
                         .child(
-                            div()
+                            wordmark
                                 .flex()
                                 .text_size(px(28.))
+                                .font_weight(FontWeight::NORMAL)
                                 .line_height(relative(1.))
                                 .child("o8")
                                 .child(div().text_color(crate::theme::brand_orange()).child(".")),
                         )
                         .child(
                             div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.))
-                                .child(sounds(cx))
-                                .child(
-                                    div()
-                                        .text_size(px(11.))
-                                        .text_color(theme().text_muted)
-                                        .child("Local workspace"),
-                                ),
+                                .text_size(px(11.))
+                                .font_weight(FontWeight::LIGHT)
+                                .text_color(theme().text_muted)
+                                .child("Local workspace"),
                         ),
                 )
                 .child(
@@ -172,6 +209,7 @@ pub(super) fn frame(
                                         .min_w_0()
                                         .flex()
                                         .flex_col()
+                                        .font_weight(FontWeight::LIGHT)
                                         .child(div().text_size(px(12.)).child(part.label))
                                         .child(
                                             div()

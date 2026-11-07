@@ -29,20 +29,23 @@ fn onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close(cx: &m
         cx.notify();
     });
     draw(cx);
-    // Settings lives in the rail's profile menu, as in the desktop rail. Busy
-    // setup keeps that menu closed, so its Settings row is out of reach.
-    click(cx, "shell-profile");
-    assert!(cx.debug_bounds("profile-settings").is_none(), "busy setup must keep the profile menu closed");
-    assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()), "busy setup must intercept shell navigation without a registry veto");
-    for chord in ["ctrl-k", "cmd-k", "ctrl-shift-p", "cmd-shift-p"] {
-        cx.simulate_keystrokes(chord);
-        assert!(!shell.read_with(cx, |s, _| s.palette), "busy setup must block palette navigation: {chord}");
+    // Setup owns the whole window, as on the desktop: the rail and its menus
+    // are not drawn, and shell shortcuts wait while it is open, busy or not.
+    assert!(cx.debug_bounds("setup-window").is_some());
+    assert!(cx.debug_bounds("shell-profile").is_none(), "setup hides the rail");
+    for busy in [true, false] {
+        setup.update(cx, |s, cx| { s.busy = busy; cx.notify(); });
+        draw(cx);
+        for chord in ["ctrl-k", "cmd-k", "ctrl-shift-p", "cmd-shift-p"] {
+            cx.simulate_keystrokes(chord);
+            assert!(!shell.read_with(cx, |s, _| s.palette), "setup must block palette navigation: {chord} (busy {busy})");
+        }
+        assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()));
     }
-    click(cx, "shell-home");
-    assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_some()));
-    setup.update(cx, |s, cx| { s.busy = false; cx.notify(); });
-    click(cx, "shell-home");
-    assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
+    // Setup ends through its own pages; stand in for that here.
+    shell.update(cx, |s, cx| { s.surfaces.setup.view = None; s.revision += 1; cx.notify(); });
+    cx.run_until_parked();
+    draw(cx);
     shell.update(cx, |s, cx| s.load(cx));
     cx.run_until_parked();
     draw(cx);

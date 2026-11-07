@@ -212,8 +212,13 @@ fn onboarding_project_tools_privacy_and_workspace(cx: &mut TestAppContext) {
     click(cx, "rail-more-setup");
     let interaction = start.elapsed().as_secs_f64() * 1000.;
     assert!(cx.debug_bounds("setup-projects").is_some());
-    click(cx, "shell-home");
+    // Reopened setup owns the whole window, as on the desktop, and ends
+    // through its own pages; the workspace then comes back.
+    assert!(cx.debug_bounds("setup-window").is_some());
+    assert!(cx.debug_bounds("rail-more").is_none());
+    click(cx, "setup-explore");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
+    assert!(cx.debug_bounds("rail-more").is_some());
     println!(
         "O8_NEXT_ONBOARDING_EVIDENCE {}",
         json!({"endpoint":"headless GPUI CPU scene; no GPU/compositor", "openToFirstFrameMs":opened,"interactionToFrameMs":interaction})

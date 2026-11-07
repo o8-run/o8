@@ -538,6 +538,11 @@ impl Shell {
         cx.notify();
     }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // Setup owns the whole window, as on the desktop: workspace shortcuts
+        // wait, and keys reach only setup's own controls.
+        if self.surfaces.setup.view.is_some() {
+            return;
+        }
         // Shortcut overrides route first; handlers then see default chords.
         let translated = match shortcuts::pre_key(self, event, window, cx) {
             shortcuts::Pre::Pass => None,

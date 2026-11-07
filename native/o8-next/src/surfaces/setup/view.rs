@@ -147,6 +147,8 @@ pub struct Setup {
     saved: Option<crate::shell_state::OnboardingProgress>,
     revision: u64,
     painted: Rc<Cell<u64>>,
+    /// Keys stay inside setup while it owns the window.
+    pub(crate) focus: gpui::FocusHandle,
 }
 enum Action {
     Load(bool),
@@ -242,6 +244,7 @@ impl Setup {
             saved: saved.cloned(),
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
+            focus: cx.focus_handle(),
         };
         this.act(Action::Load(false), cx);
         this
@@ -548,17 +551,10 @@ impl Setup {
         }
     }
 }
-/// Controls that move setup forward chime; the rest tick, as on the desktop.
-const ADVANCE: [&str; 8] = [
-    "setup-folder",
-    "setup-add",
-    "setup-explore",
-    "setup-create",
-    "setup-use",
-    "setup-consent",
-    "setup-import",
-    "setup-project-",
-];
+/// Controls that chime advance; the rest tick. On the desktop only the
+/// optional voice and iPhone offers and the permissions Continue chime, and
+/// those pages come later, so every setup control ticks for now.
+const ADVANCE: [&str; 0] = [];
 fn control(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Stateful<gpui::Div> {
     let selector = id.to_owned();
     let cue = if ADVANCE
@@ -590,7 +586,7 @@ fn control(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Sta
         .child(label.into())
 }
 impl Render for Setup {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let busy = self.busy;
         let snapshot = self.snapshot.clone();
         let ready = snapshot
@@ -925,18 +921,48 @@ impl Render for Setup {
                         ),
                 )
             });
+        // The desktop's full-window surface: a drag strip under the traffic
+        // lights, the frame centred in a scrolling area on the window's own
+        // material, and the footer.
+        let viewport = window.viewport_size();
+        let top = (f32::from(viewport.height) * 0.02).clamp(12., 24.);
+        // The scrolling area's height, so a short page centres in it.
+        let area = f32::from(viewport.height) - 52. - frame::FOOTER - top;
         div()
             .id("setup")
+            .track_focus(&self.focus)
             .size_full()
-            .overflow_y_scroll()
-            .p(px(24.))
             .flex()
             .flex_col()
-            .items_center()
-            .bg(theme().background)
             .text_color(theme().text)
             .font_family(theme().font_ui)
-            .child(frame::frame(self, body, cx))
+            .child(
+                div()
+                    .flex_none()
+                    .w_full()
+                    .h(px(52.))
+                    .window_control_area(gpui::WindowControlArea::Drag),
+            )
+            .child(
+                div()
+                    .id("setup-content")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .pt(px(top))
+                    .px(px(32.))
+                    .child(
+                        div()
+                            .min_h(px(area.max(0.)))
+                            .pb(px(24.))
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .justify_center()
+                            .child(frame::frame(self, body, viewport)),
+                    ),
+            )
+            .child(frame::footer(cx))
             .child(
                 canvas(
                     |_, _, _| (),

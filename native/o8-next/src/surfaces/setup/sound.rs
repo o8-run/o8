@@ -184,24 +184,45 @@ pub(crate) fn play(cue: Cue) {
             return;
         }
         let Some(player) = player() else { return };
-        stop();
-        let child = Command::new(player)
-            .arg(&path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        if let (Ok(child), Ok(mut playing)) = (child, PLAYING.lock()) {
+        // One lock across stop, spawn and store, so overlapping cues never
+        // play together or leave a player behind.
+        let pid = {
+            let Ok(mut playing) = PLAYING.lock() else {
+                return;
+            };
+            if let Some(mut old) = playing.take() {
+                let _ = old.kill();
+                let _ = old.wait();
+            }
+            let Ok(child) = Command::new(player)
+                .arg(&path)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            else {
+                return;
+            };
+            let pid = child.id();
             *playing = Some(child);
-        }
-        // Collect the finished player so it never lingers.
-        std::thread::sleep(Duration::from_secs(2));
-        if let Ok(mut playing) = PLAYING.lock()
-            && playing
-                .as_mut()
-                .is_some_and(|child| matches!(child.try_wait(), Ok(Some(_))))
-        {
-            playing.take();
+            pid
+        };
+        // Collect this player once it finishes, unless a newer cue (or
+        // turning sounds off) already ended and collected it.
+        loop {
+            std::thread::sleep(Duration::from_millis(250));
+            let Ok(mut playing) = PLAYING.lock() else {
+                return;
+            };
+            match playing.as_mut() {
+                Some(child) if child.id() == pid => {
+                    if !matches!(child.try_wait(), Ok(None)) {
+                        playing.take();
+                        return;
+                    }
+                }
+                _ => return,
+            }
         }
     });
 }

@@ -136,10 +136,19 @@ pub struct State {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub keybindings: BTreeMap<String, String>,
     /// Where first-run setup stopped, so a relaunch resumes there (#5303).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// A malformed value starts setup over; it never resets the window.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     pub onboarding: Option<OnboardingProgress>,
     /// Setup sounds; off until the person turns them on, as on the desktop.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(
+        default,
+        skip_serializing_if = "std::ops::Not::not",
+        deserialize_with = "lenient"
+    )]
     pub onboarding_sounds: bool,
     #[serde(skip)]
     pub(crate) retain_file: bool,
@@ -152,6 +161,7 @@ pub struct State {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OnboardingProgress {
+    #[serde(default)]
     pub step: String,
     #[serde(default)]
     pub project: Option<serde_json::Value>,
@@ -159,6 +169,16 @@ pub struct OnboardingProgress {
     pub tools_configured: bool,
     #[serde(default)]
     pub task: String,
+}
+/// Reads a setup field, falling back to its default when the saved value is
+/// malformed, so one bad field never discards the whole window's state.
+fn lenient<'de, D, T>(input: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned + Default,
+{
+    let value = serde_json::Value::deserialize(input)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
 }
 impl Default for State {
     fn default() -> Self {
