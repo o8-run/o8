@@ -9,6 +9,13 @@ pub(super) struct Runtime {
     pub view: Option<Entity<view::Setup>>,
     first_run_checked: Cell<bool>,
 }
+impl Runtime {
+    /// Start this window past first-run setup, which covers the whole window.
+    #[cfg(test)]
+    pub(crate) fn skip_first_run(&self) {
+        self.first_run_checked.set(true);
+    }
+}
 pub(super) const REGISTRATION: Registration = Registration {
     key_down: |s, _, _, cx| {
         if s.surfaces
@@ -68,7 +75,19 @@ impl Shell {
         if self.surfaces.setup.view.is_some() {
             return;
         }
-        let setup = cx.new(|cx| view::Setup::new(self.client.clone(), cx));
+        // Cue files live in a folder beside this window's saved state.
+        let sounds_dir = self.file.parent().map(|dir| dir.join("sounds"));
+        let saved = self.state.onboarding.clone();
+        let sounds_on = self.state.onboarding_sounds;
+        let setup = cx.new(|cx| {
+            view::Setup::new(
+                self.client.clone(),
+                saved.as_ref(),
+                sounds_on,
+                sounds_dir,
+                cx,
+            )
+        });
         self.subscriptions
             .push(cx.subscribe(&setup, |s, _, opened: &view::Opened, cx| {
                 if let Some(session) = &opened.0 {
@@ -91,10 +110,23 @@ impl Shell {
                     saved.composer = true;
                 }
                 s.surfaces.setup.view = None;
+                // Setup finished; a later run starts over, as on the desktop.
+                s.state.onboarding = None;
                 s.connected = true;
                 s.persist();
                 s.revision += 1;
                 cx.notify();
+            }));
+        self.subscriptions.push(
+            cx.subscribe(&setup, |s, _, progress: &view::Progressed, _| {
+                s.state.onboarding = Some(progress.0.clone());
+                s.persist();
+            }),
+        );
+        self.subscriptions
+            .push(cx.subscribe(&setup, |s, _, sounds: &view::Sounds, _| {
+                s.state.onboarding_sounds = sounds.0;
+                s.persist();
             }));
         // Imported chats join the sidebar at once, while Setup stays open.
         self.subscriptions

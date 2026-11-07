@@ -144,6 +144,18 @@ pub(super) fn open(
     let visual = VisualTestContext::from_window(handle.into(), cx);
     (shell, visual)
 }
+/// Opens a window for someone already past first-run setup. Setup covers the
+/// whole window, so suites about the rest of the window start here.
+pub(super) fn open_past_setup(
+    client: Client,
+    file: PathBuf,
+    state: State,
+    cx: &mut TestAppContext,
+) -> (Entity<Shell>, VisualTestContext) {
+    let (shell, mut visual) = open(client, file, state, cx);
+    shell.update(&mut visual, |s, _| s.surfaces.setup.skip_first_run());
+    (shell, visual)
+}
 pub(super) fn draw(cx: &mut VisualTestContext) {
     cx.update(|window, cx| {
         window.refresh();

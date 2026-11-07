@@ -11,17 +11,30 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     cell::Cell,
+    path::PathBuf,
     rc::Rc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[path = "frame.rs"]
+mod frame;
+#[path = "home.rs"]
+mod home;
 #[path = "import.rs"]
 mod import;
 #[cfg(test)]
 #[path = "view_lifecycle_tests.rs"]
 mod lifecycle_tests;
+#[path = "look.rs"]
+mod look;
 #[path = "new_project.rs"]
 mod new_project;
+#[path = "privacy.rs"]
+mod privacy;
+#[path = "progress.rs"]
+mod progress;
+#[path = "sound.rs"]
+pub(crate) mod sound;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +123,12 @@ impl EventEmitter<Opened> for Setup {}
 /// Imported chats exist now; the shell reloads its sessions.
 pub struct Imported;
 impl EventEmitter<Imported> for Setup {}
+/// Where setup stands now, saved so a relaunch resumes there.
+pub struct Progressed(pub crate::shell_state::OnboardingProgress);
+impl EventEmitter<Progressed> for Setup {}
+/// The sounds switch changed.
+pub struct Sounds(pub bool);
+impl EventEmitter<Sounds> for Setup {}
 pub struct Setup {
     client: Client,
     snapshot: Option<Snapshot>,
@@ -125,10 +144,21 @@ pub struct Setup {
     session_id: String,
     busy: bool,
     error: Option<String>,
-    telemetry: bool,
-    crashes: bool,
+    /// Usage analytics: None until chosen, which the server reads as on.
+    telemetry: Option<bool>,
+    /// Crash reports: None until the person chooses, as on the desktop.
+    crashes: Option<bool>,
+    /// Whether the sample crash report is shown.
+    crash_sample: bool,
+    /// Saved with progress, as on the desktop.
+    tools_configured: bool,
+    task: String,
+    /// The progress last saved, so only changes are written.
+    saved: Option<crate::shell_state::OnboardingProgress>,
     revision: u64,
     painted: Rc<Cell<u64>>,
+    /// Keys stay inside setup while it owns the window.
+    pub(crate) focus: gpui::FocusHandle,
 }
 enum Action {
     Load(bool),
@@ -137,6 +167,8 @@ enum Action {
     Create(Value),
     Import(Vec<String>),
     Use,
+    /// Save the usage analytics choice as soon as it changes.
+    Usage(bool),
     Consent,
 }
 struct ResultState {
@@ -159,6 +191,16 @@ impl Setup {
             Step::NewProject => "new-project",
         })
     }
+    /// The progress rail's parts (label, detail, done) and the current one.
+    #[cfg(test)]
+    pub fn rail(&self) -> (Vec<(&'static str, String, bool)>, usize) {
+        let (parts, current) = frame::rail(self);
+        let parts = parts
+            .into_iter()
+            .map(|p| (p.label, p.detail, p.done))
+            .collect();
+        (parts, current)
+    }
     #[cfg(test)]
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
@@ -175,12 +217,22 @@ impl Setup {
     pub fn busy(&self) -> bool {
         self.busy
     }
-    pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
+    /// `saved` is where an earlier launch stopped; `sounds_dir` is the
+    /// app's data folder for the cue files.
+    pub fn new(
+        client: Client,
+        saved: Option<&crate::shell_state::OnboardingProgress>,
+        sounds_on: bool,
+        sounds_dir: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        sound::configure(sounds_on, sounds_dir);
+        let resume = progress::read(saved);
         let mut this = Self {
             client,
             snapshot: None,
-            step: Step::Projects,
-            project: None,
+            step: resume.step,
+            project: resume.project,
             backend: String::new(),
             workers: vec![],
             folder: cx.new(Composer::new),
@@ -197,10 +249,15 @@ impl Setup {
             ),
             busy: false,
             error: None,
-            telemetry: false,
-            crashes: false,
+            telemetry: None,
+            crashes: None,
+            crash_sample: false,
+            tools_configured: resume.tools_configured,
+            task: resume.task,
+            saved: saved.cloned(),
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
+            focus: cx.focus_handle(),
         };
         this.act(Action::Load(false), cx);
         this
@@ -229,6 +286,7 @@ impl Setup {
         let crashes = self.crashes;
         let step = self.step;
         let id = self.session_id.clone();
+        let used = matches!(action, Action::Use);
         let task = cx.background_executor().spawn(async move {
             let mut next = snapshot;
             let mut selected = project;
@@ -238,6 +296,10 @@ impl Setup {
             match action {
                 Action::Load(refresh) => {
                     next = Some(Snapshot::load(&client, refresh)?);
+                    // A resumed project that is gone sends setup back to projects.
+                    if !refresh && Self::registered(next.as_ref().unwrap(), selected.as_ref()).is_err() {
+                        (selected, target) = (None, Step::Projects);
+                    }
                     // An older server without the routes just skips the offer.
                     discovered = import::Discovered::load(&client).ok();
                     if !refresh && step == Step::Projects && discovered.as_ref().is_some_and(import::Discovered::pending) { target = Step::Import; }
@@ -273,7 +335,12 @@ impl Setup {
                         else { target = Step::Privacy; }
                     } else { target = Step::Projects; }
                 }
+                Action::Usage(enabled) => {
+                    let response = client.setup_request("POST", "/api/panel/operator-defaults", &json!({"productTelemetryEnabled":enabled}))?;
+                    if response["values"]["productTelemetryEnabled"] != enabled { return Err("Your usage choice could not be saved.".into()); }
+                }
                 Action::Consent => {
+                    let crashes = crashes.ok_or("Choose whether to share crash reports to continue.")?;
                     let response = client.setup_request("POST", "/api/panel/operator-defaults", &json!({"productTelemetryEnabled":telemetry,"crashReportsEnabled":crashes,"telemetryConsentAnswered":true}))?;
                     if response["values"]["telemetryConsentAnswered"] != true { return Err("Privacy choices could not be confirmed. Try again.".into()); }
                     finish = true;
@@ -293,6 +360,12 @@ impl Setup {
                             this.model.update(cx, |model, cx| model.clear(cx));
                         }
                         (this.backend, this.workers) = result.snapshot.recommendation();
+                        // Privacy opens with any earlier choices, as on the desktop.
+                        if result.step == Step::Privacy
+                            && (this.step != Step::Privacy || this.snapshot.is_none())
+                        {
+                            this.privacy_choices(&result.snapshot.setup["values"]);
+                        }
                         this.snapshot = Some(result.snapshot);
                         this.project = result.project;
                         this.step = result.step;
@@ -305,8 +378,14 @@ impl Setup {
                                 cx.emit(Imported);
                             }
                         }
+                        if used {
+                            this.tools_configured = true;
+                        }
                         if let Some(session) = result.opened {
+                            sound::play(sound::Cue::Complete);
                             cx.emit(Opened(session));
+                        } else {
+                            this.remember(cx);
                         }
                     }
                     Err(error) => this.error = Some(error),
@@ -431,12 +510,43 @@ impl Setup {
         client.setup_request("POST", "/api/setup/config", &completion)?;
         Ok(session)
     }
+    /// Earlier choices: usage analytics when one was saved, and crash
+    /// reports only when the combined choice was answered.
+    fn privacy_choices(&mut self, values: &Value) {
+        let answered = values["telemetryConsentAnswered"] == true;
+        self.telemetry = values["productTelemetryEnabled"].as_bool();
+        self.crashes = values["crashReportsEnabled"].as_bool().filter(|_| answered);
+    }
     fn navigate(&mut self, step: Step, cx: &mut Context<Self>) {
         if self.busy {
             return;
         }
         self.step = step;
         self.error = None;
+        self.remember(cx);
+        self.revision += 1;
+        cx.notify();
+    }
+    /// Save where setup stands when that changed.
+    fn remember(&mut self, cx: &mut Context<Self>) {
+        let now = progress::write(
+            self.step,
+            self.project.as_ref(),
+            self.tools_configured,
+            &self.task,
+        );
+        if self.saved.as_ref() != Some(&now) {
+            self.saved = Some(now.clone());
+            cx.emit(Progressed(now));
+        }
+    }
+    /// Turn sounds on or off; turning them on by pointer previews a tick.
+    fn set_sounds(&mut self, on: bool, preview: bool, cx: &mut Context<Self>) {
+        sound::set_on(on);
+        if on && preview {
+            sound::play(sound::Cue::Tick);
+        }
+        cx.emit(Sounds(on));
         self.revision += 1;
         cx.notify();
     }
@@ -472,22 +582,20 @@ impl Setup {
         }
     }
 }
+/// A bordered setup control (`onboardingButtonStyle`).
 fn control(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Stateful<gpui::Div> {
-    let selector = id.to_owned();
-    div()
-        .id(SharedString::from(id.to_owned()))
-        .debug_selector(move || selector.clone())
-        .p(px(8.))
-        .rounded(px(6.))
-        .bg(theme().surface_raised)
-        .border_1()
-        .border_color(theme().border)
-        .opacity(if enabled { 1. } else { 0.45 })
-        .when(enabled, |v| v.cursor_pointer())
-        .child(label.into())
+    look::button(id, label, enabled, look::Look::Bordered)
+}
+/// The step's main action (`renderButton`).
+fn primary(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Stateful<gpui::Div> {
+    look::button(id, label, enabled, look::Look::Primary)
+}
+/// A quiet setup control (`onboardingQuietButtonStyle`).
+fn quiet(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Stateful<gpui::Div> {
+    look::button(id, label, enabled, look::Look::Quiet)
 }
 impl Render for Setup {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let busy = self.busy;
         let snapshot = self.snapshot.clone();
         let ready = snapshot
@@ -495,148 +603,85 @@ impl Render for Setup {
             .is_some_and(|s| s.ready(&self.backend, &self.workers));
         let painted = self.painted.clone();
         let revision = self.revision;
-        div()
-            .id("setup")
-            .size_full()
-            .overflow_y_scroll()
-            .p(px(24.))
+        let width = f32::from(window.viewport_size().width);
+        let home = self.step == Step::Projects;
+        let privacy = self.step == Step::Privacy;
+        let body = div()
             .flex()
             .flex_col()
-            .gap(px(12.))
-            .bg(theme().background)
-            .text_color(theme().text)
-            .font_family(theme().font_ui)
-            .child(
-                div()
-                    .flex()
-                    .gap(px(12.))
-                    .child(
-                        control("setup-back", "Projects", !busy).on_click(
-                            cx.listener(|this, _, _, cx| this.navigate(Step::Projects, cx)),
-                        ),
-                    )
-                    .child(
-                        control("setup-refresh", "Check again", !busy).on_click(
-                            cx.listener(|this, _, _, cx| this.act(Action::Load(true), cx)),
-                        ),
-                    ),
-            )
-            .when(busy, |v| {
+            .gap(px(20.))
+            .when(privacy, |v| v.flex_1().min_h_0())
+            // Away from home: back to projects and the project being set up.
+            .when(!home, |v| {
                 v.child(
                     div()
-                        .debug_selector(|| "setup-loading".into())
-                        .child("Checking setup…"),
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(12.))
+                        .child(quiet("setup-back", "← Projects", !busy).pl_0().on_click(
+                            cx.listener(|this, _, _, cx| this.navigate(Step::Projects, cx)),
+                        ))
+                        .when_some(self.project.as_ref(), |v, project| {
+                            v.child(
+                                div()
+                                    .flex()
+                                    .gap(px(4.))
+                                    .text_size(px(12.))
+                                    .line_height(gpui::relative(1.5))
+                                    .text_color(theme().text_secondary)
+                                    .child("Setting up")
+                                    .child(
+                                        div().text_color(theme().text).child(project.name.clone()),
+                                    ),
+                            )
+                        }),
                 )
             })
-            .when_some(self.error.clone(), |v, error| {
-                v.child(
-                    div()
-                        .debug_selector(|| "setup-error".into())
-                        .text_color(theme().danger)
-                        .child(error),
-                )
+            .when(home, |v| {
+                v.child(self.home(busy, snapshot.as_ref(), width, cx))
             })
             .when(self.step == Step::Import, |v| {
                 v.child(import::page(self, busy, cx))
-            })
-            .when(self.step == Step::Projects, |v| {
-                v.child(
-                    div()
-                        .debug_selector(|| "setup-projects".into())
-                        .flex()
-                        .flex_col()
-                        .gap(px(10.))
-                        .child(div().text_size(px(24.)).child("Open a project"))
-                        .when_some(self.import.note.clone(), |v, note| {
-                            v.child(
-                                div()
-                                    .debug_selector(|| "setup-import-note".into())
-                                    .text_color(theme().text_secondary)
-                                    .child(note),
-                            )
-                        })
-                        .when(self.import.pending(), |v| {
-                            v.child(
-                                control("setup-import-open", "Bring in existing threads", !busy)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.navigate(Step::Import, cx)
-                                    })),
-                            )
-                        })
-                        .child(
-                            control("setup-folder", "Open folder", !busy).on_click(cx.listener(
-                                |this, _, window, cx| {
-                                    this.navigate(Step::Folder, cx);
-                                    this.folder.read(cx).focus.focus(window);
-                                },
-                            )),
-                        )
-                        .children(
-                            snapshot
-                                .as_ref()
-                                .map(|s| s.projects.clone())
-                                .unwrap_or_default()
-                                .into_iter()
-                                .enumerate()
-                                .map(|(i, project)| {
-                                    control(
-                                        &format!("setup-project-{i}"),
-                                        project.name.clone(),
-                                        !busy,
-                                    )
-                                    .on_click(cx.listener(
-                                        move |this, _, _, cx| {
-                                            this.act(Action::Choose(Some(project.clone())), cx)
-                                        },
-                                    ))
-                                }),
-                        )
-                        .when(
-                            snapshot.as_ref().is_some_and(|s| s.projects.is_empty()) && !busy,
-                            |v| v.child("No projects yet"),
-                        )
-                        .child(control("setup-new-project", "New project", !busy).on_click(
-                            cx.listener(|this, _, window, cx| this.open_new_project(window, cx)),
-                        ))
-                        .child(
-                            control("setup-change-tools", "Set up tools", !busy).on_click(
-                                cx.listener(|this, _, _, cx| this.navigate(Step::Tools, cx)),
-                            ),
-                        )
-                        .child(
-                            control("setup-explore", "Start without a project", !busy).on_click(
-                                cx.listener(|this, _, _, cx| this.act(Action::Choose(None), cx)),
-                            ),
-                        ),
-                )
             })
             .when(self.step == Step::Folder, |v| {
                 v.child(
                     div()
                         .flex()
                         .flex_col()
-                        .gap(px(10.))
-                        .child("Folder path")
+                        .gap(px(12.))
+                        .child(look::title("Open a folder"))
+                        .child(
+                            div()
+                                .text_size(px(12.))
+                                .text_color(theme().text_secondary)
+                                .child("Folder path"),
+                        )
                         .child(
                             div()
                                 .debug_selector(|| "setup-folder-input".into())
                                 .child(self.folder.clone()),
                         )
-                        .child(
-                            control("setup-add", "Open folder", !busy).on_click(cx.listener(
-                                |this, _, _, cx| {
-                                    let path = this.folder.read(cx).text.clone();
-                                    this.act(Action::Add(path), cx);
-                                },
-                            )),
-                        )
-                        .child(control("setup-cancel-folder", "Cancel", !busy).on_click(
-                            cx.listener(|this, _, _, cx| {
-                                if !this.busy {
-                                    this.folder.update(cx, |input, cx| input.clear(cx));
-                                    this.navigate(Step::Projects, cx);
-                                }
-                            }),
+                        .child(look::actions(
+                            vec![
+                                quiet("setup-cancel-folder", "Cancel", !busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if !this.busy {
+                                            this.folder.update(cx, |input, cx| input.clear(cx));
+                                            this.navigate(Step::Projects, cx);
+                                        }
+                                    }))
+                                    .into_any_element(),
+                            ],
+                            vec![
+                                primary("setup-add", "Open folder", !busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        let path = this.folder.read(cx).text.clone();
+                                        this.act(Action::Add(path), cx);
+                                    }))
+                                    .into_any_element(),
+                            ],
                         )),
                 )
             })
@@ -650,7 +695,18 @@ impl Render for Setup {
                         .flex()
                         .flex_col()
                         .gap(px(10.))
-                        .child(div().text_size(px(24.)).child("Coding tools"))
+                        .child(look::title("Choose your agent"))
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .font_weight(gpui::FontWeight::LIGHT)
+                                .line_height(gpui::relative(1.6))
+                                .text_color(theme().text_secondary)
+                                .child(
+                                    "Start with an agent. You can add coding tools and adjust \
+                                     your setup later.",
+                                ),
+                        )
                         .children(
                             snapshot
                                 .as_ref()
@@ -671,22 +727,32 @@ impl Render for Setup {
                                         .to_owned();
                                     let enabled = runtime["available"] == true && !busy;
                                     let lead_enabled = enabled
-                                        && (["codex", "claude", "opencode", "muse", "fable", "o8", "pi"]
-                                            .contains(&backend.as_str())
+                                        && ([
+                                            "codex", "claude", "opencode", "muse", "fable", "o8",
+                                            "pi",
+                                        ]
+                                        .contains(&backend.as_str())
                                             || runtime["builtIn"].is_object());
                                     div()
                                         .flex()
                                         .flex_col()
                                         .gap(px(4.))
-                                        .child(
+                                        .pt(px(6.))
+                                        .font_weight(gpui::FontWeight::LIGHT)
+                                        .child(div().text_size(px(13.5)).child(
                                             runtime["label"].as_str().unwrap_or("Tool").to_owned(),
-                                        )
+                                        ))
                                         .when(!enabled, |v| {
                                             v.child(
-                                                runtime["detail"]
-                                                    .as_str()
-                                                    .unwrap_or("Unavailable")
-                                                    .to_owned(),
+                                                div()
+                                                    .text_size(px(12.))
+                                                    .text_color(theme().text_secondary)
+                                                    .child(
+                                                        runtime["detail"]
+                                                            .as_str()
+                                                            .unwrap_or("Unavailable")
+                                                            .to_owned(),
+                                                    ),
                                             )
                                         })
                                         .child(
@@ -706,7 +772,9 @@ impl Render for Setup {
                                                     .on_click(cx.listener(move |this, _, _, cx| {
                                                         if lead_enabled {
                                                             this.backend = backend.clone();
-                                                            this.model.update(cx, |model, cx| model.clear(cx));
+                                                            this.model.update(cx, |model, cx| {
+                                                                model.clear(cx)
+                                                            });
                                                             this.workers = vec![id.clone()];
                                                             this.revision += 1;
                                                             cx.notify();
@@ -749,90 +817,134 @@ impl Render for Setup {
                             }) && !busy,
                             |v| v.child("No coding tools found"),
                         )
-                        .when(snapshot.as_ref().is_some_and(|s| {
-                            s.setup["setupRecommendation"]["backend"] == self.backend
-                                && s.model("").is_none()
-                        }), |v| {
-                            v.child("Choose a model ID for this runtime to continue.")
-                                .child(div().id("setup-model-input")
-                                    .debug_selector(|| "setup-model-input".into())
-                                    .on_click(cx.listener(|s, _, window, cx| s.model.read(cx).focus.focus(window)))
-                                    .child(self.model.clone()))
-                        })
-                        .child(
-                            control("setup-use", "Use this setup", ready && !busy)
-                                .on_click(cx.listener(|this, _, _, cx| this.act(Action::Use, cx))),
-                        ),
+                        .when(
+                            snapshot.as_ref().is_some_and(|s| {
+                                s.setup["setupRecommendation"]["backend"] == self.backend
+                                    && s.model("").is_none()
+                            }),
+                            |v| {
+                                v.child("Choose a model ID for this runtime to continue.")
+                                    .child(
+                                        div()
+                                            .id("setup-model-input")
+                                            .debug_selector(|| "setup-model-input".into())
+                                            .on_click(cx.listener(|s, _, window, cx| {
+                                                s.model.read(cx).focus.focus(window)
+                                            }))
+                                            .child(self.model.clone()),
+                                    )
+                            },
+                        )
+                        .child(look::actions(
+                            vec![
+                                quiet("setup-refresh", "Check again", !busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.act(Action::Load(true), cx)
+                                    }))
+                                    .into_any_element(),
+                            ],
+                            vec![
+                                primary("setup-use", "Use this setup", ready && !busy)
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.act(Action::Use, cx)),
+                                    )
+                                    .into_any_element(),
+                            ],
+                        )),
                 )
             })
             .when(self.step == Step::Privacy, |v| {
+                v.child(privacy::page(self, busy, cx))
+            })
+            // Away from home, progress and errors follow the page.
+            .when(!home && busy, |v| {
                 v.child(
                     div()
-                        .debug_selector(|| "setup-privacy".into())
-                        .flex()
-                        .flex_col()
-                        .gap(px(10.))
-                        .child(div().text_size(px(24.)).child("Privacy"))
-                        .child(
-                            control(
-                                "setup-telemetry",
-                                if self.telemetry {
-                                    "Product analytics: on"
-                                } else {
-                                    "Product analytics: off"
-                                },
-                                !busy,
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if !this.busy {
-                                    this.telemetry = !this.telemetry;
-                                    this.revision += 1;
-                                    cx.notify();
-                                }
-                            })),
-                        )
-                        .child(
-                            control(
-                                "setup-crashes",
-                                if self.crashes {
-                                    "Crash reports: on"
-                                } else {
-                                    "Crash reports: off"
-                                },
-                                !busy,
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if !this.busy {
-                                    this.crashes = !this.crashes;
-                                    this.revision += 1;
-                                    cx.notify();
-                                }
-                            })),
-                        )
-                        .child(
-                            control("setup-consent", "Save and continue", !busy).on_click(
-                                cx.listener(|this, _, _, cx| this.act(Action::Consent, cx)),
-                            ),
-                        ),
+                        .debug_selector(|| "setup-loading".into())
+                        .text_size(px(12.))
+                        .text_color(theme().text_secondary)
+                        .child("Checking setup…"),
                 )
             })
-            .child(canvas(|_, _, _| (), move |_, _, window, _| {
-                painted.set(revision);
-                // A busy setup is modal, including shell navigation outside its
-                // content bounds. These listeners live for this painted frame.
-                if busy {
-                    window.on_mouse_event(|_: &gpui::MouseDownEvent, phase, window, cx| {
-                        if phase == gpui::DispatchPhase::Capture {
-                            window.prevent_default();
-                            cx.stop_propagation();
+            .when_some(self.error.clone().filter(|_| !home), |v, error| {
+                v.child(look::feedback(
+                    "setup-error",
+                    error,
+                    "Your saved choices are kept. You can retry or return to projects.",
+                    None,
+                ))
+            });
+        // The desktop's full-window surface: a drag strip under the traffic
+        // lights, the frame centred in a scrolling area on the window's own
+        // material, and the footer.
+        let viewport = window.viewport_size();
+        let top = (f32::from(viewport.height) * 0.02).clamp(12., 24.);
+        // The scrolling area's height, so a short page centres in it.
+        let area = f32::from(viewport.height) - 52. - frame::FOOTER - top;
+        div()
+            .id("setup")
+            .track_focus(&self.focus)
+            .size_full()
+            .flex()
+            .flex_col()
+            .text_color(theme().text)
+            .font_family(theme().font_ui)
+            .child(
+                div()
+                    .flex_none()
+                    .w_full()
+                    .h(px(52.))
+                    .window_control_area(gpui::WindowControlArea::Drag),
+            )
+            .child(
+                div()
+                    .id("setup-content")
+                    .debug_selector(|| "setup-content".into())
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .pt(px(top))
+                    .px(px(32.))
+                    .child(
+                        div()
+                            .min_h(px(area.max(0.)))
+                            .pb(px(24.))
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .justify_center()
+                            .child(frame::frame(
+                                self,
+                                body,
+                                viewport,
+                                privacy.then_some((area - 24.).max(320.)),
+                            )),
+                    ),
+            )
+            .child(frame::footer(cx))
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    move |_, _, window, _| {
+                        painted.set(revision);
+                        // A busy setup is modal, including shell navigation outside its
+                        // content bounds. These listeners live for this painted frame.
+                        if busy {
+                            window.on_mouse_event(|_: &gpui::MouseDownEvent, phase, window, cx| {
+                                if phase == gpui::DispatchPhase::Capture {
+                                    window.prevent_default();
+                                    cx.stop_propagation();
+                                }
+                            });
+                            window.on_mouse_event(|_: &gpui::MouseUpEvent, phase, _, cx| {
+                                if phase == gpui::DispatchPhase::Capture {
+                                    cx.stop_propagation();
+                                }
+                            });
                         }
-                    });
-                    window.on_mouse_event(|_: &gpui::MouseUpEvent, phase, _, cx| {
-                        if phase == gpui::DispatchPhase::Capture {
-                            cx.stop_propagation();
-                        }
-                    });
-                }
-            }).size(px(1.)))
+                    },
+                )
+                .size(px(1.)),
+            )
     }
 }

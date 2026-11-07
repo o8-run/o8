@@ -538,6 +538,11 @@ impl Shell {
         cx.notify();
     }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // Setup owns the whole window, as on the desktop: workspace shortcuts
+        // wait, and keys reach only setup's own controls.
+        if self.surfaces.setup.view.is_some() {
+            return;
+        }
         // Shortcut overrides route first; handlers then see default chords.
         let translated = match shortcuts::pre_key(self, event, window, cx) {
             shortcuts::Pre::Pass => None,
@@ -597,5 +602,8 @@ pub(crate) fn notes_test_window(
     state: State,
     cx: &mut gpui::App,
 ) -> gpui::AnyWindowHandle {
-    view::open_window(client, file, state, true, cx).into()
+    let handle = view::open_window(client, file, state, true, cx);
+    // Notes tests start past first-run setup, which covers the whole window.
+    let _ = handle.update(cx, |s, _, _| s.surfaces.setup.skip_first_run());
+    handle.into()
 }

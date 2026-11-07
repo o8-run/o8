@@ -1,7 +1,7 @@
 //! First launch: bring existing Codex and Claude Code threads into o8 as
 //! chats that continue the same provider session (#5260), over the
 //! discovered-session routes (#5450). Importing sends nothing.
-use super::{Action, Setup, Step, control};
+use super::{Action, Setup, Step, look, quiet};
 use crate::{client::Client, theme::current as theme};
 use gpui::{
     AnyElement, Context, IntoElement, UniformListScrollHandle, div, prelude::*, px, uniform_list,
@@ -400,7 +400,7 @@ pub(super) fn page(this: &Setup, busy: bool, cx: &mut Context<Setup>) -> impl In
         .flex()
         .flex_col()
         .gap(px(10.))
-        .child(div().text_size(px(24.)).child("Bring in your threads"))
+        .child(look::title("Bring in your threads"))
         .child(div().text_color(theme().text_secondary).child(format!(
             "Found {total} Codex and Claude Code {} in {projects} {}. Each one you import \
                  opens as a chat that continues the same session. Nothing is sent until you write.",
@@ -412,7 +412,7 @@ pub(super) fn page(this: &Setup, busy: bool, cx: &mut Context<Setup>) -> impl In
                 .flex()
                 .gap(px(8.))
                 .child(
-                    control("setup-import-all", "Select all", !busy && chosen < total).on_click(
+                    quiet("setup-import-all", "Select all", !busy && chosen < total).on_click(
                         cx.listener(|this, _, _, cx| {
                             if !this.busy {
                                 this.import.select_all();
@@ -422,7 +422,7 @@ pub(super) fn page(this: &Setup, busy: bool, cx: &mut Context<Setup>) -> impl In
                     ),
                 )
                 .child(
-                    control("setup-import-none", "Select none", !busy && chosen > 0).on_click(
+                    quiet("setup-import-none", "Select none", !busy && chosen > 0).on_click(
                         cx.listener(|this, _, _, cx| {
                             if !this.busy {
                                 this.import.selected.clear();
@@ -477,20 +477,17 @@ pub(super) fn page(this: &Setup, busy: bool, cx: &mut Context<Setup>) -> impl In
                     })),
                 )
                 .child(
-                    control("setup-import-skip", "Skip", !busy)
+                    quiet("setup-import-skip", "Skip", !busy)
                         .on_click(cx.listener(|this, _, _, cx| this.navigate(Step::Projects, cx))),
                 ),
         )
 }
 
-/// The step's main action: accent fill and white label, as the editor's Done.
+/// The step's main action, filled as the desktop's renderButton.
 fn primary(
     id: &str,
     label: impl Into<gpui::SharedString>,
     enabled: bool,
 ) -> gpui::Stateful<gpui::Div> {
-    control(id, label, enabled)
-        .bg(theme().accent)
-        .border_color(theme().accent)
-        .text_color(crate::theme::on_accent())
+    super::primary(id, label, enabled)
 }

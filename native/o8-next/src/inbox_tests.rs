@@ -1,6 +1,6 @@
 //! Production fixture routes -> shell palette -> GPUI controls -> persisted approvals.
 use super::*;
-use crate::shell::test_support::{draw, inbox_panel, open};
+use crate::shell::test_support::{draw, inbox_panel, open, open_past_setup};
 use gpui::TestAppContext;
 use serde_json::Value;
 use std::{
@@ -724,7 +724,7 @@ fn inbox_opens_related_session_and_pull_request_and_restores(cx: &mut TestAppCon
 #[gpui::test]
 fn inbox_empty_and_server_error_never_claim_a_false_clean_state(cx: &mut TestAppContext) {
     let mut fixture = Fixture::start(true);
-    let (shell, mut visual) = open(
+    let (shell, mut visual) = open_past_setup(
         fixture.client.clone(),
         fixture.root.join("empty.json"),
         State::default(),

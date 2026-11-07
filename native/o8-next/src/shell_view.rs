@@ -13,6 +13,20 @@ impl Render for Shell {
         if !registrations().iter().any(|r| (r.block_ensure)(self)) {
             self.ensure(window, cx);
         }
+        // Setup is its own full-window page, as on the desktop: no sidebar,
+        // rail, toolbar or panels behind it. They come back as they were.
+        if let Some(setup) = self.surfaces.setup.view.clone() {
+            let focus = setup.read(cx).focus.clone();
+            window.defer(cx, move |window, cx| {
+                if !focus.contains_focused(window, cx) {
+                    window.focus(&focus);
+                }
+            });
+            return self
+                .root(cx)
+                .debug_selector(|| "setup-window".into())
+                .child(setup);
+        }
         let mut style = gpui::StyleRefinement::default();
         style.size.width = Some(gpui::relative(1.).into());
         style.flex_shrink = Some(0.);
@@ -25,11 +39,31 @@ impl Render for Shell {
         );
         let slots = features::render_content(self, &frame, chrome.into_any_element(), window, cx);
         let rail = self.render_rail(window, cx);
+        self.root(cx)
+            .pl(px(rail::WIDTH))
+            .children(slots)
+            // The traffic-light corner above the rail moves the window too.
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .w(px(rail::WIDTH))
+                    .h(px(crate::theme::GEOMETRY.header))
+                    .window_control_area(gpui::WindowControlArea::Drag),
+            )
+            // Painted after the veil so the rail sits on the same glass as the content.
+            .child(rail)
+    }
+}
+
+impl Shell {
+    /// The window root: its material, type, focus, keys and actions.
+    fn root(&self, cx: &mut Context<Self>) -> gpui::Div {
         div()
             .size_full()
             .flex()
             .flex_col()
-            .pl(px(rail::WIDTH))
             .bg(if self.system_glass {
                 theme().background
             } else {
@@ -85,23 +119,7 @@ impl Render for Shell {
                     }
                 }),
             )
-            .children(slots)
-            // The traffic-light corner above the rail moves the window too.
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .w(px(rail::WIDTH))
-                    .h(px(crate::theme::GEOMETRY.header))
-                    .window_control_area(gpui::WindowControlArea::Drag),
-            )
-            // Painted after the veil so the rail sits on the same glass as the content.
-            .child(rail)
     }
-}
-
-impl Shell {
     fn render_chrome(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         let frame = registry::extensions()
             .find_map(|extension| extension.frame(self))

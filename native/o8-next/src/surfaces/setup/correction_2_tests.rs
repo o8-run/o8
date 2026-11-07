@@ -42,6 +42,8 @@ fn fresh_opencode_first_send(cx: &mut TestAppContext, change_workers: bool) {
         click(cx, "setup-worker-opencode");
         click(cx, "setup-use");
     }
+    scroll_privacy(cx);
+    click(cx, "setup-crashes-off");
     click(cx, "setup-consent");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
     let session = shell.read_with(cx, |s, _| {
