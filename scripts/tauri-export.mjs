@@ -15,6 +15,7 @@ import { resolveReleaseConfig } from './lib/release-config.mjs';
 import { canonicalizeServerOnlyStubEnv } from './run-lib.mjs';
 import { assertTauriExportInputsSafe } from './lib/tauri-export-safety.mjs';
 import { prunePackagedBuildInputs } from './lib/packaged-build-inputs.mjs';
+import { packagedCliShim } from './lib/packaged-cli-shim.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -672,10 +673,15 @@ if (existsSync(DECOMPOSE_PROMPT_SRC)) {
 
 // ── Build + bundle the agent-facing CLI ──
 // Builds cli/dist/o8.mjs via the package's own esbuild config, then writes a
-// shell wrapper at out/server/bin/o8. The wrapper uses O8_NODE_BIN when the app
-// injected it, then falls back to a login-shell lookup so Finder/minimal-PATH
-// sessions do not fail at `#!/usr/bin/env node`.
+// shell wrapper at out/server/bin/o8. Only runtimes supported by this bundle
+// may run the CLI, including when the login shell defaults to an unshipped ABI.
 const CLI_BUILD = join(root, 'cli', 'esbuild.config.mjs');
+const CLI_NATIVE_MANIFEST = join(server, 'native-addon-abis.json');
+// macOS/Linux emit this manifest above. Windows keeps host-built addons and
+// uses the .cmd entry point; its unused POSIX wrapper describes the build host.
+const CLI_NODE_MAJORS = existsSync(CLI_NATIVE_MANIFEST)
+  ? Object.keys(JSON.parse(readFileSync(CLI_NATIVE_MANIFEST, 'utf8')).nodeAbis)
+  : [process.versions.node.split('.')[0]];
 const CLI_OUTPUT = join(root, 'cli', 'dist', 'o8.mjs');
 const CLI_WORKER_LOGIN_OUTPUT = join(root, 'cli', 'dist', 'worker-login.mjs');
 const CLI_BIN_DIR = join(server, 'bin');
@@ -695,31 +701,7 @@ if (existsSync(CLI_BUILD)) {
   mkdirSync(CLI_BIN_DIR, { recursive: true });
   cpSync(CLI_OUTPUT, CLI_BUNDLE_DST);
   cpSync(CLI_WORKER_LOGIN_OUTPUT, join(CLI_BIN_DIR, 'worker-login.mjs'));
-  writeFileSync(CLI_BIN_DST, `#!/bin/sh
-set -eu
-# Resolve the REAL script location through symlinks — o8 is invoked via
-# /usr/local/bin/o8 -> <app bundle>/server/bin/o8, and dirname "$0" alone
-# pointed at /usr/local/bin, so o8.mjs was never found (every PATH invocation,
-# including dispatched workers' \`o8 packet report\`, died MODULE_NOT_FOUND).
-SELF="$0"
-while [ -L "$SELF" ]; do
-  LINK="$(readlink -- "$SELF")"
-  case "$LINK" in
-    /*) SELF="$LINK" ;;
-    *) SELF="$(dirname -- "$SELF")/$LINK" ;;
-  esac
-done
-DIR="$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)"
-NODE_BIN="\${O8_NODE_BIN:-}"
-if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
-  NODE_BIN="$(zsh -l -c 'command -v node' 2>/dev/null || bash -l -c 'command -v node' 2>/dev/null || sh -lc 'command -v node' 2>/dev/null || true)"
-fi
-if [ -z "$NODE_BIN" ]; then
-  echo "o8: Node.js 22+ is required. Relaunch o8.app or install Node from https://nodejs.org." >&2
-  exit 127
-fi
-exec "$NODE_BIN" "$DIR/o8.mjs" "$@"
-`);
+  writeFileSync(CLI_BIN_DST, packagedCliShim(CLI_NODE_MAJORS));
   // chmodSync instead of a chmod shellout — cmd.exe has no chmod (#1673);
   // on Windows the mode bits are a no-op, which is fine (cmd runs by extension).
   chmodSync(CLI_BIN_DST, 0o755);

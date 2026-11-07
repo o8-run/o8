@@ -19,6 +19,8 @@ export interface CodexSpeedCatalogue {
   defaultModel?: string;
 }
 let cache: { key: string; at: number; promise: Promise<CodexSpeedCatalogue> } | null = null;
+let lastGood: { key: string; at: number; catalogue: CodexSpeedCatalogue } | null = null;
+const STALE_CATALOGUE_MAX_AGE_MS = 24 * 60 * 60_000;
 
 /** Read-only model/list and config/read; never creates a thread or a provider turn. */
 export async function getCodexSpeedCatalogue(home = path.join(homedir(), '.codex'), fresh = false): Promise<CodexSpeedCatalogue> {
@@ -28,13 +30,25 @@ export async function getCodexSpeedCatalogue(home = path.join(homedir(), '.codex
   const configStat = await stat(path.join(home, 'config.toml')).catch(() => null);
   const key = `${binary.path}:${binary.version}:${home}:${authStat?.mtimeMs}:${configStat?.mtimeMs}:${credentialPolicyFingerprint('codex')}`;
   if (!fresh && cache?.key === key && Date.now() - cache.at < 5 * 60_000) return cache.promise;
-  const promise = readCodexSpeedCatalogue(binary.path, childEnvironment({ runtimeId: 'codex', env: { CODEX_HOME: home, PATH: pathWithNodeRuntime() } }));
+  const promise = readCodexSpeedCatalogue(binary.path, childEnvironment({ runtimeId: 'codex', env: { CODEX_HOME: home, PATH: pathWithNodeRuntime() } }))
+    .then(catalogue => {
+      lastGood = { key, at: Date.now(), catalogue };
+      return catalogue;
+    })
+    .catch(error => {
+      if (cache?.promise === promise) cache = null;
+      // A failed refresh must not renew the age of the last successful read.
+      if (lastGood?.key === key && Date.now() - lastGood.at <= STALE_CATALOGUE_MAX_AGE_MS) {
+        console.warn('[codex] Fresh speed catalogue read failed; using the last successful catalogue.');
+        return lastGood.catalogue;
+      }
+      throw error;
+    });
   cache = { key, at: Date.now(), promise };
-  promise.catch(() => { if (cache?.promise === promise) cache = null; });
   return promise;
 }
 
-export function readCodexSpeedCatalogue(binary: string, env: NodeJS.ProcessEnv, timeoutMs = 5000): Promise<CodexSpeedCatalogue> {
+export function readCodexSpeedCatalogue(binary: string, env: NodeJS.ProcessEnv, timeoutMs = 15_000): Promise<CodexSpeedCatalogue> {
   return new Promise((resolve, reject) => {
     const launch = cliInvocation(binary, ['app-server', '--stdio']);
     const child = spawn(launch.command, launch.args, { env, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });

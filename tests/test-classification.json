@@ -2524,6 +2524,13 @@
       ]
     },
     {
+      "path": "tests/codex-catalogue-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-cli-update-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5721,6 +5728,14 @@
     {
       "path": "tests/owner-chat-reading-position-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/packaged-cli-node-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
         "real-path"
       ]
     },
