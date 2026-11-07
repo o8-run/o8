@@ -509,6 +509,32 @@ impl Transcript {
         }
         Some(live)
     }
+    /// A stop before the first frame leaves no reply to settle; an empty one
+    /// stands in under the prompt so the stop shows. The server's saved
+    /// placeholder for the turn, when it has one, is that reply.
+    fn stopped_before_output(&mut self) {
+        let id = match self.entries.last() {
+            Some(ask) if ask.role == "user" => format!("{}:stopped", ask.id),
+            Some(reply)
+                if reply.role == "assistant"
+                    && reply.text.trim().is_empty()
+                    && reply.tools.as_ref().is_none_or(Vec::is_empty) =>
+            {
+                reply.id.clone()
+            }
+            _ => return,
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0., |d| d.as_millis() as f64);
+        self.live = Some(Entry {
+            id,
+            role: "assistant".into(),
+            text: String::new(),
+            tools: Some(vec![]),
+            extra: [("timestamp".to_owned(), serde_json::json!(now))].into(),
+        });
+    }
     /// Moves the reply on by one step when one is due; true when the rows changed.
     pub fn pace(&mut self) -> bool {
         let now = Instant::now();
@@ -575,6 +601,24 @@ impl Transcript {
     /// The turn ended: stop the marker, close open tools and record the outcome
     /// until saved history arrives.
     fn settle(&mut self, outcome: &str) -> bool {
+        if self.live.is_none() && outcome == "interrupted" {
+            self.stopped_before_output();
+        }
+        let Some(id) = self.live.as_ref().map(|live| live.id.clone()) else {
+            return false;
+        };
+        // A replayed stop keeps the time the server saved for the turn.
+        let ended = self
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .and_then(|entry| entry.extra.get("receipt"))
+            .and_then(|receipt| receipt["terminal"]["completedAt"].as_f64())
+            .unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0., |d| d.as_millis() as f64)
+            });
         let Some(live) = self.live.as_mut() else {
             return false;
         };
@@ -582,7 +626,7 @@ impl Transcript {
             .insert("thinkingActive".into(), Value::Bool(false));
         live.extra.insert(
             "receipt".into(),
-            serde_json::json!({"terminal":{"outcome":outcome}}),
+            serde_json::json!({"terminal":{"outcome":outcome,"completedAt":ended}}),
         );
         for tool in live.tools.iter_mut().flatten() {
             if tool["status"] == "running" {
@@ -719,6 +763,41 @@ mod tests {
                 .all(|tool| tool["status"] != "running")
         );
         assert!(!transcript.interrupted(), "a second stop changes nothing");
+    }
+    #[test]
+    fn a_stop_before_any_output_still_leaves_a_stopped_row() {
+        // #5202: Esc eight seconds into a turn that hadn't streamed anything.
+        let mut transcript = Transcript::new(
+            serde_json::from_value(serde_json::json!({"sessionKey":"llm-chat:thoughts-early",
+                "transcript":[{"id":"ask","role":"user","text":"Run sleep 25","timestamp":1}]}))
+            .unwrap(),
+        );
+        transcript.apply(
+            &serde_json::json!({"channel":"orchestrator","event":"status","seq":1,
+            "data":{"threadId":"thoughts-early","status":"busy"}}),
+        );
+        assert!(transcript.interrupted());
+        let live = transcript.live.as_ref().expect("a stand-in reply");
+        assert_eq!(live.extra["receipt"]["terminal"]["outcome"], "interrupted");
+        assert!(transcript.rows.iter().any(|row| matches!(row,
+            crate::model::Row::Activity { steps, trace, .. } if steps.is_empty() && trace.stopped && !trace.live)));
+        assert!(!transcript.interrupted(), "a second stop changes nothing");
+    }
+    #[test]
+    fn a_stop_settles_the_servers_empty_placeholder_reply() {
+        // The server saves an empty reply when the turn starts (seen 2026-11-07).
+        let mut transcript = Transcript::new(
+            serde_json::from_value(serde_json::json!({"sessionKey":"llm-chat:thoughts-held",
+                "transcript":[{"id":"ask","role":"user","text":"Run sleep 40","timestamp":1},
+                              {"id":"reply","role":"assistant","text":"","timestamp":2}]}))
+            .unwrap(),
+        );
+        assert!(transcript.interrupted());
+        assert_eq!(transcript.live.as_ref().unwrap().id, "reply");
+        assert!(
+            transcript.rows.iter().any(|row| matches!(row,
+            crate::model::Row::Activity { steps, trace, .. } if steps.is_empty() && trace.stopped))
+        );
     }
     #[test]
     fn a_replayed_stopped_turn_is_not_left_running() {
