@@ -120,7 +120,9 @@ export async function readRepositoryRequest(request: Request): Promise<Response 
         if (done) break;
         length += value.length;
         if (length > RESPONSE_LIMIT) { await stream.cancel(); return null; }
-        chunks.push(value);
+        // A fetch body's chunks are ArrayBuffer-backed; newer DOM types widen
+        // read() to ArrayBufferLike, which Blob parts no longer accept.
+        chunks.push(value as Uint8Array<ArrayBuffer>);
       }
     }
     return new Response(new Blob(chunks), { status: response.status, headers: response.headers });
