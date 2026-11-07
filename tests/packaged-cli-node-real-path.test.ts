@@ -39,7 +39,7 @@ beforeEach(() => {
   for (const shell of ['zsh', 'bash', 'sh']) script(join(tools, shell), 'command -v node');
   const entry = join(root, 'entry'); mkdirSync(entry);
   shim = join(entry, 'o8'); symlinkSync('../server/bin/o8', shim);
-  env = { HOME: root, PATH: tools, HOMEBREW_PREFIX: join(root, 'brew') };
+  env = { HOME: root, PATH: tools, HOMEBREW_PREFIX: join(root, 'brew') } as NodeJS.ProcessEnv;
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
