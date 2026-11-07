@@ -1,4 +1,4 @@
-use super::thread_view::{NO_SESSION, State, Views, resume_line, thread};
+use super::thread_view::{NO_SESSION, Stale, State, Views, newest_chat_turn, resume_line, thread};
 use super::*;
 use crate::shell::test_support::*;
 use gpui::Modifiers;
@@ -253,4 +253,157 @@ fn saved(v: &mut VisualTestContext, f: &Fixture, ids: &[&str]) {
         crate::shell_state::State::load(&path)
             .is_ok_and(|state| state.terminal_views.iter().eq(ids.iter().copied()))
     });
+}
+
+/// A chat turn saved now, newer than any CLI launched before it.
+fn chat_turn(f: &Fixture, id: &str, text: &str) {
+    let mut record: Value = f
+        .client
+        .get("/api/v2/chat-history", &[("tabId", id)])
+        .unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let messages = record["messages"].as_array_mut().unwrap();
+    messages.push(json!({"role": "user", "content": text, "timestamp": now + 1_000}));
+    let url = f.client.url("/api/v2/chat-history").unwrap();
+    f.client
+        .request("POST", &url)
+        .send_json(json!({
+            "tabId": id, "messages": messages, "backend": "codex",
+            "orchestratorSessionIds": {"codex": "0199-thread-view-session"},
+        }))
+        .unwrap();
+}
+
+#[gpui::test]
+fn thread_view_resumes_the_cli_again_after_newer_chat_turns(cx: &mut TestAppContext) {
+    let f = Fixture::start_mode(false, "--terminal");
+    let (s, mut v) = open(
+        f.client.clone(),
+        f.root.join("thread-view.json"),
+        crate::shell_state::State::default(),
+        cx,
+    );
+    ready(&s, &mut v);
+    let id = s.read_with(&v, |s, _| match s.active() {
+        Some(Tab::Session(id)) => id,
+        _ => panic!("a thread opens first"),
+    });
+    chat_turn(&f, &id, "Earlier chat turn");
+    let line = "exec codex resume 0199-thread-view-session";
+    let launched = |s: &Entity<Shell>, v: &VisualTestContext| {
+        s.read_with(v, |s, _| s.state.terminal_launched.get(&id).copied())
+    };
+    let pane = |s: &Entity<Shell>, v: &VisualTestContext| {
+        s.read_with(v, |s, cx| match &thread(s, cx).unwrap().state {
+            State::Open(pane) => Some(pane.clone()),
+            _ => None,
+        })
+    };
+    let stale = |s: &Entity<Shell>, v: &VisualTestContext| {
+        s.read_with(v, |s, cx| thread(s, cx).unwrap().stale)
+    };
+    let typed = |s: &Entity<Shell>, v: &VisualTestContext| {
+        s.read_with(v, |s, cx| match thread(s, cx).map(|t| &t.state) {
+            Some(State::Open(pane)) => pane.read(cx).command_output(line).is_some(),
+            _ => false,
+        })
+    };
+
+    // The first launch records when the CLI started.
+    v.simulate_keystrokes("ctrl-alt-v");
+    until(&mut v, "the CLI line typed", |v| typed(&s, v));
+    let first = launched(&s, &v).expect("the launch time is kept");
+    assert_eq!(stale(&s, &v), Stale::Current);
+
+    // A CLI still running, as an exec'd one is: the shell stays connected
+    // (`ready`) with no prompt of its own. Ctrl-C ends it, and its shell.
+    let shell = pane(&s, &v).unwrap();
+    shell.update(&mut v, |pane, cx| pane.run_line("exec sleep 30".into(), cx));
+    until(&mut v, "the CLI running", |v| {
+        shell.read_with(v, |pane, _| pane.command_output("exec sleep 30").is_some())
+    });
+    settle(&mut v);
+    let before = shell.read_with(&v, |pane, _| pane.sent.len());
+
+    // A newer chat turn: the notice offers Reopen, and the running CLI
+    // receives nothing (#5309 regression: a typed line once answered a
+    // prompt the CLI was showing).
+    v.simulate_keystrokes("ctrl-alt-v");
+    settle(&mut v);
+    chat_turn(&f, &id, "A turn sent from chat");
+    v.simulate_keystrokes("ctrl-alt-v");
+    until(&mut v, "the newer-turns notice", |v| {
+        stale(&s, v) == Stale::Newer
+    });
+    settle(&mut v);
+    assert!(v.debug_bounds("thread-terminal-stale").is_some());
+    assert!(shell.read_with(&v, |pane, _| pane.ready));
+    assert_eq!(
+        shell.read_with(&v, |pane, _| pane.sent[before..].to_vec()),
+        Vec::<String>::new()
+    );
+    assert_eq!(launched(&s, &v), Some(first));
+
+    // Reopen stops it with Ctrl-C only, then resumes the CLI on the same
+    // session in a new shell.
+    click(&mut v, "thread-terminal-reopen");
+    until(&mut v, "the CLI resumed in a new shell", |v| {
+        launched(&s, v).is_some_and(|at| at > first) && typed(&s, v)
+    });
+    let sent = shell.read_with(&v, |pane, _| pane.sent[before..].to_vec());
+    assert!(
+        !sent.is_empty() && sent.iter().all(|input| input == "\x03"),
+        "{sent:?}"
+    );
+    let fresh = pane(&s, &v).unwrap();
+    assert_ne!(fresh.entity_id(), shell.entity_id());
+    assert_eq!(stale(&s, &v), Stale::Current);
+    assert!(v.debug_bounds("thread-terminal-stale").is_none());
+    let resumed = launched(&s, &v).unwrap();
+
+    // A CLI that ignores Ctrl-C gets three of them, a second apart, then the
+    // note; nothing else reaches it and nothing is resumed.
+    let stubborn = "exec sh -c \"trap '' INT; sleep 60\"";
+    fresh.update(&mut v, |pane, cx| pane.run_line(stubborn.into(), cx));
+    until(&mut v, "the stubborn CLI running", |v| {
+        fresh.read_with(v, |pane, _| pane.command_output(stubborn).is_some())
+    });
+    settle(&mut v);
+    let before = fresh.read_with(&v, |pane, _| pane.sent.len());
+    v.simulate_keystrokes("ctrl-alt-v");
+    settle(&mut v);
+    chat_turn(&f, &id, "One more chat turn");
+    v.simulate_keystrokes("ctrl-alt-v");
+    until(&mut v, "the newer-turns notice again", |v| {
+        stale(&s, v) == Stale::Newer
+    });
+    let pressed = Instant::now();
+    click(&mut v, "thread-terminal-reopen");
+    until(&mut v, "the didn't-exit note", |v| {
+        stale(&s, v) == Stale::Stuck
+    });
+    assert!(pressed.elapsed() >= Duration::from_secs(2));
+    assert!(v.debug_bounds("thread-terminal-reopen").is_some());
+    assert_eq!(
+        fresh.read_with(&v, |pane, _| pane.sent[before..].to_vec()),
+        vec!["\x03".to_owned(); 3]
+    );
+    assert_eq!(launched(&s, &v), Some(resumed));
+    assert_eq!(pane(&s, &v).unwrap().entity_id(), fresh.entity_id());
+}
+
+#[test]
+fn thread_view_newest_chat_turn_leaves_out_terminal_imports() {
+    let record = json!({"messages": [
+        {"id": "user-1", "role": "user", "timestamp": 100},
+        {"id": "assistant-1", "role": "assistant", "timestamp": 200.0},
+        {"id": "cli-codex-turn-1", "role": "user", "timestamp": 900},
+        {"id": "no-time", "role": "assistant"},
+    ]});
+    assert_eq!(newest_chat_turn(&record), Some(200));
+    assert_eq!(newest_chat_turn(&json!({"messages": []})), None);
+    assert_eq!(newest_chat_turn(&Value::Null), None);
 }
