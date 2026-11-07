@@ -7828,6 +7828,13 @@
       ]
     },
     {
+      "path": "tests/terminal-turns-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/terminal-visibility-real-path.test.ts",
       "reasons": [
         "child-process",

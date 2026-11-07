@@ -11,9 +11,26 @@ export interface CliShim { bin: string; home: string }
 
 export const SHIMMED_CLIS = ['codex', 'claude'] as const;
 
-/** Each stub says what it was asked to run, ignores input and ends on Ctrl-C. */
+/** Each stub says what it was asked to run and ends on Ctrl-C. The Claude
+ * stand-in also records each line typed into it in its session file, as the
+ * real CLI does, so Terminal View's import reads a real turn. */
 function stub(name: string) {
-  return `#!/bin/sh\necho "fixture ${name} stand-in: $*"\nexec cat >/dev/null\n`;
+  if (name !== 'claude') return `#!/bin/sh\necho "fixture ${name} stand-in: $*"\nexec cat >/dev/null\n`;
+  return [
+    '#!/bin/sh',
+    'echo "fixture claude stand-in: $*"',
+    'session=""; [ "$1" = "--resume" ] && session="$2"',
+    'file="${CLAUDE_HOME:-$HOME/.claude}/projects/fixture/$session.jsonl"',
+    'while IFS= read -r line; do',
+    '  if [ -n "$session" ]; then',
+    '    mkdir -p "$(dirname "$file")"',
+    '    printf \'{"type":"user","message":{"role":"user","content":"%s"}}\\n\' "$line" >> "$file"',
+    '    printf \'{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"stand-in reply"}]}}\\n\' >> "$file"',
+    '  fi',
+    '  echo "stand-in reply"',
+    'done',
+    '',
+  ].join('\n');
 }
 
 export function prepareCliShim(dataDir: string): CliShim {

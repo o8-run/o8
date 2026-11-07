@@ -157,6 +157,11 @@ impl Surface {
         }
         due
     }
+    /// History changed outside this chat, as when Terminal View's turns were
+    /// copied in: read it again now.
+    pub(crate) fn shell_reload_history(&mut self, cx: &mut Context<Self>) {
+        self.reconcile(cx);
+    }
     pub(crate) fn shell_refresh(&mut self, cx: &mut Context<Self>) {
         self.load_sessions(cx);
     }

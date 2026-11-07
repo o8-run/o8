@@ -217,6 +217,7 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
             None => s.focus.focus(window),
         }
         remember(s, &session.id, terminal);
+        turns(s, key.clone(), &session.id, terminal, cx);
         if shown.is_some() {
             check(s, key, window, cx);
         }
@@ -224,6 +225,7 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
         return true;
     }
     remember(s, &session.id, true);
+    turns(s, key.clone(), &session.id, true, cx);
     open(s, key, session, window, cx);
     true
 }
@@ -321,6 +323,70 @@ fn open(
                 Err(error) => thread.state = State::Unavailable(error),
             }
             cx.notify();
+        });
+    })
+    .detach();
+}
+
+const TERMINAL_TURNS: &str = "/api/v2/chat-history/terminal-turns";
+/// A long terminal visit imports in rounds of the server's cap, at most this many.
+const IMPORT_ROUNDS: usize = 20;
+
+fn post_turns(client: &Client, id: &str, action: &str) -> Result<serde_json::Value, String> {
+    let url = client
+        .url(TERMINAL_TURNS)
+        .map_err(|error| error.to_string())?;
+    let response = client
+        .request("POST", &url)
+        .send_json(serde_json::json!({"tabId": id, "action": action}))
+        .map_err(|error| error.to_string())?;
+    Client::read(response)
+}
+
+pub(super) fn turns_text(count: u64) -> String {
+    let noun = if count == 1 { "turn" } else { "turns" };
+    format!("{count} {noun} from the terminal")
+}
+
+/// Terminal View opening marks where the CLI's session file ends; closing it
+/// copies what the CLI wrote since into the chat, which says how many turns.
+/// Opening also catches up a visit that never closed, as after a quit.
+fn turns(s: &mut Shell, key: String, id: &str, opening: bool, cx: &mut Context<Shell>) {
+    let workspace = s
+        .sessions
+        .iter()
+        .find(|session| session.id == id)
+        .map(|session| session.workspace())
+        .unwrap_or_default();
+    let client = s.panel_client(&workspace);
+    let id = id.to_owned();
+    let task = cx.background_executor().spawn(async move {
+        if opening {
+            return post_turns(&client, &id, "mark")
+                .map_or(0, |reply| reply["turns"].as_u64().unwrap_or(0));
+        }
+        let mut count = 0;
+        for _ in 0..IMPORT_ROUNDS {
+            let Ok(reply) = post_turns(&client, &id, "import") else {
+                break;
+            };
+            count += reply["turns"].as_u64().unwrap_or(0);
+            if reply["more"] != true {
+                break;
+            }
+        }
+        count
+    });
+    cx.spawn(async move |this, cx| {
+        let count = task.await;
+        if count == 0 {
+            return;
+        }
+        let _ = this.update(cx, |s, cx| {
+            super::toasts::info(turns_text(count), cx);
+            if let Some(Content::Session(view)) = s.content.get(&key) {
+                view.update(cx, |view, cx| view.shell_reload_history(cx));
+            }
         });
     })
     .detach();
@@ -511,6 +577,8 @@ fn tick(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
             .is_none_or(|(_, session)| session.id != thread.id)
     {
         thread.terminal = false;
+        let (key, id) = (active.clone().unwrap_or_default(), thread.id.clone());
+        turns(s, key, &id, false, cx);
         cx.notify();
     }
     let content: Vec<String> = s.content.keys().cloned().collect();
