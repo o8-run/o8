@@ -248,6 +248,20 @@ impl Transcript {
     /// Rows for `entries` with the live reply over its saved placeholder; a saved
     /// reply with text or tools replaces the live one.
     fn render(&mut self, entries: &[Entry]) -> Vec<Row> {
+        // A stopped reply belongs under its own prompt; a newer prompt retires it.
+        if let Some(live) = &self.live
+            && live
+                .extra
+                .get("receipt")
+                .is_some_and(|receipt| receipt["terminal"]["outcome"] == "interrupted")
+        {
+            let anchor = live.id.strip_suffix(":stopped").unwrap_or(&live.id);
+            let at = entries.iter().position(|entry| entry.id == anchor);
+            let ask = entries.iter().rposition(|entry| entry.role == "user");
+            if matches!((at, ask), (Some(at), Some(ask)) if ask > at) {
+                self.live = None;
+            }
+        }
         if let Some(live) = &self.live
             && entries.iter().any(|entry| {
                 let tools = |entry: &Entry| entry.tools.as_ref().map_or(0, Vec::len);
@@ -626,7 +640,12 @@ impl Transcript {
             .insert("thinkingActive".into(), Value::Bool(false));
         live.extra.insert(
             "receipt".into(),
-            serde_json::json!({"terminal":{"outcome":outcome,"completedAt":ended}}),
+            // Only a stop is timed here; other outcomes keep their saved stamps.
+            if outcome == "interrupted" {
+                serde_json::json!({"terminal":{"outcome":outcome,"completedAt":ended}})
+            } else {
+                serde_json::json!({"terminal":{"outcome":outcome}})
+            },
         );
         for tool in live.tools.iter_mut().flatten() {
             if tool["status"] == "running" {
@@ -782,6 +801,27 @@ mod tests {
         assert!(transcript.rows.iter().any(|row| matches!(row,
             crate::model::Row::Activity { steps, trace, .. } if steps.is_empty() && trace.stopped && !trace.live)));
         assert!(!transcript.interrupted(), "a second stop changes nothing");
+    }
+    #[test]
+    fn a_stop_stand_in_retires_when_the_next_prompt_arrives() {
+        let mut transcript = Transcript::new(
+            serde_json::from_value(serde_json::json!({"sessionKey":"llm-chat:thoughts-next",
+                "transcript":[{"id":"ask","role":"user","text":"First","timestamp":1}]}))
+            .unwrap(),
+        );
+        assert!(transcript.interrupted());
+        transcript.history(
+            &serde_json::json!({"sessionKey":"llm-chat:thoughts-next","replace":true,
+            "entries":[{"id":"ask","role":"user","text":"First","timestamp":1},
+                       {"id":"ask2","role":"user","text":"Second","timestamp":5}]}),
+        );
+        assert!(transcript.live.is_none(), "the old stop's stand-in is gone");
+        assert!(
+            matches!(transcript.rows.last(), Some(crate::model::Row::Message { role, .. }) if role == "user"),
+            "nothing stopped sits under the new prompt"
+        );
+        assert!(transcript.interrupted());
+        assert_eq!(transcript.live.as_ref().unwrap().id, "ask2:stopped");
     }
     #[test]
     fn a_stop_settles_the_servers_empty_placeholder_reply() {
