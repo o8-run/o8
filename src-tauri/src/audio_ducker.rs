@@ -114,7 +114,9 @@ pub fn duck() -> DuckHandle {
     }
     #[cfg(target_os = "linux")]
     {
-        if !o8_linux_voice::ducker::voice_pref_bool("ducking_enabled", true) {
+        // Resolve through the stt::keys overlay (#5667) so a native-app edit in
+        // voice-prefs.json is honored, not just a dictation.json value.
+        if !crate::stt::keys::config_bool("ducking_enabled", true) {
             let _ = tx.send(());
             return DuckHandle { done: rx };
         }
