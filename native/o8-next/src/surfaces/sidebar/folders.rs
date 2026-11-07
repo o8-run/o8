@@ -14,6 +14,10 @@ use super::*;
 use crate::theme::current as theme;
 use gpui::{AnyElement, div, px};
 
+/// How long a created thread may take to reach the catalog before New
+/// gives up opening it.
+const PENDING_OPEN_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum View {
     Inbox,
@@ -413,6 +417,7 @@ impl ThreadList {
                 })
                 .map(|s| s.id.clone())
         {
+            self.pending_open = None;
             self.selected = Some(id.clone());
             self.follow_selection = true;
             cx.emit(Event::Selected(id.clone()));
@@ -484,7 +489,7 @@ impl ThreadList {
                         // Open once the catalog carries the saved thread,
                         // whether it arrives through a load or the live stream.
                         if open {
-                            this.pending_open = Some(id);
+                            this.pending_open = Some((id, std::time::Instant::now()));
                             this.open_pending(cx);
                         }
                         this.load(cx);
@@ -510,10 +515,13 @@ impl ThreadList {
         started
     }
     /// Publish selection only once the shell has been sent the created thread.
+    /// A thread that has not arrived within `PENDING_OPEN_TTL` is dropped, so a
+    /// failed load or later navigation cannot pull focus back to it.
     pub(super) fn open_pending(&mut self, cx: &mut Context<Self>) {
-        if let Some(id) = self
+        self.pending_open.take_if(|(_, since)| since.elapsed() > PENDING_OPEN_TTL);
+        if let Some((id, _)) = self
             .pending_open
-            .take_if(|id| self.sessions.iter().any(|s| &s.id == id))
+            .take_if(|(id, _)| self.sessions.iter().any(|s| &s.id == id))
         {
             self.selected = Some(id.clone());
             self.follow_selection = true;
@@ -524,7 +532,11 @@ impl ThreadList {
     /// A New thread whose POST has returned and whose load has not.
     #[cfg(test)]
     pub(crate) fn expect_open(&mut self, id: &str) {
-        self.pending_open = Some(id.to_owned());
+        self.expect_open_since(id, std::time::Instant::now());
+    }
+    #[cfg(test)]
+    pub(crate) fn expect_open_since(&mut self, id: &str, since: std::time::Instant) {
+        self.pending_open = Some((id.to_owned(), since));
     }
     /// A menu's outside press closed it: remember the press for its trigger.
     pub(super) fn dismissed(&mut self, event: &gpui::MouseDownEvent) {

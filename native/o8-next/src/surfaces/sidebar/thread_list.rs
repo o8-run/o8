@@ -121,8 +121,9 @@ pub struct ThreadList {
     /// The press that last closed a menu from outside it; when that press
     /// lands on the menu's trigger, its click must not reopen the menu.
     menu_press: Option<gpui::Point<gpui::Pixels>>,
-    /// A thread New thread created; the shell opens it once the list has it.
-    pending_open: Option<String>,
+    /// A thread New thread created and when; the shell opens it once the list
+    /// has it, unless that takes longer than `PENDING_OPEN_TTL`.
+    pending_open: Option<(String, std::time::Instant)>,
     /// Threads whose start failed, so a pane waiting on one can say so.
     pub failed_starts: HashSet<String>,
     /// Closed By repo folders, by repository path.
