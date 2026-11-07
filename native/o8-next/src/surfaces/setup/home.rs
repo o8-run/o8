@@ -2,7 +2,7 @@
 //! folder action, your projects, the optional setup cards and the quiet way
 //! to start without a project.
 use super::look::{self, Look};
-use super::{Action, Project, Setup, Snapshot, Step, primary, quiet};
+use super::{Action, Project, Setup, Snapshot, Step, primary, quiet, tools};
 use crate::theme::current as theme;
 use gpui::{AnyElement, Context, Div, FontWeight, div, prelude::*, px, relative};
 
@@ -10,7 +10,6 @@ const FOLDER: &str =
     "M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z";
 const CHEVRON: &str = "m9 5 7 7-7 7";
 const PLUS: &str = "M12 5v14M5 12h14";
-const TOOLS: &str = "M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4";
 const IMPORT: &str = "M12 3v12m-5-5 5 5 5-5M5 21h14";
 
 /// The last two parts of a project's folder, as the desktop shows it.
@@ -77,6 +76,13 @@ impl Setup {
             .debug_selector(|| "setup-projects".into())
             .flex()
             .flex_col()
+            .when(self.setup_saved, |v| {
+                v.child(div().mb(px(20.)).child(look::success(
+                    "setup-saved",
+                    "Setup saved",
+                    "Your agent choices are saved. Open a project when you’re ready.",
+                )))
+            })
             .child(
                 heading
                     .text_size(px((width * 0.04).clamp(30., 40.)))
@@ -163,6 +169,14 @@ impl Setup {
                         ),
                 )
             })
+            .child(
+                div()
+                    .mt(px(28.))
+                    .pt(px(12.))
+                    .border_t_1()
+                    .border_color(theme().border)
+                    .child(self.tools_block(busy, snapshot, cx)),
+            )
             .child(look::label("OPTIONAL SETUP").mt(px(24.)))
             .child(
                 div()
@@ -181,16 +195,6 @@ impl Setup {
                         .on_click(
                             cx.listener(|this, _, window, cx| this.open_new_project(window, cx)),
                         ),
-                    )
-                    .child(
-                        card(
-                            "setup-change-tools",
-                            TOOLS,
-                            "Set up tools",
-                            "Choose a coding tool to get started.",
-                            busy,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| this.navigate(Step::Tools, cx))),
                     )
                     .when(self.import.pending(), |v| {
                         v.child(
@@ -216,6 +220,71 @@ impl Setup {
                         .on_click(cx.listener(|this, _, _, cx| this.act(Action::Choose(None), cx))),
                 ),
             )
+    }
+
+    /// The desktop's tools line on the first page: whether the lead is
+    /// ready, a way to change it, and its readiness card.
+    fn tools_block(&self, busy: bool, snapshot: Option<&Snapshot>, cx: &mut Context<Self>) -> Div {
+        let loading = self.scanning || snapshot.is_none();
+        let inventory = snapshot.map(Snapshot::inventory).unwrap_or_default();
+        let (backend, workers) = snapshot.map(Snapshot::recommendation).unwrap_or_default();
+        let ready = !loading && snapshot.is_some_and(|s| s.ready(&backend, &workers));
+        let lead = tools::runtime_for_lead(&backend, &inventory);
+        let label = inventory
+            .iter()
+            .find(|item| Some(&item.id) == lead.as_ref())
+            .map(|item| item.label.clone())
+            .unwrap_or_else(|| tools::lead_label(&backend, &inventory));
+        let preserved =
+            snapshot.is_some_and(|s| s.setup["setupRecommendation"]["preserved"] == true);
+        let built = tools::built_in(&inventory);
+        let shown: Vec<&tools::Runtime> = built
+            .into_iter()
+            .chain(inventory.iter().filter(|item| {
+                !loading && Some(&item.id) == lead.as_ref() && item.built_in.is_none()
+            }))
+            .collect();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .debug_selector(|| "setup-tools-line".into())
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::LIGHT)
+                            .text_color(theme().text_secondary)
+                            .child(if loading {
+                                tools::scan_status(self.scan_slow).to_owned()
+                            } else if ready {
+                                format!(
+                                    "{label} is ready{}",
+                                    if preserved { " · Saved setup" } else { "" }
+                                )
+                            } else {
+                                "Choose a coding tool to get started".to_owned()
+                            }),
+                    )
+                    .child(
+                        quiet(
+                            "setup-change-tools",
+                            if ready { "Change" } else { "Set up tools" },
+                            !busy,
+                        )
+                        .text_size(px(12.))
+                        .on_click(cx.listener(|this, _, _, cx| this.navigate(Step::Tools, cx))),
+                    ),
+            )
+            .when(!shown.is_empty(), |v| {
+                v.child(tools::readiness_cards(&shown, None, None))
+            })
     }
 
     /// One project: a quiet row with its folder icon, name and short path.

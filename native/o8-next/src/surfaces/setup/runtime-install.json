@@ -1,0 +1,65 @@
+{
+  "codex": {
+    "id": "codex",
+    "label": "Codex CLI",
+    "command": "npm i -g @openai/codex",
+    "hint": "Install the OpenAI Codex CLI to dispatch packets."
+  },
+  "claude-code": {
+    "id": "claude-code",
+    "label": "Claude Code",
+    "command": "npm i -g @anthropic-ai/claude-code",
+    "hint": "Install Anthropic's Claude Code CLI to dispatch packets."
+  },
+  "gemini": {
+    "id": "gemini",
+    "label": "Gemini CLI",
+    "command": "npm i -g @google/gemini-cli",
+    "hint": "Gemini CLI remains available for enterprise and paid API access. For free or AI Pro/Ultra use Antigravity CLI."
+  },
+  "antigravity": {
+    "id": "antigravity",
+    "label": "Antigravity CLI",
+    "link": "https://antigravity.google/docs/getting-started?tab=cli",
+    "hint": "Install Google Antigravity CLI (agy) for free or AI Pro/Ultra agent sessions."
+  },
+  "opencode": {
+    "id": "opencode",
+    "label": "OpenCode 2 CLI",
+    "command": "npm i -g @opencode-ai/cli@next",
+    "hint": "Install OpenCode 2 to use its multi-provider worker and shared service."
+  },
+  "3code": {
+    "id": "3code",
+    "label": "3code CLI",
+    "link": "https://3code.capocasa.dev/",
+    "hint": "Install 3code, then run it once to configure a model provider."
+  },
+  "magnitude": {
+    "id": "magnitude",
+    "label": "Magnitude CLI",
+    "command": "npm i -g @magnitudedev/cli",
+    "hint": "On macOS or Linux, install Magnitude, then launch it in a visible repository terminal to choose a local model or custom endpoint."
+  },
+  "cursor": {
+    "id": "cursor",
+    "label": "Cursor CLI",
+    "hint": "Install Cursor CLI to dispatch packets through Cursor."
+  },
+  "grok": {
+    "id": "grok",
+    "label": "Grok Build",
+    "hint": "Install Grok Build and set GROK_CODE_XAI_API_KEY to dispatch packets."
+  },
+  "pi": {
+    "id": "pi",
+    "label": "Pi",
+    "hint": "Install Pi and bring your Anthropic or OpenAI API key."
+  },
+  "ollama": {
+    "id": "ollama",
+    "label": "Ollama",
+    "link": "https://ollama.com",
+    "hint": "Install Ollama to run local models for embeddings + offline workflows."
+  }
+}

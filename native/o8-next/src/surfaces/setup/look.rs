@@ -133,6 +133,48 @@ pub(super) fn feedback(
         .when_some(action, |v, action| v.child(div().mt(px(8.)).child(action)))
 }
 
+/// `OnboardingFeedback` in its success tone: a check, a title and a line.
+pub(super) fn success(selector: &'static str, title: &'static str, detail: &'static str) -> Div {
+    div()
+        .debug_selector(move || selector.into())
+        .flex()
+        .items_start()
+        .gap(px(12.))
+        .py(px(14.))
+        .px(px(16.))
+        .rounded(px(12.))
+        .border_1()
+        .border_color(theme().success)
+        .bg(theme().success_surface)
+        .text_color(theme().success)
+        .font_weight(FontWeight::LIGHT)
+        .child(crate::icon::stroke(
+            "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM8 12l2.5 2.5L16 9",
+            theme().success,
+            20.,
+            1.8,
+        ))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .line_height(relative(1.5))
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .mt(px(4.))
+                        .text_size(px(12.))
+                        .line_height(relative(1.5))
+                        .text_color(theme().text_secondary)
+                        .child(detail),
+                ),
+        )
+}
+
 /// The action row under a page: secondary actions left, the main one right.
 pub(super) fn actions(left: Vec<AnyElement>, right: Vec<AnyElement>) -> Div {
     div()

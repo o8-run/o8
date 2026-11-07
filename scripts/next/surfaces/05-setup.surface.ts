@@ -2,7 +2,16 @@ import { chmodSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:f
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
+import type { SetupRuntime } from '../../../src/lib/setup/runtime-recommendation';
 
+/** `--onboarding-tools`: two ready tools, one that needs sign-in and two not installed. */
+const FIXTURE_TOOLS: SetupRuntime[] = [
+  { id: 'codex', label: 'Codex', available: true, installed: true, unavailableReason: null, detail: 'Ready', fix: '' },
+  { id: 'claude-code', label: 'Claude Code', available: true, installed: true, unavailableReason: null, detail: 'Signed in on this computer.', fix: '' },
+  { id: 'opencode', label: 'OpenCode', available: false, installed: true, unavailableReason: 'needs_auth', detail: 'OpenCode is installed but has no provider connected.', fix: 'Connect a provider in OpenCode, then refresh.' },
+  { id: 'gemini', label: 'Gemini CLI', available: false, installed: false, unavailableReason: 'not_installed', detail: 'Gemini CLI was not found on this computer.', fix: '' },
+  { id: 'antigravity', label: 'Antigravity CLI', available: false, installed: false, unavailableReason: 'not_installed', detail: 'Antigravity CLI was not found on this computer.', fix: '' },
+];
 export async function prepare(): Promise<SurfaceRoutes> {
   if (process.argv.includes('--onboarding')) createRequire(import.meta.url)('./setup/discovery.cjs');
   return {};
@@ -48,9 +57,22 @@ require('node:child_process').execFileSync('git', ['init', '-q'], { cwd: dest })
   const { GET: sessions } = await import('../../../src/app/api/mobile/orchestrator/threads/route');
   const { GET: state } = await import('../../../src/app/api/orchestrator/state/route');
   const { GET: inventory } = await import('../../../src/app/api/runtime/inventory/route');
+  const { recommendRuntimeSetup } = await import('../../../src/lib/setup/runtime-recommendation');
   return { priority: 5, admit: () => 200,
     run: async (route, request) => {
       const response = await route(request);
+      // A fixed tool inventory, so setup's tool pages never read this machine's tools.
+      if (process.argv.includes('--onboarding-tools') && response.ok
+        && request.method === 'GET' && request.nextUrl.pathname === '/api/panel/operator-defaults'
+        && request.nextUrl.searchParams.get('include') === 'setup') {
+        const payload = await response.json();
+        payload.dispatchableRuntimes = FIXTURE_TOOLS;
+        payload.setupRecommendation = recommendRuntimeSetup({
+          inventory: FIXTURE_TOOLS, values: payload.values, sources: payload.sources,
+          activity: { codex: 0, claude: 0, complete: false },
+        });
+        return Response.json(payload, { status: response.status, headers: response.headers });
+      }
       if (process.argv.includes('--onboarding-empty-model') && response.ok
         && request.method === 'GET' && request.nextUrl.pathname === '/api/panel/operator-defaults'
         && request.nextUrl.searchParams.get('include') === 'setup') {

@@ -35,6 +35,8 @@ mod privacy;
 mod progress;
 #[path = "sound.rs"]
 pub(crate) mod sound;
+#[path = "tools.rs"]
+mod tools;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -159,6 +161,24 @@ pub struct Setup {
     painted: Rc<Cell<u64>>,
     /// Keys stay inside setup while it owns the window.
     pub(crate) focus: gpui::FocusHandle,
+    /// The tools step's open part; None until chosen, as on the desktop.
+    panel: Option<tools::Panel>,
+    /// The customize panel's lead list is open.
+    lead_menu: bool,
+    /// A lead or worker was chosen here; a rescan keeps it.
+    choice_made: bool,
+    /// Tools are being checked, and for over three seconds.
+    scanning: bool,
+    scan_slow: bool,
+    scan_generation: u64,
+    /// The last tool check failed.
+    scan_failed: bool,
+    /// The tool setup is being saved.
+    saving: bool,
+    /// The tool whose install command was copied.
+    copied: Option<String>,
+    /// Tools were saved without a project; projects says so.
+    setup_saved: bool,
 }
 enum Action {
     Load(bool),
@@ -214,6 +234,23 @@ impl Setup {
             self.import.note.clone(),
         )
     }
+    /// The chosen lead backend and workers.
+    #[cfg(test)]
+    pub fn tools_choice(&self) -> (String, Vec<String>) {
+        (self.backend.clone(), self.workers.clone())
+    }
+    /// Start a tool check that has not answered yet, as a slow scan does.
+    #[cfg(test)]
+    pub fn begin_slow_scan(&mut self, cx: &mut Context<Self>) {
+        self.scanning = true;
+        self.watch_scan(cx);
+        self.revision += 1;
+        cx.notify();
+    }
+    #[cfg(test)]
+    pub fn scan_slow(&self) -> bool {
+        self.scan_slow
+    }
     pub fn busy(&self) -> bool {
         self.busy
     }
@@ -258,6 +295,16 @@ impl Setup {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             focus: cx.focus_handle(),
+            panel: None,
+            lead_menu: false,
+            choice_made: false,
+            scanning: false,
+            scan_slow: false,
+            scan_generation: 0,
+            scan_failed: false,
+            saving: false,
+            copied: None,
+            setup_saved: false,
         };
         this.act(Action::Load(false), cx);
         this
@@ -276,6 +323,12 @@ impl Setup {
         }
         self.busy = true;
         self.error = None;
+        let scan = matches!(action, Action::Load(_));
+        self.scanning = scan;
+        self.saving = matches!(action, Action::Use);
+        if scan {
+            self.watch_scan(cx);
+        }
         let client = self.client.clone();
         let snapshot = self.snapshot.clone();
         let project = self.project.clone();
@@ -354,12 +407,19 @@ impl Setup {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.busy = false;
+                this.scanning = false;
+                this.scan_slow = false;
+                this.saving = false;
+                this.scan_failed = scan && result.is_err();
                 match result {
                     Ok(result) => {
-                        if this.backend != result.snapshot.recommendation().0 {
-                            this.model.update(cx, |model, cx| model.clear(cx));
+                        // A rescan can finish initial setup, but never replaces a choice.
+                        if !(scan && this.choice_made) {
+                            if this.backend != result.snapshot.recommendation().0 {
+                                this.model.update(cx, |model, cx| model.clear(cx));
+                            }
+                            (this.backend, this.workers) = result.snapshot.recommendation();
                         }
-                        (this.backend, this.workers) = result.snapshot.recommendation();
                         // Privacy opens with any earlier choices, as on the desktop.
                         if result.step == Step::Privacy
                             && (this.step != Step::Privacy || this.snapshot.is_none())
@@ -380,6 +440,7 @@ impl Setup {
                         }
                         if used {
                             this.tools_configured = true;
+                            this.setup_saved = result.step == Step::Projects;
                         }
                         if let Some(session) = result.opened {
                             sound::play(sound::Cue::Complete);
@@ -510,6 +571,26 @@ impl Setup {
         client.setup_request("POST", "/api/setup/config", &completion)?;
         Ok(session)
     }
+    /// The desktop's slow-scan line appears once a tool check passes three seconds.
+    fn watch_scan(&mut self, cx: &mut Context<Self>) {
+        self.scan_slow = false;
+        self.scan_generation += 1;
+        let generation = self.scan_generation;
+        let timer = cx
+            .background_executor()
+            .timer(std::time::Duration::from_secs(3));
+        cx.spawn(async move |this, cx| {
+            timer.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.scanning && this.scan_generation == generation {
+                    this.scan_slow = true;
+                    this.revision += 1;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
     /// Earlier choices: usage analytics when one was saved, and crash
     /// reports only when the combined choice was answered.
     fn privacy_choices(&mut self, values: &Value) {
@@ -520,6 +601,15 @@ impl Setup {
     fn navigate(&mut self, step: Step, cx: &mut Context<Self>) {
         if self.busy {
             return;
+        }
+        if step != Step::Projects {
+            self.setup_saved = false;
+        }
+        if step == Step::Tools {
+            // The tools step opens fresh each time, as on the desktop.
+            self.panel = None;
+            self.lead_menu = false;
+            self.copied = None;
         }
         self.step = step;
         self.error = None;
@@ -598,19 +688,18 @@ impl Render for Setup {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let busy = self.busy;
         let snapshot = self.snapshot.clone();
-        let ready = snapshot
-            .as_ref()
-            .is_some_and(|s| s.ready(&self.backend, &self.workers));
         let painted = self.painted.clone();
         let revision = self.revision;
         let width = f32::from(window.viewport_size().width);
         let home = self.step == Step::Projects;
         let privacy = self.step == Step::Privacy;
+        // Pages with a docked action row fill the frame and scroll inside it.
+        let docked = privacy || self.step == Step::Tools;
         let body = div()
             .flex()
             .flex_col()
             .gap(px(20.))
-            .when(privacy, |v| v.flex_1().min_h_0())
+            .when(docked, |v| v.w_full().flex_1().min_h_0())
             // Away from home: back to projects and the project being set up.
             .when(!home, |v| {
                 v.child(
@@ -688,176 +777,13 @@ impl Render for Setup {
             .when(self.step == Step::NewProject, |v| {
                 v.child(new_project::page(self, busy, cx))
             })
-            .when(self.step == Step::Tools, |v| {
-                v.child(
-                    div()
-                        .debug_selector(|| "setup-tools".into())
-                        .flex()
-                        .flex_col()
-                        .gap(px(10.))
-                        .child(look::title("Choose your agent"))
-                        .child(
-                            div()
-                                .text_size(px(13.))
-                                .font_weight(gpui::FontWeight::LIGHT)
-                                .line_height(gpui::relative(1.6))
-                                .text_color(theme().text_secondary)
-                                .child(
-                                    "Start with an agent. You can add coding tools and adjust \
-                                     your setup later.",
-                                ),
-                        )
-                        .children(
-                            snapshot
-                                .as_ref()
-                                .map(|s| {
-                                    s.setup["dispatchableRuntimes"]
-                                        .as_array()
-                                        .cloned()
-                                        .unwrap_or_default()
-                                })
-                                .unwrap_or_default()
-                                .into_iter()
-                                .map(|runtime| {
-                                    let id = runtime["id"].as_str().unwrap_or("").to_owned();
-                                    let worker = id.clone();
-                                    let backend = runtime["builtIn"]["backend"]
-                                        .as_str()
-                                        .unwrap_or(if id == "claude-code" { "claude" } else { &id })
-                                        .to_owned();
-                                    let enabled = runtime["available"] == true && !busy;
-                                    let lead_enabled = enabled
-                                        && ([
-                                            "codex", "claude", "opencode", "muse", "fable", "o8",
-                                            "pi",
-                                        ]
-                                        .contains(&backend.as_str())
-                                            || runtime["builtIn"].is_object());
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(4.))
-                                        .pt(px(6.))
-                                        .font_weight(gpui::FontWeight::LIGHT)
-                                        .child(div().text_size(px(13.5)).child(
-                                            runtime["label"].as_str().unwrap_or("Tool").to_owned(),
-                                        ))
-                                        .when(!enabled, |v| {
-                                            v.child(
-                                                div()
-                                                    .text_size(px(12.))
-                                                    .text_color(theme().text_secondary)
-                                                    .child(
-                                                        runtime["detail"]
-                                                            .as_str()
-                                                            .unwrap_or("Unavailable")
-                                                            .to_owned(),
-                                                    ),
-                                            )
-                                        })
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .gap(px(8.))
-                                                .child(
-                                                    control(
-                                                        &format!("setup-lead-{id}"),
-                                                        if self.backend == backend {
-                                                            "Lead selected"
-                                                        } else {
-                                                            "Use as lead"
-                                                        },
-                                                        lead_enabled,
-                                                    )
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        if lead_enabled {
-                                                            this.backend = backend.clone();
-                                                            this.model.update(cx, |model, cx| {
-                                                                model.clear(cx)
-                                                            });
-                                                            this.workers = vec![id.clone()];
-                                                            this.revision += 1;
-                                                            cx.notify();
-                                                        }
-                                                    })),
-                                                )
-                                                .child(
-                                                    control(
-                                                        &format!("setup-worker-{worker}"),
-                                                        if self.workers.contains(&worker) {
-                                                            "Worker selected"
-                                                        } else {
-                                                            "Use as worker"
-                                                        },
-                                                        enabled,
-                                                    )
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        if enabled {
-                                                            if this.workers.contains(&worker) {
-                                                                if this.workers.len() > 1 {
-                                                                    this.workers
-                                                                        .retain(|w| w != &worker);
-                                                                }
-                                                            } else {
-                                                                this.workers.push(worker.clone());
-                                                            }
-                                                            this.revision += 1;
-                                                            cx.notify();
-                                                        }
-                                                    })),
-                                                ),
-                                        )
-                                }),
-                        )
-                        .when(
-                            snapshot.as_ref().is_some_and(|s| {
-                                s.setup["dispatchableRuntimes"]
-                                    .as_array()
-                                    .is_none_or(|r| r.is_empty())
-                            }) && !busy,
-                            |v| v.child("No coding tools found"),
-                        )
-                        .when(
-                            snapshot.as_ref().is_some_and(|s| {
-                                s.setup["setupRecommendation"]["backend"] == self.backend
-                                    && s.model("").is_none()
-                            }),
-                            |v| {
-                                v.child("Choose a model ID for this runtime to continue.")
-                                    .child(
-                                        div()
-                                            .id("setup-model-input")
-                                            .debug_selector(|| "setup-model-input".into())
-                                            .on_click(cx.listener(|s, _, window, cx| {
-                                                s.model.read(cx).focus.focus(window)
-                                            }))
-                                            .child(self.model.clone()),
-                                    )
-                            },
-                        )
-                        .child(look::actions(
-                            vec![
-                                quiet("setup-refresh", "Check again", !busy)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.act(Action::Load(true), cx)
-                                    }))
-                                    .into_any_element(),
-                            ],
-                            vec![
-                                primary("setup-use", "Use this setup", ready && !busy)
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.act(Action::Use, cx)),
-                                    )
-                                    .into_any_element(),
-                            ],
-                        )),
-                )
-            })
+            .when(self.step == Step::Tools, |v| v.child(self.tools_page(cx)))
             .when(self.step == Step::Privacy, |v| {
                 v.child(privacy::page(self, busy, cx))
             })
-            // Away from home, progress and errors follow the page.
-            .when(!home && busy, |v| {
+            // Away from home, progress and errors follow the page. Pages with
+            // a docked action row show their own.
+            .when(!home && !docked && busy, |v| {
                 v.child(
                     div()
                         .debug_selector(|| "setup-loading".into())
@@ -866,14 +792,17 @@ impl Render for Setup {
                         .child("Checking setup…"),
                 )
             })
-            .when_some(self.error.clone().filter(|_| !home), |v, error| {
-                v.child(look::feedback(
-                    "setup-error",
-                    error,
-                    "Your saved choices are kept. You can retry or return to projects.",
-                    None,
-                ))
-            });
+            .when_some(
+                self.error.clone().filter(|_| !home && !docked),
+                |v, error| {
+                    v.child(look::feedback(
+                        "setup-error",
+                        error,
+                        "Your saved choices are kept. You can retry or return to projects.",
+                        None,
+                    ))
+                },
+            );
         // The desktop's full-window surface: a drag strip under the traffic
         // lights, the frame centred in a scrolling area on the window's own
         // material, and the footer.
@@ -917,7 +846,7 @@ impl Render for Setup {
                                 self,
                                 body,
                                 viewport,
-                                privacy.then_some((area - 24.).max(320.)),
+                                docked.then_some((area - 24.).max(320.)),
                             )),
                     ),
             )

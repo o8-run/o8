@@ -16,6 +16,9 @@ mod import;
 #[path = "new_project_tests.rs"]
 mod new_project;
 
+#[path = "tools_tests.rs"]
+mod tools;
+
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
     reveal(cx, selector);
@@ -126,8 +129,10 @@ fn onboarding_project_tools_privacy_and_workspace(cx: &mut TestAppContext) {
         cx.debug_bounds("setup-tools").is_some(),
         "an unavailable CLI must lead to tool setup"
     );
-    click(cx, "setup-lead-gemini");
-    click(cx, "setup-use");
+    // A tool that is not ready cannot be chosen, so nothing is saved.
+    refresh_tools(cx);
+    click(cx, "setup-customize");
+    click(cx, "setup-worker-gemini");
     let unchanged: Value = fixture
         .client
         .get("/api/panel/operator-defaults", &[("include", "values")])
@@ -136,8 +141,9 @@ fn onboarding_project_tools_privacy_and_workspace(cx: &mut TestAppContext) {
         before["values"], unchanged["values"],
         "unavailable runtime cannot save"
     );
-    click(cx, "setup-refresh");
-    click(cx, "setup-lead-codex");
+    click(cx, "setup-customize");
+    choose_lead(cx, "codex");
+    click(cx, "setup-customize");
     click(cx, "setup-worker-claude-code");
     click(cx, "setup-use");
     assert!(cx.debug_bounds("setup-privacy").is_some());
@@ -262,8 +268,8 @@ fn onboarding_opencode_keeps_selected_model_for_first_send(cx: &mut TestAppConte
     cx.run_until_parked();
     draw(cx);
     click(cx, "setup-project-0");
-    click(cx, "setup-refresh");
-    click(cx, "setup-lead-opencode");
+    refresh_tools(cx);
+    use_only_opencode(cx);
     click(cx, "setup-use");
     scroll_privacy(cx);
     click(cx, "setup-crashes-off");
@@ -384,6 +390,49 @@ fn onboarding_operator_auth_error_retry(cx: &mut TestAppContext) {
 
 /// Scroll the privacy choices to their end, where the crash-report choice
 /// sits, as a person would before choosing.
+/// Check the tools again from Add coding tools, then return to the choices.
+/// With no ready tool the step already shows tool setup, as on the desktop.
+pub(super) fn refresh_tools(cx: &mut VisualTestContext) {
+    draw(cx);
+    if cx.debug_bounds("setup-add-tools").is_some() {
+        click(cx, "setup-add-tools");
+    }
+    click(cx, "setup-refresh-tools");
+    // Once a tool is ready the choices come back on their own.
+    if cx.debug_bounds("setup-back-choices").is_some() {
+        click(cx, "setup-back-choices");
+    }
+}
+/// Choose a lead as a person does: a readiness card for Codex and Claude
+/// Code, otherwise Customize's lead picker.
+pub(super) fn choose_lead(cx: &mut VisualTestContext, backend: &str) {
+    let card = match backend {
+        "codex" => Some("setup-agent-codex"),
+        "claude" => Some("setup-agent-claude-code"),
+        _ => None,
+    };
+    draw(cx);
+    if let Some(card) = card.filter(|card| cx.debug_bounds(card).is_some()) {
+        click(cx, card);
+        return;
+    }
+    click(cx, "setup-customize");
+    click(cx, "setup-lead-picker");
+    click(
+        cx,
+        Box::leak(format!("setup-lead-option-{backend}").into_boxed_str()),
+    );
+    click(cx, "setup-customize");
+}
+/// OpenCode as the lead and the only worker, from Customize.
+pub(super) fn use_only_opencode(cx: &mut VisualTestContext) {
+    choose_lead(cx, "opencode");
+    click(cx, "setup-customize");
+    click(cx, "setup-worker-opencode");
+    click(cx, "setup-worker-codex");
+    click(cx, "setup-customize");
+}
+
 pub(super) fn scroll_privacy(cx: &mut VisualTestContext) {
     draw(cx);
     let bounds = cx
@@ -398,19 +447,39 @@ pub(super) fn scroll_privacy(cx: &mut VisualTestContext) {
     draw(cx);
 }
 
+/// Tools step controls outside its scrolling area, always in view.
+const FIXED: [&str; 6] = [
+    "setup-use",
+    "setup-later",
+    "setup-refresh-tools",
+    "setup-back-choices",
+    "setup-back",
+    "setup-next-action",
+];
 /// Scroll setup's page until a control is inside the window, as a person
 /// would before clicking it. Setup pages taller than the window scroll.
 fn reveal(cx: &mut VisualTestContext, selector: &'static str) {
-    for _ in 0..4 {
+    for _ in 0..6 {
+        // A page with a docked action row scrolls inside its own area.
+        let inner = cx.debug_bounds("setup-tools-scroll");
         let (Some(window), Some(target), Some(page)) = (
-            cx.debug_bounds("setup-window"),
+            inner.or_else(|| cx.debug_bounds("setup-window")),
             cx.debug_bounds(selector),
-            cx.debug_bounds("setup-content"),
+            inner.or_else(|| cx.debug_bounds("setup-content")),
         ) else {
             return;
         };
-        let below = target.bottom() - window.bottom() + gpui::px(48.);
-        let above = window.top() + gpui::px(52.) - target.top();
+        let (pad_bottom, pad_top) = if inner.is_some() {
+            (gpui::px(4.), gpui::px(4.))
+        } else {
+            (gpui::px(48.), gpui::px(52.))
+        };
+        // The header and the docked action row sit outside that area.
+        if inner.is_some() && FIXED.contains(&selector) {
+            return;
+        }
+        let below = target.bottom() - window.bottom() + pad_bottom;
+        let above = window.top() + pad_top - target.top();
         let delta = if below > gpui::px(0.) {
             -below
         } else if above > gpui::px(0.) {
