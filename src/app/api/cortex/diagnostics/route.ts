@@ -26,8 +26,8 @@ import { NextResponse } from 'next/server';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import Database from 'better-sqlite3';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { openSqliteForRead, type ReadOnlySqlite } from '@/lib/cortex/read-only-sqlite';
 import {
   summarizeTimings,
   type RecallTimingSummary,
@@ -55,7 +55,7 @@ interface DiagnosticsResponse {
 }
 
 function countOutcomes(): number {
-  let sqlite: Database.Database | undefined;
+  let sqlite: ReadOnlySqlite | undefined;
   try {
     // Drizzle's COUNT helper has historically been finicky against the
     // boolean column on older sqlite builds (#747). Drop down to raw SQL
@@ -76,7 +76,7 @@ function countOutcomes(): number {
     // substrate-eval gate.
     const path = process.env.CORTEX_IDE_DB_PATH || join(getDataDir({ ...process.env }), 'cortex-ide.db');
     if (!existsSync(path)) return 0;
-    sqlite = new Database(path, { readonly: true, fileMustExist: true });
+    sqlite = openSqliteForRead(path);
     const row = sqlite
       .prepare(
         "SELECT COUNT(*) AS n FROM session_outcomes WHERE valid_from IS NOT NULL AND (valid_to IS NULL OR valid_to > datetime('now'))",

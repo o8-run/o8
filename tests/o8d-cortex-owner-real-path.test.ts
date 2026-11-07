@@ -115,6 +115,8 @@ it('counts persisted live outcomes and directives through a read-only connection
   mkdirSync(persisted);
   const databasePath = join(persisted, 'cortex-ide.db');
   const database = new Database(databasePath);
+  // The app DB runs in WAL mode; closed cleanly, only the DB file remains.
+  database.pragma('journal_mode = WAL');
   database.exec(`CREATE TABLE session_outcomes (valid_from TEXT, valid_to TEXT);
     INSERT INTO session_outcomes VALUES ('2000-01-01', NULL), ('2000-01-01', '2999-01-01'),
       ('2000-01-01', '2001-01-01'), (NULL, NULL);`);
@@ -126,8 +128,14 @@ it('counts persisted live outcomes and directives through a read-only connection
   vi.stubEnv('CORTEX_IDE_DB_PATH', databasePath);
   try {
     const before = snapshot();
+    expect(readdirSync(persisted).filter(name => name.startsWith('cortex-ide.db'))).toEqual(['cortex-ide.db']);
     expect(await (await diagnostics.GET()).json()).toMatchObject({ outcomesCount: 2, directivesCount: 1 });
-    expect(snapshot()).toEqual(before);
+    expect(snapshot(), 'a GET must not create -wal/-shm beside cortex-ide.db').toEqual(before);
+    chmodSync(persisted, 0o555);
+    try {
+      expect(await (await diagnostics.GET()).json(), 'a read-only data dir still counts outcomes')
+        .toMatchObject({ outcomesCount: 2, directivesCount: 1 });
+    } finally { chmodSync(persisted, 0o755); }
   } finally {
     vi.stubEnv('O8_DATA_DIR', directory);
     vi.stubEnv('CORTEX_IDE_DB_PATH', join(directory, 'cortex-ide.db'));

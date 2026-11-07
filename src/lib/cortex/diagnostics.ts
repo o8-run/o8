@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
+import { openSqliteForRead, type ReadOnlySqlite } from '@/lib/cortex/read-only-sqlite';
 
 /** Max number of samples kept in the ring buffer. FIFO eviction beyond this. */
 export const MAX_SAMPLES = 1000;
@@ -93,7 +94,7 @@ function databasePath(): string {
   return join(metricsDirectory(), 'recall-metrics.db');
 }
 
-function readSamples(database: Database.Database): RecallTimingSample[] {
+function readSamples(database: ReadOnlySqlite): RecallTimingSample[] {
   return database.prepare('SELECT label, duration_ms AS durationMs, timestamp, errored FROM samples ORDER BY id')
     .all().map(row => {
       const sample = row as RecallTimingSample;
@@ -165,20 +166,9 @@ export function flushTimingBuffer(): void {
 /** No cached hydrate: a native reader sees samples recorded after its first GET. */
 export function readTimingBuffer(): RecallTimingSample[] {
   if (!existsSync(databasePath())) return loadFromDisk();
-  const path = databasePath();
-  let database: Database.Database | undefined;
+  let database: ReadOnlySqlite | undefined;
   try {
-    if (existsSync(`${path}-wal`)) {
-      // A live writer already holds the -wal/-shm pair, so this adds no files.
-      database = new Database(path, { readonly: true, fileMustExist: true });
-      database.pragma('busy_timeout = 1000');
-    } else {
-      // No writer: read a copy so a GET never creates -wal/-shm, even in a
-      // read-only data dir. Deserializing needs the rollback header bytes.
-      const bytes = readFileSync(path);
-      if (bytes.length >= 100) bytes[18] = bytes[19] = 1;
-      database = new Database(bytes, { readonly: true });
-    }
+    database = openSqliteForRead(databasePath());
     return readSamples(database);
   } catch {
     return [];
