@@ -339,7 +339,10 @@ func applySelectedInputDevice(sessionId: UInt64? = nil) -> Bool {
     }
 
     guard let deviceID = inputDeviceID(forUID: uid) else {
-        emitError("Selected microphone is not connected. Falling back to System Default.", sessionId: sessionId)
+        // Recoverable: capture continues on the default input. An error here has
+        // no session when the helper is idle, and the host tears down whichever
+        // Fn dictation is starting, so a mic that moved USB ports killed it.
+        emit("status", "input_device_fallback:default", sessionId: sessionId)
         selectedInputDeviceUID = nil
         return true
     }
