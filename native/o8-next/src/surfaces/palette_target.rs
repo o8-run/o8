@@ -292,6 +292,20 @@ impl<P: Port> Picker<P> {
         self.focus.focus(window);
         self.load_choices(cx);
     }
+    /// Shows `id`: at once when the inventory lists it, else once it does.
+    pub fn open_target(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.selected.as_ref() == Some(&id) && self.child.is_some() {
+            return;
+        }
+        if self.choices.iter().any(|choice| choice.id == id) {
+            self.attach(id, window, cx);
+        } else {
+            self.requested = Some(id);
+            self.open_own = true;
+            self.load(cx);
+        }
+        cx.notify();
+    }
     /// Runs a command line in the attached target, or the next one to attach.
     pub fn run(&mut self, line: String, cx: &mut Context<Self>) {
         match &self.child {

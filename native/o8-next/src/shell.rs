@@ -413,6 +413,36 @@ impl Shell {
             cx.open_url(url);
         }
     }
+    /// A sent worktree pill opens its files, a script pill its line in the
+    /// project's package.json, and a terminal pill that terminal: its split
+    /// pane when one runs it, else the panel's Terminal attached to it.
+    fn open_mention_jump(
+        &mut self,
+        jump: crate::composer::mention::groups::Jump,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::composer::mention::groups::{Jump, script_line};
+        match jump {
+            Jump::Worktree(path) => self.open_worktree_files(path, window, cx),
+            Jump::Script(name) => {
+                let Some(workspace) = self.state.selected.clone() else {
+                    return;
+                };
+                let file =
+                    std::path::Path::new(session::workspace_path(&workspace)).join("package.json");
+                let line = std::fs::read_to_string(file)
+                    .ok()
+                    .and_then(|text| script_line(&text, &name));
+                self.open_file_link("package.json".into(), line, window, cx);
+            }
+            Jump::Terminal(session) => {
+                if !self.focus_terminal_pane(&session, window, cx) {
+                    self.open_terminal_session(session, window, cx);
+                }
+            }
+        }
+    }
     /// Threads open in place, issues and pull requests open beside the chat, and
     /// other web links leave o8.
     pub(super) fn open_transcript_link(
@@ -421,6 +451,10 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(jump) = crate::composer::mention::groups::sent_jump(url) {
+            self.open_mention_jump(jump, window, cx);
+            return;
+        }
         // A sent mention's pill opens its thread or agent the same way.
         let mention = crate::composer::mention::groups::sent_link(url);
         let url = mention.as_deref().unwrap_or(url);

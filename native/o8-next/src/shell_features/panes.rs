@@ -312,6 +312,29 @@ fn join(s: &mut Shell, cx: &mut Context<Shell>) {
     cx.notify();
 }
 
+impl Shell {
+    /// Focuses the split pane running terminal `session`; false when none does.
+    pub(crate) fn focus_terminal_pane(
+        &mut self,
+        session: &str,
+        window: &mut Window,
+        cx: &mut Context<Shell>,
+    ) -> bool {
+        let leaf = tree(self).leaves().into_iter().find_map(|(id, leaf)| {
+            matches!(leaf, Leaf::Terminal { session: Some(s) } if s == session)
+                .then(|| id.to_owned())
+        });
+        let Some(Content::Terminal(view)) =
+            leaf.and_then(|leaf| self.content.get(&key(self, &leaf)))
+        else {
+            return false;
+        };
+        let view = view.clone();
+        Content::Terminal(view).focus(false, window, cx);
+        true
+    }
+}
+
 /// Reserves a pane's own shell, which it keeps across restarts.
 fn start_terminal(s: &mut Shell, leaf: String, cx: &mut Context<Shell>) {
     let state = s.features.get::<State>();

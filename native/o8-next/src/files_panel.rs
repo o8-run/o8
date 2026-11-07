@@ -278,6 +278,11 @@ impl FilesPanel {
     }
     /// Opens a file by the path a reply gave it, at that line if it gave one.
     /// Reply text never chooses a file outside this workspace.
+    /// The panel's root, its open file and the line it was asked to show.
+    #[cfg(test)]
+    pub(crate) fn opened(&self) -> (&str, Option<&str>, Option<usize>) {
+        (&self.workspace, self.selected.as_deref(), self.pending_line)
+    }
     pub fn open_at(&mut self, path: &str, line: Option<usize>, cx: &mut Context<Self>) {
         let Some(path) = inside_workspace(&self.workspace, path) else {
             return;
