@@ -14,7 +14,7 @@ o8 is a free, open-source control room for the coding agents you already use. Cl
 
 ![One ask, three workers: the orchestrator splits the task into packets, each worker builds its page in its own worktree, and the plan and every tile report as they go](./assets/three-workers.gif)
 
-- **Bring your own agents.** o8 drives the CLIs already on your machine, on your own subscriptions or keys. It is not in the path between your agents and their providers.
+- **Bring your own agents.** o8 drives the CLIs already on your machine, on your own subscriptions or keys.
 - **Parallel work that stays apart.** Every packet gets its own worktree. Workers never merge their own work.
 - **You approve what ships.** Each result lands as a diff with receipts. Approve, reject, steer or rerun it from the app, the `o8` CLI, any MCP client or your phone.
 
@@ -23,7 +23,7 @@ Hand out several pieces of work, look away, and come back to a readable account 
 | Platform | Status |
 |---|---|
 | macOS 14+ | Signed, auto-updating universal installer: [download](https://o8.run/download) |
-| Linux | Preview packages (AppImage, DEB, RPM) from 0.1.810 on [Releases](https://github.com/o8-run/o8/releases/tag/v0.1.810), or [run from source](#linux). Packages of the native app are built in CI and not published yet. |
+| Linux | Preview packages (AppImage, DEB, RPM) from 0.1.810 on [Releases](https://github.com/o8-run/o8/releases/tag/v0.1.810), or [run from source](#linux). Full Linux support is [in progress](https://github.com/o8-run/o8/issues/1672). |
 | Windows | Not yet. [Help wanted](./ROADMAP.md). |
 
 ## What happens when you dispatch
@@ -58,7 +58,9 @@ Download the signed universal DMG from [o8.run/download](https://o8.run/download
 
 ### Linux
 
-The 0.1.810 [preview packages](https://github.com/o8-run/o8/releases/tag/v0.1.810) (AppImage, DEB, RPM, with checksums) use the older WebKit shell. The native app's packages are built on Ubuntu 24.04 in CI ([details](./docs/internals/linux-download-packages.md)) and are not published yet. Until they are, run o8 from source: the steps below work on Linux without the Xcode tools, and `npm run dev` serves the app at `http://localhost:47120`.
+The 0.1.810 [preview packages](https://github.com/o8-run/o8/releases/tag/v0.1.810) (AppImage, DEB, RPM, with checksums) are six releases behind macOS and use the older WebKit shell. The native app's packages are built on Ubuntu 24.04 in CI ([details](./docs/internals/linux-download-packages.md)) and are not published yet.
+
+From source, o8 has run agent turns on Ubuntu. Use the steps below without the Xcode tools; `npm run dev` serves the app at `http://localhost:47120`. A full install-to-merge run on a mainstream distro is not proven yet ([#1672](https://github.com/o8-run/o8/issues/1672)).
 
 ### From source
 
@@ -110,7 +112,7 @@ Each desktop update check sends a random device identifier, app version, target,
 
 ## Free and open source
 
-o8 is MIT licensed and free, with no paid plan. Every feature is unlocked. The agents run on your own subscriptions or API keys, and you can use o8 without an account.
+o8 is MIT licensed and free, and there is nothing to buy. The agents run on your own subscriptions or API keys, and you can use o8 without an account. A few hosted features from the old paid plan (managed inference, off-network phone relay and live voice) still check for its license until they are removed.
 
 ## Voice
 

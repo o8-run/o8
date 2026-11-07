@@ -14,4 +14,4 @@ The name change does not convert a lifetime license into a monthly subscription.
 The app uses Pro · Lifetime in plan labels, settings, account copy, and the
 lifetime badge tooltip. The badge keeps each member's existing serial number.
 
-See [the plan overview](../README.md#free-and-paid) and [o8 Pro](https://o8.run/pro).
+See [the plan overview](../README.md#free-and-open-source) and [o8 Pro](https://o8.run/pro).
