@@ -502,7 +502,7 @@ impl Setup {
         self.revision += 1;
         cx.notify();
     }
-/// Set up later saves nothing, so the unsaved choice goes back to the
+    /// Set up later saves nothing, so the unsaved choice goes back to the
     /// server's recommendation, which home and Change show.
     fn set_up_later(&mut self, cx: &mut Context<Self>) {
         if self.busy {
@@ -628,14 +628,14 @@ impl Setup {
                 })
                 .child(look::title(heading))
                 .child(
-                div()
-                    .mt(px(12.))
-                    .text_size(px(13.))
-                    .font_weight(FontWeight::LIGHT)
-                    .line_height(relative(1.6))
-                    .text_color(theme().text_secondary)
-                    .child(intro),
-            ),
+                    div()
+                        .mt(px(12.))
+                        .text_size(px(13.))
+                        .font_weight(FontWeight::LIGHT)
+                        .line_height(relative(1.6))
+                        .text_color(theme().text_secondary)
+                        .child(intro),
+                ),
         );
         if show_tools {
             scroll =
@@ -1348,5 +1348,9 @@ fn install_table_parses_with_the_desktop_commands() {
     assert!(table.len() >= 10);
     let codex = install("codex").expect("codex install info");
     assert_eq!(codex.command.as_deref(), Some("npm i -g @openai/codex"));
-    assert!(install("antigravity").and_then(|info| info.link.as_deref()).is_some());
+    assert!(
+        install("antigravity")
+            .and_then(|info| info.link.as_deref())
+            .is_some()
+    );
 }

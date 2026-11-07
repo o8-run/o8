@@ -563,11 +563,11 @@ pub(crate) fn symon_mark_sized(size: f32, active: bool) -> impl IntoElement {
             },
         );
     }
-    div()
-        .size(px(size))
-        .rounded_full()
-        .shadow(shadows)
-        .child(img(mark.clone()).size(px(size)).object_fit(ObjectFit::Contain))
+    div().size(px(size)).rounded_full().shadow(shadows).child(
+        img(mark.clone())
+            .size(px(size))
+            .object_fit(ObjectFit::Contain),
+    )
 }
 
 impl Shell {

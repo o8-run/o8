@@ -108,17 +108,14 @@ pub(crate) trait Client: Send + Sync {
 /// reaches a macOS prompt or System Settings. `O8_NEXT_PERMISSIONS_FIXTURE`
 /// lists the four statuses in Perm order (granted, denied, not-asked or
 /// unknown); a trailing `hold` keeps a request open.
-#[cfg(debug_assertions)]
+#[cfg(any(test, debug_assertions))]
 pub(crate) struct Fixture {
     snapshot: Snapshot,
     hold: bool,
 }
-#[cfg(debug_assertions)]
+#[cfg(any(test, debug_assertions))]
 impl Fixture {
-    pub(crate) fn from_env() -> Option<Self> {
-        Self::parse(&std::env::var("O8_NEXT_PERMISSIONS_FIXTURE").ok()?)
-    }
-    fn parse(value: &str) -> Option<Self> {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
         let mut parts = value.split(',').map(str::trim);
         let mut snapshot = EMPTY;
         for slot in &mut snapshot {
@@ -138,7 +135,7 @@ impl Fixture {
         Some(Self { snapshot, hold })
     }
 }
-#[cfg(debug_assertions)]
+#[cfg(any(test, debug_assertions))]
 impl Client for Fixture {
     fn supported(&self) -> bool {
         true
@@ -151,6 +148,23 @@ impl Client for Fixture {
             std::thread::sleep(Duration::from_secs(600));
         }
         Ok(())
+    }
+}
+
+/// Reads nothing and asks nothing: tests, and a debug build whose fixture
+/// value does not parse, so neither can reach a real prompt.
+#[cfg(any(test, debug_assertions))]
+pub(crate) struct Unsupported;
+#[cfg(any(test, debug_assertions))]
+impl Client for Unsupported {
+    fn supported(&self) -> bool {
+        false
+    }
+    fn read(&self) -> Snapshot {
+        EMPTY
+    }
+    fn request(&self, _: Perm, _: Status) -> Result<(), String> {
+        Err("Permissions are not checked here.".into())
     }
 }
 
@@ -194,11 +208,14 @@ impl Client for Native {
             if perm == Perm::InputMonitoring && mac::input_monitoring(true) {
                 return Ok(());
             }
-            std::process::Command::new("open")
+            // Runs off the UI thread; `open` returns once System Settings is asked.
+            match std::process::Command::new("open")
                 .arg(perm.settings())
-                .spawn()
-                .map(|_| ())
-                .map_err(|_| "Could not open permissions. Try again.".to_owned())
+                .status()
+            {
+                Ok(status) if status.success() => Ok(()),
+                _ => Err("Could not open permissions. Try again.".to_owned()),
+            }
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -414,6 +431,15 @@ impl Setup {
                 cx.background_executor()
                     .timer(Duration::from_millis(1_500))
                     .await;
+                // Closed while waiting: no read after the step ends.
+                let open = this
+                    .read_with(cx, |this, _| {
+                        this.step == Step::Permissions && this.permission_generation == generation
+                    })
+                    .unwrap_or(false);
+                if !open {
+                    return;
+                }
             }
         })
         .detach();
@@ -660,7 +686,7 @@ impl Setup {
                 super::primary(
                     "setup-permissions-done",
                     "Back to projects",
-                    self.permission_busy.is_none(),
+                    self.permission_busy.is_none() && !self.busy,
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.navigate(Step::Projects, cx)))
                 .into_any_element(),

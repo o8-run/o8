@@ -25,7 +25,9 @@ impl Client for Fake {
 }
 
 fn setup_view(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Entity<setup::view::Setup> {
-    shell.read_with(cx, |s, _| s.surfaces.setup.view.clone().expect("setup open"))
+    shell.read_with(cx, |s, _| {
+        s.surfaces.setup.view.clone().expect("setup open")
+    })
 }
 fn tick(cx: &mut VisualTestContext) {
     cx.executor()
@@ -38,9 +40,18 @@ fn tick(cx: &mut VisualTestContext) {
 fn fix_labels_follow_the_desktop() {
     assert_eq!(fix_label(Perm::Microphone, Status::NotAsked), "Allow…");
     assert_eq!(fix_label(Perm::Microphone, Status::Denied), "Open Settings");
-    assert_eq!(fix_label(Perm::InputMonitoring, Status::Denied), "Open Settings");
-    assert_eq!(fix_label(Perm::Accessibility, Status::NotAsked), "Open Settings");
-    assert_eq!(fix_label(Perm::ScreenRecording, Status::Unknown), "Open Settings");
+    assert_eq!(
+        fix_label(Perm::InputMonitoring, Status::Denied),
+        "Open Settings"
+    );
+    assert_eq!(
+        fix_label(Perm::Accessibility, Status::NotAsked),
+        "Open Settings"
+    );
+    assert_eq!(
+        fix_label(Perm::ScreenRecording, Status::Unknown),
+        "Open Settings"
+    );
 }
 
 #[gpui::test]
@@ -87,7 +98,10 @@ fn onboarding_permissions_read_poll_and_ask_through_the_client(cx: &mut TestAppC
     // Granted elsewhere, it shows Ready on the next 1.5 s read.
     fake.snapshot.lock().unwrap().as_mut().unwrap()[0] = Status::Granted;
     tick(cx);
-    assert!(cx.debug_bounds("setup-permission-microphone-ready").is_some());
+    assert!(
+        cx.debug_bounds("setup-permission-microphone-ready")
+            .is_some()
+    );
     assert!(cx.debug_bounds("setup-permission-microphone-fix").is_none());
     // Desktop controls start collapsed.
     assert!(cx.debug_bounds("setup-permission-accessibility").is_none());
@@ -107,9 +121,44 @@ fn onboarding_permissions_read_poll_and_ask_through_the_client(cx: &mut TestAppC
     let reads = *fake.reads.lock().unwrap();
     tick(cx);
     tick(cx);
-    assert!(
-        *fake.reads.lock().unwrap() <= reads + 1,
+    assert_eq!(
+        *fake.reads.lock().unwrap(),
+        reads,
         "no reads after the step closes"
+    );
+}
+
+#[gpui::test]
+fn onboarding_permissions_stop_reading_when_setup_closes(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--onboarding --onboarding-tools --transcript");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("permissions-closed.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    draw(cx);
+    let fake = Arc::new(Fake::default());
+    *fake.snapshot.lock().unwrap() = Some([Status::Granted; 4]);
+    let setup = setup_view(&shell, cx);
+    setup.update(cx, |s, _| s.set_permission_client(fake.clone()));
+    drop(setup);
+    click(cx, "setup-permissions-open");
+    tick(cx);
+    assert!(*fake.reads.lock().unwrap() >= 2, "the step polls");
+    // The rail closes an idle setup, dropping its view mid-poll.
+    shell.update_in(cx, |s, window, cx| s.close_rail_overlays(window, cx));
+    cx.run_until_parked();
+    assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
+    let reads = *fake.reads.lock().unwrap();
+    tick(cx);
+    tick(cx);
+    assert_eq!(
+        *fake.reads.lock().unwrap(),
+        reads,
+        "no reads once the view is gone"
     );
 }
 

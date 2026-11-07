@@ -659,29 +659,20 @@ impl Setup {
     fn permission_default() -> Arc<dyn permissions::Client> {
         #[cfg(test)]
         {
-            struct Unsupported;
-            impl permissions::Client for Unsupported {
-                fn supported(&self) -> bool {
-                    false
-                }
-                fn read(&self) -> permissions::Snapshot {
-                    permissions::EMPTY
-                }
-                fn request(
-                    &self,
-                    _: permissions::Perm,
-                    _: permissions::Status,
-                ) -> Result<(), String> {
-                    Err("Permissions are not checked in tests.".into())
-                }
-            }
-            Arc::new(Unsupported)
+            Arc::new(permissions::Unsupported)
         }
         #[cfg(not(test))]
         {
             #[cfg(debug_assertions)]
-            if let Some(fixture) = permissions::Fixture::from_env() {
-                return Arc::new(fixture);
+            if let Ok(value) = std::env::var("O8_NEXT_PERMISSIONS_FIXTURE") {
+                return match permissions::Fixture::parse(&value) {
+                    Some(fixture) => Arc::new(fixture),
+                    None => {
+                        // Set but unreadable: stay inert rather than reach macOS.
+                        eprintln!("o8 next: ignoring O8_NEXT_PERMISSIONS_FIXTURE={value:?}");
+                        Arc::new(permissions::Unsupported)
+                    }
+                };
             }
             Arc::new(permissions::Native)
         }

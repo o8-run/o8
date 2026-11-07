@@ -10,7 +10,8 @@ const FOLDER: &str =
     "M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z";
 const CHEVRON: &str = "m9 5 7 7-7 7";
 const PLUS: &str = "M12 5v14M5 12h14";
-const MIC: &str = "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Zm-6 8v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6";
+const MIC: &str =
+    "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Zm-6 8v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6";
 const IMPORT: &str = "M12 3v12m-5-5 5 5 5-5M5 21h14";
 
 /// The last two parts of a project's folder, as the desktop shows it.

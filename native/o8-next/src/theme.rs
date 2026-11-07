@@ -755,7 +755,10 @@ const SYMON_STOPS: [(f32, u32); 4] = [
 ];
 pub fn symon_color(at: f32) -> Rgba {
     let at = at.clamp(0., 1.);
-    let pair = SYMON_STOPS.windows(2).find(|w| at <= w[1].0).unwrap_or(&SYMON_STOPS[2..4]);
+    let pair = SYMON_STOPS
+        .windows(2)
+        .find(|w| at <= w[1].0)
+        .unwrap_or(&SYMON_STOPS[2..4]);
     let (a, b) = (gpui::rgba(pair[0].1), gpui::rgba(pair[1].1));
     let t = (at - pair[0].0) / (pair[1].0 - pair[0].0);
     let mix = |x: f32, y: f32| x + (y - x) * t;
