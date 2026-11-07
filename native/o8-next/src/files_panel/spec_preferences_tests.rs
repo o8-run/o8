@@ -21,6 +21,23 @@ pub(super) fn shell<'a>(
     wait(&mut visual, "spec-target");
     visual
 }
+/// Waits out the right panel's close slide. It runs on the real clock, and
+/// until it ends the sliding panel still draws its own clipped copy of
+/// `header-right-panel`, so a click aimed at the toggle can miss it.
+fn settle_closed(cx: &mut VisualTestContext) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        draw(cx);
+        if cx.debug_bounds("panel-new-tab").is_none() {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "right panel slide did not settle"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 pub(super) fn empty_state() -> Value {
     serde_json::json!({"version":1,"bounds":[100,100,1400,900],"selected":null,"workspaces":{},"right_panel_width":650})
 }
@@ -162,8 +179,7 @@ fn spec_saved_override_loads_before_active_repo_and_poll_stops_when_hidden(
         .filter(|r| r.contains("/api/repo-spec?"))
         .all(|r| r.contains("alternate")));
     click(&mut cx, "header-right-panel");
-    std::thread::sleep(Duration::from_millis(250));
-    draw(&mut cx);
+    settle_closed(&mut cx);
     let count = f
         .requests()
         .iter()
