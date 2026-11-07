@@ -24,14 +24,16 @@ pub(super) fn step_name(step: Step) -> &'static str {
         Step::Import | Step::Projects | Step::Folder | Step::NewProject => "open",
         Step::Tools => "dispatch",
         Step::Privacy => "privacy",
+        Step::Permissions => "permissions",
     }
 }
-/// The page a saved step reopens. Steps this window has no page for yet
-/// (permissions, mobile) reopen the last one it has.
+/// The page a saved step reopens. A step this window has no page for yet
+/// (mobile) reopens the last one it has.
 fn page(name: &str) -> Step {
     match name {
         "dispatch" => Step::Tools,
-        "privacy" | "permissions" | "mobile" => Step::Privacy,
+        "permissions" => Step::Permissions,
+        "privacy" | "mobile" => Step::Privacy,
         _ => Step::Projects,
     }
 }
@@ -117,7 +119,8 @@ fn saved_progress_reads_by_the_desktop_rules() {
     assert!(
         unknown.step == Step::Projects && unknown.project.is_none() && !unknown.tools_configured
     );
-    // Steps without a page here yet reopen privacy.
+    // The voice step resumes where it stopped; mobile has no page here yet.
+    assert!(read(Some(&saved("permissions", good.clone(), ""))).step == Step::Permissions);
     assert!(read(Some(&saved("mobile", good.clone(), ""))).step == Step::Privacy);
     // An incomplete project is dropped; built-in prompts and long tasks are not kept as typed.
     assert!(

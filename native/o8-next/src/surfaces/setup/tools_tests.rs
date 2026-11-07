@@ -168,3 +168,72 @@ fn onboarding_tools_scan_turns_slow_after_three_seconds(cx: &mut TestAppContext)
     assert!(setup.read_with(cx, |s, _| s.scan_slow()));
     assert!(cx.debug_bounds("setup-scan-status").is_some());
 }
+
+#[gpui::test]
+fn onboarding_set_up_later_returns_to_the_saved_recommendation(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--onboarding --onboarding-tools --transcript");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("later.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    draw(cx);
+    click(cx, "setup-change-tools");
+    click(cx, "setup-agent-claude-code");
+    assert_eq!(choice(&shell, cx).0, "claude");
+    // Set up later saves nothing, so the unsaved pick does not linger.
+    click(cx, "setup-later");
+    assert!(cx.debug_bounds("setup-projects").is_some());
+    let saved: Value = fixture
+        .client
+        .get("/api/panel/operator-defaults", &[("include", "values")])
+        .unwrap();
+    assert_ne!(saved["sources"]["orchestratorBackend"], "file");
+    assert_eq!(choice(&shell, cx), ("codex".into(), vec!["codex".into()]));
+    click(cx, "setup-change-tools");
+    assert!(inside(cx, "setup-agent-selected", "setup-agent-codex"));
+}
+
+#[gpui::test]
+fn onboarding_tools_with_none_installed_asks_to_connect_one(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--onboarding --onboarding-no-tools --transcript");
+    let (_shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("no-tools.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    draw(cx);
+    assert!(
+        cx.debug_bounds("setup-ready-codex").is_none(),
+        "no readiness card without a ready lead"
+    );
+    click(cx, "setup-change-tools");
+    // As on the desktop: "Connect a coding tool", listing the primary tools.
+    assert!(cx.debug_bounds("setup-connect-tool").is_some());
+    assert!(cx.debug_bounds("setup-tool-codex").is_some());
+    assert!(cx.debug_bounds("setup-tool-claude-code").is_some());
+    assert!(cx.debug_bounds("setup-tool-gemini").is_none());
+    assert!(cx.debug_bounds("setup-copy-codex").is_some());
+    assert!(cx.debug_bounds("setup-agent-readiness").is_none());
+    assert!(
+        cx.debug_opacity("setup-use").is_some_and(|o| o <= 0.5),
+        "Use this setup is disabled"
+    );
+    let before: Value = fixture
+        .client
+        .get("/api/panel/operator-defaults", &[("include", "values")])
+        .unwrap();
+    click(cx, "setup-use");
+    let after: Value = fixture
+        .client
+        .get("/api/panel/operator-defaults", &[("include", "values")])
+        .unwrap();
+    assert_eq!(before["values"], after["values"], "nothing is saved");
+    assert!(cx.debug_bounds("setup-connect-tool").is_some());
+}

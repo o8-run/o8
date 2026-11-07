@@ -532,6 +532,10 @@ pub(super) fn brand() -> impl IntoElement {
 /// SymonMark: classic's orb, rendered from SYMON_ORB_BACKGROUND because GPUI has
 /// no conic gradient. Its highlight follows `--t-text`, so each ink has a file.
 fn symon_mark(active: bool) -> impl IntoElement {
+    symon_mark_sized(20., active)
+}
+/// The Symon mark at any size; setup's voice step shows it at 32 px.
+pub(crate) fn symon_mark_sized(size: f32, active: bool) -> impl IntoElement {
     static DARK: OnceLock<Arc<Image>> = OnceLock::new();
     static LIGHT: OnceLock<Arc<Image>> = OnceLock::new();
     let load =
@@ -560,10 +564,10 @@ fn symon_mark(active: bool) -> impl IntoElement {
         );
     }
     div()
-        .size(px(20.))
+        .size(px(size))
         .rounded_full()
         .shadow(shadows)
-        .child(img(mark.clone()).size(px(20.)).object_fit(ObjectFit::Contain))
+        .child(img(mark.clone()).size(px(size)).object_fit(ObjectFit::Contain))
 }
 
 impl Shell {

@@ -12,6 +12,11 @@ const FIXTURE_TOOLS: SetupRuntime[] = [
   { id: 'gemini', label: 'Gemini CLI', available: false, installed: false, unavailableReason: 'not_installed', detail: 'Gemini CLI was not found on this computer.', fix: '' },
   { id: 'antigravity', label: 'Antigravity CLI', available: false, installed: false, unavailableReason: 'not_installed', detail: 'Antigravity CLI was not found on this computer.', fix: '' },
 ];
+/** `--onboarding-no-tools`: the same tools, none installed. */
+const NO_TOOLS: SetupRuntime[] = FIXTURE_TOOLS.map((tool) => ({
+  ...tool, available: false, installed: false, unavailableReason: 'not_installed',
+  detail: `${tool.label} was not found on this computer.`, fix: '',
+}));
 export async function prepare(): Promise<SurfaceRoutes> {
   if (process.argv.includes('--onboarding')) createRequire(import.meta.url)('./setup/discovery.cjs');
   return {};
@@ -62,13 +67,15 @@ require('node:child_process').execFileSync('git', ['init', '-q'], { cwd: dest })
     run: async (route, request) => {
       const response = await route(request);
       // A fixed tool inventory, so setup's tool pages never read this machine's tools.
-      if (process.argv.includes('--onboarding-tools') && response.ok
+      const tools = process.argv.includes('--onboarding-no-tools') ? NO_TOOLS
+        : process.argv.includes('--onboarding-tools') ? FIXTURE_TOOLS : null;
+      if (tools && response.ok
         && request.method === 'GET' && request.nextUrl.pathname === '/api/panel/operator-defaults'
         && request.nextUrl.searchParams.get('include') === 'setup') {
         const payload = await response.json();
-        payload.dispatchableRuntimes = FIXTURE_TOOLS;
+        payload.dispatchableRuntimes = tools;
         payload.setupRecommendation = recommendRuntimeSetup({
-          inventory: FIXTURE_TOOLS, values: payload.values, sources: payload.sources,
+          inventory: tools, values: payload.values, sources: payload.sources,
           activity: { codex: 0, claude: 0, complete: false },
         });
         return Response.json(payload, { status: response.status, headers: response.headers });

@@ -17,9 +17,9 @@ pub(super) enum Look {
 }
 
 /// Controls that chime advance; the rest tick. On the desktop only the
-/// optional voice and iPhone offers and the permissions Continue chime, and
-/// those pages come later, so every setup control ticks for now.
-const ADVANCE: [&str; 0] = [];
+/// optional voice and iPhone offers and the voice step's way back chime; the
+/// iPhone offer comes with the mobile page.
+const ADVANCE: [&str; 2] = ["setup-permissions-open", "setup-permissions-done"];
 
 /// A setup button with the desktop's look. A pointer click on an enabled
 /// one cues before its own action.
