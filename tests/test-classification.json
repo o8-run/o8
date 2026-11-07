@@ -5281,6 +5281,7 @@
       "path": "tests/o8d-cortex-owner-real-path.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "git-cli",
         "real-path"
       ]
