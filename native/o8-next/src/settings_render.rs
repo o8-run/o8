@@ -138,6 +138,13 @@ impl Render for Settings {
             .filter(|_| self.section == "providers" && query.len() < 2)
         {
             content = content.child(providers);
+        } else if let Some(history) = self.voice_history.clone().filter(|_| {
+            self.section == "voice" && self.voice_panel == VoicePanel::History && query.len() < 2
+        }) {
+            content = content
+                .child("Voice")
+                .child(self.voice_tabs(window, cx))
+                .child(history);
         } else if self.section == "bots" {
             content = content.children(self.bot_rows(window, cx));
         } else if self.section == "keys" {
@@ -163,6 +170,10 @@ impl Render for Settings {
                     .1
             });
             let mut child_index = 1;
+            if self.section == "voice" && query.len() < 2 {
+                content = content.child(self.voice_tabs(window, cx));
+                child_index += 1;
+            }
             if let Some(label) = self.first_result_label(&query) {
                 content = content.child(self.button(
                     "settings-search-open-first".into(),
@@ -447,6 +458,45 @@ impl Render for Settings {
                     .h(px(1.))
                     .w_full(),
             )
+    }
+}
+impl Settings {
+    /// The Voice tab's parts, and where the desktop voice window opens until
+    /// every part of it is here.
+    fn voice_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let enabled = !self.busy && self.editor.is_none();
+        let mut tabs = div()
+            .debug_selector(|| "settings-voice-tabs".into())
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .child(self.button(
+                "settings-voice-tab-attention".into(),
+                "Proactive attention".into(),
+                enabled,
+                self.voice_panel == VoicePanel::Attention,
+                window,
+                cx,
+                |this, _, cx| this.show_voice_panel(VoicePanel::Attention, cx),
+            ));
+        if self.voice_history.is_some() {
+            tabs = tabs.child(self.button(
+                "settings-voice-tab-history".into(),
+                nav_groups::VOICE_HISTORY.into(),
+                enabled,
+                self.voice_panel == VoicePanel::History,
+                window,
+                cx,
+                |this, _, cx| this.show_voice_panel(VoicePanel::History, cx),
+            ));
+        }
+        div().flex().flex_col().gap(px(6.)).child(tabs).child(
+            div()
+                .debug_selector(|| "settings-voice-window-hint".into())
+                .text_size(px(11.))
+                .text_color(theme().text_muted)
+                .child("Press ⌘⌥, to open the Symon voice window"),
+        )
     }
 }
 fn empty(label: &'static str) -> Div {
