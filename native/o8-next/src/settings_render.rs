@@ -145,6 +145,13 @@ impl Render for Settings {
                 .child("Voice")
                 .child(self.voice_tabs(window, cx))
                 .child(history);
+        } else if let Some(polish) = self.voice_polish.clone().filter(|_| {
+            self.section == "voice" && self.voice_panel == VoicePanel::Polish && query.len() < 2
+        }) {
+            content = content
+                .child("Voice")
+                .child(self.voice_tabs(window, cx))
+                .child(polish);
         } else if self.section == "bots" {
             content = content.children(self.bot_rows(window, cx));
         } else if self.section == "keys" {
@@ -479,6 +486,17 @@ impl Settings {
                 cx,
                 |this, _, cx| this.show_voice_panel(VoicePanel::Attention, cx),
             ));
+        if self.voice_polish.is_some() {
+            tabs = tabs.child(self.button(
+                "settings-voice-tab-polish".into(),
+                nav_groups::VOICE_POLISH.into(),
+                enabled,
+                self.voice_panel == VoicePanel::Polish,
+                window,
+                cx,
+                |this, _, cx| this.show_voice_panel(VoicePanel::Polish, cx),
+            ));
+        }
         if self.voice_history.is_some() {
             tabs = tabs.child(self.button(
                 "settings-voice-tab-history".into(),

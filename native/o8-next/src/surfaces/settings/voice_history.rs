@@ -36,19 +36,28 @@ pub(crate) struct Entry {
 /// The file the host's recorder writes, resolved as the host resolves it.
 /// Tests never resolve it: this Mac's dictations are private text.
 pub(crate) fn history_path() -> Option<PathBuf> {
+    data_dir().map(|dir| dir.join(FILE))
+}
+
+/// The desktop host's data directory on this Mac. Never resolved under test.
+pub(crate) fn data_dir() -> Option<PathBuf> {
     if cfg!(test) {
         return None;
     }
-    path_from(|key| std::env::var_os(key))
+    dir_from(|key| std::env::var_os(key))
 }
 
-fn path_from(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+fn dir_from(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     let set = |key| var(key).filter(|value| !value.is_empty());
     set("O8_DATA_DIR")
         .or_else(|| set("CORTEX_IDE_DATA_DIR"))
         .map(PathBuf::from)
         .or_else(|| set("HOME").map(|home| PathBuf::from(home).join(".o8")))
-        .map(|dir| dir.join(FILE))
+}
+
+#[cfg(test)]
+fn path_from(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    dir_from(var).map(|dir| dir.join(FILE))
 }
 
 /// The recorder's whole file, or nothing when any entry is malformed.
