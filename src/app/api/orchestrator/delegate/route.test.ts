@@ -237,7 +237,7 @@ describe('orchestrator Fast delegation entry', () => {
     expect((await dispatch('first', ['src/shared.ts'])).status).toBe(200);
     const overlap = await dispatch('second', ['src/shared.ts']);
     expect(overlap.status).toBe(422);
-    expect(await overlap.json()).toEqual({ ok: false,
+    expect(await overlap.json()).toEqual({ ok: false, code: 'shared_checkout_refusal',
       error: 'Shared checkout path overlaps worker first; assign separate paths or wait for group review.' });
     expect(launchRuntimeSurface).toHaveBeenCalledTimes(1);
     const teamFiles = (await import('node:fs')).readdirSync(join(state, 'shared-checkout-teams'))

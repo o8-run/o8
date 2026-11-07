@@ -400,6 +400,11 @@ async function performDelegate(request: NextRequest, clientMutationId: string, i
       note: launchResult.note,
     });
   } catch (err) {
+    // Typed errors keep their own status and text in either checkout mode.
+    if (err instanceof PrRepairOwnerError) return NextResponse.json({ ok: false, code: err.code, ownerLaneId: err.ownerLaneId, error: err.message }, { status: 409 });
+    if (err instanceof StaleRepairHeadError) return NextResponse.json({ ok: false, code: err.code, error: err.message }, { status: 409 });
+    if (err instanceof ReviewerPrSourceError) return NextResponse.json({ ok: false, code: 'review_source_unavailable', error: err.message }, { status: 422 });
+    if (err instanceof DelegationSelectionError || err instanceof ReviewerPrInputError) return NextResponse.json({ ok: false, code: err.code, error: err.message }, { status: 400 });
     if (checkoutMode === 'shared') {
       if (err instanceof SharedCheckoutError) {
         return NextResponse.json({ ok: false, code: 'shared_checkout_refusal', error: err.message }, { status: 422 });
@@ -407,10 +412,6 @@ async function performDelegate(request: NextRequest, clientMutationId: string, i
       console.warn('[orchestrator-delegate] Shared worker launch failed:', err);
       return NextResponse.json({ ok: false, error: SHARED_CHECKOUT_LAUNCH_FAILURE }, { status: 422 });
     }
-    if (err instanceof PrRepairOwnerError) return NextResponse.json({ ok: false, code: err.code, ownerLaneId: err.ownerLaneId, error: err.message }, { status: 409 });
-    if (err instanceof StaleRepairHeadError) return NextResponse.json({ ok: false, code: err.code, error: err.message }, { status: 409 });
-    if (err instanceof ReviewerPrSourceError) return NextResponse.json({ ok: false, code: 'review_source_unavailable', error: err.message }, { status: 422 });
-    if (err instanceof DelegationSelectionError || err instanceof ReviewerPrInputError) return NextResponse.json({ ok: false, code: err.code, error: err.message }, { status: 400 });
     console.error('[orchestrator-delegate]', err);
     return NextResponse.json({
       ok: false,

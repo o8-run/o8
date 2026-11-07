@@ -388,8 +388,9 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
     if (run.outcome === 'running') {
       run.outcome = signal ? 'interrupted' : code === 0 ? 'finished' : 'failed';
       run.finishedAt = nowIso();
-      session.activeRun = undefined;
     }
+    // An interrupted run stays active until its process has exited.
+    if (session.activeRun?.id === run.id) session.activeRun = undefined;
     void finishPiRunUsage(run.usage).then(() => saveSession(session));
   });
 
@@ -579,7 +580,9 @@ export async function interruptOwnedPiSession(surfaceId: string) {
     session.activeRun.outcome = 'interrupted';
     session.activeRun.finishedAt = nowIso();
     session.recentRuns = session.recentRuns.map((run) => run.id === session.activeRun?.id ? session.activeRun : run);
-    session.activeRun = undefined;
+    // With a live RPC child, its exit handler clears the run once the
+    // process is gone; until then the run, and its shared claim, stay held.
+    if (!client) session.activeRun = undefined;
     await saveSession(session);
   }
   activeClients.delete(surfaceId);
