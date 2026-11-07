@@ -49,7 +49,7 @@ export function openSqliteForRead(path: string): ReadOnlySqlite {
   if (!existsSync(`${path}-wal`) && isWalFile(path)) {
     const url = pathToFileURL(path);
     url.searchParams.set('immutable', '1');
-    return new (loadNodeSqlite().DatabaseSync)(url, { readOnly: true });
+    return new (loadNodeSqlite().DatabaseSync)(url.href, { readOnly: true });
   }
   const database = new Database(path, { readonly: true, fileMustExist: true });
   database.pragma('busy_timeout = 1000');
