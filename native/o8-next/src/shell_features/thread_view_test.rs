@@ -137,10 +137,14 @@ fn thread_view_switches_to_the_resumed_cli_in_the_workspace_terminal_and_back(
     });
     assert!(v.debug_bounds("thread-terminal-notice").is_some());
     assert!(s.read_with(&v, |s, cx| thread(s, cx).unwrap().launch.is_none()));
+    // The choice is kept per thread (#5309), and leaving forgets it.
+    let session = s.read_with(&v, |s, cx| thread(s, cx).unwrap().id.clone());
+    saved(&mut v, &f, &[&session]);
     v.simulate_keystrokes("ctrl-alt-v");
     settle(&mut v);
     assert!(s.read_with(&v, |s, cx| !thread(s, cx).unwrap().terminal));
     assert!(v.debug_bounds("thread-terminal-notice").is_none());
+    saved(&mut v, &f, &[]);
 
     // Bind a Codex session the way classic stores it.
     let record: Value = f
@@ -205,20 +209,48 @@ fn thread_view_switches_to_the_resumed_cli_in_the_workspace_terminal_and_back(
     assert!(!s.read_with(&v, |s, cx| thread(s, cx).unwrap().adopted));
 
     // Closing the thread drops its pane; the shell, and its CLI, keep running.
-    // Opening it again adopts that shell and types nothing into it.
+    // The thread was left in Terminal View, so it opens there again, adopting
+    // that shell and typing nothing into it.
+    saved(&mut v, &f, &[&session]);
     s.update_in(&mut v, |s, window, cx| {
         s.features.get::<Views>().threads.clear();
         // As closing a tab does, the shell hands focus back.
         s.restore_focus(window, cx);
     });
     drop(pane);
-    settle(&mut v);
-    v.simulate_keystrokes("ctrl-alt-v");
-    until(&mut v, "the running shell adopted", |v| {
+    let adopted = |s: &Entity<Shell>, v: &mut VisualTestContext| {
         s.read_with(v, |s, cx| {
-            thread(s, cx).is_some_and(|t| matches!(&t.state, State::Open(p) if p.read(cx).ready))
+            thread(s, cx).is_some_and(|t| {
+                t.terminal && t.adopted && matches!(&t.state, State::Open(p) if p.read(cx).ready)
+            })
         })
-    });
-    assert!(s.read_with(&v, |s, cx| thread(s, cx).unwrap().adopted));
+    };
+    until(&mut v, "the running shell adopted", |v| adopted(&s, v));
     assert!(v.debug_bounds("thread-terminal-view").is_some());
+
+    // A relaunch reopens the thread in Terminal View on the same shell.
+    let state = crate::shell_state::State::load(&f.root.join("thread-view.json")).unwrap();
+    let (again, mut relaunched) =
+        open(f.client.clone(), f.root.join("thread-view.json"), state, cx);
+    ready(&again, &mut relaunched);
+    until(
+        &mut relaunched,
+        "the relaunched thread in Terminal View",
+        |v| adopted(&again, v),
+    );
+    assert!(relaunched.debug_bounds("thread-terminal-view").is_some());
+    relaunched.simulate_keystrokes("ctrl-alt-v");
+    settle(&mut relaunched);
+    assert!(relaunched.debug_bounds("thread-terminal-view").is_none());
+    saved(&mut relaunched, &f, &[]);
+}
+
+/// Waits for the saved shell state to keep exactly these threads in
+/// Terminal View; the state writer saves off the UI thread.
+fn saved(v: &mut VisualTestContext, f: &Fixture, ids: &[&str]) {
+    let path = f.root.join("thread-view.json");
+    until(v, "the saved Terminal View threads", |_| {
+        crate::shell_state::State::load(&path)
+            .is_ok_and(|state| state.terminal_views.iter().eq(ids.iter().copied()))
+    });
 }
