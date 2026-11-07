@@ -53,6 +53,11 @@ gtk = "=0.18.2"
 webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
 cairo-rs = { version = "=0.18.5", features = ["png"] }
 
+# Windows maps comctl32 v6 (TaskDialogIndirect) only for an exe that embeds
+# gpui's manifest; without it the loader stops before main (0xC0000139).
+[target.'cfg(windows)'.dependencies]
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "windows-manifest"] }
+
 [dev-dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "test-support"] }
 
