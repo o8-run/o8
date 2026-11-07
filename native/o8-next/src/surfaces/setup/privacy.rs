@@ -29,7 +29,8 @@ static DISCLOSURES: LazyLock<Disclosures> = LazyLock::new(|| {
 });
 
 const SHIELD: &str = "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z M9 12l2 2 4-5";
-const CHECK: &str = "m3 8 3 3 7-7";
+/// The desktop's CheckGlyph, centred on the 24-unit grid.
+const CHECK: &str = "M20 6L9 17l-5-5";
 
 fn tracked(mut v: Div, spacing: Pixels) -> Div {
     v.style()
@@ -112,7 +113,7 @@ fn choice(
         })
         .when(!selected, |v| v.hover(|v| v.bg(theme().hover)))
         .when(selected, |v| {
-            v.child(crate::icon::stroke(CHECK, theme().background, 13., 1.8))
+            v.child(crate::icon::stroke(CHECK, theme().background, 14., 2.2))
         })
         .child(label)
 }
@@ -225,7 +226,7 @@ pub(super) fn page(this: &Setup, busy: bool, cx: &mut Context<Setup>) -> impl In
                                 .text_size(px(12.5))
                                 .text_color(theme().text_secondary)
                                 .child(if this.error.is_some() {
-                                    "Check the save status above before continuing."
+                                    "Check the save status below before continuing."
                                 } else if usage == Some(false) {
                                     "Usage analytics are off."
                                 } else {

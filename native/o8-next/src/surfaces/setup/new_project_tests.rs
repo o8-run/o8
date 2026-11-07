@@ -35,9 +35,9 @@ fn active_session(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Session 
 }
 /// Tools become available on the fixture's second refresh.
 fn connect_tools(cx: &mut VisualTestContext) {
-    click(cx, "setup-refresh");
-    click(cx, "setup-refresh");
-    click(cx, "setup-lead-codex");
+    super::refresh_tools(cx);
+    super::refresh_tools(cx);
+    super::choose_lead(cx, "codex");
     click(cx, "setup-use");
 }
 

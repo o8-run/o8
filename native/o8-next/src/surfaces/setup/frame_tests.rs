@@ -92,26 +92,25 @@ fn onboarding_frame_resumes_where_it_stopped_and_cues_only_when_on(cx: &mut Test
         .unwrap();
     assert_eq!(saved.step, "dispatch");
     assert_eq!(saved.project.as_ref().unwrap()["name"], project.as_str());
+    super::refresh_tools(cx);
     // Turning sounds on previews a tick and is kept with the window.
     click(cx, "setup-sounds");
     assert_eq!(sound::played(), [Cue::Tick]);
     assert!(shell.read_with(cx, |s, _| s.state.onboarding_sounds));
     // Choices tick, each one more than the 75 ms debounce apart.
-    std::thread::sleep(std::time::Duration::from_millis(80));
-    click(cx, "setup-refresh");
-    std::thread::sleep(std::time::Duration::from_millis(80));
-    click(cx, "setup-lead-codex");
-    std::thread::sleep(std::time::Duration::from_millis(80));
-    click(cx, "setup-worker-claude-code");
-    std::thread::sleep(std::time::Duration::from_millis(80));
-    click(cx, "setup-use");
+    for selector in [
+        "setup-agent-codex",
+        "setup-customize",
+        "setup-worker-claude-code",
+        "setup-use",
+    ] {
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        click(cx, selector);
+    }
     assert_eq!(page(&shell, cx), Some("privacy"));
     // As on the desktop, project, tool and Use choices tick; only the
     // optional voice and iPhone offers chime advance.
-    assert_eq!(
-        sound::played(),
-        [Cue::Tick, Cue::Tick, Cue::Tick, Cue::Tick]
-    );
+    assert_eq!(sound::played(), [Cue::Tick; 4]);
     let (parts, current) = rail(&shell, cx);
     assert_eq!(current, 2);
     assert_eq!(parts[1], ("Agent", "Ready".to_owned(), true));

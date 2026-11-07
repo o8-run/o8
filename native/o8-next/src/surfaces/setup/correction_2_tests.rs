@@ -17,8 +17,8 @@ fn fresh_opencode_first_send(cx: &mut TestAppContext, change_workers: bool) {
     cx.run_until_parked();
     draw(cx);
     click(cx, "setup-project-0");
-    click(cx, "setup-refresh");
-    click(cx, "setup-lead-opencode");
+    refresh_tools(cx);
+    use_only_opencode(cx);
     click(cx, "setup-use");
     let recommendation: Value = fixture
         .client
@@ -38,6 +38,7 @@ fn fresh_opencode_first_send(cx: &mut TestAppContext, change_workers: bool) {
     if change_workers {
         click(cx, "setup-back");
         click(cx, "setup-change-tools");
+        click(cx, "setup-customize");
         click(cx, "setup-worker-codex");
         click(cx, "setup-worker-opencode");
         click(cx, "setup-use");
@@ -123,8 +124,8 @@ fn onboarding_missing_model_refuses_conversation_creation(cx: &mut TestAppContex
     cx.run_until_parked();
     draw(cx);
     click(cx, "setup-project-0");
-    click(cx, "setup-refresh");
-    click(cx, "setup-lead-opencode");
+    refresh_tools(cx);
+    use_only_opencode(cx);
     click(cx, "setup-use");
     assert!(
         shell.read_with(cx, |s, _| s.surfaces.setup.view.is_some()),
