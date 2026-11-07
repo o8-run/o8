@@ -523,12 +523,8 @@ impl Surface {
         // The pills are saved with the message, so a restart still shows them.
         let mut body = body;
         if !sent_mentions.is_empty() {
-            body["payload"]["mentions"] = json!(
-                sent_mentions
-                    .iter()
-                    .map(crate::composer::mention::groups::Sent::saved)
-                    .collect::<Vec<_>>()
-            );
+            body["payload"]["mentions"] =
+                json!(crate::composer::mention::groups::saved_all(&sent_mentions));
         }
         let context = if picks.is_empty() && objects.is_empty() {
             None

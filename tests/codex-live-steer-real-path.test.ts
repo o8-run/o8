@@ -220,6 +220,30 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
     } finally { await fixture.close(); }
   }, 60_000);
 
+  it('keeps a steered message\'s pills when the relay owner saves it for another server process (#5305)', async () => {
+    const fixture = await running();
+    const id = `codex-relay-pills-${sequence}`;
+    const mentions = [{ label: 'test', title: 'test', lines: ['Script · vitest run'], jump: { kind: 'script' as const, target: 'test' } }];
+    try {
+      expect((await POST(fixture.request('POST', { ...fixture.target, id, intent: 'steer-now', payload: { ...fixture.payload, mentions } }))).status).toBe(200);
+      const script = join(root, `relay-pills-${sequence}.mts`);
+      writeFileSync(script, `
+        import queue from ${JSON.stringify(join(process.cwd(), 'src/lib/orchestrator/composer-queue.ts'))};
+        import heartbeat from ${JSON.stringify(join(process.cwd(), 'src/lib/ws-server/composer-queue-heartbeat.ts'))};
+        await heartbeat.runQueuedComposerSteer(queue.claimComposerSteer(${JSON.stringify(id)})!);
+        console.log('DONE');
+      `);
+      const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--import', join(process.cwd(), 'scripts/register-server-only-stub.mjs'), script],
+        { cwd: process.cwd(), env: { ...process.env, CODEX_HOME: join(home, '.codex') }, timeout: 30_000 });
+      expect(result.stdout).toContain('DONE');
+      expect(queue.readComposerSend(id)?.status).toBe('applied');
+      expect(fixture.steers()).toHaveLength(1);
+      const messages = (await import('@/lib/llm/chat-history-store')).readPersistedLlmChat(fixture.target.threadId)!.history.messages;
+      expect(messages.filter(message => message.id === `composer-steer-${id}`))
+        .toEqual([expect.objectContaining({ role: 'user', content: fixture.payload.text, mentions })]);
+    } finally { await fixture.close(); }
+  }, 60_000);
+
   it('advertises only the running bridge thread and withdraws the capability after Stop', async () => {
     const fixture = await running();
     try {

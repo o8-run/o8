@@ -51,15 +51,43 @@ describe('composer queue mentions', () => {
   });
 
   it.each([
-    ['terminal output', [{ ...mentions[2], lines: ['secret line'] }]],
-    ['an unknown jump', [{ ...mentions[0], jump: { kind: 'browser', target: 'x' } }]],
-    ['an empty label', [{ ...mentions[0], label: ' ' }]],
-    ['more than 20', Array.from({ length: 21 }, () => mentions[0])],
-    ['not a list', { label: 'x' }],
-  ])('refuses mentions with %s', async (_name, bad) => {
-    const response = await post(`queue-mentions-bad-${_name.replace(/\W/g, '')}`, { mentions: bad as ComposerMention[] });
-    expect(response.status).toBe(400);
-    expect(queue.listQueuedComposerSends(target)).toHaveLength(0);
+    ['terminal output', { ...mentions[2], lines: ['secret line'] }],
+    ['an unknown jump', { ...mentions[0], jump: { kind: 'browser', target: 'x' } }],
+    ['an empty label', { ...mentions[0], label: ' ' }],
+    ['a 300-character label', { ...mentions[0], label: 'l'.repeat(300) }],
+    ['an empty thread', { ...mentions[3], open: '' }],
+    ['not a pill', 'x'],
+  ])('keeps the message and drops a pill with %s', async (name, bad) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const response = await post(`queue-mentions-bad-${name.replace(/\W/g, '')}`, { mentions: [bad, mentions[1]] as ComposerMention[] });
+    expect(response.status).toBe(200);
+    expect((await response.json()).item.payload).toMatchObject({ text: payload.text, mentions: [mentions[1]] });
+    // The log counts what was dropped and never repeats it.
+    expect(warn).toHaveBeenCalledWith('[composer-queue] Dropped 1 mention(s) that could not be saved.');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('secret line');
+    warn.mockRestore();
+  });
+
+  it('delivers a message with 21 pills and a 300-character label, keeping 20 pills', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const many = [{ ...mentions[0], label: 'l'.repeat(300) },
+      ...Array.from({ length: 21 }, (_, index) => ({ ...mentions[1], label: `tree-${index}` }))];
+    const backend = (await import('@/lib/lane/orchestrator-backends/registry')).getOrchestratorBackend('pi');
+    const native = vi.spyOn(backend, 'liveSteer').mockImplementation(async (_repo, _message, options) => {
+      options.beforeAdmit(); return { accepted: true };
+    });
+    try {
+      const response = await post('queue-mentions-many', { mentions: many }, 'steer-now');
+      expect(response.status).toBe(200);
+      const saved = (await response.json()).item.payload.mentions as ComposerMention[];
+      expect(saved.map(mention => mention.label)).toEqual(Array.from({ length: 20 }, (_, index) => `tree-${index}`));
+      const { runQueuedComposerSteer } = await import('@/lib/ws-server/composer-queue-heartbeat');
+      await runQueuedComposerSteer(queue.claimComposerSteer('queue-mentions-many')!);
+    } finally { native.mockRestore(); warn.mockRestore(); }
+    const delivered = (await import('@/lib/llm/chat-history-store')).readPersistedLlmChat(target.threadId)!
+      .history.messages.find(message => message.id === 'composer-steer-queue-mentions-many');
+    expect(delivered).toMatchObject({ role: 'user', content: payload.text });
+    expect(delivered?.mentions).toHaveLength(20);
   });
 
   it('puts the pills on the delivered user message the app reads after a restart', async () => {

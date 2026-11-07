@@ -57,22 +57,28 @@ const MENTION_KINDS = ['worktree', 'script', 'terminal'];
 const text = (value: unknown, max: number, empty = false): value is string =>
   typeof value === 'string' && value.length <= max && (empty || value.trim().length > 0);
 
-/** At most 20 pills, each as sent; a terminal pill carries no terminal output. */
+/**
+ * A message's pills as saved: well-formed ones only, at most 20. Pills are
+ * display state, so a malformed one is dropped rather than failing the send;
+ * a terminal pill carrying terminal output is malformed.
+ */
 export function validateComposerMentions(input: unknown): ComposerMention[] | undefined {
   if (input === undefined) return undefined;
-  if (!Array.isArray(input) || input.length > 20) throw new Error('A message carries at most 20 mentions.');
-  return input.map((value) => {
+  const all: unknown[] = Array.isArray(input) ? input : [input];
+  const kept = all.flatMap((value): ComposerMention[] => {
     const mention = value as Partial<ComposerMention> | null;
     const jump = mention?.jump;
     if (!mention || !text(mention.label, 200) || !text(mention.title, 4096)
       || !Array.isArray(mention.lines) || mention.lines.length > 6 || !mention.lines.every(line => text(line, 400, true))
       || (mention.open !== undefined && !text(mention.open, 200))
       || (jump !== undefined && (!jump || !MENTION_KINDS.includes(jump.kind) || !text(jump.target, 4096)))
-      || (jump?.kind === 'terminal' && mention.lines.length > 0)) throw new Error('A mention is malformed.');
-    return { label: mention.label, title: mention.title, lines: [...mention.lines],
+      || (jump?.kind === 'terminal' && mention.lines.length > 0)) return [];
+    return [{ label: mention.label, title: mention.title, lines: [...mention.lines],
       ...(mention.open !== undefined ? { open: mention.open } : {}),
-      ...(jump ? { jump: { kind: jump.kind, target: jump.target } } : {}) };
-  });
+      ...(jump ? { jump: { kind: jump.kind, target: jump.target } } : {}) }];
+  }).slice(0, 20);
+  if (kept.length < all.length) console.warn(`[composer-queue] Dropped ${all.length - kept.length} mention(s) that could not be saved.`);
+  return kept;
 }
 
 export function validateComposerQueuePayload(input: unknown): ComposerQueuePayload {

@@ -330,7 +330,7 @@ fn saved_pills_read_as_sent_after_a_restart() {
         Sent::thread("Fix the build", "thoughts-9", "ready", None),
     ]
     .iter()
-    .map(Sent::saved)
+    .filter_map(Sent::saved)
     .collect();
     assert_eq!(
         serde_json::to_value(&saved).unwrap(),
@@ -382,5 +382,38 @@ fn saved_pills_read_as_sent_after_a_restart() {
         Some("o8://thread/thoughts-9")
     );
     // Malformed saved pills are ignored, never a crash.
-    remember_saved(Some(&json!([{"label": 3}])));
+    remember_saved("composer-steer-bad", Some(&json!([{"label": 3}])));
+}
+
+#[test]
+fn saved_pills_fit_the_queue_limits() {
+    // 150 one-unit characters and 75 two-unit emoji, measured as the queue
+    // measures, in UTF-16 units.
+    let long = format!("{}{}", "界".repeat(150), "😀".repeat(75));
+    assert_eq!(long.encode_utf16().count(), 300);
+    let mut pills: Vec<Sent> = std::iter::once(long.clone())
+        .chain((0..21).map(|n| format!("tree-{n}")))
+        .map(|label| {
+            Sent::object(&Mentioned::Worktree {
+                label,
+                path: "/work/tree".into(),
+                branch: None,
+            })
+        })
+        .collect();
+    pills[1].open = Some(" ".into());
+    pills[2].label = "  ".into();
+    let saved = saved_all(&pills);
+    assert_eq!(saved.len(), 20, "at most 20 pills");
+    // Cut to 200 units on a character boundary: 150 + 25 emoji (50 units).
+    assert_eq!(
+        saved[0].label,
+        format!("{}{}", "界".repeat(150), "😀".repeat(25))
+    );
+    assert!(saved[0].title.encode_utf16().count() <= 4096);
+    assert_eq!(saved[1].open, None, "an empty thread id is never sent");
+    assert!(
+        saved.iter().all(|pill| pill.label != "  "),
+        "an empty label is dropped"
+    );
 }
