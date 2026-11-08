@@ -44,7 +44,7 @@ const stopRoute = await import('@/app/api/orchestrator/stop-mission/route');
 const resetRoute = await import('@/app/api/orchestrator/reset-packet/route');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { recordMission } = await import('@/lib/db/missions-store');
-const { createLane, updateLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { createLane, getLane, updateLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { createEmptyOrchestratorMissionState, normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { persistMissionRegistryState, readMissionRegistryEntry, withMissionRegistryState, missionHasPendingHeadlessWork } = await import('@/lib/orchestrator/mission-registry');
@@ -118,6 +118,25 @@ describe('mission stop registry durability through the public route', () => {
     const dispatched = await runDispatchTick(durable);
     expect(dispatched.packets.map((packet) => packet.launchAttempts)).toEqual([0, 0]);
     expect(dispatched.packets.every((packet) => packet.operatorStopped)).toBe(true);
+  });
+
+  it('stops the live worker of a packet archived mid-turn and leaves it archived', async () => {
+    const missionId = 'mission-stop-archived-live';
+    const packets = createComparison(missionId);
+    // Archiving refuses further runs but does not end the current turn, so the
+    // first worker is still running when the operator presses Stop all.
+    const archivedAt = new Date().toISOString();
+    const state = readOrchestratorControlPlaneState();
+    writeOrchestratorControlPlaneState({ ...state,
+      packets: state.packets.map((packet) => packet.id === packets[0]!.id ? { ...packet, archivedAt } : packet) });
+    const response = await stopRoute.POST(request('stop-mission', { missionId, idempotencyKey: 'stop-archived-live' }));
+    expect(response.status).toBe(200);
+    expect(h.kills).toEqual(packets.map((packet) => packet.id));
+    const results = (await response.json()).result.packets as Array<{ packetId: string; status: string }>;
+    expect(results.map((result) => result.status)).toEqual(['already-terminal', 'stopped']);
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ archivedAt });
+    expect(readOrchestratorControlPlaneState().packets[0]?.operatorStopped).not.toBe(true);
+    expect(getLane(packets[0]!.lane!.laneId!)).toMatchObject({ status: 'paused' });
   });
 
   it('resetting one stopped comparison member leaves its sibling held', async () => {
