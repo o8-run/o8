@@ -186,6 +186,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/cli-usage', 'GET', () => import('@/app/api/panel/cli-usage/route')),
     route('/api/broadcast/why', 'GET', () => import('@/app/api/broadcast/why/route')),
     route('/api/broadcast/calendar', 'POST', () => import('@/app/api/broadcast/calendar/route')),
+    // Symon watches (src-tauri symon_watch.rs). No device/worker/spectator grant in panelGateMiddleware, so only the
+    // operator bearer passes, and the handlers add no loopback or principal check of their own. Watches are rows
+    // in SQLite: the automation scheduler in the WS process fires them from the same rows, and a plan claim is decided by an
+    // UPDATE, so either process may register, claim, settle or cancel. (#5422)
+    route('/api/symon/watches', 'GET POST', () => import('@/app/api/symon/watches/route')),
+    route('/api/symon/watches/[id]', 'GET PATCH DELETE', () => import('@/app/api/symon/watches/[id]/route')),
     // MCP config generator (Settings > MCP). GET only, no handler-level auth: gated by
     // panelGateMiddleware, which does not public-allowlist /api/setup/* (hardening #1562).
     // Over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) the loopback
