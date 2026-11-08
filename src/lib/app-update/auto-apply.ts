@@ -16,13 +16,30 @@ import { describeUpdateBlockers } from './update-card-view';
 // click, so the apply route leaves the request here for the native loop.
 let manualApply: { requestedAt: string; force: boolean; attemptId: string | null } | null = null;
 
-export function requestNativeApply(force: boolean): string {
+/**
+ * Records the operator's Update click for the native loop. A click while an earlier
+ * request is still unadmitted joins it (a force click upgrades it), and a click while
+ * that request's install is running returns null, so a second click can never
+ * replace the request an install is bound to.
+ */
+export function requestNativeApply(force: boolean): string | null {
+  const active = getAppUpdateState().autoApply;
+  if (manualApply?.attemptId) {
+    const running = active?.attemptId === manualApply.attemptId
+      && (active.phase === 'installing' || active.phase === 'restarting');
+    if (running) return null;
+    manualApply = null;
+  }
+  // A force click upgrades the pending request under a new time, so the native
+  // loop expedites it instead of waiting out its interval.
+  if (manualApply && !(force && !manualApply.force)) return manualApply.requestedAt;
   manualApply = { requestedAt: new Date().toISOString(), force, attemptId: null };
   return manualApply.requestedAt;
 }
 
+/** The Update click the native loop has not admitted yet; null once it is admitted. */
 export function getNativeApplyRequestTime(): string | null {
-  return manualApply?.requestedAt ?? null;
+  return manualApply && !manualApply.attemptId ? manualApply.requestedAt : null;
 }
 
 /** Native owns the timer and effects. Every admission reads current persisted work. */
@@ -110,7 +127,10 @@ export async function controlAutoApply(input: Record<string, unknown>) {
     },
   };
   if (allowed && input.action === 'admit') recordAppUpdateInstall({ outcome: 'started', version: activity.version });
-  if (allowed && manual && input.action === 'admit') manualApply = { ...manual, attemptId: activity.attemptId };
+  // A click that landed while admission ran (a force upgrade included) is the one bound.
+  if (allowed && manual && input.action === 'admit') {
+    manualApply = { ...(manualApply && !manualApply.attemptId ? manualApply : manual), attemptId: activity.attemptId };
+  }
   recordAutoApply(activity);
   return result(allowed, { attemptId: activity.attemptId, version: activity.version, installed: activity.installed, idle });
 }

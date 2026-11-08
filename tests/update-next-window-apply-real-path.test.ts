@@ -98,3 +98,30 @@ it('shows the native download, install and restart steps for the progress bar', 
   expect(await native({ action: 'restart', attemptId: 'clicked' })).toMatchObject({ allowed: true });
   expect(await progress()).toMatchObject({ stage: 'restarting' });
 });
+
+it('a repeat click joins the pending request and a force click re-expedites it', async () => {
+  vi.stubEnv('O8_NEXT_MAIN_WINDOW', '1');
+  expect((await apply({})).status).toBe(202);
+  const requestedAt = (await nativeRead()).applyRequestedAt;
+  expect(requestedAt).toEqual(expect.any(String));
+  expect((await apply({})).status).toBe(202);
+  expect((await nativeRead()).applyRequestedAt).toBe(requestedAt);
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  expect((await apply({ force: true })).status).toBe(202);
+  const forced = (await nativeRead()).applyRequestedAt;
+  expect(forced).not.toBe(requestedAt);
+  expect(await native({ action: 'admit', attemptId: 'clicked' })).toMatchObject({ allowed: true });
+  expect((await (await applyRoute.GET()).json()).applyRequestedAt).toBeNull();
+});
+
+it('a click while the bound install runs is refused and the install continues', async () => {
+  vi.stubEnv('O8_NEXT_MAIN_WINDOW', '1');
+  expect((await apply({})).status).toBe(202);
+  expect(await native({ action: 'admit', attemptId: 'clicked' })).toMatchObject({ allowed: true });
+  expect(await native({ action: 'install', attemptId: 'clicked' })).toMatchObject({ allowed: true });
+  // Before this fix the click replaced the request and the restart was refused.
+  const again = await apply({});
+  expect(again.status).toBe(409);
+  expect(await again.json()).toMatchObject({ error: { code: 'update_apply_in_progress' } });
+  expect(await native({ action: 'restart', attemptId: 'clicked' })).toMatchObject({ allowed: true });
+});

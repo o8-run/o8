@@ -58,6 +58,8 @@ struct State {
     checking: bool,
     /// The apply request is in flight.
     applying: bool,
+    /// A state read is in flight; a second one could land out of order.
+    reading: bool,
     /// Work is live; the next apply forces the restart.
     busy: bool,
     blockers: Option<Blockers>,
@@ -631,8 +633,18 @@ fn read(state: &mut State, body: &Value) {
     } else if state.current.is_none() {
         state.current = bundle_version();
     }
-    state.phase = phase(body);
-    state.progress = progress(body);
+    // An accepted click stays installing until the native loop admits it and
+    // reports its own phase, so the button cannot offer a second click. A
+    // loop that reports any phase (waiting on live work included) takes over.
+    let unadmitted =
+        body["applyRequestedAt"].is_string() && body["state"]["autoApply"]["phase"].is_null();
+    match phase(body) {
+        None if unadmitted && matches!(state.phase, Some(Phase::Installing)) => {}
+        reported => {
+            state.phase = reported;
+            state.progress = progress(body);
+        }
+    }
     if body["state"]["autoApply"]["phase"] == "waiting" {
         let waiting = &body["state"]["autoApply"]["blockers"];
         let as_list = |value: &Value| {
@@ -682,6 +694,7 @@ fn check(s: &mut Shell, cx: &mut Context<Shell>) {
         60
     };
     if state.checking
+        || state.reading
         || state
             .checked
             .is_some_and(|at| at.elapsed().as_secs() < every)
@@ -689,14 +702,17 @@ fn check(s: &mut Shell, cx: &mut Context<Shell>) {
         return;
     }
     state.checked = Some(Instant::now());
+    state.reading = true;
     let client = s.client.clone();
     let task = cx
         .background_executor()
         .spawn(async move { client.get::<Value>("/api/panel/update/apply", &[]) });
     cx.spawn(async move |this, cx| {
-        let Ok(body) = task.await else { return };
+        let result = task.await;
         let _ = this.update(cx, |this, cx| {
             let state = this.features.get::<State>();
+            state.reading = false;
+            let Ok(body) = result else { return };
             read(state, &body);
             let version = state.pending.clone();
             if state.open && state.notes_for != version.clone().or(Some("latest".into())) {
@@ -820,7 +836,8 @@ fn check_now(s: &mut Shell, cx: &mut Context<Shell>) {
 
 fn apply(s: &mut Shell, force: bool, cx: &mut Context<Shell>) {
     let state = s.features.get::<State>();
-    if state.applying {
+    // An install already running is bound to the first click.
+    if state.applying || matches!(state.phase, Some(Phase::Installing | Phase::Restarting)) {
         return;
     }
     let force = force || state.busy;

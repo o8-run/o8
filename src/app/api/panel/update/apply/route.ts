@@ -1,6 +1,6 @@
 import { recordForcedRestart } from '@/lib/app-update/forced-restart-receipt';
 import { checkFreshness, ensureFreshUpdateCheck, UPDATE_RETRY } from '@/lib/app-update/fresh-check';
-import { requestNativeApply } from '@/lib/app-update/auto-apply';
+import { getNativeApplyRequestTime, requestNativeApply } from '@/lib/app-update/auto-apply';
 import { inspectCliOperationAdmission } from '@/lib/setup/cli-operation-admission';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
@@ -46,7 +46,9 @@ export async function GET() {
   const idle = await readIdleWindow();
   // The state carries the last install attempt, so a caller can read a failed apply back (#3588).
   // currentVersion names the running server, so the o8 next Update pill can show it (#5069).
-  return response({ ok: true, idle, state: getAppUpdateState(), currentVersion: packageJson.version });
+  // applyRequestedAt is an Update click the native updater has not admitted yet.
+  return response({ ok: true, idle, state: getAppUpdateState(), currentVersion: packageJson.version,
+    applyRequestedAt: getNativeApplyRequestTime() });
 }
 
 export async function POST(request: Request) {
@@ -126,6 +128,11 @@ export async function POST(request: Request) {
     }, 409);
   }
 
+  const nativeWindow = process.env.O8_NEXT_MAIN_WINDOW === '1';
+  const inProgress = () => response({ ok: false, requested: false, error: { code: 'update_apply_in_progress',
+    message: 'An update is already installing.' }, idle, state: getAppUpdateState() }, 409);
+  const running = state.autoApply?.phase === 'installing' || state.autoApply?.phase === 'restarting';
+  if (nativeWindow && running) return inProgress();
   if (force) {
     try { recordForcedRestart('update-apply', { admission, idle }); }
     catch { return response({ ok: false, requested: false, error: { code: 'restart_receipt_unavailable',
@@ -133,8 +140,8 @@ export async function POST(request: Request) {
   }
   // o8 next is the window of the packaged macOS app (#5069): no webview listens
   // for the apply mutation, so the shell's native updater installs and restarts.
-  if (process.env.O8_NEXT_MAIN_WINDOW === '1') {
-    requestNativeApply(force);
+  if (nativeWindow) {
+    if (requestNativeApply(force) === null) return inProgress();
     return response({
       ok: true,
       requested: true,
