@@ -89,11 +89,13 @@ export async function POST(request: NextRequest) {
 
   if (srcPath) {
     // srcPath reads an arbitrary server-local file (the Tauri Finder-drag bridge)
-    // — operator/loopback only. A device token (the phone) may only upload body
-    // bytes, never name a server path, or this becomes a local-file read/exfil
-    // primitive over the relay. The asset route is device-allowlisted for the
-    // body-bytes upload the phone actually uses; this branch stays operator-only.
-    if (resolveRequestPrincipal(request) === 'device') {
+    // — operator only. The desktop operator is the sole legitimate caller; any
+    // other principal (worker, plugin, spectator, device) is refused, or this
+    // becomes a local image/video read+exfil primitive for a non-operator bearer:
+    // it could copy any on-disk image/video into the workspace assets and read it
+    // back. The device (phone over the relay) and other bearers keep the
+    // body-bytes upload path; only this server-path branch is operator-gated.
+    if (resolveRequestPrincipal(request) !== 'operator') {
       return NextResponse.json({ ok: false, error: 'srcPath is not permitted for this credential' }, { status: 403 });
     }
     if (!existsSync(srcPath) || !statSync(srcPath).isFile()) {
