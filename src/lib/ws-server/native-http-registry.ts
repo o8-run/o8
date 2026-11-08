@@ -154,6 +154,16 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // the operator ws-token (the ws-token only goes to operator/loopback). Principal comes from the
     // bearer, not x-o8-client-addr, so the device-vs-operator split holds over the native transport. (#5243)
     route('/api/panel/mobile-pairing', 'GET', () => import('@/app/api/panel/mobile-pairing/route')),
+    // Machine connect/disconnect (Settings > Paired devices). GET lists machines, POST registers this
+    // machine, DELETE deregisters it + writes attach-off locally. No handler-level auth beyond the
+    // panelGateMiddleware operator gate — /api/panel/connect is in no allowlist/capability list, so over
+    // native (x-o8-client-addr=unverified-proxy, non-loopback) all three verbs are operator-ws-token-only,
+    // equal-or-stricter than Next (which also trusts loopback). The handler reads x-clerk-session-token
+    // (or the cached license key) only as the UPSTREAM license-server credential for the registry call,
+    // after the gate has already passed — it is not an auth bypass; the header survives because the native
+    // transport forwards it, and the registry call is outbound HTTPS, Next-independent. No token in the
+    // response body (machine ids and device list only). (#5243)
+    route('/api/panel/connect', 'GET POST DELETE', () => import('@/app/api/panel/connect/route')),
     // Provider instances (Settings > Providers). GET+POST, gated by requirePanelAuth:
     // over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) it
     // falls through to the ws-token bearer check, so it is operator-ws-token-only here —
