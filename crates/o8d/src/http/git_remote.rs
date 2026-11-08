@@ -4,10 +4,13 @@
 //!
 //! The TS reader (`src/lib/repos/github-identity.ts`) keeps each answer for
 //! 5 s whatever changes. Here an answer is also dropped as soon as the
-//! repository's config changes (`git remote set-url`, `remove`, a re-clone),
-//! so a repository edit is seen at once. Settings outside the repository, such
-//! as a global `url.<base>.insteadOf`, can still only be up to 5 s stale,
-//! the same bound as TS.
+//! repository's config file changes (`git remote set-url`, `remove`, a
+//! re-clone), so that edit is seen at once when the config is found by
+//! walking up to `.git`. Anything this walk does not track can be up to 5 s
+//! stale, the same bound as TS: a bare repository, `GIT_DIR` or `GIT_CONFIG*`
+//! in the daemon's environment, `include` files, a symlinked path, settings
+//! outside the repository such as a global `url.<base>.insteadOf`, and a
+//! failed read.
 use super::thread_context::resolve;
 use std::{
     collections::HashMap,
