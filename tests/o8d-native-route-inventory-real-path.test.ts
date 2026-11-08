@@ -36,7 +36,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/worktrees/retention-usage', // resolveManagedWorktreeStorageTarget creates the default root.
   '/api/review/commit', // Review's commit button: a POST, outside the Phase A reads.
   '/api/review/push', // Review's push button: a POST, outside the Phase A reads.
-  '/api/v2/chat-history/terminal-turns', // Terminal View import (#5309): a POST, not yet audited for the native transport.
 ]);
 function checkInventory(directory: string) {
   const files = readdirSync(directory, { recursive: true }).map(String)

@@ -55,6 +55,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/inventory', 'GET', () => import('@/app/api/runtime/inventory/route')),
     route('/api/mobile/history', 'GET', () => import('@/app/api/mobile/history/route')),
     route('/api/v2/chat-history', 'GET POST PATCH', () => import('@/app/api/v2/chat-history/route')),
+    route('/api/v2/chat-history/terminal-turns', 'POST', () => import('@/app/api/v2/chat-history/terminal-turns/route')),
     route('/api/orchestrator/composer-queue', 'GET POST PATCH DELETE', () => import('@/app/api/orchestrator/composer-queue/route')),
     route('/api/panel/ws-info', 'GET', () => import('@/app/api/panel/ws-info/route')),
     route('/api/panel/ports', 'GET', () => import('@/app/api/panel/ports/route')),

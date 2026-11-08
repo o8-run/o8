@@ -69,6 +69,7 @@ it.each([
   ['Workers events', 'GET', '/api/orchestrator/lane-events?since=0&timeoutMs=0', 200],
   ['Sidebar list', 'GET', '/api/v2/chat-history/list?include=orchestrator', 200],
   ['Sidebar archive validation', 'POST', '/api/runtime/archive', 400],
+  ['Terminal View validation', 'POST', '/api/v2/chat-history/terminal-turns', 400],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
     ...(method === 'POST' ? { body: '{}' } : {}) });
