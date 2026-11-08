@@ -350,16 +350,21 @@ export function resolveWorktreeRootLayout(
   };
 }
 
-/** Resolve the volume target used before a managed packet workspace exists. */
+/** Resolve the volume target used before a managed packet workspace exists.
+ *  A read passes `create: false`: a missing default root is not created, and the
+ *  target is its would-be path, whose volume is observed through the nearest
+ *  existing ancestor. */
 export function resolveManagedWorktreeStorageTarget(
   repoRoot: string,
   env: NodeJS.ProcessEnv = process.env,
+  options: { create?: boolean } = {},
 ): string {
   const layout = resolveWorktreeRootLayout(repoRoot, env);
   const explicit = Boolean(env[WORKTREE_ROOT_ENV]?.trim());
-  if (!explicit) mkdirSync(layout.configuredRoot, { recursive: true });
+  if (!explicit && options.create !== false) mkdirSync(layout.configuredRoot, { recursive: true });
   const parent = explicit ? captureExplicitParent(layout.configuredRoot) : null;
   const configuredRoot = captureConfiguredRoot(layout.configuredRoot, explicit);
+  if (!configuredRoot && !parent) return path.resolve(layout.primaryBase);
   const canonicalRoot = configuredRoot?.canonicalPath
     ?? path.join(parent!.canonicalPath, path.basename(layout.configuredRoot));
   return path.resolve(canonicalRoot, path.relative(layout.configuredRoot, layout.primaryBase));

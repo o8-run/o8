@@ -151,6 +151,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/o8-update-summary', 'GET', () => import('@/app/api/panel/o8-update-summary/route')),
     route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
     route('/api/runtime/capabilities', 'GET', () => import('@/app/api/runtime/capabilities/route')),
+    route('/api/worktrees/retention-usage', 'GET', () => import('@/app/api/worktrees/retention-usage/route')),
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
     route('/api/setup/cli-updates', 'GET', () => import('@/app/api/setup/cli-updates/route')),
     route('/api/panel/operator-defaults', 'GET POST', () => import('@/app/api/panel/operator-defaults/route')),

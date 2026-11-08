@@ -26,6 +26,7 @@ const NATIVE_READS = [
   ['settings', '/api/runtime/capabilities', 200],
   ['settings', '/api/runtime/acp-registry', 200],
   ['settings', '/api/runtime/capacity', 200],
+  ['settings', '/api/worktrees/retention-usage', 200],
   ['session', '/api/runtime/service-tiers', 200],
   ['session', '/api/runtime/telemetry', 400],
   ['session', '/api/orchestrator/status', 404],

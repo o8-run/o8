@@ -1,11 +1,14 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
-import { execFile } from '@/lib/providers/child-process';
+import { execFileReadOnly } from '@/lib/providers/child-process';
 import { createHash } from 'node:crypto';
 import { readdir, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
+// du, df, diskutil, findmnt and the Windows volume query are credential-less
+// reads, so they run on the read-only child boundary and never take the
+// provider-store lock (lets the retention-usage GET run on the native transport).
+const execFileAsync = promisify(execFileReadOnly);
 const DU_TIMEOUT_MS = 30_000;
 const VOLUME_ID_TIMEOUT_MS = 5_000;
 const stableVolumeIds = new Map<string, Promise<string>>();
