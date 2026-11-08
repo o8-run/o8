@@ -69,6 +69,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/delegate', 'POST', () => import('@/app/api/orchestrator/delegate/route')),
     route('/api/next/voice-host', 'GET POST', () => import('@/app/api/next/voice-host/route')),
     route('/api/orchestrator/stop-packet', 'POST', () => import('@/app/api/orchestrator/stop-packet/route')),
+    // Operator-only (requirePanelAuth, then the bearer principal); like stop-packet
+    // they run the dispatch tick here. The agent supervisor's watch map is still
+    // per process: a hard blocker for turning Rust mode on by default (#5576).
+    route('/api/orchestrator/rerun-with-feedback', 'POST', () => import('@/app/api/orchestrator/rerun-with-feedback/route')),
+    route('/api/orchestrator/reset-packet', 'POST', () => import('@/app/api/orchestrator/reset-packet/route')),
+    route('/api/orchestrator/spawn-prompt', 'POST', () => import('@/app/api/orchestrator/spawn-prompt/route')),
     route('/api/runtime/action', 'POST', () => import('@/app/api/runtime/action/route')),
     // Loads the handler, not the Next route: Next forwards here while this
     // transport is on, so the edge-tts installer has one owner (#5422).

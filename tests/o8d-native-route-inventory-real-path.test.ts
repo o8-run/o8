@@ -55,8 +55,7 @@ it('covers native client routes with their production registration owners', () =
 // path when it is registered; the default switch waits for every list to be empty.
 const NEXT_ONLY_SHELL_PATHS = new Set([
   '/api/agent-control/action', '/api/browser/agent',
-  '/api/canvas/intent', '/api/cortex/ask/answer', '/api/orchestrator/rerun-with-feedback',
-  '/api/orchestrator/reset-packet', '/api/orchestrator/spawn-prompt',
+  '/api/canvas/intent', '/api/cortex/ask/answer',
   '/api/panel/cloud-jobs/drain', '/api/panel/release-health', '/api/symon/mcp/call',
   '/api/symon/mcp/tools', '/api/symon/transport/tool',
   '/api/v1/audio/transcriptions', '/api/v1/chat/completions',
@@ -67,8 +66,8 @@ const NEXT_ONLY_MCP_PATHS = new Set([
   '/api/devices/agent', '/api/harness', '/api/leases', '/api/mcp', '/api/operator/status',
   '/api/orchestrator/create-mission', '/api/orchestrator/digest', '/api/orchestrator/dispatch',
   '/api/orchestrator/merge', '/api/orchestrator/propose-spec', '/api/orchestrator/pull-request-context',
-  '/api/orchestrator/receipts', '/api/orchestrator/reload', '/api/orchestrator/rerun-with-feedback',
-  '/api/orchestrator/reset-packet', '/api/orchestrator/truth', '/api/orchestrator/worker-corrections',
+  '/api/orchestrator/receipts', '/api/orchestrator/reload', '/api/orchestrator/truth',
+  '/api/orchestrator/worker-corrections',
   '/api/panel/pr-stack', '/api/panel/repos/init', '/api/panel/repos/scaffold', '/api/panel/targets',
   '/api/setup/agent', '/api/task-artifacts',
 ]);
@@ -109,7 +108,7 @@ it('counts the desktop shell, the MCP server and the WS process toward the Next-
   checkCaller(['src/ws-server.ts', ...sourceFiles('src/lib/ws-server', '.ts')],
     /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^>(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, NEXT_ONLY_WS_PATHS);
   const remaining = new Set([...NEXT_ONLY_NATIVE_PATHS, ...NEXT_ONLY_SHELL_PATHS, ...NEXT_ONLY_MCP_PATHS, ...NEXT_ONLY_WS_PATHS]);
-  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(58);
+  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(55);
 });
 
 it('rejects an unknown route discovered in a shell or MCP source file', () => {
