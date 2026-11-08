@@ -20,7 +20,7 @@ import { deriveWorkflowStage } from '@/lib/workflows/status';
 import { GitHubRequestDeferredError } from '@/lib/github-broker/request-budget';
 import { beginPrWatchRead, recordPrWatchSnapshot } from '@/lib/github-broker/pr-watch';
 import { waitForPrRemarkWrites } from '@/lib/github-broker/pr-watch-writes';
-import { assessPrMergeGate, assertPrMergeAllowed, PrMergeRefused } from '@/lib/github-broker/pr-merge-gate';
+import { assessPrMergeGate, assertPrMergeAllowed, countPrChecks, PrMergeRefused } from '@/lib/github-broker/pr-merge-gate';
 import { resolveGitLabProject } from '@/lib/git-providers/detect';
 import { gitlabProvider, readGitLabPanelDetail } from '@/lib/git-providers/gitlab';
 
@@ -83,8 +83,7 @@ export async function GET(
     // workspace actions still obtain exact readiness at their own entry point.
     const readiness = localRepo ? getCachedRepoReadiness(localRepo) ?? null : null;
     const mergeGate = await assessPrMergeGate(repo, pr, commentsData);
-    const failedChecks = (pr.statusCheckRollup ?? []).filter((check) => check.conclusion && check.conclusion.toLowerCase() !== 'success').length;
-    const pendingChecks = (pr.statusCheckRollup ?? []).filter((check) => !check.conclusion || check.status?.toLowerCase() !== 'completed').length;
+    const { failedChecks, pendingChecks } = countPrChecks(pr);
     const requestedChanges = (commentsData.reviews ?? []).filter((review) => review.state?.toLowerCase() === 'changes_requested').length;
     const workflowStage = deriveWorkflowStage({
       prState: pr.state,
@@ -207,7 +206,7 @@ export async function POST(
     if (action === 'draft' || action === 'ready' || action === 'enable-auto-merge' || action === 'disable-auto-merge') {
       if (!body.commitSha || (action === 'enable-auto-merge' && !['merge', 'squash', 'rebase'].includes(body.mergeMethod || ''))) return NextResponse.json({ error: 'A reviewed commit and merge method are required' }, { status: 400 });
       await updateGitHubPullRequestMode(repo, prNum, action, { expectedHeadSha: body.commitSha, mergeMethod: body.mergeMethod,
-        ...(action === 'enable-auto-merge' ? { beforePublish: () => assertPrMergeAllowed(repo, prNum, body.commitSha!, body.mergeMethod!, body.expectedMergeGate) } : {}) });
+        ...(action === 'enable-auto-merge' ? { beforePublish: () => assertPrMergeAllowed(repo, prNum, body.commitSha!, body.mergeMethod!, body.expectedMergeGate, 'enable-auto-merge') } : {}) });
       return NextResponse.json({ ok: true, action });
     }
 

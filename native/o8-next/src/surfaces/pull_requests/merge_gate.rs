@@ -30,6 +30,17 @@ pub(super) fn snapshot(detail: &Value) -> Result<&str, String> {
     Ok(value)
 }
 
+/// Whether the gate is open for this action. A direct merge needs every gate; the
+/// merge queue and auto-merge only need everything except required checks that are
+/// still running. A server that predates `autoMergeAllowed` falls back to `allowed`.
+pub(super) fn open_for(detail: &Value, action: &str) -> bool {
+    let gate = &detail["mergeGate"];
+    if action == "enable-auto-merge" && gate["autoMergeAllowed"].is_boolean() {
+        return gate["autoMergeAllowed"] == true;
+    }
+    gate["allowed"] == true
+}
+
 pub(super) fn governance(detail: &Value) -> Result<(Option<String>, Value), String> {
     snapshot(detail)?;
     let packets = array(&detail["mergeGate"], "packets");
@@ -58,7 +69,7 @@ pub(super) fn submit(client: &Client, sent: &Confirmation) -> Submission {
         let detail = &fresh["pr"];
         if snapshot(detail).is_err()
             || snapshot(detail).ok() != sent.merge_gate.as_deref()
-            || detail["mergeGate"]["allowed"] != true
+            || !open_for(detail, &sent.action)
             || string(detail, "headSha") != sent.head
         {
             return Submission::Refused("Merge gates or packet membership changed. Review the refreshed pull request before confirming again. No merge was sent.".into());

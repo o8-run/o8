@@ -11,12 +11,42 @@ import { LaneBranchUnresolvedError } from '@/lib/lane/review-target';
 
 export interface PrMergeGate {
   repo: string; number: number; headSha: string; baseSha: string; baseRefName: string;
-  allowed: boolean; snapshot: string;
+  allowed: boolean;
+  /** Everything except required checks that are still running passes, so GitHub may queue or auto-merge it. */
+  autoMergeAllowed: boolean;
+  snapshot: string;
   checks: Array<{ name: string; verdict: 'pass' | 'fail' | 'skipped'; detail?: string; actions?: string[] }>;
   packets: Array<{ id: string; preview: Awaited<ReturnType<typeof previewPacketMerge>> | null }>;
 }
 type Detail = Awaited<ReturnType<typeof fetchGitHubPullRequestDetail>>;
 type Discussion = Awaited<ReturnType<typeof fetchGitHubPullRequestComments>>;
+type CheckRollup = Pick<Detail, 'statusCheckRollup'> & { requiredChecks?: string[] | null; requiredStatuses?: Array<{ context: string; state: string }> };
+
+// A skipped or neutral optional run is not a failure worth listing. Blocking checks keep
+// the desktop rule: anything but success refuses the merge.
+const NOT_FAILED = new Set(['success', 'neutral', 'skipped']);
+
+/**
+ * Count checks the way GitHub decides mergeability. When GitHub names the required
+ * checks, only those block, including required commit statuses; a failing optional
+ * check is reported but does not block. Without that list every check run is
+ * treated as required.
+ */
+export function countPrChecks(pr: CheckRollup) {
+  const rollup = pr.statusCheckRollup ?? [];
+  const required = pr.requiredChecks ? new Set(pr.requiredChecks) : null;
+  const blocking = required ? rollup.filter(c => required.has(c.name)) : rollup;
+  const failing = (c: (typeof rollup)[number]) => Boolean(c.conclusion && c.conclusion.toLowerCase() !== 'success');
+  const failed = (c: (typeof rollup)[number]) => Boolean(c.conclusion && !NOT_FAILED.has(c.conclusion.toLowerCase()));
+  const pending = (c: (typeof rollup)[number]) => !c.conclusion || c.status?.toLowerCase() !== 'completed';
+  const statuses = required ? pr.requiredStatuses ?? [] : [];
+  const statusState = (s: { state: string }) => s.state.toUpperCase();
+  return {
+    failedChecks: blocking.filter(failing).length + statuses.filter(s => ['FAILURE', 'ERROR'].includes(statusState(s))).length,
+    pendingChecks: blocking.filter(pending).length + statuses.filter(s => !['SUCCESS', 'FAILURE', 'ERROR'].includes(statusState(s))).length,
+    optionalFailures: required ? [...new Set(rollup.filter(c => !required.has(c.name) && failed(c)).map(c => c.name))].sort() : [],
+  };
+}
 
 /** The same fresh decision is displayed by both clients and enforced before publication. */
 export async function assessPrMergeGate(repo: string, pr: Detail, discussion: Discussion): Promise<PrMergeGate> {
@@ -31,12 +61,13 @@ export async function assessPrMergeGate(repo: string, pr: Detail, discussion: Di
   'The repository, pull request and GitHub authorization must be verified by the same fresh read.');
   add('pr-state', pr.state.toLowerCase() === 'open' && !pr.mergedAt && !pr.draft, 'The pull request must be open and ready for review.');
   add('pr-mergeable', pr.mergeable, 'GitHub must confirm this pull request is mergeable.');
-  const failedChecks = pr.statusCheckRollup.filter(c => c.conclusion && c.conclusion.toLowerCase() !== 'success').length;
-  const pendingChecks = pr.statusCheckRollup.filter(c => !c.conclusion || c.status?.toLowerCase() !== 'completed').length;
+  const { failedChecks, pendingChecks, optionalFailures } = countPrChecks(pr);
   const requestedChanges = reviews.filter(r => r.state?.toLowerCase() === 'changes_requested').length;
   // Match the existing desktop PRHeader workflow rules, including neutral/skipped conclusions.
   const workflow = describeWorkflowStage({ prState: pr.state, failedChecks, pendingChecks, requestedChanges });
-  add('pr-checks', !pr.checksUnavailable && failedChecks === 0 && pendingChecks === 0, 'Checks must be available, finished and successful.');
+  add('pr-checks', !pr.checksUnavailable && failedChecks === 0 && pendingChecks === 0, pr.requiredChecks
+    ? 'Required checks must be available, finished and successful.' : 'Checks must be available, finished and successful.');
+  if (optionalFailures.length) checks.push({ name: 'pr-optional-checks', verdict: 'skipped', detail: `Optional checks failing: ${optionalFailures.join(', ')}. GitHub does not require them.` });
   add('pr-review', discussion.reviewsIncomplete === false && requestedChanges === 0 && !['CHANGES_REQUESTED', 'REVIEW_REQUIRED'].includes(pr.reviewDecision?.toUpperCase() ?? ''), 'Read the complete review state and resolve requested changes before merging.');
   add('pr-workflow', workflow.mergeAllowed, workflow.mergeDetail);
   let membership: unknown = null;
@@ -79,10 +110,16 @@ export async function assessPrMergeGate(repo: string, pr: Detail, discussion: Di
     base: pr.baseSha, baseRef: pr.baseRefName, headRef: pr.headRefName, headRepo: pr.headRepoFullName,
     state: pr.state, draft: pr.draft, mergedAt: pr.mergedAt, mergeable: pr.mergeable,
     identity: pr.githubIdentity, scope: pr.githubScope, methods: pr.allowedMergeMethods, autoMergeEnabled: pr.autoMergeEnabled,
-    checks: pr.statusCheckRollup, checksUnavailable: pr.checksUnavailable, reviewsIncomplete: discussion.reviewsIncomplete,
+    checks: pr.statusCheckRollup, requiredChecks: pr.requiredChecks ?? null, requiredStatuses: pr.requiredStatuses ?? [],
+    mergeQueue: pr.mergeQueue ?? null, inMergeQueue: pr.inMergeQueue ?? false, checksUnavailable: pr.checksUnavailable, reviewsIncomplete: discussion.reviewsIncomplete,
     reviewDecision: pr.reviewDecision, reviews: reviews.map(r => [r.id, r.state]), membership, gates: checks })).digest('hex');
+  // Only running required checks may stand between this PR and the queue; a failure, a missing
+  // check list or any other gate still refuses.
+  const waitingOnly = !pr.checksUnavailable && failedChecks === 0;
   return { repo, number: pr.number, headSha: pr.headSha, baseSha: pr.baseSha, baseRefName: pr.baseRefName,
-    allowed: checks.every(c => c.verdict === 'pass' || c.verdict === 'skipped'), snapshot, checks, packets };
+    allowed: checks.every(c => c.verdict === 'pass' || c.verdict === 'skipped'),
+    autoMergeAllowed: checks.every(c => c.verdict !== 'fail' || (waitingOnly && (c.name === 'pr-checks' || c.name === 'pr-workflow'))),
+    snapshot, checks, packets };
 }
 
 export class PrMergeRefused extends Error {
@@ -91,13 +128,13 @@ export class PrMergeRefused extends Error {
       : gate?.checks.find(c => c.verdict === 'fail')?.detail ?? 'Merge gates could not be read before publication.');
   }
 }
-export async function assertPrMergeAllowed(repo: string, number: number, head: string, method: string, expectedSnapshot?: string) {
+export async function assertPrMergeAllowed(repo: string, number: number, head: string, method: string, expectedSnapshot?: string, action: 'merge' | 'enable-auto-merge' = 'merge') {
   try {
   const comments = fetchGitHubPullRequestComments(repo, number);
   const [pr, discussion] = await Promise.all([fetchGitHubPullRequestDetail(repo, number,
     comments.then(c => [...c.reviews].reverse().find(r => r.state && r.state !== 'COMMENTED')?.state ?? null)), comments]);
   const gate = await assessPrMergeGate(repo, pr, discussion);
   const changed = Boolean(expectedSnapshot && expectedSnapshot !== gate.snapshot) || head !== pr.headSha;
-  if (changed || !gate.allowed || !pr.allowedMergeMethods.includes(method as 'merge' | 'squash' | 'rebase')) throw new PrMergeRefused(gate, changed);
+  if (changed || !(action === 'merge' ? gate.allowed : gate.autoMergeAllowed) || !pr.allowedMergeMethods.includes(method as 'merge' | 'squash' | 'rebase')) throw new PrMergeRefused(gate, changed);
   } catch (error) { if (error instanceof PrMergeRefused) throw error; throw new PrMergeRefused(null, false); }
 }
