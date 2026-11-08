@@ -11,6 +11,10 @@ import { startParityReference } from './fixtures/ws-parity-server';
 it.skipIf(process.platform === 'win32')('serves packet rerun, reset and spawn natively with the TS answer', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-orchestrator-reruns-')));
   const saved = { ...process.env };
+  // Codex preflight counts these as auth. The child inherits this environment, its
+  // HOME is the fixture directory and its key store is the fixture data directory,
+  // so without them a complete spawn is refused on every machine before any launch.
+  for (const name of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN']) delete process.env[name];
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
     server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000 });
@@ -44,7 +48,7 @@ it.skipIf(process.platform === 'win32')('serves packet rerun, reset and spawn na
     }
 
     // A complete spawn runs the production handler as far as the runtime preflight. The
-    // fixture's native child has no worker CLI on PATH, so it refuses there and starts
+    // native child has no Codex auth (scrubbed above), so it refuses there and starts
     // nothing; the TS side is not called, so this test never spawns a worker.
     const spawn = await fetch(`${origin}/api/orchestrator/spawn-prompt`, { method: 'POST', headers: operator,
       body: JSON.stringify({ repoPath: directory, task: 'Fixture task', clientMutationId: 'fixture-spawn-native', runtime: 'codex' }) });
