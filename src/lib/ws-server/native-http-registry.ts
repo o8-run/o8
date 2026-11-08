@@ -138,6 +138,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // Paired-device list (Settings > Paired devices). GET only: operator-gated by principal
     // (not client-addr), a pure SELECT with no write, and the body carries no token or hash (#5243).
     route('/api/mobile/devices', 'GET', () => import('@/app/api/mobile/devices/route')),
+    // Connect-attach toggle (Settings > Paired devices). GET reads the setting, POST writes it
+    // (env-override locked). No handler-level auth — same panelGateMiddleware operator gate as the
+    // rest of /api/panel/* (not allowlisted), so over native (x-o8-client-addr=unverified-proxy,
+    // non-loopback) both the read and the write are operator-ws-token-only, equal-or-stricter than
+    // Next. The POST body carries only a boolean; no credential in the response. (#5243)
+    route('/api/panel/connect/attach', 'GET POST', () => import('@/app/api/panel/connect/attach/route')),
     // Provider instances (Settings > Providers). GET+POST, gated by requirePanelAuth:
     // over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) it
     // falls through to the ws-token bearer check, so it is operator-ws-token-only here —
