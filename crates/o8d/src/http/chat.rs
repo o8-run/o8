@@ -438,6 +438,21 @@ fn page(
     ))
 }
 
+/// The TS `chatHistoryRevision`: the record without `savedAt` and `page`.
+/// Hashed in place instead of on a clone; `savedAt` goes back afterwards.
+/// `page` does not: a paged reply always replaces it.
+fn semantic_revision(record: &mut Value) -> String {
+    let Some(object) = record.as_object_mut() else {
+        return hash(record);
+    };
+    let saved_at = object.remove("savedAt");
+    object.remove("page");
+    let revision = hash(record);
+    if let (Some(saved_at), Some(object)) = (saved_at, record.as_object_mut()) {
+        object.insert("savedAt".to_owned(), saved_at);
+    }
+    revision
+}
 fn hash(value: &Value) -> String {
     format!(
         "{:x}",
@@ -495,8 +510,13 @@ pub(super) fn context(store: &ReadContext<'_>, params: &Params) -> Response {
     if !record.is_object() || record["source"] == "bot-network" {
         return unavailable();
     }
-    let messages = stable(record["messages"].as_array().cloned().unwrap_or_default());
-    record["messages"] = json!(messages);
+    // Move the messages rather than copy them: on a long thread each deep copy
+    // costs milliseconds, and TS does none.
+    let messages = match record["messages"].take() {
+        Value::Array(messages) => messages,
+        _ => Vec::new(),
+    };
+    record["messages"] = Value::Array(stable(messages));
     record["projectId"] = json!(
         record["projectId"]
             .as_str()
@@ -504,13 +524,11 @@ pub(super) fn context(store: &ReadContext<'_>, params: &Params) -> Response {
             .map(str::trim)
     );
     if params.contains_key("limit") || params.contains_key("before") {
-        let mut semantic = record.clone();
-        semantic.as_object_mut().unwrap().remove("savedAt");
-        semantic.as_object_mut().unwrap().remove("page");
-        let revision = hash(&semantic);
-        match page(&messages, params, 50, &revision) {
+        let revision = semantic_revision(&mut record);
+        let messages = record["messages"].as_array().map_or(&[][..], Vec::as_slice);
+        match page(messages, params, 50, &revision) {
             Ok((messages, metadata)) => {
-                record["messages"] = json!(messages);
+                record["messages"] = Value::Array(messages);
                 record["page"] = metadata;
             }
             Err(()) => {
