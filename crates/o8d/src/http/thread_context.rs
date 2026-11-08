@@ -11,7 +11,7 @@ struct GitContext {
 
 // Match path.resolve without requiring the pointed-to file to exist. Linked
 // checkout pointers and commondir commonly contain parent-directory segments.
-fn resolve(path: &Path) -> PathBuf {
+pub(super) fn resolve(path: &Path) -> PathBuf {
     let path = if path.is_absolute() {
         path.to_owned()
     } else {

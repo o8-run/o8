@@ -167,6 +167,13 @@ async fn sidebar_batches_repository_reads_and_reopens_live_state_per_request() {
         1,
         "one repository lookup per request, regardless of the number of threads"
     );
+    let again = read(&client, &origin, "limit=500").await;
+    assert_eq!(again, first);
+    assert_eq!(
+        std::fs::read_to_string(&calls).unwrap().lines().count(),
+        1,
+        "an unchanged repository config is not read again"
+    );
 
     assert!(
         first
@@ -240,11 +247,12 @@ async fn sidebar_batches_repository_reads_and_reopens_live_state_per_request() {
     assert_eq!(page[0]["id"], "thoughts-00");
     assert_eq!(
         std::fs::read_to_string(&calls).unwrap().lines().count(),
-        4,
-        "a different repository outside the selected page must not trigger Git"
+        3,
+        "a different repository outside the selected page must not trigger Git, \
+         and the page's own repository config is unchanged since the last read"
     );
     assert!(read(&client, &origin, "offset=21&limit=1").await.is_empty());
-    assert_eq!(std::fs::read_to_string(&calls).unwrap().lines().count(), 4);
+    assert_eq!(std::fs::read_to_string(&calls).unwrap().lines().count(), 3);
 
     // The additive checkout fields must identify the linked root even when a
     // session's cwd is nested below it, and not inherit it from a deleted cwd.
