@@ -52,9 +52,25 @@ static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 pub(super) static PROJECTIONS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
+/// Marks the start of one list request.
+pub(super) fn epoch() -> u64 {
+    CACHE
+        .lock()
+        .ok()
+        .and_then(|cache| cache.as_ref().map(|cache| cache.clock))
+        .unwrap_or(0)
+}
+
 /// `path` must already be canonical and inside the profile directory, the same
-/// boundary `Store::file` applies before it reads.
-pub(super) fn read(path: &Path, project: impl FnOnce() -> Option<Summary>) -> Option<Arc<Summary>> {
+/// boundary `Store::file` applies before it reads. A list longer than the cache
+/// would evict, in order, every entry it is about to need: once the least
+/// recently used entry was used by this same request (after `epoch`), a new
+/// summary is not kept, so the entries already kept stay hits.
+pub(super) fn read(
+    path: &Path,
+    epoch: u64,
+    project: impl FnOnce() -> Option<Summary>,
+) -> Option<Arc<Summary>> {
     let Some(key) = key(path) else {
         return project().map(Arc::new);
     };
@@ -81,14 +97,17 @@ pub(super) fn read(path: &Path, project: impl FnOnce() -> Option<Summary>) -> Op
             let cache = cache.get_or_insert_with(Cache::default);
             cache.remove(path);
             while cache.entries.len() >= MAX_ENTRIES || cache.bytes + bytes > MAX_BYTES {
-                let Some(oldest) = cache
+                let Some((oldest, used)) = cache
                     .entries
                     .iter()
                     .min_by_key(|(_, entry)| entry.used)
-                    .map(|(path, _)| path.clone())
+                    .map(|(path, entry)| (path.clone(), entry.used))
                 else {
                     break;
                 };
+                if used > epoch {
+                    return Some(summary);
+                }
                 cache.remove(&oldest);
             }
             cache.clock += 1;
@@ -133,4 +152,46 @@ fn key(path: &Path) -> Option<Key> {
 #[cfg(not(unix))]
 fn key(_: &Path) -> Option<Key> {
     None
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn a_list_longer_than_the_cache_keeps_its_first_entries_as_hits() {
+        let directory =
+            std::env::temp_dir().join(format!("o8d-thread-summary-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let files: Vec<PathBuf> = (0..MAX_ENTRIES + 44)
+            .map(|index| {
+                let path = directory.join(format!("thoughts-{index:04}.json"));
+                std::fs::write(&path, "{}").unwrap();
+                path
+            })
+            .collect();
+        let list = || {
+            let epoch = epoch();
+            let before = PROJECTIONS.load(Ordering::SeqCst);
+            for path in &files {
+                read(path, epoch, || {
+                    Some(Summary {
+                        archived: false,
+                        bot_network: false,
+                        backend: Value::Null,
+                        thread: Value::Null,
+                        remote: String::new(),
+                    })
+                })
+                .unwrap();
+            }
+            PROJECTIONS.load(Ordering::SeqCst) - before
+        };
+        assert_eq!(list(), MAX_ENTRIES + 44);
+        // Plain LRU would evict each entry just before the scan needs it again.
+        assert_eq!(list(), 44, "only the entries past the bound are read again");
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
 }

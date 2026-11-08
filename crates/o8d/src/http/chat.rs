@@ -97,6 +97,7 @@ pub(super) fn threads(store: &ReadContext<'_>, params: &Params) -> ReadResult {
     files.sort();
     let mut threads = Vec::new();
     let mut ids = Vec::new();
+    let epoch = thread_summary::epoch();
     for path in files {
         let Some(id) = path
             .file_stem()
@@ -116,7 +117,7 @@ pub(super) fn threads(store: &ReadContext<'_>, params: &Params) -> ReadResult {
         else {
             continue;
         };
-        let Some(summary) = thread_summary::read(&path, || {
+        let Some(summary) = thread_summary::read(&path, epoch, || {
             let record = store.json(&path).ok()?;
             let archived = record["archivedAt"].as_str().is_some_and(|s| !s.is_empty());
             let bot_network = record["source"] == "bot-network";
