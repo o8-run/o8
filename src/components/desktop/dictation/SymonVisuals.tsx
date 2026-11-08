@@ -28,12 +28,14 @@ export function SymonMark({ size = 17, active = false }: { size?: number; active
 
 /**
  * Bar height for a measured level. Native levels are on a dBFS meter
- * (-50..-10 dBFS onto 0..1); doubling it keeps the old dock's microphone
- * sensitivity, full height from about -30 dBFS, without opening another
- * microphone or inventing ambient bars.
+ * (-50..-10 dBFS onto 0..1). A gain of 1.4 puts ordinary speech mid-height
+ * and reaches full height only near -21 dBFS, so loud syllables stand out
+ * without opening another microphone or inventing ambient bars.
  */
+export const LIVE_GAIN = 1.4;
+
 export function liveAmplitude(level: number): number {
-  return Math.min(1, Math.max(0, level) * 2);
+  return Math.min(1, Math.max(0, level) * LIVE_GAIN);
 }
 
 /** Static preview, or measured input. No ambient activity or recording claim. */

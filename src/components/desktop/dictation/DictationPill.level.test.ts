@@ -15,13 +15,14 @@ describe('dictation pill on the dBFS level meter', () => {
     expect(speakingAt(meter(-20))).toBe(true);
   });
 
-  it('keeps the agent waveform at the old dock sensitivity', () => {
-    // The old curve took RMS / 0.12 levels: sqrt((rms - 0.003) * 34).
-    const old = (dbfs: number) => Math.min(1, Math.sqrt(Math.max(0, 10 ** (dbfs / 20) - 0.003) * 34));
-    for (const dbfs of [-45, -40, -35, -30]) {
-      expect(Math.abs(liveAmplitude(meter(dbfs)) - old(dbfs))).toBeLessThan(0.06);
-    }
+  it('gives the agent waveform room between ordinary and loud speech', () => {
     expect(liveAmplitude(meter(-55))).toBe(0);
-    expect(liveAmplitude(meter(-20))).toBe(1);
+    // Ordinary speech sits mid-height, well short of the top.
+    expect(liveAmplitude(meter(-40))).toBeCloseTo(0.35, 5);
+    expect(liveAmplitude(meter(-30))).toBeCloseTo(0.7, 5);
+    // Full height only near -21 dBFS: loud syllables, not normal talking.
+    expect(liveAmplitude(meter(-25))).toBeLessThan(1);
+    expect(liveAmplitude(meter(-21))).toBeCloseTo(1, 1);
+    expect(liveAmplitude(meter(-15))).toBe(1);
   });
 });
