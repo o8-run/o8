@@ -312,7 +312,8 @@ function resolveIsolationPreference(opts: CreateWorktreeOptions): WorkspaceIsola
   return process.env[APFS_COW_ENV_FLAG] === '0' ? 'git-worktree' : 'auto';
 }
 
-/** Paths from `git status --porcelain=v1 -z`; a rename or copy reports its new path. */
+/** Paths from `git status --porcelain=v1 -z`; a rename or copy, staged or in the
+ *  working tree, reports its new path and is followed by its original path. */
 function statusPaths(stdout: string): string[] {
   const fields = stdout.split('\0');
   const paths: string[] = [];
@@ -320,7 +321,7 @@ function statusPaths(stdout: string): string[] {
     const entry = fields[index];
     if (entry.length < 4) continue;
     paths.push(entry.slice(3));
-    if (entry[0] === 'R' || entry[0] === 'C') index += 1; // Skip the original path.
+    if ('RC'.includes(entry[0]) || 'RC'.includes(entry[1])) index += 1; // Skip the original path.
   }
   return paths;
 }
