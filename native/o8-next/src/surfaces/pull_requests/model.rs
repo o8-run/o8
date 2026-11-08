@@ -625,7 +625,7 @@ impl PullRequests {
         }
         if ["merge", "enable-auto-merge"].contains(&action) {
             if merge_gate::snapshot(&self.detail).is_err()
-                || self.detail["mergeGate"]["allowed"] != true
+                || !merge_gate::open_for(&self.detail, action)
             {
                 return false;
             }

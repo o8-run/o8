@@ -3,6 +3,7 @@ import 'server-only';
 import { githubInstallationFetch } from './auth';
 import { readPullRequestFiles } from './pull-request-files';
 import { readPullRequestChecks } from './pull-request-checks';
+import { readPullRequestRequirements } from './pull-request-requirements';
 import { GitHubRequestDeferredError, type GitHubReadPriority } from './request-budget';
 import { GitHubReadScopeChangedError } from './read-scope';
 
@@ -173,13 +174,18 @@ async function readPullRequestDetailAttempt(repoFullName: string, prNumber: numb
     .then((reviews) => [...reviews].reverse().find((review) => review.state && review.state !== 'COMMENTED')?.state ?? null)
     .catch(error => { if (error instanceof GitHubReadScopeChangedError) throw error; return null; });
 
-  const reads = [filesPromise, checksPromise, reviewsPromise] as const;
+  // GitHub's GraphQL API needs authentication, so an anonymous read leaves requirements unknown.
+  const requirementsPromise = anonymous
+    ? Promise.resolve({ requiredChecks: null, mergeQueue: null, inMergeQueue: false })
+    : readPullRequestRequirements(repoFullName, prNumber, pr.base?.ref ?? '', scope);
+
+  const reads = [filesPromise, checksPromise, reviewsPromise, requirementsPromise] as const;
   // Drain the entire attempt before retrying; no old response may join the retry.
   const settled = await Promise.allSettled(reads);
   const scopeChanges = settled.filter(result => result.status === 'rejected' && result.reason instanceof GitHubReadScopeChangedError);
   const changed = scopeChanges.find(result => result.status === 'rejected' && !result.reason.anonymous) ?? scopeChanges[0];
   if (changed?.status === 'rejected') throw changed.reason;
-  const [files, statusCheckRollup, reviewDecision] = await Promise.all(reads);
+  const [files, statusCheckRollup, reviewDecision, requirements] = await Promise.all(reads);
 
   return {
     githubScope: scope,
@@ -212,6 +218,9 @@ async function readPullRequestDetailAttempt(repoFullName: string, prNumber: numb
     mergeable: Boolean(pr.mergeable),
     reviewDecision,
     statusCheckRollup,
+    requiredChecks: requirements.requiredChecks,
+    mergeQueue: requirements.mergeQueue,
+    inMergeQueue: requirements.inMergeQueue,
     url: pr.html_url,
     files: files.map((file) => ({
       path: file.filename,

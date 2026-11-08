@@ -185,7 +185,7 @@ function assessGitLabMergeGate(project: GitLabProject, mr: GitLabDetail): PrMerg
     base: mr.baseSha, baseRef: mr.baseRefName, headRef: mr.headRefName, state: mr.state, draft: mr.draft, mergedAt: mr.mergedAt,
     mergeable: mr.mergeable, checks: mr.statusCheckRollup, checksUnavailable: mr.checksUnavailable, lanes: lanesOnBranch, gates: checks })).digest('hex');
   return { repo: project.slug, number: mr.number, headSha: mr.headSha, baseSha: mr.baseSha, baseRefName: mr.baseRefName,
-    allowed: checks.every((check) => check.verdict === 'pass'), snapshot, checks, packets: [] };
+    allowed: checks.every((check) => check.verdict === 'pass'), autoMergeAllowed: checks.every((check) => check.verdict === 'pass'), snapshot, checks, packets: [] };
 }
 
 /** The `/api/panel/prs/[number]` body for a GitLab merge request, in the panel's PR shape. */

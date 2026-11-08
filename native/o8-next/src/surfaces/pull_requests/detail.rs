@@ -203,6 +203,9 @@ impl PullRequests {
             .find(|m| d["allowedMergeMethods"].is_null() || array(d, "allowedMergeMethods").contains(&json!(m)))
             .unwrap_or("");
         let auto = d["autoMergeEnabled"] == true;
+        // A merge-queue branch refuses direct merges; Merge joins the queue instead.
+        let queue = d["mergeQueue"] == true;
+        let queued = auto || d["inMergeQueue"] == true;
         let (auto_action, auto_label) = if auto {
             ("disable-auto-merge", "Disable auto-merge")
         } else {
@@ -224,13 +227,17 @@ impl PullRequests {
             more.push(item(draft_action, draft_label, self.can(draft_action, "", cx), move |s, cx| {
                 s.prepare(draft_action, "", cx)
             }));
-            more.push(item(
-                auto_action,
-                auto_label,
-                self.can(auto_action, default_method, cx),
-                move |s, cx| s.prepare(auto_action, default_method, cx),
-            ));
-            more.extend(merge_items(cx));
+            if !(queue && !auto) {
+                more.push(item(
+                    auto_action,
+                    auto_label,
+                    self.can(auto_action, default_method, cx),
+                    move |s, cx| s.prepare(auto_action, default_method, cx),
+                ));
+            }
+            if !queue {
+                more.extend(merge_items(cx));
+            }
         }
         more.extend([
             None,
@@ -272,6 +279,13 @@ impl PullRequests {
                     .text_color(theme().accent)
                     .child("Ready for review")
                     .on_click(cx.listener(|s, _, _, cx| s.prepare("ready", "", cx)))
+                    .into_any_element()
+            } else if queue {
+                let enabled = !queued && self.can("enable-auto-merge", default_method, cx);
+                action_button("pr-merge-queue".into(), true, enabled)
+                    .child(icon(super::ICON_PR, 12.))
+                    .child(if queued { "Queued" } else { "Add to merge queue" })
+                    .on_click(cx.listener(move |s, _, _, cx| s.prepare("enable-auto-merge", default_method, cx)))
                     .into_any_element()
             } else {
                 let items = merge_items(cx);
@@ -340,11 +354,16 @@ impl PullRequests {
                 "close" => format!("Close pull request · #{}", c.number),
                 "draft" => format!("Convert to draft · #{}", c.number),
                 "ready" => format!("Ready for review · #{}", c.number),
+                "enable-auto-merge" if d["mergeQueue"] == true => format!("Add to merge queue · #{}", c.number),
                 "enable-auto-merge" => format!("Enable auto-merge · #{}", c.number),
                 "disable-auto-merge" => format!("Disable auto-merge · #{}", c.number),
                 other => format!("{other} · #{}", c.number),
             };
             let body = match c.action.as_str() {
+                "enable-auto-merge" if d["mergeQueue"] == true => format!(
+                    "GitHub adds it to the {} merge queue once its required checks pass, then merges it.",
+                    string(d, "baseRefName")
+                ),
                 "enable-auto-merge" => "GitHub will merge when its rules are satisfied. It may merge immediately if ready.".to_owned(),
                 "merge" => format!("Merge into {} using {}. GitHub checks repository rules before merging.", string(d, "baseRefName"), c.method),
                 "close" => "Close this pull request on GitHub. Its branch is kept.".to_owned(),
@@ -439,11 +458,24 @@ impl PullRequests {
                 );
             }
         }
-        // PrPanelActions: a closed merge gate names its failing check.
+        // PrPanelActions: a closed merge gate names its failing check. On a merge-queue
+        // branch the queue only waits for running required checks, so say that instead.
         if d["mergeGate"].is_object() && d["mergeGate"]["allowed"] == false {
-            let failing = array(&d["mergeGate"], "checks").iter().find(|c| c["verdict"] == "fail").map(|c| string(c, "detail").to_owned());
-            let detail = failing.filter(|d| !d.is_empty()).unwrap_or_else(|| "Merge gates are unavailable. Refresh before merging.".into());
-            out.push(line(detail, theme().danger).into_any_element());
+            if d["mergeQueue"] == true && merge_gate::open_for(d, "enable-auto-merge") {
+                let waiting = if d["autoMergeEnabled"] == true || d["inMergeQueue"] == true {
+                    "Queued. GitHub merges it once its required checks pass."
+                } else {
+                    "Required checks are still running. It can join the merge queue now."
+                };
+                out.push(line(waiting.into(), theme().text_muted).into_any_element());
+            } else {
+                let failing = array(&d["mergeGate"], "checks").iter().find(|c| c["verdict"] == "fail").map(|c| string(c, "detail").to_owned());
+                let detail = failing.filter(|d| !d.is_empty()).unwrap_or_else(|| "Merge gates are unavailable. Refresh before merging.".into());
+                out.push(line(detail, theme().danger).into_any_element());
+            }
+        }
+        if let Some(optional) = array(&d["mergeGate"], "checks").iter().find(|c| string(c, "name") == "pr-optional-checks") {
+            out.push(line(string(optional, "detail").to_owned(), theme().text_muted).into_any_element());
         }
         if !self.governance_error.is_empty() {
             out.push(

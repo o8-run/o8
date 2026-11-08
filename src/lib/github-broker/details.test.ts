@@ -10,17 +10,19 @@ const pull = { number: 7, title: 'Change', state: 'open', draft: true, html_url:
 beforeEach(() => vi.clearAllMocks());
 
 describe('pull request detail reads', () => {
-  it('starts files, checks and reviews together instead of waiting for a large file response', async () => {
+  it('starts files, checks, reviews and merge requirements together instead of waiting for a large file response', async () => {
     const finish = new Map<string, (value: { response: Response }) => void>();
     githubInstallationFetch.mockImplementation((_repo: string, path: string) => path.endsWith('/pulls/7')
       ? Promise.resolve({ response: Response.json(pull) })
       : new Promise<{ response: Response }>((resolve) => { finish.set(path, resolve); }));
     const pending = fetchGitHubPullRequestDetail('example/repo', 7);
-    await vi.waitFor(() => expect(finish.size).toBe(3));
+    await vi.waitFor(() => expect(finish.size).toBe(4));
     finish.get('/repos/example/repo/pulls/7/files?per_page=100')!({ response: Response.json([{ filename: 'app.ts', additions: 27, deletions: 4, patch: '@@ diff' }]) });
     finish.get('/repos/example/repo/commits/head/check-runs?per_page=100')!({ response: Response.json({ check_runs: [{ name: 'unit', status: 'completed', conclusion: 'success', html_url: 'https://github.com/example/repo/actions/runs/1' }] }) });
     finish.get('/repos/example/repo/pulls/7/reviews?per_page=100')!({ response: Response.json([{ state: 'APPROVED' }, { state: 'COMMENTED' }]) });
-    expect(await pending).toMatchObject({ number: 7, draft: true, avatarUrl: pull.user.avatar_url, labels: ['ui'], requestedReviewers: ['reviewer'], files: [{ path: 'app.ts', patch: '@@ diff' }], statusCheckRollup: [{ name: 'unit', conclusion: 'success', url: 'https://github.com/example/repo/actions/runs/1' }], reviewDecision: 'APPROVED' });
+    finish.get('/graphql')!({ response: Response.json({ data: { repository: { mergeQueue: { id: 'MQ_1' }, pullRequest: { isInMergeQueue: false, commits: { nodes: [{ commit: { statusCheckRollup: { contexts: {
+      pageInfo: { hasNextPage: false }, nodes: [{ name: 'unit', isRequired: true }, { name: 'scanner', isRequired: false }, { context: 'legacy/status', isRequired: true }] } } } }] } } } } }) });
+    expect(await pending).toMatchObject({ requiredChecks: ['legacy/status', 'unit'], mergeQueue: true, inMergeQueue: false, number: 7, draft: true, avatarUrl: pull.user.avatar_url, labels: ['ui'], requestedReviewers: ['reviewer'], files: [{ path: 'app.ts', patch: '@@ diff' }], statusCheckRollup: [{ name: 'unit', conclusion: 'success', url: 'https://github.com/example/repo/actions/runs/1' }], reviewDecision: 'APPROVED' });
   });
 
   it('preserves file errors and tolerates unavailable optional checks and reviews', async () => {

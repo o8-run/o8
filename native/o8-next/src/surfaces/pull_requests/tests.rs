@@ -813,3 +813,52 @@ fn pull_requests_structured_preview_refusal_and_rebase(cx: &mut TestAppContext) 
             .any(|r| r["body"]["action"] == "merge" && r["body"]["mergeMethod"] == "rebase")
     );
 }
+
+#[gpui::test]
+fn pull_requests_merge_queue_joins_while_required_checks_run(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (view, cx) = cx.add_window_view(|w, cx| {
+        PullRequests::new(fixture.client.clone(), fixture.workspace.clone(), w, cx)
+    });
+    settle(cx);
+    fixture
+        .client
+        .pr_post("/__fixture/pr-gates", &json!({"scenario":"review-cleared"}))
+        .unwrap();
+    click(cx, "pr-row-7");
+    // GitHub's answer for a merge-queue branch whose required checks are still running.
+    view.update(cx, |s, cx| {
+        s.detail["mergeQueue"] = json!(true);
+        s.detail["mergeGate"]["allowed"] = json!(false);
+        s.detail["mergeGate"]["autoMergeAllowed"] = json!(true);
+        s.changed(cx);
+    });
+    draw(cx);
+    assert!(
+        cx.debug_bounds("pr-merge").is_none(),
+        "a queue branch has no direct merge menu"
+    );
+    assert!(view.read_with(cx, |s, cx| !s.can("merge", "squash", cx)));
+    assert!(view.read_with(cx, |s, cx| s.can("enable-auto-merge", "squash", cx)));
+    click(cx, "pr-merge-queue");
+    assert_eq!(
+        view.read_with(cx, |s, _| s.confirmation.as_ref().map(|c| c.action.clone())),
+        Some("enable-auto-merge".into())
+    );
+    click(cx, "pr-cancel");
+    // Anything other than running checks keeps the queue closed.
+    view.update(cx, |s, cx| {
+        s.detail["mergeGate"]["autoMergeAllowed"] = json!(false);
+        s.changed(cx);
+    });
+    draw(cx);
+    assert!(view.read_with(cx, |s, cx| !s.can("enable-auto-merge", "squash", cx)));
+    click(cx, "pr-merge-queue");
+    assert!(view.read_with(cx, |s, _| s.confirmation.is_none()));
+    assert!(
+        !fixture
+            .receipts()
+            .iter()
+            .any(|r| r["method"] == "POST" && r["body"]["action"] == "enable-auto-merge")
+    );
+}
