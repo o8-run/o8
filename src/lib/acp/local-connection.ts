@@ -74,10 +74,13 @@ export function assertLocalAcpEnvironmentCurrent(binding: AcpEnvironmentBinding)
 }
 
 /** Call under the spawn lock after validating the exact saved environment revision. */
-export function localAcpOutputRedactor(binding: AcpEnvironmentBinding | undefined, env: Record<string, string> = {}) {
+export function localAcpOutputRedactor(binding: AcpEnvironmentBinding | undefined, env: Record<string, string> = {}, extraValues: readonly string[] = []) {
   const variables = binding ? readAcpEnvironment(binding.connectionId).variables : [];
   const names = variables.filter(variable => variable.secret).map(variable => variable.name);
-  return { ...createAcpOutputRedactor(names.map(name => env[name] ?? '')), secretNames: names };
+  // extraValues are the provider credentials childEnvironment injected for this launch (API billing):
+  // they never appear in `env`/the binding, so without them a hostile agent could echo the key back
+  // out through a model name, an error message or the probe cache.
+  return { ...createAcpOutputRedactor([...names.map(name => env[name] ?? ''), ...extraValues]), secretNames: names };
 }
 
 export function acpLaunchFingerprint(launch: { command: string; args: string[]; env?: Record<string, string>; omitEnv?: string[]; localEnvironment?: AcpEnvironmentBinding }): string {
