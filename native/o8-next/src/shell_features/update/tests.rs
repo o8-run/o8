@@ -234,3 +234,25 @@ fn a_server_no_updater_ever_answers_stops_asking_for_checks() {
     read(&mut state, &current);
     assert!(!state.no_updater && state.never_since.is_none());
 }
+
+#[test]
+fn an_accepted_click_stays_installing_until_the_native_loop_reports() {
+    use super::{Progress, State, read};
+    let mut state = State {
+        phase: Some(Phase::Installing),
+        progress: Some(Progress {
+            stage: "downloading".into(),
+            received: 0,
+            total: None,
+        }),
+        ..State::default()
+    };
+    // The request is recorded but not yet admitted: no autoApply phase yet.
+    let pending = json!({ "applyRequestedAt": "2026-11-08T20:00:00.000Z", "state": {} });
+    read(&mut state, &pending);
+    assert!(matches!(state.phase, Some(Phase::Installing)));
+    assert!(state.progress.is_some());
+    // Once the server forgets the request with no phase, the panel stops waiting.
+    read(&mut state, &json!({ "state": {} }));
+    assert!(state.phase.is_none());
+}

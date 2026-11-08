@@ -16,13 +16,31 @@ import { describeUpdateBlockers } from './update-card-view';
 // click, so the apply route leaves the request here for the native loop.
 let manualApply: { requestedAt: string; force: boolean; attemptId: string | null } | null = null;
 
-export function requestNativeApply(force: boolean): string {
+/**
+ * Records the operator's Update click for the native loop. A click while an earlier
+ * request is still unadmitted joins it (a force click upgrades it), and a click while
+ * that request's install is running returns null, so a second click can never
+ * replace the request an install is bound to.
+ */
+export function requestNativeApply(force: boolean): string | null {
+  const active = getAppUpdateState().autoApply;
+  if (manualApply?.attemptId) {
+    const running = active?.attemptId === manualApply.attemptId
+      && (active.phase === 'installing' || active.phase === 'restarting');
+    if (running) return null;
+    manualApply = null;
+  }
+  if (manualApply) {
+    manualApply = { ...manualApply, force: manualApply.force || force };
+    return manualApply.requestedAt;
+  }
   manualApply = { requestedAt: new Date().toISOString(), force, attemptId: null };
   return manualApply.requestedAt;
 }
 
+/** The Update click the native loop has not admitted yet; null once it is admitted. */
 export function getNativeApplyRequestTime(): string | null {
-  return manualApply?.requestedAt ?? null;
+  return manualApply && !manualApply.attemptId ? manualApply.requestedAt : null;
 }
 
 /** Native owns the timer and effects. Every admission reads current persisted work. */
