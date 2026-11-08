@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -50,6 +51,11 @@ const NATIVE_READS = [
   // WS_TOKEN (build.ts getOrCreateWsToken), so the forged-local-header negative below is the proof
   // a non-operator cannot extract it over the native transport (#5243).
   ['settings', '/api/setup/mcp-config', 200],
+  // Mobile pairing config (Settings > Paired devices QR). GET only. Operator/loopback gets the real
+  // ws-token; a device principal gets host/port refresh with token:'' (the device→token:'' branch is
+  // pinned in its own test below). In DEVICE_CAPABILITIES (GET), so the generic negative still 401s a
+  // missing/wrong token even with forged local headers. (#5243)
+  ['settings', '/api/panel/mobile-pairing', 200],
 ] as const;
 let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;
@@ -198,6 +204,35 @@ it('refuses panel/connect/attach over native without the operator ws-token; writ
       await response.arrayBuffer();
     }
   }
+});
+
+// mobile-pairing hands the operator the real ws-token but a device only host/port with token:'' —
+// the operator credential must NEVER cross to a device. Pin it over the native transport with a real
+// enrolled-device bearer (seed its sha256 into the device-token file the middleware + principal both
+// read): the device gets 200 with token:'' and the ws-token never appears in the body, even with
+// forged loopback markers, while the operator still gets the real ws-token. (#5243)
+it('never hands the ws-token to a device over native mobile-pairing (#5243)', async () => {
+  const deviceToken = 'enrolled-device-token-pairing-5243-abcdef0123456789';
+  writeFileSync(join(server.directory, 'mobile-device-tokens'),
+    `${createHash('sha256').update(deviceToken).digest('hex')}\n`, { mode: 0o600 });
+
+  const deviceRes = await fetch(origin + '/api/panel/mobile-pairing', {
+    headers: {
+      authorization: `Bearer ${deviceToken}`,
+      'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
+    },
+  });
+  expect(deviceRes.status).toBe(200);
+  const deviceText = await deviceRes.text();
+  expect(JSON.parse(deviceText).token).toBe('');
+  expect(deviceText).not.toContain(server.token);
+
+  // The operator, by contrast, gets the real ws-token — proving the device branch is a real narrowing.
+  const operatorRes = await fetch(origin + '/api/panel/mobile-pairing', {
+    headers: { authorization: `Bearer ${server.token}` },
+  });
+  expect(operatorRes.status).toBe(200);
+  expect(JSON.parse(await operatorRes.text()).token).toBe(server.token);
 });
 
 it('keeps Sidebar and saved history reachable after verbose Workers events', async () => {

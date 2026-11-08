@@ -144,6 +144,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // non-loopback) both the read and the write are operator-ws-token-only, equal-or-stricter than
     // Next. The POST body carries only a boolean; no credential in the response. (#5243)
     route('/api/panel/connect/attach', 'GET POST', () => import('@/app/api/panel/connect/attach/route')),
+    // Mobile pairing config (Settings > Paired devices QR). GET only. No handler-level auth beyond the
+    // panelGateMiddleware operator gate PLUS a device-GET capability (DEVICE_CAPABILITIES), so over
+    // native an operator OR an enrolled-device bearer passes; everything else 401. The handler is
+    // fail-closed via resolveRequestPrincipal: a device gets host/port refresh with token:'' and NEVER
+    // the operator ws-token (the ws-token only goes to operator/loopback). Principal comes from the
+    // bearer, not x-o8-client-addr, so the device-vs-operator split holds over the native transport. (#5243)
+    route('/api/panel/mobile-pairing', 'GET', () => import('@/app/api/panel/mobile-pairing/route')),
     // Provider instances (Settings > Providers). GET+POST, gated by requirePanelAuth:
     // over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) it
     // falls through to the ws-token bearer check, so it is operator-ws-token-only here —

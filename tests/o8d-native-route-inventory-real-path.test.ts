@@ -8,7 +8,6 @@ import { viewerHttpRoutes } from '@/lib/viewers/http-routes';
 // Native paths that still need Next (#5243). Remove a path when it is registered.
 const NEXT_ONLY_NATIVE_PATHS = new Set([
   // Existing native inventory drift, outside the A1 and A2 slices. No methods added.
-  '/api/panel/mobile-pairing',
   '/api/mobile/devices/revoke',
   '/api/panel/connect',
   '/api/mcp',
