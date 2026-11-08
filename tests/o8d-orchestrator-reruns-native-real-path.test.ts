@@ -14,7 +14,9 @@ it.skipIf(process.platform === 'win32')('serves packet rerun, reset and spawn na
   // Codex preflight counts these as auth. The child inherits this environment, its
   // HOME is the fixture directory and its key store is the fixture data directory,
   // so without them a complete spawn is refused on every machine before any launch.
-  for (const name of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN']) delete process.env[name];
+  // The worker env pass-through switches could hand the login probe a real Codex home.
+  for (const name of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN', 'CODEX_HOME',
+    'O8_WORKER_ENV_INHERIT', 'O8_WORKER_ENV_ALLOW']) delete process.env[name];
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
     server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000 });
