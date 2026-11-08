@@ -20,24 +20,28 @@ export interface PrMergeGate {
 }
 type Detail = Awaited<ReturnType<typeof fetchGitHubPullRequestDetail>>;
 type Discussion = Awaited<ReturnType<typeof fetchGitHubPullRequestComments>>;
-type CheckRollup = Pick<Detail, 'statusCheckRollup'> & { requiredChecks?: string[] | null };
+type CheckRollup = Pick<Detail, 'statusCheckRollup'> & { requiredChecks?: string[] | null; requiredStatuses?: Array<{ context: string; state: string }> };
+
+// GitHub counts a skipped or neutral run as passing for a required check.
+const PASSING = new Set(['success', 'neutral', 'skipped']);
 
 /**
  * Count checks the way GitHub decides mergeability. When GitHub names the required
- * checks, only those block: a required check that has not reported yet is pending,
- * and a failing optional check is reported but does not block. Without that list
- * every check is treated as required.
+ * checks, only those block, including required commit statuses; a failing optional
+ * check is reported but does not block. Without that list every check run is
+ * treated as required.
  */
 export function countPrChecks(pr: CheckRollup) {
   const rollup = pr.statusCheckRollup ?? [];
   const required = pr.requiredChecks ? new Set(pr.requiredChecks) : null;
   const blocking = required ? rollup.filter(c => required.has(c.name)) : rollup;
-  const failing = (c: (typeof rollup)[number]) => Boolean(c.conclusion && c.conclusion.toLowerCase() !== 'success');
+  const failing = (c: (typeof rollup)[number]) => Boolean(c.conclusion && !PASSING.has(c.conclusion.toLowerCase()));
   const pending = (c: (typeof rollup)[number]) => !c.conclusion || c.status?.toLowerCase() !== 'completed';
-  const missing = required ? [...required].filter(name => !rollup.some(c => c.name === name)).length : 0;
+  const statuses = required ? pr.requiredStatuses ?? [] : [];
+  const statusState = (s: { state: string }) => s.state.toUpperCase();
   return {
-    failedChecks: blocking.filter(failing).length,
-    pendingChecks: blocking.filter(pending).length + missing,
+    failedChecks: blocking.filter(failing).length + statuses.filter(s => ['FAILURE', 'ERROR'].includes(statusState(s))).length,
+    pendingChecks: blocking.filter(pending).length + statuses.filter(s => !['SUCCESS', 'FAILURE', 'ERROR'].includes(statusState(s))).length,
     optionalFailures: required ? [...new Set(rollup.filter(c => !required.has(c.name) && failing(c)).map(c => c.name))].sort() : [],
   };
 }
@@ -104,7 +108,8 @@ export async function assessPrMergeGate(repo: string, pr: Detail, discussion: Di
     base: pr.baseSha, baseRef: pr.baseRefName, headRef: pr.headRefName, headRepo: pr.headRepoFullName,
     state: pr.state, draft: pr.draft, mergedAt: pr.mergedAt, mergeable: pr.mergeable,
     identity: pr.githubIdentity, scope: pr.githubScope, methods: pr.allowedMergeMethods, autoMergeEnabled: pr.autoMergeEnabled,
-    checks: pr.statusCheckRollup, requiredChecks: pr.requiredChecks ?? null, mergeQueue: pr.mergeQueue ?? null, checksUnavailable: pr.checksUnavailable, reviewsIncomplete: discussion.reviewsIncomplete,
+    checks: pr.statusCheckRollup, requiredChecks: pr.requiredChecks ?? null, requiredStatuses: pr.requiredStatuses ?? [],
+    mergeQueue: pr.mergeQueue ?? null, inMergeQueue: pr.inMergeQueue ?? false, checksUnavailable: pr.checksUnavailable, reviewsIncomplete: discussion.reviewsIncomplete,
     reviewDecision: pr.reviewDecision, reviews: reviews.map(r => [r.id, r.state]), membership, gates: checks })).digest('hex');
   // Only running required checks may stand between this PR and the queue; a failure, a missing
   // check list or any other gate still refuses.

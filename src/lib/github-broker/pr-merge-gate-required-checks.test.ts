@@ -8,12 +8,12 @@ type Gate = Parameters<typeof assessPrMergeGate>;
 const run = (name: string, conclusion: string | null, status = conclusion ? 'completed' : 'in_progress') => ({ name, status, conclusion, url: null });
 const REQUIRED = ['Lint', 'Type Check'];
 
-function pr(statusCheckRollup: ReturnType<typeof run>[], requiredChecks: string[] | null = REQUIRED) {
+function pr(statusCheckRollup: ReturnType<typeof run>[], requiredChecks: string[] | null = REQUIRED, requiredStatuses: Array<{ context: string; state: string }> = []) {
   return {
     number: 7, state: 'open', draft: false, mergedAt: null, mergeable: true, headSha: 'a'.repeat(40), baseSha: 'b'.repeat(40),
     baseRefName: 'main', headRefName: 'feat', headRepoFullName: 'example/workspace', githubScope: 'scope',
     githubIdentity: { repositoryId: 1, pullRequestId: 2 }, allowedMergeMethods: ['squash'], autoMergeEnabled: false,
-    reviewDecision: 'APPROVED', checksUnavailable: false, statusCheckRollup, requiredChecks, mergeQueue: true,
+    reviewDecision: 'APPROVED', checksUnavailable: false, statusCheckRollup, requiredChecks, requiredStatuses, mergeQueue: true,
   } as unknown as Gate[1];
 }
 const discussion = { githubScope: 'scope', reviews: [], reviewsIncomplete: false } as unknown as Gate[2];
@@ -38,8 +38,18 @@ describe('merge gate counts only the checks GitHub requires', () => {
     expect(result.autoMergeAllowed).toBe(true);
   });
 
-  it('counts a required check that has not reported yet as pending', () => {
-    expect(countPrChecks({ statusCheckRollup: [run('Lint', 'success')], requiredChecks: REQUIRED })).toMatchObject({ failedChecks: 0, pendingChecks: 1 });
+  it('does not list skipped or neutral runs as failing, as GitHub counts them as passing', () => {
+    expect(countPrChecks({ statusCheckRollup: [run('Lint', 'skipped'), run('Type Check', 'success'), run('Weekly', 'skipped'), run('Info', 'neutral')], requiredChecks: REQUIRED }))
+      .toEqual({ failedChecks: 0, pendingChecks: 0, optionalFailures: [] });
+  });
+
+  it('enforces required commit statuses, which the check-run read does not carry', async () => {
+    const runs = [run('Lint', 'success'), run('Type Check', 'success')];
+    expect((await gate(pr(runs, REQUIRED, [{ context: 'ci/legacy', state: 'SUCCESS' }]))).allowed).toBe(true);
+    const pending = await gate(pr(runs, REQUIRED, [{ context: 'ci/legacy', state: 'PENDING' }]));
+    expect([pending.allowed, pending.autoMergeAllowed]).toEqual([false, true]);
+    const failed = await gate(pr(runs, REQUIRED, [{ context: 'ci/legacy', state: 'ERROR' }]));
+    expect([failed.allowed, failed.autoMergeAllowed]).toEqual([false, false]);
   });
 
   it('treats every check as required when GitHub did not name them', async () => {

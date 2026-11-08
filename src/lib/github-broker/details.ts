@@ -3,7 +3,7 @@ import 'server-only';
 import { githubInstallationFetch } from './auth';
 import { readPullRequestFiles } from './pull-request-files';
 import { readPullRequestChecks } from './pull-request-checks';
-import { readPullRequestRequirements } from './pull-request-requirements';
+import { readPullRequestRequirements, UNKNOWN_REQUIREMENTS } from './pull-request-requirements';
 import { GitHubRequestDeferredError, type GitHubReadPriority } from './request-budget';
 import { GitHubReadScopeChangedError } from './read-scope';
 
@@ -176,8 +176,8 @@ async function readPullRequestDetailAttempt(repoFullName: string, prNumber: numb
 
   // GitHub's GraphQL API needs authentication, so an anonymous read leaves requirements unknown.
   const requirementsPromise = anonymous
-    ? Promise.resolve({ requiredChecks: null, mergeQueue: null, inMergeQueue: false })
-    : readPullRequestRequirements(repoFullName, prNumber, pr.base?.ref ?? '', scope);
+    ? Promise.resolve(UNKNOWN_REQUIREMENTS)
+    : readPullRequestRequirements(repoFullName, prNumber, pr.base?.ref ?? '', pr.head?.sha ?? '', scope);
 
   const reads = [filesPromise, checksPromise, reviewsPromise, requirementsPromise] as const;
   // Drain the entire attempt before retrying; no old response may join the retry.
@@ -219,6 +219,7 @@ async function readPullRequestDetailAttempt(repoFullName: string, prNumber: numb
     reviewDecision,
     statusCheckRollup,
     requiredChecks: requirements.requiredChecks,
+    requiredStatuses: requirements.requiredStatuses,
     mergeQueue: requirements.mergeQueue,
     inMergeQueue: requirements.inMergeQueue,
     url: pr.html_url,
