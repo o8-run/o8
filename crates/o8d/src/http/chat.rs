@@ -97,6 +97,7 @@ pub(super) fn threads(store: &ReadContext<'_>, params: &Params) -> ReadResult {
     files.sort();
     let mut threads = Vec::new();
     let mut ids = Vec::new();
+    let epoch = thread_summary::epoch();
     for path in files {
         let Some(id) = path
             .file_stem()
@@ -108,107 +109,138 @@ pub(super) fn threads(store: &ReadContext<'_>, params: &Params) -> ReadResult {
         if path.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
         }
-        let Ok(record) = store.json(&path) else {
+        // The profile boundary Store::file applies, checked before the cache.
+        let Some(path) = path
+            .canonicalize()
+            .ok()
+            .filter(|path| path.starts_with(&store.directory))
+        else {
             continue;
         };
-        let is_archived = record["archivedAt"].as_str().is_some_and(|s| !s.is_empty());
+        let Some(summary) = thread_summary::read(&path, epoch, || {
+            let record = store.json(&path).ok()?;
+            let archived = record["archivedAt"].as_str().is_some_and(|s| !s.is_empty());
+            let bot_network = record["source"] == "bot-network";
+            let backend = backend(&record);
+            if archived || bot_network {
+                return Some(thread_summary::Summary {
+                    archived,
+                    bot_network,
+                    backend,
+                    thread: Value::Null,
+                    remote: String::new(),
+                });
+            }
+            let messages = record["messages"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let last = messages.last().unwrap_or(&Value::Null);
+            let timestamp = messages
+                .iter()
+                .filter_map(|m| m["timestamp"].as_i64())
+                .max()
+                .unwrap_or(0);
+            let activity = if timestamp > 0 {
+                iso(timestamp)
+            } else if text(&record, "savedAt").is_empty() {
+                std::fs::metadata(&path)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .map(DateTime::<Utc>::from)
+                    .map(|d| d.to_rfc3339_opts(SecondsFormat::Millis, true))
+                    .unwrap_or_default()
+            } else {
+                text(&record, "savedAt").to_owned()
+            };
+            let title = text(&record, "title").trim();
+            let title = if title.is_empty() || title.starts_with("Orchestrator session · ") {
+                "Untitled conversation"
+            } else {
+                title
+            };
+            let model = text(&record, "model").trim().to_lowercase();
+            let inferred = if model.is_empty() {
+                match backend.as_str() {
+                    Some("codex") => "codex",
+                    Some("openclaw") => "openclaw",
+                    Some("hermes") => "hermes",
+                    _ => "claude-code",
+                }
+            } else {
+                &model
+            };
+            let runtime = if inferred.contains("claude") {
+                "claude-code"
+            } else if inferred.contains("gemini") {
+                "gemini"
+            } else if inferred.contains("opencode") {
+                "opencode"
+            } else if inferred.contains("codex") || inferred.starts_with("gpt") {
+                "codex"
+            } else if ["hermes", "pi", "muse", "openclaw"].contains(&inferred) {
+                inferred
+            } else {
+                "unknown"
+            };
+            let status = if record["orchestratorTerminalStatus"] == "failed" {
+                "failed"
+            } else if messages.is_empty() {
+                "idle"
+            } else if last["role"] == "user"
+                || (last["role"] == "assistant" && text(&last, "content").trim().is_empty())
+            {
+                "busy"
+            } else {
+                "ready"
+            };
+            let repo_name = if text(&record, "repoName").trim().is_empty() {
+                record["repoPath"]
+                    .as_str()
+                    .and_then(|s| Path::new(s.trim_end_matches(['/', '\\'])).file_name())
+                    .and_then(|s| s.to_str())
+                    .map(|s| json!(s))
+                    .unwrap_or(Value::Null)
+            } else {
+                record["repoName"].clone()
+            };
+            Some(thread_summary::Summary {
+                archived,
+                bot_network,
+                thread: json!({"title":title.chars().take(80).collect::<String>(),"lastMessageAt":activity,
+            "runtime":runtime,"status":status,"messageCount":messages.len(),"projectId":record["projectId"].as_str().filter(|s|!s.trim().is_empty()).map(str::trim),
+            "repoPath":record["repoPath"],"repoName":repo_name,"repoBranch":record["repoBranch"],
+            "backend":backend.clone(),"agent":record["agent"].as_str().filter(|s|!s.trim().is_empty()).map(|s|s.trim().chars().take(128).collect::<String>()),"pinned":record["pinned"]==true}),
+                backend,
+                remote: text(&record, "remoteUrl").to_owned(),
+            })
+        }) else {
+            continue;
+        };
         if archived {
-            if is_archived {
+            if summary.archived {
                 ids.push(json!(id));
             }
             continue;
         }
-        if is_archived {
+        if summary.archived {
             continue;
         }
-        if record["source"] == "bot-network" {
+        if summary.bot_network {
             return Err(());
         }
-        let backend = backend(&record);
         if if filter.is_empty() {
-            backend == "openclaw"
+            summary.backend == "openclaw"
         } else {
-            backend != filter
+            summary.backend != filter
         } {
             continue;
         }
-        let messages = record["messages"]
-            .as_array()
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let last = messages.last().unwrap_or(&Value::Null);
-        let timestamp = messages
-            .iter()
-            .filter_map(|m| m["timestamp"].as_i64())
-            .max()
-            .unwrap_or(0);
-        let activity = if timestamp > 0 {
-            iso(timestamp)
-        } else if text(&record, "savedAt").is_empty() {
-            std::fs::metadata(&path)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .map(DateTime::<Utc>::from)
-                .map(|d| d.to_rfc3339_opts(SecondsFormat::Millis, true))
-                .unwrap_or_default()
-        } else {
-            text(&record, "savedAt").to_owned()
-        };
-        let title = text(&record, "title").trim();
-        let title = if title.is_empty() || title.starts_with("Orchestrator session · ") {
-            "Untitled conversation"
-        } else {
-            title
-        };
-        let model = text(&record, "model").trim().to_lowercase();
-        let inferred = if model.is_empty() {
-            match backend.as_str() {
-                Some("codex") => "codex",
-                Some("openclaw") => "openclaw",
-                Some("hermes") => "hermes",
-                _ => "claude-code",
-            }
-        } else {
-            &model
-        };
-        let runtime = if inferred.contains("claude") {
-            "claude-code"
-        } else if inferred.contains("gemini") {
-            "gemini"
-        } else if inferred.contains("opencode") {
-            "opencode"
-        } else if inferred.contains("codex") || inferred.starts_with("gpt") {
-            "codex"
-        } else if ["hermes", "pi", "muse", "openclaw"].contains(&inferred) {
-            inferred
-        } else {
-            "unknown"
-        };
-        let status = if record["orchestratorTerminalStatus"] == "failed" {
-            "failed"
-        } else if messages.is_empty() {
-            "idle"
-        } else if last["role"] == "user"
-            || (last["role"] == "assistant" && text(&last, "content").trim().is_empty())
-        {
-            "busy"
-        } else {
-            "ready"
-        };
-        let repo_name = if text(&record, "repoName").trim().is_empty() {
-            record["repoPath"]
-                .as_str()
-                .and_then(|s| Path::new(s.trim_end_matches(['/', '\\'])).file_name())
-                .and_then(|s| s.to_str())
-                .map(|s| json!(s))
-                .unwrap_or(Value::Null)
-        } else {
-            record["repoName"].clone()
-        };
-        threads.push((json!({"id":id,"title":title.chars().take(80).collect::<String>(),"lastMessageAt":activity,
-            "runtime":runtime,"status":status,"messageCount":messages.len(),"projectId":record["projectId"].as_str().filter(|s|!s.trim().is_empty()).map(str::trim),
-            "repoPath":record["repoPath"],"repoName":repo_name,"repoBranch":record["repoBranch"],
-            "backend":backend,"agent":record["agent"].as_str().filter(|s|!s.trim().is_empty()).map(|s|s.trim().chars().take(128).collect::<String>()),"pinned":record["pinned"]==true}), text(&record, "remoteUrl").to_owned()));
+        // The id is the requested file's name: an alias of a cached file is
+        // its own conversation, so the id stays out of the cached summary.
+        let mut thread = summary.thread.clone();
+        thread["id"] = json!(id);
+        threads.push((thread, summary.remote.clone()));
     }
     if archived {
         return Ok(json!({"archivedIds":ids}));

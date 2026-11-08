@@ -67,6 +67,26 @@ per domain and continue this PR. Skip mobile/relay/encryption and retain all
 protected boundaries from the original user request. Do not version, release,
 merge or enable flags as part of the handoff.
 
+## B2: session read speed
+
+Box phase timing of one native read (p50, parity fixture): admission round trip
+2–3 ms, SQLite open 0.1 ms, first query on a fresh connection 3.25 ms (the
+whole schema is parsed), and for the sidebar list 6.3 ms to read and parse
+every chat-history file.
+
+- B2a (#5699) reuses one admission backhaul.
+- B2c keeps per-file thread summaries, with the same bounds and key as the TS
+  cache plus the inode (`crates/o8d/src/http/thread_summary.rs`).
+- **A held read connection is ruled out.** Keeping a read-only connection open
+  between requests means the writer is no longer the last connection to close,
+  so the old `-wal` and `-shm` outlive a replacement of the database file, and
+  the new file is then read through the old WAL: stale pages, a known SQLite
+  corruption pattern. The replacement step in
+  `crates/o8d/tests/session_reads.rs` (writer closes, main file renamed over,
+  next read must see the new file) fails with any held connection; a short
+  idle reaper only narrows the window. Each read opens its own connection and
+  pays the schema parse.
+
 ## Reproduction
 
 Use Node 22, the npm version from `packageManager`, stable Rust and the existing
