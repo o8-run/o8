@@ -6,26 +6,53 @@
 use serde_json::{Map, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const FILE: &str = "voice-prefs.json";
 
-/// Voice-prefs contract v1: the only keys the host keeps from this file, read
-/// from the list the host itself exports, so the two can't drift. The host is
-/// the boundary; a key missing here only means a setting can't be saved.
-pub(crate) fn allowlist() -> &'static [String] {
-    static KEYS: OnceLock<Vec<String>> = OnceLock::new();
-    KEYS.get_or_init(|| {
-        serde_json::from_str(include_str!(
-            "../../../../../src-tauri/src/stt/voice-prefs-allowlist.json"
-        ))
-        .unwrap_or_default()
-    })
-}
+/// Voice-prefs contract v1: the only keys the host keeps from this file. The
+/// host exports the same list as `src-tauri/src/stt/voice-prefs-allowlist.json`,
+/// and a test fails if the two differ. The crate keeps its own copy so it
+/// builds on its own. The host is the boundary; a key missing here only means
+/// a setting can't be saved.
+pub(crate) const ALLOWLIST: &[&str] = &[
+    "polish_instructions",
+    "dictation_microphone_uid",
+    "dictation_locale",
+    "output_tone",
+    "tts_provider",
+    "tts_voice_id",
+    "dictation_partials_surface",
+    "polish_model",
+    "elevenlabs_voice_id",
+    "elevenlabs_model_id",
+    "symon_brain_provider",
+    "symon_brain_tier",
+    "symon_brain_model",
+    "linux_ptt_shortcut",
+    "reading_speed",
+    "elevenlabs_stability",
+    "elevenlabs_similarity_boost",
+    "elevenlabs_style",
+    "ducking_enabled",
+    "sounds_enabled",
+    "whisper_stt_enabled",
+    "local_stt_enabled",
+    "voice_callouts",
+    "workspace_context_enabled",
+    "agent_can_warp_cursor",
+    "elevenlabs_use_speaker_boost",
+    "dictation_top_pill",
+    "external_symon_left_control",
+    "main_process_capture",
+    "linux_ptt_enabled",
+    "dictionary",
+    "replacements",
+    "voice_library",
+];
 
 fn allowlisted(key: &str) -> bool {
-    allowlist().iter().any(|allowed| allowed == key)
+    ALLOWLIST.contains(&key)
 }
 
 /// The host's file on this Mac. Never resolved under test.
@@ -170,7 +197,7 @@ mod tests {
 
     #[test]
     fn the_allowlist_is_the_v1_contract() {
-        assert_eq!(allowlist().len(), 33, "the host's exported list parses");
+        assert_eq!(ALLOWLIST.len(), 33);
         assert!(allowlisted("dictionary") && allowlisted("polish_instructions"));
         for secret in [
             "gemini_api_key",
@@ -181,6 +208,22 @@ mod tests {
         ] {
             assert!(!allowlisted(secret), "{secret} must never be written here");
         }
+    }
+
+    #[test]
+    fn the_allowlist_matches_the_hosts_export() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../src-tauri/src/stt/voice-prefs-allowlist.json"
+        );
+        let body = std::fs::read_to_string(path).unwrap_or_else(|error| {
+            panic!("the host's voice-prefs allowlist must be readable at {path}: {error}")
+        });
+        let host: Vec<String> = serde_json::from_str(&body).expect("the host's list is JSON");
+        assert_eq!(
+            host, ALLOWLIST,
+            "voice_prefs::ALLOWLIST must list the host's keys in the host's order"
+        );
     }
 
     #[test]
