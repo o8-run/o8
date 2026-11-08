@@ -363,16 +363,27 @@ export async function PATCH(req: NextRequest) {
       const packet = current.packets.find((p) => p.id === packetId);
       if (!packet) return { found: false } as const;
       if (packet.manualLaunchClaim && !manualLaunchClaimIsLive(packet.manualLaunchClaim)) packet.manualLaunchClaim = null;
-      const liveLane = updates.queueState === 'held' ? findLaneByPacket(packetId) : null;
-      const launchReservation = updates.queueState === 'held'
+      const holding = updates.queueState === 'held';
+      // Archiving hides a packet from Workers and marks its mission complete, so a
+      // worker that is still launching, running, recovering or merging must be
+      // stopped first. Restoring (archivedAt: null) is always allowed.
+      const archiving = typeof updates.archivedAt === 'string' && updates.archivedAt.trim() !== '' && !packet.archivedAt;
+      const liveLane = holding || archiving ? findLaneByPacket(packetId) : null;
+      const launchReservation = holding || archiving
         ? new StorageAdmissionStore(getSqlite()).getLatestReservationForOwner(packetId)
         : null;
-      if (
+      const launched = launchReservation?.state === 'reserved' || Boolean(packet.manualLaunchClaim);
+      if (holding && (
         (liveLane && (liveLane.status === 'idle' || liveLane.status === 'launching' || liveLane.status === 'running' || liveLane.status === 'recovering'))
-        || launchReservation?.state === 'reserved'
-        || Boolean(packet.manualLaunchClaim)
-      ) {
+        || launched
+      )) {
         return { found: true, alreadyLaunched: true } as const;
+      }
+      if (archiving && (
+        (liveLane && (liveLane.status === 'launching' || liveLane.status === 'running' || liveLane.status === 'recovering' || liveLane.status === 'merging'))
+        || launched
+      )) {
+        return { found: true, workerLive: true } as const;
       }
       const mutablePacket = packet as unknown as Record<string, unknown>;
       for (const [key, value] of Object.entries(updates)) {
@@ -386,6 +397,7 @@ export async function PATCH(req: NextRequest) {
 
     if (!result.found) return buildErrorResponse(`Packet ${packetId} not found.`, 404);
     if ('alreadyLaunched' in result) return buildErrorResponse(`Packet ${packetId} is launching or running; stop its worker before holding it.`, 409);
+    if ('workerLive' in result) return buildErrorResponse(`Packet ${packetId} has a worker that is still running; stop it before archiving the packet.`, 409);
     if (typeof updates.archivedAt === 'string' && updates.archivedAt.trim()) {
       autoResolveMergedPacketVerificationIncidents({ packetId, event: 'packet_archived' });
     }

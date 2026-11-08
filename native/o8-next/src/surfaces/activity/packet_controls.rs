@@ -97,15 +97,21 @@ impl ActivityPane {
                 cx,
             ));
         }
-        destructive = destructive.child(self.packet_button(
-            "activity-packet-archive",
-            if archived { "Restore" } else { "Archive" },
-            Action::Packet(Packet::Patch(
-                row.clone(),
-                json!({"archivedAt":if archived { Value::Null } else { json!(packet::iso_now()) }}),
-            )),
-            cx,
-        ));
+        // The server refuses to archive a packet whose worker is still live; stop it first.
+        let live = lane && matches!(status.as_str(), "running" | "launching" | "recovering" | "merging");
+        destructive = destructive.child(if live && !archived {
+            Self::inert("activity-packet-archive", "Archive")
+        } else {
+            self.packet_button(
+                "activity-packet-archive",
+                if archived { "Restore" } else { "Archive" },
+                Action::Packet(Packet::Patch(
+                    row.clone(),
+                    json!({"archivedAt":if archived { Value::Null } else { json!(packet::iso_now()) }}),
+                )),
+                cx,
+            )
+        });
         view = view.child(destructive);
         if self.closing.as_deref() == Some(row.id.as_str()) {
             view = view.child(self.close_unmerged(row, cx));

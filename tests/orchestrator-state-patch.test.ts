@@ -72,6 +72,32 @@ function patchRequest(updates: Record<string, unknown>): NextRequest {
   });
 }
 
+describe('PATCH /api/orchestrator/state archive', () => {
+  it('refuses to archive a packet while its worker runs, and archives once it stops', async () => {
+    const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
+    seedMission();
+    const lane = createLane({
+      repoPath: process.cwd(), branch: 'packet/state-patch', baseBranch: 'main', runtime: 'codex',
+      label: 'archive guard', ownership: 'managed', packetId: 'pkt-state-patch', actor: 'system',
+    });
+    setLaneStatus(lane.id, 'running');
+
+    const refused = await stateRoute.PATCH(patchRequest({ archivedAt: '2026-11-08T00:00:00.000Z' }));
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error.message).toContain('stop it before archiving');
+    expect(readOrchestratorControlPlaneState().packets[0]?.archivedAt ?? null).toBeNull();
+
+    setLaneStatus(lane.id, 'failed');
+    const archived = await stateRoute.PATCH(patchRequest({ archivedAt: '2026-11-08T00:00:00.000Z' }));
+    expect(archived.status).toBe(200);
+    expect(readOrchestratorControlPlaneState().packets[0]?.archivedAt).toBe('2026-11-08T00:00:00.000Z');
+
+    const restored = await stateRoute.PATCH(patchRequest({ archivedAt: null }));
+    expect(restored.status).toBe(200);
+    expect(readOrchestratorControlPlaneState().packets[0]?.archivedAt ?? null).toBeNull();
+  });
+});
+
 describe('PATCH /api/orchestrator/state', () => {
   it('rejects a direct status write with the correct lane transition verb', async () => {
     seedMission();
