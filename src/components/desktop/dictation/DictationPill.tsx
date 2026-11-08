@@ -289,6 +289,16 @@ function SquiggleLoader({ label }: { label: string }) {
 }
 
 /**
+ * The recorder sends levels on a dBFS meter (-50..-10 dBFS onto 0..1), so
+ * 0.25 is about -40 dBFS: quiet speech counts, a quiet room doesn't.
+ */
+export const SPEAKING_LEVEL = 0.25;
+
+export function speakingAt(level: number): boolean {
+  return level > SPEAKING_LEVEL;
+}
+
+/**
  * DictationPillView — the presentational pill (glass shell + EQ canvas +
  * squiggle loader + state body). Position-agnostic: it renders the morphing
  * pill at its natural size with NO outer positioning. Both surfaces share it:
@@ -302,16 +312,6 @@ function SquiggleLoader({ label }: { label: string }) {
  * `persistentIdle` is set (always-on dock), in which case idle renders the
  * compact Symon idle capsule and the morph runs idle ↔ recording ↔ … ↔ idle.
  */
-/**
- * The recorder sends levels on a dBFS meter (-50..-10 dBFS onto 0..1), so
- * 0.25 is about -40 dBFS: quiet speech counts, a quiet room doesn't.
- */
-export const SPEAKING_LEVEL = 0.25;
-
-export function speakingAt(level: number): boolean {
-  return level > SPEAKING_LEVEL;
-}
-
 export function DictationPillView({ snapshot, onCancel, hideCancel, persistentIdle }: DictationPillViewProps) {
   const { state, audioLevel, durationMs, error, partialTranscript } = snapshot;
   const visible = state !== 'idle';
