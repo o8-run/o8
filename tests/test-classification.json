@@ -5507,6 +5507,12 @@
       ]
     },
     {
+      "path": "tests/o8d-team-routes-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-terminal-turns-real-path.test.ts",
       "reasons": [
         "real-path"

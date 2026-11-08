@@ -192,6 +192,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // UPDATE, so either process may register, claim, settle or cancel. (#5422)
     route('/api/symon/watches', 'GET POST', () => import('@/app/api/symon/watches/route')),
     route('/api/symon/watches/[id]', 'GET PATCH DELETE', () => import('@/app/api/symon/watches/[id]/route')),
+    // o8 team presence, messages and tell for Symon: operator-only through the
+    // middleware (none is on a device, worker or loopback list), principal from the
+    // bearer. They read and append the files under each registered repo's
+    // .git/agents; no process state beyond the repo registry's short read cache.
+    route('/api/team/presence', 'GET', () => import('@/app/api/team/presence/route')),
+    route('/api/team/messages', 'GET', () => import('@/app/api/team/messages/route')),
+    route('/api/team/tell', 'POST', () => import('@/app/api/team/tell/route')),
     // MCP config generator (Settings > MCP). GET only, no handler-level auth: gated by
     // panelGateMiddleware, which does not public-allowlist /api/setup/* (hardening #1562).
     // Over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) the loopback
