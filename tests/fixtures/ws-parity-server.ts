@@ -81,6 +81,8 @@ export async function startParityReference(options: {
       O8_DATA_DIR: undefined, CORTEX_IDE_DATA_DIR: directory,
       CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'),
       CORTEX_IDE_REVIEW_REPO_ROOT: directory, WS_TOKEN: token,
+      // Never reach pip from a fixture; a test may supply its own interpreter.
+      O8_TTS_PYTHON: process.env.O8_TTS_PYTHON ?? join(directory, 'no-python'),
       O8_API_PORT: String(address.port), O8_WS_PORT: String(port),
       CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${port}`,
       O8_WS_O8D: (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
