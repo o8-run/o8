@@ -45,6 +45,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/visualizations', 'GET', () => import('@/lib/visualizations/read')),
     route('/api/repo-spec', 'GET', () => import('@/app/api/repo-spec/route')),
     route('/api/panel/browse-folder', 'POST', () => import('@/app/api/panel/browse-folder/route')),
+    route('/api/repo-spec/asset', 'POST', () => import('@/app/api/repo-spec/asset/route')),
     route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
     route('/api/runtime/service-tiers', 'GET', () => import('@/app/api/runtime/service-tiers/route')),
     route('/api/runtime/telemetry', 'GET', () => import('@/app/api/runtime/telemetry/route')),

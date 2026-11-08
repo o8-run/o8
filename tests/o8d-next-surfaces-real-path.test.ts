@@ -310,6 +310,32 @@ it('gates the native folder picker POST with Next stopped', async () => {
   await get.arrayBuffer();
 });
 
+it('saves a notes image through the native asset POST with Next stopped', async () => {
+  const repo = join(server.directory, 'asset-repo');
+  mkdirSync(repo, { recursive: true });
+  const url = `${origin}/api/repo-spec/asset?${new URLSearchParams({ repoPath: repo })}`;
+  const image = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  const upload = (authorization?: string) => fetch(url, { method: 'POST', body: image,
+    headers: { 'content-type': 'image/png', 'x-filename': 'clipboard.png', ...(authorization ? { authorization } : {}),
+      'x-o8-client-addr': '127.0.0.1' } });
+  for (const authorization of [undefined, 'Bearer fixture-wrong-token']) {
+    const refused = await upload(authorization);
+    expect(refused.status).toBe(401);
+    await refused.arrayBuffer();
+  }
+  expect(existsSync(join(repo, 'o8-assets'))).toBe(false);
+  const response = await upload(`Bearer ${server.token}`);
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body).toMatchObject({ ok: true, bytes: image.length });
+  expect(body.relPath).toMatch(/^o8-assets\/clipboard-[0-9a-f]{10}\.png$/);
+  expect(readFileSync(join(repo, body.relPath))).toEqual(image);
+  const get = await fetch(url, { headers: { authorization: `Bearer ${server.token}` } });
+  expect(get.status).toBe(405);
+  expect(get.headers.get('allow')).toBe('POST');
+  await get.arrayBuffer();
+});
+
 it('preserves canonical workspace paths through the native project handler', async () => {
   const alias = join(server.directory, 'workspace-alias');
   symlinkSync(server.directory, alias, process.platform === 'win32' ? 'junction' : 'dir');

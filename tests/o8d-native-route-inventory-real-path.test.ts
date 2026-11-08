@@ -27,7 +27,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/account/avatar',
   '/api/panel/devices',
   '/api/panel/update/apply',
-  '/api/repo-spec/asset',
   '/api/tasks/[id]/preview',
   '/api/tts', // edge-tts installer state is per-process; Phase B.
   '/api/worktrees/retention-usage', // resolveManagedWorktreeStorageTarget creates the default root.

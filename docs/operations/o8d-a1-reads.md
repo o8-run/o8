@@ -75,7 +75,6 @@ the heal-bot is on, and skips the ticks the running heal-bot already covers.
 | --- | --- |
 | `/api/panel/devices` | Handler requires verified loopback in addition to operator authority. The adapter stamps `unverified-proxy`; a bearer cannot satisfy the local-peer condition. |
 | `/api/tasks/[id]/preview` | Native client uses POST/DELETE; production route has no GET. |
-| `/api/repo-spec/asset` | Native client uploads with POST; production route has no GET. |
 | `/api/orchestrator/comparison-diff` | GET has a write path. Held; with the security lane. |
 | `/api/orchestrator/backend-models` | ACP probing writes the model cache and takes the credential-policy store lock before spawning. Moving the catalogue cache alone cannot make the GET read-only. See the orchestrator audit below. |
 | `/api/orchestrator/pull-request-context` | Refresh queries update the mirror through a reader shared with paired devices. The existing context POST is operator-only; moving all callers to it needs an authorization decision. See the orchestrator audit below. |
@@ -641,3 +640,14 @@ picks a folder through stand-in choosers on `PATH` while `.provider-keys.lock`
 is held; the locked launch answers 503 there. The socket test checks only the
 bearer gate and the method, since an authorized call opens the host's chooser.
 
+
+## Notes image upload
+
+`POST /api/repo-spec/asset` (session; `files_panel/notes_assets.rs`) is
+registered on the native transport. The handler and the middleware's device
+allowlist are unchanged; the native gate requires the bearer, so a forged
+loopback header no longer stands in for it. The `srcPath` branch stays
+operator-only by principal. The native transport refuses bodies over 16 MiB;
+the native caller sends at most 10 MB of image bytes, and larger files go by
+`srcPath`. The socket test in `tests/o8d-next-surfaces-real-path.test.ts`
+uploads an image with Next stopped and reads it back from `o8-assets/`.
