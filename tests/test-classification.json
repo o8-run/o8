@@ -7463,6 +7463,13 @@
       ]
     },
     {
+      "path": "tests/speech-recognizer-level-meter.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build"
+      ]
+    },
+    {
       "path": "tests/speech-recognizer-missing-mic-real-path.test.ts",
       "reasons": [
         "child-process",
