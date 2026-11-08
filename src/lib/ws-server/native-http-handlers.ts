@@ -102,6 +102,7 @@ import { GET as api_panel_problem_dossiers_GET } from '@/app/api/panel/problem-d
 import { GET as api_cortex_cross_repo_proposals_GET } from '@/app/api/cortex/cross-repo-proposals/route';
 import { GET as api_runtime_acp_registry_GET } from '@/app/api/runtime/acp-registry/route';
 import { GET as api_orchestrator_packet_transcript_GET } from '@/app/api/orchestrator/packet-transcript/route';
+import { GET as api_orchestrator_archive_GET } from '@/app/api/orchestrator/archive/route';
 
 export const api_tasks = { GET: api_tasks_GET };
 export const api_mobile_orchestrator_threads = { GET: api_mobile_orchestrator_threads_GET };
@@ -207,3 +208,4 @@ export const api_orchestrator_stop_packet = { POST: api_orchestrator_stop_packet
 
 export const api_cortex_codebase_memory = { GET: api_cortex_codebase_memory_GET };
 export const api_cortex_diagnostics = { GET: api_cortex_diagnostics_GET };
+export const api_orchestrator_archive = { GET: api_orchestrator_archive_GET };

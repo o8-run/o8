@@ -45,6 +45,7 @@ No peer header grants local authority.
 | `/api/cortex/codebase-memory` | settings | settings_indexing.rs | gate |
 | `/api/cortex/diagnostics` | settings | settings_indexing.rs | gate |
 | `/api/orchestrator/packet-transcript` | sidebar | surfaces/sidebar/thread_list_client.rs | gate + panel; Codex discovery runs `sqlite3 -readonly` on the read-only child boundary (#5652), so the read takes no `.provider-keys.lock` |
+| `/api/orchestrator/archive` | session | composer/command_client.rs | gate + panel; reads the repository registry, saved threads and compaction archives |
 
 `[hash]` uses the production parameter name for the native commit path
 inventoried as `[id]`. The timeline similarly uses production `[number]` for

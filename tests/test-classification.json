@@ -5378,6 +5378,12 @@
       ]
     },
     {
+      "path": "tests/o8d-orchestrator-archive-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-packet-transcript-real-path.test.ts",
       "reasons": [
         "real-path"
