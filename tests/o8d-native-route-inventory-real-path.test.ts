@@ -19,7 +19,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/orchestrator/pull-request-context',
   '/api/panel/account/avatar', // no caller yet; wired with the native rail account avatar
   '/api/panel/devices',
-  '/api/panel/update/apply', // Updater state lives in the Next process; Phase B.
   '/api/tasks/[id]/preview',
   '/api/review/push', // Review's push button: a POST, outside the Phase A reads.
 ]);
