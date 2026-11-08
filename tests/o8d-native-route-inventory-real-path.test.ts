@@ -12,7 +12,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/ssh-machines',
   '/api/runtime/acp-connection',
   '/api/runtime/acp-registry/prepare',
-  '/api/setup/detect', // CLI probes, credential reads and CLI symlink repair.
   '/api/orchestrator/backend-models',
   '/api/orchestrator/comparison-diff', // GET has a write path; held for review.
   '/api/orchestrator/pull-request-context',
@@ -111,7 +110,7 @@ it('counts the desktop shell, the MCP server and the WS process toward the Next-
   checkCaller(['src/ws-server.ts', ...sourceFiles('src/lib/ws-server', '.ts')],
     /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^>(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, NEXT_ONLY_WS_PATHS);
   const remaining = new Set([...NEXT_ONLY_NATIVE_PATHS, ...NEXT_ONLY_SHELL_PATHS, ...NEXT_ONLY_MCP_PATHS, ...NEXT_ONLY_WS_PATHS]);
-  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(67);
+  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(66);
 });
 
 it('rejects an unknown route discovered in a shell or MCP source file', () => {

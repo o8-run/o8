@@ -34,6 +34,11 @@ const NATIVE_READS = [
   ['sidebar', '/api/orchestrator/packet-transcript', 400],
   ['session', '/api/orchestrator/archive', 200],
   ['setup', '/api/setup/cli-updates?runtime=fixture-unknown', 400],
+  // Setup-wizard tool detection: no handler-level auth, gated by panelGateMiddleware
+  // (/api/setup/* is not public, hardening #1562), so operator-ws-token-only over native. It reads
+  // provider credentials to derive boolean presence; the dedicated test below proves no secret value
+  // reaches the body (#5243).
+  ['setup', '/api/setup/detect', 200],
   ['settings', '/api/panel/o8-update-summary?version=invalid', 400],
   ['activity', '/api/cortex/proposals', 200],
   ['activity', '/api/cortex/cross-repo-proposals', 200],
@@ -303,6 +308,41 @@ it('refuses paired-device revoke over native to everyone but the operator (#5243
     method: 'POST', headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' }, body: '{}',
   });
   expect(operator.status).toBe(400);
+});
+
+// setup/detect reads provider credentials (process.env + .env.local under the data dir) to decide
+// whether each tool's auth is present, then spawns CLI version probes. Over native it must stay
+// operator-ws-token-only AND never echo a secret VALUE. Seed fake key values into the data dir's
+// .env.local: the handler reads them (the api-keys tool reports openrouter configured), but the
+// response body carries only names/booleans/paths — never the seeded values. (#5243)
+it('reads provider credentials but never returns their values over native setup/detect (#5243)', async () => {
+  const fakeOpenRouter = 'sk-or-v1-redactionproof0000000000000000000000000000000000000000000000';
+  const fakeOpenAI = 'sk-redactionproof1111111111111111111111111111111111';
+  const envPath = join(server.directory, '.env.local');
+  writeFileSync(envPath, `OPENROUTER_API_KEY=${fakeOpenRouter}\nOPENAI_API_KEY=${fakeOpenAI}\n`, { mode: 0o600 });
+  try {
+    // Missing/wrong credentials are refused even with forged loopback markers.
+    for (const authorization of [undefined, 'Bearer fixture-wrong-token']) {
+      const refused = await fetch(origin + '/api/setup/detect', { headers: {
+        ...(authorization ? { authorization } : {}),
+        'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
+      } });
+      expect(refused.status).toBe(401);
+      await refused.arrayBuffer();
+    }
+
+    const response = await fetch(origin + '/api/setup/detect', { headers: { authorization: `Bearer ${server.token}` } });
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    // The handler READ the seeded credentials: the API-keys tool reports openrouter configured.
+    const apiKeys = JSON.parse(body).tools.find((tool: { id: string }) => tool.id === 'api-keys');
+    expect(apiKeys?.details?.providers).toContainEqual({ provider: 'openrouter', configured: true });
+    // But it NEVER echoes a secret VALUE — not the OpenRouter key, not the OpenAI key other tools read.
+    expect(body).not.toContain(fakeOpenRouter);
+    expect(body).not.toContain(fakeOpenAI);
+  } finally {
+    rmSync(envPath, { force: true });
+  }
 });
 
 it('keeps Sidebar and saved history reachable after verbose Workers events', async () => {
