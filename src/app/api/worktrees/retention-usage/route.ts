@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
     ].map((target) => path.resolve(target)))];
     let admissionTargets: string[] = [];
     try {
-      admissionTargets = repos.map((repo) => resolveManagedWorktreeStorageTarget(repo.localPath));
+      admissionTargets = repos.map((repo) => resolveManagedWorktreeStorageTarget(repo.localPath, process.env, { create: false }));
     } catch {
       // An unavailable configured root must not fall back to the repository volume.
       admissionTargets = [];

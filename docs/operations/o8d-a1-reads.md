@@ -86,7 +86,7 @@ One of the seven R1 candidates remains held after removing registry repair from
 
 | Candidate | Auth basis | GET call chain that writes |
 | --- | --- | --- |
-| `/api/worktrees/retention-usage` | gate + panel | `GET` -> `resolveManagedWorktreeStorageTarget` creates the default root. Independently, host-volume and directory telemetry invokes subprocesses through the shared provider boundary, which creates `.provider-keys.lock` and prepares credential policy. Moving the root creation alone does not make this GET read-only; the credential boundary remains unchanged. |
+| `/api/worktrees/retention-usage` | gate + panel | Since registered: the GET resolves the admission target with `create: false`, so a missing default root is observed through its nearest existing ancestor and never created, and `du`/`df`/`diskutil`/`findmnt` run on the read-only child boundary (#5652), so the read takes no `.provider-keys.lock`. |
 
 No eligible handler needs `next/headers`, cookie context or edge runtime.
 In-memory read caches and bounded observation processes remain in the production

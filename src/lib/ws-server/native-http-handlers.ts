@@ -107,6 +107,7 @@ import { POST as api_v2_chat_history_terminal_turns_POST } from '@/app/api/v2/ch
 import { GET as api_task_artifacts_id_decision_GET, POST as api_task_artifacts_id_decision_POST } from '@/app/api/task-artifacts/[id]/decision/route';
 import { POST as api_panel_browse_folder_POST } from '@/app/api/panel/browse-folder/route';
 import { POST as api_repo_spec_asset_POST } from '@/app/api/repo-spec/asset/route';
+import { GET as api_worktrees_retention_usage_GET } from '@/app/api/worktrees/retention-usage/route';
 
 export const api_tasks = { GET: api_tasks_GET };
 export const api_mobile_orchestrator_threads = { GET: api_mobile_orchestrator_threads_GET };
@@ -217,3 +218,4 @@ export const api_v2_chat_history_terminal_turns = { POST: api_v2_chat_history_te
 export const api_task_artifacts_id_decision = { GET: api_task_artifacts_id_decision_GET, POST: api_task_artifacts_id_decision_POST };
 export const api_panel_browse_folder = { POST: api_panel_browse_folder_POST };
 export const api_repo_spec_asset = { POST: api_repo_spec_asset_POST };
+export const api_worktrees_retention_usage = { GET: api_worktrees_retention_usage_GET };

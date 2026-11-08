@@ -5439,6 +5439,12 @@
       ]
     },
     {
+      "path": "tests/o8d-retention-usage-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-review-last-turn-real-path.test.ts",
       "reasons": [
         "child-process",

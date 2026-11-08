@@ -11,7 +11,11 @@ vi.stubEnv('CORTEX_IDE_DATA_DIR', directory);
 vi.stubEnv('CORTEX_IDE_DB_PATH', join(directory, 'cortex-ide.db'));
 // Keep the real indexer and fixture Git repo; substitute only binary availability
 // and the MCP call so its in-flight transition can be observed deterministically.
-vi.mock('@/lib/providers/child-process', () => import('node:child_process'));
+vi.mock('@/lib/providers/child-process', async () => {
+  const childProcess = await import('node:child_process');
+  // Storage telemetry launches through the read-only entrypoint.
+  return { ...childProcess, execFileReadOnly: childProcess.execFile };
+});
 vi.mock('@/lib/codebase-memory/binary', () => ({
   resolveCodebaseMemoryBin: () => null,
   waitForCodebaseMemoryBin: binaryWait,
