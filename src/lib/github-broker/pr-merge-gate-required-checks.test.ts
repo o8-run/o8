@@ -38,9 +38,13 @@ describe('merge gate counts only the checks GitHub requires', () => {
     expect(result.autoMergeAllowed).toBe(true);
   });
 
-  it('does not list skipped or neutral runs as failing, as GitHub counts them as passing', () => {
-    expect(countPrChecks({ statusCheckRollup: [run('Lint', 'skipped'), run('Type Check', 'success'), run('Weekly', 'skipped'), run('Info', 'neutral')], requiredChecks: REQUIRED }))
+  it('does not list skipped or neutral optional runs as failing', () => {
+    expect(countPrChecks({ statusCheckRollup: [run('Lint', 'success'), run('Type Check', 'success'), run('Weekly', 'skipped'), run('Info', 'neutral')], requiredChecks: REQUIRED }))
       .toEqual({ failedChecks: 0, pendingChecks: 0, optionalFailures: [] });
+  });
+
+  it('keeps refusing a required check that ends neutral or skipped', () => {
+    expect(countPrChecks({ statusCheckRollup: [run('Lint', 'neutral'), run('Type Check', 'skipped')], requiredChecks: REQUIRED }).failedChecks).toBe(2);
   });
 
   it('enforces required commit statuses, which the check-run read does not carry', async () => {

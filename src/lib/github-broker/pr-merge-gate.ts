@@ -22,8 +22,9 @@ type Detail = Awaited<ReturnType<typeof fetchGitHubPullRequestDetail>>;
 type Discussion = Awaited<ReturnType<typeof fetchGitHubPullRequestComments>>;
 type CheckRollup = Pick<Detail, 'statusCheckRollup'> & { requiredChecks?: string[] | null; requiredStatuses?: Array<{ context: string; state: string }> };
 
-// GitHub counts a skipped or neutral run as passing for a required check.
-const PASSING = new Set(['success', 'neutral', 'skipped']);
+// A skipped or neutral optional run is not a failure worth listing. Blocking checks keep
+// the desktop rule: anything but success refuses the merge.
+const NOT_FAILED = new Set(['success', 'neutral', 'skipped']);
 
 /**
  * Count checks the way GitHub decides mergeability. When GitHub names the required
@@ -35,14 +36,15 @@ export function countPrChecks(pr: CheckRollup) {
   const rollup = pr.statusCheckRollup ?? [];
   const required = pr.requiredChecks ? new Set(pr.requiredChecks) : null;
   const blocking = required ? rollup.filter(c => required.has(c.name)) : rollup;
-  const failing = (c: (typeof rollup)[number]) => Boolean(c.conclusion && !PASSING.has(c.conclusion.toLowerCase()));
+  const failing = (c: (typeof rollup)[number]) => Boolean(c.conclusion && c.conclusion.toLowerCase() !== 'success');
+  const failed = (c: (typeof rollup)[number]) => Boolean(c.conclusion && !NOT_FAILED.has(c.conclusion.toLowerCase()));
   const pending = (c: (typeof rollup)[number]) => !c.conclusion || c.status?.toLowerCase() !== 'completed';
   const statuses = required ? pr.requiredStatuses ?? [] : [];
   const statusState = (s: { state: string }) => s.state.toUpperCase();
   return {
     failedChecks: blocking.filter(failing).length + statuses.filter(s => ['FAILURE', 'ERROR'].includes(statusState(s))).length,
     pendingChecks: blocking.filter(pending).length + statuses.filter(s => !['SUCCESS', 'FAILURE', 'ERROR'].includes(statusState(s))).length,
-    optionalFailures: required ? [...new Set(rollup.filter(c => !required.has(c.name) && failing(c)).map(c => c.name))].sort() : [],
+    optionalFailures: required ? [...new Set(rollup.filter(c => !required.has(c.name) && failed(c)).map(c => c.name))].sort() : [],
   };
 }
 
