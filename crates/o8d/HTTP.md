@@ -95,12 +95,13 @@ acceptance items.
 
 ## Flagged native session reads
 
-With `O8_NEXT_O8D=1 O8_WS_O8D=1 O8D_NATIVE_SESSION_READS=1`, the app
+With `O8_NEXT_O8D=1 O8_WS_O8D=1`, the app
 transport serves saved GETs for `/api/mobile/orchestrator/threads`,
 `/api/mobile/history`, `/api/v2/chat-history` and
 `/api/orchestrator/composer-queue` in Rust. The `experimental-session-reads`
 feature adds the saved-read dependencies on top of `experimental-ws`; a plain
-`experimental-ws` build proxies every HTTP request as before. The flag defaults off. All other paths and all
+`experimental-ws` build proxies every HTTP request as before. The reads are on by
+default behind `O8_NEXT_O8D=1`; `O8D_NATIVE_SESSION_READS=0` keeps them in TypeScript. All other paths and all
 non-GET methods retain their existing TypeScript handlers. In flagged mode,
 TS HTTP responses close their connection after completion so the next request
 cannot remain inside an earlier streaming TS tunnel. WebSocket delivery retains

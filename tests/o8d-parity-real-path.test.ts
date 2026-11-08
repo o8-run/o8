@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Agent, get } from 'node:http';
 import { promisify } from 'node:util';
 import { beforeAll, expect, it } from 'vitest';
-import { firstDifference, normalize, runSessionParity, seedSessionFixture, send, SESSION_READ_PATHS, startSessionServer } from '../scripts/o8d/parity';
+import { firstDifference, normalize, runSessionParity, seedSessionFixture, send, SESSION_READ_PATHS, sessionCorpus, startSessionServer } from '../scripts/o8d/parity';
 
 // CI ships no daemon: build the session-reads feature set into its own target
 // directory so a sibling surface test's experimental-ws build cannot replace it.
@@ -18,6 +18,28 @@ beforeAll(async () => {
 }, 900_000);
 it('records TS session reads and replays them natively with zero differences and Next stopped', async () => {
   expect(await runSessionParity(binary, false)).toMatchObject({ requests: 22, differences: 0 });
+}, 180_000);
+
+it('serves session reads natively by default behind the native transport; =0 keeps them in TS', async () => {
+  const { nativeSessionReadsEnabled } = await import('../src/lib/ws-server/native-session-reads');
+  expect([undefined, '1', '0'].map(flag => [nativeSessionReadsEnabled({ O8_NEXT_O8D: '1', O8D_NATIVE_SESSION_READS: flag }),
+    nativeSessionReadsEnabled({ O8_NEXT_O8D: '0', O8D_NATIVE_SESSION_READS: flag })])).toEqual([[true, false], [true, true], [false, false]]);
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-session-default-')));
+  let server: Awaited<ReturnType<typeof startSessionServer>> | undefined;
+  try {
+    await seedSessionFixture(directory);
+    for (const [flag, native] of [['default', true], [false, false]] as const) {
+      server = await startSessionServer(directory, flag, binary);
+      // The four routes, through the benchmark's own 200 requests.
+      const corpus = sessionCorpus(directory);
+      for (const path of [corpus[0], corpus[5], corpus[10], corpus[14]]) {
+        const response = await send(server, path);
+        expect([path.split('?')[0], response.status, response.native]).toEqual([path.split('?')[0], 200, native]);
+      }
+      await server.stop();
+      server = undefined;
+    }
+  } finally { await server?.stop(); rmSync(directory, { recursive: true, force: true }); }
 }, 180_000);
 
 it('preserves auth refusals, TS writes, other routes and flag-off behavior through the public socket', async () => {
