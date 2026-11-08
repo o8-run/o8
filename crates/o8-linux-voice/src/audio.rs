@@ -23,13 +23,18 @@ pub fn decode_f32le(bytes: &[u8]) -> (Vec<f32>, &[u8]) {
     (samples, &bytes[whole..])
 }
 
-/// Meter level in 0..=1, using the Swift helper's scale (`rms / 0.12`).
+/// Meter level in 0..=1 on the Swift helper's scale: RMS in dBFS, mapped
+/// from -50..-10 dBFS onto 0..1 and clamped.
 pub fn level(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return 0.0;
     }
     let sum: f32 = samples.iter().map(|s| s * s).sum();
-    ((sum / samples.len() as f32).sqrt() / 0.12).min(1.0)
+    let rms = (sum / samples.len() as f32).sqrt();
+    if rms <= 0.0 || !rms.is_finite() {
+        return 0.0;
+    }
+    ((20.0 * rms.log10() + 50.0) / 40.0).clamp(0.0, 1.0)
 }
 
 /// Write 16 kHz mono 16-bit PCM, the format the Swift helper emits as
@@ -131,8 +136,14 @@ mod tests {
     #[test]
     fn level_matches_the_swift_scale() {
         assert_eq!(level(&[]), 0.0);
-        assert!((level(&[0.06; 160]) - 0.5).abs() < 1e-4);
-        assert_eq!(level(&[0.9; 160]), 1.0);
+        assert_eq!(level(&[0.0; 160]), 0.0);
+        // A constant signal's RMS is its value: 10^(dBFS / 20).
+        let at = |dbfs: f32| level(&[10f32.powf(dbfs / 20.0); 160]);
+        assert_eq!(at(-60.0), 0.0);
+        assert!(at(-50.0).abs() < 1e-4);
+        assert!((at(-30.0) - 0.5).abs() < 1e-4);
+        assert!((at(-10.0) - 1.0).abs() < 1e-4);
+        assert_eq!(at(0.0), 1.0);
     }
 
     #[test]

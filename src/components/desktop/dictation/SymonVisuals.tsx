@@ -26,15 +26,23 @@ export function SymonMark({ size = 17, active = false }: { size?: number; active
   return <span aria-hidden="true" data-symon-mark="" style={{ display: 'inline-block', flexShrink: 0, width: size, height: size, borderRadius: '50%', background: SYMON_ORB_BACKGROUND, boxShadow: active ? '0 0 0 2px var(--t-accent, #88d1f1), 0 0 9px rgba(136, 209, 241, 0.45)' : '0 0 9px rgba(136, 209, 241, 0.45)' }} />;
 }
 
+/**
+ * Bar height for a measured level. Native levels are on a dBFS meter
+ * (-50..-10 dBFS onto 0..1); doubling it keeps the old dock's microphone
+ * sensitivity, full height from about -30 dBFS, without opening another
+ * microphone or inventing ambient bars.
+ */
+export function liveAmplitude(level: number): number {
+  return Math.min(1, Math.max(0, level) * 2);
+}
+
 /** Static preview, or measured input. No ambient activity or recording claim. */
 export function SymonWaveform({ level = 0, width = SYMON_WAVEFORM.width, live = false }: { level?: number; width?: number; live?: boolean }) {
   const gradient = useId();
   const reducedMotion = useReducedMotion();
   const wave = SYMON_WAVEFORM;
-  // Native levels are RMS / 0.12. Match the old dock's measured microphone
-  // sensitivity, without opening another microphone or inventing ambient bars.
   const measured = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 0));
-  const amplitude = live ? Math.min(1, Math.sqrt(Math.max(0, measured * 0.12 - 0.003) * 34)) : measured;
+  const amplitude = live ? liveAmplitude(measured) : measured;
   return <svg aria-hidden="true" width={width} height={wave.height} viewBox={`0 0 ${wave.width} ${wave.height}`} style={{ display: 'block', flexShrink: 0 }}>
     <defs><linearGradient id={gradient}>{SYMON_GRADIENT_STOPS.map(([offset, color]) => <stop key={offset} offset={offset} stopColor={color} />)}</linearGradient></defs>
     {wave.weights.map((weight, i) => {

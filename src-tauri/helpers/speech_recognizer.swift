@@ -173,6 +173,37 @@ func emit(_ type: String, _ text: String, sessionId: UInt64? = nil) {
     }
 }
 
+// MARK: level meter (begin). tests/speech-recognizer-level-meter.test.ts
+// compiles this block on its own; keep it free of other helper state.
+
+/// The waveform's microphone level: RMS in dBFS, mapped from −50…−10 dBFS
+/// onto 0…1 and clamped. A linear scale left normal speech near the floor
+/// and clipped loud syllables (#2534).
+func meterLevel(rms: Float) -> Float {
+    guard rms > 0, rms.isFinite else { return 0 }
+    let dbfs = 20 * log10(rms)
+    return max(0, min(1, (dbfs + 50) / 40))
+}
+
+/// Lets a level through at most once per `interval` of wall time, so the
+/// rate doesn't depend on the sample rate or the buffer size.
+struct LevelGate {
+    var interval: TimeInterval = 0.033
+    private var last: TimeInterval = -.infinity
+
+    init(interval: TimeInterval = 0.033) {
+        self.interval = interval
+    }
+
+    mutating func open(at now: TimeInterval) -> Bool {
+        guard now - last >= interval else { return false }
+        last = now
+        return true
+    }
+}
+
+// MARK: level meter (end)
+
 func emitLevel(_ level: Float, sessionId: UInt64) {
     let clamped = max(0.0, min(1.0, level))
     rawWrite("{\"type\":\"level\",\"text\":\"\(String(format: "%.3f", clamped))\",\"session_id\":\(sessionId)}")
@@ -1440,6 +1471,7 @@ func configureAudioInputGraph(sessionId: UInt64? = nil) -> Bool {
     // AVAudioEngine.start() is ~30–80ms on modern macOS — well under the
     // user's natural press-to-speak gap.
     var frameCount = 0
+    var levelGate = LevelGate()
     inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
         // Liveness signal for the zero-buffer watchdog — count EVERY callback,
         // gate open or closed (see tapBufferCount doc).
@@ -1493,9 +1525,12 @@ func configureAudioInputGraph(sessionId: UInt64? = nil) -> Bool {
             }
         }
 
-        // Compute RMS audio level every ~6 buffers (~150ms at 44.1kHz)
+        // The peak keeps its every-6-buffers sampling; the level is sent at
+        // most every ~33ms of wall time.
         frameCount += 1
-        if frameCount % 6 == 0 {
+        let peakDue = frameCount % 6 == 0
+        let levelDue = levelGate.open(at: ProcessInfo.processInfo.systemUptime)
+        if peakDue || levelDue {
             guard let channelData = buffer.floatChannelData else { return }
             let frames = buffer.frameLength
             let samples = channelData[0]
@@ -1506,12 +1541,13 @@ func configureAudioInputGraph(sessionId: UInt64? = nil) -> Bool {
                 sumOfSquares += sample * sample
                 peak = max(peak, abs(sample))
             }
-            if peak > sessionPeakSample {
+            if peakDue && peak > sessionPeakSample {
                 sessionPeakSample = peak
             }
-            let rms = sqrt(sumOfSquares / Float(frames))
-            let normalized = min(1.0, rms / 0.12)
-            emitLevel(normalized, sessionId: currentSessionId)
+            if levelDue {
+                let rms = sqrt(sumOfSquares / Float(frames))
+                emitLevel(meterLevel(rms: rms), sessionId: currentSessionId)
+            }
         }
     }
     audioTapInstalled = true
@@ -1560,6 +1596,7 @@ func startFifoReader(path: String) {
         var raw = Data()
         var buf = [UInt8](repeating: 0, count: chunkBytes)
         var chunkCounter = 0
+        var levelGate = LevelGate()
 
         while true {
             let n = read(fd, &buf, chunkBytes)
@@ -1589,8 +1626,12 @@ func startFifoReader(path: String) {
                 currentRequest?.append(pcm)
                 recordedSamples.append(contentsOf: UnsafeBufferPointer(start: dst, count: chunkFrames))
 
+                // The peak keeps its every-3-chunks sampling; the level is
+                // sent at most every ~33ms of wall time.
                 chunkCounter += 1
-                if chunkCounter % 3 == 0 {
+                let peakDue = chunkCounter % 3 == 0
+                let levelDue = levelGate.open(at: ProcessInfo.processInfo.systemUptime)
+                if peakDue || levelDue {
                     var sumOfSquares: Float = 0
                     var peak: Float = 0
                     for i in 0..<chunkFrames {
@@ -1598,11 +1639,13 @@ func startFifoReader(path: String) {
                         sumOfSquares += sample * sample
                         peak = max(peak, abs(sample))
                     }
-                    if peak > sessionPeakSample {
+                    if peakDue && peak > sessionPeakSample {
                         sessionPeakSample = peak
                     }
-                    let rms = sqrt(sumOfSquares / Float(chunkFrames))
-                    emitLevel(min(1.0, rms / 0.12), sessionId: currentSessionId)
+                    if levelDue {
+                        let rms = sqrt(sumOfSquares / Float(chunkFrames))
+                        emitLevel(meterLevel(rms: rms), sessionId: currentSessionId)
+                    }
                 }
             }
         }

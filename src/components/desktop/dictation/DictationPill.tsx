@@ -302,6 +302,16 @@ function SquiggleLoader({ label }: { label: string }) {
  * `persistentIdle` is set (always-on dock), in which case idle renders the
  * compact Symon idle capsule and the morph runs idle ↔ recording ↔ … ↔ idle.
  */
+/**
+ * The recorder sends levels on a dBFS meter (-50..-10 dBFS onto 0..1), so
+ * 0.25 is about -40 dBFS: quiet speech counts, a quiet room doesn't.
+ */
+export const SPEAKING_LEVEL = 0.25;
+
+export function speakingAt(level: number): boolean {
+  return level > SPEAKING_LEVEL;
+}
+
 export function DictationPillView({ snapshot, onCancel, hideCancel, persistentIdle }: DictationPillViewProps) {
   const { state, audioLevel, durationMs, error, partialTranscript } = snapshot;
   const visible = state !== 'idle';
@@ -319,7 +329,7 @@ export function DictationPillView({ snapshot, onCancel, hideCancel, persistentId
   const isBusy = state === 'transcribing' || state === 'polishing';
   const isError = state === 'error';
   const isSuccess = state === 'success';
-  const speaking = audioLevel > 0.08;
+  const speaking = speakingAt(audioLevel);
 
   // Symon's container width per state. Recording with a transcript tail
   // widens (matching Pill.svelte's listening footprint that grows for words),

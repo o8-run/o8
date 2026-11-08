@@ -214,11 +214,12 @@ fn a_session_streams_levels_then_finalizes_in_swift_order() {
     h.wait_for("ready", |e| count(e, "ready") == 1);
     h.send("start:7");
     h.wait_for("listening", |e| e.iter().any(|e| e.text == "listening"));
-    h.mic.say(&vec![0.06; 16_000]);
+    // A constant -30 dBFS signal: midway on the -50..-10 dBFS meter.
+    h.mic.say(&vec![0.031_622_777; 16_000]);
     let events = h.wait_for("a level", |e| count(e, "level") > 0);
     let level = events.iter().find(|e| e.kind == "level").unwrap();
     assert_eq!(level.session_id, Some(7));
-    assert_eq!(level.text, "0.500", "rms 0.06 / 0.12");
+    assert_eq!(level.text, "0.500", "-30 dBFS");
 
     h.send("stop:7");
     let events = h.wait_for("complete", |e| {
