@@ -55,28 +55,33 @@ pub(crate) fn read(path: &Path) -> Prefs {
 
 /// Changes one allowlisted key, computed from the file as it is now, and
 /// keeps every other key exactly as the file has it. A missing or unreadable
-/// file and an off-list key are left alone. Returns the file as it now stands.
+/// file, an off-list key and a value of another JSON type than the file's are
+/// left alone. Returns the file as it now stands; `Err` when the write failed.
 pub(crate) fn update(
     path: &Path,
     key: &str,
     change: impl FnOnce(Option<&Value>) -> Value,
-) -> Prefs {
+) -> Result<Prefs, Prefs> {
     let current = read(path);
     if !allowlisted(key) {
-        return current;
+        return Ok(current);
     }
     let Prefs::Ready(mut map) = current else {
-        return current;
+        return Ok(current);
     };
-    let value = change(map.get(key));
+    let old = map.get(key).filter(|old| !old.is_null());
+    let value = change(old);
+    if old.is_some_and(|old| std::mem::discriminant(old) != std::mem::discriminant(&value)) {
+        return Ok(Prefs::Ready(map));
+    }
     map.insert(key.to_owned(), value);
     let Ok(text) = serde_json::to_string_pretty(&Value::Object(map.clone())) else {
-        return read(path);
+        return Err(read(path));
     };
     if replace(path, text.as_bytes()) {
-        Prefs::Ready(map)
+        Ok(Prefs::Ready(map))
     } else {
-        read(path)
+        Err(read(path))
     }
 }
 
@@ -183,7 +188,7 @@ mod tests {
         let path = scratch("missing");
         assert_eq!(
             update(&path, "dictionary", |_| json!(["o8"])),
-            Prefs::Missing
+            Ok(Prefs::Missing)
         );
         assert!(!path.exists());
         assert_eq!(
@@ -198,11 +203,11 @@ mod tests {
         std::fs::write(&path, "[1,2").unwrap();
         assert_eq!(
             update(&path, "dictionary", |_| json!([])),
-            Prefs::Unreadable
+            Ok(Prefs::Unreadable)
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "[1,2");
         std::fs::write(&path, r#"{"dictionary":["o8"]}"#).unwrap();
-        update(&path, "gemini_api_key", |_| json!("x"));
+        let _ = update(&path, "gemini_api_key", |_| json!("x"));
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             r#"{"dictionary":["o8"]}"#
@@ -228,7 +233,7 @@ mod tests {
             on_disk,
             json!({"sounds_enabled":false,"not_on_the_list":1,"dictionary":["a","b"]})
         );
-        assert_eq!(after, read(&path));
+        assert_eq!(after, Ok(read(&path)));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -241,6 +246,44 @@ mod tests {
             .filter(|entry| entry.file_name() != FILE)
             .collect();
         assert!(leftovers.is_empty(), "no temp file stays behind");
+    }
+
+    #[test]
+    fn a_value_of_another_type_is_left_alone() {
+        let path = scratch("type");
+        let body = r#"{"dictionary":{"not":"a list"}}"#;
+        std::fs::write(&path, body).unwrap();
+        update(&path, "dictionary", |current| {
+            let mut words = strings(current);
+            words.push("o8".into());
+            json!(words)
+        })
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), body);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_write_reports_it_and_leaves_nothing_behind() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = scratch("readonly");
+        let dir = path.parent().unwrap().to_owned();
+        std::fs::write(&path, r#"{"dictionary":["a"]}"#).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        if std::fs::write(dir.join("probe"), "").is_ok() {
+            // Running as root: permissions don't stop the write.
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+            return;
+        }
+        let result = update(&path, "dictionary", |_| json!(["a", "b"]));
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            result,
+            Err(Prefs::Ready(
+                serde_json::from_str(r#"{"dictionary":["a"]}"#).unwrap()
+            ))
+        );
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temp file");
     }
 
     #[test]

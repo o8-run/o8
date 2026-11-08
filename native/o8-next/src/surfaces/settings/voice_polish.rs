@@ -5,17 +5,21 @@ use super::voice_prefs::{self, Prefs};
 use crate::composer::{Composer, Submit};
 use crate::theme::current as theme;
 use gpui::{
-    AnyElement, Context, Entity, IntoElement, Render, SharedString, Subscription, Window, div,
-    prelude::*, px,
+    AnyElement, App, Context, Entity, IntoElement, Render, SharedString, Subscription, WeakEntity,
+    Window, div, prelude::*, px,
 };
 use serde_json::{Value, json};
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 const CLOSE: &str = "M6 6l12 12M18 6L6 18";
 const SWAP: &str = "M7 7h13l-4-4 M17 17H4l4 4";
 pub(crate) const MISSING: &str =
     "Voice settings appear here once o8 on this Mac has moved them to its new settings file.";
+pub(crate) const SAVE_FAILED: &str =
+    "o8 couldn't save that change to this Mac's voice settings file.";
 pub(crate) const UNREADABLE: &str =
     "o8 couldn't read this Mac's voice settings file, so it was left as it is.";
 
@@ -27,13 +31,23 @@ enum Op {
     Change(&'static str, Change),
 }
 
+/// The steps not yet run. It outlives the panel, so a change made as
+/// Settings closes is still written.
+#[derive(Default)]
+struct Work {
+    queue: VecDeque<Op>,
+    running: bool,
+}
+
 pub(crate) struct VoicePolish {
     path: Option<PathBuf>,
     /// None until the first read returns.
     pub prefs: Option<Prefs>,
     shown: bool,
-    queue: VecDeque<Op>,
-    running: bool,
+    work: Rc<RefCell<Work>>,
+    this: WeakEntity<Self>,
+    /// The last change couldn't be written; what was typed stays in place.
+    save_failed: bool,
     word: Entity<Composer>,
     trigger: Entity<Composer>,
     replacement: Entity<Composer>,
@@ -74,13 +88,31 @@ impl VoicePolish {
                     this.load(cx);
                 }
             }),
+            // Closing Settings drops the panel without a blur; save then too.
+            cx.on_release(|this, cx| this.save_instructions(cx)),
+            // Quitting runs no more queued steps; write directly, as the
+            // app waits for this before it exits.
+            cx.on_app_quit(|this, cx| {
+                let write = match (this.take_unsaved(cx), this.path.clone()) {
+                    (Some(text), Some(path)) => Some(cx.background_executor().spawn(async move {
+                        voice_prefs::update(&path, "polish_instructions", move |_| json!(text))
+                    })),
+                    _ => None,
+                };
+                async move {
+                    if let Some(write) = write {
+                        let _ = write.await;
+                    }
+                }
+            }),
         ];
         Self {
             path,
             prefs: None,
             shown: false,
-            queue: VecDeque::new(),
-            running: false,
+            work: Rc::default(),
+            this: cx.weak_entity(),
+            save_failed: false,
             word,
             trigger,
             replacement,
@@ -100,56 +132,36 @@ impl VoicePolish {
     }
 
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
-        self.apply(Op::Read, cx);
+        if !self.apply(Op::Read, cx) {
+            self.received(Prefs::Missing, cx);
+        }
     }
 
     fn change(
         &mut self,
         key: &'static str,
         change: impl FnOnce(Option<&Value>) -> Value + Send + 'static,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) {
         if matches!(self.prefs, Some(Prefs::Ready(_))) {
             self.apply(Op::Change(key, Box::new(change)), cx);
         }
     }
 
-    fn apply(&mut self, op: Op, cx: &mut Context<Self>) {
-        self.queue.push_back(op);
-        self.next(cx);
-    }
-
-    fn next(&mut self, cx: &mut Context<Self>) {
-        if self.running {
-            return;
-        }
+    /// Queues a step; false when there's no file to work on.
+    fn apply(&mut self, op: Op, cx: &mut App) -> bool {
         let Some(path) = self.path.clone() else {
-            self.queue.clear();
-            self.received(Prefs::Missing, cx);
-            return;
+            return false;
         };
-        let Some(op) = self.queue.pop_front() else {
-            return;
+        let start = {
+            let mut work = self.work.borrow_mut();
+            work.queue.push_back(op);
+            !std::mem::replace(&mut work.running, true)
         };
-        self.running = true;
-        let work = cx.background_executor().spawn(async move {
-            match op {
-                Op::Read => voice_prefs::read(&path),
-                Op::Change(key, change) => voice_prefs::update(&path, key, change),
-            }
-        });
-        cx.spawn(async move |this, cx| {
-            let prefs = work.await;
-            let _ = this.update(cx, |this, cx| {
-                this.running = false;
-                // A queued step reads again; show only the latest file.
-                if this.queue.is_empty() {
-                    this.received(prefs, cx);
-                }
-                this.next(cx);
-            });
-        })
-        .detach();
+        if start {
+            run(self.work.clone(), path, self.this.clone(), cx);
+        }
+        true
     }
 
     fn received(&mut self, prefs: Prefs, cx: &mut Context<Self>) {
@@ -159,7 +171,9 @@ impl VoicePolish {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_owned();
-            let unchanged = self.instructions.read(cx).text == self.instructions_read;
+            // Text that failed to save stays, so leaving the field tries again.
+            let unchanged = !self.save_failed
+                && self.instructions.read(cx).text.trim() == self.instructions_read;
             if unchanged && saved != self.instructions_read {
                 self.instructions
                     .update(cx, |input, cx| input.set_text(&saved, cx));
@@ -250,13 +264,20 @@ impl VoicePolish {
         );
     }
 
-    fn save_instructions(&mut self, cx: &mut Context<Self>) {
+    /// The trimmed instructions if they differ from the file, marked as saved.
+    fn take_unsaved(&mut self, cx: &App) -> Option<String> {
         let text = self.instructions.read(cx).text.trim().to_owned();
-        if text == self.instructions_read {
-            return;
+        if text == self.instructions_read || !matches!(self.prefs, Some(Prefs::Ready(_))) {
+            return None;
         }
         self.instructions_read = text.clone();
-        self.change("polish_instructions", move |_| json!(text), cx);
+        Some(text)
+    }
+
+    fn save_instructions(&mut self, cx: &mut App) {
+        if let Some(text) = self.take_unsaved(cx) {
+            self.change("polish_instructions", move |_| json!(text), cx);
+        }
     }
 
     fn button(
@@ -378,6 +399,46 @@ impl VoicePolish {
     }
 }
 
+/// Runs the queued steps in order until none is left. Each result reaches
+/// the panel if it's still open; the steps run either way.
+fn run(work: Rc<RefCell<Work>>, path: PathBuf, this: WeakEntity<VoicePolish>, cx: &mut App) {
+    cx.spawn(async move |cx| {
+        loop {
+            let op = {
+                let mut work = work.borrow_mut();
+                let op = work.queue.pop_front();
+                work.running = op.is_some();
+                op
+            };
+            let Some(op) = op else { break };
+            let change = matches!(op, Op::Change(..));
+            let path = path.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    match op {
+                        Op::Read => Ok(voice_prefs::read(&path)),
+                        Op::Change(key, change) => voice_prefs::update(&path, key, change),
+                    }
+                })
+                .await;
+            // A queued step reads again; show only the latest file.
+            let last = work.borrow().queue.is_empty();
+            let _ = this.update(cx, |this, cx| {
+                if change {
+                    this.save_failed = result.is_err();
+                }
+                if last {
+                    this.received(result.unwrap_or_else(|prefs| prefs), cx);
+                } else {
+                    cx.notify();
+                }
+            });
+        }
+    })
+    .detach();
+}
+
 fn field(id: &'static str, input: &Entity<Composer>, cx: &gpui::App) -> gpui::Div {
     let focus = input.read(cx).focus.clone();
     div()
@@ -449,6 +510,11 @@ impl Render for VoicePolish {
             }
             Some(Prefs::Ready(_)) => {}
         }
+        let page = page.when(self.save_failed, |page| {
+            page.child(
+                muted(SAVE_FAILED).debug_selector(|| "settings-voice-polish-save-failed".into()),
+            )
+        });
         let words = voice_prefs::strings(self.value("dictionary"));
         let rules = voice_prefs::rules(self.value("replacements"));
         let chips: Vec<AnyElement> = words

@@ -234,3 +234,59 @@ fn settings_voice_polish_leaves_an_unreadable_file(cx: &mut TestAppContext) {
     );
     untouched(&dir);
 }
+
+#[gpui::test]
+fn settings_voice_polish_saves_instructions_when_settings_closes(cx: &mut TestAppContext) {
+    let dir = scratch("close");
+    std::fs::write(dir.join("voice-prefs.json"), "{}").unwrap();
+    let (_peer, view, cx) = open_polish(&dir, cx);
+    type_into(cx, "settings-voice-polish-instructions", "Short sentences ");
+    assert!(on_disk(&dir).get("polish_instructions").is_none());
+    // Esc closes Settings without leaving the field first.
+    view.update(cx, |s, _| s.voice_polish = None);
+    draw(cx);
+    cx.run_until_parked();
+    assert_eq!(on_disk(&dir)["polish_instructions"], "Short sentences");
+    untouched(&dir);
+}
+
+#[cfg(unix)]
+#[gpui::test]
+fn settings_voice_polish_keeps_text_that_failed_to_save(cx: &mut TestAppContext) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("readonly");
+    std::fs::write(dir.join("voice-prefs.json"), "{}").unwrap();
+    let (_peer, view, cx) = open_polish(&dir, cx);
+    type_into(cx, "settings-voice-polish-instructions", "New tone");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    if std::fs::write(dir.join("probe"), "").is_ok() {
+        // Running as root: permissions don't stop the write.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        return;
+    }
+    tap(cx, "settings-voice-polish-word-input");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(
+        cx.debug_bounds("settings-voice-polish-save-failed")
+            .is_some(),
+        "a failed save says so"
+    );
+    view.read_with(cx, |s, cx| {
+        let polish = s.voice_polish.as_ref().unwrap().read(cx);
+        assert_eq!(
+            polish.instructions.read(cx).text,
+            "New tone",
+            "what was typed stays"
+        );
+    });
+    assert_eq!(on_disk(&dir), json!({}));
+    // Leaving the field again tries again.
+    tap(cx, "settings-voice-polish-instructions");
+    tap(cx, "settings-voice-polish-word-input");
+    assert_eq!(on_disk(&dir)["polish_instructions"], "New tone");
+    assert!(
+        cx.debug_bounds("settings-voice-polish-save-failed")
+            .is_none()
+    );
+    untouched(&dir);
+}
