@@ -5300,6 +5300,14 @@
       ]
     },
     {
+      "path": "tests/o8d-card-decision-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-cortex-owner-real-path.test.ts",
       "reasons": [
         "child-process",

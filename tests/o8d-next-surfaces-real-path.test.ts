@@ -282,6 +282,20 @@ it('keeps default HTTP behavior when native mode is off', async () => {
   } finally { await defaultServer.stop(); }
 });
 
+it('reaches the mission card decision handlers with Next stopped', async () => {
+  const url = `${origin}/api/task-artifacts/tart-00000000-0000-4000-8000-000000000000/decision`;
+  for (const method of ['GET', 'POST']) {
+    const refused = await fetch(url, { method, headers: { 'x-o8-client-addr': '127.0.0.1' } });
+    expect(refused.status).toBe(401);
+    await refused.arrayBuffer();
+    // The handler's own principal check admits the operator bearer, then finds no card.
+    const response = await fetch(url, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+      ...(method === 'POST' ? { body: JSON.stringify({ actionId: 'approve', nonce: 'native-fixture' }) } : {}) });
+    expect(response.status, method).toBe(404);
+    expect(await response.json(), method).toMatchObject({ error: { code: 'not_found' } });
+  }
+});
+
 it('preserves canonical workspace paths through the native project handler', async () => {
   const alias = join(server.directory, 'workspace-alias');
   symlinkSync(server.directory, alias, process.platform === 'win32' ? 'junction' : 'dir');
