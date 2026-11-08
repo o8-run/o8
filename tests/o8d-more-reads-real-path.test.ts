@@ -39,7 +39,7 @@ it('registers the production ACP GET for the native settings caller', async () =
   for (const method of ['POST', 'PATCH', 'PUT', 'DELETE']) {
     expect(matchNativeHttpRoute('/api/runtime/acp-registry', method)).toBeUndefined();
   }
-  for (const path of ['/api/orchestrator/packet-transcript', '/api/setup/detect',
+  for (const path of ['/api/setup/detect',
     '/api/review/last-turn', '/api/review/commit', '/api/review/push']) {
     expect(matchNativeHttpRoute(path), path).toBeUndefined();
   }

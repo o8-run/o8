@@ -28,6 +28,7 @@ const NATIVE_READS = [
   ['session', '/api/runtime/service-tiers', 200],
   ['session', '/api/runtime/telemetry', 400],
   ['session', '/api/orchestrator/status', 404],
+  ['sidebar', '/api/orchestrator/packet-transcript', 400],
   ['setup', '/api/setup/cli-updates?runtime=fixture-unknown', 400],
   ['settings', '/api/panel/o8-update-summary?version=invalid', 400],
   ['activity', '/api/cortex/proposals', 200],
