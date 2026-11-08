@@ -1,5 +1,5 @@
 import 'server-only';
-import type { AppUpdateBlockers } from './update-hub-client';
+import type { AppUpdateBlockers } from './types';
 import { updateCheckTicket, type UpdateCheckTicket } from './check-order';
 
 export interface AppUpdateAutoApplyState {

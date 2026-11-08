@@ -136,6 +136,16 @@ it('opens o8 next as the main window of the packaged macOS app, and the old swit
   expect(alive(child.pid)).toBe(true);
 });
 
+it('leaves the window to the process the shell gave the binary', async () => {
+  // The packaged shell also passes O8_NEXT_MAIN_WINDOW to the WS process, which
+  // has no O8_NEXT_BIN: its startup must not claim the window or report it unavailable.
+  vi.stubEnv('O8_NEXT_MAIN_WINDOW', '1');
+  vi.stubEnv('O8_NEXT_BIN', '');
+  await (await import('@/lib/next/app-window')).restoreNextWindow();
+  expect(existsSync(receipt)).toBe(false);
+  expect(await (await route.GET(new Request(endpoint))).json()).toMatchObject({ nextWindowError: null });
+});
+
 async function mountSettings(beforeGet: () => Promise<void> = async () => {}) {
   vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
     const request = new Request(new URL(input, endpoint), init);

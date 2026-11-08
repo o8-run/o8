@@ -5510,6 +5510,14 @@
       ]
     },
     {
+      "path": "tests/o8d-updater-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/onboarding-runtime-picker-real-path.test.ts",
       "reasons": [
         "real-path"

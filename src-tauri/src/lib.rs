@@ -7604,6 +7604,11 @@ impl BundledWsSpawn {
             command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
             command.env("O8_BUNDLED_MCP_PATH", path);
         }
+        // Update apply runs here when the native transport owns updater state,
+        // and must ask the native updater rather than a webview that is absent.
+        if next_main::enabled() {
+            command.env(next_main::SERVER_ENV, "1");
+        }
         for (key, value) in &self.ai_keys {
             command.env(key, value);
         }
