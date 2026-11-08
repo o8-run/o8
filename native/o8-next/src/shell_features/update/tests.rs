@@ -240,6 +240,7 @@ fn an_accepted_click_stays_installing_until_the_native_loop_reports() {
     use super::{Progress, State, read};
     let mut state = State {
         phase: Some(Phase::Installing),
+        accepted: Some(std::time::Instant::now()),
         progress: Some(Progress {
             stage: "downloading".into(),
             received: 0,
@@ -276,4 +277,19 @@ fn a_click_held_by_live_work_shows_its_blockers_not_installing() {
         state.blockers.as_ref().map(|b| b.live.clone()),
         Some(vec!["lane-a".to_string()])
     );
+}
+
+#[test]
+fn an_accepted_click_the_loop_never_admits_gives_the_button_back() {
+    use super::{ADMIT_WITHIN, State, read};
+    use std::time::Instant;
+    let mut state = State {
+        phase: Some(Phase::Installing),
+        accepted: Instant::now().checked_sub(ADMIT_WITHIN),
+        ..State::default()
+    };
+    // Admission was refused without a phase, so the request stays pending.
+    let pending = json!({ "applyRequestedAt": "2026-11-08T20:00:00.000Z", "state": {} });
+    read(&mut state, &pending);
+    assert!(state.phase.is_none());
 }
