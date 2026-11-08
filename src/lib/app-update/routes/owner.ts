@@ -14,6 +14,9 @@ export function ownedUpdateRoute(handler: Handler) {
     error: { code: 'update_owner_unavailable', message: 'The process that owns updater state is unavailable.', ...UPDATE_RETRY } },
   { status: 503, headers: { 'Cache-Control': 'no-store, max-age=0' } }));
   // Next always passes the request. The updater's in-process tests call GET()
-  // bare, which reads this process's state directly, as before.
-  return (request?: Request) => request ? owned(request) : handler(new Request('http://127.0.0.1/'));
+  // bare, which reads this process's state directly, as before. The request
+  // signature comes last: Next's route type check reads the last overload.
+  return ((request?: Request) => request ? owned(request) : handler(new Request('http://127.0.0.1/'))) as OwnedRoute;
 }
+
+type OwnedRoute = { (): Promise<Response>; (request: Request): Promise<Response> };
