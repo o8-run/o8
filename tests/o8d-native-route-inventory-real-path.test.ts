@@ -11,7 +11,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/connect/attach',
   '/api/panel/mobile-pairing',
   '/api/mobile/devices/revoke',
-  '/api/setup/mcp-config',
   '/api/setup/claude-desktop',
   '/api/setup/external-client',
   '/api/panel/connect',
@@ -23,7 +22,7 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/orchestrator/backend-models',
   '/api/orchestrator/comparison-diff', // GET has a write path; held for review.
   '/api/orchestrator/pull-request-context',
-  '/api/panel/account/avatar',
+  '/api/panel/account/avatar', // no caller yet; wired with the native rail account avatar
   '/api/panel/devices',
   '/api/panel/update/apply',
   '/api/repo-spec/asset',
