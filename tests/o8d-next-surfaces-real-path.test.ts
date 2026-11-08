@@ -41,6 +41,8 @@ const NATIVE_READS = [
   ['session', '/api/v2/files/quick-docs', 200],
   ['session', '/api/visualizations', 400],
   ['pull_requests', '/api/panel/prs/[number]/timeline', 400],
+  // Paired-device list: operator-only, token-based (not loopback), no token/hash in the body (#5243).
+  ['settings', '/api/mobile/devices', 200],
 ] as const;
 let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;
