@@ -4,7 +4,8 @@ const fixture = vi.hoisted(() => ({ execFile: vi.fn() }));
 vi.mock('@/lib/providers/child-process', async () => {
   const { promisify: custom } = await import('node:util');
   const execFile = Object.assign(() => undefined, { [custom.custom]: fixture.execFile });
-  return { execFile };
+  // The picker launches through the read-only entrypoint; storage telemetry imports it too.
+  return { execFile, execFileReadOnly: execFile };
 });
 
 const realPlatform = process.platform;
