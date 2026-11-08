@@ -178,6 +178,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // encrypted in a separate credentials table); the POST writes go through
     // withProviderStoreLock + master-key encryption. (#5243)
     route('/api/runtime/provider-instances', 'GET POST', () => import('@/app/api/runtime/provider-instances/route')),
+    // Desktop shell reads (src-tauri o8_http). No device/worker/spectator grant in panelGateMiddleware, so only
+    // the operator bearer passes. cli-usage reads the CLI usage files under this process's HOME and has no
+    // handler auth. broadcast/why and broadcast/calendar check the principal from the bearer
+    // (resolveRequestPrincipalContext), never x-o8-client-addr or loopback, so they behave as on Next. Both read
+    // and write SQLite only, and calendar ingest reads operator defaults from disk on every call. (#5422)
+    route('/api/panel/cli-usage', 'GET', () => import('@/app/api/panel/cli-usage/route')),
+    route('/api/broadcast/why', 'GET', () => import('@/app/api/broadcast/why/route')),
+    route('/api/broadcast/calendar', 'POST', () => import('@/app/api/broadcast/calendar/route')),
     // MCP config generator (Settings > MCP). GET only, no handler-level auth: gated by
     // panelGateMiddleware, which does not public-allowlist /api/setup/* (hardening #1562).
     // Over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) the loopback
