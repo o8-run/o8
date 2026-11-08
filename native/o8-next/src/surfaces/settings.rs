@@ -98,6 +98,9 @@ impl Shell {
         let history = cx
             .new(|cx| voice_history::VoiceHistory::new(voice_history::history_path(), window, cx));
         settings.update(cx, |s, _| s.voice_history = Some(history));
+        let polish = cx
+            .new(|cx| voice_polish::VoicePolish::new(voice_prefs::prefs_path(), window, cx));
+        settings.update(cx, |s, _| s.voice_polish = Some(polish));
         self.surfaces.settings.view = Some(settings);
         self.revision += 1;
         cx.notify();
@@ -215,6 +218,11 @@ pub(crate) mod machine_links;
 // Settings › Voice › History reads the desktop recorder's file on this Mac.
 #[path = "settings/voice_history.rs"]
 pub(crate) mod voice_history;
+// Settings › Voice › Polish writes only the host's secret-free voice-prefs.json.
+#[path = "settings/voice_polish.rs"]
+pub(crate) mod voice_polish;
+#[path = "settings/voice_prefs.rs"]
+pub(crate) mod voice_prefs;
 
 #[cfg(test)]
 #[path = "settings_shell_tests.rs"]

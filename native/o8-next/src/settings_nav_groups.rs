@@ -56,8 +56,9 @@ const PANEL_GROUPS: &[(&str, &[&str])] = &[
 ];
 
 /// Parts of a tab that open in place of its fields, listed after them.
+pub(super) const VOICE_POLISH: &str = "Polish";
 pub(super) const VOICE_HISTORY: &str = "History";
-const TRAILING_PANELS: &[(&str, &[&str])] = &[("voice", &[VOICE_HISTORY])];
+const TRAILING_PANELS: &[(&str, &[&str])] = &[("voice", &[VOICE_POLISH, VOICE_HISTORY])];
 
 /// The headings a tab's page shows, in page order.
 pub(super) fn groups_of(section: &str) -> Vec<&'static str> {
@@ -307,11 +308,15 @@ impl Settings {
     ) {
         self.close_flyout(cx);
         self.select(id, cx);
-        if id == "voice" && group == VOICE_HISTORY {
+        if id == "voice" && (group == VOICE_HISTORY || group == VOICE_POLISH) {
             // select() has just started reading settings, so it's busy; the
             // panel switch reads only the local file and needs no wait.
             if self.section == "voice" {
-                self.voice_panel = VoicePanel::History;
+                self.voice_panel = if group == VOICE_POLISH {
+                    VoicePanel::Polish
+                } else {
+                    VoicePanel::History
+                };
                 self.sync_voice_history(cx);
                 self.changed(cx);
             }

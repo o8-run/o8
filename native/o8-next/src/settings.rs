@@ -122,6 +122,7 @@ pub(crate) struct Close;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum VoicePanel {
     Attention,
+    Polish,
     History,
 }
 pub(crate) enum Action {
@@ -142,6 +143,8 @@ pub(crate) struct Settings {
     pub mobile: Option<Entity<crate::shell::settings::mobile::Mobile>>,
     /// Voice › History, from the desktop voice window.
     pub voice_history: Option<Entity<crate::shell::settings::voice_history::VoiceHistory>>,
+    /// Voice › Polish, from the desktop voice window.
+    pub voice_polish: Option<Entity<crate::shell::settings::voice_polish::VoicePolish>>,
     /// Which part of the Voice tab is open.
     pub voice_panel: VoicePanel,
     section: &'static str,
@@ -213,6 +216,7 @@ impl Settings {
             mobile: None,
             machines: None,
             voice_history: None,
+            voice_polish: None,
             voice_panel: VoicePanel::Attention,
             section: "general",
             search,
@@ -466,12 +470,23 @@ impl Settings {
                 history.update(cx, |history, cx| history.load(cx));
             }
         }
+        if force && self.section == "voice" && self.voice_panel == VoicePanel::Polish {
+            if let Some(polish) = &self.voice_polish {
+                polish.update(cx, |polish, cx| polish.load(cx));
+            }
+        }
     }
-    /// Tells History whether it's on screen, so it reads only while it is.
+    /// Tells Voice's file-backed parts whether they're on screen, so each
+    /// reads only while it is.
     pub(crate) fn sync_voice_history(&mut self, cx: &mut Context<Self>) {
-        let shown = self.section == "voice" && self.voice_panel == VoicePanel::History;
+        let voice = self.section == "voice";
+        let shown = voice && self.voice_panel == VoicePanel::History;
         if let Some(history) = &self.voice_history {
             history.update(cx, |history, cx| history.set_shown(shown, cx));
+        }
+        let shown = voice && self.voice_panel == VoicePanel::Polish;
+        if let Some(polish) = &self.voice_polish {
+            polish.update(cx, |polish, cx| polish.set_shown(shown, cx));
         }
     }
     /// Opens one part of the Voice tab; History rereads its file on the way in.
@@ -698,6 +713,10 @@ mod nav_groups;
 #[cfg(test)]
 #[path = "settings_voice_history_tests.rs"]
 mod voice_history_tests;
+
+#[cfg(test)]
+#[path = "settings_voice_polish_tests.rs"]
+mod voice_polish_tests;
 
 #[path = "settings_bots.rs"]
 mod bots;
