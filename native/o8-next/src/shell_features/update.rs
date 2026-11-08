@@ -60,6 +60,8 @@ struct State {
     applying: bool,
     /// A state read is in flight; a second one could land out of order.
     reading: bool,
+    /// When the server accepted this window's Update click.
+    accepted: Option<Instant>,
     /// Work is live; the next apply forces the restart.
     busy: bool,
     blockers: Option<Blockers>,
@@ -109,6 +111,10 @@ struct State {
 /// How long a server may read "never checked" before o8 next stops asking;
 /// shorter than the minute between state reads, so the second read decides.
 const NO_UPDATER_AFTER: Duration = Duration::from_secs(30);
+/// How long an accepted click shows installing before the native loop admits
+/// it. The loop is expedited on the click, so a request still unadmitted after
+/// this was refused without a phase and the button comes back.
+const ADMIT_WITHIN: Duration = Duration::from_secs(60);
 const NO_UPDATER: &str =
     "Update checks need the o8 app. This window is connected to the o8 server without it.";
 
@@ -636,8 +642,9 @@ fn read(state: &mut State, body: &Value) {
     // An accepted click stays installing until the native loop admits it and
     // reports its own phase, so the button cannot offer a second click. A
     // loop that reports any phase (waiting on live work included) takes over.
-    let unadmitted =
-        body["applyRequestedAt"].is_string() && body["state"]["autoApply"]["phase"].is_null();
+    let unadmitted = body["applyRequestedAt"].is_string()
+        && body["state"]["autoApply"]["phase"].is_null()
+        && state.accepted.is_some_and(|at| at.elapsed() < ADMIT_WITHIN);
     match phase(body) {
         None if unadmitted && matches!(state.phase, Some(Phase::Installing)) => {}
         reported => {
@@ -876,6 +883,7 @@ fn apply(s: &mut Shell, force: bool, cx: &mut Context<Shell>) {
                     // The native updater installs and restarts; the panel
                     // follows its phase from the next reads.
                     Outcome::Restarting => {
+                        state.accepted = Some(Instant::now());
                         state.blockers = None;
                         state.phase = Some(Phase::Installing);
                         state.progress = Some(Progress {
