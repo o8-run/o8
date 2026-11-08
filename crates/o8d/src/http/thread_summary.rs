@@ -232,6 +232,20 @@ mod tests {
         std::fs::write(&first, "v1-new").unwrap();
         files.insert(0, first);
         assert_eq!(list(&files), 45, "the newcomer and the 44 past the bound");
+
+        // A deleted conversation's entry is never read again. Like any entry,
+        // it becomes evictable once it is older than the previous request, and
+        // then makes room for summaries that were past the bound.
+        for path in files.drain(1..=10) {
+            std::fs::remove_file(path).unwrap();
+        }
+        assert_eq!(list(&files), 45, "still used during the previous request");
+        assert_eq!(
+            list(&files),
+            45,
+            "now evictable: ten new summaries are kept"
+        );
+        assert_eq!(list(&files), 35, "the ten deleted entries made room");
         std::fs::remove_dir_all(&directory).unwrap();
     }
 }
