@@ -115,7 +115,7 @@ it('counts the desktop shell, the MCP server and the WS process toward the Next-
   checkCaller(['src/ws-server.ts', ...sourceFiles('src/lib/ws-server', '.ts')],
     /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^>(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, NEXT_ONLY_WS_PATHS);
   const remaining = new Set([...NEXT_ONLY_NATIVE_PATHS, ...NEXT_ONLY_SHELL_PATHS, ...NEXT_ONLY_MCP_PATHS, ...NEXT_ONLY_WS_PATHS]);
-  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(74);
+  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(73);
 });
 
 it('rejects an unknown route discovered in a shell or MCP source file', () => {
