@@ -74,7 +74,8 @@ const NEXT_ONLY_MCP_PATHS = new Set([
   '/api/orchestrator/merge', '/api/orchestrator/propose-spec', '/api/orchestrator/pull-request-context',
   '/api/orchestrator/receipts', '/api/orchestrator/reload', '/api/orchestrator/rerun-with-feedback',
   '/api/orchestrator/reset-packet', '/api/orchestrator/truth', '/api/orchestrator/worker-corrections',
-  '/api/panel/repos/init', '/api/panel/repos/scaffold', '/api/panel/targets', '/api/panel/update/apply',
+  '/api/panel/pr-stack', '/api/panel/repos/init', '/api/panel/repos/scaffold', '/api/panel/targets',
+  '/api/panel/update/apply',
   '/api/setup/agent', '/api/task-artifacts',
 ]);
 const NEXT_ONLY_WS_PATHS = new Set([
@@ -87,29 +88,34 @@ function sourceFiles(directory: string, extension: string) {
     .filter(file => file.endsWith(extension) && !/test|fixture|fake/.test(file)).map(file => join(directory, file));
 }
 
-/** Checks one caller of the API port: listed paths stay unregistered, all others are registered. */
+/** Checks one caller of the API port: listed paths stay unregistered and in use, all others are registered. */
 function checkCaller(files: string[], pattern: RegExp, nextOnly: Set<string>) {
-  for (const path of nextOnly) {
-    expect(matchNativeHttpRoute(path.replace(/\[\w+\]/g, 'fixture')), `${path} is registered`).toBeUndefined();
-  }
+  const found = new Set<string>();
   for (const file of files) {
     for (const match of readFileSync(file, 'utf8').matchAll(pattern)) {
-      // A placeholder after a non-slash starts a query or suffix; one after a slash is a segment.
-      const path = match[1].split('?')[0].replace(/([^/])(\$\{[^}]*\}|\{[^}]*\}).*$/, '$1')
-        .replace(/\$\{[^}]*\}|\{[^}]*\}/g, '[id]');
-      if (path.endsWith('/') || nextOnly.has(path)) continue;
+      // A placeholder after a slash is a path segment, including one cut off at
+      // a space or call; after anything else it starts a query or suffix.
+      let path = match[1].split('?')[0].replace(/(\/)?\$\{[^}]*$/, (_, slash) => slash ? '/[id]' : '')
+        .replace(/([^/])(\$\{[^}]*\}|\{[^}]*\}).*$/, '$1').replace(/\$\{[^}]*\}|\{[^}]*\}/g, '[id]');
+      if (path.endsWith('/')) path += '[id]'; // A prefix that a caller completes with an id.
+      found.add(path);
+      if (nextOnly.has(path)) continue;
       expect(matchNativeHttpRoute(path.replace(/\[\w+\]/g, 'fixture')), `${file}: ${path}`).toBeDefined();
     }
+  }
+  for (const path of nextOnly) {
+    expect(matchNativeHttpRoute(path.replace(/\[\w+\]/g, 'fixture')), `${path} is registered`).toBeUndefined();
+    expect(found.has(path), `${path} has no caller left`).toBe(true);
   }
 }
 
 it('counts the desktop shell, the MCP server and the WS process toward the Next-stopped default', () => {
   checkCaller(sourceFiles('src-tauri/src', '.rs'), /"[^"\s]*?(\/api\/[^"\s]+)"/g, NEXT_ONLY_SHELL_PATHS);
-  checkCaller(sourceFiles('src/lib/mcp', '.ts'), /[`'"](\/api\/[^`'"\s]+)[`'"]/g, NEXT_ONLY_MCP_PATHS);
+  checkCaller(sourceFiles('src/lib/mcp', '.ts'), /[`'"](\/api\/[\w\-./${}?=&]+)/g, NEXT_ONLY_MCP_PATHS);
   checkCaller(['src/ws-server.ts', ...sourceFiles('src/lib/ws-server', '.ts')],
     /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^>(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, NEXT_ONLY_WS_PATHS);
   const remaining = new Set([...NEXT_ONLY_NATIVE_PATHS, ...NEXT_ONLY_SHELL_PATHS, ...NEXT_ONLY_MCP_PATHS, ...NEXT_ONLY_WS_PATHS]);
-  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(73);
+  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(74);
 });
 
 it('rejects an unknown route discovered in a shell or MCP source file', () => {
@@ -118,6 +124,8 @@ it('rejects an unknown route discovered in a shell or MCP source file', () => {
     writeFileSync(join(directory, 'bridge.rs'), 'let url = format!("{}/api/caller-fixture-unknown?x=1", base);');
     expect(() => checkCaller(sourceFiles(directory, '.rs'), /"[^"\s]*?(\/api\/[^"\s]+)"/g, new Set()))
       .toThrow('/api/caller-fixture-unknown');
+    expect(() => checkCaller([], /"(\/api\/[^"]+)"/g, new Set(['/api/caller-fixture-gone'])))
+      .toThrow('/api/caller-fixture-gone has no caller left');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
