@@ -79,6 +79,11 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // Loads the handler, not the Next route: Next forwards here while this
     // transport is on, so the edge-tts installer has one owner (#5422).
     route('/api/tts', 'POST', () => import('@/lib/tts/route')),
+    // Symon's connected MCP tools: the handlers, not the Next routes, so the MCP
+    // sessions and their child processes have one owner while this transport is
+    // on (#5422). Operator only (the handler refuses a worker with 403).
+    route('/api/symon/mcp/tools', 'GET', () => import('@/lib/mcp/symon-mcp-tools-route')),
+    route('/api/symon/mcp/call', 'POST', () => import('@/lib/mcp/symon-mcp-call-route')),
   ],
   brain: [route('/api/cortex/ask', 'POST', () => import('@/app/api/cortex/ask/route'))],
   activity: [

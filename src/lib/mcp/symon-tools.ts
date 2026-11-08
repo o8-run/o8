@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { createHash } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from '@/lib/providers/child-process';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
@@ -379,6 +380,7 @@ const warnedUnavailable = new Set<string>();
 let catalogEntries: CatalogEntry[] | null = null;
 let catalogPromise: Promise<CatalogEntry[]> | null = null;
 let catalogGeneration = 0;
+let registryFingerprint: string | null = null;
 
 async function getSession(server: ExternalMcpServerRecord): Promise<McpSession> {
   const existing = sessions.get(server.id);
@@ -431,9 +433,22 @@ function externalToolName(serverName: string, toolName: string): string {
   return `mcp__${server}__${sanitizeNamePart(toolName, toolBudget)}`;
 }
 
-async function buildCatalog(): Promise<CatalogEntry[]> {
-  const generation = catalogGeneration;
+/**
+ * The servers Symon may use, read fresh from SQLite. A registry write can land in
+ * another process than the one holding the sessions (#5422), so a change to any
+ * launch-relevant field closes every session and drops the catalog here too.
+ */
+function symonServers(): ExternalMcpServerRecord[] {
   const servers = listEnabledExternalMcpServers().filter((server) => server.symonInjection);
+  const fingerprint = createHash('sha256').update(JSON.stringify(servers.map((server) => [server.id, server.name,
+    server.transport, server.command, server.args, server.env, server.url, server.oauthToken]))).digest('hex');
+  if (registryFingerprint !== null && registryFingerprint !== fingerprint) invalidateAll();
+  registryFingerprint = fingerprint;
+  return servers;
+}
+
+async function buildCatalog(servers: ExternalMcpServerRecord[]): Promise<CatalogEntry[]> {
+  const generation = catalogGeneration;
   const candidates = (await Promise.all(servers.map(async (server) => {
     try {
       const tools = await (await getSession(server)).listTools();
@@ -472,10 +487,11 @@ async function buildCatalog(): Promise<CatalogEntry[]> {
 }
 
 async function entries(force = false): Promise<CatalogEntry[]> {
+  const servers = symonServers();
   if (!force && catalogEntries) return catalogEntries;
   if (catalogPromise) return catalogPromise;
   const generation = catalogGeneration;
-  const building = buildCatalog()
+  const building = buildCatalog(servers)
     .then((next) => {
       // An old refresh must neither publish nor return revoked tools.
       if (generation !== catalogGeneration) return [];

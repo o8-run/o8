@@ -4,6 +4,10 @@ import readline from 'node:readline';
 const pidFile = process.env.SYMON_MCP_PID_FILE;
 const exitFile = process.env.SYMON_MCP_EXIT_FILE;
 if (pidFile) writeFileSync(pidFile, String(process.pid));
+// Records only whether a fixture sentinel credential reached this process, never the environment itself.
+if (process.env.SYMON_MCP_SENTINEL_FILE) {
+  writeFileSync(process.env.SYMON_MCP_SENTINEL_FILE, String(Object.values(process.env).some((value) => value?.includes('o8-fixture-sentinel'))));
+}
 
 let exiting = false;
 function exit(signal) {
