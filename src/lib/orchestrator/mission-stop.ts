@@ -2,8 +2,11 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
-import { findLaneByPacket, getLane } from '@/lib/lane/registry';
+import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
+import { findLaneByPacket, getLane, setLaneStatus } from '@/lib/lane/registry';
 import { isWorkerTerminal } from '@/lib/lane/terminal-states';
+import type { Lane } from '@/lib/lane/types';
+import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
 import { readOrchestratorControlPlaneState, withControlPlaneLock, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import {
   listActiveMissionRegistryEntries,
@@ -58,6 +61,30 @@ function isPacketTerminal(packet: OrchestratorPacket): boolean {
     || packet.status === 'archived';
 }
 
+function liveArchivedLane(packet: OrchestratorPacket) {
+  const lane = (packet.lane?.laneId ? getLane(packet.lane.laneId) : null) ?? findLaneByPacket(packet.id);
+  return lane && !isWorkerTerminal(lane.status) && liveWorkerSessionLanes([lane]).length > 0 ? lane : null;
+}
+
+// The lane stop command refuses to hold an archived packet, and none is needed:
+// archiving already refuses further runs. Kill the worker and its packet-managed
+// runs, then park the lane the way an operator stop does.
+async function stopArchivedWorker(packet: OrchestratorPacket, lane: Lane): Promise<StopMissionPacketResult> {
+  const [killed] = await killLaneSessionsConfirmed(liveWorkerSessionLanes([lane]));
+  if (!killed?.confirmed && !killed?.alreadyDead) {
+    return { packetId: packet.id, status: 'stop-failed', laneId: lane.id,
+      note: `Packet is archived, but its live worker did not exit: ${killed?.note ?? 'no confirmed process result.'}` };
+  }
+  const managedRuns = await terminatePacketManagedRuns(packet.id);
+  if (managedRuns.failures.length > 0) {
+    return { packetId: packet.id, status: 'stop-failed', laneId: lane.id,
+      note: `Packet is archived and its worker stopped, but ${managedRuns.failures.length} packet-managed run${managedRuns.failures.length === 1 ? '' : 's'} could not be confirmed dead.` };
+  }
+  setLaneStatus(lane.id, 'paused', 'user', 'operator_stopped');
+  return { packetId: packet.id, status: 'already-terminal', laneId: lane.id,
+    note: 'Packet is archived; stopped its live worker.' };
+}
+
 function markStoppedPacket(packet: OrchestratorPacket, stoppedAt: string): OrchestratorPacket {
   return {
     ...packet,
@@ -97,6 +124,10 @@ async function settleTerminalPacketManagedRuns(
 async function stopPacketViaLaneCommand(packet: OrchestratorPacket, cancelledEvents: Record<string, string> = {}): Promise<StopMissionPacketResult> {
   const preRunCancelled = Object.keys(cancelledEvents).length > 0;
   if (isPacketTerminal(packet)) {
+    // Archiving refuses further runs but does not end the current turn, so an
+    // archived packet can still own a live worker. Stop it; the packet stays archived.
+    const live = packet.releaseState !== 'released' ? liveArchivedLane(packet) : null;
+    if (live) return withPacketLifecycleMutationLock(packet.id, () => stopArchivedWorker(packet, live));
     return settleTerminalPacketManagedRuns(
       packet,
       packet.lane?.laneId ?? null,
