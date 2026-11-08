@@ -1,4 +1,6 @@
-use super::{GitActions, RELEASE_POST_TIMEOUT, can_open_pull_request, pull_request_url};
+use super::{
+    COMMIT_BUDGET, GitActions, RELEASE_POST_TIMEOUT, can_open_pull_request, pull_request_url,
+};
 use crate::shell::palette::tests::{run, settled};
 use crate::shell::test_support::*;
 use crate::shell::{Content, Shell, State, Tab};
@@ -310,6 +312,10 @@ fn a_commit_without_a_reply_in_time_reloads_instead_of_failing(cx: &mut TestAppC
         git(&rig.path, &["log", "-1", "--format=%s"]) == "Slow hook commit"
     });
     assert_ne!(git(&rig.path, &["rev-parse", "HEAD"]), before);
+    // The server answers other requests while the hook runs, so the reload at
+    // the timeout can read the changes before the commit lands. The changes
+    // are read again once the commit's budget is over.
+    cx.cx.executor().advance_clock(COMMIT_BUDGET);
     rig.wait(cx, "the diff reloads", &|rig, cx| rig.files(cx).is_empty());
 }
 

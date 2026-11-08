@@ -101,6 +101,7 @@ it.each([
   // The spawn-free POST write is pinned operator-only in the standalone test below. (#5243)
   ['Connect attach setting', 'GET', '/api/panel/connect/attach', 200],
   ['Connect attach write validation', 'POST', '/api/panel/connect/attach', 400],
+  ['Diff commit validation', 'POST', '/api/review/commit', 400],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
     ...(method === 'POST' ? { body: '{}' } : {}) });

@@ -6,7 +6,7 @@ use crate::diff_ui::DiffSurface;
 use crate::theme::current as theme;
 use gpui::{prelude::*, *};
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Open pull request is off on these, as in classic.
 const DEFAULT_BRANCHES: [&str; 2] = ["main", "master"];
@@ -23,6 +23,10 @@ const POST_TIMEOUT: Duration = if cfg!(test) {
 } else {
     RELEASE_POST_TIMEOUT
 };
+/// The server gives a commit's status, add and commit steps 5, 10 and 15 s
+/// (`src/app/api/review/commit/route.ts`); after that a commit has landed or
+/// been stopped.
+const COMMIT_BUDGET: Duration = Duration::from_secs(5 + 10 + 15);
 
 fn can_open_pull_request(branch: Option<&str>) -> bool {
     branch.is_some_and(|b| {
@@ -267,6 +271,20 @@ impl GitActions {
         let _ = self.diff.update(cx, |diff, cx| diff.load(cx));
     }
 
+    /// The server does not hold its other requests while a commit's hook
+    /// runs, so the reload when the reply times out can come before the
+    /// commit lands. Read the changes again once the commit's budget is over.
+    fn reload_when_the_commit_settles(&mut self, started: Instant, cx: &mut Context<Self>) {
+        let Some(wait) = COMMIT_BUDGET.checked_sub(started.elapsed()) else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |this, cx| this.reload_diff(cx));
+        })
+        .detach();
+    }
+
     pub(crate) fn commit(&mut self, cx: &mut Context<Self>) {
         let message = self.input.read(cx).text.trim().to_owned();
         if message.is_empty() {
@@ -274,11 +292,12 @@ impl GitActions {
         }
         self.error = None;
         let body = json!({ "message": message, "workspace": self.workspace });
+        let started = Instant::now();
         self.run(
             Busy::Committing,
             cx,
             move |client| post(&client, "/api/review/commit", body),
-            |this, reply, cx| match reply {
+            move |this, reply, cx| match reply {
                 Reply::Done(reply) => {
                     let hash = reply["hash"].as_str().unwrap_or_default();
                     this.say(format!("Committed {hash}").trim().to_owned(), false, cx);
@@ -299,6 +318,7 @@ impl GitActions {
                         cx,
                     );
                     this.reload_diff(cx);
+                    this.reload_when_the_commit_settles(started, cx);
                 }
             },
         );

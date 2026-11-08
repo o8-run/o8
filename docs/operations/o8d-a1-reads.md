@@ -651,3 +651,15 @@ operator-only by principal. The native transport refuses bodies over 16 MiB;
 the native caller sends at most 10 MB of image bytes, and larger files go by
 `srcPath`. The socket test in `tests/o8d-next-surfaces-real-path.test.ts`
 uploads an image with Next stopped and reads it back from `o8-assets/`.
+
+## Review commit
+
+`POST /api/review/commit` (diff; `surfaces/diff_git.rs`) is registered on the
+native transport. Its Git calls stay on the locked child boundary, but run
+asynchronously: `execFileSync` held the serving process's event loop for the
+whole commit, pre-commit hooks included, and on the native transport that
+process also carries realtime traffic. The handler's validation, knowledge-source
+refusal and argv-only commit message are unchanged; the native gate requires
+the bearer. `tests/o8d-review-commit-real-path.test.ts` commits through a 1 s
+pre-commit hook while a 100 ms timer keeps ticking.
+
