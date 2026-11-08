@@ -24,19 +24,6 @@ fn backend(record: &Value) -> Value {
     }
     Value::Null
 }
-fn remote(repo: &str) -> Option<String> {
-    if repo.is_empty() {
-        None
-    } else {
-        std::process::Command::new("git")
-            .args(["-C", repo, "remote", "get-url", "origin"])
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-    }
-}
 fn github(remote: Option<&str>, saved_remote: &str) -> (Value, Value) {
     for url in [remote.unwrap_or(""), saved_remote] {
         let lower = url.to_lowercase();
@@ -253,7 +240,8 @@ pub(super) fn threads(store: &ReadContext<'_>, params: &Params) -> ReadResult {
     threads.drain(..offset);
     threads.truncate(limit(params, 20, 500));
     // Resolve only the returned page, and once per repository in this request.
-    // Keep each record's saved URL fallback private and never cache across reads.
+    // Keep each record's saved URL fallback private: only the repository's own
+    // origin URL is reused across reads, while its config is unchanged.
     let mut remotes = HashMap::new();
     let mut threads: Vec<Value> = threads
         .into_iter()
@@ -261,7 +249,7 @@ pub(super) fn threads(store: &ReadContext<'_>, params: &Params) -> ReadResult {
             let repo = text(&thread, "repoPath");
             let remote = remotes
                 .entry(repo.to_owned())
-                .or_insert_with(|| remote(repo));
+                .or_insert_with(|| git_remote::origin(repo));
             let (owner, repo) = github(remote.as_deref(), &saved_remote);
             thread["githubOwner"] = owner;
             thread["githubRepo"] = repo;
@@ -534,7 +522,7 @@ pub(super) fn context(store: &ReadContext<'_>, params: &Params) -> Response {
         }
     }
     let (owner, repo) = github(
-        remote(text(&record, "repoPath")).as_deref(),
+        git_remote::origin(text(&record, "repoPath")).as_deref(),
         text(&record, "remoteUrl"),
     );
     record["githubOwner"] = owner;

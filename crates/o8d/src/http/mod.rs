@@ -1,5 +1,6 @@
 //! Opt-in persisted reads for the native client. No upstream, migration or writer.
 mod chat;
+mod git_remote;
 mod queue;
 mod read_context;
 mod repository;
