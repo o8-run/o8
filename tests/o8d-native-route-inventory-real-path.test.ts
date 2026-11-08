@@ -19,7 +19,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/ssh-machines',
   '/api/runtime/acp-connection',
   '/api/runtime/acp-registry/prepare',
-  '/api/runtime/provider-instances',
   '/api/setup/detect', // CLI probes, credential reads and CLI symlink repair.
   '/api/orchestrator/backend-models',
   '/api/orchestrator/comparison-diff', // GET has a write path; held for review.

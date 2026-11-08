@@ -72,11 +72,35 @@ it.each([
   ['Sidebar list', 'GET', '/api/v2/chat-history/list?include=orchestrator', 200],
   ['Sidebar archive validation', 'POST', '/api/runtime/archive', 400],
   ['Terminal View validation', 'POST', '/api/v2/chat-history/terminal-turns', 400],
+  // Providers settings (#5243): operator ws-token lists instances; a POST with no action
+  // reaches the handler and fails validation (proves the write path is registered, gated).
+  ['Providers list', 'GET', '/api/runtime/provider-instances', 200],
+  ['Providers write validation', 'POST', '/api/runtime/provider-instances', 400],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
     ...(method === 'POST' ? { body: '{}' } : {}) });
   expect(response.status).toBe(status);
   expect(response.headers.get('content-type')).toContain('application/json');
+});
+
+// provider-instances is a credential route (it writes provider API keys), so pin the
+// fail-closed gate on the native transport: a missing or wrong token is refused even
+// when the caller forges the loopback markers, for both the GET read and the POST write.
+it('refuses provider-instances over native without the operator ws-token (#5243)', async () => {
+  for (const method of ['GET', 'POST'] as const) {
+    for (const authorization of [undefined, 'Bearer fixture-wrong-token']) {
+      const response = await fetch(origin + '/api/runtime/provider-instances', {
+        method,
+        headers: {
+          ...(authorization ? { authorization } : {}), 'content-type': 'application/json',
+          'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
+        },
+        ...(method === 'POST' ? { body: '{}' } : {}),
+      });
+      expect(response.status).toBe(401);
+      await response.arrayBuffer();
+    }
+  }
 });
 
 it('keeps Sidebar and saved history reachable after verbose Workers events', async () => {

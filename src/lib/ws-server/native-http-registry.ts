@@ -137,6 +137,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // Paired-device list (Settings > Paired devices). GET only: operator-gated by principal
     // (not client-addr), a pure SELECT with no write, and the body carries no token or hash (#5243).
     route('/api/mobile/devices', 'GET', () => import('@/app/api/mobile/devices/route')),
+    // Provider instances (Settings > Providers). GET+POST, gated by requirePanelAuth:
+    // over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) it
+    // falls through to the ws-token bearer check, so it is operator-ws-token-only here —
+    // equal-or-stricter than Next. The GET inventory masks secret values (secrets live
+    // encrypted in a separate credentials table); the POST writes go through
+    // withProviderStoreLock + master-key encryption. (#5243)
+    route('/api/runtime/provider-instances', 'GET POST', () => import('@/app/api/runtime/provider-instances/route')),
     route('/api/cortex/codebase-memory', 'GET', () => import('@/app/api/cortex/codebase-memory/route')),
     route('/api/cortex/diagnostics', 'GET', () => import('@/app/api/cortex/diagnostics/route')),
     route('/api/runtime/acp-registry', 'GET', () => import('@/app/api/runtime/acp-registry/route')),
