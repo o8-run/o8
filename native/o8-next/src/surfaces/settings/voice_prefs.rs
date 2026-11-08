@@ -212,12 +212,16 @@ mod tests {
 
     #[test]
     fn the_allowlist_matches_the_hosts_export() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../src-tauri/src/stt/voice-prefs-allowlist.json"
-        );
-        let body = std::fs::read_to_string(path).unwrap_or_else(|error| {
-            panic!("the host's voice-prefs allowlist must be readable at {path}: {error}")
+        // A root-relative literal, so CI's native input scan selects this
+        // test when only the host's list changes.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("src-tauri/src/stt/voice-prefs-allowlist.json");
+        let body = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!(
+                "the host's voice-prefs allowlist must be readable at {}: {error}",
+                path.display()
+            )
         });
         let host: Vec<String> = serde_json::from_str(&body).expect("the host's list is JSON");
         assert_eq!(
