@@ -611,3 +611,13 @@ No source change was made, so there is no source-reversion fail-before/pass-afte
 receipt or moved-write trigger to verify. No native socket registration test
 was added or run because both paths remain Next-only. No typecheck or full
 suite was run, following this worktree task's targeted-test restriction.
+
+## Terminal View turns
+
+`POST /api/v2/chat-history/terminal-turns` (session; `shell_features/thread_view.rs`)
+is registered on the native transport. Its mark files are durable files under
+the data directory, chat history writes take the cross-process `.lock` file,
+and Codex rollout discovery runs on the read-only child boundary (#5652). The
+handler and its workspace check are unchanged; the native gate requires the
+bearer.
+
