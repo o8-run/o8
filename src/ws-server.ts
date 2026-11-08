@@ -9668,6 +9668,11 @@ async function bootstrapWsServer() {
   // Native producers use this listener. Its stateful requests await this
   // bootstrap, so probing them here waits on ourselves until the timeout.
   if (process.env.O8_NEXT_O8D !== '1') await waitForNextReady();
+  // With the native transport on, this process owns the edge-tts installer
+  // (#5422). Never wait on pip; the voice route also prepares on demand.
+  if (process.env.O8_NEXT_O8D === '1') void import('./lib/tts/ensure-edge-tts')
+    .then(({ ensureEdgeTtsInstalled }) => ensureEdgeTtsInstalled())
+    .catch(() => { console.warn('[startup] Optional voice preparation failed.'); });
   if (shuttingDown) return;
   await terminalHostReady;
   if (shuttingDown) return;

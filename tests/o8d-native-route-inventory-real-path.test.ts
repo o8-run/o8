@@ -22,7 +22,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/devices',
   '/api/panel/update/apply', // Updater state lives in the Next process; Phase B.
   '/api/tasks/[id]/preview',
-  '/api/tts', // edge-tts installer state is per-process; Phase B.
   '/api/review/push', // Review's push button: a POST, outside the Phase A reads.
 ]);
 function checkInventory(directory: string) {

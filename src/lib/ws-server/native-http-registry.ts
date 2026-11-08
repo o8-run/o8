@@ -70,6 +70,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/next/voice-host', 'GET POST', () => import('@/app/api/next/voice-host/route')),
     route('/api/orchestrator/stop-packet', 'POST', () => import('@/app/api/orchestrator/stop-packet/route')),
     route('/api/runtime/action', 'POST', () => import('@/app/api/runtime/action/route')),
+    // Loads the handler, not the Next route: Next forwards here while this
+    // transport is on, so the edge-tts installer has one owner (#5422).
+    route('/api/tts', 'POST', () => import('@/lib/tts/route')),
   ],
   brain: [route('/api/cortex/ask', 'POST', () => import('@/app/api/cortex/ask/route'))],
   activity: [
