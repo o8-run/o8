@@ -5453,6 +5453,13 @@
       ]
     },
     {
+      "path": "tests/o8d-session-read-admission-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-sidebar-mutations-real-path.test.ts",
       "reasons": [
         "child-process",
