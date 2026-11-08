@@ -18,8 +18,8 @@ export function ownedByNativeTransport(handler: Handler, unavailable: () => Resp
       const value = request.headers.get(name);
       if (value !== null) headers.set(name, value);
     }
-    const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
     try {
+      const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
       const response = await fetch(`${getWsBase().replace(/^ws:/, 'http:')}${url.pathname}${url.search}`,
         { method: request.method, headers, body, redirect: 'manual', cache: 'no-store', signal: request.signal });
       // fetch has already decoded the body; framing headers belong to that hop.
@@ -27,7 +27,8 @@ export function ownedByNativeTransport(handler: Handler, unavailable: () => Resp
       if (forwarded.has('content-encoding')) forwarded.delete('content-length');
       for (const name of ['connection', 'keep-alive', 'transfer-encoding', 'content-encoding']) forwarded.delete(name);
       return new Response(response.body, { status: response.status, headers: forwarded });
-    } catch {
+    } catch (error) {
+      console.warn(`[native-owner] ${url.pathname} could not reach the WS listener:`, error instanceof Error ? error.message : error);
       return unavailable();
     }
   };

@@ -33,10 +33,9 @@ it.skipIf(process.platform === 'win32')('serves the voice with Next stopped and 
   const preload = join(directory, 'python-tier.cjs');
   writeFileSync(preload, 'globalThis.__o8EdgeTtsNativeDrift = true;\n');
   const saved = { ...process.env };
-  process.env.O8_TTS_PYTHON = interpreter;
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
-    server = await startParityReference({ o8d: true, binary, nativeHttp: true, directory, preload, startupTimeoutMs: 120_000 });
+    server = await startParityReference({ o8d: true, binary, nativeHttp: true, directory, preload, ttsPython: interpreter, startupTimeoutMs: 120_000 });
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     const speak = (headers: Record<string, string>) => fetch(`${origin}/api/tts`, { method: 'POST',
@@ -61,7 +60,7 @@ it.skipIf(process.platform === 'win32')('serves the voice with Next stopped and 
     const runs = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { parent: number; args: string[] });
     expect(runs.filter(run => run.args.includes('edge_tts')).map(run => run.args.at(-3))).toEqual(
       ['Native voice check.', 'Forwarded voice check.']);
-    expect(runs.some(run => run.args[0] === '-c'), 'the owner checked the installed CLI').toBe(true);
+    expect(runs.filter(run => run.args[0] === '-c'), 'one installer check for the whole process').toHaveLength(1);
     expect(runs.filter(run => run.args.includes('pip'))).toEqual([]);
     expect(new Set(runs.map(run => run.parent))).toEqual(new Set([server.pid]));
   } finally {
