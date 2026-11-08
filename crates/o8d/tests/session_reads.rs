@@ -391,4 +391,15 @@ async fn sidebar_summaries_are_reread_when_a_save_replaces_the_file() {
     assert_eq!(after.len(), thread_title(&directory, "Alpha").len() as u64);
     assert_eq!(after.modified().unwrap(), modified);
     assert_eq!(title(read(&client, &origin, "").await), "Carol");
+
+    // An alias of a saved file is listed under its own name, not the name the
+    // cached summary was first read through.
+    std::os::unix::fs::symlink(&file, directory.join("chat-history/thoughts-alias.json")).unwrap();
+    let mut ids: Vec<String> = read(&client, &origin, "")
+        .await
+        .iter()
+        .map(|thread| thread["id"].as_str().unwrap().to_owned())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["thoughts-alias", "thoughts-summary"]);
 }

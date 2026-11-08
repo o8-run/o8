@@ -207,7 +207,7 @@ pub(super) fn threads(store: &ReadContext<'_>, params: &Params) -> ReadResult {
             Some(thread_summary::Summary {
                 archived,
                 bot_network,
-                thread: json!({"id":id,"title":title.chars().take(80).collect::<String>(),"lastMessageAt":activity,
+                thread: json!({"title":title.chars().take(80).collect::<String>(),"lastMessageAt":activity,
             "runtime":runtime,"status":status,"messageCount":messages.len(),"projectId":record["projectId"].as_str().filter(|s|!s.trim().is_empty()).map(str::trim),
             "repoPath":record["repoPath"],"repoName":repo_name,"repoBranch":record["repoBranch"],
             "backend":backend.clone(),"agent":record["agent"].as_str().filter(|s|!s.trim().is_empty()).map(|s|s.trim().chars().take(128).collect::<String>()),"pinned":record["pinned"]==true}),
@@ -236,7 +236,11 @@ pub(super) fn threads(store: &ReadContext<'_>, params: &Params) -> ReadResult {
         } {
             continue;
         }
-        threads.push((summary.thread.clone(), summary.remote.clone()));
+        // The id is the requested file's name: an alias of a cached file is
+        // its own conversation, so the id stays out of the cached summary.
+        let mut thread = summary.thread.clone();
+        thread["id"] = json!(id);
+        threads.push((thread, summary.remote.clone()));
     }
     if archived {
         return Ok(json!({"archivedIds":ids}));

@@ -52,6 +52,8 @@ struct Cache {
     entries: HashMap<PathBuf, Entry>,
     bytes: usize,
     clock: u64,
+    /// Where the latest list request started.
+    request: u64,
 }
 
 static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
@@ -59,20 +61,24 @@ static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 pub(super) static PROJECTIONS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
-/// Marks the start of one list request.
+/// Starts one list request. Entries used since the previous request began are
+/// the active set; only entries older than that are evicted.
 pub(super) fn epoch() -> u64 {
-    CACHE
-        .lock()
-        .ok()
-        .and_then(|cache| cache.as_ref().map(|cache| cache.clock))
-        .unwrap_or(0)
+    let Ok(mut cache) = CACHE.lock() else {
+        return 0;
+    };
+    let cache = cache.get_or_insert_with(Cache::default);
+    let previous = cache.request;
+    cache.request = cache.clock;
+    previous
 }
 
 /// `path` must already be canonical and inside the profile directory, the same
 /// boundary `Store::file` applies before it reads. A list longer than the cache
 /// would evict, in order, every entry it is about to need: once the least
-/// recently used entry was used by this same request (after `epoch`), a new
-/// summary is not kept, so the entries already kept stay hits.
+/// recently used entry was used by this request or the one before it (after
+/// `epoch`), a new summary is not kept, so the active entries stay hits. A
+/// new file that sorts first therefore cannot push the rest out one by one.
 pub(super) fn read(
     path: &Path,
     epoch: u64,
@@ -172,7 +178,7 @@ mod tests {
             std::env::temp_dir().join(format!("o8d-thread-summary-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).unwrap();
-        let files: Vec<PathBuf> = (0..MAX_ENTRIES + 44)
+        let mut files: Vec<PathBuf> = (0..MAX_ENTRIES + 44)
             .map(|index| {
                 let path = directory.join(format!("thoughts-{index:04}.json"));
                 std::fs::write(&path, format!("v1-{index}")).unwrap();
@@ -181,10 +187,10 @@ mod tests {
             .collect();
         // Each summary is the file's current contents, so a returned summary
         // shows whether it matches an uncached read of the file right now.
-        let list = || {
+        let list = |files: &[PathBuf]| {
             let epoch = epoch();
             let before = PROJECTIONS.load(Ordering::SeqCst);
-            for path in &files {
+            for path in files {
                 let summary = read(path, epoch, || {
                     Some(Summary {
                         archived: false,
@@ -203,9 +209,13 @@ mod tests {
             }
             PROJECTIONS.load(Ordering::SeqCst) - before
         };
-        assert_eq!(list(), MAX_ENTRIES + 44);
+        assert_eq!(list(&files), MAX_ENTRIES + 44);
         // Plain LRU would evict each entry just before the scan needs it again.
-        assert_eq!(list(), 44, "only the entries past the bound are read again");
+        assert_eq!(
+            list(&files),
+            44,
+            "only the entries past the bound are read again"
+        );
 
         // Saves replace a kept entry and one that was never kept: both read
         // exactly what an uncached read does.
@@ -214,7 +224,14 @@ mod tests {
             std::fs::write(&temporary, format!("v2-{index}")).unwrap();
             std::fs::rename(&temporary, &files[index]).unwrap();
         }
-        assert_eq!(list(), 45);
+        assert_eq!(list(&files), 45);
+
+        // A new conversation that sorts first must not push the active
+        // entries out one by one ahead of the scan.
+        let first = directory.join("thoughts-0000-new.json");
+        std::fs::write(&first, "v1-new").unwrap();
+        files.insert(0, first);
+        assert_eq!(list(&files), 45, "the newcomer and the 44 past the bound");
         std::fs::remove_dir_all(&directory).unwrap();
     }
 }
