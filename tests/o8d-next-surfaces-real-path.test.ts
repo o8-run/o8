@@ -107,6 +107,13 @@ it.each([
   // The spawn-free POST write is pinned operator-only in the standalone test below. (#5243)
   ['Connect attach setting', 'GET', '/api/panel/connect/attach', 200],
   ['Connect attach write validation', 'POST', '/api/panel/connect/attach', 400],
+  // Machine connect (Settings > Paired devices): operator GET lists machines, POST registers / DELETE
+  // deregisters this machine via the upstream license server. With no clerk/license credential in the
+  // fixture the handler short-circuits to auth_required (200, ok:false) before any upstream call, so each
+  // verb proves it is registered + operator-gated without a network round-trip. Fail-closed 401 below. (#5243)
+  ['Connect status', 'GET', '/api/panel/connect', 200],
+  ['Connect register', 'POST', '/api/panel/connect', 200],
+  ['Connect disconnect', 'DELETE', '/api/panel/connect', 200],
   ['Diff commit validation', 'POST', '/api/review/commit', 400],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
@@ -204,6 +211,34 @@ it('refuses panel/connect/attach over native without the operator ws-token; writ
       await response.arrayBuffer();
     }
   }
+});
+
+// panel/connect GET lists machines, POST registers this machine, DELETE deregisters it + writes attach-off,
+// all through the upstream license server using x-clerk-session-token (or the cached license key). Pin the
+// fail-closed gate on the native transport: a missing or wrong token is refused even with forged loopback
+// markers, for all three verbs. With the operator ws-token but no upstream credential in the fixture, the
+// handler runs and returns auth_required (200, ok:false) WITHOUT reaching the registry — proving it is
+// reachable + operator-gated over native with no network round-trip to the license server. (#5243)
+it('refuses panel/connect over native without the operator ws-token; connect/disconnect operator-only (#5243)', async () => {
+  for (const method of ['GET', 'POST', 'DELETE'] as const) {
+    for (const authorization of [undefined, 'Bearer fixture-wrong-token']) {
+      const response = await fetch(origin + '/api/panel/connect', {
+        method,
+        headers: {
+          ...(authorization ? { authorization } : {}), 'content-type': 'application/json',
+          'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
+        },
+        ...(method === 'POST' ? { body: '{}' } : {}),
+      });
+      expect(response.status).toBe(401);
+      await response.arrayBuffer();
+    }
+  }
+  const ok = await fetch(origin + '/api/panel/connect', {
+    headers: { authorization: `Bearer ${server.token}` },
+  });
+  expect(ok.status).toBe(200);
+  expect(JSON.parse(await ok.text()).error?.code).toBe('auth_required');
 });
 
 // mobile-pairing hands the operator the real ws-token but a device only host/port with token:'' —
