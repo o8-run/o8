@@ -114,6 +114,10 @@ it.each([
   ['Connect status', 'GET', '/api/panel/connect', 200],
   ['Connect register', 'POST', '/api/panel/connect', 200],
   ['Connect disconnect', 'DELETE', '/api/panel/connect', 200],
+  // Paired-device revoke (Settings > Paired devices): the operator ws-token passes both gates and
+  // reaches the handler, which 400s on the empty body (deviceId required) before any revoke — proving
+  // the POST write path is registered and operator-gated without mutating the token-hash file. (#5243)
+  ['Device revoke validation', 'POST', '/api/mobile/devices/revoke', 400],
   ['Diff commit validation', 'POST', '/api/review/commit', 400],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
@@ -268,6 +272,37 @@ it('never hands the ws-token to a device over native mobile-pairing (#5243)', as
   });
   expect(operatorRes.status).toBe(200);
   expect(JSON.parse(await operatorRes.text()).token).toBe(server.token);
+});
+
+// Paired-device revoke is operator-only device administration: a device must not be able to revoke
+// devices (including itself), and neither may a worker. Pin the fail-closed gate over the native
+// transport with real enrolled device + worker bearers (seed the token files the middleware reads):
+// every non-operator caller is refused before the handler can touch the token-hash file, even with
+// forged loopback markers; only the operator ws-token reaches the handler, which 400s on the empty
+// body (deviceId required) — a safe no-op that proves reachability without a revoke. (#5243)
+it('refuses paired-device revoke over native to everyone but the operator (#5243)', async () => {
+  const deviceToken = 'enrolled-device-token-revoke-5243-abcdef0123456789';
+  const workerToken = 'packet-worker-token-revoke-5243-abcdef0123456789';
+  writeFileSync(join(server.directory, 'mobile-device-tokens'),
+    `${createHash('sha256').update(deviceToken).digest('hex')}\n`, { mode: 0o600 });
+  writeFileSync(join(server.directory, 'worker-token'), workerToken, { mode: 0o600 });
+  const post = (authorization?: string) => fetch(origin + '/api/mobile/devices/revoke', {
+    method: 'POST',
+    headers: {
+      ...(authorization ? { authorization } : {}), 'content-type': 'application/json',
+      'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
+    },
+    body: JSON.stringify({ deviceId: 'victim-device' }),
+  });
+  expect((await post()).status, 'no bearer').toBe(401);
+  expect((await post('Bearer fixture-wrong-token')).status, 'wrong bearer').toBe(401);
+  expect((await post(`Bearer ${deviceToken}`)).status, 'a device cannot revoke devices').toBe(403);
+  expect((await post(`Bearer ${workerToken}`)).status, 'a worker cannot revoke devices').toBe(403);
+  // The operator reaches the handler; an empty body 400s (deviceId required) before any revoke.
+  const operator = await fetch(origin + '/api/mobile/devices/revoke', {
+    method: 'POST', headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' }, body: '{}',
+  });
+  expect(operator.status).toBe(400);
 });
 
 it('keeps Sidebar and saved history reachable after verbose Workers events', async () => {

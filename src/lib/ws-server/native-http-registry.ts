@@ -141,6 +141,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // Paired-device list (Settings > Paired devices). GET only: operator-gated by principal
     // (not client-addr), a pure SELECT with no write, and the body carries no token or hash (#5243).
     route('/api/mobile/devices', 'GET', () => import('@/app/api/mobile/devices/route')),
+    // Paired-device revoke (Settings > Paired devices). POST only, and operator-only twice over:
+    // the handler returns 403 unless resolveRequestPrincipal(req) === 'operator' (principal from the
+    // bearer, never x-o8-client-addr), and the path is in no middleware allowlist, so over native
+    // (x-o8-client-addr forced to unverified-proxy, non-loopback) the gate already admits only the
+    // operator ws-token. A device/worker bearer gets 403; no/wrong bearer gets 401. The write marks
+    // the device revoked + rewrites the active-token-hash file; the response carries no token. (#5243)
+    route('/api/mobile/devices/revoke', 'POST', () => import('@/app/api/mobile/devices/revoke/route')),
     // Connect-attach toggle (Settings > Paired devices). GET reads the setting, POST writes it
     // (env-override locked). No handler-level auth — same panelGateMiddleware operator gate as the
     // rest of /api/panel/* (not allowlisted), so over native (x-o8-client-addr=unverified-proxy,
