@@ -38,6 +38,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     const init = { method: req.method, headers, signal: abort.signal };
     const gate = panelGateMiddleware(new NextRequest(url, init));
     let response: Response;
+    let admission = false;
     if (gate.headers.get('x-middleware-next') !== '1') response = gate;
     else if (authenticatedBridge && process.env.O8D_NATIVE_SESSION_READS === '1'
       && req.method === 'GET' && req.headers['x-o8d-session-read'] === 'authorize'
@@ -47,6 +48,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
       const denied = url.pathname === '/api/orchestrator/composer-queue'
         ? (await import('@/lib/panel/auth')).requirePanelAuth(new NextRequest(url, init)) : null;
       response = denied ?? new Response(null, { status: 204 });
+      admission = !denied;
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: match.route.methods.join(', ') } });
     } else if (match.route.path === '/api/runtime/archive' && typeof mutationWorkspace({ url: url.href }) !== 'string') {
@@ -77,7 +79,11 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     }
     if (res.destroyed) { await response.body?.cancel(); return true; }
     const responseHeaders = Object.fromEntries(response.headers);
-    if (process.env.O8_WS_O8D === '1' && process.env.O8D_NATIVE_SESSION_READS === '1') responseHeaders.connection = 'close';
+    // A tunnelled client socket closes after each response so the next request
+    // is classified again. An admission comes only from o8d's own pooled
+    // backhaul client with the bridge key on every request, so it may stay open.
+    if (admission) res.removeHeader('connection');
+    else if (process.env.O8_WS_O8D === '1' && process.env.O8D_NATIVE_SESSION_READS === '1') responseHeaders.connection = 'close';
     res.writeHead(response.status, responseHeaders);
     if (response.body) {
       const reader = response.body.getReader();

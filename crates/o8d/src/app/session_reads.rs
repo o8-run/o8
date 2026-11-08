@@ -1,7 +1,7 @@
 //! Native saved reads after a per-request admission by the existing TS gates.
 use crate::http;
 use axum::{body::to_bytes, http::StatusCode};
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::OnceLock, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -9,6 +9,26 @@ use tokio::{
 
 pub(super) fn enabled() -> bool {
     std::env::var("O8D_NATIVE_SESSION_READS").as_deref() == Ok("1")
+}
+
+/// One pooled client for the private admission backhaul. A client built per
+/// read opened a new loopback connection each time, about 2 ms per read.
+/// Each request still carries the bridge key and is admitted on its own.
+fn admission_client() -> Result<&'static reqwest::Client, ()> {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        // Node's default keep-alive timeout is 5 s; drop idle sockets before
+        // the backend does, so a reused socket is never one it is closing.
+        .pool_idle_timeout(Duration::from_secs(2))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .build()
+        .map_err(|_| ())?;
+    Ok(CLIENT.get_or_init(|| client))
 }
 
 /// Returns false when the original streaming TS path must own the request.
@@ -43,13 +63,7 @@ pub(super) async fn serve(
     }
     // Admit the original path/method/headers through production middleware and
     // the queue's in-handler gate. Never cache principal or credential decisions.
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .no_proxy()
-        .build()
-        .map_err(|_| ())?;
-    let mut request = client.get(format!("http://{upstream}{target}"));
+    let mut request = admission_client()?.get(format!("http://{upstream}{target}"));
     for (name, value) in header
         .lines()
         .skip(1)
@@ -70,13 +84,18 @@ pub(super) async fn serve(
         }
         request = request.header(name, value.trim());
     }
-    let admission = request
+    let Ok(admission) = request
         .header("x-o8d-bridge", key)
         .header("x-o8d-peer", "unverified-proxy")
         .header("x-o8d-session-read", "authorize")
         .send()
         .await
-        .map_err(|_| ())?;
+    else {
+        // A pooled socket the backend closed as this request went out fails
+        // the send. The original handler still owns the request, as it does
+        // for any admission that does not come back 204.
+        return Ok(false);
+    };
     if admission.status() != StatusCode::NO_CONTENT {
         // Let the original handler return its exact auth/error response. An
         // unavailable gate never grants native access.
