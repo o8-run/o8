@@ -160,6 +160,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // #1562), so over native (x-o8-client-addr=unverified-proxy) both the preview and the config-file
     // WRITE are operator-ws-token-only — equal-or-stricter than Next. (#5243)
     route('/api/setup/claude-desktop', 'GET POST', () => import('@/app/api/setup/claude-desktop/route')),
+    // External MCP client auto-register for Hermes/OpenClaw (Settings > MCP). GET probes whether the
+    // CLI is installed + o8 registered (read-only `command -v`); POST shells out to the CLI to install
+    // or remove the o8 server. No handler-level auth — same panelGateMiddleware gate as the other
+    // /api/setup/* routes (hardening #1562), so over native the probe and the CLI spawn are
+    // operator-ws-token-only. The CLI is spawned via execFile/cliInvocation arg arrays (no shell
+    // string); its args come from the o8 registry projection, not request input (only `target` is,
+    // normalized to hermes|openclaw) — so a non-operator cannot reach or steer the spawn. (#5243)
+    route('/api/setup/external-client', 'GET POST', () => import('@/app/api/setup/external-client/route')),
     route('/api/cortex/codebase-memory', 'GET', () => import('@/app/api/cortex/codebase-memory/route')),
     route('/api/cortex/diagnostics', 'GET', () => import('@/app/api/cortex/diagnostics/route')),
     route('/api/runtime/acp-registry', 'GET', () => import('@/app/api/runtime/acp-registry/route')),
