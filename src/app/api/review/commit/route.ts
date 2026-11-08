@@ -1,12 +1,21 @@
 import { NextResponse } from 'next/server';
-import { execFileSync } from '@/lib/providers/child-process';
+import { execFile } from '@/lib/providers/child-process';
 import { homedir } from 'node:os';
+import { promisify } from 'node:util';
 import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
+// Asynchronous, so a slow commit hook never blocks the serving process's event
+// loop (on the native transport, that process also carries realtime traffic).
+const execFileAsync = promisify(execFile);
+
+async function git(args: string[], root: string, timeout: number): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, { windowsHide: true, encoding: 'utf-8', timeout, cwd: root });
+  return String(stdout);
+}
 
 function resolveRoot(workspace?: string | null) {
   if (!workspace) return REPO_ROOT;
@@ -38,36 +47,21 @@ export async function POST(request: Request) {
 
   try {
     // Check if there are changes to commit
-    const status = execFileSync('git', ['status', '--porcelain'], {
-      windowsHide: true,
-      encoding: 'utf-8',
-      timeout: 5000,
-      cwd: root,
-    }).trim();
+    const status = (await git(['status', '--porcelain'], root, 5000)).trim();
 
     if (!status) {
       return NextResponse.json({ error: 'No changes to commit' }, { status: 400 });
     }
 
     // Stage all changes
-    execFileSync('git', ['add', '-A'], { windowsHide: true, encoding: 'utf-8', timeout: 10000, cwd: root });
+    await git(['add', '-A'], root, 10000);
 
     // Commit with the provided message — argv form (no shell), so backticks/$()
     // in the message are passed literally, never interpreted by a shell.
-    execFileSync('git', ['commit', '-m', message], {
-      windowsHide: true,
-      encoding: 'utf-8',
-      timeout: 15000,
-      cwd: root,
-    });
+    await git(['commit', '-m', message], root, 15000);
 
     // Get the commit hash
-    const hash = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
-      windowsHide: true,
-      encoding: 'utf-8',
-      timeout: 5000,
-      cwd: root,
-    }).trim();
+    const hash = (await git(['rev-parse', '--short', 'HEAD'], root, 5000)).trim();
 
     return NextResponse.json({ ok: true, hash, message });
   } catch (err) {

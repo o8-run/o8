@@ -5445,6 +5445,15 @@
       ]
     },
     {
+      "path": "tests/o8d-review-commit-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-review-last-turn-real-path.test.ts",
       "reasons": [
         "child-process",

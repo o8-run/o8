@@ -108,6 +108,7 @@ import { GET as api_task_artifacts_id_decision_GET, POST as api_task_artifacts_i
 import { POST as api_panel_browse_folder_POST } from '@/app/api/panel/browse-folder/route';
 import { POST as api_repo_spec_asset_POST } from '@/app/api/repo-spec/asset/route';
 import { GET as api_worktrees_retention_usage_GET } from '@/app/api/worktrees/retention-usage/route';
+import { POST as api_review_commit_POST } from '@/app/api/review/commit/route';
 
 export const api_tasks = { GET: api_tasks_GET };
 export const api_mobile_orchestrator_threads = { GET: api_mobile_orchestrator_threads_GET };
@@ -219,3 +220,4 @@ export const api_task_artifacts_id_decision = { GET: api_task_artifacts_id_decis
 export const api_panel_browse_folder = { POST: api_panel_browse_folder_POST };
 export const api_repo_spec_asset = { POST: api_repo_spec_asset_POST };
 export const api_worktrees_retention_usage = { GET: api_worktrees_retention_usage_GET };
+export const api_review_commit = { POST: api_review_commit_POST };

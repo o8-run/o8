@@ -218,6 +218,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/lanes/[id]/diff', 'GET', () => import('@/app/api/lanes/[id]/diff/route')),
     route('/api/worktrees/diff', 'GET', () => import('@/app/api/worktrees/diff/route')),
     route('/api/review/last-turn', 'GET', () => import('@/app/api/review/last-turn/route')),
+    route('/api/review/commit', 'POST', () => import('@/app/api/review/commit/route')),
   ],
   customize: [
     route('/api/customize/inventory', 'GET', () => import('@/app/api/customize/inventory/route')),
