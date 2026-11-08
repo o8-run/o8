@@ -6,6 +6,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { spawn, type ChildProcess } from '@/lib/providers/child-process';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import type { RealtimeEventEnvelope } from '@/lib/realtime/types';
+import { nativeSessionReadsEnabled } from './native-session-reads';
 
 const PIPE_LIMIT = 1024 * 1024;
 
@@ -79,7 +80,7 @@ export class O8dBridge {
       '--app-upstream', this.upstream], {
       env: childEnvironment({ inherit: false, env: {
         O8D_BRIDGE_KEY: this.key, O8D_EPOCH: this.epoch,
-        O8D_NATIVE_SESSION_READS: process.env.O8_NEXT_O8D === '1' ? process.env.O8D_NATIVE_SESSION_READS : undefined,
+        O8D_NATIVE_SESSION_READS: process.env.O8_NEXT_O8D === '1' && nativeSessionReadsEnabled() ? '1' : undefined,
         O8D_SESSION_DATA_DIR: getDataDir(), O8D_SESSION_DB_PATH: process.env.CORTEX_IDE_DB_PATH, TZ: process.env.TZ,
       } }), stdio: ['pipe', 'pipe', 'pipe'],
     });

@@ -1,8 +1,8 @@
 # Phase B ownership and protected boundaries
 
 Refs #5422 and #5243. This is an implementation audit of the server domains, not a
-claim that the Rust server port is complete. The saved-session optimization keeps
-`O8D_NATIVE_SESSION_READS` default off. The repository integration adds the
+claim that the Rust server port is complete. The saved-session reads are on by
+default behind `O8_NEXT_O8D=1`; `O8D_NATIVE_SESSION_READS=0` turns them off. The repository integration adds the
 default-off `O8D_NATIVE_REPOSITORY_READS` flag for branch GETs. Neither change
 introduces a store writer, and every existing TypeScript fallback remains
 available. The repository/git domain is only partially implemented.

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Agent, get } from 'node:http';
 import { promisify } from 'node:util';
 import { beforeAll, expect, it } from 'vitest';
-import { firstDifference, normalize, runSessionParity, seedSessionFixture, send, SESSION_READ_PATHS, startSessionServer } from '../scripts/o8d/parity';
+import { firstDifference, normalize, runSessionParity, seedSessionFixture, send, SESSION_READ_PATHS, sessionCorpus, startSessionServer } from '../scripts/o8d/parity';
 
 // CI ships no daemon: build the session-reads feature set into its own target
 // directory so a sibling surface test's experimental-ws build cannot replace it.
@@ -18,6 +18,30 @@ beforeAll(async () => {
 }, 900_000);
 it('records TS session reads and replays them natively with zero differences and Next stopped', async () => {
   expect(await runSessionParity(binary, false)).toMatchObject({ requests: 22, differences: 0 });
+}, 180_000);
+
+it('serves session reads natively by default behind the native transport; =0 keeps them in TS', async () => {
+  const { nativeSessionReadsEnabled } = await import('../src/lib/ws-server/native-session-reads');
+  // Only an unset flag takes the default; every value other than 1 is off.
+  expect([undefined, '1', '0', 'false', 'off', ''].map(flag => [nativeSessionReadsEnabled({ O8_NEXT_O8D: '1', O8D_NATIVE_SESSION_READS: flag }),
+    nativeSessionReadsEnabled({ O8_NEXT_O8D: '0', O8D_NATIVE_SESSION_READS: flag })]))
+    .toEqual([[true, false], [true, true], [false, false], [false, false], [false, false], [false, false]]);
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-session-default-')));
+  let server: Awaited<ReturnType<typeof startSessionServer>> | undefined;
+  try {
+    await seedSessionFixture(directory);
+    for (const [flag, native] of [['default', true], [false, false]] as const) {
+      server = await startSessionServer(directory, flag, binary);
+      // The four routes, through the benchmark's own 200 requests.
+      const corpus = sessionCorpus(directory);
+      for (const path of [corpus[0], corpus[5], corpus[10], corpus[14]]) {
+        const response = await send(server, path);
+        expect([path.split('?')[0], response.status, response.native]).toEqual([path.split('?')[0], 200, native]);
+      }
+      await server.stop();
+      server = undefined;
+    }
+  } finally { await server?.stop(); rmSync(directory, { recursive: true, force: true }); }
 }, 180_000);
 
 it('preserves auth refusals, TS writes, other routes and flag-off behavior through the public socket', async () => {
@@ -56,13 +80,14 @@ it('preserves auth refusals, TS writes, other routes and flag-off behavior throu
   } finally { await server?.stop(); rmSync(directory, { recursive: true, force: true }); }
 }, 180_000);
 
-it('reclassifies native reads after a TS request on a keep-alive client', async () => {
+// The TS response must close its socket (both connection-close marks) so the next read is classified again.
+it.each([true, 'default'] as const)('reclassifies native reads after a TS request on a keep-alive client (flag %s)', async flag => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-parity-keepalive-')));
   const agent = new Agent({ keepAlive: true, maxSockets: 1 });
   let server: Awaited<ReturnType<typeof startSessionServer>> | undefined;
   try {
     await seedSessionFixture(directory);
-    server = await startSessionServer(directory, true, binary);
+    server = await startSessionServer(directory, flag, binary);
     const read = (path: string) => new Promise<{ status: number | undefined; native: boolean }>((resolve, reject) => {
       const request = get(server!.origin + path, { agent, headers: { authorization: `Bearer ${server!.token}` } }, response => {
         response.resume();
@@ -71,7 +96,10 @@ it('reclassifies native reads after a TS request on a keep-alive client', async 
       });
       request.once('error', reject);
     });
+    // A registered TS route (native-http-routes close mark), then a path outside the registry (ws-server close mark).
     expect(await read('/api/panel/projects')).toEqual({ status: 200, native: false });
+    expect(await read('/api/v2/chat-history?tabId=thoughts-review')).toEqual({ status: 200, native: true });
+    expect((await read('/api/o8d-parity-unregistered')).native).toBe(false);
     expect(await read('/api/v2/chat-history?tabId=thoughts-review')).toEqual({ status: 200, native: true });
   } finally { agent.destroy(); await server?.stop(); rmSync(directory, { recursive: true, force: true }); }
 }, 180_000);

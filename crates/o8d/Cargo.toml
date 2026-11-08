@@ -10,7 +10,8 @@ experimental-mcp = ["dep:libc", "dep:axum", "dep:reqwest", "dep:rusqlite", "dep:
 experimental-ws = ["dep:tokio-tungstenite", "dep:futures-util", "dep:form_urlencoded", "dep:subtle", "dep:uuid"]
 experimental-supervisor = ["dep:libc", "dep:base64", "dep:subtle", "dep:uuid"]
 experimental-http = ["dep:axum", "dep:form_urlencoded", "dep:subtle", "dep:rusqlite", "dep:chrono", "dep:sha2", "dep:base64"]
-# Flagged native session reads on the app transport (O8D_NATIVE_SESSION_READS=1).
+# Native session reads on the app transport (on by default behind O8_NEXT_O8D=1;
+# O8D_NATIVE_SESSION_READS=0 turns them off).
 # Kept out of experimental-ws so the common fixture build stays small.
 experimental-session-reads = ["experimental-ws", "experimental-http", "dep:reqwest"]
 

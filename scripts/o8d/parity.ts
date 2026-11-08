@@ -60,7 +60,7 @@ export async function seedSessionFixture(directory: string, linkedCheckout = fal
     'scripts/next/seed-o8d.ts', directory, ...(linkedCheckout ? ['--linked-checkout'] : [])],
   { env: { ...process.env, O8_NEXT_API_TOKEN: 'ws-parity-fixture-credential' } });
 }
-export async function startSessionServer(directory: string, nativeSessionReads: boolean, binary: string) {
+export async function startSessionServer(directory: string, nativeSessionReads: boolean | 'default', binary: string) {
   const server = await startParityReference({ directory, nativeHttp: true, o8d: true, nativeSessionReads, binary, startupTimeoutMs: 60_000 });
   try { await server.stopNext(); } catch (error) { await server.stop(); throw error; }
   return { ...server, origin: server.url.replace('ws:', 'http:').replace('/ws', '') };

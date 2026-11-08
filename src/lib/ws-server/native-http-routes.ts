@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 import { panelGateMiddleware } from '@/middleware';
 import { mutationWorkspace } from '@/lib/repos/mutation-workspace';
 import { matchNativeHttpRoute } from './native-http-registry';
+import { nativeSessionReadsEnabled } from './native-session-reads';
 import { markNativeCortexReader } from '@/lib/cortex/owner-process';
 export { nativeSurfaceRoutes } from './native-http-registry';
 
@@ -40,7 +41,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     let response: Response;
     let admission = false;
     if (gate.headers.get('x-middleware-next') !== '1') response = gate;
-    else if (authenticatedBridge && process.env.O8D_NATIVE_SESSION_READS === '1'
+    else if (authenticatedBridge && nativeSessionReadsEnabled()
       && req.method === 'GET' && req.headers['x-o8d-session-read'] === 'authorize'
       && ['/api/mobile/orchestrator/threads', '/api/mobile/history', '/api/v2/chat-history', '/api/orchestrator/composer-queue'].includes(url.pathname)) {
       // Admission only. Keep the middleware and queue's existing defense-in-depth
@@ -83,7 +84,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     // is classified again. An admission comes only from o8d's own pooled
     // backhaul client with the bridge key on every request, so it may stay open.
     if (admission) res.removeHeader('connection');
-    else if (process.env.O8_WS_O8D === '1' && process.env.O8D_NATIVE_SESSION_READS === '1') responseHeaders.connection = 'close';
+    else if (process.env.O8_WS_O8D === '1' && nativeSessionReadsEnabled()) responseHeaders.connection = 'close';
     res.writeHead(response.status, responseHeaders);
     if (response.body) {
       const reader = response.body.getReader();
