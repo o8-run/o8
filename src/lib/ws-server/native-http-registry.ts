@@ -130,6 +130,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/steer-packet', 'POST', () => import('@/app/api/orchestrator/steer-packet/route')),
   ],
   settings: [
+    // Paired-device list (Settings > Paired devices). GET only: operator-gated by principal
+    // (not client-addr), a pure SELECT with no write, and the body carries no token or hash (#5243).
+    route('/api/mobile/devices', 'GET', () => import('@/app/api/mobile/devices/route')),
     route('/api/cortex/codebase-memory', 'GET', () => import('@/app/api/cortex/codebase-memory/route')),
     route('/api/cortex/diagnostics', 'GET', () => import('@/app/api/cortex/diagnostics/route')),
     route('/api/runtime/acp-registry', 'GET', () => import('@/app/api/runtime/acp-registry/route')),

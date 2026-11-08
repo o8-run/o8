@@ -10,7 +10,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   // Existing native inventory drift, outside the A1 and A2 slices. No methods added.
   '/api/panel/connect/attach',
   '/api/panel/mobile-pairing',
-  '/api/mobile/devices',
   '/api/mobile/devices/revoke',
   '/api/setup/mcp-config',
   '/api/setup/claude-desktop',
