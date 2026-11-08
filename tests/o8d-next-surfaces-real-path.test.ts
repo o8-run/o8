@@ -87,6 +87,13 @@ it.each([
   // returns other servers by NAME only (never their contents); the o8 entry carries WS_TOKEN,
   // which is the operator's own token. The POST config-file write is pinned operator-only below.
   ['MCP Claude Desktop preview', 'GET', '/api/setup/claude-desktop', 200],
+  // MCP external client (Settings > MCP): operator GET probes whether the hermes/openclaw CLI is
+  // installed + o8 registered (read-only `command -v` via login shell; fixed CLI names). A POST with
+  // no/invalid target fails validation (400) before any resolveCli/spawn, so this asserts the write
+  // path is registered + gated without triggering a real CLI install. The install/remove spawn is
+  // pinned operator-only in the standalone test below. (#5243)
+  ['MCP external client probe', 'GET', '/api/setup/external-client?target=hermes', 200],
+  ['MCP external client write validation', 'POST', '/api/setup/external-client', 400],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
     ...(method === 'POST' ? { body: '{}' } : {}) });
@@ -140,6 +147,28 @@ it('refuses setup/claude-desktop over native without the operator ws-token; writ
   });
   expect(ok.status).toBe(200);
   await ok.arrayBuffer();
+});
+
+// external-client POST shells out to the hermes/openclaw CLI to install/remove the o8 MCP server,
+// so pin the fail-closed gate on the native transport: a missing or wrong token is refused even with
+// forged loopback markers, for both the GET probe and the POST spawn. The POST uses an invalid target
+// so it would fail validation before any resolveCli/spawn even if it reached the handler — but it must
+// not: the gate refuses it first (401, not 400). (#5243)
+it('refuses setup/external-client over native without the operator ws-token; CLI spawn operator-only (#5243)', async () => {
+  for (const method of ['GET', 'POST'] as const) {
+    for (const authorization of [undefined, 'Bearer fixture-wrong-token']) {
+      const response = await fetch(origin + '/api/setup/external-client?target=hermes', {
+        method,
+        headers: {
+          ...(authorization ? { authorization } : {}), 'content-type': 'application/json',
+          'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
+        },
+        ...(method === 'POST' ? { body: '{}' } : {}),
+      });
+      expect(response.status).toBe(401);
+      await response.arrayBuffer();
+    }
+  }
 });
 
 it('keeps Sidebar and saved history reachable after verbose Workers events', async () => {
