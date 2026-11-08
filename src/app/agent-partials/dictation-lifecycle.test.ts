@@ -168,8 +168,8 @@ describe('native Fn dictation surfaces', () => {
     await event('system-start', { hud: true, surface: 'caret' });
     await event('status', { sessionId: 25, text: 'listening' });
     await wait(32);
-    // Ordinary speech, about -38 dBFS on the recorder's -50..-10 dBFS meter.
-    await event('level', { sessionId: 25, level: 0.3 });
+    // Ordinary speech, about -36 dBFS on the recorder's -50..-10 dBFS meter.
+    await event('level', { sessionId: 25, level: 0.35 });
     const speaking = tallestBar();
     expect(speaking).toBeGreaterThan(10);
     await event('partial', { sessionId: 25, text: 'normal speaking fixture' });
