@@ -43,6 +43,7 @@ No peer header grants local authority.
 | `/api/tasks` | session | browser_panel/remote/client.rs | gate + panel |
 | `/api/cortex/codebase-memory` | settings | settings_indexing.rs | gate |
 | `/api/cortex/diagnostics` | settings | settings_indexing.rs | gate |
+| `/api/orchestrator/packet-transcript` | sidebar | surfaces/sidebar/thread_list_client.rs | gate + panel; Codex discovery runs `sqlite3 -readonly` on the read-only child boundary (#5652), so the read takes no `.provider-keys.lock` |
 
 `[hash]` uses the production parameter name for the native commit path
 inventoried as `[id]`. The timeline similarly uses production `[number]` for
@@ -77,7 +78,6 @@ the heal-bot is on, and skips the ticks the running heal-bot already covers.
 | `/api/orchestrator/backend-models` | ACP probing writes the model cache and takes the credential-policy store lock before spawning. Moving the catalogue cache alone cannot make the GET read-only. See the orchestrator audit below. |
 | `/api/orchestrator/pull-request-context` | Refresh queries update the mirror through a reader shared with paired devices. The existing context POST is operator-only; moving all callers to it needs an authorization decision. See the orchestrator audit below. |
 | `/api/setup/identity` | `getInstanceIdentity` creates persisted instance/boot IDs when absent. Existing producer registration is preserved; no surface entry is added. |
-| `/api/orchestrator/packet-transcript` | Transcript lookup can call `getCodexRolloutPath` -> `queryCodexThreadByIdFromHome` -> the shared child-process boundary. That boundary refreshes credentials and takes `.provider-keys.lock`, even for a read-only SQLite query. Held at the credential boundary; no source or auth changes. |
 | `/api/setup/detect` | CLI detection launches probes through the shared child-process boundary and provider store lock, reads login material, and can repair CLI symlinks via `scanAndLink`. Held at the credential/process boundary. |
 | `/api/review/last-turn` | `getWorktreeManager(...).list()` -> `gitWorktreeList`/`getDirtyFiles` -> `materializationAwareExecFile` -> the shared child-process boundary, which refreshes credentials and takes `.provider-keys.lock`. Held at the credential boundary. |
 
@@ -94,7 +94,8 @@ handlers. Held entries remain in `NEXT_ONLY_NATIVE_PATHS`. Existing producer/vie
 registrations (including setup identity, file assets and v2 files) are preserved;
 this inventory tracks surface membership, not the whole pre-existing registry.
 The expanded inventory walk also exposed ten pre-existing native literals
-missing from the hold list: orchestrator stop-packet/packet-transcript,
+missing from the hold list: orchestrator stop-packet/packet-transcript (the
+transcript GET has since been registered),
 runtime action, panel connect/attach/mobile-pairing, mobile devices/devices/revoke,
 and setup mcp-config/claude-desktop/external-client. They are named explicitly in
 the hold list so the full scan can complete; no method is registered for them.

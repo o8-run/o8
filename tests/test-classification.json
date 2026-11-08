@@ -5378,6 +5378,12 @@
       ]
     },
     {
+      "path": "tests/o8d-packet-transcript-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-parity-real-path.test.ts",
       "reasons": [
         "child-process",

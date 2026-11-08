@@ -115,6 +115,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
     route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),
     route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
+    route('/api/orchestrator/packet-transcript', 'GET', () => import('@/app/api/orchestrator/packet-transcript/route')),
     route('/api/runtime/inventory', 'GET', () => import('@/app/api/runtime/inventory/route')),
     route('/api/v2/chat-history/list', 'GET', () => import('@/app/api/v2/chat-history/list/route')),
     route('/api/v2/chat-history', 'GET POST PATCH', () => import('@/app/api/v2/chat-history/route')),
