@@ -312,6 +312,20 @@ function resolveIsolationPreference(opts: CreateWorktreeOptions): WorkspaceIsola
   return process.env[APFS_COW_ENV_FLAG] === '0' ? 'git-worktree' : 'auto';
 }
 
+/** Paths from `git status --porcelain=v1 -z`; a rename or copy, staged or in the
+ *  working tree, reports its new path and is followed by its original path. */
+function statusPaths(stdout: string): string[] {
+  const fields = stdout.split('\0');
+  const paths: string[] = [];
+  for (let index = 0; index < fields.length; index += 1) {
+    const entry = fields[index];
+    if (entry.length < 4) continue;
+    paths.push(entry.slice(3));
+    if ('RC'.includes(entry[0]) || 'RC'.includes(entry[1])) index += 1; // Skip the original path.
+  }
+  return paths;
+}
+
 export class WorktreeManager {
   private repoRoot: string;
   private worktreeBase: string;
@@ -2744,36 +2758,21 @@ export class WorktreeManager {
 
   async getDirtyFiles(worktreePath: string, baseBranch?: string): Promise<string[]> {
     try {
-      // Three independent git probes with no ordering dependency between them.
-      // They used to run SERIALLY — three full process-spawn round trips
-      // (~68ms each on the operator's Intel box, so ~204ms per worktree) to
-      // answer three questions that could have been asked at the same time.
-      // Concurrent: wall time becomes the slowest probe, not the sum.
-      //
-      // Deliberately NOT collapsed into a single `git diff --name-only HEAD`.
-      // That would miss a file that was staged and then reverted in the working
-      // tree (index differs from HEAD, working tree does not) — the union of the
-      // three probes is the correct definition of "dirty" and is preserved here
-      // exactly, including the failure semantics: if either of the first two
-      // probes throws, Promise.all rejects and the outer catch returns [], just
-      // as it did before. Only the base-branch probe swallows its own error,
+      // Two independent probes, run concurrently. Status reports the union of
+      // unstaged (working tree vs index) and staged (index vs HEAD) tracked
+      // changes, including a file staged and then reverted in the working tree.
+      // It replaces `git diff --name-only` and `--cached`: `git diff` rewrites a
+      // stat-dirty worktree's index even without optional locks, so a read would
+      // take index.lock under an agent's feet. Status with --no-optional-locks
+      // writes nothing. Only the base-branch probe swallows its own error,
       // because the base branch may legitimately not be reachable.
-      const [uncommitted, staged, committed] = await Promise.all([
-        // Uncommitted changes (working tree vs index)
-        execFileAsync('git', ['diff', '--name-only'], {
+      const [changed, committed] = await Promise.all([
+        execFileAsync('git', ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '--untracked-files=no'], {
           windowsHide: true,
           cwd: worktreePath,
           timeout: 5000,
           readOnly: true,
-        }).then((r) => r.stdout),
-
-        // Staged changes (index vs HEAD)
-        execFileAsync('git', ['diff', '--name-only', '--cached'], {
-          windowsHide: true,
-          cwd: worktreePath,
-          timeout: 5000,
-          readOnly: true,
-        }).then((r) => r.stdout),
+        }).then((r) => statusPaths(r.stdout)),
 
         // Committed changes since base (if base provided)
         baseBranch
@@ -2782,7 +2781,7 @@ export class WorktreeManager {
           : Promise.resolve(''),
       ]);
 
-      const allFiles = [...uncommitted.split('\n'), ...staged.split('\n'), ...committed.split('\n')]
+      const allFiles = [...changed, ...committed.split('\n')]
         .map((f) => f.trim())
         .filter(Boolean);
 

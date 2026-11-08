@@ -5418,6 +5418,14 @@
       ]
     },
     {
+      "path": "tests/o8d-review-last-turn-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-sidebar-mutations-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -15,7 +15,7 @@
  * putting the disk walk back on the 5-second timer.
  */
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -152,5 +152,36 @@ describe('WorktreeManager.getDirtyFiles() semantics after parallelizing the prob
     const dirty = await mgr.getDirtyFiles(worktreePath, 'main');
 
     expect(dirty).toContain('revert-me.txt');
+  }, 60_000);
+
+  it('reports a staged rename by its new path, as the staged diff did', async () => {
+    const mgr = new WorktreeManager(repoRoot);
+
+    await writeFile(path.join(worktreePath, 'rename-me.txt'), 'rename fixture\n'.repeat(8), 'utf-8');
+    await git(['add', 'rename-me.txt'], worktreePath);
+    await git(['commit', '-m', 'add rename-me'], worktreePath);
+    await git(['mv', 'rename-me.txt', 'renamed.txt'], worktreePath);
+
+    const dirty = await mgr.getDirtyFiles(worktreePath);
+
+    expect(dirty).toContain('renamed.txt');
+    expect(dirty).not.toContain('rename-me.txt');
+  }, 60_000);
+
+  it('reports a working-tree rename by its new path only', async () => {
+    const mgr = new WorktreeManager(repoRoot);
+
+    await writeFile(path.join(worktreePath, 'moved from.txt'), 'moved fixture\n'.repeat(8), 'utf-8');
+    await git(['add', 'moved from.txt'], worktreePath);
+    await git(['commit', '-m', 'add moved from'], worktreePath);
+    await rename(path.join(worktreePath, 'moved from.txt'), path.join(worktreePath, 'moved to.txt'));
+    await git(['add', '-N', 'moved to.txt'], worktreePath);
+
+    const dirty = await mgr.getDirtyFiles(worktreePath);
+
+    expect(dirty).toContain('moved to.txt');
+    // Read as an entry, the original path's field would yield `ed from.txt`.
+    expect(dirty).not.toContain('ed from.txt');
+    expect(dirty).not.toContain('moved from.txt');
   }, 60_000);
 });

@@ -95,6 +95,7 @@ import { GET as api_runtime_capacity_GET } from '@/app/api/runtime/capacity/rout
 import { GET as api_runtime_service_tiers_GET } from '@/app/api/runtime/service-tiers/route';
 import { GET as api_runtime_telemetry_GET } from '@/app/api/runtime/telemetry/route';
 import { GET as api_orchestrator_status_GET } from '@/app/api/orchestrator/status/route';
+import { GET as api_review_last_turn_GET } from '@/app/api/review/last-turn/route';
 import { GET as api_setup_cli_updates_GET } from '@/app/api/setup/cli-updates/route';
 import { GET as api_panel_o8_update_summary_GET } from '@/app/api/panel/o8-update-summary/route';
 import { GET as api_panel_problem_dossiers_GET } from '@/app/api/panel/problem-dossiers/route';
@@ -183,6 +184,7 @@ export const api_runtime_capacity = { GET: api_runtime_capacity_GET };
 export const api_runtime_service_tiers = { GET: api_runtime_service_tiers_GET };
 export const api_runtime_telemetry = { GET: api_runtime_telemetry_GET };
 export const api_orchestrator_status = { GET: api_orchestrator_status_GET };
+export const api_review_last_turn = { GET: api_review_last_turn_GET };
 export const api_setup_cli_updates = { GET: api_setup_cli_updates_GET };
 export const api_panel_o8_update_summary = { GET: api_panel_o8_update_summary_GET };
 export const api_panel_problem_dossiers = { GET: api_panel_problem_dossiers_GET };

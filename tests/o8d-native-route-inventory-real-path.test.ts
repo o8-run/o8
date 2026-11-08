@@ -35,7 +35,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/task-artifacts/[id]/decision', // Mission card decision (#5516): a POST, outside the Phase A reads.
   '/api/tts',
   '/api/worktrees/retention-usage', // resolveManagedWorktreeStorageTarget creates the default root.
-  '/api/review/last-turn', // Worktree listing launches Git through credential refresh and the provider store lock.
   '/api/review/commit', // Review's commit button: a POST, outside the Phase A reads.
   '/api/review/push', // Review's push button: a POST, outside the Phase A reads.
   '/api/v2/chat-history/terminal-turns', // Terminal View import (#5309): a POST, not yet audited for the native transport.

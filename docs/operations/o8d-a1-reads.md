@@ -40,6 +40,7 @@ No peer header grants local authority.
 | `/api/v2/files/quick-docs` | session | files_panel/quick_docs.rs | gate |
 | `/api/visualizations` | session | transcript_visualizations.rs | gate + visualization |
 | `/api/panel/prs/[number]/timeline` | pull_requests | surfaces/pull_requests/model.rs | gate |
+| `/api/review/last-turn` | diff | diff_ui_scope.rs | gate; `git worktree list`, `git --no-optional-locks status` and the committed diff run on the read-only child boundary (#5652), so the read takes no `.provider-keys.lock` and never rewrites a worktree index |
 | `/api/tasks` | session | browser_panel/remote/client.rs | gate + panel |
 | `/api/cortex/codebase-memory` | settings | settings_indexing.rs | gate |
 | `/api/cortex/diagnostics` | settings | settings_indexing.rs | gate |
@@ -79,7 +80,6 @@ the heal-bot is on, and skips the ticks the running heal-bot already covers.
 | `/api/orchestrator/pull-request-context` | Refresh queries update the mirror through a reader shared with paired devices. The existing context POST is operator-only; moving all callers to it needs an authorization decision. See the orchestrator audit below. |
 | `/api/setup/identity` | `getInstanceIdentity` creates persisted instance/boot IDs when absent. Existing producer registration is preserved; no surface entry is added. |
 | `/api/setup/detect` | CLI detection launches probes through the shared child-process boundary and provider store lock, reads login material, and can repair CLI symlinks via `scanAndLink`. Held at the credential/process boundary. |
-| `/api/review/last-turn` | `getWorktreeManager(...).list()` -> `gitWorktreeList`/`getDirtyFiles` -> `materializationAwareExecFile` -> the shared child-process boundary, which refreshes credentials and takes `.provider-keys.lock`. Held at the credential boundary. |
 
 One of the seven R1 candidates remains held after removing registry repair from
 `listRepos()` and separating signature computation from persistence:

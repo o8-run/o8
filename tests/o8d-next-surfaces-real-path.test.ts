@@ -14,6 +14,7 @@ const NATIVE_READS = [
   ['session', '/api/tasks?includeDone=true&includeBrief=true', 200],
   ['session', '/api/panel/branches', 400],
   ['diff', '/api/panel/commits/[hash]', 400],
+  ['diff', '/api/review/last-turn', 200],
   ['session', '/api/panel/files', 200],
   ['session', '/api/panel/file-diff', 400],
   ['settings', '/api/panel/status', 200],
