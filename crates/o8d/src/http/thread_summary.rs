@@ -5,6 +5,13 @@
 //! so every save is a new inode and is read again even within the same mtime
 //! and size. A same-inode rewrite that keeps both size and mtime is not seen,
 //! the same limit the TS cache has.
+//!
+//! One deliberate difference from the TS cache: eviction resists the list's
+//! in-order scan. With plain LRU, a 300-conversation list evicted each entry
+//! just before the next read needed it, so every read missed and the list was
+//! slower than with no cache (box: 38 ms against 34 ms; 200 conversations,
+//! within the bound, 6 ms against 24 ms). It changes only which summaries are
+//! kept, never what a read returns.
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -168,30 +175,46 @@ mod tests {
         let files: Vec<PathBuf> = (0..MAX_ENTRIES + 44)
             .map(|index| {
                 let path = directory.join(format!("thoughts-{index:04}.json"));
-                std::fs::write(&path, "{}").unwrap();
+                std::fs::write(&path, format!("v1-{index}")).unwrap();
                 path
             })
             .collect();
+        // Each summary is the file's current contents, so a returned summary
+        // shows whether it matches an uncached read of the file right now.
         let list = || {
             let epoch = epoch();
             let before = PROJECTIONS.load(Ordering::SeqCst);
             for path in &files {
-                read(path, epoch, || {
+                let summary = read(path, epoch, || {
                     Some(Summary {
                         archived: false,
                         bot_network: false,
                         backend: Value::Null,
-                        thread: Value::Null,
+                        thread: Value::String(std::fs::read_to_string(path).unwrap()),
                         remote: String::new(),
                     })
                 })
                 .unwrap();
+                assert_eq!(
+                    summary.thread,
+                    Value::String(std::fs::read_to_string(path).unwrap()),
+                    "{path:?}"
+                );
             }
             PROJECTIONS.load(Ordering::SeqCst) - before
         };
         assert_eq!(list(), MAX_ENTRIES + 44);
         // Plain LRU would evict each entry just before the scan needs it again.
         assert_eq!(list(), 44, "only the entries past the bound are read again");
+
+        // Saves replace a kept entry and one that was never kept: both read
+        // exactly what an uncached read does.
+        for index in [3, MAX_ENTRIES + 7] {
+            let temporary = directory.join("save.tmp");
+            std::fs::write(&temporary, format!("v2-{index}")).unwrap();
+            std::fs::rename(&temporary, &files[index]).unwrap();
+        }
+        assert_eq!(list(), 45);
         std::fs::remove_dir_all(&directory).unwrap();
     }
 }
