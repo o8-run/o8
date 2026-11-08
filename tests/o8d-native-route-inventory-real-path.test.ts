@@ -54,6 +54,81 @@ it('covers native client routes with their production registration owners', () =
   checkInventory('native/o8-next/src');
 });
 
+// With Next stopped, the WS listener serves the API port, so every caller of
+// that port counts toward the Next-stopped default, not only o8 next. Remove a
+// path when it is registered; the default switch waits for every list to be empty.
+const NEXT_ONLY_SHELL_PATHS = new Set([
+  '/api/agent-control/action', '/api/broadcast/calendar', '/api/broadcast/why', '/api/browser/agent',
+  '/api/canvas/intent', '/api/cortex/ask/answer', '/api/orchestrator/rerun-with-feedback',
+  '/api/orchestrator/reset-packet', '/api/orchestrator/spawn-prompt', '/api/panel/app/update-state',
+  '/api/panel/cli-usage', '/api/panel/cloud-jobs/drain', '/api/panel/release-health', '/api/symon/mcp/call',
+  '/api/symon/mcp/tools', '/api/symon/transport/tool', '/api/symon/watches', '/api/symon/watches/[id]',
+  '/api/team/messages', '/api/team/presence', '/api/team/tell', '/api/v1/audio/transcriptions',
+  '/api/v1/chat/completions',
+]);
+const NEXT_ONLY_MCP_PATHS = new Set([
+  '/api/agents/inbox', '/api/agents/message', '/api/agents/presence', '/api/broadcast/post', '/api/broadcast/say',
+  '/api/broadcast/tokens', '/api/browser/proxy', '/api/canvas/intent', '/api/cortex/ask/answer', '/api/cortex/sources',
+  '/api/devices/agent', '/api/harness', '/api/leases', '/api/mcp', '/api/operator/status',
+  '/api/orchestrator/create-mission', '/api/orchestrator/digest', '/api/orchestrator/dispatch',
+  '/api/orchestrator/merge', '/api/orchestrator/propose-spec', '/api/orchestrator/pull-request-context',
+  '/api/orchestrator/receipts', '/api/orchestrator/reload', '/api/orchestrator/rerun-with-feedback',
+  '/api/orchestrator/reset-packet', '/api/orchestrator/truth', '/api/orchestrator/worker-corrections',
+  '/api/panel/pr-stack', '/api/panel/repos/init', '/api/panel/repos/scaffold', '/api/panel/targets',
+  '/api/panel/update/apply',
+  '/api/setup/agent', '/api/task-artifacts',
+]);
+const NEXT_ONLY_WS_PATHS = new Set([
+  '/api/mobile/symon', '/api/mobile/symon/confirm', '/api/mobile/symon/text-turn', '/api/mobile/symon/tool',
+  '/api/symon/machine/session', '/api/worktrees/conflicts',
+]);
+
+function sourceFiles(directory: string, extension: string) {
+  return readdirSync(directory, { recursive: true }).map(String)
+    .filter(file => file.endsWith(extension) && !/test|fixture|fake/.test(file)).map(file => join(directory, file));
+}
+
+/** Checks one caller of the API port: listed paths stay unregistered and in use, all others are registered. */
+function checkCaller(files: string[], pattern: RegExp, nextOnly: Set<string>) {
+  const found = new Set<string>();
+  for (const file of files) {
+    for (const match of readFileSync(file, 'utf8').matchAll(pattern)) {
+      // A placeholder after a slash is a path segment, including one cut off at
+      // a space or call; after anything else it starts a query or suffix.
+      let path = match[1].split('?')[0].replace(/(\/)?\$\{[^}]*$/, (_, slash) => slash ? '/[id]' : '')
+        .replace(/([^/])(\$\{[^}]*\}|\{[^}]*\}).*$/, '$1').replace(/\$\{[^}]*\}|\{[^}]*\}/g, '[id]');
+      if (path.endsWith('/')) path += '[id]'; // A prefix that a caller completes with an id.
+      found.add(path);
+      if (nextOnly.has(path)) continue;
+      expect(matchNativeHttpRoute(path.replace(/\[\w+\]/g, 'fixture')), `${file}: ${path}`).toBeDefined();
+    }
+  }
+  for (const path of nextOnly) {
+    expect(matchNativeHttpRoute(path.replace(/\[\w+\]/g, 'fixture')), `${path} is registered`).toBeUndefined();
+    expect(found.has(path), `${path} has no caller left`).toBe(true);
+  }
+}
+
+it('counts the desktop shell, the MCP server and the WS process toward the Next-stopped default', () => {
+  checkCaller(sourceFiles('src-tauri/src', '.rs'), /"[^"\s]*?(\/api\/[^"\s]+)"/g, NEXT_ONLY_SHELL_PATHS);
+  checkCaller(sourceFiles('src/lib/mcp', '.ts'), /[`'"](\/api\/[\w\-./${}?=&]+)/g, NEXT_ONLY_MCP_PATHS);
+  checkCaller(['src/ws-server.ts', ...sourceFiles('src/lib/ws-server', '.ts')],
+    /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^>(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, NEXT_ONLY_WS_PATHS);
+  const remaining = new Set([...NEXT_ONLY_NATIVE_PATHS, ...NEXT_ONLY_SHELL_PATHS, ...NEXT_ONLY_MCP_PATHS, ...NEXT_ONLY_WS_PATHS]);
+  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(71);
+});
+
+it('rejects an unknown route discovered in a shell or MCP source file', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'o8-api-caller-inventory-'));
+  try {
+    writeFileSync(join(directory, 'bridge.rs'), 'let url = format!("{}/api/caller-fixture-unknown?x=1", base);');
+    expect(() => checkCaller(sourceFiles(directory, '.rs'), /"[^"\s]*?(\/api\/[^"\s]+)"/g, new Set()))
+      .toThrow('/api/caller-fixture-unknown');
+    expect(() => checkCaller([], /"(\/api\/[^"]+)"/g, new Set(['/api/caller-fixture-gone'])))
+      .toThrow('/api/caller-fixture-gone has no caller left');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 it('rejects an unknown route discovered in a native source file', () => {
   const directory = mkdtempSync(join(tmpdir(), 'o8-native-route-inventory-'));
   try {
