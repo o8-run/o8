@@ -630,3 +630,14 @@ and reads the bearer, which the native gate requires. Delivery stays on durable
 paths: a packet steer (its route is already native), the lead's composer queue,
 or the operator's own turn.
 
+## Folder picker
+
+`POST /api/panel/browse-folder` (session; `files_panel/spec_target.rs`) is
+registered on the native transport. The native chooser (`osascript`, `zenity`
+or `kdialog`) carries no runtime identity or credentials, so `native-picker.ts`
+launches it through the existing read-only child entrypoint (#5652) instead of
+the locked one; the boundary itself is unchanged. `tests/o8d-browse-folder-real-path.test.ts`
+picks a folder through stand-in choosers on `PATH` while `.provider-keys.lock`
+is held; the locked launch answers 503 there. The socket test checks only the
+bearer gate and the method, since an authorized call opens the host's chooser.
+
