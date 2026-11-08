@@ -317,3 +317,78 @@ async fn sidebar_batches_repository_reads_and_reopens_live_state_per_request() {
     assert!(main[0]["worktreePath"].is_null());
     assert_eq!(main[0]["branch"], "second");
 }
+
+fn thread_title(directory: &Path, title: &str) -> Vec<u8> {
+    serde_json::to_vec(
+        &json!({"title":title,"repoPath":directory.join("repo"),"backend":"claude",
+        "messages":[],"savedAt":"2026-10-01T00:00:00.000Z"}),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn sidebar_summaries_are_reread_when_a_save_replaces_the_file() {
+    let directory =
+        std::env::temp_dir().join(format!("o8d-thread-summaries-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(directory.join("chat-history")).unwrap();
+    std::fs::create_dir(directory.join("repo")).unwrap();
+    let mut fixture = Fixture {
+        directory: directory.clone(),
+        daemon: None,
+    };
+    let file = directory.join("chat-history/thoughts-summary.json");
+    std::fs::write(&file, thread_title(&directory, "Alpha")).unwrap();
+    let _db = database(&directory.join("cortex-ide.db"));
+    std::fs::write(directory.join("ws-token"), "session-read-fixture-token").unwrap();
+    let mut daemon = Command::new(env!("CARGO_BIN_EXE_o8d"))
+        .args([
+            "--experimental-http",
+            "--listen",
+            "127.0.0.1:0",
+            "--data-dir",
+        ])
+        .arg(&directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let stdout = daemon.stdout.take().unwrap();
+    fixture.daemon = Some(daemon);
+    let mut ready = String::new();
+    BufReader::new(stdout).read_line(&mut ready).unwrap();
+    let ready: Value = serde_json::from_str(&ready).unwrap();
+    let origin = format!("http://{}", ready["listening"].as_str().unwrap());
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let title = |threads: Vec<Value>| threads[0]["title"].as_str().unwrap().to_owned();
+    assert_eq!(title(read(&client, &origin, "").await), "Alpha");
+
+    // Rewritten in place with the same inode, size and mtime: the summary is
+    // served from the cache, as the TS cache does. Saves never write this way.
+    let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+    let same_file = std::fs::OpenOptions::new().write(true).open(&file).unwrap();
+    std::io::Write::write_all(&mut &same_file, &thread_title(&directory, "Bravo")).unwrap();
+    same_file.set_modified(modified).unwrap();
+    drop(same_file);
+    assert_eq!(title(read(&client, &origin, "").await), "Alpha");
+
+    // A save writes a temporary file and renames it: a new inode, read again
+    // even with the same size and mtime.
+    let temporary = directory.join("chat-history/thoughts-summary.json.tmp");
+    std::fs::write(&temporary, thread_title(&directory, "Carol")).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&temporary)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    std::fs::rename(&temporary, &file).unwrap();
+    let after = std::fs::metadata(&file).unwrap();
+    assert_eq!(after.len(), thread_title(&directory, "Alpha").len() as u64);
+    assert_eq!(after.modified().unwrap(), modified);
+    assert_eq!(title(read(&client, &origin, "").await), "Carol");
+}
