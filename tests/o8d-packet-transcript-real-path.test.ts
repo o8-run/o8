@@ -55,10 +55,12 @@ it('registers the production transcript GET for the native sidebar caller', asyn
 
 it('reads a Codex transcript while a provider key write holds the store lock, and writes nothing', async () => {
   getSqlite(); // Startup opens the database; the GET must not add to the data directory.
-  const files = readdirSync(dataDir).sort();
   // A key write holds this lock for its whole transaction. A locked child launch
-  // would wait for it, time out and lose the transcript.
+  // would wait for it, time out and lose the transcript. Opening the holder
+  // creates the lock file when startup did not (Linux), so it is not counted
+  // as a write by the GET; its journal exists only while the lock is held.
   const holder = new Database(join(dataDir, '.provider-keys.lock'));
+  const files = readdirSync(dataDir).sort();
   holder.exec('BEGIN EXCLUSIVE');
   const before = digest(stateDb);
   let response: Response;

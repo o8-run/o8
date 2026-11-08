@@ -94,7 +94,8 @@ handlers. Held entries remain in `NEXT_ONLY_NATIVE_PATHS`. Existing producer/vie
 registrations (including setup identity, file assets and v2 files) are preserved;
 this inventory tracks surface membership, not the whole pre-existing registry.
 The expanded inventory walk also exposed ten pre-existing native literals
-missing from the hold list: orchestrator stop-packet/packet-transcript,
+missing from the hold list: orchestrator stop-packet/packet-transcript (the
+transcript GET has since been registered),
 runtime action, panel connect/attach/mobile-pairing, mobile devices/devices/revoke,
 and setup mcp-config/claude-desktop/external-client. They are named explicitly in
 the hold list so the full scan can complete; no method is registered for them.
