@@ -222,6 +222,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   setup: [
     route('/api/setup/cli-updates', 'GET', () => import('@/app/api/setup/cli-updates/route')),
     route('/api/setup/config', 'GET POST', () => import('@/app/api/setup/config/route')),
+    // Setup-wizard tool detection. GET has no handler-level auth — same panelGateMiddleware gate as
+    // the other /api/setup/* routes (not public-allowlisted, hardening #1562), so over native
+    // (x-o8-client-addr=unverified-proxy) it is operator-ws-token-only. It reads provider credentials
+    // (process.env + .env.local) and probes CLIs, but only to derive boolean presence: the response
+    // carries key/provider NAMES, counts, paths, versions and static hints — never a secret VALUE
+    // (verified; a real-path test asserts seeded key values never appear in the body). The CLI
+    // version probes and symlink repair run as an operator side effect, no request input steers them.
+    route('/api/setup/detect', 'GET', () => import('@/app/api/setup/detect/route')),
   ],
   projects: [
     route('/api/panel/projects', 'GET', () => import('@/app/api/panel/projects/route')),
