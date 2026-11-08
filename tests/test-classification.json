@@ -5361,6 +5361,12 @@
       ]
     },
     {
+      "path": "tests/o8d-mcp-receipts-corrections-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-more-reads-real-path.test.ts",
       "reasons": [
         "real-path"
