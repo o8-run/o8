@@ -84,13 +84,18 @@ pub(super) async fn serve(
         }
         request = request.header(name, value.trim());
     }
-    let admission = request
+    let Ok(admission) = request
         .header("x-o8d-bridge", key)
         .header("x-o8d-peer", "unverified-proxy")
         .header("x-o8d-session-read", "authorize")
         .send()
         .await
-        .map_err(|_| ())?;
+    else {
+        // A pooled socket the backend closed as this request went out fails
+        // the send. The original handler still owns the request, as it does
+        // for any admission that does not come back 204.
+        return Ok(false);
+    };
     if admission.status() != StatusCode::NO_CONTENT {
         // Let the original handler return its exact auth/error response. An
         // unavailable gate never grants native access.
