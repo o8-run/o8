@@ -153,6 +153,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // the gate only ever lets the body reach a caller already holding that same operator token,
     // and the real-path forged-local-header negative pins that a non-operator cannot extract it. (#5243)
     route('/api/setup/mcp-config', 'GET', () => import('@/app/api/setup/mcp-config/route')),
+    // Claude Desktop / Claude Code auto-register (Settings > MCP). GET previews the Claude config
+    // (other servers by name only; the o8 entry carries the operator's own WS_TOKEN); POST merges the
+    // o8 + codebase-memory entries into the user's config file. No handler-level auth — same
+    // panelGateMiddleware gate as the other /api/setup/* routes (not public-allowlisted, hardening
+    // #1562), so over native (x-o8-client-addr=unverified-proxy) both the preview and the config-file
+    // WRITE are operator-ws-token-only — equal-or-stricter than Next. (#5243)
+    route('/api/setup/claude-desktop', 'GET POST', () => import('@/app/api/setup/claude-desktop/route')),
     route('/api/cortex/codebase-memory', 'GET', () => import('@/app/api/cortex/codebase-memory/route')),
     route('/api/cortex/diagnostics', 'GET', () => import('@/app/api/cortex/diagnostics/route')),
     route('/api/runtime/acp-registry', 'GET', () => import('@/app/api/runtime/acp-registry/route')),

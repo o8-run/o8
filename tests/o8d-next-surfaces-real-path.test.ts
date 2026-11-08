@@ -83,6 +83,10 @@ it.each([
   // reaches the handler and fails validation (proves the write path is registered, gated).
   ['Providers list', 'GET', '/api/runtime/provider-instances', 200],
   ['Providers write validation', 'POST', '/api/runtime/provider-instances', 400],
+  // MCP Claude Desktop preview (Settings > MCP): operator GET inspects the Claude config. It
+  // returns other servers by NAME only (never their contents); the o8 entry carries WS_TOKEN,
+  // which is the operator's own token. The POST config-file write is pinned operator-only below.
+  ['MCP Claude Desktop preview', 'GET', '/api/setup/claude-desktop', 200],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
     ...(method === 'POST' ? { body: '{}' } : {}) });
@@ -108,6 +112,34 @@ it('refuses provider-instances over native without the operator ws-token (#5243)
       await response.arrayBuffer();
     }
   }
+});
+
+// claude-desktop POST writes the user's Claude MCP config file, so pin the fail-closed gate on the
+// native transport: a missing or wrong token is refused even with forged loopback markers, for both
+// the GET preview and the POST write. An authorized POST {remove:true} confirms the write path is
+// reachable and gated — a safe no-op against the fixture's empty config (HOME is the fixture dir).
+it('refuses setup/claude-desktop over native without the operator ws-token; write path operator-only (#5243)', async () => {
+  for (const method of ['GET', 'POST'] as const) {
+    for (const authorization of [undefined, 'Bearer fixture-wrong-token']) {
+      const response = await fetch(origin + '/api/setup/claude-desktop', {
+        method,
+        headers: {
+          ...(authorization ? { authorization } : {}), 'content-type': 'application/json',
+          'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
+        },
+        ...(method === 'POST' ? { body: '{"remove":true}' } : {}),
+      });
+      expect(response.status).toBe(401);
+      await response.arrayBuffer();
+    }
+  }
+  const ok = await fetch(origin + '/api/setup/claude-desktop', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+    body: '{"remove":true}',
+  });
+  expect(ok.status).toBe(200);
+  await ok.arrayBuffer();
 });
 
 it('keeps Sidebar and saved history reachable after verbose Workers events', async () => {

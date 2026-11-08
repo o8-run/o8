@@ -11,7 +11,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/connect/attach',
   '/api/panel/mobile-pairing',
   '/api/mobile/devices/revoke',
-  '/api/setup/claude-desktop',
   '/api/setup/external-client',
   '/api/panel/connect',
   '/api/mcp',
