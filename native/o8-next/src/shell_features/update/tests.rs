@@ -256,3 +256,24 @@ fn an_accepted_click_stays_installing_until_the_native_loop_reports() {
     read(&mut state, &json!({ "state": {} }));
     assert!(state.phase.is_none());
 }
+
+#[test]
+fn a_click_held_by_live_work_shows_its_blockers_not_installing() {
+    use super::{State, read};
+    let mut state = State {
+        phase: Some(Phase::Installing),
+        ..State::default()
+    };
+    // The loop refused admission because work started: the request is still
+    // unadmitted, but the loop reports its own waiting phase.
+    let waiting = json!({
+        "applyRequestedAt": "2026-11-08T20:00:00.000Z",
+        "state": { "autoApply": { "phase": "waiting", "blockers": { "live": ["lane-a"], "parked": [] } } }
+    });
+    read(&mut state, &waiting);
+    assert!(state.phase.is_none());
+    assert_eq!(
+        state.blockers.as_ref().map(|b| b.live.clone()),
+        Some(vec!["lane-a".to_string()])
+    );
+}

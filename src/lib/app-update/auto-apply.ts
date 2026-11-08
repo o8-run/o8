@@ -30,10 +30,9 @@ export function requestNativeApply(force: boolean): string | null {
     if (running) return null;
     manualApply = null;
   }
-  if (manualApply) {
-    manualApply = { ...manualApply, force: manualApply.force || force };
-    return manualApply.requestedAt;
-  }
+  // A force click upgrades the pending request under a new time, so the native
+  // loop expedites it instead of waiting out its interval.
+  if (manualApply && !(force && !manualApply.force)) return manualApply.requestedAt;
   manualApply = { requestedAt: new Date().toISOString(), force, attemptId: null };
   return manualApply.requestedAt;
 }
@@ -128,7 +127,10 @@ export async function controlAutoApply(input: Record<string, unknown>) {
     },
   };
   if (allowed && input.action === 'admit') recordAppUpdateInstall({ outcome: 'started', version: activity.version });
-  if (allowed && manual && input.action === 'admit') manualApply = { ...manual, attemptId: activity.attemptId };
+  // A click that landed while admission ran (a force upgrade included) is the one bound.
+  if (allowed && manual && input.action === 'admit') {
+    manualApply = { ...(manualApply && !manualApply.attemptId ? manualApply : manual), attemptId: activity.attemptId };
+  }
   recordAutoApply(activity);
   return result(allowed, { attemptId: activity.attemptId, version: activity.version, installed: activity.installed, idle });
 }

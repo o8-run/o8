@@ -634,10 +634,12 @@ fn read(state: &mut State, body: &Value) {
         state.current = bundle_version();
     }
     // An accepted click stays installing until the native loop admits it and
-    // reports its own phase, so the button cannot offer a second click.
-    let requested = body["applyRequestedAt"].is_string();
+    // reports its own phase, so the button cannot offer a second click. A
+    // loop that reports any phase (waiting on live work included) takes over.
+    let unadmitted =
+        body["applyRequestedAt"].is_string() && body["state"]["autoApply"]["phase"].is_null();
     match phase(body) {
-        None if requested && matches!(state.phase, Some(Phase::Installing)) => {}
+        None if unadmitted && matches!(state.phase, Some(Phase::Installing)) => {}
         reported => {
             state.phase = reported;
             state.progress = progress(body);
