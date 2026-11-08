@@ -145,6 +145,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // encrypted in a separate credentials table); the POST writes go through
     // withProviderStoreLock + master-key encryption. (#5243)
     route('/api/runtime/provider-instances', 'GET POST', () => import('@/app/api/runtime/provider-instances/route')),
+    // MCP config generator (Settings > MCP). GET only, no handler-level auth: gated by
+    // panelGateMiddleware, which does not public-allowlist /api/setup/* (hardening #1562).
+    // Over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) the loopback
+    // branch fails, so it is operator-ws-token-only here — equal-or-stricter than Next. The GET
+    // body embeds the operator WS_TOKEN (build.ts getOrCreateWsToken); that is not a leak because
+    // the gate only ever lets the body reach a caller already holding that same operator token,
+    // and the real-path forged-local-header negative pins that a non-operator cannot extract it. (#5243)
+    route('/api/setup/mcp-config', 'GET', () => import('@/app/api/setup/mcp-config/route')),
     route('/api/cortex/codebase-memory', 'GET', () => import('@/app/api/cortex/codebase-memory/route')),
     route('/api/cortex/diagnostics', 'GET', () => import('@/app/api/cortex/diagnostics/route')),
     route('/api/runtime/acp-registry', 'GET', () => import('@/app/api/runtime/acp-registry/route')),

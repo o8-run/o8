@@ -44,6 +44,12 @@ const NATIVE_READS = [
   ['pull_requests', '/api/panel/prs/[number]/timeline', 400],
   // Paired-device list: operator-only, token-based (not loopback), no token/hash in the body (#5243).
   ['settings', '/api/mobile/devices', 200],
+  // MCP config generator (Settings > MCP): no handler-level auth, gated by panelGateMiddleware
+  // (/api/setup/* is not public, hardening #1562). Over native (x-o8-client-addr=unverified-proxy)
+  // the loopback branch fails, leaving operator-ws-token-only. Its GET body embeds the operator
+  // WS_TOKEN (build.ts getOrCreateWsToken), so the forged-local-header negative below is the proof
+  // a non-operator cannot extract it over the native transport (#5243).
+  ['settings', '/api/setup/mcp-config', 200],
 ] as const;
 let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;
