@@ -40,7 +40,7 @@ No peer header grants local authority.
 | `/api/v2/files/quick-docs` | session | files_panel/quick_docs.rs | gate |
 | `/api/visualizations` | session | transcript_visualizations.rs | gate + visualization |
 | `/api/panel/prs/[number]/timeline` | pull_requests | surfaces/pull_requests/model.rs | gate |
-| `/api/review/last-turn` | diff | diff_ui_scope.rs | gate; `git worktree list` and `git diff --name-only` run on the read-only child boundary (#5652), so the read takes no `.provider-keys.lock` |
+| `/api/review/last-turn` | diff | diff_ui_scope.rs | gate; `git worktree list`, `git --no-optional-locks status` and the committed diff run on the read-only child boundary (#5652), so the read takes no `.provider-keys.lock` and never rewrites a worktree index |
 | `/api/tasks` | session | browser_panel/remote/client.rs | gate + panel |
 | `/api/cortex/codebase-memory` | settings | settings_indexing.rs | gate |
 | `/api/cortex/diagnostics` | settings | settings_indexing.rs | gate |

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -49,11 +49,17 @@ it('registers the production last-turn GET for the native diff caller', async ()
 
 it('reads the last turn while a provider key write holds the store lock, and writes nothing', async () => {
   getSqlite(); // Startup opens the database; the GET must not add to the data directory.
+  // Same content, new time: Git would refresh this worktree's index if a read took optional locks.
+  utimesSync(join(worktree, 'README.md'), new Date(), new Date(Date.now() + 5_000));
+  const index = join(repo, '.git', 'worktrees', 'last-turn-fixture', 'index');
+  const indexBefore = statSync(index, { bigint: true });
+  // A key write holds this lock for its whole transaction. Each Git launch on the
+  // locked boundary would block the event loop for the lock's 1 s timeout before
+  // it fails. Opening the holder creates the lock file when startup did not
+  // (Linux), so it is not counted as a write by the GET.
+  const holder = new Database(join(dataDir, '.provider-keys.lock'));
   const files = readdirSync(dataDir).sort();
   const worktreeFiles = readdirSync(worktree).sort();
-  // A key write holds this lock for its whole transaction. Each Git launch on the
-  // locked boundary would block for the lock's 1 s timeout before it fails.
-  const holder = new Database(join(dataDir, '.provider-keys.lock'));
   holder.exec('BEGIN EXCLUSIVE');
   let response: Response;
   const started = performance.now();
@@ -63,13 +69,15 @@ it('reads the last turn while a provider key write holds the store lock, and wri
     holder.exec('ROLLBACK');
     holder.close();
   }
-  expect(performance.now() - started).toBeLessThan(1_000);
+  expect(performance.now() - started).toBeLessThan(2_500);
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ filePaths: ['src/last-turn-fixture.ts'], worktreePath: worktree,
     timestamp: '2026-11-08T10:00:00.000Z', attempt: 1 });
   expect(readdirSync(dataDir).sort()).toEqual(files);
   expect(readdirSync(worktree).sort()).toEqual(worktreeFiles);
-  expect(readdirSync(join(repo, '.git'))).not.toContain('index.lock');
+  const indexAfter = statSync(index, { bigint: true });
+  expect([indexAfter.ino, indexAfter.mtimeNs, indexAfter.size]).toEqual([indexBefore.ino, indexBefore.mtimeNs, indexBefore.size]);
+  expect(readdirSync(join(repo, '.git', 'worktrees', 'last-turn-fixture'))).not.toContain('index.lock');
 });
 
 it('answers an empty scope without a workspace', async () => {

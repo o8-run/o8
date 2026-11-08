@@ -153,4 +153,18 @@ describe('WorktreeManager.getDirtyFiles() semantics after parallelizing the prob
 
     expect(dirty).toContain('revert-me.txt');
   }, 60_000);
+
+  it('reports a staged rename by its new path, as the staged diff did', async () => {
+    const mgr = new WorktreeManager(repoRoot);
+
+    await writeFile(path.join(worktreePath, 'rename-me.txt'), 'rename fixture\n'.repeat(8), 'utf-8');
+    await git(['add', 'rename-me.txt'], worktreePath);
+    await git(['commit', '-m', 'add rename-me'], worktreePath);
+    await git(['mv', 'rename-me.txt', 'renamed.txt'], worktreePath);
+
+    const dirty = await mgr.getDirtyFiles(worktreePath);
+
+    expect(dirty).toContain('renamed.txt');
+    expect(dirty).not.toContain('rename-me.txt');
+  }, 60_000);
 });
