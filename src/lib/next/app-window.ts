@@ -151,6 +151,10 @@ export function setNextWindowEnabled(enabled: boolean): Promise<void> {
 export async function restoreNextWindow(): Promise<void> {
   const result = process.platform === 'linux' && isMainWindow() ? process.env.O8_NEXT_STARTUP_RESULT : undefined;
   await serialized(async () => {
+    // The shell gives the window binary only to the process that owns the
+    // window. The WS process also sees O8_NEXT_MAIN_WINDOW (for update apply),
+    // and must not claim the window or report it unavailable.
+    if (!process.env.O8_NEXT_BIN) return;
     if (isMainWindow() || (await getOperatorDefaults()).values.experimentalNext) {
       await apply(true, result && isAbsolute(result) ? result : undefined);
     }
