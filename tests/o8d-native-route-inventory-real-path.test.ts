@@ -29,7 +29,7 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/panel/update/apply',
   '/api/repo-spec/asset',
   '/api/tasks/[id]/preview',
-  '/api/tts',
+  '/api/tts', // edge-tts installer state is per-process; Phase B.
   '/api/worktrees/retention-usage', // resolveManagedWorktreeStorageTarget creates the default root.
   '/api/review/commit', // Review's commit button: a POST, outside the Phase A reads.
   '/api/review/push', // Review's push button: a POST, outside the Phase A reads.
