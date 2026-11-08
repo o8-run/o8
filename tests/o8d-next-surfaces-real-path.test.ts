@@ -296,6 +296,20 @@ it('reaches the mission card decision handlers with Next stopped', async () => {
   }
 });
 
+it('gates the native folder picker POST with Next stopped', async () => {
+  // Refusals only: an authorized call would open the host's real chooser.
+  for (const authorization of [undefined, 'Bearer fixture-wrong-token']) {
+    const refused = await fetch(`${origin}/api/panel/browse-folder`, { method: 'POST', body: '{}',
+      headers: { 'content-type': 'application/json', 'x-o8-client-addr': '127.0.0.1', ...(authorization ? { authorization } : {}) } });
+    expect(refused.status).toBe(401);
+    await refused.arrayBuffer();
+  }
+  const get = await fetch(`${origin}/api/panel/browse-folder`, { headers: { authorization: `Bearer ${server.token}` } });
+  expect(get.status).toBe(405);
+  expect(get.headers.get('allow')).toBe('POST');
+  await get.arrayBuffer();
+});
+
 it('preserves canonical workspace paths through the native project handler', async () => {
   const alias = join(server.directory, 'workspace-alias');
   symlinkSync(server.directory, alias, process.platform === 'win32' ? 'junction' : 'dir');

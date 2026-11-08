@@ -10,14 +10,17 @@
  */
 
 import { promisify } from 'node:util';
-import { execFile } from '@/lib/providers/child-process';
+import { execFileReadOnly } from '@/lib/providers/child-process';
 import { workerParentEnvironment } from '@/lib/providers/worker-environment';
 
 export type PickerKind = 'folder' | 'file';
 export type PickerResult = { path: string | null; unavailable?: true };
 export type PickerRunner = (command: string, args: string[], timeoutMs: number) => Promise<string>;
 
-const execFileAsync = promisify(execFile);
+// A chooser (osascript, zenity, kdialog) carries no runtime identity or injected
+// credentials, so it runs on the read-only child boundary and never waits on the
+// provider-store lock while a key write holds it.
+const execFileAsync = promisify(execFileReadOnly);
 
 const defaultRunner: PickerRunner = async (command, args, timeoutMs) => {
   const linuxPicker = command === 'zenity' || command === 'kdialog';
