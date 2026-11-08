@@ -5427,6 +5427,12 @@
       ]
     },
     {
+      "path": "tests/o8d-release-health-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-repository-client-real-path.test.ts",
       "reasons": [
         "child-process",

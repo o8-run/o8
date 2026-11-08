@@ -205,6 +205,10 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/team/presence', 'GET', () => import('@/app/api/team/presence/route')),
     route('/api/team/messages', 'GET', () => import('@/app/api/team/messages/route')),
     route('/api/team/tell', 'POST', () => import('@/app/api/team/tell/route')),
+    // The updater kill switch: operator-only through the middleware, principal from
+    // the bearer. A stateless fetch of the fixed release-health manifest that fails
+    // open on any error.
+    route('/api/panel/release-health', 'GET', () => import('@/app/api/panel/release-health/route')),
     // MCP config generator (Settings > MCP). GET only, no handler-level auth: gated by
     // panelGateMiddleware, which does not public-allowlist /api/setup/* (hardening #1562).
     // Over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) the loopback
