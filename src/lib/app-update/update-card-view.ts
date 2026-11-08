@@ -1,4 +1,4 @@
-import type { AppUpdateBlockers } from '@/lib/app-update/update-hub-client';
+import type { AppUpdateBlockers } from '@/lib/app-update/types';
 
 export interface UpdateInfo {
   version: string;
