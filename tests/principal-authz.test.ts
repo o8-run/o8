@@ -70,6 +70,7 @@ const mergePreview = await import('@/app/api/orchestrator/merge-preview/route');
 const workspace = await import('@/app/api/orchestrator/workspace/route');
 const devServer = await import('@/app/api/panel/dev-server/route');
 const fileIo = await import('@/app/api/panel/file-io/route');
+const repoSpecAsset = await import('@/app/api/repo-spec/asset/route');
 const lanes = await import('@/app/api/lanes/route');
 const managedRuns = await import('@/app/api/panel/managed-runs/route');
 const laneEvents = await import('@/app/api/lanes/[id]/events/route');
@@ -839,6 +840,45 @@ describe('principal-authz — worker file access is confined to registered repos
     // and reads it (200) — the point is it is NOT the worker 403.
     const res = await fileIo.GET(req(`${url}?path=${encodeURIComponent('/etc/hosts')}`, { principal: 'operator', method: 'GET' }));
     expect(res.status).not.toBe(403);
+  });
+});
+
+describe('principal-authz — repo-spec/asset srcPath local-file read is operator-only (#5243)', () => {
+  // srcPath names an arbitrary server-local image/video path that the handler
+  // reads off disk and copies into <repoPath>/o8-assets. The route comment says
+  // this branch is operator-only (the Tauri Finder-drag bridge), but it only
+  // blocked the device principal — so a worker/spectator bearer could turn it
+  // into a local-file read+exfil primitive. These assertions drive the REAL POST
+  // handler: operator reaches logic; every non-operator principal is refused.
+  const assetRepo = mkdtempSync(join(os.tmpdir(), 'o8-repospec-asset-authz-'));
+  // The source image lives OUTSIDE the repo — srcPath can name any local path, so
+  // this stands in for "read a file the caller was never handed and copy it in".
+  const outsideImage = join(mkdtempSync(join(os.tmpdir(), 'o8-repospec-src-')), 'screenshot.png');
+  writeFileSync(outsideImage, Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+  ));
+  const url = `http://localhost:3001/api/repo-spec/asset?repoPath=${encodeURIComponent(assetRepo)}&srcPath=${encodeURIComponent(outsideImage)}`;
+
+  it('OPERATOR → NOT 403 (the Tauri desktop drag-drop bridge reaches real logic)', async () => {
+    const res = await repoSpecAsset.POST(req(url, { principal: 'operator' }));
+    expect(res.status).not.toBe(403);
+    expect(res.status).not.toBe(401);
+  });
+
+  for (const principal of ['worker', 'spectator'] as const) {
+    it(`${principal} naming srcPath → 403 before any local-file read`, async () => {
+      const res = await repoSpecAsset.POST(req(url, { principal }));
+      expect(res.status).toBe(403);
+    });
+  }
+
+  it('DEVICE (phone over the relay) → 403 (unchanged)', async () => {
+    const res = await repoSpecAsset.POST(new NextRequest(url, {
+      method: 'POST',
+      headers: { host: 'localhost:3001', authorization: `Bearer ${DEVICE_TOKEN}` },
+    }));
+    expect(res.status).toBe(403);
   });
 });
 
