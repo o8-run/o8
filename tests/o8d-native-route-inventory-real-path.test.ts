@@ -62,7 +62,6 @@ const NEXT_ONLY_MCP_PATHS = new Set([
   '/api/orchestrator/create-mission', '/api/orchestrator/dispatch',
   '/api/orchestrator/merge', '/api/orchestrator/propose-spec',
   '/api/orchestrator/reload', '/api/orchestrator/truth',
-  '/api/panel/targets',
   '/api/task-artifacts',
 ]);
 const NEXT_ONLY_WS_PATHS = new Set([
