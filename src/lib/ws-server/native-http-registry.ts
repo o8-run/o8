@@ -213,6 +213,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/cli-usage', 'GET', () => import('@/app/api/panel/cli-usage/route')),
     route('/api/broadcast/why', 'GET', () => import('@/app/api/broadcast/why/route')),
     route('/api/broadcast/calendar', 'POST', () => import('@/app/api/broadcast/calendar/route')),
+    // Operator-principal writes (resolveRequestPrincipal / handleBroadcastSay refuse any other role), never
+    // x-o8-client-addr or loopback. Both store in SQLite; pull-request-context reads conversations from disk
+    // and its refresh=1 / refresh=missing reads call the GitHub broker's single-PR sync (ensureGitHubPullRequest),
+    // which shares its token and request-budget caches with the open-PR sync the native /api/panel/prs uses. (#5422)
+    route('/api/orchestrator/pull-request-context', 'GET POST DELETE', () => import('@/app/api/orchestrator/pull-request-context/route')),
+    route('/api/broadcast/say', 'POST', () => import('@/app/api/broadcast/say/route')),
     // Symon watches (src-tauri symon_watch.rs). No device/worker/spectator grant in panelGateMiddleware, so only the
     // operator bearer passes, and the handlers add no loopback or principal check of their own. Watches are rows
     // in SQLite: the automation scheduler in the WS process fires them from the same rows, and a plan claim is decided by an
