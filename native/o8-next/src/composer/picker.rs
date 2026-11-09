@@ -9,7 +9,7 @@ pub(super) const HOUSES: &[(&str, &[(&str, &str, &str, &str)])] = &[
     (
         "Claude",
         &[
-            ("fable", "claude-fable-5-1", "Fable 5.1", "flagship"),
+            ("fable", "claude-fable-5-2", "Fable 5.2", "flagship"),
             ("claude", "claude-opus-5-5", "Opus 5.5", "recommended lead"),
             ("claude", "claude-opus-5", "Opus 5", "deep reasoning"),
             ("claude", "claude-opus-4-8", "Opus 4.8", "previous Opus"),

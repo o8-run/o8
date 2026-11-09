@@ -88,7 +88,7 @@ describe('detected runtime recommendation', () => {
     } }).leadModel).toBe('claude-opus-5-5');
     expect(recommendRuntimeSetup({ inventory, activity, sources, values: {
       orchestratorBackend: 'fable', orchestratorModel: 'claude-opus-5',
-    } }).leadModel).toBe('claude-fable-5-1');
+    } }).leadModel).toBe('claude-fable-5-2');
   });
 
   it('keeps the saved default worker when the pool was ordered differently', () => {

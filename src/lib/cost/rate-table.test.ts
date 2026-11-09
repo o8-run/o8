@@ -55,6 +55,7 @@ describe('dated model rate table reproducibility', () => {
   it.each([
     // Anthropic pricing page, https://platform.claude.com/docs/en/about-claude/pricing, read 2026-11-05.
     ['claude-opus-5-5', 4, 20, 0.2, 5, 8],
+    ['claude-fable-5-2', 8, 40, 0.2, 10, 16],
     ['claude-fable-5-1', 10, 50, 0.25, 12.5, 20],
     ['claude-sonnet-5-5', 2, 10, 0.1, 2.5, 4],
     ['claude-sonnet-5', 2, 10, 0.2, 2.5, 4],
@@ -97,6 +98,10 @@ describe('dated model rate table reproducibility', () => {
     ['claude-opus-5', 'claude-opus-5'],
     ['Claude Opus 5', 'claude-opus-5'],
     ['claude-opus-5-fast', 'claude-opus-5-fast'],
+    ['Claude Fable 5.2', 'claude-fable-5-2'],
+    ['claude-fable-5-2-fast', 'claude-fable-5-2-fast'],
+    ['claude-fable-5-1', 'claude-fable-5-1'],
+    ['claude-fable-5', 'claude-fable-5'],
   ])('resolves %s to %s', (name, modelKey) => {
     expect(resolveRate('claude-code', name)).toMatchObject({ modelKey });
   });
@@ -117,6 +122,13 @@ describe('dated model rate table reproducibility', () => {
       inputUsdPerMillion: 5, outputUsdPerMillion: 25,
       cacheReadUsdPerMillion: 0.5, cacheWriteUsdPerMillion: 6.25, cacheWrite1hUsdPerMillion: 10,
     });
+    // Fable 5.2 fast mode, read 2026-11-09; cache multipliers apply on top.
+    expect(resolveRate('claude-code', 'claude-fable-5-2-fast')).toMatchObject({
+      inputUsdPerMillion: 16, outputUsdPerMillion: 80,
+      cacheReadUsdPerMillion: 0.4, cacheWriteUsdPerMillion: 20, cacheWrite1hUsdPerMillion: 32,
+    });
+    // Fable 5.1 has no fast mode on the page.
+    expect(resolveRate('claude-code', 'claude-fable-5-1-fast')).toBeNull();
     // No fast mode is listed for Opus 4.7 or 4.6, so those runs stay unpriced.
     for (const model of ['claude-opus-4-7-fast', 'claude-opus-4-6-fast']) {
       expect(resolveRate('claude-code', model), model).toBeNull();
@@ -248,8 +260,8 @@ describe('dated model rate table reproducibility', () => {
     ) / TOKENS_PER_MILLION);
 
     expect(modelRateTable).toMatchObject({
-      rateTableVersion: '2026-11-06.1',
-      observedOn: '2026-11-06',
+      rateTableVersion: '2026-11-09.1',
+      observedOn: '2026-11-09',
     });
   });
 

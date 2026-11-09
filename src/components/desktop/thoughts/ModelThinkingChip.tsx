@@ -80,7 +80,7 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     key: 'claude',
     label: 'Claude',
     options: [
-      { value: MODEL_IDS.raw.anthropicClaudeFable51, label: 'Fable 5.1', backend: 'fable', model: MODEL_IDS.fableDefault, sub: 'flagship' },
+      { value: MODEL_IDS.raw.anthropicClaudeFable52, label: 'Fable 5.2', backend: 'fable', model: MODEL_IDS.fableDefault, sub: 'flagship' },
       { value: MODEL_IDS.raw.anthropicClaudeOpus55, label: 'Opus 5.5', backend: 'claude', model: MODEL_IDS.raw.anthropicClaudeOpus55, sub: 'recommended lead' },
       { value: MODEL_IDS.raw.anthropicClaudeOpus5, label: 'Opus 5', backend: 'claude', model: MODEL_IDS.raw.anthropicClaudeOpus5, sub: 'deep reasoning' },
       { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8', backend: 'claude', model: MODEL_IDS.raw.anthropicClaudeOpus48, sub: 'previous Opus' },
