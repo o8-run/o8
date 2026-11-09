@@ -55,10 +55,20 @@ it.skipIf(process.platform === 'win32')('creates tasks and reaps stale lanes nat
     const deadPid = exited.pid!;
     await new Promise(resolve => exited.on('close', resolve));
 
-    // The stale lane is seeded after boot, so startup reconciliation cannot settle it first.
+    // The stale lane is seeded after boot, so startup reconciliation cannot settle it first. The
+    // live WS process writes the same database, so a seed write that loses a transaction upgrade
+    // gets SQLITE_BUSY at once (the busy timeout does not cover that case); retry it.
     const seeded = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
       const { mkdirSync, writeFileSync } = require('node:fs');
       const { join } = require('node:path');
+      const retryBusy = (write) => {
+        for (let attempt = 1; ; attempt += 1) {
+          try { return write(); } catch (error) {
+            if (error?.code !== 'SQLITE_BUSY' || attempt >= 40) throw error;
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+          }
+        }
+      };
       (async () => {
         const root = process.env.CORTEX_IDE_DATA_DIR;
         const repoPath = process.env.SEED_REPO_PATH;
@@ -66,9 +76,9 @@ it.skipIf(process.platform === 'win32')('creates tasks and reaps stale lanes nat
         const worktreePath = join(root, 'stale-worktree');
         mkdirSync(worktreePath);
         writeFileSync(join(worktreePath, 'keep.txt'), 'worktree content\\n');
-        const lane = createLane({ repoPath, branch: 'fixture-stale-lane', runtime: 'codex',
-          worktreePath, sessionKey: 'codex-live:${deadPid}' });
-        updateLane(lane.id, { status: 'running', lastHeartbeatAt: Date.now() - 10 * 60_000 }, 'system');
+        const lane = retryBusy(() => createLane({ repoPath, branch: 'fixture-stale-lane', runtime: 'codex',
+          worktreePath, sessionKey: 'codex-live:${deadPid}' }));
+        retryBusy(() => updateLane(lane.id, { status: 'running', lastHeartbeatAt: Date.now() - 10 * 60_000 }, 'system'));
         console.log('seed ' + JSON.stringify({ laneId: lane.id, worktreePath }));
         require('./src/lib/db/index.ts').closeDb();
       })().catch(error => { console.error(error); process.exit(1); });
