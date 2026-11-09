@@ -87,7 +87,6 @@ export const NEXT_ONLY_WS_PATHS: NextOnlyTable = {
   '/api/symon/machine/session': security('Symon machine session'),
   '/api/worktrees/conflicts': seek('worktree conflict read'),
   '/api/v2/proxy/llm': security('o8 lane model calls: provider keys and spend'),
-  '/api/setup/status': seek("dispatch readiness probe, a plain fetch on the API base; ported in #5768"),
 };
 
 // The o8 CLI that packet workers and the operator run. Uncounted until the scan read cli/src.
