@@ -175,6 +175,15 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
     route('/api/orchestrator/lane-events', 'GET', () => import('@/app/api/orchestrator/lane-events/route')),
     route('/api/orchestrator/steer-packet', 'POST', () => import('@/app/api/orchestrator/steer-packet/route')),
+    // Shared agent controls (the desktop agent bridge's start/stop/approve/… actions on a
+    // runtime, session or surface). POST only, operator-only twice over: the path is in no
+    // middleware allowlist, so over native (x-o8-client-addr forced to unverified-proxy,
+    // non-loopback) the panelGateMiddleware floor already admits only the operator ws-token
+    // — a worker or device bearer 403s, no/invalid bearer 401s — and the handler then calls
+    // authorize(resolveRequestPrincipal(req)) which returns operator->pass, worker/device->403,
+    // else 401 (principal from the bearer, never the client address). The response is a control
+    // receipt with no credential. (#5243)
+    route('/api/agent-control/action', 'POST', () => import('@/app/api/agent-control/action/route')),
   ],
   settings: [
     // Paired-device list (Settings > Paired devices). GET only: operator-gated by principal
