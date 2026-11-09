@@ -29,7 +29,10 @@ const repositoryRead = (load: Route['load']): Route['load'] => async () => ({
 // Each route loads its own implementation; unrelated surfaces stay cold.
 export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
-    route('/api/tasks', 'GET', () => import('@/app/api/tasks/route')),
+    // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
+    // operator bearer. The new packet is written through the file-locked control plane, which the
+    // WS process already writes for its own lane and mission work. (#5243)
+    route('/api/tasks', 'GET POST', () => import('@/app/api/tasks/route')),
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
     route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/panel/branches', 'GET', repositoryRead(() => import('@/app/api/panel/branches/route'))),
@@ -208,6 +211,11 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // processes. The WS process already runs open_lane and launch_session (orchestrator/delegate),
     // stop (mission stop) and send_turn and interrupt (runtime/action). (#5576)
     route('/api/lanes', 'GET POST', () => import('@/app/api/lanes/route')),
+    // `o8 doctor --reap` lists stale running lanes whose owner is gone and, with force, moves them
+    // to recovery. The gate grants workers nothing here, so it needs the operator bearer. The
+    // reaper only changes lane rows, never the worktree; the WS process already runs the same
+    // reaper on its own interval. (#5243)
+    route('/api/lanes/reap', 'POST', () => import('@/app/api/lanes/reap/route')),
     route('/api/lanes/[id]', 'GET', () => import('@/app/api/lanes/[id]/route')),
     // A packet worker's o8 CLI heartbeats, reports progress, tails its events and reads or widens
     // its scope here. The gate grants workers these paths; each handler then binds the bearer to
