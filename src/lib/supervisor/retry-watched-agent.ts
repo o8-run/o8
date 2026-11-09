@@ -5,7 +5,8 @@ export async function retryWatchedAgent(
   watched: WatchedAgent,
   callbacks: SupervisorCallbacks,
   state: {
-    persist(agent: WatchedAgent): void;
+    /** False when another process unregistered the watch; the lane must not be relaunched. */
+    persist(agent: WatchedAgent): boolean;
     replace(surfaceId: string): void;
     scheduleCleanup(): void;
   },
@@ -13,7 +14,7 @@ export async function retryWatchedAgent(
   // Reserve this transition before awaiting launch, including against completion pushes.
   watched.completionReported = true;
   watched.lastEventAt = Date.now();
-  state.persist(watched);
+  if (!state.persist(watched)) return;
   let result: SupervisorRelaunchResult;
   try {
     result = await callbacks.relaunchAgent(

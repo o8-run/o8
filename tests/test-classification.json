@@ -7872,6 +7872,12 @@
       ]
     },
     {
+      "path": "tests/supervisor-stop-mid-tick-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-brain-o8-commands-real-path.test.ts",
       "reasons": [
         "real-path"
