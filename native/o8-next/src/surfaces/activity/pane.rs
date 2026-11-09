@@ -446,7 +446,9 @@ impl ActivityPane {
         if self
             .unsettled
             .as_ref()
-            .is_some_and(|(_, unsettled, replay)| (*unsettled, replay) != (path, &body))
+            .is_some_and(|(_, unsettled, replay)| {
+                !RECEIPTS.contains(&path) || (*unsettled, replay) != (path, &body)
+            })
         {
             self.notice_error = true;
             self.notice = "An earlier decision is unsettled. Refresh to check it.".into();
@@ -566,7 +568,8 @@ impl ActivityPane {
             Action::Refresh => {
                 // A receipt route replays the same body, which only reads the
                 // persisted outcome; anything else settles from the fresh feed.
-                if let Some((method, path, body)) = self.unsettled.take()
+                if !self.pending
+                    && let Some((method, path, body)) = self.unsettled.take()
                     && RECEIPTS.contains(&path)
                 {
                     self.mutate(method, path, body, cx);
@@ -625,12 +628,19 @@ impl ActivityPane {
                 self.archiving = None;
                 self.archive_after_stop = Some(row.id.clone());
                 self.act(Action::Lane(row, "stop"), cx);
+                // A refused stop must not leave the archive armed for the next
+                // decision that succeeds.
+                if !self.pending {
+                    self.archive_after_stop = None;
+                }
             }
             Action::CloseReason(reason) => self.close_reason = reason,
             Action::Close(row) => {
                 if self.pending { return; }
                 let mutation = format!("next-close-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos());
                 self.mutate("POST", "/api/orchestrator/discard-packet", json!({"packetId": row.id, "disposition": self.close_reason, "clientMutationId": mutation}), cx);
+                // A refused close keeps its notice and leaves the confirm usable.
+                if !self.pending { return; }
                 // The stage shows on the confirm itself, as in classic.
                 self.notice.clear();
                 self.close_stage = Some("Closing packet…");

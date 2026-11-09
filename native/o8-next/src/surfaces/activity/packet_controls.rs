@@ -97,6 +97,10 @@ impl ActivityPane {
                 cx,
             ));
         }
+        // The confirm is for a running worker; once it stops, Archive is plain again.
+        if !live && self.archiving.as_deref() == Some(row.id.as_str()) {
+            self.archiving = None;
+        }
         let asking = self.archiving.as_deref() == Some(row.id.as_str());
         if !asking {
             destructive = destructive.child(self.packet_button(

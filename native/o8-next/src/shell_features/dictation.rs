@@ -49,8 +49,9 @@ struct Mic {
     finishing_since: Option<std::time::Instant>,
 }
 
-/// A recording that never answers its stop gives the microphone back.
-const FINISH_WITHIN: std::time::Duration = std::time::Duration::from_secs(15);
+/// A recording that never answers its stop gives the microphone back. Long
+/// enough for a slow polish of a long recording.
+const FINISH_WITHIN: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Mic {
     fn active(&self) -> bool {
@@ -277,9 +278,18 @@ fn follow(s: &mut Shell, cx: &mut Context<Shell>) {
     if state == DictationState::Finishing
         && finishing_since.is_some_and(|since| since.elapsed() >= FINISH_WITHIN)
     {
+        let mic = s.features.get::<Mic>();
+        let sent = mic.sent;
+        // Release the host's recording too, so the next start is not refused.
+        let release = mic.control(
+            json!({"action":"dictation-stop","requestId":format!("m-{}", stamp()),"submit":false}),
+        );
         restore(s, cx);
         retire(s, cx);
-        toasts::error("Dictation did not finish. Try again.", cx);
+        if !sent {
+            post(s, release, cx, |_, _, _| {});
+            toasts::error("Dictation did not finish. Try again.", cx);
+        }
         return;
     }
     if state == DictationState::Off || state == DictationState::Finishing {
