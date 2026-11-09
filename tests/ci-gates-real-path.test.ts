@@ -402,11 +402,18 @@ describe('native next CI through persisted fixtures', () => {
       return readFileSync(receipt, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as string[]);
     };
     expect(run(true), 'installed runner packages must not be upgraded or fetched again').toEqual([]);
+    // update, a time-bounded download-only fetch (#5616), then the install.
     const missing = run(false);
-    expect(missing).toHaveLength(2);
-    expect(missing[1]).toContain('libfontconfig1-dev');
-    for (const graphical of ['mesa-vulkan-drivers', 'xvfb', 'tesseract-ocr']) {
-      expect(missing[1].includes(graphical)).toBe(!headless);
+    expect(missing).toHaveLength(3);
+    const [, download, install] = missing;
+    expect(download.slice(0, 2)).toEqual(['timeout', '480']);
+    expect(download).toContain('--download-only');
+    expect(install).not.toContain('--download-only');
+    for (const call of [download, install]) {
+      expect(call).toContain('libfontconfig1-dev');
+      for (const graphical of ['mesa-vulkan-drivers', 'xvfb', 'tesseract-ocr']) {
+        expect(call.includes(graphical)).toBe(!headless);
+      }
     }
   });
 
