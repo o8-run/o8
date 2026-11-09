@@ -104,11 +104,7 @@ impl Render for ThreadList {
                 }),
             )
             .capture_key_down(cx.listener(Self::key))
-            .child(arriving(
-                div().child(self.project_header(window, cx)),
-                self.arrived(0),
-            ))
-            // Search lives in the sidebar, as T3 Code's does (Q 2026-11-09): a
+            // Search heads the sidebar, as T3 Code's does (Q 2026-11-09): a
             // resting field that opens the list's own search in place.
             .map(|view| {
                 if self.editing || !self.query.is_empty() {
@@ -117,6 +113,10 @@ impl Render for ThreadList {
                     view.child(self.search_field(cx))
                 }
             })
+            .child(arriving(
+                div().child(self.project_header(window, cx)),
+                self.arrived(0),
+            ))
             .when(!status.is_empty(), |view| {
                 view.child(
                     div()
@@ -193,8 +193,8 @@ impl ThreadList {
             .id("sidebar-search-field")
             .debug_selector(|| "sidebar-search-field".into())
             .mx(px(6.))
-            .mt(px(2.))
-            .mb(px(4.))
+            .mt(px(4.))
+            .mb(px(2.))
             .h(px(30.))
             .px(px(8.))
             .flex()
