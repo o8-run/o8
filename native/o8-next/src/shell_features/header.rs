@@ -1,12 +1,12 @@
 use super::*;
+#[cfg(test)]
+#[path = "header/open_in_editor_tests.rs"]
+mod open_in_editor_tests;
 #[path = "header/pills.rs"]
 mod pills;
 #[cfg(test)]
 #[path = "header/worktree_badge_tests.rs"]
 mod worktree_badge_tests;
-#[cfg(test)]
-#[path = "header/open_in_editor_tests.rs"]
-mod open_in_editor_tests;
 struct Header;
 register_shell_feature!(Header);
 impl ShellFeature for Header {
@@ -165,7 +165,7 @@ fn render(
             // The resize edges stay invisible below; these mark where they sit.
             .when(!hidden && !moving, |row| {
                 row.child(edge_mark().left(px(
-                    super::super::sidebar::width(s) + super::super::sidebar::EDGE_GAP,
+                    super::super::sidebar::width(s) + super::super::sidebar::EDGE_GAP
                 )))
             })
             .when_some(
@@ -207,16 +207,19 @@ fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui:
         },
         true,
     )
-    .child(crate::icon::stroke(
-        SIDEBAR,
-        if hidden {
-            theme().text_secondary
-        } else {
-            crate::theme::brand_orange()
-        },
-        14.,
-        1.8,
-    ))
+    .child(
+        crate::icon::stroke(
+            SIDEBAR,
+            if hidden {
+                theme().text_secondary
+            } else {
+                crate::theme::brand_orange()
+            },
+            14.,
+            1.8,
+        )
+        .with_transformation(press_glyph("header-sidebar")),
+    )
     .on_click(cx.listener(|this, _, window, cx| {
         this.capture(window, cx);
         toggle_sidebar(this, window, cx);
@@ -245,13 +248,17 @@ pub(super) fn pill(
         .justify_center()
         .rounded(px(7.))
         .when(enabled, |button| {
-            crate::motion::fade_hover(
-                button.cursor_pointer().bg(gpui::Rgba {
-                    a: hover.a * shown,
-                    ..hover
-                }),
+            crate::motion::track_press(
+                crate::motion::fade_hover(
+                    button.cursor_pointer().bg(gpui::Rgba {
+                        a: hover.a * shown,
+                        ..hover
+                    }),
+                    id.into(),
+                    140,
+                ),
                 id.into(),
-                140,
+                120,
             )
         })
         .when(!enabled, |button| button.opacity(0.35))
@@ -259,6 +266,12 @@ pub(super) fn pill(
         .when(!tip.is_empty(), |button| {
             button.tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(tip.into())).into())
         })
+}
+
+/// The press sink for a pill's glyph, keyed by the pill's id.
+pub(super) fn press_glyph(id: &'static str) -> gpui::Transformation {
+    let scale = crate::motion::press_scale(&id.into());
+    gpui::Transformation::scale(gpui::size(scale, scale))
 }
 
 pub(super) fn icon_button(
@@ -275,12 +288,16 @@ pub(super) fn icon_button(
     } else {
         0.
     };
-    pill(id, tip, enabled).child(crate::icon::stroke(
-        path,
-        crate::motion::mix(theme().text_secondary, theme().text, shown),
-        size,
-        weight,
-    ))
+    pill(id, tip, enabled).child(
+        crate::icon::stroke(
+            path,
+            crate::motion::mix(theme().text_secondary, theme().text, shown),
+            size,
+            weight,
+        )
+        // The glyph sinks while held, the desktop's scale(0.97) press.
+        .with_transformation(press_glyph(id)),
+    )
 }
 
 pub(crate) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
