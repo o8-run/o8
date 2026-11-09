@@ -3,6 +3,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -12,6 +13,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { getDataDir } from '@/lib/data-dir-migration';
 import { piWriteHelperPath } from '@/lib/pi/sdk/scripts';
 
 import { runLaneRebaseLint } from './rebase-lint';
@@ -190,6 +192,60 @@ describe('runLaneRebaseLint', () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.output).toContain('src/packet.js:2:no-console');
+  }, 20_000);
+
+  it('lints in a private checkout in the data directory, never the shared temp dir', async () => {
+    const repo = initLintRepo('checkout-place');
+    // A base rule that reports where ESLint runs.
+    writeFileSync(path.join(repo, 'eslint.config.mjs'), [
+      "const where = { rules: { cwd: { create: (context) => ({ Program(node) { context.report({ node, message: `cwd=${process.cwd()}` }); } }) } } };",
+      "export default [{ files: ['**/*.js'], plugins: { where }, rules: { 'where/cwd': 'error' } }];",
+      '',
+    ].join('\n'));
+    packetWithConsoleLog(repo, 'packet/place');
+    commitAll(repo, 'packet change');
+
+    const result = await runLaneRebaseLint({
+      cwd: repo, baseRef: 'main', actualBranch: 'packet/place', logPrefix: 'test',
+    });
+    expect(result.ok).toBe(false);
+    const checkouts = path.join(realpathSync(getDataDir()), 'lint-checkouts');
+    if (!result.ok) expect(result.output).toContain(`where/cwd cwd=${checkouts}${path.sep}base-`);
+  }, 20_000);
+
+  it('loads only the base root config, never one in a parent directory', async () => {
+    const checkouts = path.join(getDataDir(), 'lint-checkouts');
+    mkdirSync(checkouts, { recursive: true });
+    const planted = path.join(checkouts, 'eslint.config.mjs');
+    writeFileSync(planted, [
+      leakingPlugin(outsideSecret()),
+      "export default [{ files: ['**/*.js'], plugins: { leak: plugin }, rules }];",
+      '',
+    ].join('\n'));
+    try {
+      // The base configures ESLint only through package.json.
+      const repo = makeDir('package-config');
+      git(repo, ['init', '-b', 'main']);
+      writeFileSync(path.join(repo, 'package.json'), JSON.stringify({
+        private: true,
+        scripts: { lint: 'eslint .' },
+        eslintConfig: { parserOptions: { ecmaVersion: 2022, sourceType: 'module' }, rules: { 'no-console': 'warn' } },
+      }));
+      writeFileSync(path.join(repo, '.gitignore'), 'node_modules\n');
+      symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(repo, 'node_modules'), 'junction');
+      mkdirSync(path.join(repo, 'src'), { recursive: true });
+      packetWithConsoleLog(repo, 'packet/package-config');
+      commitAll(repo, 'packet change');
+
+      const result = await runLaneRebaseLint({
+        cwd: repo, baseRef: 'main', actualBranch: 'packet/package-config', logPrefix: 'test',
+      });
+      expect(JSON.stringify(result)).not.toContain('fixture-outside-secret');
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.output).toContain('src/packet.js:2:no-console');
+    } finally {
+      rmSync(planted, { force: true });
+    }
   }, 20_000);
 
   it('skips when the base revision has no lint script or ESLint config', async () => {

@@ -3,17 +3,19 @@ import { execFile } from '@/lib/providers/child-process';
 import * as nodeModule from 'node:module';
 import {
   existsSync,
+  lstatSync,
+  mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { LaneGitMetadataError, laneGit } from '@/lib/lane/lane-git';
+import { getDataDir } from '@/lib/data-dir-migration';
+import { LaneGitMetadataError, laneGit, laneGitArguments, laneGitEnvironment } from '@/lib/lane/lane-git';
 import { ranUnconfined, runConfinedProcess } from '@/lib/sandbox/run-confined';
 
 const execFileAsync = promisify(execFile);
@@ -41,20 +43,28 @@ const LINTABLE_EXTENSIONS = new Set([
   '.yaml',
   '.yml',
 ]);
-const ESLINT_CONFIG_FILES = [
+// In ESLint's own lookup order.
+const FLAT_CONFIG_FILES = [
   'eslint.config.js',
   'eslint.config.mjs',
   'eslint.config.cjs',
   'eslint.config.ts',
   'eslint.config.mts',
   'eslint.config.cts',
-  '.eslintrc',
+];
+const LEGACY_CONFIG_FILES = [
   '.eslintrc.js',
   '.eslintrc.cjs',
-  '.eslintrc.json',
   '.eslintrc.yaml',
   '.eslintrc.yml',
+  '.eslintrc.json',
+  '.eslintrc',
 ];
+
+/** The one config lint loads: a root config file, or `eslintConfig` from package.json. */
+type BaseLintConfig =
+  | { legacy: boolean; file: string }
+  | { legacy: true; packageConfig: unknown };
 
 interface ChangedLintFile {
   headPath: string;
@@ -96,15 +106,29 @@ export const UNCONFINED_LINT_NOTE = 'Lint ran without the sandbox: command confi
 const LINT_TEXT_RUNNER = `
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
+// The private temp dir is not in the data directory, so no compiled-config cache is kept there.
+process.env.JITI_FS_CACHE = 'false';
 (async () => {
   const [eslintEntry, inputPath] = process.argv.slice(1);
-  const files = JSON.parse(readFileSync(inputPath, 'utf8'));
+  const { config, files } = JSON.parse(readFileSync(inputPath, 'utf8'));
   const api = require(eslintEntry);
-  const ESLint = typeof api.loadESLint === 'function' ? await api.loadESLint({ cwd: process.cwd() }) : api.ESLint;
-  const eslint = new ESLint({ cwd: process.cwd() });
+  const cwd = process.cwd();
+  // Only the base revision's root config; ESLint looks for no other config file.
+  const configFile = config.file ? path.join(cwd, config.file) : undefined;
+  let ESLint;
+  let options;
+  if (config.legacy) {
+    ESLint = typeof api.loadESLint === 'function' ? await api.loadESLint({ useFlatConfig: false }) : api.ESLint;
+    options = { cwd, useEslintrc: false, ...(configFile ? { overrideConfigFile: configFile } : { baseConfig: config.packageConfig }) };
+  } else {
+    if (typeof api.loadESLint !== 'function') throw new Error('This ESLint install cannot load a flat config file by path.');
+    ESLint = await api.loadESLint({ useFlatConfig: true });
+    options = { cwd, overrideConfigFile: configFile };
+  }
+  const eslint = new ESLint(options);
   const results = [];
   for (const file of files) {
-    for (const result of await eslint.lintText(file.text, { filePath: path.join(process.cwd(), file.path) })) {
+    for (const result of await eslint.lintText(file.text, { filePath: path.join(cwd, file.path) })) {
       results.push({ filePath: result.filePath, messages: result.messages.map(({ ruleId, severity, message, line, column }) => ({ ruleId, severity, message, line, column })) });
     }
   }
@@ -163,7 +187,7 @@ async function lintAvailability(input: {
   mergeBase: string;
   installRoot: string;
   deadline: number;
-}): Promise<{ skip: false; eslintEntry: string } | { skip: true; reason: string }> {
+}): Promise<{ skip: false; eslintEntry: string; config: BaseLintConfig } | { skip: true; reason: string }> {
   const packageText = await revisionFile(input.cwd, input.mergeBase, 'package.json', input.deadline, input.gitRepoPath);
   const packageJson = packageText === null ? null : parsePackageJson(packageText);
   const scripts = packageJson?.scripts;
@@ -174,11 +198,23 @@ async function lintAvailability(input: {
     return { skip: true, reason: 'package.json has no lint script' };
   }
 
+  // Regular files only: a committed link could point at a file outside the checkout.
   const rootFiles = new Set((await gitOutput(
-    input.cwd, ['ls-tree', '--name-only', input.mergeBase], input.deadline, input.gitRepoPath,
-  )).split('\n'));
-  const hasConfigFile = ESLINT_CONFIG_FILES.some((file) => rootFiles.has(file));
-  if (!hasConfigFile && !packageJson?.eslintConfig) {
+    input.cwd, ['ls-tree', '-z', input.mergeBase], input.deadline, input.gitRepoPath,
+  )).split('\0').flatMap((entry) => {
+    const match = /^(100644|100755) blob [0-9a-f]+\t(.+)$/.exec(entry);
+    return match ? [match[2]] : [];
+  }));
+  const flatFile = FLAT_CONFIG_FILES.find((file) => rootFiles.has(file));
+  const legacyFile = LEGACY_CONFIG_FILES.find((file) => rootFiles.has(file));
+  const config: BaseLintConfig | null = flatFile
+    ? { legacy: false, file: flatFile }
+    : legacyFile
+      ? { legacy: true, file: legacyFile }
+      : packageJson?.eslintConfig && typeof packageJson.eslintConfig === 'object'
+        ? { legacy: true, packageConfig: packageJson.eslintConfig }
+        : null;
+  if (!config) {
     return { skip: true, reason: 'no ESLint config was found' };
   }
 
@@ -188,7 +224,7 @@ async function lintAvailability(input: {
     // undefined resolver when its argument cannot be evaluated at build time.
     const runtimeCreateRequire = Reflect.get(nodeModule, 'createRequire') as typeof nodeModule.createRequire;
     const requireFromInstall = runtimeCreateRequire(path.join(input.installRoot, 'package.json'));
-    return { skip: false, eslintEntry: requireFromInstall.resolve('eslint') };
+    return { skip: false, eslintEntry: requireFromInstall.resolve('eslint'), config };
   } catch {
     return { skip: true, reason: 'no local ESLint installation was found' };
   }
@@ -276,13 +312,16 @@ function parseEslintResults(stdout: string, stderr: string): LintSnapshot {
 async function lintSnapshot(input: {
   cwd: string;
   eslintEntry: string;
+  config: BaseLintConfig;
   files: Array<{ path: string; text: string }>;
   deadline: number;
   onUnconfined: () => void;
 }): Promise<LintSnapshot> {
   // Inside the checkout's .git, so the confined process can read it and nothing lints it.
+  // Created exclusively, so it never follows a link, and fresh for each snapshot.
   const inputPath = path.join(input.cwd, '.git', 'o8-lint-input.json');
-  writeFileSync(inputPath, JSON.stringify(input.files));
+  rmSync(inputPath, { force: true });
+  writeFileSync(inputPath, JSON.stringify({ config: input.config, files: input.files }), { flag: 'wx', mode: 0o600 });
   const args = ['-e', LINT_TEXT_RUNNER, input.eslintEntry, inputPath];
   try {
     const run = await runConfinedProcess(input.cwd, process.execPath, args, {
@@ -339,19 +378,52 @@ function formatFailure(lines: string[]): string {
   return output.slice(0, LINT_OUTPUT_PREVIEW_CHARS) || 'Unknown lint error';
 }
 
+const LINT_CHECKOUTS = 'lint-checkouts';
+
+/**
+ * Base checkouts live in the data directory, which sandboxed packet workers can
+ * neither read nor write; they can write the shared temp dir. The confined lint
+ * process may still read its own checkout there.
+ */
+function lintCheckoutRoot(): string {
+  const dataDir = getDataDir();
+  const root = path.join(dataDir, LINT_CHECKOUTS);
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  const stat = lstatSync(root);
+  const ownedHere = typeof process.getuid !== 'function' || stat.uid === process.getuid();
+  if (!stat.isDirectory() || !ownedHere || realpathSync(root) !== path.join(realpathSync(dataDir), LINT_CHECKOUTS)) {
+    throw new Error('The lint checkout directory is not a private directory in the o8 data directory.');
+  }
+  return realpathSync(root);
+}
+
+// Host Git, hardened as lane Git is: no inherited routing, hooks or fsmonitor.
+async function hostGit(cwd: string, args: string[], deadline: number): Promise<void> {
+  await execFileAsync(resolveGitBinary(), laneGitArguments(args), {
+    cwd,
+    env: laneGitEnvironment(),
+    windowsHide: true,
+    encoding: 'utf8',
+    timeout: remainingTimeout(deadline),
+    maxBuffer: LINT_MAX_BUFFER_BYTES,
+  });
+}
+
 async function makeBaseCheckout(
   cwd: string,
   mergeBase: string,
   deadline: number,
   installRoot: string,
 ): Promise<string> {
-  const baseDir = realpathSync(mkdtempSync(path.join(tmpdir(), 'o8-lint-base-')));
+  const baseDir = realpathSync(mkdtempSync(path.join(lintCheckoutRoot(), 'base-')));
   try {
-    await gitOutput(baseDir, ['clone', '--quiet', '--shared', '--no-checkout', cwd, '.'], deadline);
-    await gitOutput(baseDir, ['checkout', '--quiet', '--detach', mergeBase], deadline);
+    await hostGit(baseDir, ['clone', '--quiet', '--shared', '--no-checkout', cwd, '.'], deadline);
+    await hostGit(baseDir, ['checkout', '--quiet', '--detach', mergeBase], deadline);
+    // Packages always come from the repository's install, even when the base commits a node_modules.
     const sourceModules = path.join(installRoot, 'node_modules');
     const baseModules = path.join(baseDir, 'node_modules');
-    if (existsSync(sourceModules) && !existsSync(baseModules)) {
+    rmSync(baseModules, { recursive: true, force: true });
+    if (existsSync(sourceModules)) {
       symlinkSync(sourceModules, baseModules, 'junction');
     }
     return baseDir;
@@ -441,7 +513,9 @@ export async function runLaneRebaseLint(input: {
       const read: Array<{ path: string; text: string }> = [];
       for (const file of paths) {
         const text = await revisionFile(input.cwd, rev, file, deadline, input.gitRepoPath);
-        if (text !== null) read.push({ path: file, text });
+        // A changed file that cannot be read fails lint rather than going unlinted.
+        if (text === null) throw new Error(`Unable to read ${file} at ${rev} for lint.`);
+        read.push({ path: file, text });
       }
       return read;
     };
@@ -450,6 +524,7 @@ export async function runLaneRebaseLint(input: {
       const head = await lintSnapshot({
         cwd: baseDir,
         eslintEntry: availability.eslintEntry,
+        config: availability.config,
         files: await texts('HEAD', files.map((file) => file.headPath)),
         deadline,
         onUnconfined,
@@ -480,6 +555,7 @@ export async function runLaneRebaseLint(input: {
         : warningsByPath(baseDir, await lintSnapshot({
           cwd: baseDir,
           eslintEntry: availability.eslintEntry,
+          config: availability.config,
           files: await texts(mergeBase, basePaths),
           deadline,
           onUnconfined,
