@@ -3,7 +3,6 @@ import type { LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
 import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
-import type { RepoReadiness } from '@/lib/repos/types';
 import type { PersistedChatCheckpoint } from '@/lib/terminal/tab-state';
 import type { TerminalExitState } from '@/lib/terminal/exit-state';
 import type {
@@ -19,16 +18,8 @@ import type {
 } from '@/lib/panel/preview';
 import type { WorkspaceAttachedTerminalSession } from '@/components/desktop/workspace-terminal/terminal-mode';
 
-export interface RegisteredRepo {
-  name: string;
-  localPath: string;
-  remoteUrl?: string;
-  branch?: string | null;
-  readiness?: RepoReadiness | null;
-  registryRepoId?: string;
-  isWorktree?: boolean;
-  worktreeStatus?: string | null;
-}
+import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/registered-repo';
+export type { RegisteredRepo };
 
 export interface OrchestratorTurnInjection {
   autoSend?: boolean;
