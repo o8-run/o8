@@ -180,6 +180,16 @@ fn native_composer_draft_survives_reopen_and_clears_on_send(app: &mut TestAppCon
     let (surface, visual) = open(app, &fixture);
     focus(&surface, visual);
     visual.simulate_input("Half-written thought");
+    // An attached file is part of the draft; the sent one must not come back.
+    let attached = root.join("notes.txt");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(&attached, "attached").unwrap();
+    surface.update(visual, |s, cx| {
+        s.composer.update(cx, |input, cx| {
+            input.controls.files.push(attached.clone());
+            input.save_draft(cx);
+        })
+    });
     // The draft is written once typing pauses.
     visual.executor().advance_clock(std::time::Duration::from_millis(500));
     visual.run_until_parked();
@@ -190,7 +200,8 @@ fn native_composer_draft_survives_reopen_and_clears_on_send(app: &mut TestAppCon
     drop(surface);
     let (reopened, visual) = open(app, &fixture);
     reopened.read_with(visual, |s, cx| {
-        assert_eq!(s.composer.read(cx).text, "Half-written thought")
+        assert_eq!(s.composer.read(cx).text, "Half-written thought");
+        assert_eq!(s.composer.read(cx).controls.files, vec![attached.clone()]);
     });
     // A confirmed send clears the stored draft at once, with no pause.
     focus(&reopened, visual);
@@ -204,6 +215,9 @@ fn native_composer_draft_survives_reopen_and_clears_on_send(app: &mut TestAppCon
     visual.update(|window, _| window.remove_window());
     drop(reopened);
     let (again, visual) = open(app, &fixture);
-    again.read_with(visual, |s, cx| assert!(s.composer.read(cx).text.is_empty()));
+    again.read_with(visual, |s, cx| {
+        assert!(s.composer.read(cx).text.is_empty());
+        assert!(s.composer.read(cx).controls.files.is_empty(), "sent files stay sent");
+    });
     let _ = std::fs::remove_dir_all(root);
 }

@@ -67,6 +67,8 @@ pub struct Composer {
     /// relaunch or update brings the draft back (#5203).
     pub(crate) persist_draft: bool,
     draft_save: Option<gpui::Task<()>>,
+    /// The draft last handed to the store, so cursor moves write nothing.
+    draft_saved: Option<mode_store::Draft>,
 }
 impl Composer {
     /// Read-only input viewport for floating previews; layout and input stay here.
@@ -102,6 +104,7 @@ impl Composer {
             masked: false,
             persist_draft: false,
             draft_save: None,
+            draft_saved: None,
         }
     }
     pub(crate) fn select_all(&mut self, cx: &mut Context<Self>) {
@@ -171,8 +174,10 @@ impl Composer {
         self.changed(cx);
     }
     /// Writes the draft once typing pauses. An emptied draft is written at
-    /// once, so a sent message never comes back after a quick quit.
-    fn save_draft(&mut self, cx: &mut Context<Self>) {
+    /// once, so a sent message never comes back after a quick quit. Text,
+    /// attached files and their removal all save; an unchanged draft writes
+    /// nothing.
+    pub(crate) fn save_draft(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.controls.prompt.store.clone().filter(|_| self.persist_draft) else {
             return;
         };
@@ -180,17 +185,28 @@ impl Composer {
             text: self.text.clone(),
             files: self.controls.files.clone(),
         };
-        let wait = !draft.text.trim().is_empty();
-        self.draft_save = Some(cx.spawn(async move |_, cx| {
+        if self.draft_saved.as_ref() == Some(&draft) {
+            return;
+        }
+        let wait = !draft.text.trim().is_empty() || !draft.files.is_empty();
+        let order = mode_store::draft_order();
+        self.draft_saved = Some(draft.clone());
+        self.draft_save = Some(cx.spawn(async move |this, cx| {
             if wait {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(400))
                     .await;
             }
-            let _ = cx
+            let saved = cx
                 .background_executor()
-                .spawn(async move { mode_store::save_draft(Some(&path), &draft) })
+                .spawn(async move { mode_store::save_draft_in_order(Some(&path), &draft, order) })
                 .await;
+            if let Err(error) = saved {
+                let _ = this.update(cx, |this, cx| {
+                    this.controls.error = error;
+                    cx.notify();
+                });
+            }
         }));
     }
     fn changed(&mut self, cx: &mut Context<Self>) {

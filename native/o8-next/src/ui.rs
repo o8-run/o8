@@ -360,6 +360,8 @@ impl Surface {
                 editor.controls.prompt.store = store;
                 editor.controls.prompt.prelude = prelude;
                 editor.load_stash(cx);
+                // A restored continuation is saved as this thread's draft too.
+                editor.persist_draft = true;
                 match prompt_draft {
                     Ok(Some(draft)) => {
                         editor.set_text(&draft.text, cx);
@@ -375,7 +377,6 @@ impl Surface {
                         }
                     }
                 }
-                editor.persist_draft = true;
                 if let Some(mode) = mode {
                     editor.controls.overrides["mode"] =
                         json!(if mode == "solo" { "single" } else { "fleet" });

@@ -139,6 +139,7 @@ impl Composer {
             }
         }
         self.images_changed(cx);
+        self.save_draft(cx);
     }
     pub(crate) fn remove_file(
         &mut self,
@@ -157,6 +158,7 @@ impl Composer {
                 .flatten();
             next.unwrap_or(&self.focus).focus(window);
             self.images_changed(cx);
+            self.save_draft(cx);
         }
     }
     pub(super) fn images_changed(&mut self, cx: &mut Context<Self>) {
