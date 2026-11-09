@@ -5452,6 +5452,14 @@
       ]
     },
     {
+      "path": "tests/o8d-repos-bootstrap-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-repository-client-real-path.test.ts",
       "reasons": [
         "child-process",
