@@ -149,6 +149,11 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/github-status', 'GET', () => import('@/app/api/panel/github-status/route')),
     route('/api/orchestrator/merge-preview', 'GET', () => import('@/app/api/orchestrator/merge-preview/route')),
     route('/api/orchestrator/comparison-pick', 'POST', () => import('@/app/api/orchestrator/comparison-pick/route')),
+    // Compare grid file list. GET only, a stateless read: two `git diff <base>...HEAD` runs in the
+    // given worktree, with the base ref validated before git sees it. A commit-range diff writes
+    // nothing in the repository. No worker, device or spectator grant and no loopback read, so the
+    // operator bearer is required, as on Next. (#5576)
+    route('/api/orchestrator/comparison-diff', 'GET', () => import('@/app/api/orchestrator/comparison-diff/route')),
   ],
   bots: [
     route('/api/bots', 'GET', () => import('@/app/api/bots/route')),

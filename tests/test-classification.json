@@ -5398,6 +5398,14 @@
       ]
     },
     {
+      "path": "tests/o8d-comparison-diff-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-cortex-ask-answer-native-real-path.test.ts",
       "reasons": [
         "real-path"
