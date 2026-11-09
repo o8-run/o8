@@ -51,7 +51,7 @@ fn ids_are_path_encoded_and_unknown_houses_fall_back_to_the_bot_glyph() {
 }
 
 #[gpui::test]
-fn bot_entries_sit_under_prs_and_open_their_thread(cx: &mut TestAppContext) {
+fn bot_entries_sit_beside_prs_and_open_their_thread(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--bots");
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -72,11 +72,10 @@ fn bot_entries_sit_under_prs_and_open_their_thread(cx: &mut TestAppContext) {
     let bot = cx
         .debug_bounds("rail-bot-grok:agent-1")
         .expect("bot rail entry");
-    assert!(bot.top() >= prs.bottom(), "bot entries render below PRs");
-    assert!(
-        bot.top() - prs.bottom() < gpui::px(4.),
-        "and directly under it"
-    );
+    // The dock is one row: a bot sits beside PRs, on its line.
+    assert!(bot.left() >= prs.right(), "bot entries render after PRs");
+    assert!(bot.left() - prs.right() < gpui::px(4.), "and directly beside it");
+    assert_eq!(bot.top(), prs.top(), "on the dock's line");
     cx.simulate_click(bot.center(), gpui::Modifiers::none());
     cx.run_until_parked();
     assert_eq!(

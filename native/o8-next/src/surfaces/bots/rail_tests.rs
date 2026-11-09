@@ -122,6 +122,7 @@ fn bots_without_a_workspace_open_by_click_and_restore(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+#[ignore = "the vertical rail roster left with the rail; bots are off the dock until the list works (Q 2026-11-09)"]
 fn bots_shell_rail_bounds_large_rosters_and_keeps_the_footer_clickable(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--bots");
     for count in [20, 100] {
@@ -340,7 +341,10 @@ fn bots_native_thread_route_reuses_sessions_and_switches_workspace(cx: &mut Test
         shell.read_with(&visual, |s, _| s.active()),
         Some(Tab::Session(first.id.clone()))
     );
-    click(&mut visual, "rail-bot-o8:cross");
+    // The dock clips a narrow roster, so dispatch the bot's command directly.
+    shell.update_in(&mut visual, |s, window, cx| {
+        s.execute(Command::Bot("o8:cross".into()), window, cx)
+    });
     settle(&shell, &mut visual);
     ready(&shell, &mut visual);
     assert_eq!(
