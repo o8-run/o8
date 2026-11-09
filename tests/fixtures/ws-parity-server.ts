@@ -26,6 +26,8 @@ export async function startParityReference(options: {
   logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean | 'default'; nativeRepositoryReads?: boolean; ttsPython?: string;
   /** WS_TOKEN for the WS process when it should differ from the stored ws-token. */
   envToken?: string;
+  /** The WS process's API base is its own listener, as the Next-stopped switch will bind it. */
+  apiOnListener?: boolean;
   inbox?: () => typeof fixtureInbox;
   sync?: (body: Record<string, unknown>) => unknown | Promise<unknown>;
 } = {}) {
@@ -85,7 +87,9 @@ export async function startParityReference(options: {
       CORTEX_IDE_REVIEW_REPO_ROOT: directory, WS_TOKEN: options.envToken ?? token,
       // Never reach pip from a fixture, even from a shell that sets a real one.
       O8_TTS_PYTHON: options.ttsPython ?? join(directory, 'no-python'),
-      O8_API_PORT: String(address.port), O8_WS_PORT: String(port),
+      // PORT outranks O8_API_PORT in getApiBase(), so it moves with it.
+      O8_API_PORT: String(options.apiOnListener ? port : address.port), O8_WS_PORT: String(port),
+      ...(options.apiOnListener ? { PORT: String(port) } : {}),
       CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${port}`,
       O8_WS_O8D: (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
       O8_NEXT_O8D: options.nativeHttp ? '1' : '0',

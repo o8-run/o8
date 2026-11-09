@@ -747,3 +747,7 @@ mod archive_tests;
 mod pin_reorder_tests;
 #[path = "copy_tests.rs"]
 mod copy_tests;
+
+// Mounted here for the shell's private fields, tick and commands, and test_support's open_past_setup and draw.
+#[path = "../../o8d_write_receipt.rs"]
+mod o8d_write_receipt;
