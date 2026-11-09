@@ -33,6 +33,7 @@ import { promisify } from 'node:util';
 import { execFile } from '@/lib/providers/child-process';
 import { SandboxUnavailableError } from './sandbox-error';
 import { homeToolchainPolicy } from './sandbox-toolchain';
+import { gitGuardBinds } from './git-metadata-guard';
 import type { PreparedSandbox, PrepareWorkerSandboxInput, SeatbeltProfileInput } from './sandbox';
 
 const execFileAsync = promisify(execFile);
@@ -194,6 +195,14 @@ export function buildBwrapArgs(policy: SeatbeltProfileInput, context: BwrapPolic
   for (const p of uniq(policy.finalAllowReadPaths ?? [])) {
     if (exists(p)) bind(p, 'ro');
   }
+  // Shared Git metadata (GitMetadataGuard): read-only, then the lane's own parts,
+  // then the redirects inside them. Before the read-only packet binds below.
+  if (policy.gitMetadataGuard) {
+    const binds = gitGuardBinds(policy.gitMetadataGuard);
+    for (const p of binds.readOnly) if (exists(p) && stateOf(p) === 'rw') bind(p, 'ro');
+    for (const p of binds.writable) if (exists(p)) bind(p, 'rw');
+    for (const p of binds.readOnlyAfter) if (exists(p) && stateOf(p) === 'rw') bind(p, 'ro');
+  }
   const immutable = uniq([
     ...toolchain.immutablePaths,
     ...(policy.finalDenyWritePaths ?? []),
@@ -226,6 +235,7 @@ export function bwrapPolicyPaths(policy: SeatbeltProfileInput, runtimeDir?: stri
       policy.finalDenyWritePaths, policy.finalImmutableWritePaths, policy.finalAllowReadPaths,
       policy.readOnlyDenyWritePaths,
     ].flatMap((list) => list ?? []),
+    ...(policy.gitMetadataGuard ? Object.values(gitGuardBinds(policy.gitMetadataGuard)).flat() : []),
   ]);
 }
 

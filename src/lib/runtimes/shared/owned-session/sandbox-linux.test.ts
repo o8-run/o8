@@ -65,6 +65,28 @@ describe('buildBwrapArgs — Linux worker sandbox policy', () => {
     expect(mountIndex(args, '--bind', `${HOME}/.npm`)).toBe(-1);
   });
 
+  it("leaves a lane worker only its branch directory, own worktree state and objects in the shared .git", () => {
+    const common = '/srv/repo/.git';
+    const gitDir = `${common}/worktrees/app`;
+    const guard = { commonDir: common, gitDir, pointerFile: `${WORKTREE}/.git`, branchRef: 'refs/heads/inline/pkt-a' };
+    const dirs = [...baseDirs, common, gitDir, `${common}/objects`, `${common}/objects/info`,
+      `${common}/refs/heads/inline`, `${common}/logs/refs/heads/inline`];
+    const files = [`${common}/config`, `${gitDir}/commondir`, `${gitDir}/gitdir`, `${WORKTREE}/.git`];
+    const args = buildBwrapArgs(policy({ extraReadWritePaths: [common], gitMetadataGuard: guard }), { kinds: kinds(dirs, files) });
+    const sealed = mountIndex(args, '--ro-bind', common);
+    expect(sealed).toBeGreaterThan(mountIndex(args, '--bind', common));
+    for (const rw of [`${common}/objects`, gitDir, `${common}/refs/heads/inline`, `${common}/logs/refs/heads/inline`]) {
+      expect(mountIndex(args, '--bind', rw)).toBeGreaterThan(sealed);
+    }
+    for (const ro of [`${common}/objects/info`, `${gitDir}/commondir`, `${gitDir}/gitdir`, `${WORKTREE}/.git`]) {
+      expect(mountIndex(args, '--ro-bind', ro)).toBeGreaterThan(mountIndex(args, '--bind', gitDir));
+    }
+    // Config, hooks and the base branch stay under the read-only Git dir.
+    expect(mountIndex(args, '--bind', `${common}/refs/heads`)).toBe(-1);
+    expect(mountIndex(args, '--bind', `${common}/config`)).toBe(-1);
+    expect(bwrapPolicyPaths(policy({ gitMetadataGuard: guard }))).toEqual(expect.arrayContaining([common, gitDir, `${common}/refs/heads/inline`]));
+  });
+
   it('hides secrets that would otherwise be visible, and only those', () => {
     const gh = `${HOME}/.config/gh`;
     const token = `${WORKTREE}/.o8-token`;

@@ -8678,6 +8678,13 @@
       ]
     },
     {
+      "path": "tests/worker-git-metadata-guard-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worker-live-status-real-path.test.ts",
       "reasons": [
         "network-listener",
