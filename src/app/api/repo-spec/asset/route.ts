@@ -1,7 +1,7 @@
 import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 import { isWorkspaceFileError, writeWorkspaceFile } from '@/lib/fs/workspace-file';
 import { NextResponse, type NextRequest } from 'next/server';
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { specCallerScope, WORKER_SPEC_SCOPE_REFUSAL } from '@/lib/o8md/worker-scope';
 import { extname, join, resolve, sep } from 'node:path';
@@ -160,7 +160,17 @@ export async function POST(request: NextRequest) {
 
   try {
     mkdirSync(assetsDir, { recursive: true });
-    if (!existsSync(target)) await writeWorkspaceFile(assetsDir, fileName, buf);
+    // The asset folder must be a real directory in the repository, not a link elsewhere. The
+    // write is rooted at the repository, so a folder swapped for a link afterwards is refused.
+    const folder = lstatSync(assetsDir);
+    if (folder.isSymbolicLink() || !folder.isDirectory()
+      || realpathSync(assetsDir) !== join(realpathSync(repoPath), ASSETS_DIR)) {
+      return NextResponse.json(
+        { ok: false, error: `${ASSETS_DIR} must be a directory inside the repository`, code: 'workspace_symlink_refused' },
+        { status: 403 },
+      );
+    }
+    if (!existsSync(target)) await writeWorkspaceFile(repoPath, join(ASSETS_DIR, fileName), buf);
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : 'write failed' },

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -7,8 +7,8 @@ import { NextRequest } from 'next/server';
 
 // The gate lets a packet worker read and annotate o8.md and add its assets. A worker reaches only
 // its own lane's repository or worktree, may only add notes (comment, reply, suggest, resolve)
-// under the default author, cannot hand in replacement content, and cannot read through a
-// symlinked o8.md. The operator keeps every action on any repository.
+// under the default author, cannot hand in replacement content, and cannot read or write through
+// a symlinked o8.md or asset folder. The operator keeps every action on any repository.
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-repo-spec-worker-'));
 const OPERATOR_TOKEN = 'repo-spec-worker-operator-0123456789';
 const LEGACY_WORKER_TOKEN = 'repo-spec-worker-legacy-0123456789';
@@ -100,6 +100,16 @@ it('keeps a packet worker to notes on its own lane repository', async () => {
     expect(await errorCode(refused)).toBe('repo_spec_operator_only');
   }
   expect(readFileSync(join(worktree, 'o8.md'), 'utf8')).toBe('# Spec\n\nOperator prose.\n');
+
+  // An asset folder linked elsewhere is refused, and nothing lands at the link's target.
+  const elsewhere = join(dataDir, 'elsewhere');
+  mkdirSync(elsewhere);
+  symlinkSync(elsewhere, join(worktree, 'o8-assets'));
+  const linkedAssets = await asset(worker, worktree);
+  expect(linkedAssets.status).toBe(403);
+  expect(await errorCode(linkedAssets)).toBe('workspace_symlink_refused');
+  expect(readdirSync(elsewhere)).toEqual([]);
+  unlinkSync(join(worktree, 'o8-assets'));
 
   // A note and an asset on its own worktree, and a read of its lane repository, still work. The
   // note keeps the default author whatever the worker names.
