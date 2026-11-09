@@ -555,6 +555,10 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         }
         throw error;
       }
+    } else if (reviewedHead.reviewedHeadSha) {
+      // A review pinned this commit: merge exactly it, never what the branch
+      // points at now, and no uncommitted changes the review did not cover.
+      reviewedSnapshotSha = reviewedHead.reviewedHeadSha;
     } else {
       if (command.commitMessage) {
         try {
