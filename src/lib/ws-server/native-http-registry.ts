@@ -216,6 +216,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // else 401 (principal from the bearer, never the client address). The response is a control
     // receipt with no credential. (#5243)
     route('/api/agent-control/action', 'POST', () => import('@/app/api/agent-control/action/route')),
+    // Named resource leases (o8 MCP and CLI lease tools). The gate grants a worker GET and POST;
+    // the handler resolves the principal from the bearer, refuses a worker credential with no
+    // authoritative row, keeps workers out of the governed namespaces, and requires a worker's
+    // owner and waiter pids to be proved by its credential's process binding. Holders and
+    // waiters are SQLite rows, so leases taken through Next and through the WS process are one
+    // set. (#5576)
+    route('/api/leases', 'GET POST', () => import('@/app/api/leases/route')),
   ],
   settings: [
     // Paired-device list (Settings > Paired devices). GET only: operator-gated by principal
