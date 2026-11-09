@@ -130,7 +130,7 @@ import {
   type SymonMachineIdentity,
 } from '@/lib/symon/machine-registry';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
-import { getOrCreateWsToken, WS_TOKEN_PATH, wsTokenSource } from '@/lib/ws-auth';
+import { getOrCreateWsToken, wsTokenSource } from '@/lib/ws-auth';
 import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { resolveAppVersion } from '@/lib/telemetry/crash-store';
