@@ -96,6 +96,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/ci', 'GET', () => import('@/app/api/panel/ci/route')),
     route('/api/panel/ci/[id]', 'GET', () => import('@/app/api/panel/ci/[id]/route')),
     route('/api/panel/pr', 'GET', () => import('@/app/api/panel/pr/route')),
+    // The o8 MCP server's packet receipts, worker corrections and PR stack:
+    // operator-only (none is on a device, worker or spectator list; receipts and
+    // corrections also require the operator principal). Receipts and corrections
+    // live in SQLite; corrections steer through the native runtime action; the
+    // stack reads GitHub through the same broker as /api/panel/pr.
+    route('/api/orchestrator/receipts', 'GET POST', () => import('@/app/api/orchestrator/receipts/route')),
+    route('/api/orchestrator/worker-corrections', 'GET POST', () => import('@/app/api/orchestrator/worker-corrections/route')),
+    route('/api/panel/pr-stack', 'GET', () => import('@/app/api/panel/pr-stack/route')),
     route('/api/orchestrator/stop-mission', 'POST', () => import('@/app/api/orchestrator/stop-mission/route')),
     route('/api/orchestrator/discard-packet', 'POST', () => import('@/app/api/orchestrator/discard-packet/route')),
   ],
