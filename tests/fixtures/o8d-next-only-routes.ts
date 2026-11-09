@@ -25,7 +25,6 @@ export const NEXT_ONLY_NATIVE_PATHS: NextOnlyTable = {
   '/api/panel/ssh-machines': security('local-only trust gate (isTrustedPanelRequest) and SSH commands on saved machines'),
   '/api/runtime/acp-connection': seek('native inventory drift outside the A1 and A2 slices'),
   '/api/runtime/acp-registry/prepare': seek('native inventory drift outside the A1 and A2 slices'),
-  '/api/orchestrator/comparison-diff': security('GET has a write path; ported in the security lane'),
   '/api/panel/devices': security('device pairing and revocation'),
   '/api/tasks/[id]/preview': seek('native inventory drift outside the A1 and A2 slices'),
   '/api/review/push': seek("review's push button: a POST outside the Phase A reads"),
@@ -49,16 +48,12 @@ export const NEXT_ONLY_SHELL_PATHS: NextOnlyTable = {};
 export const NEXT_ONLY_SHELL_METHODS: NextOnlyTable = {};
 
 export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
-  '/api/agents/inbox': security('worker grant'),
-  '/api/agents/message': security('worker grant'),
-  '/api/agents/presence': security('worker grant'),
   '/api/broadcast/post': security('worker grant'),
   '/api/broadcast/tokens': security('mints broadcast tokens'),
   '/api/browser/proxy': security('loopback read grant'),
   '/api/cortex/sources': seek('operator MCP tool read'),
   '/api/devices/agent': security('worker grant: packet-bound device authority'),
   '/api/harness': seek('operator MCP tool'),
-  '/api/leases': security('worker grant'),
   '/api/orchestrator/create-mission': seek('operator mission mutation'),
   '/api/orchestrator/dispatch': seek('operator mission mutation'),
   '/api/orchestrator/merge': seek('operator merge mutation'),
@@ -66,9 +61,6 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
   '/api/orchestrator/reload': seek('operator reload'),
   '/api/orchestrator/truth': security('spectator grant'),
   '/api/task-artifacts': seek('operator MCP tool'),
-  // Hidden until the scan read template literals whole: `/api/lanes/${encodeURIComponent(id)}/events`
-  // was cut at the call and counted as the registered /api/lanes/[id].
-  '/api/lanes/[id]/events': security('worker grant'),
   '/api/task-artifacts/[id]/actions': seek('operator MCP tool'),
 };
 export const NEXT_ONLY_MCP_METHODS: NextOnlyTable = {
@@ -84,26 +76,18 @@ export const NEXT_ONLY_WS_PATHS: NextOnlyTable = {
   '/api/mobile/symon/confirm': security('Symon relay: operator credential only'),
   '/api/mobile/symon/text-turn': security('Symon relay: operator credential only'),
   '/api/mobile/symon/tool': security('Symon relay: operator credential only'),
-  '/api/symon/machine/session': security('Symon machine session'),
   '/api/worktrees/conflicts': seek('worktree conflict read'),
   '/api/v2/proxy/llm': security('o8 lane model calls: provider keys and spend'),
 };
 
 // The o8 CLI that packet workers and the operator run. Uncounted until the scan read cli/src.
 export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
-  '/api/agents/inbox': security('worker grant'),
-  '/api/agents/message': security('worker grant'),
-  '/api/agents/presence': security('worker grant'),
   '/api/broadcast/automation-say': security('worker grant: automation lanes speak'),
   '/api/broadcast/post': security('worker grant'),
   '/api/broadcast/tokens': security('mints broadcast tokens'),
   '/api/browser/engine/capture': security('headless browser loads any URL; the handler relies on loopback plus token'),
   '/api/cortex/sources': seek('Brain source listing'),
   '/api/harness': seek('harness bundle and measure'),
-  '/api/lanes/[id]/events': security('worker grant: packet log and report'),
-  '/api/lanes/[id]/heartbeat': security('worker grant: packet heartbeat'),
-  '/api/lanes/[id]/scope': security('worker grant: packet scope read and expansion'),
-  '/api/leases': security('worker grant'),
   '/api/orchestrator/create-mission': seek('operator mission mutation'),
   '/api/orchestrator/dispatch': seek('operator mission mutation'),
   '/api/orchestrator/history': seek('orchestrator history read'),
