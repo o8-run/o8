@@ -103,10 +103,16 @@ const callMethods: MethodReader = (source, quoteAt) => {
   if (!before) return undefined; // Not a request's path argument: a constant, list or comparison.
   if (/CorrelatedMutation|CorrelatedPacketMutation/.test(before[1])) return ['POST'];
   const args = callArguments(source, quoteAt - before[0].length + before[0].indexOf('(', before[1].length));
-  const option = args.match(/\bmethod\s*:\s*([^,\n}]+)/);
-  if (option) {
-    const verbs = [...option[1].matchAll(HTTP_METHODS)].map(verb => verb[1]);
-    return verbs.length > 0 ? verbs : undefined;
+  // `{ method }` shorthand holds a variable, so the method is unknown.
+  if (/[{,]\s*method\s*[,}]/.test(args)) return undefined;
+  const options = [...args.matchAll(/\bmethod\s*:\s*([^,\n}]+)/g)];
+  if (options.length > 0) {
+    const verbs = options.flatMap(option => [...option[1].matchAll(HTTP_METHODS)].map(verb => verb[1]));
+    if (verbs.length === 0) return undefined;
+    // Options picked by a condition (`x ? {} : { method: 'POST' }`): a branch with no method sends the default.
+    const picked = args.match(/[`'"]\s*,\s*[\w.!()\s=&|'"]+\?\s*(\{[^{}]*\})\s*:\s*(\{[^{}]*\})/);
+    if (picked && !picked.slice(1).every(branch => /\bmethod\s*:/.test(branch))) verbs.push('GET');
+    return [...new Set(verbs)];
   }
   const trailing = args.match(new RegExp(`,\\s*['"]${VERBS}['"]\\s*$`));
   if (trailing) return [trailing[1]];
@@ -274,6 +280,8 @@ it('counts the desktop shell, the MCP server, the WS process and the CLI toward 
   const wsFound = checkCallers([
     { files: nextCallers, pattern: /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, methods: callMethods },
     { files: API_BASE_CLIENTS, pattern: /[`'"][^`'"\s]*?(\/api\/[^`'"\s]+)[`'"]/g },
+    // A fetch built against a base or the request's own URL: `new URL('/api/v2/proxy/llm', request.url)`.
+    { files: [...sourceFiles('src', '.ts'), ...sourceFiles('src', '.tsx')], pattern: /new URL\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]\s*,/g },
   ], keys(NEXT_ONLY_WS_PATHS));
   // A WS-to-Next call whose path is not a literal escapes the scan, so each one is pinned here.
   expect(dynamicNextCalls(nextCallers)).toEqual(DYNAMIC_NEXT_CALLS);
@@ -288,9 +296,11 @@ it('counts the desktop shell, the MCP server, the WS process and the CLI toward 
   // The scorecard is derived, not pinned: each list already fails when an entry in it is
   // registered or loses its last caller, so a pinned total only made parallel ports collide.
   const routes = nextOnlyRoutes();
-  const byOwner = (owner: string) => [...routes.values()].filter(entry => entry.owner === owner).length;
-  console.info(`[o8d inventory] ${routes.size} API-port routes still need Next `
-    + `(security ${byOwner('security')}, seek ${byOwner('seek')}); ${retired.size} retired`);
+  const nextOnly = [...routes.values()].filter(entry => !entry.noNextHandler);
+  const byOwner = (owner: string) => nextOnly.filter(entry => entry.owner === owner).length;
+  console.info(`[o8d inventory] ${nextOnly.length} API-port routes still need Next `
+    + `(security ${byOwner('security')}, seek ${byOwner('seek')}); ${routes.size - nextOnly.length} have no handler on Next either; `
+    + `${retired.size} retired`);
 });
 
 /** Device, worker, spectator and loopback-read grants, read from the middleware source. */
@@ -371,6 +381,13 @@ it('checks TS callers by method, reads template paths whole and pins dynamic WS 
       .toThrow('POST /api/panel/status');
     expect(scan('mcp-mutation.ts', "await apiFetchCorrelatedMutation('/api/panel/status', body, 'id');", TS_PATTERN))
       .toThrow('POST /api/panel/status');
+    // A `{ method }` shorthand is unknown; options picked by a condition send each branch's method.
+    expect(scan('shorthand.ts', "await apiFetch(cfg, '/api/panel/status', { method, body });", TS_PATTERN)).not.toThrow();
+    expect(scan('ternary.ts', "await apiFetch(cfg, '/api/panel/status', x ? {} : { method: 'DELETE', body });", TS_PATTERN))
+      .toThrow('DELETE /api/panel/status');
+    expect(callMethods("apiFetch(cfg, '/api/x', x ? {} : { method: 'POST', body })", 14)).toEqual(['POST', 'GET']);
+    expect(callMethods("apiFetch(cfg, '/api/x', action === 'list' ? {} : { method: 'POST', body })", 14)).toEqual(['POST', 'GET']);
+    expect(callMethods("apiFetch(cfg, '/api/x', body ? { method: 'POST', body } : {})", 14)).toEqual(['POST', 'GET']);
     // A listed method stays counted until it is registered, and only while a caller sends it.
     const listed = { methods: callMethods, nextOnlyMethods: new Set(['POST /api/panel/status']) };
     expect(scan('listed.ts', "await apiFetch('/api/panel/status', { method: 'POST' });", TS_PATTERN, listed)).not.toThrow();

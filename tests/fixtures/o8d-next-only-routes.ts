@@ -10,17 +10,22 @@
  * device, worker, spectator or loopback grant reaches is owned by security; the inventory checks it.
  */
 export type NextOnlyOwner = 'security' | 'seek';
-export interface NextOnlyEntry { readonly owner: NextOnlyOwner; readonly reason: string }
+export interface NextOnlyEntry {
+  readonly owner: NextOnlyOwner;
+  readonly reason: string;
+  /** Next has no handler either, so the caller is broken today; listed for the port, not counted as Next-only. */
+  readonly noNextHandler?: true;
+}
 export type NextOnlyTable = Readonly<Record<string, NextOnlyEntry>>;
 
 const security = (reason: string): NextOnlyEntry => ({ owner: 'security', reason });
 const seek = (reason: string): NextOnlyEntry => ({ owner: 'seek', reason });
 
 export const NEXT_ONLY_NATIVE_PATHS: NextOnlyTable = {
-  '/api/panel/ssh-machines': seek('native inventory drift outside the A1 and A2 slices'),
+  '/api/panel/ssh-machines': security('local-only trust gate (isTrustedPanelRequest) and SSH commands on saved machines'),
   '/api/runtime/acp-connection': seek('native inventory drift outside the A1 and A2 slices'),
   '/api/runtime/acp-registry/prepare': seek('native inventory drift outside the A1 and A2 slices'),
-  '/api/orchestrator/comparison-diff': seek('GET has a write path; held for review'),
+  '/api/orchestrator/comparison-diff': security('GET has a write path; ported in the security lane'),
   '/api/panel/devices': security('device pairing and revocation'),
   '/api/tasks/[id]/preview': seek('native inventory drift outside the A1 and A2 slices'),
   '/api/review/push': seek("review's push button: a POST outside the Phase A reads"),
@@ -67,7 +72,7 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
   '/api/task-artifacts/[id]/actions': seek('operator MCP tool'),
 };
 export const NEXT_ONLY_MCP_METHODS: NextOnlyTable = {
-  'POST /api/setup/mcp-servers': seek('MCP server registration write'),
+  'POST /api/setup/mcp-servers': security('stores MCP commands, env and OAuth tokens that workers receive'),
   'POST /api/visualizations': security('worker grant'),
   // Also matched the GET-only /api/visualizations/[id] path, so a path-only check counted it as served.
   'POST /api/visualizations/preview': security('worker grant'),
@@ -93,7 +98,7 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
   '/api/broadcast/automation-say': security('worker grant: automation lanes speak'),
   '/api/broadcast/post': security('worker grant'),
   '/api/broadcast/tokens': security('mints broadcast tokens'),
-  '/api/browser/engine/capture': seek('packet capture of the browser engine view'),
+  '/api/browser/engine/capture': security('headless browser loads any URL; the handler relies on loopback plus token'),
   '/api/cortex/sources': seek('Brain source listing'),
   '/api/harness': seek('harness bundle and measure'),
   '/api/lanes/[id]/events': security('worker grant: packet log and report'),
@@ -123,7 +128,7 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 };
 export const NEXT_ONLY_CLI_METHODS: NextOnlyTable = {
   // Next lost this handler too (deleted as uncalled in a cleanup), so `o8 doctor --reap` gets 405 on both.
-  'POST /api/lanes/reap': seek('doctor reaps stale lanes; no handler on Next either'),
+  'POST /api/lanes/reap': { ...seek('doctor reaps stale lanes'), noNextHandler: true },
   'POST /api/setup/cli-updates': seek('install or update a runtime CLI'),
   'POST /api/tasks': seek('create a task'),
 };
@@ -144,7 +149,10 @@ export const NEXT_ONLY_TABLES = {
   cli: [NEXT_ONLY_CLI_PATHS, NEXT_ONLY_CLI_METHODS],
 } as const satisfies Record<string, readonly [NextOnlyTable, NextOnlyTable]>;
 
-/** Every Next-only route across callers, keyed by `/path` or `METHOD /path`, retired entries excluded. */
+/**
+ * Every listed route across callers, keyed by `/path` or `METHOD /path`, retired entries excluded.
+ * Entries marked noNextHandler are included (a caller still gets 404 or 405) but are not Next-only.
+ */
 export function nextOnlyRoutes(): Map<string, NextOnlyEntry> {
   const routes = new Map<string, NextOnlyEntry>();
   for (const [paths, methods] of Object.values(NEXT_ONLY_TABLES)) {
