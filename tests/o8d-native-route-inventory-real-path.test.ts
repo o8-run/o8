@@ -56,7 +56,7 @@ it('covers native client routes with their production registration owners', () =
 const NEXT_ONLY_SHELL_PATHS = new Set([
   '/api/agent-control/action', '/api/browser/agent',
   '/api/canvas/intent', '/api/cortex/ask/answer',
-  '/api/panel/cloud-jobs/drain', '/api/panel/release-health', '/api/symon/mcp/call',
+  '/api/panel/cloud-jobs/drain', '/api/symon/mcp/call',
   '/api/symon/mcp/tools', '/api/symon/transport/tool',
   '/api/v1/audio/transcriptions', '/api/v1/chat/completions',
 ]);
@@ -108,7 +108,7 @@ it('counts the desktop shell, the MCP server and the WS process toward the Next-
   checkCaller(['src/ws-server.ts', ...sourceFiles('src/lib/ws-server', '.ts')],
     /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^>(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, NEXT_ONLY_WS_PATHS);
   const remaining = new Set([...NEXT_ONLY_NATIVE_PATHS, ...NEXT_ONLY_SHELL_PATHS, ...NEXT_ONLY_MCP_PATHS, ...NEXT_ONLY_WS_PATHS]);
-  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(55);
+  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(54);
 });
 
 it('rejects an unknown route discovered in a shell or MCP source file', () => {
