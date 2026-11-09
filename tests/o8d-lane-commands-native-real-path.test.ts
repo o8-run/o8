@@ -38,7 +38,7 @@ it.skipIf(process.platform === 'win32')('runs lane commands natively with Next s
     const command = (body: Record<string, unknown>, headers: Record<string, string> = {}) => fetch(`${origin}/api/lanes`, {
       method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
 
-    // Forged local markers change nothing: the path is no loopback read.
+    // Every lesser credential is refused, with local markers forged as well.
     const forged = { 'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1' };
     expect((await command({ verb: 'stop', laneId }, forged)).status).toBe(401);
     expect((await command({ verb: 'stop', laneId }, { ...forged, authorization: `Bearer ${device}` })).status).toBe(403);
@@ -59,7 +59,9 @@ it.skipIf(process.platform === 'win32')('runs lane commands natively with Next s
     // The persisted lane, read back through the native lane read; the refused archive left its lane alone.
     const lanes = await (await fetch(`${origin}/api/lanes?active=false`, { headers: operator })).json() as { lanes: Array<{ id: string; status: string }> };
     expect(lanes.lanes.find(lane => lane.id === laneId)?.status).toBe('archived');
-    expect(lanes.lanes.find(lane => lane.id === ownedId)?.status).not.toBe('archived');
+    const untouched = lanes.lanes.find(lane => lane.id === ownedId);
+    expect(untouched).toBeDefined();
+    expect(untouched?.status).not.toBe('archived');
   } finally {
     await server?.stop();
     rmSync(directory, { recursive: true, force: true });

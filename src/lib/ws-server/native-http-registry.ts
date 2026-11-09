@@ -199,8 +199,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // POST is the lane command dispatcher (stop, archive, create_pr, merge, ...) that o8 next's
     // Activity pane and agent roster send. The gate grants workers GET only on this path, so a
     // POST needs the operator bearer whatever the caller's address. Lane state is SQLite and the
-    // control-plane lock, and the WS process already runs these commands through
-    // orchestrator/delegate. (#5576)
+    // control-plane lock; launch claims, create_pr reservations and repo leases hold across
+    // processes. The WS process already runs open_lane and launch_session (orchestrator/delegate),
+    // stop (mission stop) and send_turn and interrupt (runtime/action). (#5576)
     route('/api/lanes', 'GET POST', () => import('@/app/api/lanes/route')),
     route('/api/lanes/[id]', 'GET', () => import('@/app/api/lanes/[id]/route')),
     route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
