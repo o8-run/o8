@@ -1,9 +1,9 @@
 import { build, type Plugin } from 'esbuild';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cliBuildOptions } from '../../cli/build-options.mjs';
 
-const sqliteRuntime = join(process.cwd(), 'cli', 'src', 'sqlite-runtime.ts');
+const sqliteRuntime = fileURLToPath(new URL('../../cli/src/sqlite-runtime.ts', import.meta.url));
 // A test bundle is written to a temp directory, where the bundled better-sqlite3 cannot find its
 // package root or native binding. Load the checkout's own module instead, as the runtime does
 // in a source checkout.
