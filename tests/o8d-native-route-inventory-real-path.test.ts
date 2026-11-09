@@ -68,6 +68,8 @@ const NEXT_ONLY_MCP_PATHS = new Set([
 const NEXT_ONLY_WS_PATHS = new Set([
   '/api/mobile/symon', '/api/mobile/symon/confirm', '/api/mobile/symon/text-turn', '/api/mobile/symon/tool',
   '/api/symon/machine/session', '/api/worktrees/conflicts',
+  '/api/broadcast/commentary', // Symon's commentary reader
+  '/api/v2/proxy/llm', // o8 lane model calls: provider keys and spend, held for security
 ]);
 
 function sourceFiles(directory: string, extension: string) {
@@ -99,8 +101,12 @@ function checkCaller(files: string[], pattern: RegExp, nextOnly: Set<string>) {
 it('counts the desktop shell, the MCP server and the WS process toward the Next-stopped default', () => {
   checkCaller(sourceFiles('src-tauri/src', '.rs'), /"[^"\s]*?(\/api\/[^"\s]+)"/g, NEXT_ONLY_SHELL_PATHS);
   checkCaller(sourceFiles('src/lib/mcp', '.ts'), /[`'"](\/api\/[\w\-./${}?=&]+)/g, NEXT_ONLY_MCP_PATHS);
-  checkCaller(['src/ws-server.ts', ...sourceFiles('src/lib/ws-server', '.ts')],
-    /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^>(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, NEXT_ONLY_WS_PATHS);
+  // Every src module that calls the WS-to-Next helpers, not only the WS entry and its lib.
+  const nextCallers = [...sourceFiles('src', '.ts'), ...sourceFiles('src', '.tsx')]
+    .filter(file => /\b(?:buildNextUrl|fetchNext(?!Page)\w*)[<(]/.test(readFileSync(file, 'utf8')));
+  expect(nextCallers).toEqual(expect.arrayContaining(['src/ws-server.ts', 'src/lib/broadcast/speaker.ts']));
+  checkCaller(nextCallers,
+    /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, NEXT_ONLY_WS_PATHS);
   // The scorecard is derived, not pinned: each list above already fails when a path in it is
   // registered or loses its last caller, so a pinned total only made parallel ports collide.
   const remaining = new Set([...NEXT_ONLY_NATIVE_PATHS, ...NEXT_ONLY_SHELL_PATHS, ...NEXT_ONLY_MCP_PATHS, ...NEXT_ONLY_WS_PATHS]);

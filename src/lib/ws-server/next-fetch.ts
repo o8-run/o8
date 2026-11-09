@@ -44,7 +44,8 @@ function getNextOrigin(pathname: string, method: string): string {
   return process.env.NEXT_ORIGIN ?? getApiBase();
 }
 
-export function buildNextUrl(pathname: string, searchParams?: URLSearchParams, method = 'GET'): string {
+/** `method` is required: the native route lookup matches on it, so a POST caller left on a GET default reaches Next. */
+export function buildNextUrl(pathname: string, searchParams: URLSearchParams | undefined, method: 'GET' | 'POST' | 'DELETE'): string {
   const query = searchParams && searchParams.size > 0 ? `?${searchParams.toString()}` : '';
   return `${getNextOrigin(pathname, method)}${pathname}${query}`;
 }
@@ -104,7 +105,7 @@ export async function fetchNextJson<T>(
     headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetchWithRetry(buildNextUrl(pathname, options.searchParams, options.method), {
+  const response = await fetchWithRetry(buildNextUrl(pathname, options.searchParams, options.method ?? 'GET'), {
     method: options.method ?? 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
