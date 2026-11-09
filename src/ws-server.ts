@@ -9674,6 +9674,13 @@ async function bootstrapWsServer() {
   if (process.env.O8_NEXT_O8D === '1') void import('./lib/tts/ensure-edge-tts')
     .then(({ ensureEdgeTtsInstalled }) => ensureEdgeTtsInstalled())
     .catch(() => { console.warn('[startup] Optional voice preparation failed.'); });
+  // One process opens the o8 next window at startup (#5709). Next does, unless the shell names
+  // this process with O8_NEXT_WINDOW_OWNER=ws, as once it serves the API port with Next stopped.
+  // Both children inherit the same value, so a launcher that gives both the window environment
+  // (the Linux desktop) never has two claim the startup marker. Next checks the same variable.
+  if (process.env.O8_PACKAGED_APP === '1' && process.env.O8_NEXT_WINDOW_OWNER === 'ws') void import('./lib/next/app-window')
+    .then(({ restoreNextWindow }) => restoreNextWindow())
+    .catch(() => {});
   if (shuttingDown) return;
   await terminalHostReady;
   if (shuttingDown) return;
