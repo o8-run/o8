@@ -222,6 +222,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // the bearer. A stateless fetch of the fixed release-health manifest that fails
     // open on any error.
     route('/api/panel/release-health', 'GET', () => import('@/app/api/panel/release-health/route')),
+    // Model picker catalogue (orchestrator backend models). GET only, gated twice: panelGateMiddleware gives it
+    // no device/worker/spectator grant, so only the operator bearer passes; requirePanelAuth then trusts
+    // loopback via x-o8-client-addr, which the native transport stamps unverified-proxy, so here it falls
+    // through to the same ws-token bearer check — equal-or-stricter than Next. resolveOpenRouterKey() stays
+    // in-process and only primes the model probe; the agent's output is redacted before it reaches the body
+    // (tests/o8d-backend-models-native-real-path.test.ts). The OpenRouter metadata cache is per process and
+    // the probe cache is on disk, so neither needs a single owner. (#5243)
+    route('/api/orchestrator/backend-models', 'GET', () => import('@/app/api/orchestrator/backend-models/route')),
     // MCP config generator (Settings > MCP). GET only, no handler-level auth: gated by
     // panelGateMiddleware, which does not public-allowlist /api/setup/* (hardening #1562).
     // Over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) the loopback
