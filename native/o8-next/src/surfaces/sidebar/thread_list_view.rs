@@ -104,15 +104,6 @@ impl Render for ThreadList {
                 }),
             )
             .capture_key_down(cx.listener(Self::key))
-            // Search heads the sidebar, as T3 Code's does (Q 2026-11-09): a
-            // resting field that opens the list's own search in place.
-            .map(|view| {
-                if self.editing || !self.query.is_empty() {
-                    view.child(self.editor.clone())
-                } else {
-                    view.child(self.search_field(cx))
-                }
-            })
             .child(arriving(
                 div().child(self.project_header(window, cx)),
                 self.arrived(0),
@@ -187,7 +178,7 @@ impl Render for ThreadList {
 impl ThreadList {
     /// The sidebar's resting Search field: a magnifier, "Search" and its
     /// shortcut; a press opens the inline search where it sits.
-    fn search_field(&self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+    pub(super) fn search_field(&self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         const SEARCH: &str = "M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z M16 16l5 5";
         div()
             .id("sidebar-search-field")
