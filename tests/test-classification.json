@@ -7880,6 +7880,8 @@
     {
       "path": "tests/supervisor-stop-mid-tick-real-path.test.ts",
       "reasons": [
+        "child-process",
+        "process-signal",
         "real-path"
       ]
     },
