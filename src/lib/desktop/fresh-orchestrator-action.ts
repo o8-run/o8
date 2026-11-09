@@ -1,4 +1,4 @@
-import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/types';
+import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/registered-repo';
 
 /** Fixed app-owned action, delivered only to the exact live workspace root.
  * Ordinary New session retains blank reuse. This explicit action alone forces
