@@ -244,9 +244,10 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // transport forwards it, and the registry call is outbound HTTPS, Next-independent. No token in the
     // response body (machine ids and device list only). (#5243)
     route('/api/panel/connect', 'GET POST DELETE', () => import('@/app/api/panel/connect/route')),
-    // Provider instances (Settings > Providers). GET+POST, gated by requirePanelAuth, which
-    // trusts loopback only through the peer o8d attests (#5576) and otherwise checks the
-    // ws-token bearer, as on Next. The GET inventory masks secret values (secrets live
+    // Provider instances (Settings > Providers). GET+POST, gated twice: the path has no
+    // device/worker/spectator grant, so the gate admits only the operator bearer whatever the
+    // caller's address, and requirePanelAuth then checks loopback (the peer o8d attests, #5576)
+    // or the same ws-token bearer, as on Next. The GET inventory masks secret values (secrets live
     // encrypted in a separate credentials table); the POST writes go through
     // withProviderStoreLock + master-key encryption. (#5243)
     route('/api/runtime/provider-instances', 'GET POST', () => import('@/app/api/runtime/provider-instances/route')),
