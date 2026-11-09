@@ -359,6 +359,7 @@ async function retryBaseAdvancedAfterRebase(
     if (dependencyBlocker) return dependencyBlocker;
     const verify = await runLaneRebaseVerify({
       cwd: opts.worktreePath,
+      installRoot: lane.repoPath,
       baseRef: lane.baseBranch,
       actualBranch: opts.actualBranch,
       logPrefix: 'lane-merge',
@@ -608,6 +609,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     if (dependencyBlocker) return dependencyBlocker;
     const verify = await runLaneRebaseVerify({
       cwd: mergeWorktreePath,
+      installRoot: lane.repoPath,
       baseRef: lane.baseBranch,
       actualBranch,
       logPrefix: 'lane-merge',

@@ -126,7 +126,8 @@ async function createFixture(
       scripts: { lint: 'eslint .' },
       devDependencies: { eslint: '^9.39.5' },
     }, null, 2));
-    writeFileSync(join(repo, '.gitignore'), 'node_modules/\n');
+    // No trailing slash: the pattern must also ignore the node_modules symlinks below.
+    writeFileSync(join(repo, '.gitignore'), 'node_modules\n');
     if (lintMode !== 'no-config') {
       writeFileSync(join(repo, 'eslint.config.mjs'), [
         'export default [{',
@@ -139,6 +140,8 @@ async function createFixture(
   }
   commitAll(repo, 'base');
   git(repo, ['push', '-u', 'origin', 'main']);
+  // Lint runs with the repository's install, never the packet worktree's.
+  if (lintMode) symlinkSync(join(process.cwd(), 'node_modules'), join(repo, 'node_modules'), 'junction');
 
   const worktree = await getWorktreeManager(repo).create({
     agentType: 'codex',

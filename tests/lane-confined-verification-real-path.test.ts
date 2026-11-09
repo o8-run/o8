@@ -1,9 +1,10 @@
 /**
- * #3414: the merge gate's lint and test replay run lane code (the lane's
- * ESLint config and its `test` script). Both run through the real
- * `runLaneRebaseVerify` entry under the confinement lane commands get (#3412):
- * writes only inside the lane checkout and a private temp dir. Where
- * confinement is unavailable they still run, and the merge card says so.
+ * #3414: the merge gate's lint runs the base revision's ESLint config in a
+ * temporary base checkout, and test replay runs the lane's `test` script. Both
+ * run through the real `runLaneRebaseVerify` entry under the confinement lane
+ * commands get (#3412): writes only inside their checkout and a private temp
+ * dir. Where confinement is unavailable they still run, and the merge card
+ * says so.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -55,9 +56,10 @@ function git(cwd: string, args: string[]): void {
   execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', ...args], { cwd, stdio: 'ignore' });
 }
 
-// The lane's ESLint config and test script each record one file inside the
-// checkout and try to record one outside it. The test script also tries the
-// Unix socket at `socket`, as a host control socket would be reached.
+// The base ESLint config and the test script each record one file inside the
+// checkout they run in and try to record one outside it. Lint runs in a
+// temporary base checkout, so its record is relative. The test script also
+// tries the Unix socket at `socket`, as a host control socket would be reached.
 function makeLane(outside: string, testExit = 0, socket = join(outside, 'none.sock')): string {
   const repo = makeDir('lane');
   git(repo, ['init', '-b', 'main']);
@@ -68,7 +70,7 @@ function makeLane(outside: string, testExit = 0, socket = join(outside, 'none.so
     devDependencies: { eslint: '^9.39.5' },
   }));
   const record = (name: string) => [
-    `require('node:fs').writeFileSync(${JSON.stringify(join(repo, `${name}.ran`))}, '1');`,
+    `require('node:fs').writeFileSync(${JSON.stringify(name === 'lint' ? 'lint.ran' : join(repo, `${name}.ran`))}, '1');`,
     `try { require('node:fs').writeFileSync(${JSON.stringify(join(outside, name))}, '1'); } catch {}`,
   ].join('\n');
   writeFileSync(join(repo, 'eslint.config.cjs'), `${record('lint')}\nmodule.exports = [{ files: ['**/*.js'], rules: {} }];\n`);
@@ -125,27 +127,28 @@ describe('merge-gate lint and test replay confinement (#3414)', () => {
     }
   }, 20000);
 
-  it.runIf(process.platform === 'darwin')('ends escaped children from lane lint and test replay before returning', async () => {
+  // Lint's escaped children are covered by the lost-supervisor case above: it
+  // runs in a base checkout that is removed afterwards, so it leaves no pid file.
+  it.runIf(process.platform === 'darwin')('ends escaped children from lane test replay before returning', async () => {
     const lane = makeLane(makeDir('outside'));
     const orphan = (name: string) => `require('node:child_process').execFileSync('/usr/bin/perl', ['-MPOSIX', '-e', '$p=fork(); die unless defined $p; if ($p) { select undef, undef, undef, 0.15; exit; } $SIG{TERM}=q(IGNORE); POSIX::setsid(); open(my $f, q(>), q(${name}.pid)); print $f $$; close $f; sleep 30'], { stdio: 'ignore' });\n`;
-    writeFileSync(join(lane, 'eslint.config.cjs'), `${orphan('lint')}module.exports = [{ files: ['**/*.js'], rules: {} }];\n`);
     writeFileSync(join(lane, 'replay.cjs'), orphan('tests'));
     const pids: number[] = [];
     try {
       expect((await verify(lane)).ok).toBe(true);
-      for (const name of ['lint', 'tests']) {
+      for (const name of ['tests']) {
         const pid = Number(readFileSync(join(lane, `${name}.pid`), 'utf8')); pids.push(pid);
         await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' })), { timeout: 2_000 });
       }
     } finally {
-      for (const name of ['lint', 'tests']) {
+      for (const name of ['tests']) {
         if (existsSync(join(lane, `${name}.pid`))) pids.push(Number(readFileSync(join(lane, `${name}.pid`), 'utf8')));
       }
       for (const pid of new Set(pids)) { try { process.kill(pid, 'SIGKILL'); } catch { /* Gone. */ } }
     }
   }, 120_000);
 
-  it.runIf(confinable)('runs the lane lint config and test script confined to the lane checkout', async () => {
+  it.runIf(confinable)('runs the base lint config and the lane test script confined to their checkouts', async () => {
     const outside = makeDir('outside');
     const host = await listenSocket(makeShortDir());
     const lane = makeLane(outside, 0, host.path);
@@ -158,8 +161,9 @@ describe('merge-gate lint and test replay confinement (#3414)', () => {
     // macOS denies every socket, Unix included. Landlock does not scope
     // pathname Unix sockets, so Linux keeps that residual (#3412).
     if (process.platform === 'darwin') expect(host.connections()).toBe(0);
-    // Both ran, and both kept their writes inside the checkout.
-    expect(existsSync(join(lane, 'lint.ran'))).toBe(true);
+    // Test replay wrote inside the lane. Lint ran in its own base checkout,
+    // so it wrote nothing into the lane.
+    expect(existsSync(join(lane, 'lint.ran'))).toBe(false);
     expect(existsSync(join(lane, 'tests.ran'))).toBe(true);
     expect(existsSync(join(outside, 'lint'))).toBe(false);
     expect(existsSync(join(outside, 'tests'))).toBe(false);

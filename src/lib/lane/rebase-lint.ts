@@ -4,16 +4,16 @@ import * as nodeModule from 'node:module';
 import {
   existsSync,
   mkdtempSync,
-  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { laneGit } from '@/lib/lane/lane-git';
+import { LaneGitMetadataError, laneGit } from '@/lib/lane/lane-git';
 import { ranUnconfined, runConfinedProcess } from '@/lib/sandbox/run-confined';
 
 const execFileAsync = promisify(execFile);
@@ -80,15 +80,37 @@ interface LintSnapshot {
 }
 
 /**
- * `unconfined` is set when ESLint, which loads the lane's config file as code,
- * ran without the sandbox because confinement is unavailable on this host.
+ * `unconfined` is set when ESLint ran without the sandbox because confinement
+ * is unavailable on this host.
  */
 export type LaneRebaseLintResult =
   | { ok: true; skipped?: string; detail?: string; unconfined?: true }
   | { ok: false; output: string; unconfined?: true };
 
 /** One line for the merge card when lane lint ran without the sandbox (#3414). */
-export const UNCONFINED_LINT_NOTE = 'The lane\'s lint config ran without the sandbox: command confinement is unavailable on this host.';
+export const UNCONFINED_LINT_NOTE = 'Lint ran without the sandbox: command confinement is unavailable on this host.';
+
+// Lints file texts with the ESLint entry in argv[1], from the base checkout in
+// cwd. The texts never reach disk, so a lane file cannot become ESLint config
+// or a module that config loads.
+const LINT_TEXT_RUNNER = `
+const { readFileSync } = require('node:fs');
+const path = require('node:path');
+(async () => {
+  const [eslintEntry, inputPath] = process.argv.slice(1);
+  const files = JSON.parse(readFileSync(inputPath, 'utf8'));
+  const api = require(eslintEntry);
+  const ESLint = typeof api.loadESLint === 'function' ? await api.loadESLint({ cwd: process.cwd() }) : api.ESLint;
+  const eslint = new ESLint({ cwd: process.cwd() });
+  const results = [];
+  for (const file of files) {
+    for (const result of await eslint.lintText(file.text, { filePath: path.join(process.cwd(), file.path) })) {
+      results.push({ filePath: result.filePath, messages: result.messages.map(({ ruleId, severity, message, line, column }) => ({ ruleId, severity, message, line, column })) });
+    }
+  }
+  process.stdout.write(JSON.stringify(results));
+})().catch((error) => { process.stderr.write(String((error && error.stack) || error)); process.exitCode = 2; });
+`;
 
 class LintTimeoutError extends Error {}
 
@@ -112,19 +134,38 @@ function isTimeoutError(error: unknown): boolean {
   return candidate.killed === true || candidate.code === 'ETIMEDOUT' || candidate.signal === 'SIGTERM';
 }
 
-function readPackageJson(cwd: string): Record<string, unknown> | null {
-  const packagePath = path.join(cwd, 'package.json');
-  if (!existsSync(packagePath)) return null;
+function parsePackageJson(text: string): Record<string, unknown> | null {
   try {
-    const parsed = JSON.parse(readFileSync(packagePath, 'utf8'));
+    const parsed = JSON.parse(text);
     return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
   } catch {
     return null;
   }
 }
 
-function lintAvailability(cwd: string): { skip: false; eslintScript: string } | { skip: true; reason: string } {
-  const packageJson = readPackageJson(cwd);
+/** A file at a revision, read from git so a link in a checkout is never followed. */
+async function revisionFile(cwd: string, rev: string, file: string, deadline: number, gitRepoPath?: string): Promise<string | null> {
+  try {
+    return await gitOutput(cwd, ['show', `${rev}:${file}`], deadline, gitRepoPath);
+  } catch (error) {
+    if (isTimeoutError(error)) throw error;
+    return null;
+  }
+}
+
+/**
+ * Lint runs only when the base revision configures it, and only with the
+ * ESLint installed in `installRoot`, never one from the lane's checkout.
+ */
+async function lintAvailability(input: {
+  cwd: string;
+  gitRepoPath?: string;
+  mergeBase: string;
+  installRoot: string;
+  deadline: number;
+}): Promise<{ skip: false; eslintEntry: string } | { skip: true; reason: string }> {
+  const packageText = await revisionFile(input.cwd, input.mergeBase, 'package.json', input.deadline, input.gitRepoPath);
+  const packageJson = packageText === null ? null : parsePackageJson(packageText);
   const scripts = packageJson?.scripts;
   const lintScript = scripts && typeof scripts === 'object'
     ? (scripts as Record<string, unknown>).lint
@@ -133,7 +174,10 @@ function lintAvailability(cwd: string): { skip: false; eslintScript: string } | 
     return { skip: true, reason: 'package.json has no lint script' };
   }
 
-  const hasConfigFile = ESLINT_CONFIG_FILES.some((file) => existsSync(path.join(cwd, file)));
+  const rootFiles = new Set((await gitOutput(
+    input.cwd, ['ls-tree', '--name-only', input.mergeBase], input.deadline, input.gitRepoPath,
+  )).split('\n'));
+  const hasConfigFile = ESLINT_CONFIG_FILES.some((file) => rootFiles.has(file));
   if (!hasConfigFile && !packageJson?.eslintConfig) {
     return { skip: true, reason: 'no ESLint config was found' };
   }
@@ -143,13 +187,8 @@ function lintAvailability(cwd: string): { skip: false; eslintScript: string } | 
     // A direct createRequire call is statically rewritten by webpack to an
     // undefined resolver when its argument cannot be evaluated at build time.
     const runtimeCreateRequire = Reflect.get(nodeModule, 'createRequire') as typeof nodeModule.createRequire;
-    const requireFromRepo = runtimeCreateRequire(path.join(cwd, 'package.json'));
-    const eslintPackage = requireFromRepo.resolve('eslint/package.json');
-    const eslintScript = path.join(path.dirname(eslintPackage), 'bin', 'eslint.js');
-    if (!existsSync(eslintScript)) {
-      return { skip: true, reason: 'no local ESLint installation was found' };
-    }
-    return { skip: false, eslintScript };
+    const requireFromInstall = runtimeCreateRequire(path.join(input.installRoot, 'package.json'));
+    return { skip: false, eslintEntry: requireFromInstall.resolve('eslint') };
   } catch {
     return { skip: true, reason: 'no local ESLint installation was found' };
   }
@@ -188,13 +227,29 @@ function parseChangedFiles(output: string, cwd: string): ChangedLintFile[] {
   return changed;
 }
 
+// A merge verifies in a clone of the repository, where the base branch may
+// exist only as the fetched origin ref. Same order as lane diff facts.
+async function resolveBaseRef(cwd: string, baseRef: string, deadline: number, gitRepoPath?: string): Promise<string> {
+  if (baseRef.startsWith('refs/')) return baseRef;
+  for (const ref of [`refs/heads/${baseRef}`, `refs/remotes/origin/${baseRef}`]) {
+    try {
+      await gitOutput(cwd, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], deadline, gitRepoPath);
+      return ref;
+    } catch (error) {
+      if (error instanceof LaneGitMetadataError) throw error;
+    }
+  }
+  return baseRef;
+}
+
 async function changedLintFiles(
   cwd: string,
   baseRef: string,
   deadline: number,
   gitRepoPath?: string,
 ): Promise<{ mergeBase: string; files: ChangedLintFile[] }> {
-  const mergeBase = (await gitOutput(cwd, ['merge-base', baseRef, 'HEAD'], deadline, gitRepoPath)).trim();
+  const base = await resolveBaseRef(cwd, baseRef, deadline, gitRepoPath);
+  const mergeBase = (await gitOutput(cwd, ['merge-base', base, 'HEAD'], deadline, gitRepoPath)).trim();
   if (!mergeBase) throw new Error(`Unable to resolve the lint merge base from ${baseRef}.`);
   const output = await gitOutput(
     cwd,
@@ -216,24 +271,19 @@ function parseEslintResults(stdout: string, stderr: string): LintSnapshot {
   }
 }
 
-// ESLint loads the lane's config file, which is code, so it runs confined to
-// the checkout it lints (#3414). Without `--cache` it writes only to TMPDIR.
+// ESLint loads the base checkout's config, which is code, so it still runs
+// confined to that checkout (#3414).
 async function lintSnapshot(input: {
   cwd: string;
-  eslintScript: string;
-  files: string[];
+  eslintEntry: string;
+  files: Array<{ path: string; text: string }>;
   deadline: number;
   onUnconfined: () => void;
 }): Promise<LintSnapshot> {
-  const args = [
-    input.eslintScript,
-    '--format',
-    'json',
-    '--max-warnings',
-    '0',
-    '--no-error-on-unmatched-pattern',
-    ...input.files,
-  ];
+  // Inside the checkout's .git, so the confined process can read it and nothing lints it.
+  const inputPath = path.join(input.cwd, '.git', 'o8-lint-input.json');
+  writeFileSync(inputPath, JSON.stringify(input.files));
+  const args = ['-e', LINT_TEXT_RUNNER, input.eslintEntry, inputPath];
   try {
     const run = await runConfinedProcess(input.cwd, process.execPath, args, {
       cwd: input.cwd,
@@ -293,12 +343,13 @@ async function makeBaseCheckout(
   cwd: string,
   mergeBase: string,
   deadline: number,
+  installRoot: string,
 ): Promise<string> {
-  const baseDir = mkdtempSync(path.join(tmpdir(), 'o8-lint-base-'));
+  const baseDir = realpathSync(mkdtempSync(path.join(tmpdir(), 'o8-lint-base-')));
   try {
     await gitOutput(baseDir, ['clone', '--quiet', '--shared', '--no-checkout', cwd, '.'], deadline);
     await gitOutput(baseDir, ['checkout', '--quiet', '--detach', mergeBase], deadline);
-    const sourceModules = path.join(cwd, 'node_modules');
+    const sourceModules = path.join(installRoot, 'node_modules');
     const baseModules = path.join(baseDir, 'node_modules');
     if (existsSync(sourceModules) && !existsSync(baseModules)) {
       symlinkSync(sourceModules, baseModules, 'junction');
@@ -352,10 +403,15 @@ function warningsAbsentFromBase(
  * Lint only packet-attributed files, then compare warning identities with the
  * merge-base revision. Severity-2 findings always block; warnings block only
  * when their rule-and-message signature is absent from the base multiset.
+ *
+ * ESLint config is code, so it always comes from the merge base: the packet's
+ * files are linted as text inside a base checkout, with the ESLint installed
+ * in `installRoot` (default: the repository, then `cwd`).
  */
 export async function runLaneRebaseLint(input: {
   cwd: string;
   gitRepoPath?: string;
+  installRoot?: string;
   baseRef: string;
   actualBranch: string;
   logPrefix: string;
@@ -363,91 +419,91 @@ export async function runLaneRebaseLint(input: {
 }): Promise<LaneRebaseLintResult> {
   const timeoutMs = input.timeoutMs ?? LINT_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
-  const availability = lintAvailability(input.cwd);
-  if (availability.skip) {
-    console.warn(`[${input.logPrefix}] Skipping lint for ${input.actualBranch}: ${availability.reason}.`);
-    return { ok: true, skipped: availability.reason };
-  }
+  const installRoot = input.installRoot ?? input.gitRepoPath ?? input.cwd;
 
   let unconfined = false;
   const onUnconfined = () => { unconfined = true; };
   const marked = <T extends LaneRebaseLintResult>(result: T): T => (unconfined ? { ...result, unconfined: true } : result);
   try {
     const { mergeBase, files } = await changedLintFiles(input.cwd, input.baseRef, deadline, input.gitRepoPath);
+    const availability = await lintAvailability({
+      cwd: input.cwd, gitRepoPath: input.gitRepoPath, mergeBase, installRoot, deadline,
+    });
+    if (availability.skip) {
+      console.warn(`[${input.logPrefix}] Skipping lint for ${input.actualBranch}: ${availability.reason}.`);
+      return { ok: true, skipped: availability.reason };
+    }
     if (files.length === 0) {
       return { ok: true, detail: 'No changed lintable files.' };
     }
 
-    const head = await lintSnapshot({
-      cwd: input.cwd,
-      eslintScript: availability.eslintScript,
-      files: files.map((file) => file.headPath),
-      deadline,
-      onUnconfined,
-    });
-    const errors: string[] = [];
-    let warningCount = 0;
-    for (const result of head.results) {
-      const file = relativeResultPath(input.cwd, result.filePath);
-      const messages = relevantMessages(result);
-      warningCount += messages.filter((message) => message.severity === 1).length;
-      errors.push(...messages
-        .filter((message) => message.severity === 2)
-        .map((message) => formatDiagnostic(file, message)));
-    }
-    if (errors.length > 0) {
-      const output = formatFailure(errors);
-      console.error(`[${input.logPrefix}] Lint failed for ${input.actualBranch}:\n${output}`);
-      return marked({ ok: false, output });
-    }
-    if (warningCount === 0) {
-      console.log(`[${input.logPrefix}] Lint passed for ${input.actualBranch}`);
-      return marked({ ok: true });
-    }
-
-    const baseFiles = files.filter((file): file is ChangedLintFile & { basePath: string } => (
-      file.basePath !== null
-    ));
-    const baseWarnings = new Map<string, EslintMessage[]>();
-    if (baseFiles.length > 0) {
-      const baseDir = await makeBaseCheckout(input.cwd, mergeBase, deadline);
-      try {
-        if (lintAvailability(baseDir).skip) {
-          // The packet introduced lint itself, so the base had no configured
-          // warning budget. Every head warning is new.
-        } else {
-          const base = await lintSnapshot({
-            cwd: baseDir,
-            eslintScript: availability.eslintScript,
-            files: baseFiles.map((file) => file.basePath),
-            deadline,
-            onUnconfined,
-          });
-          for (const [file, messages] of warningsByPath(baseDir, base)) {
-            baseWarnings.set(file, messages);
-          }
-        }
-      } finally {
-        rmSync(baseDir, { recursive: true, force: true });
+    const texts = async (rev: string, paths: string[]) => {
+      const read: Array<{ path: string; text: string }> = [];
+      for (const file of paths) {
+        const text = await revisionFile(input.cwd, rev, file, deadline, input.gitRepoPath);
+        if (text !== null) read.push({ path: file, text });
       }
-    }
+      return read;
+    };
+    const baseDir = await makeBaseCheckout(input.cwd, mergeBase, deadline, installRoot);
+    try {
+      const head = await lintSnapshot({
+        cwd: baseDir,
+        eslintEntry: availability.eslintEntry,
+        files: await texts('HEAD', files.map((file) => file.headPath)),
+        deadline,
+        onUnconfined,
+      });
+      const errors: string[] = [];
+      let warningCount = 0;
+      for (const result of head.results) {
+        const file = relativeResultPath(baseDir, result.filePath);
+        const messages = relevantMessages(result);
+        warningCount += messages.filter((message) => message.severity === 1).length;
+        errors.push(...messages
+          .filter((message) => message.severity === 2)
+          .map((message) => formatDiagnostic(file, message)));
+      }
+      if (errors.length > 0) {
+        const output = formatFailure(errors);
+        console.error(`[${input.logPrefix}] Lint failed for ${input.actualBranch}:\n${output}`);
+        return marked({ ok: false, output });
+      }
+      if (warningCount === 0) {
+        console.log(`[${input.logPrefix}] Lint passed for ${input.actualBranch}`);
+        return marked({ ok: true });
+      }
 
-    const headWarnings = warningsByPath(input.cwd, head);
-    const newWarnings: string[] = [];
-    for (const file of files) {
-      const current = headWarnings.get(file.headPath) ?? [];
-      const baseline = file.basePath ? baseWarnings.get(file.basePath) ?? [] : [];
-      newWarnings.push(...warningsAbsentFromBase(baseline, current)
-        .map((message) => formatDiagnostic(file.headPath, message)));
-    }
-    if (newWarnings.length > 0) {
-      const output = formatFailure(newWarnings);
-      console.error(`[${input.logPrefix}] Lint introduced warnings for ${input.actualBranch}:\n${output}`);
-      return marked({ ok: false, output });
-    }
+      const basePaths = files.flatMap((file) => (file.basePath === null ? [] : [file.basePath]));
+      const baseWarnings = basePaths.length === 0
+        ? new Map<string, EslintMessage[]>()
+        : warningsByPath(baseDir, await lintSnapshot({
+          cwd: baseDir,
+          eslintEntry: availability.eslintEntry,
+          files: await texts(mergeBase, basePaths),
+          deadline,
+          onUnconfined,
+        }));
 
-    console.log(`[${input.logPrefix}] Lint passed for ${input.actualBranch}; existing base warnings did not increase.`);
-    return marked({ ok: true });
+      const headWarnings = warningsByPath(baseDir, head);
+      const newWarnings: string[] = [];
+      for (const file of files) {
+        const current = headWarnings.get(file.headPath) ?? [];
+        const baseline = file.basePath ? baseWarnings.get(file.basePath) ?? [] : [];
+        newWarnings.push(...warningsAbsentFromBase(baseline, current)
+          .map((message) => formatDiagnostic(file.headPath, message)));
+      }
+      if (newWarnings.length > 0) {
+        const output = formatFailure(newWarnings);
+        console.error(`[${input.logPrefix}] Lint introduced warnings for ${input.actualBranch}:\n${output}`);
+        return marked({ ok: false, output });
+      }
+
+      console.log(`[${input.logPrefix}] Lint passed for ${input.actualBranch}; existing base warnings did not increase.`);
+      return marked({ ok: true });
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
   } catch (error) {
     if (isTimeoutError(error)) {
       const reason = `ESLint exceeded the ${Math.ceil(timeoutMs / 1000)} s timeout`;

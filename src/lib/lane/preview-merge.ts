@@ -193,7 +193,7 @@ export function withCheckNote(detail: string | undefined, note: string | false |
   return [detail, note].filter(Boolean).join('\n') || undefined;
 }
 
-/** The lint row of the merge card; it says plainly when the lane's lint config ran without the sandbox. */
+/** The lint row of the merge card; it says plainly when lint ran without the sandbox. */
 export function lintPreviewCheck(result: LaneRebaseLintResult): MergeCheckResult {
   const note = result.unconfined && UNCONFINED_LINT_NOTE;
   if (!result.ok) return { name: 'lint', verdict: 'fail', detail: withCheckNote(result.output, note) };
