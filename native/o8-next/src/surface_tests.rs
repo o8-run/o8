@@ -303,6 +303,14 @@ fn placement_empty_send_racing_selection_retains_the_destination(cx: &mut TestAp
             .iter()
             .any(|item| item["payload"]["text"] == "First prompt")
     );
+    // The send finished after the switch. Its own draft settles anyway, so
+    // returning to the chat cannot send the queued message a second time.
+    surface.update(cx, |s, cx| s.select("thoughts-composer-first".into(), cx));
+    cx.run_until_parked();
+    surface.read_with(cx, |s, cx| {
+        assert!(s.composer.read(cx).text.is_empty());
+        assert!(!s.pending.contains_key("thoughts-composer-first"));
+    });
 }
 
 #[gpui::test]

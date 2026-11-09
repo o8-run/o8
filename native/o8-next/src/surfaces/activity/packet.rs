@@ -231,7 +231,7 @@ impl ActivityPane {
         }
         self.changed(cx);
     }
-    fn packet_patch(&mut self, id: &str, updates: Value, cx: &mut Context<Self>) {
+    pub(super) fn packet_patch(&mut self, id: &str, updates: Value, cx: &mut Context<Self>) {
         if self.pending {
             return;
         }

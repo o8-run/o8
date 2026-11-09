@@ -54,6 +54,11 @@ pub(super) enum Action {
     CloseAsk(Option<String>),
     CloseReason(&'static str),
     Close(Row),
+    /// Opens or cancels the stop-and-archive confirmation for a live packet.
+    ArchiveAsk(Option<String>),
+    /// Stops the packet's worker (the lane stop keeps its worktree), then
+    /// archives the packet once the stop is applied.
+    StopArchive(Row),
 }
 
 /// Routes whose persisted receipt is replayed with the same body until terminal
@@ -109,6 +114,9 @@ pub struct ActivityPane {
     pub(super) expanded: Option<String>,
     pub(super) details: HashMap<String, Detail>,
     pub(super) pending: bool,
+    /// A decision whose outcome is still unknown, kept so Refresh can read its
+    /// receipt again instead of leaving every action inert.
+    unsettled: Option<(&'static str, &'static str, Value)>,
     pub(super) notice: String,
     pub(super) notice_error: bool,
     generation: u64,
@@ -116,6 +124,10 @@ pub struct ActivityPane {
     stop_identity: Option<(String, String)>,
     /// The packet whose close-unmerged confirmation is open, and its reason.
     pub(super) closing: Option<String>,
+    /// The live packet whose stop-and-archive confirmation is open.
+    pub(super) archiving: Option<String>,
+    /// The packet to archive once its worker's stop is applied.
+    archive_after_stop: Option<String>,
     pub(super) close_reason: &'static str,
     /// PacketCloseUnmergedActions' busy label while the close receipt settles.
     pub(super) close_stage: Option<&'static str>,
@@ -166,12 +178,15 @@ impl ActivityPane {
             expanded: None,
             details: HashMap::new(),
             pending: false,
+            unsettled: None,
             notice: String::new(),
             notice_error: false,
             generation: 0,
             loaded_at: Instant::now(),
             stop_identity: None,
             closing: None,
+            archiving: None,
+            archive_after_stop: None,
             close_reason: CLOSE_REASONS[0].0,
             close_stage: None,
             scope_menu: false,
@@ -428,10 +443,22 @@ impl ActivityPane {
         if self.pending {
             return;
         }
+        if self
+            .unsettled
+            .as_ref()
+            .is_some_and(|(_, unsettled, replay)| (*unsettled, replay) != (path, &body))
+        {
+            self.notice_error = true;
+            self.notice = "An earlier decision is unsettled. Refresh to check it.".into();
+            self.changed(cx);
+            return;
+        }
+        self.unsettled = None;
         self.pending = true;
         self.notice_error = false;
         self.notice = "Applying decision…".into();
         let merge = body["verb"] == "merge";
+        let replay = body.clone();
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let deadline = Instant::now() + Duration::from_secs(300);
@@ -472,10 +499,16 @@ impl ActivityPane {
                         if value["result"]["inProgress"] == true
                             || value["outcomeUnknown"] == true =>
                     {
-                        this.pending = true;
-                        "Decision is unsettled. Refresh before another action.".into()
+                        this.unsettled = Some((method, path, replay));
+                        this.archive_after_stop = None;
+                        "Decision is unsettled. Refresh to check it.".into()
                     }
                     Ok(value) => {
+                        // Archive only after the worker has stopped, so a running
+                        // agent never disappears from Workers while it edits.
+                        if let Some(id) = this.archive_after_stop.take() {
+                            this.packet_patch(&id, json!({"archivedAt": packet::iso_now()}), cx);
+                        }
                         this.stop_identity = None;
                         this.closing = None;
                         this.close_stage = None;
@@ -486,6 +519,7 @@ impl ActivityPane {
                             .map_or_else(|| "Decision applied.".into(), String::from)
                     }
                     Err(error) => {
+                        this.archive_after_stop = None;
                         if error.status.is_some() {
                             this.stop_identity = None;
                         }
@@ -529,7 +563,16 @@ impl ActivityPane {
                 if let Some(y)=self.restore_y {self.scroll.set_offset(gpui::point(gpui::px(0.),gpui::px(y)));} self.generation += 1; self.loading = false;
                 self.packet.reads.clear(); self.packet.editor = None; self.rows.clear(); self.errors.clear(); self.details.clear(); self.keyboard = None; self.load(cx);
             }
-            Action::Refresh => { self.packet.reads.clear(); self.refresh_feed(true,true,cx); self.load_dossiers(cx); self.load_proposals(cx); },
+            Action::Refresh => {
+                // A receipt route replays the same body, which only reads the
+                // persisted outcome; anything else settles from the fresh feed.
+                if let Some((method, path, body)) = self.unsettled.take()
+                    && RECEIPTS.contains(&path)
+                {
+                    self.mutate(method, path, body, cx);
+                }
+                self.packet.reads.clear(); self.refresh_feed(true,true,cx); self.load_dossiers(cx); self.load_proposals(cx);
+            },
             Action::Attention => {
                 self.attention_open = !self.attention_open;
                 self.mark_proposals_seen(cx);
@@ -576,6 +619,13 @@ impl ActivityPane {
                 self.mutate("POST", "/api/lanes", body, cx);
             }
             Action::CloseAsk(packet) => { self.closing = packet; self.close_reason = CLOSE_REASONS[0].0; }
+            Action::ArchiveAsk(packet) => self.archiving = packet,
+            Action::StopArchive(row) => {
+                if self.pending { return; }
+                self.archiving = None;
+                self.archive_after_stop = Some(row.id.clone());
+                self.act(Action::Lane(row, "stop"), cx);
+            }
             Action::CloseReason(reason) => self.close_reason = reason,
             Action::Close(row) => {
                 if self.pending { return; }

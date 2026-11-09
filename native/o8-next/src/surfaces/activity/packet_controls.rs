@@ -28,11 +28,11 @@ impl ActivityPane {
         // PacketCard's lifecycle buttons and review section.
         let status = text(&row.data, "status");
         let lane = !text(&row.data["lane"], "laneId").is_empty();
-
-        if lane
+        let live = lane
             && row.data["operatorStopped"] != true
-            && matches!(status.as_str(), "running" | "launching" | "recovering")
-        {
+            && matches!(status.as_str(), "running" | "launching" | "recovering");
+
+        if live {
             view = view.child(self.packet_button(
                 "activity-lane-stop",
                 "Stop",
@@ -97,18 +97,64 @@ impl ActivityPane {
                 cx,
             ));
         }
-        destructive = destructive.child(self.packet_button(
-            "activity-packet-archive",
-            if archived { "Restore" } else { "Archive" },
-            Action::Packet(Packet::Patch(
-                row.clone(),
-                json!({"archivedAt":if archived { Value::Null } else { json!(packet::iso_now()) }}),
-            )),
-            cx,
-        ));
+        let asking = self.archiving.as_deref() == Some(row.id.as_str());
+        if !asking {
+            destructive = destructive.child(self.packet_button(
+                "activity-packet-archive",
+                if archived {
+                    "Restore"
+                } else if live {
+                    "Archive…"
+                } else {
+                    "Archive"
+                },
+                // A running worker is stopped first; archiving alone would hide it.
+                if live && !archived {
+                    Action::ArchiveAsk(Some(row.id.clone()))
+                } else {
+                    Action::Packet(Packet::Patch(
+                        row.clone(),
+                        json!({"archivedAt":if archived { Value::Null } else { json!(packet::iso_now()) }}),
+                    ))
+                },
+                cx,
+            ));
+        }
         view = view.child(destructive);
         if self.closing.as_deref() == Some(row.id.as_str()) {
             view = view.child(self.close_unmerged(row, cx));
+        }
+        if asking {
+            view = view.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .debug_selector(|| "activity-archive-confirm".into())
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme().text_secondary)
+                            .child("This worker is still running. Stop it and archive the packet? Its worktree is kept."),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(6.))
+                            .child(self.packet_button(
+                                "activity-archive-stop-confirm",
+                                "Stop and archive",
+                                Action::StopArchive(row.clone()),
+                                cx,
+                            ))
+                            .child(self.packet_button(
+                                "activity-archive-cancel",
+                                "Cancel",
+                                Action::ArchiveAsk(None),
+                                cx,
+                            )),
+                    ),
+            );
         }
 
         view
