@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { requirePanelOrWorkerAuth } from '@/lib/panel/auth';
+import { requirePanelOrWorkerAuth } from '@/lib/auth/packet-worker-auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { getPacketScope, projectPacketScope } from '@/lib/lanes/scope';
 import { requestPacketScopeExpansion } from '@/lib/orchestrator/packet-scope-expansion';

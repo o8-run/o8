@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
-import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 
 /**
  * In-handler loopback trust. Delegates to the SHARED loopback-request logic so
@@ -41,17 +40,4 @@ export function requirePanelAuth(req: NextRequest): NextResponse | null {
   }
 
   return null;
-}
-
-/**
- * For packet-bound handlers the middleware opens to workers. The native transport marks every
- * caller unverified, so loopback trust cannot admit the worker there; a bearer that resolves to a
- * packet does, on either transport. The handler must still refuse a worker that targets another
- * packet (workerPacketRefusal). Every other caller, including a worker credential with no packet,
- * keeps panel auth.
- */
-export function requirePanelOrWorkerAuth(req: NextRequest): NextResponse | null {
-  const principal = resolveRequestPrincipalContext(req);
-  if (principal.role === 'operator' || (principal.role === 'worker' && principal.packetId)) return null;
-  return requirePanelAuth(req);
 }

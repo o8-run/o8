@@ -1,7 +1,7 @@
 import { viewerGitJson } from '@/lib/viewers/git-response';
 import { viewerJson } from '@/lib/viewers/response';
 import { type NextRequest } from 'next/server';
-import { requirePanelOrWorkerAuth } from '@/lib/panel/auth';
+import { requirePanelOrWorkerAuth } from '@/lib/auth/packet-worker-auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
 import {
