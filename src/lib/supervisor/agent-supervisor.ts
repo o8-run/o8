@@ -77,20 +77,65 @@ let heartbeatInFlight = false;
 const pollIntervalMs = DEFAULT_ACTIVE_POLL_INTERVAL_MS;
 let registrationOrdinal = 0;
 // ── #458: SQLite persistence for watched agents ──
+//
+// The watched_agents row is the single owner of a watch. Only the WS process runs the loop, but
+// stop, reset, rerun and retry run in whichever process serves the route, so an unregister there
+// deletes the row and the loop drops its copy: on a later write that finds no row, and at every
+// heartbeat. A write never re-creates a row another process deleted.
+
+/** Watches whose row this process wrote or loaded; a missing row then means another process unregistered it. */
+const storedWatches = new WeakSet<WatchedAgent>();
+
+function forgetUnwatched(agent: WatchedAgent): void {
+  if (watchedAgents.get(agent.surfaceId) !== agent) return;
+  console.log(`[supervisor] Unwatching agent "${agent.name}" (${agent.surfaceId}): unregistered by another process`);
+  watchedAgents.delete(agent.surfaceId);
+  transcriptSourceCache.delete(agent.surfaceId);
+}
 
 function persistWatchedAgent(agent: WatchedAgent): void {
   try {
     const db = getSqlite();
-    db.prepare(
+    const values = [
+      agent.repoPath, agent.name, agent.prompt,
+      agent.registeredAt, agent.lastStatus, agent.retryCount, agent.steerCount,
+      agent.completionReported ? 1 : 0, agent.lastEventAt, agent.lastActivityAt,
+    ];
+    if (storedWatches.has(agent)) {
+      const { changes } = db.prepare(
+        `UPDATE watched_agents SET repo_path = ?, name = ?, prompt = ?, registered_at = ?, last_status = ?, retry_count = ?,
+         steer_count = ?, completion_reported = ?, last_event_at = ?, last_activity_at = ? WHERE surface_id = ?`,
+      ).run(...values, agent.surfaceId);
+      if (changes === 0) forgetUnwatched(agent);
+      return;
+    }
+    const { changes } = db.prepare(
       `INSERT OR REPLACE INTO watched_agents
        (surface_id, repo_path, name, prompt, registered_at, last_status, retry_count, steer_count, completion_reported, last_event_at, last_activity_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      agent.surfaceId, agent.repoPath, agent.name, agent.prompt,
-      agent.registeredAt, agent.lastStatus, agent.retryCount, agent.steerCount,
-      agent.completionReported ? 1 : 0, agent.lastEventAt, agent.lastActivityAt,
-    );
+    ).run(agent.surfaceId, ...values);
+    // Only a row known to be written can later be found missing.
+    if (changes > 0) storedWatches.add(agent);
   } catch { /* DB may not be ready */ }
+}
+
+/** Drops every stored watch whose row another process deleted. Returns how many were dropped. */
+export function reconcileWatchedAgents(): number {
+  if (watchedAgents.size === 0) return 0;
+  let present: Set<string>;
+  try {
+    present = new Set((getSqlite().prepare('SELECT surface_id FROM watched_agents').all() as Array<{ surface_id: string }>)
+      .map(row => row.surface_id));
+  } catch {
+    return 0; // DB may not be ready; keep every watch.
+  }
+  let dropped = 0;
+  for (const agent of [...watchedAgents.values()]) {
+    if (!storedWatches.has(agent) || present.has(agent.surfaceId)) continue;
+    forgetUnwatched(agent);
+    dropped += 1;
+  }
+  return dropped;
 }
 
 function removePersistedAgent(surfaceId: string): void {
@@ -160,6 +205,7 @@ export function rehydrateWatchedAgents(): number {
         nextPollAt: now,
         lastPolledAt: null,
       });
+      storedWatches.add(watchedAgents.get(row.surface_id)!);
       rehydratedSurfaceIds.push(row.surface_id);
       count++;
     }
@@ -257,8 +303,9 @@ export function unregisterWatchedAgent(surfaceId: string, expectedWatch?: Watche
   if (agent) {
     console.log(`[supervisor] Unwatching agent "${agent.name}" (${surfaceId})`);
     watchedAgents.delete(surfaceId);
-    removePersistedAgent(surfaceId);
   }
+  // The watch may live in another process's loop; deleting the row is what reaches it.
+  removePersistedAgent(surfaceId);
   transcriptSourceCache.delete(surfaceId);
 }
 
@@ -386,6 +433,7 @@ function pollIntervalForAgent(
 
 async function supervisorTick(): Promise<void> {
   callbacks?.onHeartbeat?.();
+  reconcileWatchedAgents();
   if (!callbacks || watchedAgents.size === 0) return;
 
   const now = Date.now();
