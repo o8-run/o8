@@ -38,6 +38,8 @@ export function stripTerminalControlSequences(value: string): string {
   return value
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/gu, '')
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/gu, '')
+    // Escapes with intermediates, such as the ESC ( B character-set reset in sgr0.
+    .replace(/\x1b[ -/]+[0-~]/gu, '')
     .replace(/\x1b[@-_]/gu, '')
     .replaceAll('\r', '');
 }
