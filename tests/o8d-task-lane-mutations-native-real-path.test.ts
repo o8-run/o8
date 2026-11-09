@@ -57,14 +57,14 @@ it.skipIf(process.platform === 'win32')('creates tasks and reaps stale lanes nat
 
     // The stale lane is seeded after boot, so startup reconciliation cannot settle it first. The
     // live WS process writes the same database, so a seed write that loses a transaction upgrade
-    // gets SQLITE_BUSY at once (the busy timeout does not cover that case); retry it.
+    // gets SQLITE_BUSY or SQLITE_BUSY_SNAPSHOT at once (the busy timeout does not cover those); retry it.
     const seeded = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
       const { mkdirSync, writeFileSync } = require('node:fs');
       const { join } = require('node:path');
       const retryBusy = (write) => {
         for (let attempt = 1; ; attempt += 1) {
           try { return write(); } catch (error) {
-            if (error?.code !== 'SQLITE_BUSY' || attempt >= 40) throw error;
+            if (!/^SQLITE_BUSY/.test(error?.code ?? '') || attempt >= 40) throw error;
             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
           }
         }
