@@ -188,6 +188,8 @@ function checkCallers(scans: CallerScan[], nextOnly: Set<string>, nextOnlyMethod
         if (/^\s*(?:\/\/|\/?\*)/.test(source.slice(source.lastIndexOf('\n', match.index) + 1, match.index))) continue;
         let quoteAt = match.index + match[0].indexOf(literal) - 1;
         while (quoteAt > match.index && !'"\'`'.includes(source[quoteAt])) quoteAt -= 1;
+        // An absolute URL on another host (a provider's /api/v1/…) is not the API port.
+        if (/^[a-z]+:\/\/(?!127\.0\.0\.1|localhost|\[::1\]|[{$])/i.test(source.slice(quoteAt + 1, match.index + match[0].indexOf(literal)))) continue;
         // A placeholder after a slash is a path segment, including one cut off at
         // a space or call; after anything else it starts a query or suffix.
         let path = literal.split('?')[0].replace(/(\/)?\$\{[^}]*$/, (_, slash) => slash ? '/[id]' : '')
@@ -335,6 +337,11 @@ it('rejects an unknown route discovered in a shell or MCP source file', () => {
     writeFileSync(join(directory, 'bridge.rs'), 'let url = format!("{}/api/caller-fixture-unknown?x=1", base);');
     expect(() => checkCaller(sourceFiles(directory, '.rs'), SHELL_PATTERN, new Set()))
       .toThrow('/api/caller-fixture-unknown');
+    // A provider URL on another host is skipped; the local API port is not.
+    writeFileSync(join(directory, 'provider.rs'), 'const A: &str = "https://provider.example/api/caller-fixture-remote";');
+    expect(() => checkCaller([join(directory, 'provider.rs')], SHELL_PATTERN, new Set())).not.toThrow();
+    writeFileSync(join(directory, 'local.rs'), 'let u = format!("http://127.0.0.1:{port}/api/caller-fixture-local");');
+    expect(() => checkCaller([join(directory, 'local.rs')], SHELL_PATTERN, new Set())).toThrow('/api/caller-fixture-local');
     expect(() => checkCaller([], /"(\/api\/[^"]+)"/g, new Set(['/api/caller-fixture-gone'])))
       .toThrow('/api/caller-fixture-gone has no caller left');
   } finally { rmSync(directory, { recursive: true, force: true }); }

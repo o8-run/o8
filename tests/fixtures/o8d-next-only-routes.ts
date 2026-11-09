@@ -40,10 +40,8 @@ export const NEXT_ONLY_NATIVE_METHODS: NextOnlyTable = {
   'POST /api/setup/cli-updates': seek('install or update a runtime CLI'),
 };
 
-export const NEXT_ONLY_SHELL_PATHS: NextOnlyTable = {
-  '/api/v1/audio/transcriptions': security('OpenAI-compatible provider endpoint: provider keys and spend'),
-  '/api/v1/chat/completions': security('OpenAI-compatible provider endpoint: provider keys and spend'),
-};
+// The shell's /api/v1/* hits were a provider's own URL (openrouter.ai), not the API port.
+export const NEXT_ONLY_SHELL_PATHS: NextOnlyTable = {};
 export const NEXT_ONLY_SHELL_METHODS: NextOnlyTable = {};
 
 export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
@@ -126,7 +124,8 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 };
 export const NEXT_ONLY_CLI_METHODS: NextOnlyTable = {
   'POST /api/lanes': security('lane verbs (archive, stop) taken by security'),
-  'POST /api/lanes/reap': seek('doctor reaps dead lanes'),
+  // Next lost this handler too (deleted as uncalled in a cleanup), so `o8 doctor --reap` gets 405 on both.
+  'POST /api/lanes/reap': seek('doctor reaps stale lanes; no handler on Next either'),
   'POST /api/setup/cli-updates': seek('install or update a runtime CLI'),
   'POST /api/tasks': seek('create a task'),
 };
