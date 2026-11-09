@@ -84,6 +84,16 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // on (#5422). Operator only (the handler refuses a worker with 403).
     route('/api/symon/mcp/tools', 'GET', () => import('@/lib/mcp/symon-mcp-tools-route')),
     route('/api/symon/mcp/call', 'POST', () => import('@/lib/mcp/symon-mcp-call-route')),
+    // Symon Agent-Mode tool relay (an already-confirmed SSH-transported tool invoked on the
+    // remote webview). POST only, operator-ws-token-only TWICE over: the handler's
+    // transportAuthorized does a constant-time timingSafeEqual(bearer, getOrCreateWsToken())
+    // -> 401 for anything but the exact ws-token, and the path is in no middleware allowlist,
+    // so over native (x-o8-client-addr=unverified-proxy) the panelGateMiddleware floor already
+    // admits only the operator ws-token (worker/device 403, anon 401). sessionId/callId/tool/args
+    // from the body reach the webview eval (buildTransportedToolEval) ONLY through JSON.stringify
+    // -> they are JS data literals, never interpolated as code, so a ws-token holder cannot inject
+    // JS. The response is the tool result, no credential. (#5243)
+    route('/api/symon/transport/tool', 'POST', () => import('@/app/api/symon/transport/tool/route')),
   ],
   brain: [
     route('/api/cortex/ask', 'POST', () => import('@/app/api/cortex/ask/route')),

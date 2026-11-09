@@ -5566,6 +5566,12 @@
       ]
     },
     {
+      "path": "tests/o8d-symon-transport-tool-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-symon-watches-native-real-path.test.ts",
       "reasons": [
         "real-path"
