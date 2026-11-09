@@ -111,8 +111,18 @@ jobs:
       - name: Measure fast typecheck with its own heap budget
         if: needs.reuse.outputs.reuse != 'true'
         run: /usr/bin/time -f 'typecheck:fast wall=%e s peak_rss=%M KiB' npm run typecheck:fast
+      # The restored tsbuildinfo can leave the incremental checker without the
+      # wildcard ambient module declarations (src/types/*.d.ts), so it reports
+      # missing lucide-react icon and stylesheet types that a full check accepts
+      # (#5722, 11-08). On failure, drop the incremental state and check once
+      # more from scratch; a real type error fails both runs.
       - if: needs.reuse.outputs.reuse != 'true'
-        run: npm run typecheck
+        run: |
+          if ! npm run typecheck; then
+            echo "::warning::Incremental typecheck failed; rechecking without tsconfig.tsbuildinfo."
+            rm -f tsconfig.tsbuildinfo
+            npm run typecheck
+          fi
       # These bounded publication fixtures never contact release services or
       # build an app. Keep the stable/preview boundary on every PR.
       - name: Release channel policy
