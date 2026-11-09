@@ -1,3 +1,5 @@
+import { spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -88,6 +90,7 @@ it('never acts on a lane another process unregistered during the heartbeat', asy
 // nothing more, and a retry the relaunch already started is ended rather than watched.
 it('never acts on a lane another process unregistered during an await', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-supervisor-stop-await-')));
+  let retryProcessForCleanup: import('node:child_process').ChildProcess | undefined;
   const repo = join(directory, 'repo');
   mkdirSync(repo);
   Object.assign(process.env, { HOME: directory, CORTEX_IDE_DATA_DIR: directory, CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db') });
@@ -115,6 +118,10 @@ it('never acts on a lane another process unregistered during an await', async ()
 
     const acted: string[] = [];
     const stop = (surfaceId: string) => next.unregisterWatchedAgent(surfaceId);
+    // The relaunch starts a real process for the retry; the interrupt ends it and waits for its exit,
+    // as the production interrupt confirms the run dead before it resolves.
+    let retryProcess: ChildProcess | undefined;
+    const alive = (child: ChildProcess | undefined) => !!child && child.exitCode === null && child.signalCode === null;
     const callbacks: SupervisorCallbacks = {
       fetchFleetStatus: async () => Object.entries(fleet).map(([sessionKey, status]) => ({ sessionKey, status }) as AgentStatusEntry),
       fetchTranscript: async surfaceId => {
@@ -126,9 +133,17 @@ it('never acts on a lane another process unregistered during an await', async ()
       interruptAgent: async surfaceId => {
         acted.push(`interrupt ${surfaceId}`);
         if (surfaceId === 'surface-interrupt') stop(surfaceId);
+        if (surfaceId === 'surface-retry-2' && alive(retryProcess)) {
+          const exited = once(retryProcess!, 'exit');
+          retryProcess!.kill('SIGTERM');
+          await exited;
+        }
       },
       relaunchAgent: async (_prompt, _repo, _name, retryOf) => {
         acted.push(`relaunch ${retryOf}`);
+        retryProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+        await once(retryProcess, 'spawn');
+        retryProcessForCleanup = retryProcess;
         stop(retryOf!);
         return { status: 'launched', surfaceId: 'surface-retry-2' };
       },
@@ -154,11 +169,13 @@ it('never acts on a lane another process unregistered during an await', async ()
     expect(acted.filter(action => /^(escalate|retry) /.test(action)
       || /^broadcast .* (retrying|completed|running)$/.test(action)
       || action.startsWith('broadcast surface-interrupt') && acted.indexOf(action) > acted.indexOf('interrupt surface-interrupt'))).toEqual([]);
-    // The retry the relaunch started is ended, not watched.
+    // The retry the relaunch started is ended, not watched, and no process is left running.
     expect(acted).toContain('interrupt surface-retry-2');
+    expect([retryProcess?.pid !== undefined, alive(retryProcess)]).toEqual([true, false]);
     expect([rows(), ws.getWatchedAgents().map(agent => agent.surfaceId)]).toEqual([[], []]);
   } finally {
     ws?.stopSupervisorLoop();
+    if (retryProcessForCleanup && retryProcessForCleanup.exitCode === null && retryProcessForCleanup.signalCode === null) retryProcessForCleanup.kill('SIGKILL');
     rmSync(directory, { recursive: true, force: true });
   }
 });
