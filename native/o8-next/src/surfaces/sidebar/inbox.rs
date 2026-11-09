@@ -57,8 +57,23 @@ pub(super) fn auto_note(reason: &str) -> &'static str {
     }
 }
 
-/// Active, then Snoozed, Settled newest first, then Archived. A child worker stays
-/// out: its parent conversation is listed and carries its state.
+/// The shelves pinned to the foot of the Inbox, in order (T3 Code's sidebar
+/// shelves; Working moved to the head of the list). Each folds to one line and
+/// hides when empty.
+pub(crate) const SHELVES: [&str; 2] = ["Snoozed", "Settled"];
+
+/// The key that keeps a shelf unfolded.
+pub(crate) fn open_key(shelf: &str) -> String {
+    format!("open:{shelf}")
+}
+
+/// Working on top when anything runs, then Active; then the Snoozed and
+/// Settled shelves. A shelf is a
+/// `shelf` row (its count in `age`, "open" in `status` when unfolded) followed
+/// by its threads, each marked with the shelf's name. A folded shelf still
+/// lists the open thread, so the selection never disappears. A child worker
+/// stays out: its parent conversation is listed and carries its state.
+/// Archived threads live in the other views.
 pub(super) fn rows(
     sessions: &[Session],
     query: &str,
@@ -66,27 +81,43 @@ pub(super) fn rows(
     expanded: &HashSet<String>,
     branches: &HashSet<String>,
     snoozes: &HashMap<String, u64>,
+    selected: Option<&str>,
+    pinned: &[String],
 ) -> Vec<Row> {
     let now = recents::now();
     let searching = !query.trim().is_empty();
-    let (live, archived): (Vec<_>, Vec<_>) = recents::visible(sessions, query, matches)
+    let live: Vec<_> = recents::visible(sessions, query, matches)
         .into_iter()
-        .filter(|s| s.parent_inbox_subject.is_none())
-        .partition(|s| s.status != "archived");
+        .filter(|s| s.parent_inbox_subject.is_none() && s.status != "archived")
+        .collect();
     let (mut settled, active): (Vec<_>, Vec<_>) = live.into_iter().partition(|s| s.settled());
     settled.sort_by(|a, b| b.settled_at.cmp(&a.settled_at));
     // A snooze hides an Active thread until its time; then it comes back on
     // top, under the threads waiting on you, until it is opened.
-    let (mut snoozed, mut active): (Vec<_>, Vec<_>) = active
+    let (mut snoozed, active): (Vec<_>, Vec<_>) = active
         .into_iter()
         .partition(|s| snoozes.get(&s.id).is_some_and(|until| *until > now));
     snoozed.sort_by_key(|s| snoozes[&s.id]);
-    // A work outcome does not settle attention; merged threads stay Active
-    // until their persisted inbox state changes.
+    // Running work heads the list so its live timers stay in view; a run
+    // that asks for you drops into Active with the other questions.
+    let (working, mut active): (Vec<_>, Vec<_>) = active
+        .into_iter()
+        // A pinned thread keeps its place on the Pinned shelf.
+        .partition(|s| sidebar::working(s) && !needs_input(s) && !pinned.contains(&s.id));
     let woken = |s: &Session| snoozes.contains_key(&s.id);
     active.sort_by_key(|s| (!needs_input(s), !woken(s)));
-    // Active always heads the list; its row carries the view picker.
-    let mut rows = vec![recents::header("section", "Active", "")];
+    let mut rows = Vec::new();
+    if !working.is_empty() {
+        // Q 2026-11-09: Working on top, Settled at the bottom. The first
+        // heading carries the view picker, whichever it is.
+        rows.push(recents::header("section", "Working", ""));
+        rows.extend(working.iter().map(|s| {
+            let mut row = recents::thread_row(s, now, branches);
+            row.marker = "working";
+            row
+        }));
+    }
+    rows.push(recents::header("section", "Active", ""));
     let open = searching || expanded.contains("Active");
     let count = if open {
         active.len()
@@ -111,32 +142,44 @@ pub(super) fn rows(
             "Active",
         ));
     }
-    let open = searching || expanded.contains("Snoozed");
-    let at = rows.len();
-    recents::group_rows(&mut rows, "Snoozed", &snoozed, 10, open, now, branches);
-    // A snoozed row reads when it comes back in place of its age.
-    for row in &mut rows[at..] {
-        if let Some(until) = row.id.as_ref().and_then(|id| snoozes.get(id)) {
-            row.age = snooze::until_label(*until, now);
+    for (name, group, cap) in [
+        ("Snoozed", &snoozed, 10),
+        ("Settled", &settled, 10),
+    ] {
+        if group.is_empty() {
+            continue;
+        }
+        let unfolded = searching || expanded.contains(&open_key(name));
+        let mut header = recents::header("shelf", name, if unfolded { "open" } else { "" });
+        header.age = group.len().to_string();
+        rows.push(header);
+        let shown: Vec<_> = if unfolded {
+            let count = if expanded.contains(name) { group.len() } else { group.len().min(cap) };
+            group.iter().take(count).collect()
+        } else {
+            group.iter().filter(|s| Some(s.id.as_str()) == selected).collect()
+        };
+        let more = unfolded && shown.len() < group.len();
+        for s in shown {
+            let mut row = recents::thread_row(s, now, branches);
+            row.marker = if name == "Snoozed" { "snoozed" } else { "settled" };
+            if let Some(until) = snoozes.get(&s.id).filter(|_| name == "Snoozed") {
+                row.age = snooze::until_label(*until, now);
+            }
+            // An automatic settle says why: "merged · 2h".
+            if let Some(reason) = s.auto_settled_reason.as_deref().filter(|_| name == "Settled") {
+                row.age = note_with_age(reason, &row.age);
+            }
+            rows.push(row);
+        }
+        if more {
+            rows.push(recents::header(
+                "more",
+                &format!("Show {} more", group.len() - cap.min(group.len())),
+                name,
+            ));
         }
     }
-    let open = searching || expanded.contains("Settled");
-    let at = rows.len();
-    recents::group_rows(&mut rows, "Settled", &settled, 10, open, now, branches);
-    // An automatic settle says why: "merged · 2h".
-    for row in &mut rows[at..] {
-        let reason = row.id.as_ref().and_then(|id| {
-            settled
-                .iter()
-                .find(|s| &s.id == id)
-                .and_then(|s| s.auto_settled_reason.as_deref())
-        });
-        if let Some(reason) = reason {
-            row.age = note_with_age(reason, &row.age);
-        }
-    }
-    let open = searching || expanded.contains("Archived");
-    recents::group_rows(&mut rows, "Archived", &archived, 12, open, now, branches);
     rows
 }
 
@@ -490,9 +533,11 @@ mod auto_settle_tests {
             &sessions,
             "",
             &HashSet::new(),
-            &HashSet::new(),
+            &["open:Settled".to_owned()].into_iter().collect(),
             &HashSet::new(),
             &HashMap::new(),
+            None,
+            &[],
         );
         let age = |id: &str| {
             rows.iter()

@@ -164,6 +164,8 @@ pub struct ThreadList {
     /// Running threads fold into a Working section; `working_closed` collapses it.
     pub(super) working_section: bool,
     pub(super) working_closed: bool,
+    /// A one-second repaint is queued for the Working timers.
+    pub(super) second_tick: bool,
     archived_open: bool,
     #[cfg(test)]
     pub(super) title_layouts: HashMap<String, gpui::TextLayout>,
@@ -282,6 +284,7 @@ impl ThreadList {
             branch_names: HashMap::new(),
             detailed: false,
             working_section: false,
+            second_tick: false,
             working_closed: false,
             archived_open: false,
             #[cfg(test)]
@@ -356,7 +359,7 @@ impl ThreadList {
         // Remeasure detailed rows; keep the reader's place.
         let top = self.detailed_list.logical_scroll_top();
         let old = self.detailed_list.item_count();
-        self.detailed_list.splice(0..old, self.rows.len());
+        self.detailed_list.splice(0..old, self.top_len());
         self.detailed_list.scroll_to(top);
         if !self
             .rows
@@ -381,6 +384,20 @@ impl ThreadList {
             self.scroll_row(index, ScrollStrategy::Top, false);
         }
     }
+    /// Inbox rows are cards, as T3 Code's; the other views keep the row mode.
+    pub(super) fn cards(&self) -> bool {
+        self.detailed || self.view() == folders::View::Inbox
+    }
+    /// Where the Inbox's foot shelves start; the scrolling list ends there.
+    pub(super) fn top_len(&self) -> usize {
+        if self.view() != folders::View::Inbox {
+            return self.rows.len();
+        }
+        self.rows
+            .iter()
+            .position(|r| r.kind == "shelf")
+            .unwrap_or(self.rows.len())
+    }
     /// The disclosure group a thread belongs to in the current view.
     fn group_key(&self, session: &Session) -> &'static str {
         match self.view() {
@@ -390,6 +407,7 @@ impl ThreadList {
             folders::View::Repo => "",
             folders::View::Inbox if session.settled() => "Settled",
             folders::View::Inbox if self.snoozed(&session.id) => "Snoozed",
+            folders::View::Inbox if sidebar::working(session) => "Working",
             folders::View::Inbox => "Active",
         }
     }
@@ -407,7 +425,7 @@ impl ThreadList {
             rows.truncate(index + 1);
         }
         rows = self.nest_rows(rows, sessions);
-        if self.working_section {
+        if self.working_section && self.view() != folders::View::Inbox {
             // The Pinned shelf stays first and keeps its running threads.
             let shelf = if rows.first().is_some_and(|r| r.status == "pinned") {
                 1 + rows[1..].iter().take_while(|r| r.kind == "thread").count()
@@ -434,6 +452,8 @@ impl ThreadList {
                 expanded,
                 branches,
                 &self.snoozes,
+                self.selected.as_deref(),
+                &pins::pinned_order(sessions),
             ),
             folders::View::Repo => {
                 let keys = self.scope_keys();
@@ -1212,6 +1232,8 @@ mod archive_controls;
 
 #[path = "inbox.rs"]
 mod inbox;
+#[path = "inbox_card.rs"]
+mod inbox_card;
 #[path = "auto_settle_toggle.rs"]
 mod auto_settle_toggle;
 #[path = "snooze.rs"]
@@ -1239,7 +1261,8 @@ impl ThreadList {
         } else {
             self.scroll.scroll_to_item(index, strategy);
         }
-        if self.detailed {
+        // A shelf row sits below the scrolling list, always in view.
+        if self.cards() && index < self.top_len() {
             self.detailed_list.scroll_to(gpui::ListOffset { item_ix: index, offset_in_item: gpui::px(0.) });
         }
     }

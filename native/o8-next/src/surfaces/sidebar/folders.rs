@@ -212,7 +212,8 @@ impl ThreadList {
             .copied()
             // A host without inbox settlement keeps the sidebar it had.
             .filter(|view| *view != View::Inbox || self.inbox_ready())
-            .unwrap_or_default()
+            // The Inbox is the default where the host settles threads (Q 2026-11-09).
+            .unwrap_or(if self.inbox_ready() { View::Inbox } else { View::Date })
     }
     /// Restores each project's view and the closed folders from the shell state.
     pub fn restore_views(

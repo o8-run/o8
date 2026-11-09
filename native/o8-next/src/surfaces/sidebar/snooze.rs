@@ -43,16 +43,29 @@ fn at_hour(now: u64, days: u64, hour: u64) -> u64 {
     // Correct for a daylight-saving change between now and then.
     (guess as i64 + offset(now) - offset(guess)) as u64
 }
-/// The presets offered at `now`: an hour, tonight while it is still ahead,
-/// and tomorrow morning.
+/// The presets offered at `now`, in T3 Code's order: an hour, three hours,
+/// this evening while it is still ahead, tomorrow morning and next Monday.
 pub(super) fn presets(now: u64) -> Vec<(&'static str, u64)> {
-    let mut presets = vec![("1 hour", now + HOUR)];
-    let tonight = at_hour(now, 0, 20);
-    if tonight > now + HOUR {
-        presets.push(("Tonight · 8 PM", tonight));
+    let mut presets = vec![("In 1 hour", now + HOUR), ("In 3 hours", now + 3 * HOUR)];
+    let evening = at_hour(now, 0, 20);
+    if evening > now + 3 * HOUR {
+        presets.push(("This evening", evening));
     }
-    presets.push(("Tomorrow morning · 9 AM", at_hour(now, 1, 9)));
+    presets.push(("Tomorrow", at_hour(now, 1, 9)));
+    // Next Monday; on a Sunday that is tomorrow, so the Monday after.
+    let today = weekday(now);
+    let days = match (8 - today) % 7 {
+        0 | 1 => (8 - today) % 7 + 7,
+        n => n,
+    };
+    presets.push(("Next week", at_hour(now, days, 9)));
     presets
+}
+/// The local weekday at `at`, 0 for Sunday.
+fn weekday(at: u64) -> u64 {
+    let (_, midnight) = local_day(at);
+    // 1970-01-01 was a Thursday.
+    ((midnight as i64 + offset(at)) / DAY as i64 + 4).rem_euclid(7) as u64
 }
 /// "8 PM", or "Tue 9 AM" on another day; minutes show when not on the hour.
 pub(super) fn until_label(until: u64, now: u64) -> String {
@@ -92,17 +105,12 @@ impl ThreadList {
     /// A snooze shown as waiting whose time has now come.
     pub(super) fn snooze_due(&self) -> bool {
         let now = recents::now();
-        let mut shelf = false;
-        self.rows.iter().any(|row| {
-            if row.kind == "section" {
-                shelf = row.title == "Snoozed";
-            }
-            shelf
-                && row
-                    .id
-                    .as_ref()
-                    .and_then(|id| self.snoozes.get(id))
-                    .is_some_and(|until| *until <= now)
+        // A folded Snoozed shelf lists no rows, so ask the snoozes themselves:
+        // one is due when its time passed but its thread is not yet back.
+        self.snoozes.iter().any(|(id, until)| {
+            *until <= now
+                && self.sessions.iter().any(|s| &s.id == id && !s.settled() && s.status != "archived")
+                && !self.rows.iter().any(|r| r.id.as_ref() == Some(id) && r.marker == "back")
         })
     }
     pub(super) fn save_snoozes(&self, cx: &mut Context<Self>) {
@@ -140,48 +148,86 @@ impl ThreadList {
         }
         cx.notify();
     }
-    /// The row menu's Snooze presets, or Unsnooze for a snoozed thread.
-    pub(super) fn snooze_items(&self, id: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    /// The row menu's Snooze entry. The full menu offers "Snooze…", which
+    /// turns the menu into the preset list; the card's clock opens that list
+    /// directly (T3 Code's snooze menu). A snoozed thread offers Unsnooze.
+    pub(super) fn snooze_items(&self, id: &str, only: bool, cx: &mut Context<Self>) -> Vec<AnyElement> {
         if !self.snoozable(id) {
             return vec![];
         }
         let now = recents::now();
-        let items: Vec<(String, Option<u64>)> = if self.snoozed(id) {
-            vec![("Unsnooze".into(), None)]
-        } else {
-            presets(now)
-                .into_iter()
-                .map(|(name, until)| (format!("Snooze {name}"), Some(until)))
-                .collect()
+        let item = |selector: String, name: AnyElement, hint: Option<String>| {
+            div()
+                .id(gpui::ElementId::Name(selector.clone().into()))
+                .debug_selector(move || selector.clone())
+                .h(px(28.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(7.))
+                .text_size(px(12.5))
+                .cursor_pointer()
+                .hover(|s| s.bg(theme().hover))
+                .child(crate::icon::stroke(CLOCK, theme().text_muted, 14., 1.7))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(div().flex_1().child(name))
+                .map(move |row| match hint {
+                    Some(hint) => row.child(
+                        div()
+                            .pl(px(16.))
+                            .text_color(theme().text_faint)
+                            .child(hint),
+                    ),
+                    None => row,
+                })
         };
-        items
-            .into_iter()
-            .enumerate()
-            .map(|(i, (text, until))| {
+        if self.snoozed(id) {
+            let id = id.to_owned();
+            return vec![
+                item("sidebar-row-unsnooze".into(), "Unsnooze".into_any_element(), None)
+                    .on_click(cx.listener(move |this, _, _, cx| this.snooze(id.clone(), None, cx)))
+                    .into_any_element(),
+            ];
+        }
+        if !only {
+            return vec![
+                item("sidebar-row-snooze".into(), "Snooze…".into_any_element(), None)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(menu) = this.row_menu.as_mut() {
+                            menu.snooze_only = true;
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            ];
+        }
+        let heading = div()
+            .px(px(8.))
+            .pt(px(4.))
+            .pb(px(2.))
+            .text_size(px(11.5))
+            .text_color(theme().text_muted)
+            .child("Snooze until")
+            .into_any_element();
+        std::iter::once(heading)
+            .chain(presets(now).into_iter().enumerate().map(|(i, (name, until))| {
                 let id = id.to_owned();
-                div()
-                    .id(gpui::ElementId::Name(format!("snooze:{i}").into()))
-                    .debug_selector(move || format!("sidebar-row-snooze-{i}"))
-                    .h(px(28.))
-                    .px(px(8.))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .rounded(px(7.))
-                    .text_size(px(12.5))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(theme().hover))
-                    .child(crate::icon::stroke(CLOCK, theme().text_muted, 14., 1.7))
-                    .child(text)
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                item(
+                    format!("sidebar-row-snooze-{i}"),
+                    name.into_any_element(),
+                    Some(until_label(until, now)),
+                )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.snooze(id.clone(), until, cx)
+                        this.row_menu = None;
+                        this.snooze(id.clone(), Some(until), cx)
                     }))
                     .into_any_element()
-            })
+            }))
             .collect()
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -190,7 +236,9 @@ mod tests {
     fn presets_are_ahead_and_ordered() {
         let now = 1_793_000_000;
         let presets = presets(now);
-        assert_eq!(presets[0], ("1 hour", now + HOUR));
+        assert_eq!(presets[0], ("In 1 hour", now + HOUR));
+        assert_eq!(presets.last().unwrap().0, "Next week");
+        assert_eq!(weekday(presets.last().unwrap().1), 1);
         assert!(presets.windows(2).all(|w| w[0].1 < w[1].1));
         let (into, _) = local_day(presets.last().unwrap().1);
         assert_eq!(into, 9 * HOUR);

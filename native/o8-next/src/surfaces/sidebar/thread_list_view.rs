@@ -46,6 +46,7 @@ impl Render for ThreadList {
                 self.reveal = None;
             }
         }
+        self.tick_working(cx);
         if !self.mark_pace {
             self.mark_pace = true;
             super::status_mark::pace(cx);
@@ -129,7 +130,7 @@ impl Render for ThreadList {
                     ))
                     .on_drop(cx.listener(|this, drag: &pins::PinDrag, _, cx| this.drop_pin(drag, cx)))
                     .child(
-                if self.detailed {
+                if self.cards() {
                     // Detailed rows vary: 66px threads under 28px headings.
                     let view = cx.entity();
                     div().debug_selector(|| "thread-list".into()).flex().flex_col().flex_1().min_h_0().child(
@@ -141,6 +142,7 @@ impl Render for ThreadList {
                             div()
                                 .w_full()
                                 .px(px(6.))
+                                .py(px(1.))
                                 .child(this.render_row(i, keyboard, cx))
                                 .into_any_element()
                         })
@@ -168,6 +170,7 @@ impl Render for ThreadList {
                 },
             ),
             )
+            .children(self.shelves(window, cx))
             .children(self.row_menu(cx))
             .children(self.pr_hover_list(cx))
     }
@@ -185,11 +188,23 @@ impl ThreadList {
                     if let Some(folder) = &row.folder {
                         return this.folder_row(&row, folder, cx);
                     }
+                    if row.kind == "shelf" {
+                        return this.shelf_header(&row, cx);
+                    }
                     let thread = row.id.is_some();
-                    let detailed = this.detailed;
+                    let inbox = this.view() == folders::View::Inbox;
+                    let slim = inbox && thread && matches!(row.marker, "snoozed" | "settled");
+                    let detailed = this.cards();
                     let detailed_thread = detailed && thread;
-                    let detailed_content = detailed_thread
-                        .then(|| this.detailed_content(&row, keyboard, cx));
+                    let detailed_content = detailed_thread.then(|| {
+                        if slim {
+                            this.slim_content(&row, cx)
+                        } else if inbox {
+                            this.card_content(&row, cx)
+                        } else {
+                            this.detailed_content(&row, keyboard, cx)
+                        }
+                    });
                     let by_repo = this.view() == folders::View::Repo;
                     let title =
                         gpui::StyledText::new(crate::text::sanitize(&row.title));
@@ -218,7 +233,11 @@ impl ThreadList {
                         .group("thread-row")
                         .w_full()
                         .min_w_0()
-                        .h(px(if detailed_thread {
+                        .h(px(if slim {
+                            inbox_card::SLIM_HEIGHT
+                        } else if detailed_thread && inbox {
+                            inbox_card::CARD_HEIGHT
+                        } else if detailed_thread {
                             detailed::ROW_HEIGHT
                         } else {
                             28.
@@ -472,5 +491,39 @@ impl ThreadList {
                             )
                             .size(px(1.)),
                         )
+    }
+
+    /// The Inbox's foot: the Working, Snoozed and Settled shelves under the
+    /// scrolling list, as T3 Code pins them to the bottom of its sidebar.
+    fn shelves(&mut self, _: &mut Window, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let start = self.top_len();
+        if start >= self.rows.len() {
+            return None;
+        }
+        let keyboard = false;
+        let rows: Vec<_> = (start..self.rows.len())
+            .map(|i| {
+                div()
+                    .w_full()
+                    .py(px(1.))
+                    .child(self.render_row(i, keyboard, cx))
+                    .into_any_element()
+            })
+            .collect();
+        Some(
+            div()
+                .id("sidebar-shelves")
+                .debug_selector(|| "sidebar-shelves".into())
+                .flex_shrink_0()
+                .max_h(gpui::relative(0.6))
+                .overflow_y_scroll()
+                .px(px(6.))
+                .pt(px(4.))
+                .pb(px(2.))
+                .flex()
+                .flex_col()
+                .children(rows)
+                .into_any_element(),
+        )
     }
 }
