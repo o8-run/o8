@@ -26,7 +26,10 @@ async function initialize(): Promise<void> {
     } catch {
       console.warn('[auto-review] Queue startup failed.');
     }
-    void import('@/lib/next/app-window').then(({ restoreNextWindow }) => restoreNextWindow()).catch(() => {});
+    // The WS process opens the window instead when the shell names it the owner (#5709).
+    if (process.env.O8_NEXT_WINDOW_OWNER !== 'ws') {
+      void import('@/lib/next/app-window').then(({ restoreNextWindow }) => restoreNextWindow()).catch(() => {});
+    }
   }
   try {
     const { startTelemetryUploadLoop } = await import('@/lib/telemetry/uploader');
