@@ -128,6 +128,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/pr-stack', 'GET', () => import('@/app/api/panel/pr-stack/route')),
     route('/api/orchestrator/stop-mission', 'POST', () => import('@/app/api/orchestrator/stop-mission/route')),
     route('/api/orchestrator/discard-packet', 'POST', () => import('@/app/api/orchestrator/discard-packet/route')),
+    // The operator MCP `digest` tool. In no middleware allowlist and the handler requires the
+    // ws-token (requirePanelAuth), so over native only the operator reaches it. The read-only
+    // Codex exec's environment carries no provider API keys (codex is not an API-credential runtime)
+    // and no ws-token, but its sandbox can still read files on disk, so the digest stays operator-only;
+    // the repoPath must be registered.
+    route('/api/orchestrator/digest', 'POST', () => import('@/app/api/orchestrator/digest/route')),
   ],
   pull_requests: [
     route('/api/panel/file-diff', 'GET', () => import('@/app/api/panel/file-diff/route')),
