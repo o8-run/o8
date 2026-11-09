@@ -53,11 +53,7 @@ pub(crate) struct Status {
 
 /// T3's indigo for a question waiting on you.
 fn input_color() -> Rgba {
-    if crate::theme::light() {
-        gpui::rgb(0x4f46e5)
-    } else {
-        gpui::rgb(0xa5b4fc)
-    }
+    crate::theme::inbox_input()
 }
 
 /// What a card says on the right of its first line; `None` leaves its age.
@@ -322,11 +318,7 @@ impl ThreadList {
         if session.is_some_and(|s| s.tmux_session.as_deref().is_some_and(|t| !t.is_empty())) {
             // T3's terminal pulse: full, then half, every other second while it works.
             let pulse = if working && now % 2 == 1 { 0.5 } else { 1. };
-            let color = if crate::theme::light() {
-                gpui::rgb(0x0d9488)
-            } else {
-                gpui::rgb(0x5eead4)
-            };
+            let color = crate::theme::inbox_terminal();
             let sid = id.clone();
             third = third.child(
                 div()
