@@ -392,6 +392,9 @@ fn a_file_pill_peeks_at_its_lines_after_a_pause(cx: &mut TestAppContext) {
         assert!(cx.debug_bounds(selector).is_some(), "line {line}");
     }
     assert!(cx.debug_bounds("transcript-peek-line-10").is_none());
+    // The header notes the file's length beside its path.
+    let meta = cx.debug_bounds("transcript-peek-meta").expect("line count shows");
+    assert!(meta.right() <= card.right() && meta.top() < card.top() + px(26.), "{meta:?} in {card:?}");
     cx.simulate_mouse_move(point(px(5.), px(650.)), None, gpui::Modifiers::default());
     cx.executor()
         .advance_clock(crate::transcript_peek::OPEN_DELAY);

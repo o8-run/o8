@@ -66,6 +66,23 @@ pub(crate) fn window(content: &str, line: Option<usize>) -> Snippet {
     }
 }
 
+/// The header's note for a file: its length and how long ago it changed.
+pub(crate) fn meta(content: &str, mtime_ms: Option<f64>, now_ms: f64) -> String {
+    let count = content.lines().count();
+    let lines = if count == 1 { "1 line".to_owned() } else { format!("{count} lines") };
+    let Some(mtime) = mtime_ms else {
+        return lines;
+    };
+    let secs = ((now_ms - mtime) / 1000.).max(0.) as u64;
+    let ago = match secs {
+        0..60 => "modified just now".to_owned(),
+        60..3_600 => format!("modified {} min ago", secs / 60),
+        3_600..86_400 => format!("modified {} h ago", secs / 3_600),
+        _ => format!("modified {} d ago", secs / 86_400),
+    };
+    format!("{lines} · {ago}")
+}
+
 /// A file as the server answered for it.
 #[derive(Clone, Debug)]
 enum Read {
@@ -315,9 +332,18 @@ impl Peeks {
             (None, Lookup::Fresh(read) | Lookup::Stale(read)) => Some(read.snippet(target.line)),
             (None, Lookup::Miss) => None,
         };
+        let note = match (&target.preview, state.cache.0.get(&target.file())) {
+            (None, Some(Entry { read: Read::Text(content), mtime, .. })) => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0., |elapsed| elapsed.as_millis() as f64);
+                Some(meta(content, *mtime, now))
+            }
+            _ => None,
+        };
         let at = place(pill, size(px(WIDTH), height(&snippet)), viewport);
         let peeks = self.clone();
-        let card = card(target, snippet)
+        let card = card(target, snippet, note)
             .on_hover(move |hovering, window, cx| peeks.card_hover(*hovering, window, cx));
         Some(
             deferred(
@@ -369,7 +395,7 @@ pub(crate) fn place(
     )
 }
 
-fn card(target: &Target, snippet: Option<Snippet>) -> gpui::Stateful<gpui::Div> {
+fn card(target: &Target, snippet: Option<Snippet>, note_text: Option<String>) -> gpui::Stateful<gpui::Div> {
     let at = target
         .line
         .map_or_else(String::new, |line| format!(":{line}"));
@@ -460,14 +486,32 @@ fn card(target: &Target, snippet: Option<Snippet>) -> gpui::Stateful<gpui::Div> 
                 .py(px(6.))
                 .border_b_1()
                 .border_color(theme().border)
-                .whitespace_nowrap()
-                .overflow_hidden()
-                .text_ellipsis()
+                .flex()
+                .items_center()
+                .gap(px(8.))
                 .text_size(px(11.5))
-                .text_color(theme().text_secondary)
-                .child(match &target.preview {
-                    Some((title, _)) => title.clone(),
-                    None => format!("{}{at}", target.file()),
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .text_color(theme().text_secondary)
+                        .child(match &target.preview {
+                            Some((title, _)) => title.clone(),
+                            None => format!("{}{at}", target.file()),
+                        }),
+                )
+                .when_some(note_text, |header, note| {
+                    header.child(
+                        div()
+                            .debug_selector(|| "transcript-peek-meta".into())
+                            .flex_shrink_0()
+                            .whitespace_nowrap()
+                            .text_color(theme().text_faint)
+                            .child(note),
+                    )
                 }),
         )
         .child(body)
@@ -485,6 +529,18 @@ mod tests {
             Snippet::Lines { first, lines } => (first, first + lines.len() - 1),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn the_header_counts_lines_and_says_how_long_ago_the_file_changed() {
+        let now = 1_000_000_000.;
+        assert_eq!(meta("one", None, now), "1 line");
+        assert_eq!(meta("a\nb\nc\n", Some(now - 20_000.), now), "3 lines · modified just now");
+        assert_eq!(meta("a\nb", Some(now - 5. * 60_000.), now), "2 lines · modified 5 min ago");
+        assert_eq!(meta("a\nb", Some(now - 3. * 3_600_000.), now), "2 lines · modified 3 h ago");
+        assert_eq!(meta("a\nb", Some(now - 2. * 86_400_000.), now), "2 lines · modified 2 d ago");
+        // A clock behind the file's time reads as just now, never negative.
+        assert_eq!(meta("a", Some(now + 5_000.), now), "1 line · modified just now");
     }
 
     #[test]
