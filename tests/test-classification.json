@@ -4945,6 +4945,12 @@
       ]
     },
     {
+      "path": "tests/next-fetch-native-method.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
       "path": "tests/next-fixture-cli-shim-real-path.test.ts",
       "reasons": [
         "executable-fixture",

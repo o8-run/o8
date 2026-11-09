@@ -228,7 +228,7 @@ async function sendTextOnlyTurn(
   let response: Response;
   armWatchdog();
   try {
-    response = await fetch(buildNextUrl('/api/v2/proxy/llm'), {
+    response = await fetch(buildNextUrl('/api/v2/proxy/llm', undefined, 'POST'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

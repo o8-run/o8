@@ -29,7 +29,7 @@ async function verifiedDesktopSession(request: Request): Promise<{ owner: string
       issuer, algorithms: ['RS256'], requiredClaims: ['sub', 'exp', 'iat', 'nbf', 'sid'],
       ...(process.env.CLERK_JWT_AUDIENCE ? { audience: process.env.CLERK_JWT_AUDIENCE } : {}),
     });
-    const local = new URL(buildNextUrl('/'));
+    const local = new URL(buildNextUrl('/', undefined, 'GET'));
     const authorizedParties = new Set([
       local.origin, `${local.protocol}//localhost:${local.port}`, 'https://o8.run',
       'tauri://localhost', 'https://tauri.localhost',

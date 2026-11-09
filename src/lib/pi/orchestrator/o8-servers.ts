@@ -62,7 +62,7 @@ function postJson(url: string, headers: Record<string, string>, body: string, si
  */
 function createOperatorOverHttp(timeoutMs = SERVER_REQUEST_TIMEOUT_MS): O8ServerRequest {
   return async (method, params, signal) => {
-    const response = await postJson(buildNextUrl('/api/mcp'), {
+    const response = await postJson(buildNextUrl('/api/mcp', undefined, 'POST'), {
       Accept: 'application/json',
       'Content-Type': 'application/json',
       Authorization: `Bearer ${getOrCreateWsToken()}`,

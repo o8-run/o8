@@ -486,7 +486,7 @@ const NEXT_READY_POLL_MS = 250;
 const NEXT_READY_TIMEOUT_MS = 10_000;
 
 async function waitForNextReady(): Promise<void> {
-  const url = buildNextUrl('/api/panel/status');
+  const url = buildNextUrl('/api/panel/status', undefined, 'GET');
   const deadline = Date.now() + NEXT_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
@@ -2113,7 +2113,7 @@ const chatListeners = new Set<(delta: ChatDelta) => void>();
 // consecutive failures per channel.
 async function nextServerAliveDespiteBackpressure(): Promise<boolean> {
   try {
-    const res = await fetch(buildNextUrl('/api/setup/identity'), {
+    const res = await fetch(buildNextUrl('/api/setup/identity', undefined, 'GET'), {
       signal: AbortSignal.timeout(15_000),
     });
     return res.ok;
@@ -6837,7 +6837,7 @@ function startPollingLoops() {
     try {
       const res = await fetchWithRetry(buildNextUrl('/api/worktrees/conflicts', new URLSearchParams({
         repo: process.cwd(),
-      })), {
+      }), 'GET'), {
         headers: {
           'Cache-Control': 'no-cache',
           'Authorization': `Bearer ${WS_TOKEN}`,
