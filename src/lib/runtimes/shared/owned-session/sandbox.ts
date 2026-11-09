@@ -651,8 +651,7 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
     try {
       await access(SANDBOX_EXEC_PATH, fsConstants.X_OK);
     } catch {
-      throw new SandboxUnavailableError(`sandbox-exec not found or not executable at ${SANDBOX_EXEC_PATH}. `
-        + 'Set O8_WORKER_SANDBOX=off to dispatch unsandboxed.');
+      throw new SandboxUnavailableError(`sandbox-exec not found or not executable at ${SANDBOX_EXEC_PATH}.`);
     }
   }
 
