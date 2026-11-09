@@ -5468,6 +5468,13 @@
       ]
     },
     {
+      "path": "tests/o8d-lane-worker-routes-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-leases-native-real-path.test.ts",
       "reasons": [
         "child-process",

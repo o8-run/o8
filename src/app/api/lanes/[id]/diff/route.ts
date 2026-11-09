@@ -1,7 +1,7 @@
 import { viewerGitJson } from '@/lib/viewers/git-response';
 import { viewerJson } from '@/lib/viewers/response';
 import { type NextRequest } from 'next/server';
-import { requirePanelAuth } from '@/lib/panel/auth';
+import { requirePanelOrWorkerAuth } from '@/lib/auth/packet-worker-auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
 import {
@@ -30,7 +30,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const denied = requirePanelAuth(req);
+  const denied = requirePanelOrWorkerAuth(req);
   if (denied) return denied;
 
   const { id } = await params;

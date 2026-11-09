@@ -209,6 +209,15 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // stop (mission stop) and send_turn and interrupt (runtime/action). (#5576)
     route('/api/lanes', 'GET POST', () => import('@/app/api/lanes/route')),
     route('/api/lanes/[id]', 'GET', () => import('@/app/api/lanes/[id]/route')),
+    // A packet worker's o8 CLI heartbeats, reports progress, tails its events and reads or widens
+    // its scope here. The gate grants workers these paths; each handler then binds the bearer to
+    // the lane's packet (worker_packet_mismatch otherwise), and a device bearer is refused. The
+    // events handler's loopback check reads the request host, so the bearer is the gate, as on
+    // Next. Writes are SQLite rows and the file-locked control plane; the event tail polls SQLite
+    // and the live push goes to this process's /internal/packet-tail. (#5576)
+    route('/api/lanes/[id]/heartbeat', 'POST', () => import('@/app/api/lanes/[id]/heartbeat/route')),
+    route('/api/lanes/[id]/events', 'GET POST', () => import('@/app/api/lanes/[id]/events/route')),
+    route('/api/lanes/[id]/scope', 'GET POST', () => import('@/app/api/lanes/[id]/scope/route')),
     route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
     route('/api/orchestrator/lane-events', 'GET', () => import('@/app/api/orchestrator/lane-events/route')),
     route('/api/orchestrator/steer-packet', 'POST', () => import('@/app/api/orchestrator/steer-packet/route')),
