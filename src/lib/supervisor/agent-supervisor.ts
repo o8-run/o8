@@ -93,7 +93,11 @@ function forgetUnwatched(agent: WatchedAgent): void {
   transcriptSourceCache.delete(agent.surfaceId);
 }
 
-function persistWatchedAgent(agent: WatchedAgent): void {
+/**
+ * Writes the watch. Returns false only when another process unregistered it (its row is gone), so
+ * the caller must not act on the lane: a stop that lands mid-heartbeat ends supervision there.
+ */
+function persistWatchedAgent(agent: WatchedAgent): boolean {
   try {
     const db = getSqlite();
     const values = [
@@ -106,8 +110,11 @@ function persistWatchedAgent(agent: WatchedAgent): void {
         `UPDATE watched_agents SET repo_path = ?, name = ?, prompt = ?, registered_at = ?, last_status = ?, retry_count = ?,
          steer_count = ?, completion_reported = ?, last_event_at = ?, last_activity_at = ? WHERE surface_id = ?`,
       ).run(...values, agent.surfaceId);
-      if (changes === 0) forgetUnwatched(agent);
-      return;
+      if (changes === 0) {
+        forgetUnwatched(agent);
+        return false;
+      }
+      return true;
     }
     const { changes } = db.prepare(
       `INSERT OR REPLACE INTO watched_agents
@@ -116,7 +123,10 @@ function persistWatchedAgent(agent: WatchedAgent): void {
     ).run(agent.surfaceId, ...values);
     // Only a row known to be written can later be found missing.
     if (changes > 0) storedWatches.add(agent);
-  } catch { /* DB may not be ready */ }
+    return true;
+  } catch {
+    return true; // DB may not be ready; keep the watch.
+  }
 }
 
 /** Drops every stored watch whose row another process deleted. Returns how many were dropped. */
@@ -516,7 +526,7 @@ async function pollWatchedAgent(
     if (!watchedAgents.has(watched.surfaceId)) {
       return;
     }
-    persistWatchedAgent(watched);
+    if (!persistWatchedAgent(watched)) return;
   }
 
   if ((currentStatus === 'running' || currentStatus === 'waiting') && !watched.completionReported) {
@@ -642,7 +652,7 @@ async function handleStatusChange(
     // concurrent poll during the async window can't re-enter with a stale
     // 'failed' or 'interrupted' status.
     watched.completionReported = true;
-    persistWatchedAgent(watched);
+    if (!persistWatchedAgent(watched)) return;
     const completionDecision = await callbacks.onAgentCompletion?.(watched.surfaceId, 'completed');
     if (watchedAgents.get(watched.surfaceId) !== watched) return;
     if (completionDecision?.superseded || completionDecision?.resume) {
@@ -711,7 +721,7 @@ async function handleStatusChange(
     } else {
       watched.completionReported = true;
       recordWatchedAgentEvent(watched, now);
-      persistWatchedAgent(watched);
+      if (!persistWatchedAgent(watched)) return;
       callbacks.broadcastAgentUpdate({
         surfaceId: watched.surfaceId,
         name: watched.name,
@@ -749,7 +759,7 @@ async function handleStatusChange(
   if (status === 'interrupted') {
     watched.completionReported = true;
     recordWatchedAgentEvent(watched, now);
-    persistWatchedAgent(watched);
+    if (!persistWatchedAgent(watched)) return;
     callbacks.broadcastAgentUpdate({
       surfaceId: watched.surfaceId,
       name: watched.name,
@@ -790,7 +800,7 @@ async function checkStuck(
     watched.steerCount += 1;
     watched.lastActivityAt = now;
     recordWatchedAgentEvent(watched, now);
-    persistWatchedAgent(watched);
+    if (!persistWatchedAgent(watched)) return;
     console.log(`[supervisor] Auto-steering stuck agent "${watched.name}" (steer ${watched.steerCount})`);
 
     callbacks.broadcastAgentUpdate({
@@ -814,7 +824,7 @@ async function checkStuck(
     // Prevent the 'failed' handler from auto-retrying after stuck escalation
     watched.retryCount = MAX_RETRIES;
     recordWatchedAgentEvent(watched, now);
-    persistWatchedAgent(watched);
+    if (!persistWatchedAgent(watched)) return;
     console.log(`[supervisor] Agent "${watched.name}" stuck after ${watched.steerCount} steers — escalating`);
 
     callbacks.broadcastAgentUpdate({
