@@ -307,7 +307,8 @@ describe('worktree-side merge with real git repos', () => {
     const sessionKey = await bindOwnedPacketSession(repo, worktree, { packetId: 'pkt-pinned', branch: 'inline/pinned' });
     writeFileSync(join(worktree.path, 'reviewed.txt'), 'reviewed\n');
     commitAll(worktree.path, 'reviewed change');
-    const reviewedHeadSha = git(worktree.path, ['rev-parse', 'HEAD']);
+    // A review may record an abbreviated SHA.
+    const reviewedHeadSha = git(worktree.path, ['rev-parse', '--short=12', 'HEAD']);
     recordOrchestratorReview('pkt-pinned', {
       approved: true, findings: [], reviewer: 'codex', reviewedHeadSha, requiresSecondPass: false,
     });

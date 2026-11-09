@@ -138,10 +138,10 @@ export interface DetachedIntegrationWorktree {
   cleanup: () => Promise<void>;
 }
 
-// Repo-local config can be written by the repository's workers, so only keys
-// that can neither run a command nor redirect or intercept the fetch reach the
-// clone. Credential helpers, SSH commands, URL rewrites and HTTP settings stay
-// in the operator's global config, which the clone still reads.
+// The disposable clone takes from the repository's local config only keys that
+// can neither run a command nor redirect or intercept its fetch. Credential
+// helpers, SSH commands, URL rewrites and HTTP settings come from the
+// operator's global config, which the clone still reads.
 function isTransportConfigKey(key: string): boolean {
   const normalized = key.toLowerCase();
   return normalized === 'ssh.variant' || normalized === 'remote.origin.url';
