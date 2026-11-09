@@ -346,6 +346,14 @@ const producers = [
   route('/api/mobile/inbox', 'GET', () => import('@/app/api/mobile/inbox/route')),
   route('/api/command-center/snapshot', 'GET', () => import('@/app/api/command-center/snapshot/route')),
   route('/api/browser/inventory', 'GET', () => import('@/app/api/browser/inventory/route')),
+  // Browser-automation verbs (canvas browser card / Browser tab). POST only, in
+  // WORKER_CAPABILITIES so the operator ws-token OR a packet-worker token passes
+  // panelGateMiddleware; the handler then calls workerPacketRefusal, scoping a
+  // worker to its own packetId (operator acts as scope 'operator'). Device,
+  // spectator and anonymous are refused at the middleware. The verb is validated
+  // against the fixed VERBS set and args are JSON-encoded into the webview eval,
+  // so a scoped caller cannot inject JS. Same gate over native as on Next.
+  route('/api/browser/agent', 'POST', () => import('@/app/api/browser/agent/route')),
   route('/api/runtime/transcript', 'GET', () => import('@/app/api/runtime/transcript/route')),
   route('/api/runtime/launch', 'POST', () => import('@/app/api/runtime/launch/route')),
   route('/api/orchestrator/headless-tick', 'POST', () => import('@/app/api/orchestrator/headless-tick/route')),
