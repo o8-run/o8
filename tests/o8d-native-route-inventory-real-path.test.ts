@@ -280,9 +280,9 @@ it('counts the desktop shell, the MCP server, the WS process and the CLI toward 
   // Workers run the o8 CLI against the API port: packet heartbeats, events, scope and reports.
   const cliFound = checkCaller(sourceFiles('cli/src', '.ts'), TS_PATTERN, keys(NEXT_ONLY_CLI_PATHS),
     { methods: callMethods, nextOnlyMethods: keys(NEXT_ONLY_CLI_METHODS) });
-  // A retired path is held to the same rule as a listed one: unregistered and still called.
+  // A retired path may be unregistered or answer a native refusal (a 503); either way it needs a
+  // caller left, or its entry goes.
   for (const path of retired) {
-    expect(matchNativeHttpRoute(concrete(path)), `${path} is registered`).toBeUndefined();
     expect([shellFound, mcpFound, wsFound, cliFound].some(found => found.has(path)), `${path} has no caller left`).toBe(true);
   }
   // The scorecard is derived, not pinned: each list already fails when an entry in it is

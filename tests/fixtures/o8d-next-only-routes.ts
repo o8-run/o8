@@ -131,8 +131,8 @@ export const NEXT_ONLY_CLI_METHODS: NextOnlyTable = {
 };
 
 /**
- * Callers kept on purpose that will not be ported, so they do not count as Next-only. Each still
- * needs a live caller and an unregistered route, like the lists above.
+ * Callers kept on purpose whose route is out of the Next-stopped scope, so they do not count as
+ * Next-only. Each needs a live caller; the route may stay unregistered or answer a native refusal.
  */
 export const RETIRED_WITH_REASON: Readonly<Record<string, string>> = {
   '/api/canvas/intent': 'drives the classic webview canvas page (/preview/canvas-glass), which exists only while Next serves it',
