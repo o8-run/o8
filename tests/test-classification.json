@@ -4558,6 +4558,14 @@
       ]
     },
     {
+      "path": "tests/merge-preview-base-lint-config-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/merge-settles-on-cleanup-refusal-real-path.test.ts",
       "reasons": [
         "child-process",
