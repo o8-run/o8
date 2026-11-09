@@ -33,7 +33,7 @@ import { promisify } from 'node:util';
 import { execFile } from '@/lib/providers/child-process';
 import { SandboxUnavailableError } from './sandbox-error';
 import { homeToolchainPolicy } from './sandbox-toolchain';
-import { gitGuardBinds } from './git-metadata-guard';
+import { assertBwrapGitGuard, ensureGitGuardEntries, gitGuardBinds } from './git-metadata-guard';
 import type { PreparedSandbox, PrepareWorkerSandboxInput, SeatbeltProfileInput } from './sandbox';
 
 const execFileAsync = promisify(execFile);
@@ -319,6 +319,11 @@ export async function prepareBwrapSandbox(input: {
   args: string[];
 }): Promise<PreparedSandbox> {
   const runtimeDir = xdgRuntimeDir();
+  if (input.policy.gitMetadataGuard) {
+    assertBwrapGitGuard(input.policy.gitMetadataGuard);
+    // A read-only bind needs its target to exist.
+    await ensureGitGuardEntries(input.policy.gitMetadataGuard);
+  }
   await ensureToolchainWriteDirs(input.policy.homeDir);
   const kinds = await statKinds(bwrapPolicyPaths(input.policy, runtimeDir));
   const bwrapArgs = buildBwrapArgs(input.policy, { kinds, runtimeDir });

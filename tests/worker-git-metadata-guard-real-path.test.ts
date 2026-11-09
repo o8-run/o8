@@ -50,6 +50,12 @@ step('ownCommondir', () => fs.writeFileSync(path.join(ownAdmin, 'commondir'), '/
 // A hard link from a writable path to a protected file must not open a way to write it.
 step('linkConfig', () => { fs.linkSync(path.join(common, 'config'), path.join(ownAdmin, 'linked-config')); fs.appendFileSync(path.join(ownAdmin, 'linked-config'), '[core]\n\tfsmonitor = /worker\n'); });
 step('moveHooks', () => fs.renameSync(path.join(common, 'objects', 'info'), path.join(common, 'hooks-swap')));
+step('configWorktree', () => fs.writeFileSync(path.join(ownAdmin, 'config.worktree'), '[core]\n\tfsmonitor = /worker\n'));
+// Moving a directory that holds a protected entry carries the entry with it.
+step('moveOwnAdmin', () => fs.renameSync(ownAdmin, path.join(common, 'objects', 'moved-admin')));
+step('moveObjectInfo', () => fs.renameSync(path.join(common, 'objects', 'info'), path.join(common, 'objects', 'info-moved')));
+step('moveObjects', () => fs.renameSync(path.join(common, 'objects'), path.join(ownAdmin, 'objects-moved')));
+step('moveCheckout', () => fs.renameSync(process.cwd(), path.join(process.env.TMPDIR, 'moved-checkout')));
 process.stdout.write(JSON.stringify(result));
 `;
 
@@ -93,7 +99,7 @@ describe.runIf(sandboxUsable)('worker Git metadata through the production sandbo
     for (const dir of [home, temp, data, profiles]) mkdirSync(dir, { recursive: true });
     const prepared = await prepareWorkerSandbox({
       runId: 'git-guard', profileDir: profiles, cwd: lane, repoPath: lane,
-      binary: process.execPath, args: [], homeDir: home, tmpDir: temp, gitBranch: 'inline/pkt-guard',
+      binary: process.execPath, args: [], homeDir: home, tmpDir: temp, gitBranch: { lane: 'inline/pkt-guard' },
     });
     const run = spawnSync(prepared.binary, [...prepared.args, '-e', WORKER_STEPS, gitBinary, common, otherAdmin, ownAdmin], {
       cwd: lane, encoding: 'utf8',
@@ -117,6 +123,11 @@ describe.runIf(sandboxUsable)('worker Git metadata through the production sandbo
       ownCommondir: 'refused',
       linkConfig: 'refused',
       moveHooks: 'refused',
+      configWorktree: 'refused',
+      moveOwnAdmin: 'refused',
+      moveObjectInfo: 'refused',
+      moveObjects: 'refused',
+      moveCheckout: 'refused',
     });
 
     // The host sees the worker's commit on its branch and nothing else changed.
@@ -132,5 +143,38 @@ describe.runIf(sandboxUsable)('worker Git metadata through the production sandbo
     expect(readFileSync(join(common, 'HEAD'), 'utf8')).toBe(before.head);
     expect(readFileSync(join(otherAdmin, 'HEAD'), 'utf8')).toBe(before.otherHead);
     expect(readFileSync(join(ownAdmin, 'commondir'), 'utf8')).toBe(before.commondir);
+    // Linux binds an empty placeholder over a missing worktree config.
+    const configWorktree = join(ownAdmin, 'config.worktree');
+    expect(existsSync(configWorktree) ? readFileSync(configWorktree, 'utf8') : '').toBe('');
+    expect(existsSync(join(common, 'objects', 'info'))).toBe(true);
+    expect(existsSync(join(lane, 'base.txt'))).toBe(true);
+  }, 60_000);
+
+  it('guards a linked worktree by its session branch when it has no lane, and leaves a main checkout without a lane unguarded', async () => {
+    const repo = join(root, 'session-repo');
+    mkdirSync(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    writeFileSync(join(repo, 'base.txt'), 'base\n');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-qm', 'base');
+    const checkout = join(root, 'session-checkout');
+    git(repo, 'worktree', 'add', '-q', '-b', 'inline/session-only', checkout, 'main');
+    const home = join(root, 'session-home');
+    const temp = join(root, 'session-tmp');
+    const profiles = join(root, 'session-profiles');
+    for (const dir of [home, temp, profiles]) mkdirSync(dir, { recursive: true });
+    const prepare = (cwd: string, gitBranch: { lane?: string; session?: string }, runId: string) => prepareWorkerSandbox({
+      runId, profileDir: profiles, cwd, repoPath: cwd, binary: process.execPath, args: [], homeDir: home, tmpDir: temp, gitBranch,
+    });
+    const linked = await prepare(checkout, { session: 'inline/session-only' }, 'session-linked');
+    const main = await prepare(repo, { session: 'main' }, 'session-main');
+    // The guard keeps a linked worktree's commondir and a main checkout's packed refs in place.
+    const common = join(realpathSync(repo), '.git');
+    expect(linked.profileText).toContain(join(common, 'worktrees', 'session-checkout', 'commondir'));
+    expect(main.profileText).not.toContain(join(common, 'packed-refs'));
+    expect(main.profileText).not.toContain(join(common, 'hooks'));
+    if (process.platform === 'linux') {
+      await expect(prepare(checkout, { lane: 'pkt-top' }, 'session-top')).rejects.toThrow(/own directory/);
+    }
   }, 60_000);
 });

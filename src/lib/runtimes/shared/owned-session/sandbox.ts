@@ -39,16 +39,18 @@ import { ownerInstructionPaths } from './owner-instructions';
 import { SandboxUnavailableError } from './sandbox-error';
 import { homeToolchainPolicy } from './sandbox-toolchain';
 import {
+  gitFixedDirectories,
   gitRedirectPaths,
   isLinkedCheckout,
   laneBranchFiles,
   resolveGitMetadataGuard,
   type GitMetadataGuard,
+  type WorkerGitBranch,
 } from './git-metadata-guard';
 import { assertBwrapExpressible, prepareBwrapSandbox, requireBwrap } from './sandbox-linux';
 
 export { SandboxUnavailableError };
-export type { GitMetadataGuard };
+export type { GitMetadataGuard, WorkerGitBranch };
 
 const execFileAsync = promisify(execFile);
 
@@ -214,10 +216,10 @@ function gitMetadataGuardRules(guard: GitMetadataGuard): string[] {
     ...ownState,
     ...laneBranchFiles(guard).map((file) => `  (literal ${sbplString(file)})`),
     ')',
-    // Literals: a protected directory entry cannot be renamed, replaced or removed;
-    // what lies under it stays as the rules above decide.
+    // Literals: a protected entry, or a directory holding one, cannot be renamed,
+    // replaced or removed; what lies under it stays as the rules above decide.
     `(deny ${GIT_GUARD_WRITE_OPS}`,
-    ...gitRedirectPaths(guard).map((entry) => `  (literal ${sbplString(entry)})`),
+    ...[...gitRedirectPaths(guard), ...gitFixedDirectories(guard)].map((entry) => `  (literal ${sbplString(entry)})`),
     ')',
   ];
 }
@@ -614,12 +616,13 @@ export interface PrepareWorkerSandboxInput {
   enforceReadOnly?: boolean;
   finalCredentialPolicy?: FinalCredentialPolicy;
   /**
-   * The lane's branch, from the lane record. When set (and the run is not
-   * read-only, which already denies every repository write), the worker may
-   * write only that branch, its own checkout state and new objects in the
-   * shared Git metadata.
+   * The worker's branch, from its lane record or else as its session recorded
+   * it. When set (and the run is not read-only, which already denies every
+   * repository write), a worker in a linked worktree, or in a main checkout
+   * with a lane, may write only that branch, its own checkout state and new
+   * objects in the shared Git metadata.
    */
-  gitBranch?: string;
+  gitBranch?: WorkerGitBranch;
 }
 
 /**

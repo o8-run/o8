@@ -505,8 +505,11 @@ export function createOwnedRunController({
           // paths come from the SAME git probe prepareWorkerSandbox uses to
           // grant access, and it throws if that probe resolves nothing.
           enforceReadOnly: readOnlySandbox.enforced,
-          // A lane worker may move only its lane's branch in the shared Git metadata.
-          gitBranch: session.laneId ? getLane(session.laneId)?.branch : undefined,
+          // A worker may move only its own branch in the shared Git metadata.
+          gitBranch: {
+            lane: (session.laneId ? getLane(session.laneId)?.branch : undefined) || undefined,
+            session: session.branch || undefined,
+          },
           finalAllowReadWritePaths: runtimeState.writablePaths,
           finalImmutableWritePaths: [...(runtimeState.immutablePaths ?? []), ...(preparedLaunch.workerO8?.immutablePaths ?? [])],
           finalImmutableAncestorPaths: preparedLaunch.workerO8?.immutableAncestorPaths,
