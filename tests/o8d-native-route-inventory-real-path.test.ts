@@ -52,13 +52,13 @@ it('covers native client routes with their production registration owners', () =
 // path when it is registered; the default switch waits for every list to be empty.
 const NEXT_ONLY_SHELL_PATHS = new Set([
   '/api/agent-control/action',
-  '/api/canvas/intent', '/api/cortex/ask/answer',
+  '/api/canvas/intent',
   '/api/panel/cloud-jobs/drain', '/api/symon/transport/tool',
   '/api/v1/audio/transcriptions', '/api/v1/chat/completions',
 ]);
 const NEXT_ONLY_MCP_PATHS = new Set([
   '/api/agents/inbox', '/api/agents/message', '/api/agents/presence', '/api/broadcast/post',
-  '/api/broadcast/tokens', '/api/browser/proxy', '/api/canvas/intent', '/api/cortex/ask/answer', '/api/cortex/sources',
+  '/api/broadcast/tokens', '/api/browser/proxy', '/api/canvas/intent', '/api/cortex/sources',
   '/api/devices/agent', '/api/harness', '/api/leases',
   '/api/orchestrator/create-mission', '/api/orchestrator/digest', '/api/orchestrator/dispatch',
   '/api/orchestrator/merge', '/api/orchestrator/propose-spec',

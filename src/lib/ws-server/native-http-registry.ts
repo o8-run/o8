@@ -85,7 +85,19 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/symon/mcp/tools', 'GET', () => import('@/lib/mcp/symon-mcp-tools-route')),
     route('/api/symon/mcp/call', 'POST', () => import('@/lib/mcp/symon-mcp-call-route')),
   ],
-  brain: [route('/api/cortex/ask', 'POST', () => import('@/app/api/cortex/ask/route'))],
+  brain: [
+    route('/api/cortex/ask', 'POST', () => import('@/app/api/cortex/ask/route')),
+    // The MCP-callable JSON Q&A sibling (cortex_ask tool + the `o8 ask` worker CLI).
+    // middleware.ts admits three principals here: a valid brain-read-worker bearer
+    // (self-allowlisted inside the isBrainReadWorkerBearer block), a local worker
+    // token (WORKER_CAPABILITIES), and the operator ws-token. Over native: anonymous
+    // 401 and enrolled device 403 at the middleware; a brain-read worker is scoped by
+    // the handler to its signed repo/project (a cross-project or packet-addressed read
+    // is refused before retrieval); a worker reaches the Brain only for its own packet
+    // (workerPacketRefusal refuses any other, including a legacy unbound worker). No
+    // unauthenticated caller reaches askCortex.
+    route('/api/cortex/ask/answer', 'POST', () => import('@/app/api/cortex/ask/answer/route')),
+  ],
   activity: [
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
