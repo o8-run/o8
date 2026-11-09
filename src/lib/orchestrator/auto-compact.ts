@@ -119,7 +119,11 @@ type CodexSummaryResult = {
   estimated: boolean;
 };
 
-async function summarizeWithCodex(repoPath: string, prompt: string): Promise<CodexSummaryResult> {
+/** Ends a summary run early: the caller went away, or the run overstayed its deadline. */
+type CodexSummaryLimits = { signal?: AbortSignal; timeoutMs?: number };
+
+async function summarizeWithCodex(repoPath: string, prompt: string, limits: CodexSummaryLimits = {}): Promise<CodexSummaryResult> {
+  limits.signal?.throwIfAborted();
   const { resolveCli } = await import('@/lib/runtimes/shared/cli-resolver');
   const codexBin = (await resolveCli({
     runtimeId: 'codex',
@@ -162,6 +166,23 @@ async function summarizeWithCodex(repoPath: string, prompt: string): Promise<Cod
       child.stdin?.write(prompt, 'utf-8');
       child.stdin?.end();
     }
+    let stopped: Error | null = null;
+    let forceKill: ReturnType<typeof setTimeout> | undefined;
+    const stop = (reason: Error) => {
+      if (stopped) return;
+      stopped = reason;
+      child.kill('SIGTERM');
+      forceKill = setTimeout(() => child.kill('SIGKILL'), 2_000);
+    };
+    const deadline = limits.timeoutMs === undefined ? undefined
+      : setTimeout(() => stop(new Error(`Codex summary timed out after ${limits.timeoutMs}ms`)), limits.timeoutMs);
+    const cancelled = () => stop(new Error('Codex summary cancelled: the caller disconnected'));
+    limits.signal?.addEventListener('abort', cancelled, { once: true });
+    const settle = () => {
+      clearTimeout(deadline);
+      clearTimeout(forceKill);
+      limits.signal?.removeEventListener('abort', cancelled);
+    };
     let buffer = '';
     let stderr = '';
     let result = '';
@@ -200,8 +221,10 @@ async function summarizeWithCodex(repoPath: string, prompt: string): Promise<Cod
       }
     });
     child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-    child.once('error', reject);
+    child.once('error', (error) => { settle(); reject(error); });
     child.once('close', (code) => {
+      settle();
+      if (stopped) return reject(stopped);
       const text = result.trim();
       if (code === 0 && text) resolve({
         text,
@@ -253,6 +276,11 @@ export interface DigestResult {
 
 /** Argv-safety cap — the prompt rides as a single codex argv element. */
 const DIGEST_INPUT_CHAR_CAP = 180_000;
+/**
+ * Ends a digest run before the operator MCP client's 120 s request timeout, so a
+ * client retry never overlaps a run that is still going.
+ */
+export const DIGEST_TIMEOUT_MS = 110_000;
 
 /**
  * Pre-digest arbitrary bulk (logs, test output, a diff, docs, a transcript)
@@ -264,7 +292,7 @@ const DIGEST_INPUT_CHAR_CAP = 180_000;
  * codex exec — the digest never comes from the proposing worker's session, so
  * no summarizer grades its own work.
  */
-export async function digest(text: string, repoPath: string): Promise<DigestResult> {
+export async function digest(text: string, repoPath: string, limits: CodexSummaryLimits = {}): Promise<DigestResult> {
   const trimmed = text.trim();
   if (!trimmed) throw new Error('digest: text is required');
   const truncatedInput = trimmed.length > DIGEST_INPUT_CHAR_CAP;
@@ -280,7 +308,7 @@ export async function digest(text: string, repoPath: string): Promise<DigestResu
     'Use file paths, symbols, and numbers verbatim. If a section is empty, write "- None." Do not editorialize or add recommendations beyond the material.',
     '',
     capped,
-  ].join('\n'));
+  ].join('\n'), { signal: limits.signal, timeoutMs: limits.timeoutMs ?? DIGEST_TIMEOUT_MS });
   const summary = summaryResult.text;
   return {
     digest: summary,
