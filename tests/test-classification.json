@@ -5244,6 +5244,15 @@
       ]
     },
     {
+      "path": "tests/o8-next-o8d-boot-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8-next-pane-grid-real-path.test.ts",
       "reasons": [
         "child-process",
