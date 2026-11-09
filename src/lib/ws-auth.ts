@@ -8,26 +8,31 @@ export const WS_TOKEN_PATH = path.join(DATA_DIR, 'ws-token');
 const TOKEN_LENGTH = 32; // 256-bit token
 const MIN_TOKEN_LENGTH = 16;
 
-/** A stored token shorter than the minimum is a truncated file, never a credential. */
-export function storedWsToken(raw: string): string | null {
+/** A token shorter than the minimum (a truncated file, a placeholder) is never a credential. */
+export function validWsToken(raw: string): string | null {
   const token = raw.trim();
   return token.length >= MIN_TOKEN_LENGTH ? token : null;
 }
 
 /**
- * The one rule every verifier shares (the middleware gate, request handlers and the WS
- * upgrade): a valid stored token wins, and WS_TOKEN stands in only when none is stored.
- * Every client (the desktop shell, o8d, the MCP servers) reads the stored file, so letting
- * the environment override it would split the operator's credential in two.
+ * The one rule the TypeScript verifiers share (the middleware gate, request handlers and the
+ * WS upgrade): a valid stored token wins, and a valid WS_TOKEN stands in only when none is
+ * stored. Every client (the desktop shell, o8d, the MCP servers) reads the stored file, so
+ * letting the environment override it would split the operator's credential in two.
  */
 export function wsTokenFor(stored: string | null): string | null {
-  return stored ?? (process.env.WS_TOKEN?.trim() || null);
+  return stored ?? validWsToken(process.env.WS_TOKEN ?? '');
+}
+
+/** Where the operator token comes from, for startup diagnostics. */
+export function wsTokenSource(): string {
+  return readStoredWsToken() ? WS_TOKEN_PATH : wsTokenFor(null) ? 'WS_TOKEN' : WS_TOKEN_PATH;
 }
 
 function readStoredWsToken(): string | null {
   try {
     if (!existsSync(WS_TOKEN_PATH)) return null;
-    return storedWsToken(readFileSync(WS_TOKEN_PATH, 'utf8'));
+    return validWsToken(readFileSync(WS_TOKEN_PATH, 'utf8'));
   } catch {
     return null;
   }
@@ -37,9 +42,9 @@ let warnedEnvIgnored = false;
 
 export function getOrCreateWsToken(): string {
   const existing = readStoredWsToken();
-  const envToken = process.env.WS_TOKEN?.trim();
+  const envToken = wsTokenFor(null);
   if (existing) {
-    if (envToken && envToken !== existing && !warnedEnvIgnored) {
+    if (process.env.WS_TOKEN?.trim() && process.env.WS_TOKEN.trim() !== existing && !warnedEnvIgnored) {
       warnedEnvIgnored = true;
       console.warn(`[ws-auth] WS_TOKEN differs from ${WS_TOKEN_PATH}; using the stored token so clients and verifiers agree`);
     }

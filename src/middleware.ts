@@ -35,7 +35,7 @@ import {
   isTauriShellOrigin,
 } from '@/lib/auth/loopback-request';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
-import { storedWsToken, wsTokenFor } from '@/lib/ws-auth';
+import { validWsToken, wsTokenFor } from '@/lib/ws-auth';
 // DB-free reader of the registry's derived active-token-hash file (#5). Importing
 // this does NOT pull better-sqlite3 into the middleware bundle — it is pure fs.
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
@@ -76,7 +76,7 @@ function loadStoredPanelToken(): string | null {
       return _cachedToken.value;
     }
 
-    const value = storedWsToken(readFileSync(tokenPath, 'utf-8'));
+    const value = validWsToken(readFileSync(tokenPath, 'utf-8'));
     _cachedToken = { path: tokenPath, value, mtimeMs: stat.mtimeMs, size: stat.size };
     return value;
   } catch {

@@ -130,7 +130,7 @@ import {
   type SymonMachineIdentity,
 } from '@/lib/symon/machine-registry';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
-import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
+import { getOrCreateWsToken, WS_TOKEN_PATH, wsTokenSource } from '@/lib/ws-auth';
 import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { resolveAppVersion } from '@/lib/telemetry/crash-store';
@@ -8921,7 +8921,7 @@ const WS_LISTEN_HOST = resolveListenHost();
 const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
 
 const WS_TOKEN = getOrCreateWsToken();
-console.log(`[ws-auth] WS token loaded (source: ${WS_TOKEN_PATH})`);
+console.log(`[ws-auth] WS token loaded (source: ${wsTokenSource()})`);
 
 const wss = new WebSocketServer({
   server: httpServer,

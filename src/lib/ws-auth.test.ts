@@ -29,7 +29,7 @@ describe('the operator token has one source', () => {
     const stored = 'stored-operator-credential-0123456789';
     const { directory, auth } = await load({ stored, wsToken: 'environment-credential-0123456789' });
     expect(auth.getOrCreateWsToken()).toBe(stored);
-    expect(auth.wsTokenFor(auth.storedWsToken(stored))).toBe(stored);
+    expect(auth.wsTokenFor(auth.validWsToken(stored))).toBe(stored);
     expect(readFileSync(join(directory, 'ws-token'), 'utf8')).toBe(stored);
   });
 
@@ -44,8 +44,16 @@ describe('the operator token has one source', () => {
   it('treats a truncated stored token as absent at every verifier', async () => {
     const wsToken = 'environment-credential-0123456789';
     const { auth } = await load({ stored: 'short', wsToken });
-    expect(auth.storedWsToken('short')).toBeNull();
-    expect(auth.wsTokenFor(auth.storedWsToken('short'))).toBe(wsToken);
+    expect(auth.validWsToken('short')).toBeNull();
+    expect(auth.wsTokenFor(auth.validWsToken('short'))).toBe(wsToken);
     expect(auth.getOrCreateWsToken()).toBe(wsToken);
+  });
+
+  it('never accepts a short WS_TOKEN as the operator credential', async () => {
+    const { directory, auth } = await load({ wsToken: 'op!42x' });
+    expect(auth.wsTokenFor(null)).toBeNull();
+    const token = auth.getOrCreateWsToken();
+    expect(token).not.toBe('op!42x');
+    expect(readFileSync(join(directory, 'ws-token'), 'utf8')).toBe(token);
   });
 });
