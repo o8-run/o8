@@ -3,6 +3,7 @@ import { isWorkspaceFileError, writeWorkspaceFile } from '@/lib/fs/workspace-fil
 import { NextResponse, type NextRequest } from 'next/server';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import { specCallerScope, WORKER_SPEC_SCOPE_REFUSAL } from '@/lib/o8md/worker-scope';
 import { extname, join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -70,7 +71,12 @@ function slugifyStem(name: string): string {
 export async function POST(request: NextRequest) {
   const sourceRefusal = knowledgeSourceWriteRefusal(request.nextUrl.searchParams.get('repoPath'));
   if (sourceRefusal) return sourceRefusal;
-  const repoPath = repoDir(request.nextUrl.searchParams.get('repoPath') ?? '');
+  const requested = request.nextUrl.searchParams.get('repoPath') ?? '';
+  const caller = specCallerScope(request, requested);
+  if (caller.worker && !caller.repoPath) {
+    return NextResponse.json({ ok: false, error: WORKER_SPEC_SCOPE_REFUSAL }, { status: 403 });
+  }
+  const repoPath = repoDir(caller.worker ? caller.repoPath ?? '' : requested);
   if (!repoPath) {
     return NextResponse.json({ ok: false, error: 'repoPath invalid' }, { status: 400 });
   }
