@@ -116,6 +116,11 @@ describe('terminal resync barrier', () => {
     })).resolves.toMatchObject({ captureAttempts: 1, fallbackReason: null });
   });
 
+  it('strips cursor save, restore and keypad escapes from a prompt', () => {
+    expect(terminalResyncFreshnessLine(['\x1b712:00\x1b8\x1b=user@host$ '])).toBe('12:00user@host$');
+    expect(terminalResyncFreshnessLine(['echo (B) and ( 0 )\r\n'])).toBe('echo (B) and ( 0 )');
+  });
+
   it('extracts the last cursor-addressed row without spanning painted rows', () => {
     expect(terminalResyncFreshnessLine([
       '\x1b[2J\x1b[H\x1b[1;1Hfirst painted row\x1b[2Hsecond painted row',
