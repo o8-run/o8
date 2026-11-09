@@ -60,7 +60,7 @@ pub(super) fn auto_note(reason: &str) -> &'static str {
 /// The shelves pinned to the foot of the Inbox, in order (T3 Code's sidebar
 /// shelves; Working moved to the head of the list). Each folds to one line and
 /// hides when empty.
-pub(crate) const SHELVES: [&str; 2] = ["Snoozed", "Settled"];
+pub(crate) const SHELVES: [&str; 3] = ["Snoozed", "Settled", "Archived"];
 
 /// The key that keeps a shelf unfolded.
 pub(crate) fn open_key(shelf: &str) -> String {
@@ -88,10 +88,11 @@ pub(super) fn rows(
 ) -> Vec<Row> {
     let now = recents::now();
     let searching = !query.trim().is_empty();
-    let live: Vec<_> = recents::visible(sessions, query, matches)
+    // Archived threads keep their bottom shelf, so a search still finds them.
+    let (live, archived): (Vec<_>, Vec<_>) = recents::visible(sessions, query, matches)
         .into_iter()
-        .filter(|s| s.parent_inbox_subject.is_none() && s.status != "archived")
-        .collect();
+        .filter(|s| s.parent_inbox_subject.is_none())
+        .partition(|s| s.status != "archived");
     let (mut settled, active): (Vec<_>, Vec<_>) = live.into_iter().partition(|s| s.settled());
     settled.sort_by(|a, b| b.settled_at.cmp(&a.settled_at));
     // A snooze hides an Active thread until its time; then it comes back on
@@ -166,6 +167,7 @@ pub(super) fn rows(
     for (name, group, cap) in [
         ("Snoozed", &snoozed, 10),
         ("Settled", &settled, 10),
+        ("Archived", &archived, 12),
     ] {
         if group.is_empty() {
             continue;
@@ -175,20 +177,35 @@ pub(super) fn rows(
         header.age = group.len().to_string();
         rows.push(header);
         let shown: Vec<_> = if unfolded {
-            let count = if expanded.contains(name) { group.len() } else { group.len().min(cap) };
+            let count = if expanded.contains(name) {
+                group.len()
+            } else {
+                group.len().min(cap)
+            };
             group.iter().take(count).collect()
         } else {
-            group.iter().filter(|s| Some(s.id.as_str()) == selected).collect()
+            group
+                .iter()
+                .filter(|s| Some(s.id.as_str()) == selected)
+                .collect()
         };
         let more = unfolded && shown.len() < group.len();
         for s in shown {
             let mut row = recents::thread_row(s, now, branches);
-            row.marker = if name == "Snoozed" { "snoozed" } else { "settled" };
+            row.marker = match name {
+                "Snoozed" => "snoozed",
+                "Settled" => "settled",
+                _ => "",
+            };
             if let Some(until) = snoozes.get(&s.id).filter(|_| name == "Snoozed") {
                 row.age = snooze::until_label(*until, now);
             }
             // An automatic settle says why: "merged · 2h".
-            if let Some(reason) = s.auto_settled_reason.as_deref().filter(|_| name == "Settled") {
+            if let Some(reason) = s
+                .auto_settled_reason
+                .as_deref()
+                .filter(|_| name == "Settled")
+            {
                 row.age = note_with_age(reason, &row.age);
             }
             rows.push(row);
@@ -432,16 +449,20 @@ impl ThreadList {
     /// The Active thread now in the settled row's place, else the one above.
     pub(super) fn next_active(&self, index: Option<usize>) -> Option<String> {
         let index = index?;
-        let end = self
+        // The Active section runs from its heading to the next heading or
+        // shelf; the Working shelf can sit above it.
+        let start = self
             .rows
             .iter()
-            .skip(1)
-            .position(|r| r.kind == "section")
-            .map_or(self.rows.len(), |at| at + 1);
-        let active: Vec<_> = self.rows[..end]
+            .position(|r| r.kind == "section" && r.title == "Active")?;
+        let end = self.rows[start + 1..]
+            .iter()
+            .position(|r| matches!(r.kind.as_str(), "section" | "shelf"))
+            .map_or(self.rows.len(), |at| start + 1 + at);
+        let active: Vec<_> = self.rows[start + 1..end]
             .iter()
             .enumerate()
-            .filter_map(|(i, r)| r.id.clone().map(|id| (i, id)))
+            .filter_map(|(i, r)| r.id.clone().map(|id| (start + 1 + i, id)))
             .collect();
         active
             .iter()
@@ -618,16 +639,27 @@ mod auto_settle_tests {
             with_status("c", "idle"),
         ];
         let rows = inbox(&sessions, &[], None, true, &[]);
-        assert_eq!((rows[0].kind.as_str(), rows[0].title.as_str()), ("shelf", "Working"));
+        assert_eq!(
+            (rows[0].kind.as_str(), rows[0].title.as_str()),
+            ("shelf", "Working")
+        );
         assert_eq!(rows[0].age, "2");
         assert_eq!(rows[1].title, "Active");
         assert_eq!(ids(&rows), ["c"], "folded: only the count shows");
         // The open thread stays listed under a folded shelf.
-        assert_eq!(ids(&inbox(&sessions, &[], Some("b"), true, &[])), ["b", "c"]);
+        assert_eq!(
+            ids(&inbox(&sessions, &[], Some("b"), true, &[])),
+            ["b", "c"]
+        );
         let open = inbox(&sessions, &["open:Working"], None, true, &[]);
         assert_eq!(open[0].status, "open");
         assert_eq!(ids(&open), ["a", "b", "c"]);
-        assert!(open.iter().filter(|r| r.id.is_some()).take(2).all(|r| r.marker == "working"));
+        assert!(
+            open.iter()
+                .filter(|r| r.id.is_some())
+                .take(2)
+                .all(|r| r.marker == "working")
+        );
     }
 
     #[test]
@@ -646,5 +678,24 @@ mod auto_settle_tests {
         assert_eq!(rows[0].title, "Working");
         assert_eq!(ids(&rows), ["a", "c"]);
         assert_eq!(rows[1].marker, "working");
+    }
+
+    #[test]
+    fn archived_threads_keep_a_folded_bottom_shelf() {
+        let sessions = [with_status("a", "idle"), with_status("z", "archived")];
+        let folded = inbox(&sessions, &[], None, true, &[]);
+        let shelf = folded.last().unwrap();
+        assert_eq!(
+            (
+                shelf.kind.as_str(),
+                shelf.title.as_str(),
+                shelf.age.as_str()
+            ),
+            ("shelf", "Archived", "1")
+        );
+        assert_eq!(ids(&folded), ["a"]);
+        let open = inbox(&sessions, &["open:Archived"], None, true, &[]);
+        assert_eq!(ids(&open), ["a", "z"]);
+        assert_eq!(open.last().unwrap().id.as_deref(), Some("z"));
     }
 }

@@ -82,7 +82,7 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("detailed.json"),
-        State::default(),
+        by_date(),
         cx,
     );
     wait_for(&shell, &mut visual, |s, _| s.connected);

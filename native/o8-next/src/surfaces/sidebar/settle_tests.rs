@@ -131,7 +131,14 @@ fn sidebar_inbox_settles_advances_and_undoes(cx: &mut TestAppContext) {
         s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
     });
     draw(&mut visual);
-    assert_eq!(list(&shell, &visual, |l| l.rows[0].title.clone()), "Active");
+    // Working heads the Inbox when a fixture thread runs; Active follows it.
+    let heads = list(&shell, &visual, |l| {
+        let first = l.rows.iter().position(|r| r.kind == "section").unwrap();
+        let above: Vec<_> = l.rows[..first].iter().map(|r| r.title.clone()).collect();
+        (l.rows[first].title.clone(), above)
+    });
+    assert_eq!(heads.0, "Active");
+    assert!(heads.1.iter().all(|title| title == "Working"), "{heads:?}");
     for id in [FIRST, SECOND] {
         assert_eq!(
             list(&shell, &visual, |l| section(l, id)).as_deref(),
@@ -164,19 +171,24 @@ fn sidebar_inbox_settles_advances_and_undoes(cx: &mut TestAppContext) {
             .iter()
             .position(|r| r.id.as_deref() == Some(FIRST))
             .unwrap();
-        let end = l
+        // The Active section, between its heading and the next heading or
+        // shelf (Working can sit above it).
+        let start = l
             .rows
             .iter()
-            .skip(1)
-            .position(|r| r.kind == "section")
-            .map_or(l.rows.len(), |e| e + 1);
+            .position(|r| r.kind == "section" && r.title == "Active")
+            .unwrap();
+        let end = l.rows[start + 1..]
+            .iter()
+            .position(|r| matches!(r.kind.as_str(), "section" | "shelf"))
+            .map_or(l.rows.len(), |e| start + 1 + e);
         l.rows[..end]
             .iter()
             .enumerate()
-            .filter(|(i, r)| r.id.is_some() && *i != at)
+            .filter(|(i, r)| r.id.is_some() && *i != at && *i > start)
             .find(|(i, _)| *i > at)
             .or_else(|| {
-                l.rows[..at]
+                l.rows[start + 1..at]
                     .iter()
                     .enumerate()
                     .rev()
@@ -295,7 +307,8 @@ fn sidebar_view_menu_takes_the_press_over_inbox_rows(cx: &mut TestAppContext) {
     shell.update(&mut visual, |s, cx| {
         let sidebar = s.surfaces.sidebar.view.clone().unwrap();
         sidebar.update(cx, |l, cx| {
-            l.scroll.scroll_to_item(0, ScrollStrategy::Top);
+            // The card view scrolls its own list; scroll_row moves either.
+            l.scroll_row(0, ScrollStrategy::Top, false);
             cx.notify();
         });
     });

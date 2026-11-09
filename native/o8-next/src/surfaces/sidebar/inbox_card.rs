@@ -29,7 +29,8 @@ const FADE: std::time::Duration = std::time::Duration::from_millis(180);
 // Lucide icons.
 const CIRCLE_DASHED: &str = "M10.1 2.182a10 10 0 0 1 3.8 0 M13.9 21.818a10 10 0 0 1-3.8 0 M17.609 3.721a10 10 0 0 1 2.69 2.7 M2.182 13.9a10 10 0 0 1 0-3.8 M20.279 17.609a10 10 0 0 1-2.7 2.69 M21.818 10.1a10 10 0 0 1 0 3.8 M3.721 6.391a10 10 0 0 1 2.7-2.69 M6.391 20.279a10 10 0 0 1-2.69-2.7";
 const SHIELD_QUESTION: &str = "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z M9.1 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3 M12 17h.01";
-const MESSAGE_QUESTION: &str = "M7.9 20A9 9 0 1 0 4 16.1L2 22Z M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3 M12 17h.01";
+const MESSAGE_QUESTION: &str =
+    "M7.9 20A9 9 0 1 0 4 16.1L2 22Z M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3 M12 17h.01";
 const CIRCLE_ALERT: &str = "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z M12 8v4 M12 16h.01";
 const CIRCLE_CHECK: &str = "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z M9 12l2 2 4-4";
 const ALARM_CLOCK: &str = "M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16z M12 9v4l2 2 M5 3 2 6 M22 6l-3-3 M6.38 18.7 4 21 M17.64 18.67 20 21";
@@ -63,10 +64,24 @@ fn input_color() -> Rgba {
 pub(crate) fn status(s: &Session, woke: bool, now: u64) -> Option<Status> {
     let rank = sidebar::rank(s);
     let status = s.status.trim().to_lowercase();
-    let make = |key, icon, label: &str, color| Some(Status { key, icon, label: label.into(), color });
+    let make = |key, icon, label: &str, color| {
+        Some(Status {
+            key,
+            icon,
+            label: label.into(),
+            color,
+        })
+    };
     match rank {
         5 => return make("failed", CIRCLE_ALERT, "Failed", theme().danger),
-        4 => return make("rejected", CIRCLE_ALERT, "Rejected", crate::theme::rejected_mark()),
+        4 => {
+            return make(
+                "rejected",
+                CIRCLE_ALERT,
+                "Rejected",
+                crate::theme::rejected_mark(),
+            );
+        }
         3 => return make("input", MESSAGE_QUESTION, "Input", input_color()),
         2 if matches!(status.as_str(), "approval") => {
             return make("approval", SHIELD_QUESTION, "Approval", theme().warning);
@@ -85,7 +100,12 @@ pub(crate) fn status(s: &Session, woke: bool, now: u64) -> Option<Status> {
             Some(timer) => format!("Working {timer}"),
             None => "Working".into(),
         };
-        return Some(Status { key: "working", icon: CIRCLE_DASHED, label, color: theme().accent });
+        return Some(Status {
+            key: "working",
+            icon: CIRCLE_DASHED,
+            label,
+            color: theme().accent,
+        });
     }
     if woke {
         return make("woke", ALARM_CLOCK, "Woke", theme().warning);
@@ -302,14 +322,23 @@ impl ThreadList {
         if session.is_some_and(|s| s.tmux_session.as_deref().is_some_and(|t| !t.is_empty())) {
             // T3's terminal pulse: full, then half, every other second while it works.
             let pulse = if working && now % 2 == 1 { 0.5 } else { 1. };
-            let color = if crate::theme::light() { gpui::rgb(0x0d9488) } else { gpui::rgb(0x5eead4) };
+            let color = if crate::theme::light() {
+                gpui::rgb(0x0d9488)
+            } else {
+                gpui::rgb(0x5eead4)
+            };
             let sid = id.clone();
             third = third.child(
                 div()
-                    .id(gpui::ElementId::Name(format!("thread-terminal-{sid}").into()))
+                    .id(gpui::ElementId::Name(
+                        format!("thread-terminal-{sid}").into(),
+                    ))
                     .debug_selector(move || format!("thread-terminal-{sid}"))
                     .opacity(pulse)
-                    .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Terminal running".into())).into())
+                    .tooltip(|_, cx| {
+                        cx.new(|_| crate::icon::Tip("Terminal running".into()))
+                            .into()
+                    })
                     .child(crate::icon::stroke(TERMINAL, color, 12., 2.)),
             );
         }
@@ -332,33 +361,51 @@ impl ThreadList {
     pub(super) fn slim_content(&self, row: &Row, cx: &mut Context<Self>) -> AnyElement {
         let id = row.id.clone().unwrap_or_default();
         let snoozed = row.marker == "snoozed";
+        // A server settle's age already reads "merged · 2h": it is the note.
+        let auto = !snoozed
+            && self
+                .sessions
+                .iter()
+                .any(|s| s.id == id && s.settled() && s.auto_settled_reason.is_some());
+        let note_id = id.clone();
         let time = div()
+            .when(auto, |v| {
+                v.debug_selector(move || format!("thread-auto-note-{note_id}"))
+            })
             .flex_shrink_0()
             .flex()
             .items_center()
             .gap(px(4.))
             .text_size(px(11.))
-            .text_color(if snoozed { theme().accent } else { theme().text_faint })
-            .when(snoozed, |v| v.child(crate::icon::stroke(ALARM_CLOCK, theme().accent, 12., 1.9)))
+            .text_color(if snoozed {
+                theme().accent
+            } else {
+                theme().text_faint
+            })
+            .when(snoozed, |v| {
+                v.child(crate::icon::stroke(ALARM_CLOCK, theme().accent, 12., 1.9))
+            })
             .child(row.age.clone());
         let action = if snoozed {
             let wake = id.clone();
-            Some(icon_button(format!("thread-wake-{id}"), ALARM_CLOCK_OFF, "Wake").on_click(
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.snooze(wake.clone(), None, cx);
-                }),
-            ))
+            Some(
+                icon_button(format!("thread-wake-{id}"), ALARM_CLOCK_OFF, "Wake").on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.snooze(wake.clone(), None, cx);
+                    }),
+                ),
+            )
         } else {
             self.settleable(&id).map(|_| {
                 let unsettle = id.clone();
-                icon_button(format!("thread-settle-{id}"), UNDO, "Un-settle").on_click(
-                    cx.listener(move |this, _, window, cx| {
+                icon_button(format!("thread-settle-{id}"), UNDO, "Un-settle").on_click(cx.listener(
+                    move |this, _, window, cx| {
                         cx.stop_propagation();
                         this.focus.focus(window);
                         this.settle_id(unsettle.clone(), cx);
-                    }),
-                )
+                    },
+                ))
             })
         };
         let has_action = action.is_some();
@@ -386,6 +433,8 @@ impl ThreadList {
                     .text_color(theme().text_secondary)
                     .child(crate::text::sanitize(&row.title)),
             )
+            // A settled thread whose workspace was parked says so, and what it freed.
+            .children(self.workspace_parked_detail(&id))
             .child(
                 div()
                     .relative()
@@ -393,7 +442,9 @@ impl ThreadList {
                     .flex()
                     .items_center()
                     .when(has_action, |slot| slot.min_w(px(20.)).justify_end())
-                    .child(time.group_hover("thread-row", move |s| if has_action { s.invisible() } else { s }))
+                    .child(time.group_hover("thread-row", move |s| {
+                        if has_action { s.invisible() } else { s }
+                    }))
                     .children(action.map(|action| {
                         div()
                             .absolute()
@@ -408,7 +459,11 @@ impl ThreadList {
     }
 
     /// A shelf's header: its name, count and a chevron; a click folds it.
-    pub(super) fn shelf_header(&self, row: &Row, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+    pub(super) fn shelf_header(
+        &self,
+        row: &Row,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
         let name = row.title.clone();
         let open = row.status == "open";
         let selector = format!("sidebar-shelf-{}", name.to_lowercase());
@@ -446,9 +501,11 @@ impl ThreadList {
                     .drag_over::<crate::shell::features::RailPane>(|style, _, _, _| {
                         style.bg(theme().selection)
                     })
-                    .on_drop(cx.listener(|this, pane: &crate::shell::features::RailPane, _, cx| {
-                        this.drop_thread("Settled", pane, cx)
-                    }))
+                    .on_drop(
+                        cx.listener(|this, pane: &crate::shell::features::RailPane, _, cx| {
+                            this.drop_thread("Settled", pane, cx)
+                        }),
+                    )
             })
             .on_click(cx.listener(move |this, _, _, cx| {
                 let key = super::inbox::open_key(&name);
@@ -530,7 +587,9 @@ impl ThreadList {
         self.placed = Some(current);
     }
     pub(super) fn arrival_opacity(&self, i: usize) -> f32 {
-        let Some(row) = self.rows.get(i) else { return 1. };
+        let Some(row) = self.rows.get(i) else {
+            return 1.;
+        };
         let Some(id) = row.id.as_ref() else { return 1. };
         let Some(at) = self.arrivals.get(&format!("{id}/{}", row.marker)) else {
             return 1.;
@@ -546,7 +605,9 @@ impl ThreadList {
         }
         self.fade_tick = true;
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(std::time::Duration::from_millis(16)).await;
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(16))
+                .await;
             let _ = this.update(cx, |this, cx| {
                 this.fade_tick = false;
                 cx.notify();
@@ -567,7 +628,9 @@ impl ThreadList {
         self.second_tick = true;
         // Half a second keeps the clocks on time and ends a grace promptly.
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(std::time::Duration::from_millis(500)).await;
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(500))
+                .await;
             let _ = this.update(cx, |this, cx| {
                 this.second_tick = false;
                 if !this.lingering.is_empty() {
@@ -592,7 +655,9 @@ impl ThreadList {
                 seen.insert(s.id.clone(), None);
                 continue;
             }
-            let Some(entry) = seen.get_mut(&s.id) else { continue };
+            let Some(entry) = seen.get_mut(&s.id) else {
+                continue;
+            };
             if inbox::needs_input(s) {
                 seen.remove(&s.id);
                 continue;
@@ -614,8 +679,13 @@ impl ThreadList {
 /// Tabular figures, so a ticking clock or a changing count holds its width
 /// (Emil Kowalski's UI cheatsheet: numbers jitter when they change).
 pub(crate) fn tabular<E: gpui::Styled>(mut element: E) -> E {
-    element.text_style().get_or_insert_with(Default::default).font_features =
-        Some(gpui::FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)])));
+    element
+        .text_style()
+        .get_or_insert_with(Default::default)
+        .font_features = Some(gpui::FontFeatures(std::sync::Arc::new(vec![(
+        "tnum".into(),
+        1,
+    )])));
     element
 }
 /// A run's clock keeps its seconds: "42s", "1m 05s", "1h 02m 05s".
@@ -623,7 +693,12 @@ pub(super) fn run_timer(secs: u64) -> String {
     match secs {
         0..60 => format!("{secs}s"),
         60..3600 => format!("{}m {:02}s", secs / 60, secs % 60),
-        _ => format!("{}h {:02}m {:02}s", secs / 3600, secs % 3600 / 60, secs % 60),
+        _ => format!(
+            "{}h {:02}m {:02}s",
+            secs / 3600,
+            secs % 3600 / 60,
+            secs % 60
+        ),
     }
 }
 

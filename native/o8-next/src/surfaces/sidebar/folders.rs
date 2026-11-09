@@ -201,14 +201,13 @@ const DOTS: &str = "M5 12h.001 M12 12h.001 M19 12h.001";
 pub(super) const CHECK: &str = "M20 6 9 17l-5-5";
 
 impl ThreadList {
-    /// The active project's view; By date until one is chosen.
+    /// The active project's view; the Inbox until one is chosen where the
+    /// host settles threads, else By date.
     pub(super) fn view(&self) -> View {
-        self.header
-            .ledger
-            .projects
-            .iter()
-            .find(|p| p.id == self.header.ledger.active_project_id)
-            .and_then(|p| self.views.get(&p.id))
+        // Without a project the choice is kept under the empty id, so the
+        // view menu still works before the first project exists.
+        self.views
+            .get(&self.header.ledger.active_project_id)
             .copied()
             // A host without inbox settlement keeps the sidebar it had.
             .filter(|view| *view != View::Inbox || self.inbox_ready())
@@ -231,10 +230,8 @@ impl ThreadList {
     pub(super) fn set_view(&mut self, view: View, cx: &mut Context<Self>) {
         self.view_menu = false;
         let project = self.header.ledger.active_project_id.clone();
-        if !project.is_empty() {
-            self.views.insert(project.clone(), view);
-            cx.emit(Event::View(project, view.key()));
-        }
+        self.views.insert(project.clone(), view);
+        cx.emit(Event::View(project, view.key()));
         self.rebuild();
         cx.notify();
     }

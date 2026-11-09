@@ -29,6 +29,8 @@ fn make(
         let mut list = ThreadList::new(Client::new("http://127.0.0.1:9").unwrap(), cx);
         list.sessions = sessions;
         list.detailed = detailed;
+        // Nesting is the By date list's; the Inbox lists only parents.
+        list.views.insert(String::new(), super::folders::View::Date);
         list.rebuild();
         list.focus.focus(window);
         list

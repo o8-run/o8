@@ -22,7 +22,7 @@ fn shown(shell: &Entity<Shell>, cx: &mut VisualTestContext, id: &str) {
     let index = index.unwrap_or_else(|| panic!("{id} is listed"));
     shell.update(cx, |s, cx| {
         s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
-            l.scroll.scroll_to_item(index, ScrollStrategy::Center);
+            l.scroll_row(index, ScrollStrategy::Center, false);
             cx.notify();
         });
     });

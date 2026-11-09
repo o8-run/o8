@@ -100,9 +100,14 @@ fn new_thread_view(cx: &mut TestAppContext, archive: bool, shift: bool) {
     if shift {
         paths.push(fixture.folders[0].clone());
     }
-    scope_tests::project(&fixture, &paths);
+    let project = scope_tests::project(&fixture, &paths);
     let file = fixture.root.join("new-thread-view.json");
-    let (shell, mut visual) = open(fixture.client.clone(), file.clone(), State::default(), cx);
+    // The project chose By date, the list this view returns to.
+    let state = State {
+        sidebar_view: [(project, "date".to_owned())].into_iter().collect(),
+        ..State::default()
+    };
+    let (shell, mut visual) = open(fixture.client.clone(), file.clone(), state, cx);
     wait_for(&shell, &mut visual, |s, cx| {
         s.connected
             && s.surfaces
