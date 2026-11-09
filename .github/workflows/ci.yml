@@ -502,9 +502,8 @@ jobs:
         # RUSTSEC-2026-0099: rustls-webpki 0.102.8 is pinned by sentry 0.34.0 through rustls 0.22.4.
         # RUSTSEC-2026-0049: rustls-webpki 0.102.8 is pinned by sentry 0.34.0 through rustls 0.22.4.
         # RUSTSEC-2026-0235: rkyv >=0.8.17 is blocked by rust_decimal 1.40.0 (rkyv 0.7 line) via byte-unit 5.2.0; o8 never deserializes rkyv archives.
-        # RUSTSEC-2026-0459: bundled SQLite in libsqlite3-sys 0.28.0 (rusqlite 0.31) reads stale page-cache memory from a crafted database and -wal pair. The desktop app opens only o8's own cortex-ide.db and agent.db in the operator's data directory. Fixed in libsqlite3-sys 0.39 (rusqlite 0.41); remove this entry with that upgrade.
         env:
-          AUDIT_IGNORE: RUSTSEC-2026-0195,RUSTSEC-2026-0194,RUSTSEC-2026-0104,RUSTSEC-2026-0098,RUSTSEC-2026-0099,RUSTSEC-2026-0049,RUSTSEC-2026-0235,RUSTSEC-2026-0459
+          AUDIT_IGNORE: RUSTSEC-2026-0195,RUSTSEC-2026-0194,RUSTSEC-2026-0104,RUSTSEC-2026-0098,RUSTSEC-2026-0099,RUSTSEC-2026-0049,RUSTSEC-2026-0235
         run: |
           ignores=""
           for id in ${AUDIT_IGNORE//,/ }; do ignores="$ignores --ignore $id"; done
