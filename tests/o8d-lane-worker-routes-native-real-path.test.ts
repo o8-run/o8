@@ -89,9 +89,13 @@ it.skipIf(process.platform === 'win32')('serves the packet worker lane routes na
       expect(refused.status).toBe(403);
       expect(await refused.json()).toMatchObject({ error: { code: 'worker_packet_mismatch' } });
     }
-    // A worker credential bound to no packet keeps panel auth, which admits only the operator here.
-    expect((await call(legacyWorker, `${ownId}/heartbeat`, {})).status).toBe(401);
-    expect((await call(legacyWorker, ownId)).status).toBe(401);
+    // A worker credential bound to no packet keeps panel auth; a loopback caller passes it, as under
+    // Next, and the route then refuses the unbound credential.
+    for (const [path, body] of [[`${ownId}/heartbeat`, {}], [ownId, undefined]] as const) {
+      const refused = await call(legacyWorker, path, body);
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ error: { code: 'worker_packet_mismatch' } });
+    }
     expect((await call(null, `${ownId}/heartbeat`, {})).status).toBe(401);
     expect((await call(device, `${ownId}/heartbeat`, {})).status).toBe(403);
     expect((await call(device, `${ownId}/scope`)).status).toBe(403);
