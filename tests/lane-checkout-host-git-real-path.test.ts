@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, truncateSync,
+  utimesSync, writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
@@ -94,6 +95,17 @@ describe('host commits in a lane checkout', () => {
     await expect(commitDirtyWorktree(f.lane, f.repo, f.branch, 'merge snapshot')).rejects.toBeInstanceOf(LaneGitMetadataError);
     expect(git(f.repo, 'rev-parse', f.branch)).toBe(f.main);
   }, 10_000);
+
+  it('starts from the branch tree instead of copying an oversized checkout index', async () => {
+    const f = fixture('index-oversized');
+    truncateSync(join(f.admin, 'index'), 4 * 1024 * 1024 * 1024);
+    const started = Date.now();
+    await commitDirtyWorktree(f.lane, f.repo, f.branch, 'merge snapshot');
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(git(f.repo, 'show', `${f.branch}:work.txt`)).toBe('worker');
+    expect(statSync(join(f.admin, 'index')).size).toBeLessThan(1024 * 1024);
+    expect(readdirSync(join(root, 'data', 'lane-git'))).toEqual([]);
+  }, 20_000);
 
   it('commits a checkout that uses a split index', async () => {
     const f = fixture('split-index');

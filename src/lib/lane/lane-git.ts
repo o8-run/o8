@@ -4,7 +4,7 @@ import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { execFile, execFileSync, type ExecFileSyncOptions } from '@/lib/providers/child-process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, constants as fsConstants, copyFileSync, fstatSync, lstatSync, openSync, readFileSync, readSync,
-  readdirSync, realpathSync, renameSync, writeSync } from 'node:fs';
+  readdirSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { devNull } from 'node:os';
 import path from 'node:path';
@@ -460,6 +460,12 @@ async function removeAbandonedCommitDirectories(root: string): Promise<void> {
   }
 }
 
+/**
+ * An index this large covers about half a million files. Copying runs on the
+ * main thread, so a larger one starts from the branch's tree instead.
+ */
+const MAX_COPIED_INDEX_BYTES = 64 * 1024 * 1024;
+
 /** False when the commit should start from the branch's tree instead. */
 function copyCheckoutIndex(admin: string, target: string): boolean {
   // A split index keeps its shared part beside the checkout's own index.
@@ -472,19 +478,28 @@ function copyCheckoutIndex(admin: string, target: string): boolean {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
     throw new LaneGitMetadataError();
   }
+  let copied = 0;
   try {
-    if (!fstatSync(source).isFile()) throw new LaneGitMetadataError();
+    const stat = fstatSync(source);
+    if (!stat.isFile()) throw new LaneGitMetadataError();
+    if (stat.size > MAX_COPIED_INDEX_BYTES) return false;
     const copy = openSync(target, 'wx', 0o600);
     try {
       const chunk = Buffer.allocUnsafe(1024 * 1024);
-      for (let read = readSync(source, chunk); read > 0; read = readSync(source, chunk)) writeSync(copy, chunk, 0, read);
+      // Bounded here too: the worker can grow the file after fstat.
+      for (let read = readSync(source, chunk); read > 0 && copied <= MAX_COPIED_INDEX_BYTES; read = readSync(source, chunk)) {
+        writeSync(copy, chunk, 0, read);
+        copied += read;
+      }
     } finally {
       closeSync(copy);
     }
   } finally {
     closeSync(source);
   }
-  return true;
+  if (copied <= MAX_COPIED_INDEX_BYTES) return true;
+  rmSync(target);
+  return false;
 }
 
 function replaceCheckoutIndex(source: string, admin: string): void {
