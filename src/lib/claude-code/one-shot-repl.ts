@@ -30,7 +30,9 @@ import 'server-only';
 import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
 
 import { spawn } from '@/lib/providers/child-process';
+import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 
 import {
   createClaudeCodeStreamJsonParser,
@@ -43,6 +45,18 @@ import { modelToolsWithheld } from '@/lib/providers/model-tool-scope';
 
 /** A turn that answers from its prompt alone: no tools, MCP servers, settings, commands, or saved session. */
 export const NO_TOOLS_ARGS: readonly string[] = ['--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence'];
+
+let restrictedDir: string | null = null;
+
+/**
+ * The empty working directory of a restricted turn. Without tools the CLI still
+ * reads a file the prompt names with `@`; restricted mode confines that to the
+ * working directory, and this one holds nothing.
+ */
+export function restrictedTurnCwd(): string {
+  restrictedDir ??= mkdtempSync(path.join(os.tmpdir(), 'o8-qa-restricted-'));
+  return restrictedDir;
+}
 
 export interface AskClaudeOneShotOptions {
   /** Explicit `claude` binary path. Caller resolves; we don't probe. */
@@ -66,18 +80,21 @@ export interface AskClaudeOneShotOptions {
  * Exported for `warm-repl-pool.ts` so the pre-warmed spawn path shares the
  * exact same flag set (and the same #1066 no-print billing guard).
  */
-export function buildOneShotArgs(model: string, effort?: string): string[] {
+export function buildOneShotArgs(model: string, effort?: string, restricted = false): string[] {
   const args = [
     '--input-format', 'stream-json',
     '--output-format', 'stream-json',
     '--verbose',
-    '--permission-mode', 'bypassPermissions',
+    // Restricted mode refuses bypassPermissions.
+    ...(restricted ? [] : ['--permission-mode', 'bypassPermissions']),
     '--include-partial-messages',
     '--model', model,
   ];
   // Mirror the orchestrator precedent (orchestrator-session.ts) — attach an
   // explicit reasoning effort only when the caller asks for a non-adaptive one.
   if (effort && effort !== 'adaptive') args.push('--effort', claudeEffortFlagValue(effort));
+  // A caller other than the operator: no tools, and file access confined to restrictedTurnCwd().
+  if (restricted) args.push('--restricted', ...NO_TOOLS_ARGS);
   // #1066 billing guard — enforce what line 52's comment only described.
   assertNoPrintFlag(args, 'One-shot Claude REPL');
   return args;
@@ -92,13 +109,14 @@ export async function askClaudeOneShot(
   prompt: string,
   opts: AskClaudeOneShotOptions,
 ): Promise<string> {
-  const cwd = opts.cwd ?? os.tmpdir();
+  const restricted = modelToolsWithheld();
+  const cwd = restricted ? restrictedTurnCwd() : opts.cwd ?? os.tmpdir();
   const timeoutMs = opts.timeoutMs ?? 300_000;
   const env = providerSpawnEnvironment(childEnvironment({ runtimeId: 'claude-code', env: { FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' } }), { runtimeId: 'claude-code' });
 
   return new Promise<string>((resolve, reject) => {
-    const args = buildOneShotArgs(opts.model, opts.effort);
-    if (opts.tools === 'none' || modelToolsWithheld()) args.push(...NO_TOOLS_ARGS);
+    const args = buildOneShotArgs(opts.model, opts.effort, restricted);
+    if (opts.tools === 'none' && !restricted) args.push(...NO_TOOLS_ARGS);
     const launch = cliInvocation(opts.binary, args);
     const child = spawn(launch.command, launch.args, {
       windowsHide: true,

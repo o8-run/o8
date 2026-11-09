@@ -35,7 +35,7 @@ import { writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { buildOneShotArgs, NO_TOOLS_ARGS } from './one-shot-repl';
+import { buildOneShotArgs, restrictedTurnCwd } from './one-shot-repl';
 import { modelToolsWithheld } from '@/lib/providers/model-tool-scope';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
@@ -93,17 +93,16 @@ function poolKey(binary: string, model: string, effort?: string, noTools = false
 function spawnWarmProc(binary: string, model: string, effort?: string, noTools = false): WarmProc | null {
   if (liveProcCount >= MAX_LIVE_PROCS) return null;
 
-  const args = [...buildOneShotArgs(model, effort)];
+  const args = [...buildOneShotArgs(model, effort, noTools)];
   const mcpStrip = noTools ? null : getEmptyMcpConfigPath();
-  if (noTools) args.push(...NO_TOOLS_ARGS);
-  else if (mcpStrip) args.push('--strict-mcp-config', '--mcp-config', mcpStrip);
+  if (mcpStrip) args.push('--strict-mcp-config', '--mcp-config', mcpStrip);
 
   let child: ChildProcessWithoutNullStreams;
   try {
     const launch = cliInvocation(binary, args);
     child = spawn(launch.command, launch.args, {
       windowsHide: true,
-      cwd: os.tmpdir(),
+      cwd: noTools ? restrictedTurnCwd() : os.tmpdir(),
       env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'claude-code', env: { FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' } }), { runtimeId: 'claude-code' }),
       stdio: ['pipe', 'pipe', 'pipe'],
     });

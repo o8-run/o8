@@ -29,9 +29,9 @@ writeFileSync(join(dataDir, 'ws-token'), `${OPERATOR_TOKEN}\n`, 'utf8');
 function fakeCli(name: string, body: string): string {
   const path = join(dataDir, name);
   writeFileSync(path, `#!${process.execPath}
-const { appendFileSync, writeFileSync } = require('node:fs');
+const { appendFileSync, readdirSync, writeFileSync } = require('node:fs');
 const args = process.argv.slice(2);
-const served = () => appendFileSync(${JSON.stringify(turnLog)}, JSON.stringify({ cli: ${JSON.stringify(name)}, args }) + '\\n');
+const served = () => appendFileSync(${JSON.stringify(turnLog)}, JSON.stringify({ cli: ${JSON.stringify(name)}, args, cwdEntries: readdirSync(process.cwd()).length }) + '\\n');
 ${body}
 `, 'utf8');
   chmodSync(path, 0o755);
@@ -98,14 +98,17 @@ async function ask(token: string, body: Record<string, unknown>) {
   return await res.json() as { answer: string; citations: unknown[] };
 }
 
-function turns(): Array<{ cli: 'claude' | 'codex'; args: string[] }> {
+function turns(): Array<{ cli: 'claude' | 'codex'; args: string[]; cwdEntries: number }> {
   if (!existsSync(turnLog)) return [];
   return readFileSync(turnLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
 }
 
-function withoutTools(args: string[]): boolean {
+// No tools, and restricted to an empty working directory: without that the CLI
+// still reads a file the prompt names with `@`.
+function withoutTools({ args, cwdEntries }: { args: string[]; cwdEntries: number }): boolean {
   const at = args.indexOf('--tools');
-  return at >= 0 && args[at + 1] === '';
+  return at >= 0 && args[at + 1] === '' && args.includes('--restricted')
+    && !args.includes('bypassPermissions') && cwdEntries === 0;
 }
 
 it("runs a packet worker's ask on Claude with no tools and leaves the operator's tools in place", async () => {
@@ -115,23 +118,23 @@ it("runs a packet worker's ask on Claude with no tools and leaves the operator's
   });
 
   expect((await ask(OPERATOR_TOKEN, { repoPath: repo, bypassCache: true })).answer).toContain('fixture Claude answer');
-  expect(turns().map(({ cli, args }) => [cli, withoutTools(args)])).toEqual([['claude', false]]);
+  expect(turns().map((turn) => [turn.cli, withoutTools(turn)])).toEqual([['claude', false]]);
 
   // The operator's turn left a warm process with tools behind; the worker's turn must not take it.
   rmSync(turnLog);
   expect((await ask(WORKER_TOKEN, { packetId: 'fixture-tools', bypassCache: true })).answer).toContain('fixture Claude answer');
-  expect(turns().map(({ cli, args }) => [cli, withoutTools(args)])).toEqual([['claude', true]]);
+  expect(turns().map((turn) => [turn.cli, withoutTools(turn)])).toEqual([['claude', true]]);
 
   // Nor does the operator take the worker's tool-less process.
   rmSync(turnLog);
   await ask(OPERATOR_TOKEN, { repoPath: repo, bypassCache: true });
-  expect(turns().map(({ cli, args }) => [cli, withoutTools(args)])).toEqual([['claude', false]]);
+  expect(turns().map((turn) => [turn.cli, withoutTools(turn)])).toEqual([['claude', false]]);
 
   // A question that is not a value lookup is classified by a model too; that call has no tools either.
   rmSync(turnLog);
   await ask(WORKER_TOKEN, { question: 'How should a packet hand off its review?', packetId: 'fixture-tools', bypassCache: true });
   expect(turns().length).toBeGreaterThan(1);
-  expect(turns().filter(({ cli, args }) => cli !== 'claude' || !withoutTools(args))).toEqual([]);
+  expect(turns().filter((turn) => turn.cli !== 'claude' || !withoutTools(turn))).toEqual([]);
 }, 30_000);
 
 it("never launches Codex for a packet worker and answers it from the retrieved sources", async () => {
