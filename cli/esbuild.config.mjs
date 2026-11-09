@@ -58,6 +58,10 @@ await esbuild.build({
   define: { __O8_CLI_VERSION__: JSON.stringify(cliVersion) },
   plugins: [sqlitePlugin],
   alias: cliBundleAlias,
+  // The native route registry's dynamic imports reach the browser-automation route, which loads
+  // playwright-core. No CLI command runs it, and its bundle requires optional packages the lock
+  // does not install, so leave it as a runtime require instead of failing the build (#5736).
+  external: ['playwright-core'],
   outfile: outFile,
 });
 
