@@ -88,7 +88,7 @@ tokio = { version = "1.54.1", features = ["rt", "net", "time", "sync"] }
 # path deps' manifests even when the feature is off).
 tauri-plugin-mcp = { path = "../tauri-plugin-mcp", optional = true }
 window-vibrancy = "0.6"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 
 # Crash/error reporting for the native shell (telemetry ruling). DORMANT unless a
 # RELEASE build baked a DSN (build.rs → cargo:rustc-env=O8_SENTRY_DSN). Keep

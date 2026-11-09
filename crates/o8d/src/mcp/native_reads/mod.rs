@@ -253,7 +253,6 @@ fn rows(db: &Connection, sql: &str) -> ReadResult<Vec<Value>> {
     let mut stmt = db.prepare_cached(sql).map_err(|_| ())?;
     let columns = stmt
         .column_names()
-        .iter()
         .map(|name| name.to_string())
         .collect::<Vec<_>>();
     let values = stmt
