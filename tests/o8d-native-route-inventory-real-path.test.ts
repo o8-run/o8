@@ -59,8 +59,7 @@ const NEXT_ONLY_SHELL_PATHS = new Set([
   '/api/orchestrator/reset-packet', '/api/orchestrator/spawn-prompt',
   '/api/panel/cloud-jobs/drain', '/api/panel/release-health', '/api/symon/mcp/call',
   '/api/symon/mcp/tools', '/api/symon/transport/tool',
-  '/api/team/messages', '/api/team/presence', '/api/team/tell', '/api/v1/audio/transcriptions',
-  '/api/v1/chat/completions',
+  '/api/v1/audio/transcriptions', '/api/v1/chat/completions',
 ]);
 const NEXT_ONLY_MCP_PATHS = new Set([
   '/api/agents/inbox', '/api/agents/message', '/api/agents/presence', '/api/broadcast/post', '/api/broadcast/say',
@@ -110,7 +109,7 @@ it('counts the desktop shell, the MCP server and the WS process toward the Next-
   checkCaller(['src/ws-server.ts', ...sourceFiles('src/lib/ws-server', '.ts')],
     /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^>(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, NEXT_ONLY_WS_PATHS);
   const remaining = new Set([...NEXT_ONLY_NATIVE_PATHS, ...NEXT_ONLY_SHELL_PATHS, ...NEXT_ONLY_MCP_PATHS, ...NEXT_ONLY_WS_PATHS]);
-  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(61);
+  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(58);
 });
 
 it('rejects an unknown route discovered in a shell or MCP source file', () => {
