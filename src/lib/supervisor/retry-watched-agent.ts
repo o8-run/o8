@@ -31,7 +31,10 @@ export async function retryWatchedAgent(
   // The operator stopped the lane while the relaunch was in flight. A stop means stop: end the
   // session the relaunch just started instead of watching it or reporting a retry.
   if (!state.held(watched)) {
-    if (result.status === 'launched') await callbacks.interruptAgent(result.surfaceId).catch(() => {});
+    if (result.status === 'launched') {
+      console.log(`[supervisor] "${watched.name}" (${watched.surfaceId}) was stopped during its retry; ending retry session ${result.surfaceId}`);
+      await callbacks.interruptAgent(result.surfaceId).catch(() => {});
+    }
     return;
   }
   if (result.status === 'held') {
