@@ -136,7 +136,8 @@ it.skipIf(!runnable)('boots o8 next against the WS process with Next stopped', a
     const info = await (await fetch(`http://127.0.0.1:${target}/api/panel/ws-info`, { headers: { authorization: `Bearer ${server.token}` } })).json() as { wsPort: number; wsToken: string };
     expect([info.wsPort, info.wsToken.length > 0]).toEqual([target, true]);
     expect(routes).toContain('UPGRADE /ws 101');
-    expect(routes.filter(line => / (4\d\d|5\d\d|relay-error|unparsed)$/.test(line) && !designed.has(line))).toEqual([]);
+    // Every request through the end of the wait, including reads that answered during it.
+    expect([...new Set(requests)].filter(line => / (4\d\d|5\d\d|relay-error|unparsed)$/.test(line) && !designed.has(line))).toEqual([]);
     // The window's boot reads, each answered natively.
     for (const read of ['GET /api/mobile/orchestrator/threads 200', 'GET /api/panel/ws-info 200', 'GET /api/panel/operator-defaults 200']) {
       expect(routes).toContain(read);
