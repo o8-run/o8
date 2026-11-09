@@ -5406,6 +5406,12 @@
       ]
     },
     {
+      "path": "tests/o8d-operator-status-setup-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-orchestrator-archive-real-path.test.ts",
       "reasons": [
         "real-path"

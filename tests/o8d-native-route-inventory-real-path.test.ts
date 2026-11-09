@@ -60,12 +60,12 @@ const NEXT_ONLY_SHELL_PATHS = new Set([
 const NEXT_ONLY_MCP_PATHS = new Set([
   '/api/agents/inbox', '/api/agents/message', '/api/agents/presence', '/api/broadcast/post', '/api/broadcast/say',
   '/api/broadcast/tokens', '/api/browser/proxy', '/api/canvas/intent', '/api/cortex/ask/answer', '/api/cortex/sources',
-  '/api/devices/agent', '/api/harness', '/api/leases', '/api/operator/status',
+  '/api/devices/agent', '/api/harness', '/api/leases',
   '/api/orchestrator/create-mission', '/api/orchestrator/digest', '/api/orchestrator/dispatch',
   '/api/orchestrator/merge', '/api/orchestrator/propose-spec', '/api/orchestrator/pull-request-context',
   '/api/orchestrator/reload', '/api/orchestrator/truth',
   '/api/panel/repos/init', '/api/panel/repos/scaffold', '/api/panel/targets',
-  '/api/setup/agent', '/api/task-artifacts',
+  '/api/task-artifacts',
 ]);
 const NEXT_ONLY_WS_PATHS = new Set([
   '/api/mobile/symon', '/api/mobile/symon/confirm', '/api/mobile/symon/text-turn', '/api/mobile/symon/tool',

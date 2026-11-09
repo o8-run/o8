@@ -282,6 +282,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   setup: [
     route('/api/setup/cli-updates', 'GET', () => import('@/app/api/setup/cli-updates/route')),
     route('/api/setup/config', 'GET POST', () => import('@/app/api/setup/config/route')),
+    // The o8 MCP server's operator status and agent setup: operator-only through the
+    // middleware (no device, worker or spectator grant). Status reads SQLite and the
+    // runtime inventory cache /api/runtime/inventory already shares here; setup composes
+    // the native operator-defaults, setup/config and repos handlers. (#5422)
+    route('/api/operator/status', 'GET', () => import('@/app/api/operator/status/route')),
+    route('/api/setup/agent', 'GET POST', () => import('@/app/api/setup/agent/route')),
     // Setup-wizard tool detection. GET has no handler-level auth — same panelGateMiddleware gate as
     // the other /api/setup/* routes (not public-allowlisted, hardening #1562), so over native
     // (x-o8-client-addr=unverified-proxy) it is operator-ws-token-only. It reads provider credentials
