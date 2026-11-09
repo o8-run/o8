@@ -30,7 +30,7 @@ import 'server-only';
 import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
 
 import { spawn } from '@/lib/providers/child-process';
-import { mkdtempSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -42,20 +42,30 @@ import { assertNoPrintFlag } from './assert-no-print-flag';
 import { claudeEffortFlagValue } from '@/lib/orchestrator/thinking-effort';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { modelToolsWithheld } from '@/lib/providers/model-tool-scope';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /** A turn that answers from its prompt alone: no tools, MCP servers, settings, commands, or saved session. */
 export const NO_TOOLS_ARGS: readonly string[] = ['--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence'];
 
-let restrictedDir: string | null = null;
-
 /**
  * The empty working directory of a restricted turn. Without tools the CLI still
  * reads a file the prompt names with `@`; restricted mode confines that to the
- * working directory, and this one holds nothing.
+ * working directory, and this one holds nothing. It lives in the data
+ * directory, which sandboxed workers can neither read nor write, and is
+ * checked before every turn so a swapped or filled directory refuses the turn.
  */
 export function restrictedTurnCwd(): string {
-  restrictedDir ??= mkdtempSync(path.join(os.tmpdir(), 'o8-qa-restricted-'));
-  return restrictedDir;
+  const dataDir = getDataDir();
+  const dir = path.join(dataDir, 'brain-restricted-cwd');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const stat = lstatSync(dir);
+  const ownedHere = typeof process.getuid !== 'function' || stat.uid === process.getuid();
+  if (!stat.isDirectory() || !ownedHere
+    || realpathSync(dir) !== path.join(realpathSync(dataDir), 'brain-restricted-cwd')
+    || readdirSync(dir).length > 0) {
+    throw new Error('[qa][claude-repl] the restricted working directory is not an empty private directory');
+  }
+  return dir;
 }
 
 export interface AskClaudeOneShotOptions {
