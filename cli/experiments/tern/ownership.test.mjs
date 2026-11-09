@@ -38,7 +38,10 @@ beforeAll(async () => {
   root = await realpath(await mkdtemp(join(getDataDir(), 'tern-owner-')));
   vi.stubEnv('O8_OWNED_PI_ROOT', join(root, 'sessions'));
   const wrapper = join(root, 'pi');
-  await writeFile(wrapper, `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(join(here, 'fixtures/pi-permission-worker.mjs'))} "$@"\n`, { mode: 0o700 });
+  // Worker children get an allowlisted environment (#4585), so the case's fixture root cannot ride
+  // the parent's env. The wrapper reads the current case from a file and hands it to the worker.
+  await writeFile(wrapper, `#!/bin/sh\nO8_TERN_PI_FIXTURE_ROOT="$(cat ${shellQuote(join(root, 'current-fixture'))})" `
+    + `exec ${shellQuote(process.execPath)} ${shellQuote(join(here, 'fixtures/pi-permission-worker.mjs'))} "$@"\n`, { mode: 0o700 });
   vi.stubEnv('O8_PI_BIN', wrapper);
   ({ piRuntime } = await import('@/lib/runtimes/pi'));
   approvals = await import('@/lib/approvals/store');
@@ -70,7 +73,7 @@ async function start(label) {
   const git = (...args) => execFileSync('git', args, { cwd: workspace, encoding: 'utf8', stdio: 'pipe' });
   git('init', '-q', '-b', 'main');
   git('-c', 'user.name=o8 fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture');
-  vi.stubEnv('O8_TERN_PI_FIXTURE_ROOT', fixtureRoot);
+  await writeFile(join(root, 'current-fixture'), fixtureRoot);
   const result = await piRuntime.launch({ cwd: workspace, prompt: `ownership ${label}`, packetId: `packet-${label}` });
   expect(result.ok).toBe(true);
   expect(result.sessionKey).toMatch(/^pi-owned:/);
@@ -205,7 +208,7 @@ describe('Tern observer cannot own Pi RPC lifecycle or permissions', () => {
     const before = await snapshot(f);
     const oldPid = f.pid;
     await stop(f);
-    vi.stubEnv('O8_TERN_PI_FIXTURE_ROOT', f.fixtureRoot);
+    await writeFile(join(root, 'current-fixture'), f.fixtureRoot);
     expect((await piRuntime.resume(f.key, 'second owning-runtime turn')).ok).toBe(true);
     f.approval = await pending(f.key);
     f.pid = (await until(async () => (await rows(f.log)).find(row => row.event === 'boot' && row.pid !== oldPid), 'new RPC process')).pid;
