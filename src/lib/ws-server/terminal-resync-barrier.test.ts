@@ -101,6 +101,26 @@ describe('terminal resync barrier', () => {
       .toBe('newest line');
   });
 
+  it('matches a colored prompt whose redraw resets the character set', async () => {
+    // tmux redraws sgr0 as ESC ( B ESC [ m; tmux capture-pane -e keeps only SGR.
+    const scrollback = '\x1b[32m\x1b[1muser@host\x1b(B\x1b[m:\x1b[34m\x1b[1m~\x1b(B\x1b[m$ ';
+    expect(terminalResyncFreshnessLine([scrollback])).toBe('user@host:~$');
+    await expect(waitForTerminalResyncBarrier({
+      getLastOutputAt: () => 0,
+      getBatchBuffer: () => '',
+      getScrollbackChunks: () => [scrollback],
+      capture: () => ({ ok: true, data: '\x1b[1m\x1b[32muser@host\x1b[0m:\x1b[1m\x1b[34m~\x1b[0m$\n' }),
+      isCancelled: () => false,
+      now: () => 1_000,
+      wait: async () => {},
+    })).resolves.toMatchObject({ captureAttempts: 1, fallbackReason: null });
+  });
+
+  it('strips cursor save, restore and keypad escapes from a prompt', () => {
+    expect(terminalResyncFreshnessLine(['\x1b712:00\x1b8\x1b=user@host$ '])).toBe('12:00user@host$');
+    expect(terminalResyncFreshnessLine(['echo (B) and ( 0 )\r\n'])).toBe('echo (B) and ( 0 )');
+  });
+
   it('extracts the last cursor-addressed row without spanning painted rows', () => {
     expect(terminalResyncFreshnessLine([
       '\x1b[2J\x1b[H\x1b[1;1Hfirst painted row\x1b[2Hsecond painted row',
