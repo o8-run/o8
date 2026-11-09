@@ -506,6 +506,9 @@ impl Surface {
             .unwrap_or_default();
         let network_send = body["payload"]["routing"]["source"] == "bot-network";
         let request_identity = (session.id.clone(), body["id"].clone());
+        // The draft this message came from. A chat switch replaces the view's
+        // composer, so a late receipt still settles the thread it was sent from.
+        let source_composer = self.composer.clone();
         let (picks, objects) = if method == "POST" && fresh {
             self.composer
                 .update(cx, |i, _| (i.thread_mentions(), i.object_mentions()))
@@ -607,55 +610,59 @@ impl Surface {
                 {
                     this.retire_pending_send(&request_identity.0, &request_identity.1);
                 }
+                // Settle the source draft before the view check: switching chats
+                // mid-send must not leave the queued text to be sent again.
+                if let Ok((method, ..)) = &result {
+                    sent_mentions
+                        .into_iter()
+                        .for_each(crate::composer::mention::groups::remember_sent);
+                    if *method == "POST" {
+                        if !network_send {
+                            source_composer.update(cx, |i, _| {
+                                if let Some(sent) =
+                                    sent_prelude.as_ref().filter(|sent| !sent.is_empty())
+                                {
+                                    if i.controls.prompt.prelude == *sent {
+                                        i.controls.prompt.prelude.clear();
+                                    } else if let Some(remaining) = i
+                                        .controls
+                                        .prompt
+                                        .prelude
+                                        .strip_prefix(&format!("{sent}\n\n"))
+                                    {
+                                        i.controls.prompt.prelude = remaining.to_owned();
+                                    }
+                                    if let Err(error) =
+                                        crate::composer::mode_store::save_prelude(
+                                            i.controls.prompt.store.as_deref(),
+                                            &i.controls.prompt.prelude,
+                                        )
+                                    {
+                                        i.controls.error = error;
+                                    }
+                                }
+                                i.controls.prompt.queued_prelude = None;
+                                i.controls.prompt.command_wire = None;
+                            });
+                        }
+                        source_composer.update(cx, |i, cx| {
+                            if i.text == draft {
+                                i.clear(cx);
+                            }
+                            i.controls
+                                .images
+                                .retain(|image| !sent_images.contains(image));
+                            i.controls.files.retain(|file| !files.contains(file));
+                            cx.notify();
+                        });
+                    }
+                }
                 if this.generation != generation {
                     return;
                 }
                 this.saving = false;
                 match result {
-                    Ok((method, session, queue, history)) => {
-                        sent_mentions
-                            .into_iter()
-                            .for_each(crate::composer::mention::groups::remember_sent);
-                        if method == "POST" {
-                            if !network_send {
-                                this.composer.update(cx, |i, _| {
-                                    if let Some(sent) =
-                                        sent_prelude.as_ref().filter(|sent| !sent.is_empty())
-                                    {
-                                        if i.controls.prompt.prelude == *sent {
-                                            i.controls.prompt.prelude.clear();
-                                        } else if let Some(remaining) = i
-                                            .controls
-                                            .prompt
-                                            .prelude
-                                            .strip_prefix(&format!("{sent}\n\n"))
-                                        {
-                                            i.controls.prompt.prelude = remaining.to_owned();
-                                        }
-                                        if let Err(error) =
-                                            crate::composer::mode_store::save_prelude(
-                                                i.controls.prompt.store.as_deref(),
-                                                &i.controls.prompt.prelude,
-                                            )
-                                        {
-                                            i.controls.error = error;
-                                        }
-                                    }
-                                    i.controls.prompt.queued_prelude = None;
-                                    i.controls.prompt.command_wire = None;
-                                });
-                            }
-                            this.composer.update(cx, |i, cx| {
-                                if i.text == draft {
-                                    i.clear(cx);
-                                }
-                                i.controls
-                                    .images
-                                    .retain(|image| !sent_images.contains(image));
-                                i.controls.files.retain(|file| !files.contains(file));
-                                cx.notify();
-                            });
-                        }
+                    Ok((_, session, queue, history)) => {
                         // The queue rows under the composer show delivery, as on
                         // the desktop; the transcript keeps no confirmation line.
                         this.notice.clear();

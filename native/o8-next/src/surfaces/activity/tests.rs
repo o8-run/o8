@@ -353,6 +353,133 @@ fn activity_stop_replays_lost_response_with_one_identity(cx: &mut TestAppContext
 }
 
 #[gpui::test]
+fn activity_unsettled_stop_blocks_until_refresh_reads_its_receipt(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let view = activity_view(&shell, cx);
+    activity_click(cx, "activity-filter-packet");
+    activity_click(cx, "activity-row-packet-local-activity-queued");
+    let _: Value = fixture
+        .client
+        .get("/api/activity-fixture", &[("mode", "stop-unknown")])
+        .unwrap();
+    activity_click(cx, "activity-stop-mission");
+    assert_eq!(
+        view.read_with(cx, |v, _| v.notice.clone()),
+        "Decision is unsettled. Refresh to check it."
+    );
+    // Another decision waits for the unsettled one instead of racing it.
+    activity_click(cx, "activity-hold");
+    assert_eq!(
+        view.read_with(cx, |v, _| v.notice.clone()),
+        "An earlier decision is unsettled. Refresh to check it."
+    );
+    // Refresh replays the same body, which settles from the persisted receipt.
+    activity_click(cx, "activity-refresh");
+    assert_eq!(
+        view.read_with(cx, |v, _| v.notice.clone()),
+        "Decision applied."
+    );
+    let state: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
+    assert_eq!(state["mission"]["packets"][0]["queueState"], "held");
+    activity_click(cx, "activity-release");
+    let state: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
+    assert_eq!(state["mission"]["packets"][0]["queueState"], "queued");
+}
+
+#[gpui::test]
+fn activity_archiving_a_running_packet_stops_it_first(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let view = activity_view(&shell, cx);
+    let settle = |cx: &mut VisualTestContext| {
+        for _ in 0..200 {
+            cx.run_until_parked();
+            draw(cx);
+            if view.read_with(cx, |v, _| !v.pending && !v.loading) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("the decision never settled");
+    };
+    let _: Value = fixture
+        .client
+        .get("/api/activity-fixture", &[("mode", "lane-running")])
+        .unwrap();
+    activity_click(cx, "activity-filter-packet");
+    activity_click(cx, "activity-row-packet-local-activity-packet");
+    activity_click(cx, "activity-release");
+    settle(cx);
+    assert!(cx.debug_bounds("activity-lane-stop").is_some(), "the fixture packet runs");
+    // Archive asks first; Cancel leaves the worker alone.
+    activity_click(cx, "activity-packet-archive");
+    assert!(cx.debug_bounds("activity-archive-confirm").is_some());
+    activity_click(cx, "activity-archive-cancel");
+    assert!(cx.debug_bounds("activity-archive-confirm").is_none());
+    let packet = |fixture: &Fixture| {
+        fixture.client.get::<Value>("/api/orchestrator/state", &[]).unwrap()["mission"]["packets"][1].clone()
+    };
+    assert!(packet(&fixture)["archivedAt"].is_null());
+    // Confirming stops the lane, then archives the packet.
+    activity_click(cx, "activity-packet-archive");
+    activity_click(cx, "activity-archive-stop-confirm");
+    settle(cx);
+    settle(cx);
+    let state = fixture.client.get::<Value>("/api/activity-fixture", &[]).unwrap();
+    let stop = state["mutations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|body| serde_json::from_str::<Value>(body.as_str()?).ok())
+        .rfind(|body| body["verb"].is_string())
+        .unwrap();
+    assert_eq!(stop, serde_json::json!({"verb": "stop", "laneId": state["laneId"], "actor": "user"}));
+    assert!(packet(&fixture)["archivedAt"].is_string(), "{}", view.read_with(cx, |v, _| v.notice.clone()));
+}
+
+#[gpui::test]
+fn activity_refused_stop_and_archive_never_archives_later(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let view = activity_view(&shell, cx);
+    let _: Value = fixture
+        .client
+        .get("/api/activity-fixture", &[("mode", "stop-unknown-running")])
+        .unwrap();
+    activity_click(cx, "activity-filter-packet");
+    activity_click(cx, "activity-row-packet-local-activity-packet");
+    activity_click(cx, "activity-release");
+    activity_click(cx, "activity-stop-mission");
+    assert_eq!(
+        view.read_with(cx, |v, _| v.notice.clone()),
+        "Decision is unsettled. Refresh to check it."
+    );
+    // Stop and archive is refused while the stop is unsettled.
+    activity_click(cx, "activity-packet-archive");
+    activity_click(cx, "activity-archive-stop-confirm");
+    assert_eq!(
+        view.read_with(cx, |v, _| v.notice.clone()),
+        "An earlier decision is unsettled. Refresh to check it."
+    );
+    // The replay settles the mission stop; the refused archive stays unarmed.
+    activity_click(cx, "activity-refresh");
+    for _ in 0..100 {
+        cx.run_until_parked();
+        if view.read_with(cx, |v, _| !v.pending && !v.loading) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(view.read_with(cx, |v, _| v.notice.clone()), "Decision applied.");
+    let state: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
+    assert!(state["mission"]["packets"][1]["archivedAt"].is_null());
+}
+
+#[gpui::test]
 fn activity_empty_local_auth_and_scoped_retention(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--activity");
     let (shell, mut visual, _) = activity_open(&fixture, cx);

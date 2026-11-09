@@ -42,7 +42,16 @@ struct Mic {
     held: bool,
     /// The final transcript went out; the host's idle retires the recording.
     sent: bool,
+    /// The host accepted the start. A stop sent before that could reach the
+    /// host first and leave the late start recording with no owner.
+    started: bool,
+    /// When the stop was asked for; a host restart never answers it.
+    finishing_since: Option<std::time::Instant>,
 }
+
+/// A recording that never answers its stop gives the microphone back. Long
+/// enough for a slow polish of a long recording.
+const FINISH_WITHIN: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Mic {
     fn active(&self) -> bool {
@@ -176,18 +185,31 @@ fn start(s: &mut Shell, held: bool, cx: &mut Context<Shell>) {
         view: Some(view.downgrade()),
         held,
         sent: false,
+        started: false,
+        finishing_since: None,
     };
     show(s, DictationState::Starting, cx);
-    let body = s
-        .features
-        .get::<Mic>()
-        .control(json!({"action":"dictation-start","requestId":request}));
+    let (body, late_stop) = {
+        let mic = s.features.get::<Mic>();
+        (
+            mic.control(json!({"action":"dictation-start","requestId":request})),
+            mic.control(
+                json!({"action":"dictation-stop","requestId":format!("m-{}", stamp()),"submit":false}),
+            ),
+        )
+    };
     post(s, body, cx, move |this, result, cx| {
-        if let Err(error) = result
-            && this.features.get::<Mic>().request == request
-        {
-            retire(this, cx);
-            toasts::error(error, cx);
+        let current = this.features.get::<Mic>().request == request;
+        match result {
+            Ok(()) if current => this.features.get::<Mic>().started = true,
+            // Cancelled while the start was in flight: stop it now that the host
+            // holds it. Its nonce cannot match a newer recording.
+            Ok(()) => post(this, late_stop, cx, |_, _, _| {}),
+            Err(error) if current => {
+                retire(this, cx);
+                toasts::error(error, cx);
+            }
+            Err(_) => {}
         }
     });
 }
@@ -200,6 +222,7 @@ fn stop(s: &mut Shell, cx: &mut Context<Shell>) {
         json!({"action":"dictation-stop","requestId":format!("m-{}", stamp()),"submit":true}),
     );
     show(s, DictationState::Finishing, cx);
+    s.features.get::<Mic>().finishing_since = Some(std::time::Instant::now());
     post(s, body, cx, move |this, result, cx| {
         if let Err(error) = result
             && this.features.get::<Mic>().request == request
@@ -217,12 +240,16 @@ fn cancel(s: &mut Shell, cx: &mut Context<Shell>) {
     if !mic.active() {
         return;
     }
+    let started = mic.started;
     let body = mic.control(
         json!({"action":"dictation-stop","requestId":format!("m-{}", stamp()),"submit":false}),
     );
     restore(s, cx);
     retire(s, cx);
-    post(s, body, cx, |_, _, _| {});
+    // Before the host answers the start, its reply sends this stop instead.
+    if started {
+        post(s, body, cx, |_, _, _| {});
+    }
 }
 
 /// Puts back the draft the recording started from.
@@ -244,10 +271,27 @@ fn retire(s: &mut Shell, cx: &mut Context<Shell>) {
 
 /// Another chat in front, or this one closing or changing, cancels.
 fn follow(s: &mut Shell, cx: &mut Context<Shell>) {
-    let (state, target) = {
+    let (state, target, finishing_since) = {
         let mic = s.features.get::<Mic>();
-        (mic.state, mic.target.clone())
+        (mic.state, mic.target.clone(), mic.finishing_since)
     };
+    if state == DictationState::Finishing
+        && finishing_since.is_some_and(|since| since.elapsed() >= FINISH_WITHIN)
+    {
+        let mic = s.features.get::<Mic>();
+        let sent = mic.sent;
+        // Release the host's recording too, so the next start is not refused.
+        let release = mic.control(
+            json!({"action":"dictation-stop","requestId":format!("m-{}", stamp()),"submit":false}),
+        );
+        restore(s, cx);
+        retire(s, cx);
+        if !sent {
+            post(s, release, cx, |_, _, _| {});
+            toasts::error("Dictation did not finish. Try again.", cx);
+        }
+        return;
+    }
     if state == DictationState::Off || state == DictationState::Finishing {
         return;
     }

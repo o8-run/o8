@@ -57,6 +57,7 @@ export async function installActivityFixture(repo: string) {
     await touchRepo(activityRepo.id, new Date(Date.now() + 1000).toISOString());
   }
   let dropped = false;
+  let unknownSent = false;
   const mutations: string[] = [];
   const closes: string[] = [];
   const packetReads: string[] = [];
@@ -135,7 +136,13 @@ export async function installActivityFixture(repo: string) {
       if (mode === 'packet-hold-slow') await new Promise(resolve => setTimeout(resolve, 500));
       if (mode === 'packet-hold-refused') return Response.json({ error: 'Fixture packet hold refused' }, { status: 403 });
       return state.PATCH(request);
-    }, 'POST /api/orchestrator/stop-mission': stop.POST,
+    }, 'POST /api/orchestrator/stop-mission': request => {
+      // The first answer leaves the outcome unknown; the same body then reads the receipt.
+      if ((mode === 'stop-unknown' || mode === 'stop-unknown-running') && !unknownSent) { unknownSent = true; return Promise.resolve(Response.json({ outcomeUnknown: true })); }
+      // The running lane has no process to stop; its replayed receipt reads as applied.
+      if (mode === 'stop-unknown-running') return Promise.resolve(Response.json({ ok: true }));
+      return stop.POST(request);
+    },
     // `slow-close` answers the first close as still running after the real
     // route applied it, so the client must replay the same receipt.
     'POST /api/orchestrator/discard-packet': async request => {
@@ -155,7 +162,9 @@ export async function installActivityFixture(repo: string) {
     },
     'GET /api/activity-fixture': async request => {
       mode = request.nextUrl.searchParams.get('mode') ?? mode;
-      if (mode === 'drop-stop' || mode === 'stop-ready') updateLane(laneId, { sessionKey: null });
+      if (mode === 'drop-stop' || mode === 'stop-ready' || mode === 'stop-unknown') updateLane(laneId, { sessionKey: null });
+      if (mode === 'stop-unknown-running') updateLane(laneId, { sessionKey: null });
+      if (mode === 'lane-running' || mode === 'stop-unknown-running') setLaneStatus(laneId, 'running', 'system', 'fixture_running');
       if (request.nextUrl.searchParams.has('mode')) {
         const { invalidate } = await import('../../../src/lib/github/cache'); invalidate('');
         const { invalidateGitHubSync } = await import('../../../src/lib/github-broker/store');
