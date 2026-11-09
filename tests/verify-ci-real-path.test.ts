@@ -459,7 +459,7 @@ describe('local CI verification through its command entry point', () => {
     const audit = result.calls.find(call => call.tool === 'cargo-audit');
     expect(audit?.args).toContain('src-tauri/Cargo.lock');
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
-    const ignores = workflow.jobs.security.steps.find((step: { name?: string }) => step.name === 'Audit Rust dependencies').with.ignore.split(',');
+    const ignores = workflow.jobs.security.steps.find((step: { name?: string }) => step.name === 'Audit Rust dependencies').env.AUDIT_IGNORE.split(',');
     for (const ignore of ignores) expect(audit.args).toContain(ignore);
   }, 60_000);
 
@@ -786,6 +786,28 @@ describe('local CI verification through its command entry point', () => {
     expect(workflow.jobs.typecheck.steps.some((step: { run?: string }) => step.run === 'node scripts/ci/check-verify-ci.mjs')).toBe(true);
     const audit = workflow.jobs.security.steps.find((step: { name?: string }) => step.name === 'Audit root dependencies');
     expect(audit['continue-on-error']).not.toBe(true);
+  });
+
+  it('audits Rust dependencies with a direct cargo-audit run, not the check-run-writing action', () => {
+    const workflow = parse(readFileSync(workflowPath, 'utf8'));
+    const steps: Array<{ name?: string; uses?: string; run?: string; env?: { AUDIT_IGNORE?: string }; 'working-directory'?: string }>
+      = workflow.jobs.security.steps;
+    // No step reports through the GitHub Checks API, whose intermittent
+    // "Not Found - update-a-check-run" write failure blocked the gate.
+    expect(steps.some(step => step.uses?.startsWith('rustsec/audit-check'))).toBe(false);
+    const audit = steps.find(step => step.name === 'Audit Rust dependencies')!;
+    expect(audit.uses).toBeUndefined();
+    expect(audit.run).toContain('cargo audit --file Cargo.lock');
+    expect(audit['working-directory']).toBe('src-tauri');
+    // The ignore list is authored once, here, and consumed by the run; the
+    // verify:ci coverage test above derives the local audit from AUDIT_IGNORE,
+    // so the two entry points cannot drift.
+    const ignores = String(audit.env?.AUDIT_IGNORE).split(',');
+    expect(ignores.length).toBeGreaterThan(0);
+    expect(ignores.every(id => /^RUSTSEC-\d{4}-\d{4}$/.test(id))).toBe(true);
+    // cargo-audit is provisioned without the action.
+    expect(steps.some(step => step.uses?.startsWith('dtolnay/rust-toolchain@'))).toBe(true);
+    expect(steps.some(step => step.run?.trim().startsWith('cargo install cargo-audit'))).toBe(true);
   });
 
   it('uses the CI merge-base selector for committed, staged, unstaged and untracked classified files', () => {

@@ -20,7 +20,7 @@ const alwaysHostedJobs = {
 const alwaysLocalJobs = ['typecheck', 'server-bundle-size', 'lint', 'classification', 'test-shards', 'test', 'security', 'governance-smoke', 'integration-changed'];
 const setupActions = ['actions/checkout@', 'actions/setup-node@', 'actions/cache/restore@',
   'actions/cache/save@', 'actions/upload-artifact@'];
-const auditAction = 'rustsec/audit-check@';
+const rustToolchainAction = 'dtolnay/rust-toolchain@';
 const bootstrapCommands = new Set([
   'npm ci --prefer-offline',
   `npm install -g "$(node -p 'require("./package.json").packageManager')"`,
@@ -149,7 +149,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     for (const step of job.steps ?? []) {
       if (!step.uses) continue;
       const supported = setupActions.some(prefix => step.uses.startsWith(prefix))
-        || (id === 'security' && step.uses.startsWith(auditAction))
+        || (id === 'security' && step.uses.startsWith(rustToolchainAction))
         || (['integration-changed', 'integration-weekly'].includes(id) && step.uses === './.github/actions/linux-package-prerequisites')
         || (id === 'o8-next-tests' && [
           './.github/actions/next-linux-setup',
@@ -412,13 +412,18 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       { ...runStep({ ...integrationRun, run: 'npm run test:integration --' }, integration, undefined, scripts), selectedFiles: true },
     ] });
   }
-  const audit = jobs.security.steps.find(step => step.uses?.startsWith(auditAction));
-  requireCondition(audit, 'native dependency audit is missing');
-  const ignores = String(audit.with?.ignore ?? '').split(',').map(value => value.trim()).filter(Boolean);
+  const audit = jobs.security.steps.find(step => step.name === 'Audit Rust dependencies');
+  requireCondition(audit && !audit.uses && typeof audit.run === 'string', 'native dependency audit is missing');
+  const ignores = String(audit.env?.AUDIT_IGNORE ?? '').split(',').map(value => value.trim()).filter(Boolean);
   requireCondition(ignores.every(value => /^RUSTSEC-\d{4}-\d{4}$/.test(value)), 'native audit ignore list is malformed');
-  const auditFile = path.posix.join(audit.with?.['working-directory'] ?? '.', 'Cargo.lock');
+  const auditFile = path.posix.join(audit['working-directory'] ?? '.', 'Cargo.lock');
+  // cargo-audit is provisioned by the hosted toolchain + install steps; local
+  // verification assumes it is already on PATH and runs the audit directly, so
+  // those two steps are not part of the local security check.
+  const localSecurity = { ...jobs.security, steps: jobs.security.steps.filter(step =>
+    step !== audit && !/^cargo install cargo-audit\b/.test(step.run?.trim() ?? '')) };
   checks.push({ id: 'security', after: dependencies(jobs.security), name: jobs.security.name, steps: [
-    ...selectedSteps(jobs.security).map(step => runStep(step, jobs.security, undefined, scripts)),
+    ...selectedSteps(localSecurity).map(step => runStep(step, jobs.security, undefined, scripts)),
     { command: `cargo-audit audit --file ${quote(auditFile)}${ignores.map(value => ` --ignore ${quote(value)}`).join('')}`,
       env: {}, timeoutMs: jobs.security['timeout-minutes'] * 60_000 },
   ] });
