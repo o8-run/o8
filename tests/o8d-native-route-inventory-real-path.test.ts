@@ -12,7 +12,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/runtime/acp-connection',
   '/api/runtime/acp-registry/prepare',
   '/api/orchestrator/comparison-diff', // GET has a write path; held for review.
-  '/api/panel/account/avatar', // no caller yet; wired with the native rail account avatar
   '/api/panel/devices',
   '/api/tasks/[id]/preview',
   '/api/review/push', // Review's push button: a POST, outside the Phase A reads.

@@ -178,6 +178,11 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/v2/chat-history', 'GET POST PATCH', () => import('@/app/api/v2/chat-history/route')),
     route('/api/runtime/archive', 'POST', () => import('@/app/api/runtime/archive/route')),
     route('/api/orchestrator/workspace', 'POST', () => import('@/app/api/orchestrator/workspace/route')),
+    // The rail's account photo (profile_menu.rs). The handler admits only the operator principal from the
+    // bearer, never x-o8-client-addr or loopback. It reads the active identity file and the users row, then
+    // fetches only an https URL on the two known photo hosts, with redirects refused, a 5 s deadline and a
+    // 2 MiB cap; anything else is a 204 (#5243).
+    route('/api/panel/account/avatar', 'GET', () => import('@/app/api/panel/account/avatar/route')),
   ],
   workers: [
     route('/api/lanes', 'GET', () => import('@/app/api/lanes/route')),

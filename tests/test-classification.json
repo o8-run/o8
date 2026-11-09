@@ -5306,6 +5306,12 @@
       ]
     },
     {
+      "path": "tests/o8d-account-avatar-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-agent-control-native-real-path.test.ts",
       "reasons": [
         "real-path"
