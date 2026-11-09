@@ -1,10 +1,11 @@
 import { isMaskedViewerReplay } from '@/lib/viewers/copy-safety';
 import { viewerJson } from '@/lib/viewers/response';
 import { type NextRequest } from 'next/server';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
-import { isWorkspaceFileError, writeWorkspaceFile } from '@/lib/fs/workspace-file';
+import { isWorkspaceFileError, readWorkspaceFile, writeWorkspaceFile } from '@/lib/fs/workspace-file';
+import { specCallerScope, WORKER_SPEC_SCOPE_REFUSAL } from '@/lib/o8md/worker-scope';
 import {
   extractRoughdraftReviewIndex,
   validateRoughdraftMarkdown,
@@ -25,6 +26,39 @@ export const dynamic = 'force-dynamic';
 // back via the existing repo-write tool path.
 
 const MAX_BYTES = 256 * 1024;
+// The notes actions agents use (`o8 spec`); the rest change operator prose or start a model turn.
+const WORKER_SPEC_ACTIONS = new Set(['comment', 'reply', 'suggest', 'resolve']);
+const OPERATOR_ONLY_REFUSAL = {
+  code: 'repo_spec_operator_only',
+  message: 'Workers may comment, reply, suggest and resolve; other edits are the operator\'s.',
+} as const;
+
+/**
+ * The repoPath this request acts on: a worker's is its lane directory's real path (null when it
+ * asked for another directory), anyone else's is the one it sent.
+ */
+function scopedRepoPath(request: NextRequest): { repoPath: string; worker: boolean } | Response {
+  const requested = request.nextUrl.searchParams.get('repoPath') ?? '';
+  const caller = specCallerScope(request, requested);
+  if (!caller.worker) return { repoPath: requested, worker: false };
+  if (!caller.repoPath) return viewerJson({ ok: false, error: WORKER_SPEC_SCOPE_REFUSAL }, { status: 403 });
+  return { repoPath: caller.repoPath, worker: true };
+}
+
+/** o8.md's text, or null when there is none. Like the writes, it refuses a symlinked or non-regular file. */
+async function readSpec(specPath: string): Promise<string | null> {
+  try {
+    return (await readWorkspaceFile(dirname(specPath), basename(specPath))).bytes.toString('utf-8');
+  } catch (error) {
+    if (isWorkspaceFileError(error) && error.code === 'workspace_file_not_found') return null;
+    throw error;
+  }
+}
+
+function workspaceFileErrorResponse(error: unknown): Response {
+  if (!isWorkspaceFileError(error)) throw error;
+  return viewerJson({ ok: false, error: error.message, code: error.code }, { status: error.status });
+}
 
 function resolveSpecPath(repoPath: string): string | null {
   if (!repoPath || typeof repoPath !== 'string') return null;
@@ -60,13 +94,16 @@ What this repo exists to do, in one paragraph.
 `;
 
 export async function GET(request: NextRequest) {
-  const repoPath = request.nextUrl.searchParams.get('repoPath') ?? '';
-  const specPath = resolveSpecPath(repoPath);
+  const scope = scopedRepoPath(request);
+  if (scope instanceof Response) return scope;
+  const specPath = resolveSpecPath(scope.repoPath);
   if (!specPath) {
     return viewerJson({ ok: false, error: 'repoPath invalid' }, { status: 400 });
   }
-  const exists = existsSync(specPath);
-  const content = exists ? readFileSync(specPath, 'utf-8') : DEFAULT_TEMPLATE;
+  let stored: string | null;
+  try { stored = await readSpec(specPath); } catch (error) { return workspaceFileErrorResponse(error); }
+  const exists = stored !== null;
+  const content = stored ?? DEFAULT_TEMPLATE;
 
   // Review-aware views (RFM parser). `view` absent = raw content (back-compat).
   const view = request.nextUrl.searchParams.get('view');
@@ -86,7 +123,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const repoPath = request.nextUrl.searchParams.get('repoPath') ?? '';
+  const scope = scopedRepoPath(request);
+  if (scope instanceof Response) return scope;
+  if (scope.worker) return viewerJson({ ok: false, error: OPERATOR_ONLY_REFUSAL }, { status: 403 });
+  const repoPath = scope.repoPath;
   const specPath = resolveSpecPath(repoPath);
   if (!specPath) {
     return viewerJson({ ok: false, error: 'repoPath invalid' }, { status: 400 });
@@ -102,14 +142,16 @@ export async function PUT(request: NextRequest) {
   if (content === null) {
     return viewerJson({ ok: false, error: 'content must be a string' }, { status: 400 });
   }
-  if (isMaskedViewerReplay(existsSync(specPath) ? readFileSync(specPath, 'utf8') : '', content)) return viewerJson({ error: 'Masked viewer content is read-only', code: 'redacted_content_read_only' }, { status: 409 });
+  let stored: string | null;
+  try { stored = await readSpec(specPath); } catch (error) { return workspaceFileErrorResponse(error); }
+  if (isMaskedViewerReplay(stored ?? '', content)) return viewerJson({ error: 'Masked viewer content is read-only', code: 'redacted_content_read_only' }, { status: 409 });
   const cleanup = cleanupOrphanedRoughdraftAnnotations(content);
   if (Buffer.byteLength(cleanup.content, 'utf-8') > MAX_BYTES) {
     return viewerJson({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
   }
   const expectedHash = typeof body?.expectedHash === 'string' ? body.expectedHash : undefined;
   if (expectedHash !== undefined && body?.force !== true) {
-    const currentContent = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
+    const currentContent = stored;
     const currentHash = currentContent === null ? null : await contentHash(currentContent);
     if (currentHash !== expectedHash) {
       return viewerJson({
@@ -140,7 +182,9 @@ export async function PUT(request: NextRequest) {
 // is never overwritten — only annotated. The parser throws on not-found / unsafe
 // input, so every mutation is wrapped and returned as a structured error.
 export async function POST(request: NextRequest) {
-  const repoPath = request.nextUrl.searchParams.get('repoPath') ?? '';
+  const scope = scopedRepoPath(request);
+  if (scope instanceof Response) return scope;
+  const repoPath = scope.repoPath;
   const specPath = resolveSpecPath(repoPath);
   if (!specPath) {
     return viewerJson({ ok: false, error: 'repoPath invalid' }, { status: 400 });
@@ -149,6 +193,13 @@ export async function POST(request: NextRequest) {
   if (sourceRefusal) return sourceRefusal;
   const action = request.nextUrl.searchParams.get('action');
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  if (scope.worker) {
+    // A worker adds notes to the file as it stands, under the parser's default author.
+    if (!WORKER_SPEC_ACTIONS.has(action ?? '') || typeof body?.content === 'string') {
+      return viewerJson({ ok: false, error: OPERATOR_ONLY_REFUSAL }, { status: 403 });
+    }
+    if (body) delete body.author;
+  }
   const suppliedContent = typeof body?.content === 'string' ? body.content : null;
   if (suppliedContent !== null && Buffer.byteLength(suppliedContent, 'utf-8') > MAX_BYTES) {
     return viewerJson({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
@@ -156,8 +207,10 @@ export async function POST(request: NextRequest) {
   // The editor supplies its current buffer so a note action can't race the
   // autosave debounce and overwrite fresh operator prose. MCP callers omit it
   // and continue operating against the persisted file exactly as before.
-  if (suppliedContent !== null && isMaskedViewerReplay(existsSync(specPath) ? readFileSync(specPath, 'utf8') : '', suppliedContent)) return viewerJson({ error: 'Masked viewer content is read-only', code: 'redacted_content_read_only' }, { status: 409 });
-  const current = suppliedContent ?? (existsSync(specPath) ? readFileSync(specPath, 'utf-8') : DEFAULT_TEMPLATE);
+  let stored: string | null;
+  try { stored = await readSpec(specPath); } catch (error) { return workspaceFileErrorResponse(error); }
+  if (suppliedContent !== null && isMaskedViewerReplay(stored ?? '', suppliedContent)) return viewerJson({ error: 'Masked viewer content is read-only', code: 'redacted_content_read_only' }, { status: 409 });
+  const current = suppliedContent ?? stored ?? DEFAULT_TEMPLATE;
 
   try {
     if (action === 'reply') {

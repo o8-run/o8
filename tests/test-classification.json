@@ -7098,6 +7098,12 @@
       ]
     },
     {
+      "path": "tests/repo-spec-worker-scope-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/repo-storage-pressure-policy-real-path.test.ts",
       "reasons": [
         "child-process",
