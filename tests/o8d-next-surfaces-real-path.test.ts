@@ -775,6 +775,9 @@ const WRITE_ROUTES: Array<[method: string, path: string, workerStatus: number]> 
   ['POST', '/api/orchestrator/steer-packet', 403],
   ['POST', '/api/cortex/reingest', 403],
   ['POST', '/api/orchestrator/stop-packet', 403],
+  ['POST', '/api/orchestrator/rerun-with-feedback', 403],
+  ['POST', '/api/orchestrator/reset-packet', 403],
+  ['POST', '/api/orchestrator/spawn-prompt', 403],
   ['POST', '/api/runtime/action', 403],
   // Packet-bound workers reach proposals through the gate; the handler binds the packet.
   ['POST', '/api/cortex/proposals', 403],
@@ -863,6 +866,9 @@ it.each([
   ['POST', '/api/orchestrator/steer-packet', {}, 400, 'invalid_request'],
   ['POST', '/api/cortex/reingest', { repoPath: '/fixture-missing' }, 404, 'No connected repo'],
   ['POST', '/api/orchestrator/stop-packet', {}, 400, 'packetId is required'],
+  ['POST', '/api/orchestrator/rerun-with-feedback', { packetId: 'fixture-missing' }, 400, 'feedback is required'],
+  ['POST', '/api/orchestrator/reset-packet', {}, 400, 'packetId is required'],
+  ['POST', '/api/orchestrator/spawn-prompt', { repoPath: '/fixture-missing' }, 400, 'task is required'],
   ['POST', '/api/runtime/action', {}, 400, 'action, surfaceId, and clientMutationId are required'],
 ])('runs the production %s %s handler for the operator with Next stopped', async (method, path, body, status, detail) => {
   const response = await fetch(origin + path, { method, body: JSON.stringify(body),
