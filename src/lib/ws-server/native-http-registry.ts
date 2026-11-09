@@ -467,7 +467,12 @@ const producers = [
   route('/api/orchestrator/headless-tick', 'POST', () => import('@/app/api/orchestrator/headless-tick/route')),
   route('/api/review/auto-review', 'POST', () => import('@/app/api/review/auto-review/route')),
 ];
-const routes = [...Object.values(nativeSurfaceRoutes).flat(), ...producers, ...viewerHttpRoutes];
+// Next-only by design. The native transport answers these with a readable refusal, not a 404.
+const retired = [
+  // Canvas intents drive the canvas page Next renders in the desktop webview (#5576).
+  route('/api/canvas/intent', 'POST', () => import('@/lib/canvas/intent-unavailable-route')),
+];
+const routes = [...Object.values(nativeSurfaceRoutes).flat(), ...producers, ...retired, ...viewerHttpRoutes];
 function parameters(pattern: string, pathname: string): Record<string, string> | null {
   const expected = pattern.split('/');
   const actual = pathname.split('/');

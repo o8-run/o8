@@ -5408,6 +5408,13 @@
       ]
     },
     {
+      "path": "tests/o8d-canvas-intent-unavailable-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-card-decision-real-path.test.ts",
       "reasons": [
         "child-process",
