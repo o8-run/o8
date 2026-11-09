@@ -5314,6 +5314,13 @@
       ]
     },
     {
+      "path": "tests/o8d-browser-agent-native-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-card-decision-real-path.test.ts",
       "reasons": [
         "child-process",
