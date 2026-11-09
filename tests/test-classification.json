@@ -2036,6 +2036,12 @@
       ]
     },
     {
+      "path": "tests/brain-answer-worker-repo-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/brain-classifier-referee-real-path.test.ts",
       "reasons": [
         "executable-fixture",
