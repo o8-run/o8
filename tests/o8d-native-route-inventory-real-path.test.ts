@@ -63,7 +63,7 @@ const NEXT_ONLY_SHELL_PATHS = new Set([
   '/api/v1/audio/transcriptions', '/api/v1/chat/completions',
 ]);
 const NEXT_ONLY_MCP_PATHS = new Set([
-  '/api/agents/inbox', '/api/agents/message', '/api/agents/presence', '/api/broadcast/post',
+  '/api/broadcast/post',
   '/api/broadcast/tokens', '/api/browser/proxy', '/api/canvas/intent', '/api/cortex/sources',
   '/api/devices/agent', '/api/harness',
   '/api/orchestrator/create-mission', '/api/orchestrator/dispatch',
