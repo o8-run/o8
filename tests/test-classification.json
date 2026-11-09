@@ -2076,6 +2076,13 @@
       ]
     },
     {
+      "path": "tests/brain-worker-model-tools-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/broadcast-commentary-settings-real-path.test.ts",
       "reasons": [
         "real-path"

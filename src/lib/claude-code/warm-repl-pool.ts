@@ -35,7 +35,8 @@ import { writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { buildOneShotArgs } from './one-shot-repl';
+import { buildOneShotArgs, restrictedTurnCwd } from './one-shot-repl';
+import { modelToolsWithheld } from '@/lib/providers/model-tool-scope';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   createClaudeCodeStreamJsonParser,
@@ -82,18 +83,18 @@ interface WarmProc {
 const idlePools = new Map<string, WarmProc[]>();
 let liveProcCount = 0;
 
-function poolKey(binary: string, model: string, effort?: string): string {
+function poolKey(binary: string, model: string, effort?: string, noTools = false): string {
   // No-effort callers key EXACTLY as before (byte-identical) so their warm
   // hits are unaffected; an effort'd proc gets a distinct key so it can never
-  // be handed to a no-effort caller.
-  return `${binary}\x00${model}\x00${effort ?? ''}\x00${credentialPolicyFingerprint('claude-code')}`;
+  // be handed to a no-effort caller. A tool-less proc is likewise kept apart.
+  return `${binary}\x00${model}\x00${effort ?? ''}\x00${credentialPolicyFingerprint('claude-code')}${noTools ? '\x00no-tools' : ''}`;
 }
 
-function spawnWarmProc(binary: string, model: string, effort?: string): WarmProc | null {
+function spawnWarmProc(binary: string, model: string, effort?: string, noTools = false): WarmProc | null {
   if (liveProcCount >= MAX_LIVE_PROCS) return null;
 
-  const args = [...buildOneShotArgs(model, effort)];
-  const mcpStrip = getEmptyMcpConfigPath();
+  const args = [...buildOneShotArgs(model, effort, noTools)];
+  const mcpStrip = noTools ? null : getEmptyMcpConfigPath();
   if (mcpStrip) args.push('--strict-mcp-config', '--mcp-config', mcpStrip);
 
   let child: ChildProcessWithoutNullStreams;
@@ -101,7 +102,7 @@ function spawnWarmProc(binary: string, model: string, effort?: string): WarmProc
     const launch = cliInvocation(binary, args);
     child = spawn(launch.command, launch.args, {
       windowsHide: true,
-      cwd: os.tmpdir(),
+      cwd: noTools ? restrictedTurnCwd() : os.tmpdir(),
       env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'claude-code', env: { FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' } }), { runtimeId: 'claude-code' }),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -159,13 +160,13 @@ function killProc(proc: WarmProc): void {
 }
 
 /** Add one idle proc for `key` if below the idle/live caps. */
-function refill(binary: string, model: string, effort?: string): void {
-  const key = poolKey(binary, model, effort);
+function refill(binary: string, model: string, effort?: string, noTools = false): void {
+  const key = poolKey(binary, model, effort, noTools);
   const pool = idlePools.get(key) ?? [];
   idlePools.set(key, pool);
   if (pool.length >= MAX_IDLE_PER_KEY) return;
 
-  const proc = spawnWarmProc(binary, model, effort);
+  const proc = spawnWarmProc(binary, model, effort, noTools);
   if (!proc) return;
   pool.push(proc);
   proc.reapTimer = setTimeout(() => {
@@ -181,8 +182,8 @@ function refill(binary: string, model: string, effort?: string): void {
 }
 
 /** Pop a healthy idle proc for `key`, or null. */
-function takeIdle(binary: string, model: string, effort?: string): WarmProc | null {
-  const pool = idlePools.get(poolKey(binary, model, effort));
+function takeIdle(binary: string, model: string, effort?: string, noTools = false): WarmProc | null {
+  const pool = idlePools.get(poolKey(binary, model, effort, noTools));
   while (pool && pool.length > 0) {
     const proc = pool.shift()!;
     if (proc.reapTimer) clearTimeout(proc.reapTimer);
@@ -254,7 +255,7 @@ export interface AskClaudeWarmOptions {
  * next `askClaudeWarm` skips the bootstrap. Safe to call on every question.
  */
 export function prewarmClaudeRepl(binary: string, model: string, effort?: string): void {
-  try { refill(binary, model, effort); } catch { /* never block the pipeline on warm-up */ }
+  try { refill(binary, model, effort, modelToolsWithheld()); } catch { /* never block the pipeline on warm-up */ }
 }
 
 /**
@@ -264,14 +265,15 @@ export function prewarmClaudeRepl(binary: string, model: string, effort?: string
  */
 export async function askClaudeWarm(prompt: string, opts: AskClaudeWarmOptions): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 300_000;
+  const noTools = modelToolsWithheld();
   const releaseSlot = await acquireTurnSlot(timeoutMs);
 
-  let proc = takeIdle(opts.binary, opts.model, opts.effort);
+  let proc = takeIdle(opts.binary, opts.model, opts.effort, noTools);
   const warm = proc !== null;
   if (proc) {
     console.info(`[qa][warm-repl] warm hit for ${opts.model} (age ${((Date.now() - proc.spawnedAt) / 1000).toFixed(1)}s)`);
   } else {
-    proc = spawnWarmProc(opts.binary, opts.model, opts.effort);
+    proc = spawnWarmProc(opts.binary, opts.model, opts.effort, noTools);
     if (!proc) {
       releaseSlot();
       throw new Error(`[qa][warm-repl] live-proc cap reached (${MAX_LIVE_PROCS}) — refusing to spawn`);
@@ -286,7 +288,7 @@ export async function askClaudeWarm(prompt: string, opts: AskClaudeWarmOptions):
   // while a call is queued wins (#2521). Non-Brain callers omit the policy and
   // keep the pre-#2521 behavior.
   if (!opts.refillPolicy || opts.refillPolicy()) {
-    refill(opts.binary, opts.model, opts.effort);
+    refill(opts.binary, opts.model, opts.effort, noTools);
   }
 
   try {

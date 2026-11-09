@@ -33,6 +33,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { resolveBrainCodexRouteSync } from '@/lib/operator/brain-routing';
+import { modelToolsWithheld } from '@/lib/providers/model-tool-scope';
 import { codexModelArgs } from '@/lib/codex/local-model';
 import { resolveCodexLaunchContext } from '@/lib/codex/launch-context';
 import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
@@ -195,6 +196,7 @@ export function buildCodexQaEnv(
  * from a tmpfile written by `--output-last-message`.
  *
  * Throws on:
+ *   - a caller whose model calls run without tools
  *   - codex binary not found
  *   - CLI exit code non-zero
  *   - timeout exceeded
@@ -204,6 +206,8 @@ export function buildCodexQaEnv(
  * have their own next-step on failure — OpenRouter → Flash → Sonnet → heuristic).
  */
 export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Promise<string> {
+  // Codex always has a shell, so a call that must run without tools takes the next tier.
+  if (modelToolsWithheld()) throw new Error('[qa][codex] skipped: this caller gets no model tools');
   const timeoutMs = opts.timeoutMs ?? 30_000;
   const route = resolveCodexQaRoute(opts);
 

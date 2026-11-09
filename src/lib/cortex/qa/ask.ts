@@ -46,6 +46,7 @@ import type { Citation, TypedRow } from '@/lib/cortex/qa/types';
 import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 import { currentComposerBrainRoute } from '@/lib/operator/composer-brain-context';
 import { brainRouteCacheKeySync, usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
+import { modelToolsWithheld } from '@/lib/providers/model-tool-scope';
 
 // ── In-process cache ──────────────────────────────────────────────────────────
 
@@ -76,8 +77,13 @@ interface CacheEntry {
 
 const answerCache = new Map<string, CacheEntry>();
 
+// Answers composed without model tools are cached apart from the operator's.
+function toolScopeKey(): string {
+  return modelToolsWithheld() ? '\x00no-tools' : '';
+}
+
 function scopeKey(repoPath: string | undefined, projectId: string | undefined, terse = false): string {
-  return `${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}\x00${requestProjectScopeKey()}`;
+  return `${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}\x00${requestProjectScopeKey()}${toolScopeKey()}`;
 }
 
 /**
@@ -155,7 +161,7 @@ function cacheKey(
   terse = false,
 ): string {
   return createHash('sha256')
-    .update(`${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}\x00${requestProjectScopeKey()}`)
+    .update(`${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}\x00${requestProjectScopeKey()}${toolScopeKey()}`)
     .digest('hex');
 }
 
