@@ -653,6 +653,8 @@ impl Surface {
                                 .images
                                 .retain(|image| !sent_images.contains(image));
                             i.controls.files.retain(|file| !files.contains(file));
+                            // The sent files leave the saved draft with the text.
+                            i.save_draft(cx);
                             cx.notify();
                         });
                     }

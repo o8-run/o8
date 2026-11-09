@@ -360,13 +360,22 @@ impl Surface {
                 editor.controls.prompt.store = store;
                 editor.controls.prompt.prelude = prelude;
                 editor.load_stash(cx);
+                // A restored continuation is saved as this thread's draft too.
+                editor.persist_draft = true;
                 match prompt_draft {
                     Ok(Some(draft)) => {
                         editor.set_text(&draft.text, cx);
                         editor.controls.images = draft.images;
                     }
                     Err(error) => editor.controls.error = error,
-                    Ok(None) => {}
+                    Ok(None) => {
+                        if let Some(draft) =
+                            crate::composer::mode_store::load_draft(editor.controls.prompt.store.as_deref())
+                        {
+                            editor.controls.files = draft.files;
+                            editor.set_text(&draft.text, cx);
+                        }
+                    }
                 }
                 if let Some(mode) = mode {
                     editor.controls.overrides["mode"] =

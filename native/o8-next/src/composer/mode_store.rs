@@ -43,6 +43,56 @@ pub(crate) fn save_prelude(path: Option<&Path>, text: &str) -> Result<(), String
         .map_err(|_| "Queued context could not be saved for the next launch.".into())
 }
 
+/// A thread's unsent composer text and attached file paths (#5203). Pasted
+/// images stay in memory: they can be megabytes, and a relaunch drops them.
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Clone)]
+pub(crate) struct Draft {
+    pub text: String,
+    #[serde(default)]
+    pub files: Vec<PathBuf>,
+}
+/// Drafts are this size or smaller; a larger one is not kept across launches.
+const DRAFT_LIMIT: usize = 1024 * 1024;
+pub(crate) fn save_draft(path: Option<&Path>, draft: &Draft) -> Result<(), String> {
+    let path = path.map(|p| p.with_extension("draft.json"));
+    // An empty draft is written as nothing, which loads as no draft.
+    let text = if draft.text.trim().is_empty() && draft.files.is_empty() {
+        String::new()
+    } else {
+        serde_json::to_string(draft).map_err(|e| e.to_string())?
+    };
+    if serde_json::to_vec(&text).map_err(|e| e.to_string())?.len() > DRAFT_LIMIT {
+        return Err("The draft is too large to keep across launches.".into());
+    }
+    save(path.as_deref(), &text).map_err(|_| "The draft could not be saved.".into())
+}
+static DRAFT_ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// The newest ticket written for each draft file.
+static DRAFT_WRITTEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, u64>>> =
+    std::sync::LazyLock::new(Default::default);
+/// A ticket taken when a save is asked for, in edit order.
+pub(crate) fn draft_order() -> u64 {
+    DRAFT_ORDER.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+/// Writes one at a time, and never over a newer edit's draft: a debounced
+/// write that starts late cannot land after the empty write a send made.
+pub(crate) fn save_draft_in_order(path: Option<&Path>, draft: &Draft, order: u64) -> Result<(), String> {
+    let mut written = DRAFT_WRITTEN.lock().unwrap_or_else(|poison| poison.into_inner());
+    if let Some(path) = path {
+        let newest = written.entry(path.to_path_buf()).or_default();
+        if order < *newest {
+            return Ok(());
+        }
+        *newest = order;
+    }
+    save_draft(path, draft)
+}
+pub(crate) fn load_draft(path: Option<&Path>) -> Option<Draft> {
+    let path = path.map(|p| p.with_extension("draft.json"));
+    let text = load_text(path.as_deref(), DRAFT_LIMIT as u64).filter(|t| !t.is_empty())?;
+    serde_json::from_str(&text).ok()
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct PromptDraft {
     pub text: String,
@@ -142,4 +192,25 @@ pub(crate) fn save(path: Option<&Path>, mode: &str) -> Result<(), String> {
     save().ok_or_else(|| {
         "Mode changed for this draft, but could not be saved for the next launch.".into()
     })
+}
+
+#[cfg(test)]
+mod draft_order_tests {
+    use super::*;
+    #[test]
+    fn a_late_older_draft_write_never_lands_over_a_newer_one() {
+        let dir = std::env::temp_dir().join(format!("o8-draft-order-{}", std::process::id()));
+        let path = dir.join("thread.json");
+        let draft = |text: &str| Draft { text: text.into(), files: vec![] };
+        let (older, newer) = (draft_order(), draft_order());
+        save_draft_in_order(Some(&path), &draft(""), newer).unwrap();
+        // The debounced write asked for first starts last; it is skipped.
+        save_draft_in_order(Some(&path), &draft("stale text"), older).unwrap();
+        assert_eq!(load_draft(Some(&path)), None);
+        // Another thread's draft is ordered on its own.
+        let other = dir.join("other.json");
+        save_draft_in_order(Some(&other), &draft("kept"), older).unwrap();
+        assert_eq!(load_draft(Some(&other)).unwrap().text, "kept");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
