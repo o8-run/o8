@@ -4,7 +4,7 @@ import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { createHmac } from 'node:crypto';
 import { afterAll, expect, it, vi } from 'vitest';
-import { cliBundleAlias } from '../cli/bundle-alias.mjs';
+import { buildCliBundle } from './fixtures/cli-bundle';
 
 const provider = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock('@/lib/github-broker/auth', async importOriginal => ({
@@ -384,7 +384,6 @@ it('gives a paired mobile read the same links and archived thread, but no mutati
 it('roundtrips the built CLI and registered MCP tool through the real API and persisted reverse links', async () => {
   const { createServer } = await import('node:http');
   const { spawn } = await import('node:child_process');
-  const { build } = await import('esbuild');
   const f = fixture();
   provider.read.mockImplementation(async (repo: string, resource: string) => {
     const current = getGitHubPullRequestByNumber(repo, 7)!;
@@ -406,8 +405,7 @@ it('roundtrips the built CLI and registered MCP tool through the real API and pe
   const port = (server.address() as import('node:net').AddressInfo).port;
   try {
     const bundle = path.join(root, 'o8-cli.mjs');
-    await build({ alias: cliBundleAlias, entryPoints: [path.join(process.cwd(), 'cli/src/index.ts')], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
-      define: { __O8_CLI_VERSION__: '"fixture"' }, banner: { js: "import { createRequire as fixtureRequire } from 'node:module'; const require = fixtureRequire(import.meta.url); globalThis.require = require;" } });
+    await buildCliBundle(bundle, 'fixture');
     const run = async (args: string[], token = getOrCreateWsToken()) => {
       const env: NodeJS.ProcessEnv = { ...process.env, O8_API_PORT: String(port), O8_API_TOKEN: token };
       delete env.O8_WORKER_TOKEN; delete env.O8_WORKER_PACKET_ID; delete env.O8_SPECTATOR_TOKEN;

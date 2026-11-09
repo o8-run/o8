@@ -2,9 +2,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { cliBundleAlias } from '../cli/bundle-alias.mjs';
+import { buildCliBundle } from './fixtures/cli-bundle';
 
 const dir = mkdtempSync(join(tmpdir(), 'o8-saved-ssh-machine-'));
 const cli = join(dir, 'o8.mjs');
@@ -30,17 +29,7 @@ function run(args: string[], input?: string, overrides: Record<string, string> =
 
 beforeAll(async () => {
   writeFileSync(join(dir, 'ws-token'), 'local-operator-test-token\n', { mode: 0o600 });
-  await build({
-    entryPoints: ['cli/src/index.ts'],
-    alias: cliBundleAlias,
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    target: 'node22',
-    outfile: cli,
-    banner: { js: 'import { createRequire as __o8_createRequire } from "node:module"; globalThis.require = __o8_createRequire(import.meta.url);' },
-    define: { __O8_CLI_VERSION__: '"test"' },
-  });
+  await buildCliBundle(cli, 'test');
   writeFileSync(ssh, `#!/bin/sh
 for argument in "$@"; do last="$argument"; done
 case " $* " in *downhost*) echo 'offline' >&2; exit 255;; esac

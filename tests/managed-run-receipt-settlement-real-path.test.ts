@@ -4,9 +4,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { build } from 'esbuild';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { cliBundleAlias } from '../cli/bundle-alias.mjs';
+import { buildCliBundle } from './fixtures/cli-bundle';
 
 const fileRace = vi.hoisted(() => ({ before: null as null | ((input: { name?: string; writeUnknown?: boolean }) => (() => void) | undefined) }));
 vi.mock('node:child_process', async (original) => {
@@ -102,9 +101,7 @@ describe.skipIf(!tmux || process.platform === 'win32')('managed-run receipt path
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('missing port');
     const bundle = join(root, 'o8.mjs');
-    await build({ alias: cliBundleAlias, entryPoints: ['cli/src/index.ts'], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
-      define: { __O8_CLI_VERSION__: '"fixture"' },
-      banner: { js: "import { createRequire as __o8_require } from 'node:module'; const require = __o8_require(import.meta.url); globalThis.require = require;" } });
+    await buildCliBundle(bundle, 'fixture');
     const child = spawn(process.execPath, [bundle, 'run', '--detach', '--', process.execPath, '-e', 'process.exit(7)'], {
       cwd, env: { ...process.env, O8_API_PORT: String(address.port), O8_API_TOKEN: '',
         O8_WORKER_TOKEN: mintPacketWorkerToken('receipt'), O8_WORKER_PACKET_ID: 'receipt',

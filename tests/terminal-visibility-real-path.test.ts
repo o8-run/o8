@@ -5,11 +5,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket } from 'ws';
-import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dashSessionNameForOwnerKey, dashTmuxArgs } from '@/lib/ws-server/dash-terminal-persistence';
 import { renderTerminalBytes } from './helpers/headless-terminal';
-import { cliBundleAlias } from '../cli/bundle-alias.mjs';
+import { buildCliBundle } from './fixtures/cli-bundle';
 
 type WireFrame = {
   channel?: string;
@@ -250,21 +249,7 @@ beforeAll(async () => {
   if (!tmuxAvailable) return;
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(join(dataDir, 'ws-token'), `${token}\n`, { mode: 0o600 });
-  await build({
-    entryPoints: [join(process.cwd(), 'cli/src/index.ts')],
-    alias: cliBundleAlias,
-    outfile: cliBundle,
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    target: 'node22',
-    define: { __O8_CLI_VERSION__: JSON.stringify('test-fixture') },
-    banner: { js: `import { createRequire as __o8_createRequire } from 'node:module';
-import { fileURLToPath as __o8_fileURLToPath } from 'node:url';
-import { dirname as __o8_dirname } from 'node:path';
-const require = __o8_createRequire(import.meta.url); globalThis.require = require;
-const __filename = __o8_fileURLToPath(import.meta.url); const __dirname = __o8_dirname(__filename);` },
-  });
+  await buildCliBundle(cliBundle, 'test-fixture');
   apiPort = await freePort();
   wsPort = await freePort();
   apiServer = createServer((_request, response) => {

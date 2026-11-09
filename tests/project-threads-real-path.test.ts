@@ -8,7 +8,7 @@ import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { ProjectThreads, ProjectThread } from '@/lib/threads/types';
-import { cliBundleAlias } from '../cli/bundle-alias.mjs';
+import { buildCliBundle } from './fixtures/cli-bundle';
 
 const fixture = vi.hoisted(() => ({ agents: [] as import('@/lib/fleet/types').AgentSummary[], moveHead: null as (() => void) | null }));
 vi.mock('@/lib/providers/child-process', async original => {
@@ -100,11 +100,9 @@ it('shares state filters with the registered MCP catalog and refuses foreign or 
 });
 
 async function cliThreads(args: string[]) {
-  const { build } = await import('esbuild');
   const entry = join(root, 'o8.mjs');
   if (!existsSync(join(root, 'node_modules'))) symlinkSync(join(process.cwd(), 'node_modules'), join(root, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
-  if (!existsSync(entry)) await build({ alias: cliBundleAlias, entryPoints: [join(process.cwd(), 'cli/src/index.ts')], outfile: entry, bundle: true, platform: 'node', format: 'esm', packages: 'external',
-    banner: { js: 'import {createRequire as __fixtureCreateRequire} from "node:module";const require=__fixtureCreateRequire(import.meta.url);globalThis.require=require;' } });
+  if (!existsSync(entry)) await buildCliBundle(entry, 'test');
   const server = createServer(async (req, res) => {
     if (req.method !== 'GET' || !req.url?.startsWith('/api/panel/threads?')) { res.writeHead(404); res.end(); return; }
     const response = await route.GET(new NextRequest(`http://localhost${req.url}`, { headers: { authorization: `Bearer ${token}` } }));

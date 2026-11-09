@@ -3,10 +3,9 @@ import { createServer, type Server } from 'node:http';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { build } from 'esbuild';
 import { afterEach, describe, expect, it } from 'vitest';
 import { prepareWorkerSandbox } from '@/lib/runtimes/shared/owned-session/sandbox';
-import { cliBundleAlias } from '../cli/bundle-alias.mjs';
+import { buildCliBundle } from './fixtures/cli-bundle';
 
 const tmux = spawnSync('which', ['tmux'], { encoding: 'utf8' }).stdout?.trim();
 const roots: string[] = [], sockets: string[] = [], servers: Server[] = [];
@@ -32,13 +31,7 @@ async function fixture() {
   for (const dir of [data, temp, cwd, profiles, bin]) mkdirSync(dir, { recursive: true });
   execFileSync('git', ['init', '-q', cwd]);
   const bundle = join(root, 'o8.mjs');
-  await build({ alias: cliBundleAlias, entryPoints: ['cli/src/index.ts'], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
-    define: { __O8_CLI_VERSION__: JSON.stringify('test-fixture') },
-    banner: { js: `import { createRequire as __o8_createRequire } from 'node:module';
-import { fileURLToPath as __o8_fileURLToPath } from 'node:url';
-import { dirname as __o8_dirname } from 'node:path';
-const require = __o8_createRequire(import.meta.url); globalThis.require = require;
-const __filename = __o8_fileURLToPath(import.meta.url); const __dirname = __o8_dirname(__filename);` } });
+  await buildCliBundle(bundle, 'test-fixture');
   // macOS Unix socket names have a 104-byte limit; the isolated test data
   // root can exceed it before a fixture name is appended.
   const socketRoot = mkdtempSync('/tmp/o8-rr-');

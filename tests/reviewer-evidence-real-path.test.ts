@@ -1,14 +1,12 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { build } from 'esbuild';
 import type { PacketTaskContract } from '@/lib/orchestrator/types';
-import { cliBundleAlias } from '../cli/bundle-alias.mjs';
+import { buildCliBundle } from './fixtures/cli-bundle';
 
 const telemetry = vi.hoisted(() => ({ path: '' }));
 vi.mock('@/lib/codex/sessions', async (original) => ({
@@ -285,21 +283,7 @@ describe('reviewer evidence recovery (#4150)', () => {
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Missing fixture port.');
       const bundle = join(root, 'cli.mjs');
-      await build({ alias: cliBundleAlias, entryPoints: [join(process.cwd(), 'cli/src/index.ts')], outfile: bundle,
-        bundle: true, platform: 'node', format: 'esm', target: 'node22',
-        define: { __O8_CLI_VERSION__: '"fixture"' },
-        plugins: [{ name: 'fixture-native-sqlite', setup(bundle) {
-          bundle.onResolve({ filter: /^better-sqlite3$/ }, () => ({
-            path: createRequire(import.meta.url).resolve('better-sqlite3'), external: true,
-          }));
-        } }],
-        banner: { js: [
-          "import { createRequire as fixtureRequire } from 'node:module';",
-          "import { fileURLToPath as fixtureFileURLToPath } from 'node:url';",
-          "import { dirname as fixtureDirname } from 'node:path';",
-          'const require = fixtureRequire(import.meta.url); globalThis.require = require;',
-          'const __filename = fixtureFileURLToPath(import.meta.url); const __dirname = fixtureDirname(__filename);',
-        ].join('\n') } });
+      await buildCliBundle(bundle, 'fixture');
       const command = join(root, 'check.mjs');
       writeFileSync(command, "console.log('reviewer-check-passed');\n");
       const env: NodeJS.ProcessEnv = { ...process.env, O8_API_PORT: String(address.port), O8_API_TOKEN: getOrCreateWsToken() };
