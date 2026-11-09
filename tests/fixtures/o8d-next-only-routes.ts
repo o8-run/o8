@@ -31,7 +31,6 @@ export const NEXT_ONLY_NATIVE_METHODS: NextOnlyTable = {
   'POST /api/bots/[id]/thread': seek("bot mailbox reply"),
   'POST /api/cortex/cross-repo-proposals': seek('accept or dismiss a cross-repo proposal'),
   'POST /api/cortex/directives': seek('save an accepted directive'),
-  'POST /api/lanes': security('lane verbs (archive, stop) taken by security'),
   'POST /api/panel/branches': seek('create a branch from the composer'),
   'POST /api/panel/file-io': security('local file write chosen by path: filesystem jail'),
   'POST /api/panel/problem-dossiers': seek('record a decision on a problem dossier'),
@@ -123,7 +122,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
   '/api/tasks/[id]/[id]': security('worker grant: task report and block'),
 };
 export const NEXT_ONLY_CLI_METHODS: NextOnlyTable = {
-  'POST /api/lanes': security('lane verbs (archive, stop) taken by security'),
   // Next lost this handler too (deleted as uncalled in a cleanup), so `o8 doctor --reap` gets 405 on both.
   'POST /api/lanes/reap': seek('doctor reaps stale lanes; no handler on Next either'),
   'POST /api/setup/cli-updates': seek('install or update a runtime CLI'),
