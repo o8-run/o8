@@ -126,8 +126,15 @@ it.skipIf(!runnable)('boots o8 next against the WS process with Next stopped', a
     const voice = await fetch(`http://127.0.0.1:${target}/api/next/voice-host`, { headers: { authorization: `Bearer ${server.token}` } });
     expect([voice.status, await voice.json()]).toEqual([503, { ok: false, available: false, code: 'VOICE_HOST_UNAVAILABLE' }]);
     const designed = new Set(['GET /api/next/voice-host 503']);
-    // A read still open after 5 s is a stuck route, even if the window keeps working around it.
-    expect([...inflight.values()].filter(entry => Date.now() - entry.started > 5_000).map(entry => entry.line)).toEqual([]);
+    // A read open now and still open 6 s later is a stuck route, even if the window keeps working
+    // around it (its own read timeout is 45 s).
+    const open = new Map(inflight);
+    await new Promise(resolve => setTimeout(resolve, 6_000));
+    expect([...open.keys()].filter(id => inflight.has(id)).map(id => open.get(id)!.line)).toEqual([]);
+    // Tunnel mode dials the relay instead of ws-info's port, so check that port here: a normal launch
+    // dials exactly what ws-info reports, which must be this listener.
+    const info = await (await fetch(`http://127.0.0.1:${target}/api/panel/ws-info`, { headers: { authorization: `Bearer ${server.token}` } })).json() as { wsPort: number; wsToken: string };
+    expect([info.wsPort, info.wsToken.length > 0]).toEqual([target, true]);
     expect(routes).toContain('UPGRADE /ws 101');
     expect(routes.filter(line => / (4\d\d|5\d\d|relay-error|unparsed)$/.test(line) && !designed.has(line))).toEqual([]);
     // The window's boot reads, each answered natively.
