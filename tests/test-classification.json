@@ -5300,6 +5300,13 @@
       ]
     },
     {
+      "path": "tests/o8d-backend-models-native-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-browse-folder-real-path.test.ts",
       "reasons": [
         "executable-fixture",
