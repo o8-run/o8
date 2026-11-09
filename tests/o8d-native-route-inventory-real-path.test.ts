@@ -69,10 +69,7 @@ const NEXT_ONLY_MCP_PATHS = new Set([
   '/api/orchestrator/create-mission', '/api/orchestrator/dispatch',
   '/api/orchestrator/merge', '/api/orchestrator/propose-spec',
   '/api/orchestrator/reload', '/api/orchestrator/truth',
-  '/api/task-artifacts',
-  // Hidden until the scan read template literals whole: `/api/lanes/${encodeURIComponent(id)}/events`
-  // was cut at the call and counted as the registered /api/lanes/[id].
-  '/api/lanes/[id]/events', '/api/task-artifacts/[id]/actions',
+  '/api/task-artifacts', '/api/task-artifacts/[id]/actions',
 ]);
 // Registered paths the MCP server calls with a method the native registration lacks, so that
 // request still falls back to Next. Remove an entry when its method is registered.

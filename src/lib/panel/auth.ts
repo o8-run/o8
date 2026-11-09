@@ -45,11 +45,13 @@ export function requirePanelAuth(req: NextRequest): NextResponse | null {
 
 /**
  * For packet-bound handlers the middleware opens to workers. The native transport marks every
- * caller unverified, so loopback trust cannot admit the worker there; its bearer does, on either
- * transport. The handler must still refuse a worker that targets another packet
- * (workerPacketRefusal). Every other caller keeps panel auth.
+ * caller unverified, so loopback trust cannot admit the worker there; a bearer that resolves to a
+ * packet does, on either transport. The handler must still refuse a worker that targets another
+ * packet (workerPacketRefusal). Every other caller, including a worker credential with no packet,
+ * keeps panel auth.
  */
 export function requirePanelOrWorkerAuth(req: NextRequest): NextResponse | null {
-  const { role } = resolveRequestPrincipalContext(req);
-  return role === 'operator' || role === 'worker' ? null : requirePanelAuth(req);
+  const principal = resolveRequestPrincipalContext(req);
+  if (principal.role === 'operator' || (principal.role === 'worker' && principal.packetId)) return null;
+  return requirePanelAuth(req);
 }
