@@ -93,6 +93,9 @@ include!(concat!(env!("OUT_DIR"), "/shell_features.rs"));
 
 pub(super) use rail_drag::{Pane as RailPane, start_chat};
 pub(super) use rail_more::button as rail_more;
+pub(super) mod rail_more_dock {
+    pub(crate) use super::rail_more::{Dock, compact};
+}
 pub(super) use profile_menu::button as profile;
 pub(super) use header::toggle_sidebar;
 pub(super) use right_panel::chrome_focused as panel_chrome_focused;

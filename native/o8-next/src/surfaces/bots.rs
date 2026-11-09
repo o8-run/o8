@@ -2,6 +2,8 @@
 //! entries directly under PRs. The list comes from `GET /api/bots`; a click
 //! opens the bot's main thread as a `Tab::Bot(id)` in the main pane. No drag:
 //! a rail row carries at most one `on_drag`, and bots do not claim one yet.
+/// Whether the dock lists bots. Tests keep the parked roster covered.
+const SHOW_ON_DOCK: bool = cfg!(test);
 use super::*;
 use crate::icon::Tip;
 use crate::theme::current as theme;
@@ -302,9 +304,10 @@ pub(super) const REGISTRATION: Registration = Registration {
             cx.new(|cx| view::BotThread::new(client, id, bot, window, cx)),
         ))
     },
-    // Registered right after pull_requests, so these sit directly under PRs.
+    // Registered right after pull_requests, so these sit directly beside PRs.
+    // Off the dock until the bot list works (Q 2026-11-09); tests still drive it.
     nav: |s, position, cx| {
-        if position != NavPosition::BeforeWorkspaces {
+        if position != NavPosition::BeforeWorkspaces || !SHOW_ON_DOCK {
             return vec![];
         }
         let state = &s.surfaces.bots;

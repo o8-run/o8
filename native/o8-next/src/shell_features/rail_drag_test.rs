@@ -69,13 +69,21 @@ fn rail_drags_split_workspace_panes_like_classic(cx: &mut TestAppContext) {
     // Run terminal near the main pane's right edge splits it side by side.
     let main = bounds(&mut v, "pane-main");
     let right = gpui::point(main.right() - px(20.), main.center().y);
+    // Tools opens the drawer that now holds Terminal and New chat.
+    let tools = bounds(&mut v, "rail-more").center();
+    v.simulate_click(tools, Modifiers::default());
+    settle(&mut v);
     assert_eq!(
-        drag(&mut v, "rail-terminal", right),
+        drag(&mut v, "rail-more-terminal", right),
         Some("pane-drop-right")
     );
     assert!(
         v.debug_bounds("pane-drop-right").is_none(),
         "the preview clears on drop"
+    );
+    assert!(
+        v.debug_bounds("rail-more-menu").is_none(),
+        "the drawer closes when the drag starts"
     );
     assert_eq!(
         s.read_with(&v, |s, _| s.active()),
@@ -108,8 +116,11 @@ fn rail_drags_split_workspace_panes_like_classic(cx: &mut TestAppContext) {
     // with a new chat on the lead.
     let pane = bounds(&mut v, &format!("pane-{terminal}"));
     let below = gpui::point(pane.center().x, pane.bottom() - px(20.));
+    let tools = bounds(&mut v, "rail-more").center();
+    v.simulate_click(tools, Modifiers::default());
+    settle(&mut v);
     assert_eq!(
-        drag(&mut v, "rail-orchestrator", below),
+        drag(&mut v, "rail-more-chat", below),
         Some("pane-drop-below")
     );
     let tree = panes(&s, &v).unwrap();
@@ -169,7 +180,10 @@ fn rail_drags_split_workspace_panes_like_classic(cx: &mut TestAppContext) {
     assert!(v.debug_bounds("pane-main").is_some());
 
     // A click still opens in place.
-    let terminal_button = bounds(&mut v, "rail-terminal").center();
+    let tools = bounds(&mut v, "rail-more").center();
+    v.simulate_click(tools, Modifiers::default());
+    settle(&mut v);
+    let terminal_button = bounds(&mut v, "rail-more-terminal").center();
     v.simulate_click(terminal_button, Modifiers::default());
     settle(&mut v);
     assert_eq!(s.read_with(&v, |s, _| s.active()), Some(Tab::Terminal));

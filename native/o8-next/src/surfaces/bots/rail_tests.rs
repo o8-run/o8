@@ -492,7 +492,8 @@ fn restored_native_target(cx: &mut TestAppContext, hydrate_before_home: bool) {
         restored.read_with(&next, |s, _| s.active()),
         Some(Tab::Bot("o8:late".into()))
     );
-    click(&mut next, "shell-home");
+    // The dock's Settings button closes the open Settings.
+    click(&mut next, "dock-settings");
     assert!(!restored.read_with(&next, |s, _| s.surfaces.settings.view.is_some()));
     if !hydrate_before_home {
         // The target cannot arrive during the Home click: it does not exist yet.

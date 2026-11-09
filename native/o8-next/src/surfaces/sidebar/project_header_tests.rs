@@ -149,7 +149,7 @@ fn sidebar_project_menu_closes_on_a_press_outside(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn sidebar_project_row_sits_level_with_the_home_mark(cx: &mut TestAppContext) {
+fn sidebar_project_row_keeps_its_measured_height(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(true, "--shell --composer");
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -159,15 +159,12 @@ fn sidebar_project_row_sits_level_with_the_home_mark(cx: &mut TestAppContext) {
     );
     wait_for(&shell, &mut visual, |s, _| s.connected);
     let cx = &mut visual;
-    let home = cx.debug_bounds("shell-home").expect("home mark");
     let header = cx
         .debug_bounds("sidebar-project-header")
         .expect("project header");
-    let home = f32::from(home.origin.y) + f32::from(home.size.height) / 2.;
-    // The 32px switcher sits 13px down the header.
+    // The 32px switcher sits 13px down the header. Measured in the desktop
+    // DOM: Switch project 69. The home mark it lined up with left with the rail.
     let row = f32::from(header.origin.y) + 13. + 16.;
-    // Measured in the desktop DOM: Home 70, Switch project 69.
-    assert_eq!(home, 70.);
     assert_eq!(row, 69.);
 }
 

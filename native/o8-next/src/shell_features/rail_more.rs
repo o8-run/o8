@@ -38,6 +38,20 @@ impl ShellFeature for RailMore {
     }
 }
 
+/// Below this sidebar width the dock drops Settings (the profile menu has it)
+/// and the update button (the Tools drawer has it), Q 2026-11-09.
+pub(crate) const COMPACT_BELOW: f32 = 240.;
+
+/// The dock's width this frame, set by the dock before its items render.
+#[derive(Default)]
+pub(crate) struct Dock {
+    pub(crate) width: f32,
+}
+
+pub(crate) fn compact(s: &Shell) -> bool {
+    s.features.read::<Dock>().is_some_and(|dock| dock.width < COMPACT_BELOW)
+}
+
 #[derive(Default)]
 struct Menu {
     open: bool,
@@ -60,6 +74,8 @@ fn selected(s: &Shell) -> bool {
 }
 
 pub(crate) fn button(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement {
+    // In a narrow dock the update button lives in the drawer; a dot says it is ready.
+    let dot = compact(s) && super::update::ready(s);
     let open = s.features.get::<Menu>().open;
     let active = open || selected(s);
     div()
@@ -94,6 +110,17 @@ pub(crate) fn button(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement
                     17.,
                     1.8,
                 ))
+                .when(dot, |button| {
+                    button.relative().child(
+                        div()
+                            .absolute()
+                            .top(px(5.))
+                            .right(px(5.))
+                            .size(px(6.))
+                            .rounded_full()
+                            .bg(crate::theme::update_ready()),
+                    )
+                })
                 .on_click(cx.listener(|this, _, window, cx| {
                     let menu = this.features.get::<Menu>();
                     if menu.open {
@@ -126,10 +153,10 @@ fn run(command: Command, s: &mut Shell, window: &mut Window, cx: &mut Context<Sh
     s.execute(command, window, cx);
 }
 
-fn items(s: &Shell) -> [Item; 8] {
+fn items(s: &Shell) -> Vec<Item> {
     use super::super::rail::Icon;
     let active = s.active();
-    [
+    let mut items: Vec<Item> = vec![
         ("rail-more-chat", Icon::Play.path(), "New chat", Some("Start a chat on the lead"), false, false, |s, w, cx| {
             s.capture(w, cx);
             super::start_chat(s, w, cx);
@@ -165,13 +192,28 @@ fn items(s: &Shell) -> [Item; 8] {
             true,
             |s, w, cx| run(Command::Setup, s, w, cx),
         ),
-    ]
+    ];
+    if compact(s) {
+        let ready = super::update::ready(s);
+        items.push((
+            "rail-more-updates",
+            UPDATES,
+            "Updates",
+            Some(if ready { "An update is ready to install" } else { "Check for updates" }),
+            false,
+            false,
+            |s, _, cx| super::update::open(s, cx),
+        ));
+    }
+    items
 }
 
 /// Opens destination `index`, one at a time. Picking the open overlay again
 /// closes it, which is how the workspace comes back now that Home is gone.
 fn pick(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<Shell>) {
-    let (.., current, overlay, action) = items(s)[index];
+    let Some(&(.., current, overlay, action)) = items(s).get(index) else {
+        return;
+    };
     close(s, cx);
     s.close_rail_overlays(window, cx);
     if current && overlay {
@@ -228,15 +270,30 @@ fn row(
 fn menu(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement {
     let menu = s.features.get::<Menu>();
     let active = menu.keyed.then_some(menu.active);
+    // New chat and Terminal still drag onto the workspace, as they did from the
+    // rail; the drawer closes as the drag starts.
+    let shell = cx.weak_entity();
+    let draggable = move |row: gpui::Stateful<gpui::Div>, pane: super::RailPane| {
+        let shell = shell.clone();
+        row.on_drag(pane, move |drag: &super::RailPane, _, _, cx: &mut gpui::App| {
+            let _ = shell.update(cx, |s, cx| close(s, cx));
+            cx.new(|_| drag.clone())
+        })
+    };
     let body = div()
         .p(px(8.))
         .flex()
         .flex_col()
         .children(items(s).into_iter().enumerate().map(
             |(index, (id, glyph, label, description, current, ..))| {
-                row(id, glyph, label, description, current, active == Some(index)).on_click(
+                let row = row(id, glyph, label, description, current, active == Some(index)).on_click(
                     cx.listener(move |this, _, window, cx| pick(this, index, window, cx)),
-                )
+                );
+                match id {
+                    "rail-more-chat" => draggable(row, super::RailPane::Chat),
+                    "rail-more-terminal" => draggable(row, super::RailPane::Terminal),
+                    _ => row,
+                }
             },
         ));
     // The drawer opens 8 px above the dock, right-aligned to the Tools button.
@@ -286,6 +343,7 @@ fn menu(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement {
 }
 
 // Lucide paths: layout-grid for the Tools button, then the drawer's glyphs.
+const UPDATES: &str = "M12 15V3 M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5";
 const GRID: &str = "M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z";
 const PROJECTS: &str = "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z";
 const CUSTOMIZE: &str = "M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6";

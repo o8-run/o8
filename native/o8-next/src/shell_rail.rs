@@ -631,6 +631,9 @@ impl Shell {
             return div().into_any_element();
         }
         let width = super::sidebar::width(self) * open;
+        // Items read the dock's width to fold into the Tools drawer when narrow.
+        self.features.get::<features::rail_more_dock::Dock>().width = super::sidebar::width(self);
+        let compact = features::rail_more_dock::compact(self);
         div()
             .id("shell-rail")
             .debug_selector(|| "shell-dock".into())
@@ -662,7 +665,8 @@ impl Shell {
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_voice(cx))),
                 )
             })
-            .child(
+            // A narrow dock leaves Settings to the profile menu.
+            .when(!compact, |dock| dock.child(
                 button("dock-settings", Icon::Settings, "Settings", settings_open).on_click(
                     cx.listener(|this, _, window, cx| {
                         let open = this.surfaces.settings.view.is_some();
@@ -676,7 +680,7 @@ impl Shell {
                         }
                     }),
                 ),
-            )
+            ))
             .children(top)
             .child(gauge(self, cx))
             .child(div().flex_1().min_w_0())
