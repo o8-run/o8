@@ -4,7 +4,7 @@
  * The voice path: the operator says "tell Nova to hold the ship" → Symon calls
  * this → it finds the LIVE peer named Nova across the operator's repos and drops
  * a durable message in that repo's o8 team mailbox. Nova's guard hook surfaces it
- * on its next tool call. Loopback-gated; resolves the handle to its repo so the
+ * on its next tool call. Operator bearer only (panelGateMiddleware); resolves the handle to its repo so the
  * caller doesn't need to know which repo the agent is in.
  */
 

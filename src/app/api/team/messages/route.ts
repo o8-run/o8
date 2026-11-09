@@ -2,7 +2,7 @@
  * GET /api/team/messages?limit=N — recent o8 team messages across the operator's
  * repos (newest first), for oversight. Lets Symon answer "what are the agents
  * saying to each other?" and feeds the supervisor inbox's team view. Read-only
- * filesystem; loopback-gated.
+ * filesystem; operator bearer only (panelGateMiddleware).
  */
 
 export const dynamic = 'force-dynamic';

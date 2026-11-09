@@ -2,7 +2,7 @@
  * GET /api/panel/release-health?version=X — updater kill-switch check.
  *
  * The desktop webview CSP forbids connecting to raw.githubusercontent.com, so
- * the UpdateCard asks the (loopback-gated) server to fetch the release-health
+ * the UpdateCard asks the server (operator bearer only) to fetch the release-health
  * manifest and decide whether the target version is pulled. FAIL-OPEN: any
  * error returns `{ pulled: false }` so the update proceeds. Never throws.
  */
