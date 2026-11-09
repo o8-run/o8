@@ -88,8 +88,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // remote webview). POST only, operator-ws-token-only TWICE over: the handler's
     // transportAuthorized does a constant-time timingSafeEqual(bearer, getOrCreateWsToken())
     // -> 401 for anything but the exact ws-token, and the path is in no middleware allowlist,
-    // so over native (x-o8-client-addr=unverified-proxy) the panelGateMiddleware floor already
-    // admits only the operator ws-token (worker/device 403, anon 401). sessionId/callId/tool/args
+    // so the panelGateMiddleware floor already admits only the operator ws-token, whatever the
+    // caller's address (worker/device 403, anon 401). sessionId/callId/tool/args
     // from the body reach the webview eval (buildTransportedToolEval) ONLY through JSON.stringify
     // -> they are JS data literals, never interpolated as code, so a ws-token holder cannot inject
     // JS. The response is the tool result, no credential. (#5243)
@@ -155,8 +155,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/bots/[id]/thread', 'GET', () => import('@/app/api/bots/[id]/thread/route')),
     // Operator MCP host (the bots surface's mcp_url points here, surfaces/bots/client.rs). POST runs
     // the operator MCP tools over JSON-RPC; DELETE terminates a session (204); GET is 405. No
-    // handler-level auth — gated by panelGateMiddleware, and /api/mcp is in no allowlist, so over
-    // native (x-o8-client-addr=unverified-proxy) it is operator-ws-token-only. The device-context
+    // handler-level auth — gated by panelGateMiddleware, and /api/mcp is in no allowlist, so it is
+    // operator-ws-token-only, whatever the caller's address. The device-context
     // elevation (x-o8-device-worker/conversation/pid) is honored ONLY when the principal is already
     // operator (route.ts: resolveRequestPrincipalContext(request).role === 'operator'), so a device
     // or worker bearer cannot forge it. Responses are operator-visible MCP tool results. (#5243)
@@ -203,8 +203,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/steer-packet', 'POST', () => import('@/app/api/orchestrator/steer-packet/route')),
     // Shared agent controls (the desktop agent bridge's start/stop/approve/… actions on a
     // runtime, session or surface). POST only, operator-only twice over: the path is in no
-    // middleware allowlist, so over native (x-o8-client-addr forced to unverified-proxy,
-    // non-loopback) the panelGateMiddleware floor already admits only the operator ws-token
+    // middleware allowlist, so the panelGateMiddleware floor already admits only the operator
+    // ws-token, whatever the caller's address
     // — a worker or device bearer 403s, no/invalid bearer 401s — and the handler then calls
     // authorize(resolveRequestPrincipal(req)) which returns operator->pass, worker/device->403,
     // else 401 (principal from the bearer, never the client address). The response is a control
@@ -217,16 +217,15 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/mobile/devices', 'GET', () => import('@/app/api/mobile/devices/route')),
     // Paired-device revoke (Settings > Paired devices). POST only, and operator-only twice over:
     // the handler returns 403 unless resolveRequestPrincipal(req) === 'operator' (principal from the
-    // bearer, never x-o8-client-addr), and the path is in no middleware allowlist, so over native
-    // (x-o8-client-addr forced to unverified-proxy, non-loopback) the gate already admits only the
-    // operator ws-token. A device/worker bearer gets 403; no/wrong bearer gets 401. The write marks
+    // bearer, never x-o8-client-addr), and the path is in no middleware allowlist, so the gate
+    // already admits only the operator ws-token, whatever the caller's address. A device/worker
+    // bearer gets 403; no/wrong bearer gets 401. The write marks
     // the device revoked + rewrites the active-token-hash file; the response carries no token. (#5243)
     route('/api/mobile/devices/revoke', 'POST', () => import('@/app/api/mobile/devices/revoke/route')),
     // Connect-attach toggle (Settings > Paired devices). GET reads the setting, POST writes it
     // (env-override locked). No handler-level auth — same panelGateMiddleware operator gate as the
-    // rest of /api/panel/* (not allowlisted), so over native (x-o8-client-addr=unverified-proxy,
-    // non-loopback) both the read and the write are operator-ws-token-only, equal-or-stricter than
-    // Next. The POST body carries only a boolean; no credential in the response. (#5243)
+    // rest of /api/panel/* (not allowlisted), so both the read and the write are
+    // operator-ws-token-only, whatever the caller's address, as on Next. The POST body carries only a boolean; no credential in the response. (#5243)
     route('/api/panel/connect/attach', 'GET POST', () => import('@/app/api/panel/connect/attach/route')),
     // Mobile pairing config (Settings > Paired devices QR). GET only. No handler-level auth beyond the
     // panelGateMiddleware operator gate PLUS a device-GET capability (DEVICE_CAPABILITIES), so over
@@ -237,18 +236,17 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/mobile-pairing', 'GET', () => import('@/app/api/panel/mobile-pairing/route')),
     // Machine connect/disconnect (Settings > Paired devices). GET lists machines, POST registers this
     // machine, DELETE deregisters it + writes attach-off locally. No handler-level auth beyond the
-    // panelGateMiddleware operator gate — /api/panel/connect is in no allowlist/capability list, so over
-    // native (x-o8-client-addr=unverified-proxy, non-loopback) all three verbs are operator-ws-token-only,
-    // equal-or-stricter than Next (which also trusts loopback). The handler reads x-clerk-session-token
+    // panelGateMiddleware operator gate — /api/panel/connect is in no allowlist/capability list, so all
+    // three verbs are operator-ws-token-only, whatever the caller's address, as on Next. The handler
+    // reads x-clerk-session-token
     // (or the cached license key) only as the UPSTREAM license-server credential for the registry call,
     // after the gate has already passed — it is not an auth bypass; the header survives because the native
     // transport forwards it, and the registry call is outbound HTTPS, Next-independent. No token in the
     // response body (machine ids and device list only). (#5243)
     route('/api/panel/connect', 'GET POST DELETE', () => import('@/app/api/panel/connect/route')),
-    // Provider instances (Settings > Providers). GET+POST, gated by requirePanelAuth:
-    // over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) it
-    // falls through to the ws-token bearer check, so it is operator-ws-token-only here —
-    // equal-or-stricter than Next. The GET inventory masks secret values (secrets live
+    // Provider instances (Settings > Providers). GET+POST, gated by requirePanelAuth, which
+    // trusts loopback only through the peer o8d attests (#5576) and otherwise checks the
+    // ws-token bearer, as on Next. The GET inventory masks secret values (secrets live
     // encrypted in a separate credentials table); the POST writes go through
     // withProviderStoreLock + master-key encryption. (#5243)
     route('/api/runtime/provider-instances', 'GET POST', () => import('@/app/api/runtime/provider-instances/route')),
@@ -291,16 +289,16 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/release-health', 'GET', () => import('@/app/api/panel/release-health/route')),
     // Model picker catalogue (orchestrator backend models). GET only, gated twice: panelGateMiddleware gives it
     // no device/worker/spectator grant, so only the operator bearer passes; requirePanelAuth then trusts
-    // loopback via x-o8-client-addr, which the native transport stamps unverified-proxy, so here it falls
-    // through to the same ws-token bearer check — equal-or-stricter than Next. resolveOpenRouterKey() stays
+    // loopback via x-o8-client-addr, which native sets to the peer o8d attests (#5576), as the production
+    // wrapper does, and otherwise checks the same ws-token bearer. resolveOpenRouterKey() stays
     // in-process and only primes the model probe; the agent's output is redacted before it reaches the body
     // (tests/o8d-backend-models-native-real-path.test.ts). The OpenRouter metadata cache is per process and
     // the probe cache is on disk, so neither needs a single owner. (#5243)
     route('/api/orchestrator/backend-models', 'GET', () => import('@/app/api/orchestrator/backend-models/route')),
     // MCP config generator (Settings > MCP). GET only, no handler-level auth: gated by
     // panelGateMiddleware, which does not public-allowlist /api/setup/* (hardening #1562).
-    // Over the native transport (x-o8-client-addr=unverified-proxy, non-loopback) the loopback
-    // branch fails, so it is operator-ws-token-only here — equal-or-stricter than Next. The GET
+    // It is not one of the gate's loopback reads, so it is operator-ws-token-only, whatever the
+    // caller's address, as on Next. The GET
     // body embeds the operator WS_TOKEN (build.ts getOrCreateWsToken); that is not a leak because
     // the gate only ever lets the body reach a caller already holding that same operator token,
     // and the real-path forged-local-header negative pins that a non-operator cannot extract it. (#5243)
@@ -309,13 +307,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // (other servers by name only; the o8 entry carries the operator's own WS_TOKEN); POST merges the
     // o8 + codebase-memory entries into the user's config file. No handler-level auth — same
     // panelGateMiddleware gate as the other /api/setup/* routes (not public-allowlisted, hardening
-    // #1562), so over native (x-o8-client-addr=unverified-proxy) both the preview and the config-file
-    // WRITE are operator-ws-token-only — equal-or-stricter than Next. (#5243)
+    // #1562), so both the preview and the config-file WRITE are operator-ws-token-only, whatever the
+    // caller's address, as on Next. (#5243)
     route('/api/setup/claude-desktop', 'GET POST', () => import('@/app/api/setup/claude-desktop/route')),
     // External MCP client auto-register for Hermes/OpenClaw (Settings > MCP). GET probes whether the
     // CLI is installed + o8 registered (read-only `command -v`); POST shells out to the CLI to install
     // or remove the o8 server. No handler-level auth — same panelGateMiddleware gate as the other
-    // /api/setup/* routes (hardening #1562), so over native the probe and the CLI spawn are
+    // /api/setup/* routes (hardening #1562), so the probe and the CLI spawn are
     // operator-ws-token-only. The CLI is spawned via execFile/cliInvocation arg arrays (no shell
     // string); its args come from the o8 registry projection, not request input (only `target` is,
     // normalized to hermes|openclaw) — so a non-operator cannot reach or steer the spawn. (#5243)
@@ -353,8 +351,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/operator/status', 'GET', () => import('@/app/api/operator/status/route')),
     route('/api/setup/agent', 'GET POST', () => import('@/app/api/setup/agent/route')),
     // Setup-wizard tool detection. GET has no handler-level auth — same panelGateMiddleware gate as
-    // the other /api/setup/* routes (not public-allowlisted, hardening #1562), so over native
-    // (x-o8-client-addr=unverified-proxy) it is operator-ws-token-only. It reads provider credentials
+    // the other /api/setup/* routes (not public-allowlisted, hardening #1562), so it is
+    // operator-ws-token-only, whatever the caller's address. It reads provider credentials
     // (process.env + .env.local) and probes CLIs, but only to derive boolean presence: the response
     // carries key/provider NAMES, counts, paths, versions and static hints — never a secret VALUE
     // (verified; a real-path test asserts seeded key values never appear in the body). The CLI
