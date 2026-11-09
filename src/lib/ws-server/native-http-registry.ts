@@ -211,8 +211,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // and presence; presence join and the exchange history need the operator bearer. The service
     // resolves the principal from the bearer, refuses a worker credential without a packet, and
     // keeps a packet worker to its own lane's repository and inbox. Messages and presence are
-    // SQLite; live delivery uses the codex CLI queue, a terminal input or an owned-session resume,
-    // none of which the Next process holds. (#5576)
+    // SQLite. Live delivery uses the codex CLI queue, a terminal input or an owned-session resume
+    // (which the WS process already runs through runtime/action); none is held by the Next process,
+    // and a failed delivery keeps the message in the inbox. (#5576)
     route('/api/agents/message', 'GET POST', () => import('@/app/api/agents/message/route')),
     route('/api/agents/inbox', 'GET', () => import('@/app/api/agents/inbox/route')),
     route('/api/agents/presence', 'GET POST', () => import('@/app/api/agents/presence/route')),

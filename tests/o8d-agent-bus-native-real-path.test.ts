@@ -54,7 +54,9 @@ it.skipIf(process.platform === 'win32')('serves the agent bus natively with Next
     expect((await presence.json()).agents).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Receiver' })]));
     const sent = await call('POST', '/api/agents/message', tokens.sender, send);
     expect(sent.status).toBe(201);
-    expect(await sent.json()).toMatchObject({ ok: true, message: { to: 'Receiver', text: send.text } });
+    // The fixture receiver has no live terminal, so live delivery is deferred and the message is
+    // kept for the receiver's inbox, from the WS process as from Next.
+    expect(await sent.json()).toMatchObject({ ok: true, message: { to: 'Receiver', text: send.text, delivery: 'poll' } });
     expect((await call('GET', '/api/agents/inbox', tokens.sender)).status).toBe(200);
     const inbox = await call('GET', '/api/agents/inbox?agentId=fixture-receiver', server.token);
     expect(inbox.status).toBe(200);
