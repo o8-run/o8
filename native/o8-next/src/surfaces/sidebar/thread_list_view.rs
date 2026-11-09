@@ -108,8 +108,14 @@ impl Render for ThreadList {
                 div().child(self.project_header(window, cx)),
                 self.arrived(0),
             ))
-            .when(self.editing || !self.query.is_empty(), |view| {
-                view.child(self.editor.clone())
+            // Search lives in the sidebar, as T3 Code's does (Q 2026-11-09): a
+            // resting field that opens the list's own search in place.
+            .map(|view| {
+                if self.editing || !self.query.is_empty() {
+                    view.child(self.editor.clone())
+                } else {
+                    view.child(self.search_field(cx))
+                }
             })
             .when(!status.is_empty(), |view| {
                 view.child(
@@ -179,6 +185,40 @@ impl Render for ThreadList {
 }
 
 impl ThreadList {
+    /// The sidebar's resting Search field: a magnifier, "Search" and its
+    /// shortcut; a press opens the inline search where it sits.
+    fn search_field(&self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        const SEARCH: &str = "M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z M16 16l5 5";
+        div()
+            .id("sidebar-search-field")
+            .debug_selector(|| "sidebar-search-field".into())
+            .mx(px(6.))
+            .mt(px(2.))
+            .mb(px(4.))
+            .h(px(30.))
+            .px(px(8.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .rounded(px(8.))
+            .cursor_text()
+            .hover(|s| s.bg(theme().hover))
+            .child(crate::icon::stroke(SEARCH, theme().text_faint, 14., 1.8))
+            .child(
+                div()
+                    .flex_1()
+                    .text_size(px(13.))
+                    .text_color(theme().text_muted)
+                    .child("Search"),
+            )
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme().text_faint)
+                    .child(if cfg!(target_os = "macos") { "⌘F" } else { "Ctrl F" }),
+            )
+            .on_click(cx.listener(|this, _, window, cx| this.search(window, cx)))
+    }
     fn render_row(
         &mut self,
         i: usize,

@@ -26,9 +26,9 @@ fn render(
 ) -> Option<AnyElement> {
     // The desktop header, measured from WorkspaceHeaderStrip, LeftHeaderStrip
     // and PanelHeaderStrip. The sidebar toggle stays at x=78 (rail 52 + 26)
-    // whether the sidebar is open or not. With the sidebar open, search sits
-    // at the sidebar's right edge and back/forward start the workspace header;
-    // with it closed, toggle, search, back and forward share one row.
+    // whether the sidebar is open or not, with back and forward beside it, as
+    // T3 Code's sidebar header holds its history arrows (Q 2026-11-09). The
+    // tabs start the workspace header; search is the sidebar's own field.
     super::right_panel::sync(s, window, cx);
     // Settings is its own page with its own header, as in classic.
     if s.surfaces.settings.view.is_some() {
@@ -62,6 +62,17 @@ fn render(
             }))
         })
     };
+    // Toggle, Back and Forward: one cluster that never moves.
+    let nav = |hidden: bool, cx: &mut Context<Shell>| {
+        div()
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap(px(4.))
+            .child(sidebar_toggle(hidden, cx))
+            .child(history("header-back", BACK, "Back", back, cx))
+            .child(history("header-forward", FORWARD, "Forward", forward, cx))
+    };
     let workspace = div()
         .flex()
         .flex_1()
@@ -73,11 +84,7 @@ fn render(
         // 8px padding after the 4px sidebar resize edge.
         .pl(px(if hidden && !moving { TOGGLE_INSET } else { 16. }))
         .pr(px(8.))
-        .when(hidden && !moving, |row| {
-            row.child(sidebar_toggle(true, cx)).child(search_button(cx))
-        })
-        .child(history("header-back", BACK, "Back", back, cx))
-        .child(history("header-forward", FORWARD, "Forward", forward, cx))
+        .when(hidden && !moving, |row| row.child(nav(true, cx)))
         .child(tabs(s, cx))
         .child(
             div()
@@ -131,15 +138,12 @@ fn render(
                         .gap(px(4.))
                         .pl(px(TOGGLE_INSET))
                         .pr(px(8.))
-                        .child(sidebar_toggle(false, cx))
-                        .child(div().flex_1())
-                        .child(search_button(cx)),
+                        .child(nav(false, cx)),
                 )
             })
             // In flight the column's slot travels with it, so the tabs move with
-            // the workspace, while the toggle holds its place and search rides
-            // the column's edge down to its spot beside the toggle. At either
-            // end every button sits where the resting header puts it.
+            // the workspace, while toggle, Back and Forward hold their place. At
+            // either end every button sits where the resting header puts it.
             .when(moving, |row| {
                 let edge = super::super::sidebar::width(s) * open;
                 let top = (crate::theme::GEOMETRY.header - 26.) / 2.;
@@ -149,14 +153,7 @@ fn render(
                             .absolute()
                             .left(px(TOGGLE_INSET))
                             .top(px(top))
-                            .child(sidebar_toggle(hidden, cx)),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .left(px((edge - 8. - SEARCH_W).max(TOGGLE_INSET + TOGGLE_W + 4.)))
-                            .top(px(top))
-                            .child(search_button(cx)),
+                            .child(nav(hidden, cx)),
                     )
             })
             .when(!super::right_panel::maximized(s), |row| {
@@ -190,15 +187,15 @@ fn edge_mark() -> gpui::Div {
 }
 
 /// SidebarTogglePill: 14px panel glyph, orange while the sidebar is pinned open.
-/// The toggle's and search's widths: 7px either side of a 14px and a 16px glyph.
+/// The toggle's and an arrow's widths: 7px either side of a 14px and a 15px glyph.
 const TOGGLE_W: f32 = 28.;
-const SEARCH_W: f32 = 30.;
-/// The travelling slot's floor: the folded strip's 14px inset, toggle, 4px gap,
-/// search and 4px gap, less the strip's 16px padding in flight, so Back lands
-/// where the folded header puts it.
+const ARROW_W: f32 = 29.;
 /// Past the traffic lights, so the toggle never crowds them.
 const TOGGLE_INSET: f32 = 26. + super::super::rail::LIGHTS;
-const FOLDED: f32 = TOGGLE_INSET + TOGGLE_W + 4. + SEARCH_W + 4. - 16.;
+/// The travelling slot's floor: the folded strip's inset, toggle, Back and
+/// Forward with their gaps and the 4px before the tabs, less the strip's 16px
+/// padding in flight, so the tabs land where the folded header puts them.
+const FOLDED: f32 = TOGGLE_INSET + TOGGLE_W + 4. + ARROW_W + 4. + ARROW_W + 4. - 16.;
 
 fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
     pill(
@@ -224,16 +221,6 @@ fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui:
         this.capture(window, cx);
         toggle_sidebar(this, window, cx);
     }))
-}
-
-/// Search opens the command palette from the top, as the desktop's does.
-fn search_button(cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
-    icon_button("header-search", SEARCH, 16., 1.7, "Search chats  ⌘K", true).on_click(cx.listener(
-        |this, _, window, cx| {
-            super::super::palette::toggle(this, window, cx);
-            cx.notify();
-        },
-    ))
 }
 
 /// The desktop's 26px header icon pill (HeaderIconPill): 7px padding either
@@ -390,7 +377,6 @@ const SIDEBAR: &str =
     "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z M9 3v18";
 const BACK: &str = "M19 12H5m6-6-6 6 6 6";
 const FORWARD: &str = "M5 12h14m-6-6 6 6-6 6";
-const SEARCH: &str = "M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z M16 16l5 5";
 const CLOSE: &str = "M6 6l12 12M18 6L6 18";
 
 /// The desktop's single-colour pill glyphs (PillRuntimeGlyph), chosen by label.
