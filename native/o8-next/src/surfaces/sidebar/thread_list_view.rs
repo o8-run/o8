@@ -183,6 +183,7 @@ impl ThreadList {
         div()
             .id("sidebar-search-field")
             .debug_selector(|| "sidebar-search-field".into())
+            .group("sidebar-search")
             .mx(px(6.))
             .mt(px(4.))
             .mb(px(2.))
@@ -202,8 +203,11 @@ impl ThreadList {
                     .text_color(theme().text_muted)
                     .child("Search"),
             )
+            // The shortcut shows on hover only: at rest the row is just Search.
             .child(
                 div()
+                    .invisible()
+                    .group_hover("sidebar-search", |s| s.visible())
                     .text_size(px(11.))
                     .text_color(theme().text_faint)
                     .child(if cfg!(target_os = "macos") { "⌘F" } else { "Ctrl F" }),
@@ -291,7 +295,10 @@ impl ThreadList {
                         .when(row.kind == "section" && i > 0, |v| v.items_end())
                         // With the list's 6, a highlight has even margins on
                         // both sides.
-                        .pl(px(Self::child_inset(&row)))
+                        // In the card view headings start where the cards'
+                        // content does, 16px in, as the head row's Search.
+                        .pl(px(Self::child_inset(&row)
+                            + if row.kind == "section" && this.cards() { 4. } else { 0. }))
                         .pr(px(6.))
                         .rounded(px(8.))
                         .overflow_hidden()
@@ -357,7 +364,6 @@ impl ThreadList {
                                                 .child(this.scope_trigger(cx))
                                                 .children(this.scope_picker(cx)),
                                         )
-                                        .child(this.new_thread_button(cx))
                                     })
                                     .child(this.view_picker(cx))
                                     },

@@ -209,9 +209,9 @@ impl ThreadList {
                     .font_weight(gpui::FontWeight(450.))
                     .text_color(st.color)
                     .child(crate::icon::stroke(st.icon, st.color, 13., 1.9))
-                    .child(st.label)
+                    .child(tabular(div()).child(st.label))
             }
-            None => div()
+            None => tabular(div())
                 .debug_selector(move || format!("thread-age-{status_id}"))
                 .text_size(px(11.))
                 .text_color(faint)
@@ -430,7 +430,7 @@ impl ThreadList {
             .text_color(theme().text_muted)
             .child(div().flex_1().child(name.clone()))
             .child(
-                div()
+                tabular(div())
                     .text_size(px(11.))
                     .text_color(theme().text_faint)
                     .child(row.age.clone()),
@@ -611,6 +611,13 @@ impl ThreadList {
     }
 }
 
+/// Tabular figures, so a ticking clock or a changing count holds its width
+/// (Emil Kowalski's UI cheatsheet: numbers jitter when they change).
+pub(crate) fn tabular<E: gpui::Styled>(mut element: E) -> E {
+    element.text_style().get_or_insert_with(Default::default).font_features =
+        Some(gpui::FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)])));
+    element
+}
 /// A run's clock keeps its seconds: "42s", "1m 05s", "1h 02m 05s".
 pub(super) fn run_timer(secs: u64) -> String {
     match secs {

@@ -190,6 +190,7 @@ impl ThreadList {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let new_thread = (!self.scope_repos().is_empty()).then(|| self.new_thread_button(cx));
         let active = self
             .header
             .ledger
@@ -224,12 +225,17 @@ impl ThreadList {
             self.search_field(cx)
                 .flex_1()
                 .min_w_0()
+                // The magnifier sits on the list's 16px content edge.
+                .pl(px(10.))
                 .mx(px(0.))
                 .mt(px(0.))
                 .mb(px(0.))
                 .into_any_element()
         };
-        let tip = crate::text::sanitize(&name);
+        let tip = match repos.len() {
+            0 | 1 => crate::text::sanitize(&name),
+            n => format!("{} · {n} repositories", crate::text::sanitize(&name)),
+        };
         let mut view = div()
             .debug_selector(|| "sidebar-project-header".into())
             .pt(px(6.))
@@ -239,7 +245,9 @@ impl ThreadList {
             .child(
                 div()
                     .pl(px(6.))
-                    .pr(px(5.))
+                    // The last control's centre meets the list's right axis,
+                    // 22px in, with the shelf chevrons and the dock's Tools.
+                    .pr(px(8.))
                     .flex()
                     .items_center()
                     .gap(px(2.))
@@ -276,18 +284,6 @@ impl ThreadList {
                                         "sidebar-project-identity",
                                     )),
                             )
-                            .when(repos.len() > 1, |v| {
-                                v.child(
-                                    div()
-                                        .debug_selector({
-                                            let count = repos.len();
-                                            move || format!("sidebar-project-count:{count}")
-                                        })
-                                        .text_size(px(10.))
-                                        .text_color(theme().text_muted)
-                                        .child(repos.len().to_string()),
-                                )
-                            })
                             .child(
                                 div()
                                     .debug_selector(|| "sidebar-project-chevron".into())
@@ -332,7 +328,9 @@ impl ThreadList {
                                 this.header_drop_repository(paths, cx)
                             }))
                             .on_click(cx.listener(|this, _, _, cx| this.header_add_repository(cx))),
-                    ),
+                    )
+                    // New thread closes the row, as in T3 Code's sidebar head.
+                    .children(new_thread),
             );
         if let Some(projects) = self.header_menu {
             let mut menu = div()
