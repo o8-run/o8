@@ -5442,6 +5442,12 @@
       ]
     },
     {
+      "path": "tests/o8d-orchestrator-digest-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-orchestrator-reruns-native-real-path.test.ts",
       "reasons": [
         "real-path"
