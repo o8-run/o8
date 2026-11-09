@@ -42,7 +42,7 @@ function normalizedPacketId(packetId: string): string {
 export function writeActivePacketWorkerTokenHashes(): void {
   const rows = getSqlite().prepare(`
     SELECT token_hash FROM worker_tokens
-    WHERE scope = ? AND revoked_at IS NULL
+    WHERE scope = ? AND revoked_at IS NULL AND packet_id IS NOT NULL
     ORDER BY created_at, id
   `).all(PACKET_WORKER_SCOPE) as Array<{ token_hash: string }>;
   writePacketWorkerTokenHashes(rows.map((row) => row.token_hash));

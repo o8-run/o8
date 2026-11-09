@@ -1,24 +1,36 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
 
-// Every rewrite of the gate's packet-token file must happen inside the transaction that changed
-// worker_tokens: the database lock is what orders rewrites from different processes, so a stale
-// rewrite can never put a revoked hash back.
-const writesInTransaction: boolean[] = [];
+// Every rewrite of the gate's packet-token file must happen while its process holds the database
+// write lock: that lock is what orders rewrites from different processes, so a stale rewrite can
+// never put a revoked hash back. The startup rebuild only reads before it writes, so only an
+// immediate transaction gives it that lock.
+const writesUnderWriteLock: boolean[] = [];
 vi.mock('@/lib/auth/worker-token', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/auth/worker-token')>();
   const { getSqlite } = await import('@/lib/db');
   return {
     ...actual,
     writePacketWorkerTokenHashes: (hashes: string[]) => {
-      writesInTransaction.push(getSqlite().inTransaction);
+      // Another connection, as another process would open it, cannot take the write lock now.
+      const other = new Database(getSqlite().name, { timeout: 0 });
+      try {
+        other.exec('BEGIN IMMEDIATE');
+        other.exec('ROLLBACK');
+        writesUnderWriteLock.push(false);
+      } catch (error) {
+        writesUnderWriteLock.push((error as { code?: string }).code === 'SQLITE_BUSY');
+      } finally {
+        other.close();
+      }
       actual.writePacketWorkerTokenHashes(hashes);
     },
   };
 });
 
-it('rewrites the gate file only while the changing transaction holds the database', async () => {
+it('rewrites the gate file only while the changing transaction holds the write lock', async () => {
   const { mintPacketWorkerToken, syncPacketWorkerTokenHashes } = await import('@/lib/auth/packet-worker-token');
   const { revokeToken } = await import('@/lib/worker/tokens');
   const { getSqlite } = await import('@/lib/db');
@@ -31,7 +43,7 @@ it('rewrites the gate file only while the changing transaction holds the databas
   expect(revokeToken(id)).toBe(true);
   syncPacketWorkerTokenHashes();
 
-  expect(writesInTransaction).toEqual([true, true, true, true]);
+  expect(writesUnderWriteLock).toEqual([true, true, true, true]);
   const file = readFileSync(PACKET_WORKER_TOKEN_HASHES_PATH, 'utf8');
   expect(file).toContain(hash(kept));
   expect(file).not.toContain(hash(revoked));

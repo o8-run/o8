@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -87,8 +87,13 @@ export function writePacketWorkerTokenHashes(tokenHashes: string[]): void {
   }
   mkdirSync(DATA_DIR, { recursive: true });
   const temporary = `${PACKET_WORKER_TOKEN_HASHES_PATH}.${process.pid}.tmp`;
-  writeFileSync(temporary, tokenHashes.map((tokenHash) => `${tokenHash}\n`).join(''), { mode: 0o600 });
-  renameSync(temporary, PACKET_WORKER_TOKEN_HASHES_PATH);
+  try {
+    writeFileSync(temporary, tokenHashes.map((tokenHash) => `${tokenHash}\n`).join(''), { mode: 0o600 });
+    renameSync(temporary, PACKET_WORKER_TOKEN_HASHES_PATH);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
 }
 
 /** DB-free packet-worker recognition for middleware. */

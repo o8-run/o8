@@ -35,6 +35,20 @@ it('refuses a packet worker at the gate once the operator revokes it', async () 
     expect(response.status, path).toBe(401);
     expect((await response.json()).detail, path).toMatch(GATE_REFUSAL);
   }
+
+  // A credential the Workers panel creates with the packet scope but no packet stays out of the
+  // file, after the next rewrite too, so the gate never treats it as a packet worker.
+  const created = await POST(new Request('http://127.0.0.1:3000/api/panel/workers', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'create_token', label: 'fixture packetless', scope: 'local-packet' }) }));
+  expect(created.status).toBe(201);
+  const { plaintextToken } = await created.json() as { plaintextToken: string };
+  mintPacketWorkerToken('fixture-after-packetless');
+  for (const path of WORKER_READS) {
+    const response = panelGateMiddleware(new NextRequest(`http://127.0.0.1:3000${path}`, {
+      headers: { host: '127.0.0.1:3000', authorization: `Bearer ${plaintextToken}`, 'x-o8-client-addr': '127.0.0.1' } }));
+    expect(response.status, path).toBe(401);
+  }
 });
 
 it.skipIf(process.platform === 'win32')('keeps the gate file equal to the active credentials while two processes mint and revoke at once', async () => {
