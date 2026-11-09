@@ -51,7 +51,6 @@ it('covers native client routes with their production registration owners', () =
 // path when it is registered; the default switch waits for every list to be empty.
 const NEXT_ONLY_SHELL_PATHS = new Set([
   '/api/canvas/intent',
-  '/api/panel/cloud-jobs/drain',
   '/api/v1/audio/transcriptions', '/api/v1/chat/completions',
 ]);
 const NEXT_ONLY_MCP_PATHS = new Set([
