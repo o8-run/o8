@@ -7984,6 +7984,14 @@
       ]
     },
     {
+      "path": "tests/symon-machine-session-in-process-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-managed-messages-pi-brain-real-path.test.ts",
       "reasons": [
         "real-path"
