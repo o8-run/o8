@@ -263,7 +263,7 @@ export async function probeSelfReviewStall(
  * lane's branch itself becomes reviewable.
  */
 export async function preserveSelfReviewStallWork(
-  lane: Pick<Lane, 'id' | 'label' | 'repoPath' | 'worktreePath' | 'baseBranch'>,
+  lane: Pick<Lane, 'id' | 'label' | 'repoPath' | 'worktreePath' | 'baseBranch'> & Partial<Pick<Lane, 'branch'>>,
   cwd: string,
 ): Promise<SelfReviewStallWorkPreservation> {
   const [{ captureWorktreeState }, completion] = await Promise.all([
@@ -274,7 +274,7 @@ export async function preserveSelfReviewStallWork(
 
   let committed = false;
   try {
-    committed = await completion.autoCommitCompletionWorktree(cwd, lane.repoPath, lane.label);
+    committed = await completion.autoCommitCompletionWorktree(cwd, lane.repoPath, lane.label, lane.branch);
   } catch (error) {
     return {
       committed: false,

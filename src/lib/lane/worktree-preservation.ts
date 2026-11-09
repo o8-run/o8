@@ -68,7 +68,7 @@ async function resolveRefSha(repoPath: string, refName: string): Promise<string 
 }
 
 export async function preserveLaneWorktreeHead(
-  lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'baseBranch'>,
+  lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'baseBranch'> & Partial<Pick<Lane, 'branch'>>,
 ): Promise<LaneWorktreePreservation> {
   const worktreePath = lane.worktreePath?.trim();
   if (!worktreePath) {
@@ -80,7 +80,7 @@ export async function preserveLaneWorktreeHead(
   // committed correctly — the worktree-amend false-landing trap.
   const capture = await captureWorktreeState(worktreePath, lane.id, lane.repoPath);
 
-  const autoCommitted = await autoCommitCompletionWorktree(worktreePath, lane.repoPath);
+  const autoCommitted = await autoCommitCompletionWorktree(worktreePath, lane.repoPath, undefined, lane.branch);
   const baseBranch = lane.baseBranch?.trim() || 'main';
   const hasUnmergedWork = await headHasUnmergedWork(worktreePath, lane.repoPath, baseBranch);
   if (!autoCommitted && !hasUnmergedWork) {

@@ -54,9 +54,9 @@ function git(cwd: string, args: string[]): string {
 }
 
 /** A temp git repo on `main` with one base commit; optionally leave a dirty edit. */
-function makeWorktree(opts: { dirty: boolean }): string {
+function makeWorktree(opts: { dirty: boolean; branch?: string }): string {
   const dir = mkdtempSync(join(tmpdir(), 'o8-reaper-wt-'));
-  git(dir, ['init', '-q', '-b', 'main']);
+  git(dir, ['init', '-q', '-b', opts.branch ?? 'main']);
   git(dir, ['config', 'user.email', 'test@o8.dev']);
   git(dir, ['config', 'user.name', 'o8 test']);
   git(dir, ['config', 'commit.gpgsign', 'false']);
@@ -147,7 +147,8 @@ describe('reapZombieLane salvage (#1282 Failure B)', () => {
   });
 
   it('commits a running lane\'s uncommitted work and routes it to reviewing', async () => {
-    const wt = makeWorktree({ dirty: true });
+    // The lane's checkout is on the lane's branch.
+    const wt = makeWorktree({ dirty: true, branch: 'pkt/salvage-me' });
     const lane = createLane({
       repoPath: wt,
       branch: 'pkt/salvage-me',

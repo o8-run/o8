@@ -7,6 +7,7 @@ import type {
 import { resolveAttributedCommitMessage } from '@/lib/lane/commit-attribution';
 import { resolveGovernedMergeHistoryPlan } from '@/lib/lane/governed-merge-history';
 import { checkExpectedHeadSha, formatHeadShaMismatchNote, resolveHeadSha } from '@/lib/lane/head-sha-lock';
+import { assertLaneHeadOnBranch, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { blockIncompleteMergeDependencies } from '@/lib/lane/dependency-materialization-merge-blocker';
 import { checkReviewedHeadIntegrity, formatReviewedHeadMismatchNote } from '@/lib/lane/review-head-integrity';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
@@ -53,7 +54,7 @@ import {
   mergeRefForLane,
   pushExactBase, pushWorkerBranchBestEffort,
   pushWorkerBranchLeaseBestEffort,
-  readHeadSha,
+  readLaneBranchSha,
   refExists,
   refPointsTo,
   refreshOriginBaseBestEffort,
@@ -509,6 +510,18 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     if (!branch.ok) return branch.result;
     const actualBranch = branch.actualBranch;
     console.log(`[lane-merge] Actual worktree branch: ${actualBranch} (lane.branch: ${lane.branch})`);
+    // The worker can point its checkout's HEAD anywhere: merge only from the lane's branch.
+    try {
+      await assertLaneHeadOnBranch(worktreePath, lane.repoPath, lane.branch);
+    } catch (error) {
+      if (!(error instanceof LaneGitMetadataError)) throw error;
+      return {
+        ok: false,
+        laneId: command.laneId,
+        note: `The lane checkout is not on ${lane.branch}, or its Git metadata is not Git's own.`,
+        reason: 'worktree_branch_mismatch',
+      };
+    }
 
     if (command.strategy === 'manual') {
       setLaneStatus(command.laneId, 'awaiting_input', actor, 'manual_resolution');
@@ -573,13 +586,15 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         try {
           await commitDirtyWorktree(
             worktreePath,
+            lane.repoPath,
+            lane.branch,
             resolveAttributedCommitMessage(command.commitMessage),
           );
         } catch (error) {
           console.warn(`[lane-merge] commitDirtyWorktree non-fatal: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      reviewedSnapshotSha = await readHeadSha(worktreePath);
+      reviewedSnapshotSha = await readLaneBranchSha(worktreePath, lane.repoPath, lane.branch);
     }
 
     const integration = await createDetachedIntegrationWorktree({

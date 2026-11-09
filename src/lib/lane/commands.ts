@@ -40,7 +40,8 @@ import { decideSurfaceMerge } from '@/lib/lane/surface-merge-decision';
 import { resolveRequireApprovalSync } from '@/lib/operator/defaults';
 import { formatOversizedFiles, getOversizedChangedFilesForLane } from '@/lib/lane/file-size-policy';
 import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
-import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
+import { assertLaneHeadOnBranch, laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
+import { commitLaneWork } from '@/lib/supervisor/completion-verification';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
@@ -60,7 +61,7 @@ import {
   SpokenReviewSnapshotChangedError,
   validateSpokenReviewEvidenceBundle,
 } from '@/lib/lane/spoken-review-snapshot';
-import { commitDirtyWorktree, readHeadSha } from '@/lib/lane/worktree-merge-git';
+import { commitDirtyWorktree, readLaneBranchSha } from '@/lib/lane/worktree-merge-git';
 import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { enqueueLaneReview } from '@/lib/lane/review-queue';
@@ -470,21 +471,10 @@ async function dispatchUnlocked(
         });
         if (porcelain.trim().length > 0) {
           console.log(`[lane] request_review: dirty worktree detected in ${reviewCwd}, auto-committing`);
-          await laneGit(reviewCwd, lane.repoPath, ['add', '-A', '--', '.'], {
-            maxBuffer: 10 * 1024 * 1024,
-          });
-          // Unstage o8-injected worktree artifacts so they never land in the review
-          // commit: the safety-hook `.claude/settings.json` (otherwise blows the
-          // diff-budget merge gate) and the `node_modules` symlink (otherwise pollutes
-          // the target repo's main). Use `git reset` to unstage rather than a negative
-          // `git add` pathspec — the latter errors ("paths are ignored") when an ignored
-          // dir like node_modules exists in the worktree.
-          await laneGit(reviewCwd, lane.repoPath, ['reset', '-q', '--', '.claude', 'node_modules'], {
-            maxBuffer: 10 * 1024 * 1024,
-          });
-          await laneGit(reviewCwd, lane.repoPath, ['commit', '-m', 'auto-commit: agent work before review'], {
-            maxBuffer: 10 * 1024 * 1024,
-          });
+          // Commit only onto the lane's branch, wherever the worker pointed HEAD.
+          await assertLaneHeadOnBranch(reviewCwd, lane.repoPath, lane.branch);
+          // Leaves o8-injected worktree artifacts out of the review commit.
+          await commitLaneWork(reviewCwd, lane.repoPath, lane.branch, 'auto-commit: agent work before review');
         }
       } catch (err) {
         console.warn(`[lane] request_review: git status/commit check failed for ${reviewCwd}:`, err);
@@ -693,12 +683,12 @@ async function dispatchUnlocked(
         } else {
           if (command.commitMessage) {
             try {
-              await commitDirtyWorktree(lockedLane.worktreePath, command.commitMessage);
+              await commitDirtyWorktree(lockedLane.worktreePath, lockedLane.repoPath, lockedLane.branch, command.commitMessage);
             } catch {
               // Preserve legacy PR behavior when an optional auto-commit fails.
             }
           }
-          reviewedSnapshotSha = await readHeadSha(lockedLane.worktreePath);
+          reviewedSnapshotSha = await readLaneBranchSha(lockedLane.worktreePath, lockedLane.repoPath, lockedLane.branch);
         }
 
         const publicationGovernanceDrift = await rejectSpokenReviewGovernanceDrift({
