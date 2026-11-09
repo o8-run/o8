@@ -39,6 +39,10 @@ import {
 import { assertNoPrintFlag } from './assert-no-print-flag';
 import { claudeEffortFlagValue } from '@/lib/orchestrator/thinking-effort';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { modelToolsWithheld } from '@/lib/providers/model-tool-scope';
+
+/** A turn that answers from its prompt alone: no tools, MCP servers, settings, commands, or saved session. */
+export const NO_TOOLS_ARGS: readonly string[] = ['--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence'];
 
 export interface AskClaudeOneShotOptions {
   /** Explicit `claude` binary path. Caller resolves; we don't probe. */
@@ -94,7 +98,7 @@ export async function askClaudeOneShot(
 
   return new Promise<string>((resolve, reject) => {
     const args = buildOneShotArgs(opts.model, opts.effort);
-    if (opts.tools === 'none') args.push('--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence');
+    if (opts.tools === 'none' || modelToolsWithheld()) args.push(...NO_TOOLS_ARGS);
     const launch = cliInvocation(opts.binary, args);
     const child = spawn(launch.command, launch.args, {
       windowsHide: true,

@@ -3,6 +3,7 @@ import 'server-only';
 
 import { currentComposerBrainRoute } from '@/lib/operator/composer-brain-context';
 import { resolveBrainCodexRouteSync } from '@/lib/operator/brain-routing';
+import { modelToolsWithheld } from '@/lib/providers/model-tool-scope';
 import { callCodex } from './llm/codex-adapter';
 import { askClaudeOneShot } from '@/lib/claude-code/one-shot-repl';
 import { buildSonnetComposeSystem, buildSonnetComposeUser, type ComposeOptions } from '@/lib/prompts/v1';
@@ -16,6 +17,7 @@ import type { SseEmit } from './compose-class-a';
 export async function composeConnectedBrain(question: string, repoPath: string | undefined, rows: TypedRow[], emit: SseEmit, options: ComposeOptions): Promise<boolean> {
   const route = currentComposerBrainRoute();
   if (!route?.runtime || !route.model || !route.binary) return false;
+  if (route.runtime === 'codex' && modelToolsWithheld()) return false;
   const prompt = `${buildSonnetComposeSystem(options)}\n\n${buildSonnetComposeUser(question, repoPath, rows)}`;
   const choice = createRoleRouteChoice({ backend: route.runtime === 'codex' ? 'codex' : 'claude', runtime: route.runtime, model: route.model, effort: route.runtime === 'codex' ? resolveBrainCodexRouteSync().reasoningEffort ?? null : null });
   const receipt = (status: 'selected' | 'failed') => recordRoleRoutingReceiptSafely({ role: 'brain', repoPath: repoPath ?? null, contextType: 'brain-conversation', requested: choice, effective: status === 'selected' ? choice : null, sources: { backend: 'request-time', runtime: 'derived', model: 'derived', effort: 'derived' }, reason: 'Composer Brain uses the available connected runtime.', fallbackReason: null, status });

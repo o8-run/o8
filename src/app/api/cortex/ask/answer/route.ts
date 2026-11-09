@@ -33,6 +33,7 @@ import { estimateBrainTokenCount } from '@/lib/cortex/qa/llm/brain-spend';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
+import { withModelToolsWithheld } from '@/lib/providers/model-tool-scope';
 
 interface AskAnswerBody {
   question?: unknown;
@@ -152,7 +153,9 @@ export async function POST(request: NextRequest) {
       terse,
       ...(usageContext ? { usageContext } : {}),
     });
-    const result = await (readScope ? withRequestProjectScope(readScope, ask) : ask());
+    const scopedAsk = () => (readScope ? withRequestProjectScope(readScope, ask) : ask());
+    // Only the operator's asks reach models with tools; any other caller's question is answered from retrieved context alone.
+    const result = await (principal.role === 'operator' ? scopedAsk() : withModelToolsWithheld(scopedAsk));
     const latencyMs = Math.max(0, performance.now() - startedAt);
     if (packetId && laneId) recordBrainConsulted(packetId, laneId, question, result, latencyMs);
     return NextResponse.json({

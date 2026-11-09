@@ -25,6 +25,7 @@ import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
 import { getOperatorDefaultsSync, type ClassAComposer } from '@/lib/operator/defaults';
 import { usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
+import { modelToolsWithheld } from '@/lib/providers/model-tool-scope';
 import { createRoleRouteChoice } from '@/lib/operator/role-routing';
 import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
 import { flushBrainQuotaAlerts, noteBrainQuotaError } from './brain-quota-alert';
@@ -362,7 +363,21 @@ export async function composeClassA(
   attemptedRoutes.push('deterministic-heuristic');
   console.info('[qa][composer-A] resolved via heuristic');
   recordBrainResolution({ backend: 'deterministic-heuristic', runtime: null, model: null, label: 'deterministic heuristic' });
+  if (modelToolsWithheld() && topRows.length > 0) {
+    // A caller without model tools still gets what retrieval found.
+    emitRetrievedSources(topRows, emit, options);
+    return;
+  }
   emit('token', { text: 'I don\'t have that information yet.' });
+  emit('done', {});
+}
+
+/** Plain answer listing the top retrieved rows, cited, for when no model could compose one. */
+function emitRetrievedSources(topRows: TypedRow[], emit: SseEmit, options: ComposeOptions): void {
+  const rows = topRows.slice(0, options.terse ? 2 : 5);
+  const lines = rows.map((row) => `- ${rowDisplayTitle(row)}: ${(row.citation.excerpt || rowFullText(row)).replace(/\s+/g, ' ').trim().slice(0, 280)}`);
+  emit('token', { text: `No model was available to compose an answer. Closest retrieved sources:\n${lines.join('\n')}` });
+  emitCitations(rows, emit);
   emit('done', {});
 }
 
@@ -525,7 +540,12 @@ function emitClassAAnswer(
   const citationRows = options.terse ? verifiedRows.slice(0, 2) : verifiedRows;
   const answer = options.terse ? limitCitationMarkers(translatedAnswer, citationRows) : translatedAnswer;
   emit('token', { text: answer });
-  for (const row of citationRows) {
+  emitCitations(citationRows, emit);
+  emit('done', {});
+}
+
+function emitCitations(rows: TypedRow[], emit: SseEmit): void {
+  for (const row of rows) {
     emit('citation', {
       kind: row.citation.kind,
       rowId: `${row.citation.kind}-${row.citation.rowId}`,
@@ -535,7 +555,6 @@ function emitClassAAnswer(
       url: row.citation.url, sourcePath: row.citation.sourcePath,
     });
   }
-  emit('done', {});
 }
 
 export function limitCitationMarkers(answer: string, allowedRows: TypedRow[]): string {
