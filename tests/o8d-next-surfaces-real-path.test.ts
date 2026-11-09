@@ -781,6 +781,9 @@ const WRITE_ROUTES: Array<[method: string, path: string, workerStatus: number]> 
   ['POST', '/api/runtime/action', 403],
   // Packet-bound workers reach proposals through the gate; the handler binds the packet.
   ['POST', '/api/cortex/proposals', 403],
+  // Operator MCP host: in no middleware allowlist, so a worker bearer is refused at the gate (403)
+  // before the handler — the device-context elevation it could otherwise assert never runs. (#5243)
+  ['POST', '/api/mcp', 403],
 ];
 
 async function seedPacketWorker(packetId: string) {
@@ -810,6 +813,42 @@ it.each(WRITE_ROUTES)('refuses native %s %s without the operator bearer', async 
     expect(response.status, `${method} ${path} ${authorization ?? 'no bearer'}`).toBe(status);
     await response.arrayBuffer();
   }
+});
+
+// The operator MCP host must be reachable over native for the operator, and refuse every other
+// principal (covered above in WRITE_ROUTES). Here: the operator ws-token POSTs a JSON-RPC tools/list
+// and reaches the handler (200 with a JSON-RPC result), DELETE terminates a session (204), and GET is
+// rejected (405). A worker/device bearer cannot reach this handler, so the x-o8-device-* elevation
+// (honored only when role === 'operator') can never be forged by a non-operator. (#5243)
+it('serves the operator MCP host over native and rejects non-POST/DELETE verbs (#5243)', async () => {
+  const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
+  const listed = await fetch(`${origin}/api/mcp`, { method: 'POST', headers,
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+  expect(listed.status).toBe(200);
+  const body = await listed.json();
+  expect(body.jsonrpc).toBe('2.0');
+  expect(Array.isArray(body.result?.tools)).toBe(true);
+
+  // An enrolled device bearer — the only principal that could even supply x-o8-device-* headers —
+  // is refused at the gate (403) before the handler, so it can never reach the role==='operator'
+  // branch that honors the device-context elevation. Pin it explicitly, even with forged markers.
+  const deviceToken = 'enrolled-device-token-mcp-5243-abcdef0123456789';
+  writeFileSync(join(server.directory, 'mobile-device-tokens'),
+    `${createHash('sha256').update(deviceToken).digest('hex')}\n`, { mode: 0o600 });
+  const deviceForge = await fetch(`${origin}/api/mcp`, { method: 'POST',
+    headers: { authorization: `Bearer ${deviceToken}`, 'content-type': 'application/json',
+      'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
+      'x-o8-device-worker': 'forged-worker', 'x-o8-device-conversation': 'forged-convo' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+  expect(deviceForge.status, 'a device bearer cannot reach the MCP host or forge device-context').toBe(403);
+  await deviceForge.arrayBuffer();
+
+  const terminated = await fetch(`${origin}/api/mcp`, { method: 'DELETE', headers: { authorization: `Bearer ${server.token}` } });
+  expect(terminated.status).toBe(204);
+
+  const rejected = await fetch(`${origin}/api/mcp`, { headers: { authorization: `Bearer ${server.token}` } });
+  expect(rejected.status).toBe(405);
+  expect(rejected.headers.get('allow')).toBe('POST, DELETE');
 });
 
 it('adds, lists and removes a session rule through the native transport', async () => {
