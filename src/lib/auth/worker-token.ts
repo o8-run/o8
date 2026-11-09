@@ -31,6 +31,11 @@ function readStored(): string | null {
   }
 }
 
+/** The stored local-worker token, never minting one (for redaction). */
+export function readLocalWorkerToken(): string | null {
+  return readStored();
+}
+
 /** Mint-once (0600) local-worker token; call at dispatch to stamp the worker env. */
 export function getOrCreateLocalWorkerToken(): string {
   const existing = readStored();

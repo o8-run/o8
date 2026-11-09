@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 
+import { readLocalWorkerToken } from '@/lib/auth/worker-token';
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 
@@ -15,7 +16,15 @@ export interface BroadcastRedactionContext {
   activeDeviceTokenHashes: Set<string>;
   environmentValues: string[];
   operatorToken: string | null;
+  /** The shared local-worker token from the data directory. */
+  workerToken?: string | null;
 }
+
+// Prefixed bearers match wherever they start: a preceding word character, escape or
+// percent-encoding must not shield one. A brain-read grant carries a dot-separated signature.
+const PREFIXED_BEARER = /(?:o8sp|o8pw|o8ro|o8br|o8wt|o8p|o8d|cwk)_[A-Za-z0-9_-]{12,}(?:\.[A-Za-z0-9_-]+)*/g;
+// Device bearers are 64 lowercase hex; only a run whose hash is an active device token is redacted.
+const DEVICE_TOKEN_RUN = /(?<![0-9a-fA-F])[0-9a-f]{64}(?![0-9a-fA-F])/g;
 
 // Only values under secret-looking keys are treated as secrets. A blanket
 // "any value over N chars" rule scrubbed ordinary words out of the feed
@@ -42,14 +51,17 @@ export function createBroadcastRedactionContext(): BroadcastRedactionContext {
     activeDeviceTokenHashes: readActiveTokenHashes(),
     environmentValues: environmentValues(),
     operatorToken: operatorToken || null,
+    workerToken: readLocalWorkerToken(),
   };
 }
+
+const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
 function isExactCredential(value: string, context: BroadcastRedactionContext): boolean {
   if (context.operatorToken === value) return true;
   if (!value) return false;
-  const hash = createHash('sha256').update(value).digest('hex');
-  return context.activeDeviceTokenHashes.has(hash);
+  if (context.workerToken === value) return true;
+  return context.activeDeviceTokenHashes.has(sha256(value));
 }
 
 export function redactBroadcastText(
@@ -58,16 +70,21 @@ export function redactBroadcastText(
 ): string {
   if (isExactCredential(value, context)) return '[redacted-token]';
   let redacted = value;
-  // The live operator token usually comes from the data directory, not the environment, so the
-  // environment pass below cannot find it inside a sentence or a quoted value.
-  const operator = context.operatorToken;
-  if (operator && operator.length >= MIN_ENV_SECRET_LENGTH && redacted.includes(operator)) {
-    redacted = redacted.split(operator).join('[redacted-token]');
+  // The live operator and local-worker tokens usually come from the data directory, not the
+  // environment, so the environment pass below cannot find them inside a sentence or a quoted value.
+  for (const token of [context.operatorToken, context.workerToken]) {
+    if (token && token.length >= MIN_ENV_SECRET_LENGTH && redacted.includes(token)) {
+      redacted = redacted.split(token).join('[redacted-token]');
+    }
   }
-  // Worker bearers are base64url, and a brain-read grant carries a dot-separated signature.
+  if (context.activeDeviceTokenHashes.size > 0) {
+    redacted = redacted.replace(DEVICE_TOKEN_RUN, (run) => (
+      context.activeDeviceTokenHashes.has(sha256(run)) ? '[redacted-token]' : run
+    ));
+  }
   redacted = redacted
     .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
-    .replace(/\b(?:o8sp|o8pw|o8ro|o8br|cwk)_[A-Za-z0-9_-]{12,}(?:\.[A-Za-z0-9_-]+)*/g, '[redacted-token]');
+    .replace(PREFIXED_BEARER, '[redacted-token]');
   const home = homedir();
   if (home && home !== '/') redacted = redacted.split(home).join('~');
   for (const pattern of GENERIC_HOME_PATHS) redacted = redacted.replace(pattern, '~');

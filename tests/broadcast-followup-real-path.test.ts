@@ -4,7 +4,7 @@
  * so the fixture is established before the dynamic route imports below.
  */
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -209,6 +209,91 @@ describe('Broadcast follow-up bounds and redaction through real routes', () => {
         expect(serialized, `${path} leaks ${raw.slice(0, 8)}`).not.toContain(raw);
       }
       expect(serialized, path).toContain('[redacted-token]');
+    }
+  });
+
+  // Seeds `text` into a lane event (message and a payload value) and a commentary row, then
+  // returns what a spectator reads from each reader route.
+  async function spectatorReads(label: string, text: string): Promise<Array<[string, string]>> {
+    delete process.env.WS_TOKEN;
+    const lane = createLane({
+      label: `Broadcast ${label}`,
+      repoPath: '/tmp/broadcast-redaction-route',
+      branch: `agent/broadcast-${label}-${Date.now()}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: `packet-broadcast-${label}-${Date.now()}`,
+    });
+    appendEvent(lane.id, 'agent_report', 'orchestrator', { event: 'progress', message: text, metadata: { note: text } });
+    getSqlite().prepare(`
+      INSERT INTO broadcast_events (id, kind, actor, audience, text, lane_id, packet_id, metadata_json, created_at)
+      VALUES (?, 'commentary', 'symon', NULL, ?, NULL, NULL, '{}', ?)
+    `).run(`commentary-${label}-${lane.id}`, text, new Date().toISOString());
+    const broadcastCommentary = await import('@/app/api/broadcast/commentary/route');
+    const reads: Array<[string, string]> = [];
+    for (const [route, path] of [
+      [broadcastEvents, `/api/broadcast/events?kinds=progress&lane=${encodeURIComponent(lane.id)}`],
+      [broadcastSnapshot, '/api/broadcast/snapshot?events=100'],
+      [broadcastCommentary, '/api/broadcast/commentary?limit=100'],
+    ] as const) {
+      const response = await route.GET(spectatorRequest(path));
+      expect(response.status, path).toBe(200);
+      reads.push([path, await response.text()]);
+    }
+    return reads;
+  }
+
+  const bearerBody = 'Zm9vYmFyLWJhei1xdXV4LWZpeHR1cmUtYmVhcmVyLTAxMjM0NQ';
+
+  it('redacts worker bearers glued to a preceding word, escape or encoding', async () => {
+    const packet = `o8pw_${bearerBody}`;
+    const brain = `o8br_eyJyZXBvUGF0aCI6Ii90bXAvZ2x1ZWQifQ.c2lnbmF0dXJlLWdsdWVkLWZpeHR1cmU`;
+    const reads = await spectatorReads('glued', `token%3D${packet} WORKER_${packet} \u001b[32m${brain}\u001b[0m`);
+    for (const [path, body] of reads) {
+      for (const raw of [bearerBody, 'c2lnbmF0dXJlLWdsdWVkLWZpeHR1cmU']) expect(body, `${path} leaks a glued bearer`).not.toContain(raw);
+    }
+  });
+
+  it('redacts the local worker token from the data directory wherever it appears', async () => {
+    const workerToken = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
+    writeFileSync(join(dataDir, 'worker-token'), workerToken, 'utf8');
+    try {
+      const reads = await spectatorReads('worker-token', `worker env carried ${workerToken} into the report`);
+      for (const [path, body] of reads) {
+        expect(body, `${path} leaks the local worker token`).not.toContain(workerToken);
+        expect(body, path).toContain('[redacted-token]');
+      }
+    } finally {
+      rmSync(join(dataDir, 'worker-token'), { force: true });
+    }
+  });
+
+  it('redacts an active device token inside text', async () => {
+    const deviceToken = 'f0e1d2c3b4a5968778695a4b3c2d1e0ff0e1d2c3b4a5968778695a4b3c2d1e0f';
+    const devices = join(dataDir, 'mobile-device-tokens');
+    const before = readFileSync(devices, 'utf8');
+    appendFileSync(devices, `${createHash('sha256').update(deviceToken).digest('hex')}\n`, 'utf8');
+    try {
+      const reads = await spectatorReads('device-run', `paired device token=${deviceToken} today`);
+      for (const [path, body] of reads) expect(body, `${path} leaks a device token`).not.toContain(deviceToken);
+    } finally {
+      writeFileSync(devices, before, 'utf8');
+    }
+  });
+
+  it('redacts customer worker, plugin, o8d and read-only worker bearers', async () => {
+    const tokens = [`o8wt_${bearerBody}`, `o8p_${bearerBody}x`, `o8d_${bearerBody}y`, `o8ro_${bearerBody}z`];
+    const reads = await spectatorReads('prefixes', `issued ${tokens.join(' and ')} for the run`);
+    for (const [path, body] of reads) {
+      for (const token of tokens) expect(body, `${path} leaks ${token.slice(0, 5)}`).not.toContain(token.slice(5));
+    }
+  });
+
+  it('redacts a bearer that ends in a dash, dash included', async () => {
+    const reads = await spectatorReads('trailing-dash', `grant o8pw_${bearerBody}-- then done`);
+    for (const [path, body] of reads) {
+      expect(body, path).toContain('[redacted-token]');
+      expect(body, `${path} leaves the trailing dash`).not.toContain('[redacted-token]-');
     }
   });
 
