@@ -87,6 +87,43 @@ describe('GET /api/panel/account/avatar', () => {
     expect(upstream.mock.calls[0]?.[1]).toMatchObject({ redirect: 'error' });
   });
 
+  // An 8 MiB photo body that streams on demand, counting how much of it the handler pulls.
+  const endless = (chunk = 64 * 1024, headers: Record<string, string> = {}) => {
+    const pulled = { bytes: 0 };
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled.bytes >= 8 * 1024 * 1024) return controller.close();
+        pulled.bytes += chunk;
+        controller.enqueue(new Uint8Array(chunk));
+      },
+    }, { highWaterMark: 0 });
+    return { pulled, response: new Response(body, { headers: { 'content-type': 'image/png', ...headers } }) };
+  };
+
+  it('stops reading an oversized photo at the 2 MiB cap', async () => {
+    mocks.direct = { avatarUrl: PHOTO };
+    const { pulled, response } = endless();
+    upstream.mockImplementation(async () => response);
+    expect((await GET(request())).status).toBe(204);
+    expect(pulled.bytes).toBeLessThanOrEqual(2 * 1024 * 1024 + 64 * 1024);
+  });
+
+  it('refuses a declared oversized photo without reading it', async () => {
+    mocks.direct = { avatarUrl: PHOTO };
+    const { pulled, response } = endless(64 * 1024, { 'content-length': String(3 * 1024 * 1024) });
+    upstream.mockImplementation(async () => response);
+    expect((await GET(request())).status).toBe(204);
+    expect(pulled.bytes).toBe(0);
+  });
+
+  it('still serves a photo of exactly 2 MiB', async () => {
+    mocks.direct = { avatarUrl: PHOTO };
+    upstream.mockImplementation(async () => new Response(new Uint8Array(2 * 1024 * 1024).fill(7), { headers: { 'content-type': 'image/png' } }));
+    const response = await GET(request());
+    expect(response.status).toBe(200);
+    expect((await response.arrayBuffer()).byteLength).toBe(2 * 1024 * 1024);
+  });
+
   it('falls back to no photo when the fetch fails', async () => {
     mocks.direct = { avatarUrl: PHOTO };
     upstream.mockRejectedValue(new Error('offline'));

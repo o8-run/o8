@@ -39,6 +39,24 @@ function photoUrl(stored: string | null | undefined): URL | null {
   }
 }
 
+/** Reads at most `limit` bytes; a longer body is cancelled and refused. */
+async function readCapped(response: Response, limit: number): Promise<Uint8Array | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return Buffer.concat(chunks, size);
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+}
+
 /**
  * GET /api/panel/account/avatar — the signed-in account's photo, for the native
  * rail, which has no TLS client of its own. 204 means show the account icon.
@@ -54,9 +72,12 @@ export async function GET(request: Request) {
     if (!url) return noPhoto();
     const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(5_000) });
     const type = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? '';
-    if (!response.ok || !AVATAR_TYPES.has(type)) return noPhoto();
-    const bytes = await response.arrayBuffer();
-    if (bytes.byteLength === 0 || bytes.byteLength > AVATAR_LIMIT) return noPhoto();
+    if (!response.ok || !AVATAR_TYPES.has(type) || Number(response.headers.get('content-length')) > AVATAR_LIMIT) {
+      await response.body?.cancel().catch(() => {});
+      return noPhoto();
+    }
+    const bytes = await readCapped(response, AVATAR_LIMIT);
+    if (!bytes || bytes.byteLength === 0) return noPhoto();
     return new NextResponse(bytes, {
       headers: { 'Content-Type': type, 'Cache-Control': 'private, max-age=3600' },
     });

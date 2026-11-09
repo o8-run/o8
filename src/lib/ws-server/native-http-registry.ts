@@ -186,8 +186,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/workspace', 'POST', () => import('@/app/api/orchestrator/workspace/route')),
     // The rail's account photo (profile_menu.rs). The handler admits only the operator principal from the
     // bearer, never x-o8-client-addr or loopback. It reads the active identity file and the users row, then
-    // fetches only an https URL on the two known photo hosts, with redirects refused, a 5 s deadline and a
-    // 2 MiB cap; anything else is a 204 (#5243).
+    // fetches only an https URL on the two known photo hosts, with redirects refused and a 5 s deadline. It
+    // refuses a declared length over 2 MiB and stops reading at 2 MiB; anything else is a 204 (#5243).
     route('/api/panel/account/avatar', 'GET', () => import('@/app/api/panel/account/avatar/route')),
   ],
   workers: [
