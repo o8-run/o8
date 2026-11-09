@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
+import { writeActivePacketWorkerTokenHashes } from '@/lib/auth/packet-worker-token';
 
 export type FleetStatusKind = 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -122,15 +123,18 @@ export function createToken(input: {
 }
 
 export function revokeToken(id: string): boolean {
-  const result = getSqlite()
-    .prepare(`
-      UPDATE worker_tokens
-      SET revoked_at = COALESCE(revoked_at, ?)
-      WHERE id = ?
-    `)
-    .run(nowIso(), id);
-
-  return result.changes > 0;
+  return getSqlite().transaction(() => {
+    const result = getSqlite()
+      .prepare(`
+        UPDATE worker_tokens
+        SET revoked_at = COALESCE(revoked_at, ?)
+        WHERE id = ?
+      `)
+      .run(nowIso(), id);
+    // The middleware gate recognizes packet credentials from a file; drop a revoked one now.
+    if (result.changes > 0) writeActivePacketWorkerTokenHashes();
+    return result.changes > 0;
+  }).immediate();
 }
 
 export function getFleetStatus(): FleetStatusSummary {

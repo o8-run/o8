@@ -9654,6 +9654,13 @@ async function bootstrapWsServer() {
   } catch (error) {
     console.warn('[ws-server] could not persist the default project ledger:', error);
   }
+  // The gate's packet-token file once only grew; rebuild it so revoked credentials leave it.
+  try {
+    const { syncPacketWorkerTokenHashes } = await import('@/lib/auth/packet-worker-token');
+    syncPacketWorkerTokenHashes();
+  } catch (error) {
+    console.warn('[ws-server] could not rebuild the worker credential file:', error instanceof Error ? error.message : error);
+  }
   if (o8dBridge) {
     await o8dBridge.start();
   } else {
