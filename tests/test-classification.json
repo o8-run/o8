@@ -1578,6 +1578,12 @@
       ]
     },
     {
+      "path": "src/lib/ws-server/terminal-resync-barrier.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/lib/ws-server/terminal-resync-snapshot.test.ts",
       "reasons": [
         "terminal-tool"
