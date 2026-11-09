@@ -11,7 +11,7 @@
  * plus ~5s of agent boot; paying that every time a menu opens is not a menu.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { acpLaunchFingerprint, localAcpOutputRedactor } from '@/lib/acp/local-connection';
@@ -30,6 +30,12 @@ export interface AcpModelProbeResult {
 /** Catalogues change when the operator adds a provider — a day is plenty. */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 30_000;
+/**
+ * Bumped when the catalogue's redaction changes. A cache written before provider keys were
+ * redacted out of agent output could hold one in plaintext, so a stale version is deleted on read,
+ * not served: the next probe rewrites a redacted one. Raise this on any future redaction change.
+ */
+const PROBE_REDACTION_VERSION = 1;
 
 function cachePath(id: OrchestratorBackendId): string {
   return join(getDataDir(), 'acp-models', `${id}.json`);
@@ -39,7 +45,10 @@ function readCache(id: OrchestratorBackendId, fingerprint?: string): AcpModelPro
   try {
     const path = cachePath(id);
     if (!existsSync(path)) return null;
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<AcpModelProbeResult> & { fingerprint?: string };
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<AcpModelProbeResult> & { fingerprint?: string; redactionVersion?: number };
+    // A cache written under an older redaction could hold a provider key in plaintext. Purge it
+    // from disk rather than serve or trust it; the probe rewrites a redacted one.
+    if (parsed.redactionVersion !== PROBE_REDACTION_VERSION) { rmSync(path, { force: true }); return null; }
     if (fingerprint && parsed.fingerprint !== fingerprint) return null;
     if (!Array.isArray(parsed.models) || typeof parsed.probedAt !== 'number') return null;
     return {
@@ -57,7 +66,7 @@ function writeCache(id: OrchestratorBackendId, result: AcpModelProbeResult, fing
   try {
     const path = cachePath(id);
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify({ ...result, fingerprint, source: undefined }, null, 2), 'utf-8');
+    writeFileSync(path, JSON.stringify({ ...result, fingerprint, redactionVersion: PROBE_REDACTION_VERSION, source: undefined }, null, 2), 'utf-8');
   } catch {
     // A cache miss is slow, not broken — never fail the probe on a write error.
   }

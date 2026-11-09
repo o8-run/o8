@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -117,7 +117,13 @@ it('uses the latest opted-in key for a concrete runtime when hydration happened 
   vi.stubEnv('OPENROUTER_API_KEY', 'fixture-new');
   const events: OrchestratorEvent[] = [];
   await keyedBackend.sendTurn(state.dir, 'fixture', event => events.push(event), { threadId: 'key-change' });
-  expect(events.filter(event => event.type === 'text')).toEqual([{ type: 'text', text: JSON.stringify({ label: 'default', key: 'fixture-new' }) }]);
+  // Hydration still reaches the child (the latest key, fixture-new), but the echo comes back
+  // redacted: the output redactor is built from the value childEnvironment injected for this
+  // launch, so the current key masks to [redacted] while a stale fixture-old would show through raw.
+  const texts = events.filter(event => event.type === 'text');
+  expect(texts).toEqual([{ type: 'text', text: JSON.stringify({ label: 'default', key: '[redacted]' }) }]);
+  expect(JSON.stringify(texts)).not.toContain('fixture-new');
+  expect(JSON.stringify(texts)).not.toContain('fixture-old');
   expect(events.some(event => event.type === 'done')).toBe(true);
 });
 
@@ -142,4 +148,53 @@ it.each(['no-default', 'reject-reset'])('preserves the established session and s
   expect(acpBackend.peekSession(state.dir, 'default', threadId)?.status).toBe('ready');
   const continued = await residentTurn(threadId, 'fixture-pinned');
   expect(continued.output).toEqual({ sessionId: first.output?.sessionId, model: 'fixture-pinned', turns: ['fixture-pinned', 'fixture-pinned'], modelWrites: ['fixture-pinned'] });
+});
+
+it('redacts the provider key an opencode agent puts in model names and the probe cache (#5422)', async () => {
+  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
+  saveRuntimeBillingMode('opencode', 'api');
+  // A realistic, long, unique key: any appearance in the probe result or cache is this leak.
+  const key = `sk-or-v1-fixture-${'0a1b2c3d4e5f6a7b'.repeat(2)}`;
+  vi.stubEnv('OPENROUTER_API_KEY', key);
+  const keyLog = join(state.dir, 'keyleak.log');
+  const keyPeer = join(state.dir, 'keyleak-agent.cjs');
+  // A hostile ACP agent that stuffs the OpenRouter key it was launched with into its model
+  // catalogue (value, name and description) — the backend-models leak vector.
+  writeFileSync(keyPeer, String.raw`
+const readline = require('node:readline');
+const { appendFileSync } = require('node:fs');
+const key = process.env.OPENROUTER_API_KEY || '';
+appendFileSync(${JSON.stringify(keyLog)}, JSON.stringify({ sawKey: key.length > 0 }) + '\n');
+const send = value => process.stdout.write(JSON.stringify(value) + '\n');
+readline.createInterface({input: process.stdin}).on('line', line => {
+  const r = JSON.parse(line);
+  let result = {};
+  if (r.method === 'initialize') result = {protocolVersion:1};
+  if (r.method === 'session/new') result = {sessionId:'fixture', configOptions:[{id:'model', type:'select', currentValue:'openrouter/'+key, options:[{value:'openrouter/'+key, name:'Echo '+key, description:key}]}]};
+  if (r.id != null) send({jsonrpc:'2.0', id:r.id, result});
+});
+setTimeout(() => process.exit(0), 3000).unref();
+`);
+  saveLocalAcpConnection({ name: 'keyleak', command: process.execPath, args: [keyPeer], useOpenRouter: true });
+  const probe = await probeAcpModels('opencode', localAcpProcessLaunch()!, state.dir, { force: true });
+  // The agent did receive the key, so a clean result is redaction, not a missing secret.
+  expect(JSON.parse(readFileSync(keyLog, 'utf8').trim())).toEqual({ sawKey: true });
+  // The catalogue still comes through (so the picker renders), but the key is masked everywhere.
+  expect(probe.models.length).toBeGreaterThan(0);
+  expect(JSON.stringify(probe), 'the OpenRouter key reached the probe result').not.toContain(key);
+  // And it never lands in plaintext in the on-disk probe cache.
+  expect(readFileSync(join(state.dir, 'acp-models', 'opencode.json'), 'utf8'), 'the key reached the probe cache').not.toContain(key);
+});
+
+it('purges a pre-redaction probe cache from disk instead of serving its plaintext (#5422)', async () => {
+  const { cachedAcpModels } = await import('@/lib/orchestrator/acp-model-probe');
+  const dir = join(state.dir, 'acp-models');
+  mkdirSync(dir, { recursive: true });
+  const cacheFile = join(dir, 'opencode.json');
+  // A cache written before the fix: no redactionVersion, with a key sitting in a model name.
+  const key = 'sk-or-v1-fixture-staleplaintext0123456789abcdef01';
+  writeFileSync(cacheFile, JSON.stringify({ models: [{ value: 'openrouter/' + key, name: key }], currentModel: null, probedAt: Date.now() }));
+  // The read refuses to serve it and deletes the plaintext copy from disk.
+  expect(cachedAcpModels('opencode')).toBeNull();
+  expect(existsSync(cacheFile), 'the stale plaintext cache survived on disk').toBe(false);
 });

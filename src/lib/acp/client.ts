@@ -259,10 +259,14 @@ export class AcpClient {
     this.credentialRuntimeId = opts.runtimeId;
     const child = withProviderStoreLock(() => {
       if (opts.localEnvironment) assertLocalAcpEnvironmentCurrent(opts.localEnvironment);
-      const outputRedactor = localAcpOutputRedactor(opts.localEnvironment, opts.env);
       const env = childEnvironment({ runtimeId: opts.runtimeId, runtimeLaunch: true, omitEnv: opts.omitEnv, env: { ...(opts.cwd ? { PWD: opts.cwd } : {}), ...opts.env } });
+      // Build the output redactor after the child env, so it also covers the provider credentials
+      // the runtime billing policy injected here (context.deniedValues) — not just the binding's
+      // declared secrets. Otherwise an agent launched with an API key can leak it straight back out.
+      const context = childEnvironmentContext(env);
+      const outputRedactor = localAcpOutputRedactor(opts.localEnvironment, opts.env, context?.deniedValues ?? []);
       retainChildMetadataRedaction(env, { names: outputRedactor.secretNames, redact: value => outputRedactor.redact(value) });
-      const policy = childEnvironmentContext(env)?.policy;
+      const policy = context?.policy;
       return { policy, outputRedactor, proc: spawn(launch.command, launch.args, {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
