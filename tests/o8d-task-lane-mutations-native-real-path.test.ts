@@ -23,30 +23,45 @@ it.skipIf(process.platform === 'win32')('creates tasks and reaps stale lanes nat
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
     await buildCliBundle(cliEntry, 'test-fixture');
+    const seedEnv = { ...process.env, HOME: directory, O8_DATA_DIR: directory, CORTEX_IDE_DATA_DIR: directory,
+      CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db') };
+    // Register the repo before the WS process starts: it answers repo lookups from a short-lived
+    // in-memory cache, so a repo added from another process after boot can stay invisible to it.
+    const seededRepo = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+      const { execFileSync } = require('node:child_process');
+      const { mkdirSync } = require('node:fs');
+      const { join } = require('node:path');
+      (async () => {
+        const repoPath = join(process.env.CORTEX_IDE_DATA_DIR, 'repo');
+        mkdirSync(repoPath);
+        const git = (...args) => execFileSync('git', args, { stdio: 'ignore' });
+        git('init', '-q', '-b', 'main', repoPath);
+        git('-C', repoPath, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'fixture');
+        await require('./src/lib/repos/registry.ts').addRepo(repoPath);
+        console.log('seed ' + JSON.stringify({ repoPath }));
+        require('./src/lib/db/index.ts').closeDb();
+      })().catch(error => { console.error(error); process.exit(1); });
+    `], { env: seedEnv });
+    const { repoPath } = JSON.parse(seededRepo.stdout.split('\n').find(line => line.startsWith('seed '))!.slice(5)) as { repoPath: string };
+
     server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000 });
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     const apiPort = new URL(origin).port;
-    const env = { ...process.env, O8_DATA_DIR: directory, CORTEX_IDE_DATA_DIR: directory,
-      CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'), WS_TOKEN: server.token };
+    const env = { ...seedEnv, WS_TOKEN: server.token };
 
     // A dead pid for the lane's session, so the owner probe reads it as gone.
     const exited = spawn(process.execPath, ['-e', '']);
     const deadPid = exited.pid!;
     await new Promise(resolve => exited.on('close', resolve));
 
+    // The stale lane is seeded after boot, so startup reconciliation cannot settle it first.
     const seeded = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
-      const { execFileSync } = require('node:child_process');
       const { mkdirSync, writeFileSync } = require('node:fs');
       const { join } = require('node:path');
       (async () => {
         const root = process.env.CORTEX_IDE_DATA_DIR;
-        const repoPath = join(root, 'repo');
-        mkdirSync(repoPath);
-        const git = (...args) => execFileSync('git', args, { stdio: 'ignore' });
-        git('init', '-q', '-b', 'main', repoPath);
-        git('-C', repoPath, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'fixture');
-        await require('./src/lib/repos/registry.ts').addRepo(repoPath);
+        const repoPath = process.env.SEED_REPO_PATH;
         const { createLane, updateLane } = require('./src/lib/lane/registry.ts');
         const worktreePath = join(root, 'stale-worktree');
         mkdirSync(worktreePath);
@@ -54,12 +69,12 @@ it.skipIf(process.platform === 'win32')('creates tasks and reaps stale lanes nat
         const lane = createLane({ repoPath, branch: 'fixture-stale-lane', runtime: 'codex',
           worktreePath, sessionKey: 'codex-live:${deadPid}' });
         updateLane(lane.id, { status: 'running', lastHeartbeatAt: Date.now() - 10 * 60_000 }, 'system');
-        console.log('seed ' + JSON.stringify({ repoPath, laneId: lane.id, worktreePath }));
+        console.log('seed ' + JSON.stringify({ laneId: lane.id, worktreePath }));
         require('./src/lib/db/index.ts').closeDb();
       })().catch(error => { console.error(error); process.exit(1); });
-    `], { env });
-    const { repoPath, laneId, worktreePath } = JSON.parse(seeded.stdout.split('\n')
-      .find(line => line.startsWith('seed '))!.slice(5)) as { repoPath: string; laneId: string; worktreePath: string };
+    `], { env: { ...env, SEED_REPO_PATH: repoPath } });
+    const { laneId, worktreePath } = JSON.parse(seeded.stdout.split('\n')
+      .find(line => line.startsWith('seed '))!.slice(5)) as { laneId: string; worktreePath: string };
 
     const post = (path: string, body: Record<string, unknown>, headers: Record<string, string> = {}) => fetch(`${origin}${path}`, {
       method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
@@ -111,7 +126,7 @@ it.skipIf(process.platform === 'win32')('creates tasks and reaps stale lanes nat
     const reaped = lanesAfter.lanes.find(lane => lane.id === laneId);
     expect(reaped?.status).toBeDefined();
     expect(reaped?.status).not.toBe('running');
-    // The reaper only moves the lane; the worktree and its content stay.
+    // The reap keeps the worktree and its content.
     expect(existsSync(join(worktreePath, 'keep.txt'))).toBe(true);
   } finally {
     await server?.stop();

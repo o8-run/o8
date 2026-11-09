@@ -211,9 +211,10 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // processes. The WS process already runs open_lane and launch_session (orchestrator/delegate),
     // stop (mission stop) and send_turn and interrupt (runtime/action). (#5576)
     route('/api/lanes', 'GET POST', () => import('@/app/api/lanes/route')),
-    // `o8 doctor --reap` lists stale running lanes whose owner is gone and, with force, moves them
-    // to recovery. The gate grants workers nothing here, so it needs the operator bearer. The
-    // reaper only changes lane rows, never the worktree; the WS process already runs the same
+    // `o8 doctor --reap` lists stale running lanes whose owner is gone and, with force, reaps them.
+    // The gate grants workers nothing here, so it needs the operator bearer. A reap keeps the
+    // worktree: it may save its head on a branch and commit uncommitted edits so they show for
+    // review, then moves the lane to reviewing or recovery. The WS process already runs the same
     // reaper on its own interval. (#5243)
     route('/api/lanes/reap', 'POST', () => import('@/app/api/lanes/reap/route')),
     route('/api/lanes/[id]', 'GET', () => import('@/app/api/lanes/[id]/route')),
