@@ -9007,6 +9007,12 @@
       ]
     },
     {
+      "path": "tests/ws-token-single-source-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ws-work-soak-real-path.test.ts",
       "reasons": [
         "child-process",
