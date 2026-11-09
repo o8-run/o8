@@ -24,10 +24,10 @@ export function isReadOnlyRuntimeConfig(runtimeConfig?: Record<string, string>):
  * How a spawn must treat a read-only session's OS sandbox.
  *
  * `enforced` is deliberately independent of `O8_WORKER_SANDBOX`: that gate is
- * an operator opt-in for hardening NORMAL packets, and it defaults off. A
+ * the operator's switch for hardening NORMAL packets (on by default on macOS). A
  * read-only packet is a governance promise, so its sandbox is mandatory —
  * without it the argv tool deny leaves Bash, and Bash can write the worktree.
- * The spawn chokepoint ORs this with the opt-in gate and stays FAIL-CLOSED: if
+ * The spawn chokepoint ORs this with that gate and stays FAIL-CLOSED: if
  * the sandbox cannot be built the run is refused, never downgraded.
  *
  * This module deliberately does NOT resolve the write-deny paths itself. The

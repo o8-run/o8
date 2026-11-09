@@ -100,7 +100,7 @@ The iPhone app is a remote control for the desktop: approve work, steer an agent
 
 ## Your data
 
-o8 runs on your machine against your own subscriptions and keys; it is not in the path between your agents and their providers. Worktree isolation covers repository changes: today workers run under your user account and can read what you can read. Usage analytics default on after the first-run privacy screen, with one-click off and earlier choices preserved. Crash reports and error transmission remain off by default and opt-in. [`SECURITY.md`](./SECURITY.md) covers what dispatched workers can reach and what the sandbox does and does not do today.
+o8 runs on your machine against your own subscriptions and keys; it is not in the path between your agents and their providers. Worktree isolation covers repository changes. On macOS, dispatched workers also run in an OS sandbox by default (`O8_WORKER_SANDBOX=off` turns it off); on Linux they run under your user account and can read what you can read unless you turn the sandbox on. Usage analytics default on after the first-run privacy screen, with one-click off and earlier choices preserved. Crash reports and error transmission remain off by default and opt-in. [`SECURITY.md`](./SECURITY.md) covers what dispatched workers can reach and what the sandbox does and does not do today.
 
 ### Telemetry
 
