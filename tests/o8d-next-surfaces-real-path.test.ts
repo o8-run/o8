@@ -383,11 +383,11 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   const { nativeSurfaceRoutes } = await import('@/lib/ws-server/native-http-registry');
   const routePath = pattern.split('?')[0];
   const path = pattern.replace(/\[\w+\]/g, 'fixture');
-  // Public health is deliberately readable without credentials. All other
-  // reads must refuse missing/wrong credentials even with forged local headers.
+  // Public health is deliberately readable without credentials. All other reads must refuse a
+  // caller without loopback trust (a relayed remote caller) even with forged local headers.
   for (const authorization of [undefined, 'Bearer fixture-wrong-token']) {
     const response = await fetch(origin + path, { headers: {
-      ...(authorization ? { authorization } : {}),
+      ...(authorization ? { authorization } : {}), 'x-o8-relay-forward': '1',
       'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
     } });
     expect(response.status).toBe(routePath === '/api/panel/status' ? 200 : 401);
@@ -518,7 +518,8 @@ it('walks every production surface registration and its HTTP routes', async () =
       const handlers = await route.load() as Record<string, unknown>;
       for (const method of route.methods) {
         expect(handlers[method], `${method} ${route.path}`).toBeTypeOf('function');
-        const response = await fetch(origin + path, { method, headers: {
+        // A relayed remote caller with forged local headers: only public health answers.
+        const response = await fetch(origin + path, { method, headers: { 'x-o8-relay-forward': '1',
           'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
         } });
         expect(response.status, `${name}: ${method} ${path}`).toBe(route.path === '/api/panel/status' && method === 'GET' ? 200 : 401);
@@ -670,13 +671,15 @@ it('refuses read-only workers and invalid credentials on native writes', async (
   }
 });
 
-it('does not turn the Rust relay peer into unauthenticated loopback authority', async () => {
-  const response = await fetch(`${origin}/api/setup/identity`, { headers: {
-    host: '127.0.0.1', origin: 'http://127.0.0.1',
-    'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
-  } });
-  expect(response.status).toBe(401);
-  const authenticated = await fetch(`${origin}/api/setup/identity`, { headers: { authorization: `Bearer ${server.token}` } });
+it('gives a relayed caller its attested peer, never a forged or relayed one (#5576)', async () => {
+  // o8d attests the TCP peer, so this loopback test client gets the loopback read Next grants.
+  // Client-supplied address and bridge headers are dropped before the stamp.
+  const forged = { 'x-o8-client-addr': '203.0.113.5', 'x-o8d-peer': '203.0.113.5', 'x-o8d-bridge': 'forged' };
+  expect((await fetch(`${origin}/api/setup/identity`, { headers: { origin: 'http://127.0.0.1', ...forged } })).status).toBe(200);
+  // A same-host relay replays a remote caller: no loopback authority without a bearer.
+  const relayed = await fetch(`${origin}/api/setup/identity`, { headers: { 'x-o8-relay-forward': '1', 'x-o8-client-addr': '127.0.0.1' } });
+  expect(relayed.status).toBe(401);
+  const authenticated = await fetch(`${origin}/api/setup/identity`, { headers: { authorization: `Bearer ${server.token}`, 'x-o8-relay-forward': '1' } });
   expect(authenticated.status).toBe(200);
 });
 
@@ -721,7 +724,11 @@ it('preserves packet-worker lane diff and visualization ownership through o8d', 
   const foreign = await read(fixture.foreignLaneId);
   expect(foreign.status).toBe(403);
   expect((await foreign.json()).error.code).toBe('worker_packet_mismatch');
-  expect((await read(fixture.laneId, fixture.ghostToken)).status).toBe(401);
+  // A recognized token without a packet row passes the gate from loopback, then the handler's
+  // ownership check refuses it, as under Next.
+  const ghost = await read(fixture.laneId, fixture.ghostToken);
+  expect(ghost.status).toBe(403);
+  expect((await ghost.json()).ok).toBe(false);
   expect((await read(fixture.laneId, fixture.token, 'POST')).status).toBe(403);
   const visualization = await fetch(`${origin}/api/visualizations/${fixture.visualizationId}`, {
     headers: { authorization: `Bearer ${fixture.token}` },
@@ -750,8 +757,10 @@ it('preserves packet-worker lane diff and visualization ownership through o8d', 
     getSqlite().prepare("UPDATE worker_tokens SET revoked_at = ? WHERE packet_id = ?").run(new Date().toISOString(), 'fixture-native-worker');
     closeDb();
   `], { env });
-  expect((await read(fixture.laneId)).status).toBe(401);
-  expect((await read(fixture.foreignLaneId)).status).toBe(401);
+  // From loopback the gate still recognizes the token's hash; the handler's ownership check
+  // reads the revocation and refuses both lanes, as under Next.
+  expect((await read(fixture.laneId)).status).toBe(403);
+  expect((await read(fixture.foreignLaneId)).status).toBe(403);
   const revokedVisualization = await fetch(`${origin}/api/visualizations/${fixture.visualizationId}`, {
     headers: { authorization: `Bearer ${fixture.token}` },
   });

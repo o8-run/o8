@@ -4900,6 +4900,12 @@
       ]
     },
     {
+      "path": "tests/native-verified-peer.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
       "path": "tests/native-worker-token-setup-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5664,6 +5670,14 @@
     },
     {
       "path": "tests/o8d-updater-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-verified-peer-real-path.test.ts",
       "reasons": [
         "child-process",
         "native-build",
