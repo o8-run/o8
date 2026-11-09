@@ -161,6 +161,11 @@ describe('server size check CLI', () => {
     `);
     const outDir = join(root, 'built');
     const report = bundleServers({ root, outDir });
+    // A Next-traced copy carries no license files; a rebuild over it restores them.
+    const staged = join(outDir, 'node_modules/playwright-core');
+    for (const notice of ['LICENSE', 'NOTICE', 'ThirdPartyNotices.txt']) rmSync(join(staged, notice));
+    bundleServers({ root, outDir });
+    for (const notice of ['LICENSE', 'NOTICE', 'ThirdPartyNotices.txt']) expect(existsSync(join(staged, notice))).toBe(true);
     rmSync(join(root, 'node_modules'), { recursive: true, force: true });
     writeFileSync(join(outDir, 'native-addon-runtime.cjs'), 'exports.prepareNativeAddons = () => {};');
     const executed = spawnSync(process.execPath, [join(outDir, 'ws-server.mjs'), 'browser'], { encoding: 'utf8', timeout: 10_000 });

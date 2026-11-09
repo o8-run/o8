@@ -27,15 +27,16 @@ const ESM_BANNER = [
 // Lazy runtimes the desktop export already traces for Next. The server bundles
 // load them from node_modules beside the entries instead of embedding them;
 // native-only packages receive the same runtime without checkout resolution.
-// null ships the whole package (its own lazy requires resolve inside it).
+// `files` always ship (a traced copy can omit license notices); `whole` also
+// copies the full package when nothing traced it.
 const SHARED_RUNTIMES = {
-  typescript: ['package.json', 'LICENSE.txt', 'ThirdPartyNoticeText.txt', 'lib/typescript.js'],
+  typescript: { files: ['package.json', 'LICENSE.txt', 'ThirdPartyNoticeText.txt', 'lib/typescript.js'] },
   // The browser engine imports it only when an agent drives a browser.
-  'playwright-core': null,
+  'playwright-core': { whole: true, files: ['LICENSE', 'NOTICE', 'ThirdPartyNotices.txt'] },
 };
 
 function stageSharedRuntimes(root, outDir, metafile) {
-  for (const [name, files] of Object.entries(SHARED_RUNTIMES)) {
+  for (const [name, { files, whole = false }] of Object.entries(SHARED_RUNTIMES)) {
     if (!Object.values(metafile.outputs).some(output =>
       output.imports.some(item => item.external && item.path === name))) continue;
     const source = join(root, 'node_modules', name);
@@ -45,10 +46,7 @@ function stageSharedRuntimes(root, outDir, metafile) {
       !== JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')).version) {
       throw new Error(`Shared ${name} runtime does not match the build`);
     }
-    if (!files) {
-      if (!existsSync(manifest)) cpSync(source, destination, { recursive: true });
-      continue;
-    }
+    if (whole && !existsSync(manifest)) cpSync(source, destination, { recursive: true });
     for (const file of files) {
       const target = join(destination, file);
       if (existsSync(target)) continue;
