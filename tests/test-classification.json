@@ -8059,6 +8059,12 @@
       ]
     },
     {
+      "path": "tests/task-mutation-worker-packet-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/task-pool-history-real-path.test.ts",
       "reasons": [
         "real-path"
