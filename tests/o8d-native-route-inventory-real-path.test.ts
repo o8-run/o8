@@ -51,7 +51,6 @@ it('covers native client routes with their production registration owners', () =
 // that port counts toward the Next-stopped default, not only o8 next. Remove a
 // path when it is registered; the default switch waits for every list to be empty.
 const NEXT_ONLY_SHELL_PATHS = new Set([
-  '/api/agent-control/action',
   '/api/canvas/intent',
   '/api/panel/cloud-jobs/drain', '/api/symon/transport/tool',
   '/api/v1/audio/transcriptions', '/api/v1/chat/completions',

@@ -5300,6 +5300,12 @@
       ]
     },
     {
+      "path": "tests/o8d-agent-control-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-backend-models-native-real-path.test.ts",
       "reasons": [
         "executable-fixture",
