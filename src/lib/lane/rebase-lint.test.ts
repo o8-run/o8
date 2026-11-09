@@ -369,7 +369,8 @@ describe('runLaneRebaseLint', () => {
     }));
     writeFileSync(
       path.join(repo, 'node_modules', 'eslint', 'api.js'),
-      'exports.ESLint = class { lintText() { return new Promise(() => setTimeout(() => {}, 10_000)); } };\n',
+      'exports.ESLint = class { lintText() { return new Promise(() => setTimeout(() => {}, 10_000)); } };\n'
+        + 'exports.loadESLint = async () => exports.ESLint;\n',
     );
     const eslintScript = path.join(repo, 'node_modules', 'eslint', 'bin', 'eslint.js');
     writeFileSync(eslintScript, '#!/usr/bin/env node\nsetTimeout(() => {}, 10_000);\n');
