@@ -4525,6 +4525,15 @@
       ]
     },
     {
+      "path": "tests/merge-clone-registered-origin-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/merge-evidence-superseding-snapshot-real-path.test.ts",
       "reasons": [
         "child-process",

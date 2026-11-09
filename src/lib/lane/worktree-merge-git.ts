@@ -1,7 +1,8 @@
-import { mkdtemp, rm, stat, symlink } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
+import { listReposFresh } from '@/lib/repos/registry';
 
 const execFileAsync = materializationAwareExecFile;
 
@@ -137,17 +138,13 @@ export interface DetachedIntegrationWorktree {
   cleanup: () => Promise<void>;
 }
 
+// The disposable clone takes from the repository's local config only keys that
+// can neither run a command nor redirect or intercept its fetch. Credential
+// helpers, SSH commands, URL rewrites and HTTP settings come from the
+// operator's global config, which the clone still reads.
 function isTransportConfigKey(key: string): boolean {
   const normalized = key.toLowerCase();
-  return normalized === 'core.sshcommand'
-    || normalized === 'core.gitproxy'
-    || normalized === 'core.askpass'
-    || normalized === 'ssh.variant'
-    || normalized.startsWith('http.')
-    || normalized.startsWith('credential.')
-    || normalized.startsWith('protocol.')
-    || normalized.startsWith('url.')
-    || normalized.startsWith('remote.origin.');
+  return normalized === 'ssh.variant' || normalized === 'remote.origin.url';
 }
 
 function resolveRemoteUrl(sourceWorktreePath: string, value: string): string {
@@ -160,6 +157,21 @@ function resolveRemoteUrl(sourceWorktreePath: string, value: string): string {
     || /^[^/\\:]+:.+/.test(value)
   ) return value;
   return resolve(sourceWorktreePath, value);
+}
+
+/**
+ * The origin the operator registered for `repoPath`, from the stored registry
+ * record: the registered URL, the repository itself when it was registered
+ * without one, or null when the repository is not registered.
+ */
+async function registeredOrigin(repoPath: string): Promise<string | null> {
+  const canonical = await realpath(repoPath).catch(() => resolve(repoPath));
+  const entry = (await listReposFresh()).find((repo) => (
+    resolve(repo.localPath) === resolve(repoPath) || resolve(repo.localPath) === canonical
+  ));
+  if (!entry) return null;
+  const url = entry.remoteUrl?.trim();
+  return url ? resolveRemoteUrl(repoPath, url) : repoPath;
 }
 
 async function copyTransportConfig(
@@ -180,7 +192,7 @@ async function copyTransportConfig(
     const key = separator < 0 ? record : record.slice(0, separator);
     if (!isTransportConfigKey(key)) continue;
     const rawValue = separator < 0 ? '' : record.slice(separator + 1);
-    const value = ['remote.origin.url', 'remote.origin.pushurl'].includes(key.toLowerCase())
+    const value = key.toLowerCase() === 'remote.origin.url'
       ? resolveRemoteUrl(sourceWorktreePath, rawValue)
       : rawValue;
     const entries = values.get(key) ?? [];
@@ -238,6 +250,10 @@ export async function createDetachedIntegrationWorktree(input: {
       input.sourceSha,
     ], { timeout: 30_000 });
     await copyTransportConfig(input.sourceWorktreePath, integrationPath);
+    // A registered repository fetches from the origin the operator registered,
+    // never one its config names now.
+    const origin = await registeredOrigin(input.repoPath);
+    if (origin) await git(integrationPath, ['config', '--local', 'remote.origin.url', origin], { timeout: 5000 });
     for (const key of ['user.name', 'user.email']) {
       try {
         const { stdout } = await git(input.sourceWorktreePath, ['config', '--get', key]);

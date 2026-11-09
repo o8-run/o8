@@ -6,7 +6,7 @@ import type {
 } from '@/lib/approvals/types';
 import { resolveAttributedCommitMessage } from '@/lib/lane/commit-attribution';
 import { resolveGovernedMergeHistoryPlan } from '@/lib/lane/governed-merge-history';
-import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head-sha-lock';
+import { checkExpectedHeadSha, formatHeadShaMismatchNote, resolveHeadSha } from '@/lib/lane/head-sha-lock';
 import { blockIncompleteMergeDependencies } from '@/lib/lane/dependency-materialization-merge-blocker';
 import { checkReviewedHeadIntegrity, formatReviewedHeadMismatchNote } from '@/lib/lane/review-head-integrity';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
@@ -556,6 +556,18 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         }
         throw error;
       }
+    } else if (reviewedHead.reviewedHeadSha) {
+      // A review pinned this commit: merge exactly it, never what the branch
+      // points at now, and no uncommitted changes the review did not cover.
+      const pinned = await resolveHeadSha(worktreePath, reviewedHead.reviewedHeadSha, lane.repoPath);
+      if (!pinned) {
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: `The reviewed commit ${reviewedHead.reviewedHeadSha} could not be resolved in this lane's repository.`,
+        };
+      }
+      reviewedSnapshotSha = pinned;
     } else {
       if (command.commitMessage) {
         try {

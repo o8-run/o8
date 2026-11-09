@@ -35,7 +35,7 @@ const { claimApprovalResolution } = await import('@/lib/approvals/resolution');
 const { currentSpokenReviewGovernanceFingerprint } = await import('@/lib/approvals/spoken-review-guard');
 const { createLaneActionApproval } = await import('@/lib/lane/commands-approval');
 const { getLaneSpokenDiffFacts } = await import('@/lib/lane/lane-diff-facts');
-const { createDetachedIntegrationWorktree } = await import('@/lib/lane/worktree-merge-git');
+const { createDetachedIntegrationWorktree, resolveCurrentBranch } = await import('@/lib/lane/worktree-merge-git');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { getSqlite } = await import('@/lib/db');
 const {
@@ -300,12 +300,48 @@ describe('worktree-side merge with real git repos', () => {
     expect(git(repo, ['show', 'HEAD:file.txt'])).toBe('base');
   }, 20_000);
 
-  it('preserves local transport config and resolves relative remotes in the disposable clone', async () => {
+  it('integrates the reviewed commit even when the lane branch moves after the review check', async () => {
+    const { repo } = makeRepo('o8-merge-pinned');
+    const worktree = await makeWorktree(repo, 'pkt-pinned', 'inline/pinned');
+    const { bindOwnedPacketSession } = await import('./helpers/managed-packet-worktree');
+    const sessionKey = await bindOwnedPacketSession(repo, worktree, { packetId: 'pkt-pinned', branch: 'inline/pinned' });
+    writeFileSync(join(worktree.path, 'reviewed.txt'), 'reviewed\n');
+    commitAll(worktree.path, 'reviewed change');
+    // A review may record an abbreviated SHA.
+    const reviewedHeadSha = git(worktree.path, ['rev-parse', '--short=12', 'HEAD']);
+    recordOrchestratorReview('pkt-pinned', {
+      approved: true, findings: [], reviewer: 'codex', reviewedHeadSha, requiresSecondPass: false,
+    });
+    const lane = createLane({
+      repoPath: repo, worktreePath: worktree.path, branch: 'inline/pinned', baseBranch: 'main',
+      runtime: 'codex', packetId: 'pkt-pinned', sessionKey,
+    });
+
+    const result = await performWorktreeSideMerge({
+      lane,
+      command: mergeCommand(lane.id),
+      actor: 'system',
+      gateResult: { passed: true, violations: [] },
+      // The lane branch moves after the reviewed-head check, as a still-running worker could move it.
+      branchResolver: async (worktreePath) => {
+        writeFileSync(join(worktreePath, 'unreviewed.txt'), 'unreviewed\n');
+        commitAll(worktreePath, 'unreviewed change');
+        return resolveCurrentBranch(worktreePath);
+      },
+      createLaneActionApproval: async (_lane, _actor, input) => ({ ok: false, laneId: lane.id, note: input.note }),
+    });
+
+    expect(result.ok, result.note).toBe(true);
+    expect(git(repo, ['show', 'main:reviewed.txt'])).toBe('reviewed');
+    expect(() => git(repo, ['show', 'main:unreviewed.txt'])).toThrow();
+  }, 30_000);
+
+  it('resolves relative remotes in the disposable clone without copying executable transport config', async () => {
     const { repo, origin } = makeRepo('o8-merge-transport-config');
     const worktree = await makeWorktree(repo, 'pkt-transport-config', 'inline/transport-config');
-    const sshCommand = 'ssh -F /tmp/o8-test-ssh-config';
-    git(worktree.path, ['config', 'core.sshCommand', sshCommand]);
+    git(worktree.path, ['config', 'core.sshCommand', 'ssh -F /tmp/o8-test-ssh-config']);
     git(worktree.path, ['config', 'credential.helper', 'o8-test-helper']);
+    git(worktree.path, ['config', 'ssh.variant', 'ssh']);
     git(worktree.path, ['remote', 'set-url', 'origin', relative(worktree.path, origin)]);
     git(worktree.path, ['remote', 'set-url', '--add', '--push', 'origin', 'test-host:repo.git']);
 
@@ -315,10 +351,12 @@ describe('worktree-side merge with real git repos', () => {
       sourceSha: git(worktree.path, ['rev-parse', 'HEAD']),
     });
     try {
-      expect(git(integration.path, ['config', '--get', 'core.sshCommand'])).toBe(sshCommand);
-      expect(git(integration.path, ['config', '--get', 'credential.helper'])).toBe('o8-test-helper');
+      expect(() => git(integration.path, ['config', '--local', '--get', 'core.sshCommand'])).toThrow();
+      expect(() => git(integration.path, ['config', '--local', '--get', 'credential.helper'])).toThrow();
+      expect(git(integration.path, ['config', '--local', '--get', 'ssh.variant'])).toBe('ssh');
       expect(git(integration.path, ['remote', 'get-url', 'origin'])).toBe(origin);
-      expect(git(integration.path, ['remote', 'get-url', '--push', 'origin'])).toBe('test-host:repo.git');
+      // The clone only fetches; merges push from the lane and the repository.
+      expect(git(integration.path, ['remote', 'get-url', '--push', 'origin'])).toBe(origin);
       expect(() => git(integration.path, ['fetch', 'origin', 'main', '--quiet'])).not.toThrow();
     } finally {
       await integration.cleanup();
