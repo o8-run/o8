@@ -57,9 +57,17 @@ export function redactBroadcastText(
   context: BroadcastRedactionContext = createBroadcastRedactionContext(),
 ): string {
   if (isExactCredential(value, context)) return '[redacted-token]';
-  let redacted = value
+  let redacted = value;
+  // The live operator token usually comes from the data directory, not the environment, so the
+  // environment pass below cannot find it inside a sentence or a quoted value.
+  const operator = context.operatorToken;
+  if (operator && operator.length >= MIN_ENV_SECRET_LENGTH && redacted.includes(operator)) {
+    redacted = redacted.split(operator).join('[redacted-token]');
+  }
+  // Worker bearers are base64url, and a brain-read grant carries a dot-separated signature.
+  redacted = redacted
     .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
-    .replace(/\b(?:o8sp|o8pw|cwk)_[A-Za-z0-9_-]{12,}\b/g, '[redacted-token]');
+    .replace(/\b(?:o8sp|o8pw|o8ro|o8br|cwk)_[A-Za-z0-9_-]{12,}(?:\.[A-Za-z0-9_-]+)*/g, '[redacted-token]');
   const home = homedir();
   if (home && home !== '/') redacted = redacted.split(home).join('~');
   for (const pattern of GENERIC_HOME_PATHS) redacted = redacted.replace(pattern, '~');

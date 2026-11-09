@@ -167,6 +167,51 @@ describe('Broadcast follow-up bounds and redaction through real routes', () => {
     expect(serialized).toContain('production launcher');
   });
 
+  it('redacts a file-sourced operator token and worker bearers embedded in text on every reader route', async () => {
+    // The operator token comes from the data directory, as in production: no WS_TOKEN in the
+    // environment, so only the live context can find it inside a sentence or a quoted value.
+    delete process.env.WS_TOKEN;
+    const readOnlyWorker = 'o8ro_Zm9vYmFyLWJhei1xdXV4LWZpeHR1cmUtcmVhZC1vbmx5LTA';
+    const brainSignature = 'c2lnbmF0dXJlLWZpeHR1cmUtMDEyMzQ1Njc4OWFiY2Rl-';
+    const brainWorker = `o8br_eyJyZXBvUGF0aCI6Ii90bXAvZml4dHVyZSJ9.${brainSignature}`;
+    const lane = createLane({
+      label: 'Broadcast embedded redaction',
+      repoPath: '/tmp/broadcast-redaction-route',
+      branch: `agent/broadcast-embedded-${Date.now()}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: `packet-broadcast-embedded-${Date.now()}`,
+    });
+    appendEvent(lane.id, 'agent_report', 'orchestrator', {
+      event: 'progress',
+      message: `the ws token is ${OPERATOR_TOKEN} now`,
+      metadata: {
+        note: `token="${OPERATOR_TOKEN}"`,
+        worker: `read-only bearer ${readOnlyWorker} in use`,
+        brain: `brain grant ${brainWorker} issued`,
+      },
+    });
+    getSqlite().prepare(`
+      INSERT INTO broadcast_events (id, kind, actor, audience, text, lane_id, packet_id, metadata_json, created_at)
+      VALUES (?, 'commentary', 'symon', NULL, ?, NULL, NULL, '{}', ?)
+    `).run(`commentary-embedded-${lane.id}`, `symon read ${OPERATOR_TOKEN} and ${brainWorker} aloud`, new Date().toISOString());
+
+    const broadcastCommentary = await import('@/app/api/broadcast/commentary/route');
+    for (const [route, path] of [
+      [broadcastEvents, `/api/broadcast/events?kinds=progress&lane=${encodeURIComponent(lane.id)}`],
+      [broadcastSnapshot, '/api/broadcast/snapshot?events=100'],
+      [broadcastCommentary, '/api/broadcast/commentary?limit=100'],
+    ] as const) {
+      const response = await route.GET(spectatorRequest(path));
+      expect(response.status, path).toBe(200);
+      const serialized = await response.text();
+      for (const raw of [OPERATOR_TOKEN, readOnlyWorker, brainWorker, brainSignature]) {
+        expect(serialized, `${path} leaks ${raw.slice(0, 8)}`).not.toContain(raw);
+      }
+      expect(serialized, path).toContain('[redacted-token]');
+    }
+  });
+
   it('caps a projected event payload at 8 KB and marks it truncated', async () => {
     const lane = createLane({
       label: 'Broadcast payload bound',
