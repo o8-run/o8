@@ -1,8 +1,10 @@
 import { isMaskedViewerReplay } from '@/lib/viewers/copy-safety';
 import { viewerJson } from '@/lib/viewers/response';
 import { type NextRequest } from 'next/server';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
+import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
+import { findLaneByPacket } from '@/lib/lane/registry';
 import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 import { isWorkspaceFileError, writeWorkspaceFile } from '@/lib/fs/workspace-file';
 import {
@@ -25,6 +27,40 @@ export const dynamic = 'force-dynamic';
 // back via the existing repo-write tool path.
 
 const MAX_BYTES = 256 * 1024;
+// The notes actions agents use (o8_spec_* and `o8 spec`); the rest change operator prose or start a model turn.
+const WORKER_SPEC_ACTIONS = new Set(['comment', 'reply', 'suggest', 'resolve']);
+
+function realPathOrNull(path: string | null | undefined): string | null {
+  if (!path) return null;
+  try { return realpathSync(path); } catch { return null; }
+}
+
+/**
+ * The gate lets a packet worker read and annotate o8.md. It reaches only its own lane's worktree
+ * or repository, takes only the notes actions, and cannot hand in replacement content. Other
+ * callers are unchanged.
+ */
+function workerSpecRefusal(
+  request: NextRequest,
+  repoPath: string,
+  post?: { action: string | null; body: Record<string, unknown> | null },
+): Response | null {
+  const principal = resolveRequestPrincipalContext(request);
+  if (principal.role !== 'worker') return null;
+  const lane = principal.packetId ? findLaneByPacket(principal.packetId) : null;
+  const target = realPathOrNull(repoPath);
+  if (!target || ![lane?.worktreePath, lane?.repoPath].some((own) => realPathOrNull(own) === target)) {
+    return viewerJson({ ok: false, error: {
+      code: 'worker_packet_mismatch', message: "A worker reads and annotates only its own lane's o8.md.",
+    } }, { status: 403 });
+  }
+  if (post && (!WORKER_SPEC_ACTIONS.has(post.action ?? '') || typeof post.body?.content === 'string')) {
+    return viewerJson({ ok: false, error: {
+      code: 'repo_spec_operator_only', message: 'Workers may comment, reply, suggest and resolve; other edits are the operator\'s.',
+    } }, { status: 403 });
+  }
+  return null;
+}
 
 function resolveSpecPath(repoPath: string): string | null {
   if (!repoPath || typeof repoPath !== 'string') return null;
@@ -65,6 +101,8 @@ export async function GET(request: NextRequest) {
   if (!specPath) {
     return viewerJson({ ok: false, error: 'repoPath invalid' }, { status: 400 });
   }
+  const workerRefusal = workerSpecRefusal(request, repoPath);
+  if (workerRefusal) return workerRefusal;
   const exists = existsSync(specPath);
   const content = exists ? readFileSync(specPath, 'utf-8') : DEFAULT_TEMPLATE;
 
@@ -149,6 +187,8 @@ export async function POST(request: NextRequest) {
   if (sourceRefusal) return sourceRefusal;
   const action = request.nextUrl.searchParams.get('action');
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const workerRefusal = workerSpecRefusal(request, repoPath, { action, body });
+  if (workerRefusal) return workerRefusal;
   const suppliedContent = typeof body?.content === 'string' ? body.content : null;
   if (suppliedContent !== null && Buffer.byteLength(suppliedContent, 'utf-8') > MAX_BYTES) {
     return viewerJson({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
