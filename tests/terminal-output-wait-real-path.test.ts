@@ -5,10 +5,9 @@ import { createServer, type Server } from 'node:http';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dashSessionNameForOwnerKey } from '@/lib/ws-server/dash-terminal-persistence';
-import { cliBundleAlias } from '../cli/bundle-alias.mjs';
+import { buildCliBundle } from './fixtures/cli-bundle';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-terminal-wait-'));
 const tmuxServer = `o8-wait-${process.pid}`;
@@ -70,16 +69,7 @@ function run(args: string[]) {
 beforeAll(async () => {
   if (!tmuxAvailable) return;
   writeFileSync(join(dataDir, 'ws-token'), `${token}\n`, { mode: 0o600 });
-  await build({
-    alias: cliBundleAlias, entryPoints: ['cli/src/index.ts'], outfile: cli, bundle: true,
-    platform: 'node', format: 'esm', target: 'node22',
-    define: { __O8_CLI_VERSION__: '"test"' },
-    banner: { js: `import { createRequire as __o8_createRequire } from 'node:module';
-import { fileURLToPath as __o8_fileURLToPath } from 'node:url';
-import { dirname as __o8_dirname } from 'node:path';
-const require = __o8_createRequire(import.meta.url); globalThis.require = require;
-const __filename = __o8_fileURLToPath(import.meta.url); const __dirname = __o8_dirname(__filename);` },
-  });
+  await buildCliBundle(cli, 'test');
   writeFileSync(failedSnapshotShim, `const originalFetch = globalThis.fetch;
 globalThis.fetch = (input, init) => String(input).includes('/terminal-snapshot')
   ? Promise.reject(new Error('simulated snapshot failure')) : originalFetch(input, init);\n`);

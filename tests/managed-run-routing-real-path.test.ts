@@ -4,12 +4,10 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { build } from 'esbuild';
-import { cliBundleAlias } from '../cli/bundle-alias.mjs';
+import { buildCliBundle } from './fixtures/cli-bundle';
 
 const tmux = spawnSync('which', ['tmux'], { encoding: 'utf8' }).stdout?.trim();
 const tsxImport = import.meta.resolve('tsx');
-const cli = new URL('../cli/src/index.ts', import.meta.url).pathname;
 const routingKeys = ['O8_API_PORT', 'O8_WS_PORT', 'WS_PORT', 'O8_API_TOKEN', 'O8_WORKER_TOKEN',
   'O8_WORKER_PACKET_ID', 'O8_SPECTATOR_TOKEN', 'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'NODE_OPTIONS',
   '__NEXT_PRIVATE_STANDALONE_CONFIG', 'O8_PACKAGED_APP', 'NEXT_PHASE'];
@@ -62,13 +60,7 @@ describe.skipIf(!tmux || process.platform === 'win32')('managed CLI routing thro
     const root = mkdtempSync(join(tmpdir(), 'o8-route-'));
     roots.push(root);
     const bundle = join(root, 'o8.mjs');
-    await build({ alias: cliBundleAlias, entryPoints: [cli], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
-      define: { __O8_CLI_VERSION__: JSON.stringify('test-fixture') },
-      banner: { js: `import { createRequire as __o8_createRequire } from 'node:module';
-import { fileURLToPath as __o8_fileURLToPath } from 'node:url';
-import { dirname as __o8_dirname } from 'node:path';
-const require = __o8_createRequire(import.meta.url); globalThis.require = require;
-const __filename = __o8_fileURLToPath(import.meta.url); const __dirname = __o8_dirname(__filename);` } });
+    await buildCliBundle(bundle, 'test-fixture');
     const data = join(root, 'data'), staleData = join(root, 'stale'), bin = join(root, 'bin'), socket = join(root, 'sock');
     for (const dir of [data, staleData, bin]) mkdirSync(dir);
     const disk = await endpoint('persisted-fixture', 'disk-fixture-token');
@@ -138,9 +130,7 @@ await runVersion({ human: false, verbose: false });
     const root = mkdtempSync(join(tmpdir(), 'o8-unregistered-run-'));
     roots.push(root);
     const bundle = join(root, 'o8.mjs');
-    await build({ alias: cliBundleAlias, entryPoints: [cli], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
-      define: { __O8_CLI_VERSION__: JSON.stringify('test-fixture') },
-      banner: { js: `import { createRequire as __o8_createRequire } from 'node:module'; const require = __o8_createRequire(import.meta.url); globalThis.require = require;` } });
+    await buildCliBundle(bundle, 'test-fixture');
     const data = join(root, 'data'), bin = join(root, 'bin'), socket = `/tmp/o8-rg-${process.pid}-${Date.now()}`;
     mkdirSync(data); mkdirSync(bin);
     sockets.push(socket);

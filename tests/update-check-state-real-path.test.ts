@@ -4,12 +4,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import * as updateApplyRoute from '@/app/api/panel/update/apply/route';
 import * as updateStateRoute from '@/app/api/panel/app/update-state/route';
-import { cliBundleAlias } from '../cli/bundle-alias.mjs';
+import { buildCliBundle } from './fixtures/cli-bundle';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-update-check-state-'));
 const cliEntry = join(dataDir, 'o8.mjs');
@@ -83,23 +82,7 @@ async function runCli(args: string[]) {
 }
 
 beforeAll(async () => {
-  await build({
-    entryPoints: [join(process.cwd(), 'cli/src/index.ts')],
-    alias: cliBundleAlias,
-    outfile: cliEntry,
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    target: 'node22',
-    define: { __O8_CLI_VERSION__: JSON.stringify('test-fixture') },
-    banner: {
-      js: `import { createRequire as __o8_createRequire } from 'node:module';
-import { fileURLToPath as __o8_fileURLToPath } from 'node:url';
-import { dirname as __o8_dirname } from 'node:path';
-const require = __o8_createRequire(import.meta.url); globalThis.require = require;
-const __filename = __o8_fileURLToPath(import.meta.url); const __dirname = __o8_dirname(__filename);`,
-    },
-  });
+  await buildCliBundle(cliEntry, 'test-fixture');
   server = createServer(async (request, response) => {
     if (request.method === 'GET' && request.url === '/api/setup/cli-updates?refresh=1') {
       response.writeHead(200, { 'Content-Type': 'application/json' });

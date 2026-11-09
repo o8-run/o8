@@ -4,11 +4,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
-import { build } from 'esbuild';
-import { cliBundleAlias } from '../cli/bundle-alias.mjs';
 import { NextRequest } from 'next/server';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { LaunchOptions } from '@/lib/runtimes/types';
+import { buildCliBundle } from './fixtures/cli-bundle';
 
 // Exercise the clone implementation on Linux; only the filesystem capability probe is replaced.
 vi.mock('@/lib/worktree/apfs', async original => ({
@@ -286,12 +285,7 @@ describe('reviewer PR checkout through delegate dispatch', () => {
     expect(existsSync(join(f.repo, 'pr-only.test.cjs'))).toBe(false);
 
     const bundle = join(artifacts, 'o8.mjs');
-    await build({ alias: cliBundleAlias, entryPoints: ['cli/src/index.ts'], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22', external: ['better-sqlite3'],
-      define: { __O8_CLI_VERSION__: JSON.stringify('test') }, banner: { js: `import { createRequire as __fixtureRequire } from 'node:module';
-import { fileURLToPath as __fixtureFileURLToPath } from 'node:url';
-import { dirname as __fixtureDirname } from 'node:path';
-const require = __fixtureRequire(${JSON.stringify(join(process.cwd(), 'package.json'))}); globalThis.require = require;
-const __filename = __fixtureFileURLToPath(import.meta.url); const __dirname = __fixtureDirname(__filename);` } });
+    await buildCliBundle(bundle, 'test');
     const bin = join(artifacts, 'bin');
     mkdirSync(bin);
     // Darwin's Unix-domain socket limit is shorter than the isolated test root.
