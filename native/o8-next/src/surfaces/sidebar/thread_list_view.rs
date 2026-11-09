@@ -47,6 +47,7 @@ impl Render for ThreadList {
             }
         }
         self.tick_working(cx);
+        self.tick_fade(cx);
         if !self.mark_pace {
             self.mark_pace = true;
             super::status_mark::pace(cx);
@@ -143,6 +144,7 @@ impl Render for ThreadList {
                                 .w_full()
                                 .px(px(6.))
                                 .py(px(1.))
+                                .opacity(this.arrival_opacity(i))
                                 .child(this.render_row(i, keyboard, cx))
                                 .into_any_element()
                         })
@@ -193,6 +195,12 @@ impl ThreadList {
                     }
                     let thread = row.id.is_some();
                     let inbox = this.view() == folders::View::Inbox;
+                    // Inbox headings take a dragged thread (T3 Code's drag
+                    // between sections).
+                    let section_drop = (inbox
+                        && row.kind == "section"
+                        && matches!(row.title.as_str(), "Active" | "Pinned"))
+                    .then(|| row.title.clone());
                     let slim = inbox && thread && matches!(row.marker, "snoozed" | "settled");
                     let detailed = this.cards();
                     let detailed_thread = detailed && thread;
@@ -304,8 +312,13 @@ impl ThreadList {
                                         .child(title),
                                 )
                                 // Classic has no Search row, so the list's own
-                                // controls sit on its first heading.
-                                .when(!thread && i == 0, |view| {
+                                // controls sit on its first heading (the Inbox's
+                                // Working shelf can come before it).
+                                .when(
+                                    !thread
+                                        && this.rows.iter().position(|r| r.kind == "section")
+                                            == Some(i),
+                                    |view| {
                                     view.when(!this.scope_repos().is_empty(), |view| {
                                         view.child(
                                             div()
@@ -316,7 +329,8 @@ impl ThreadList {
                                         .child(this.new_thread_button(cx))
                                     })
                                     .child(this.view_picker(cx))
-                                })
+                                    },
+                                )
                                 .when(thread, |view| {
                                     // A folder already names its threads' repository.
                                     view.when(row.machine.is_some(), |view| {
@@ -373,6 +387,23 @@ impl ThreadList {
                                 }),
                         ))
                         .children(this.children_disclosure(&row, cx))
+                        // A pin zone already takes this drag (PinDrag is the
+                        // pane drag), and GPUI allows one drop listener per type,
+                        // so a pin zone handles the section move itself below.
+                        .when(
+                            section_drop.is_some() && this.pin_zone(i).is_none(),
+                            |view| {
+                                let section = row.title.clone();
+                                view.drag_over::<crate::shell::features::RailPane>(|style, _, _, _| {
+                                    style.bg(theme().selection)
+                                })
+                                .on_drop(cx.listener(
+                                    move |this, pane: &crate::shell::features::RailPane, _, cx| {
+                                        this.drop_thread(&section, pane, cx)
+                                    },
+                                ))
+                            },
+                        )
                         .when(row.kind == "section" && row.status == "working", |view| {
                             view.debug_selector(|| "sidebar-working-header".into())
                                 .cursor_pointer()
@@ -439,8 +470,15 @@ impl ThreadList {
                                     this.pin_drag_move(&target, Some(after), event, cx);
                                 },
                             ))
-                            .on_drop(cx.listener(move |this, drag: &pins::PinDrag, _, cx| {
-                                this.drop_pin(drag, cx);
+                            .on_drop(cx.listener({
+                                let section = section_drop.clone();
+                                move |this, drag: &pins::PinDrag, _, cx| {
+                                    let pin = matches!(drag, pins::PinDrag::Thread { id, .. } if this.pinned(id));
+                                    match section.as_deref() {
+                                        Some(section) if !pin => this.drop_thread(section, drag, cx),
+                                        _ => this.drop_pin(drag, cx),
+                                    }
+                                }
                             }))
                         })
                         .when(thread, |view| {
@@ -506,6 +544,7 @@ impl ThreadList {
                 div()
                     .w_full()
                     .py(px(1.))
+                    .opacity(self.arrival_opacity(i))
                     .child(self.render_row(i, keyboard, cx))
                     .into_any_element()
             })

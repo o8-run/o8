@@ -128,6 +128,10 @@ pub struct State {
     /// Running threads fold into a collapsible Working section.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sidebar_working_section: bool,
+    /// The Inbox keeps running threads in Active instead of folding them into
+    /// its Working shelf (on unless turned off, as in T3 Code).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sidebar_inbox_working_off: bool,
     /// Workspace Notes target history and user-selected annotation ink.
     #[serde(default)]
     pub notes: crate::files_panel::NotesPreferences,
@@ -204,6 +208,7 @@ impl Default for State {
             terminal_launched: BTreeMap::new(),
             sidebar_detailed_rows: false,
             sidebar_working_section: false,
+            sidebar_inbox_working_off: false,
             notes: Default::default(),
             keybindings: BTreeMap::new(),
             onboarding: None,

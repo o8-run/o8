@@ -43,6 +43,60 @@ fn at_hour(now: u64, days: u64, hour: u64) -> u64 {
     // Correct for a daylight-saving change between now and then.
     (guess as i64 + offset(now) - offset(guess)) as u64
 }
+/// The Unix second `secs` into the local day `days` after today.
+fn at_local(now: u64, days: u64, secs: u64) -> u64 {
+    let (_, midnight) = local_day(now);
+    let guess = midnight + days * DAY + secs;
+    (guess as i64 + offset(now) - offset(guess)) as u64
+}
+/// A custom snooze being set in the menu (T3 Code's CustomSnoozeDialog:
+/// a date and time, or a duration).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) struct Custom {
+    pub by_date: bool,
+    pub amount: u64,
+    /// 0 minutes, 1 hours, 2 days.
+    pub unit: usize,
+    /// Days after today, 0 to 6.
+    pub day: u64,
+    /// Minutes into that day.
+    pub minute: u64,
+}
+const UNITS: [(&str, u64); 3] = [("min", 60), ("hours", HOUR), ("days", DAY)];
+impl Custom {
+    /// Two hours, or the next half hour an hour from now.
+    pub(super) fn new(now: u64) -> Self {
+        let (into, _) = local_day(now + HOUR);
+        let minute = (into / 60).div_ceil(30) * 30;
+        let (day, minute) = if minute >= 24 * 60 {
+            (1, minute - 24 * 60)
+        } else {
+            (u64::from(local_day(now + HOUR).1 > local_day(now).1), minute)
+        };
+        Custom { by_date: false, amount: 2, unit: 1, day, minute }
+    }
+    /// When the snooze ends, or None when that is not ahead.
+    pub(super) fn until(&self, now: u64) -> Option<u64> {
+        let until = if self.by_date {
+            at_local(now, self.day, self.minute * 60)
+        } else {
+            now + self.amount * UNITS[self.unit].1
+        };
+        (until > now).then_some(until)
+    }
+}
+/// A click that edits the open Custom… panel.
+fn setter(
+    cx: &mut Context<ThreadList>,
+    change: fn(&mut Custom),
+) -> impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static {
+    cx.listener(move |this, _, _, cx| {
+        if let Some(custom) = this.snooze_custom.as_mut() {
+            change(custom);
+        }
+        cx.notify();
+    })
+}
 /// The presets offered at `now`, in T3 Code's order: an hour, three hours,
 /// this evening while it is still ahead, tomorrow morning and next Monday.
 pub(super) fn presets(now: u64) -> Vec<(&'static str, u64)> {
@@ -210,7 +264,7 @@ impl ThreadList {
             .text_color(theme().text_muted)
             .child("Snooze until")
             .into_any_element();
-        std::iter::once(heading)
+        let mut items: Vec<AnyElement> = std::iter::once(heading)
             .chain(presets(now).into_iter().enumerate().map(|(i, (name, until))| {
                 let id = id.to_owned();
                 item(
@@ -218,13 +272,197 @@ impl ThreadList {
                     name.into_any_element(),
                     Some(until_label(until, now)),
                 )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.row_menu = None;
-                        this.snooze(id.clone(), Some(until), cx)
-                    }))
-                    .into_any_element()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.row_menu = None;
+                    this.snooze(id.clone(), Some(until), cx)
+                }))
+                .into_any_element()
             }))
-            .collect()
+            .collect();
+        match self.snooze_custom {
+            None => items.push(
+                item("sidebar-row-snooze-custom".into(), "Custom…".into_any_element(), None)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.snooze_custom = Some(Custom::new(recents::now()));
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            ),
+            Some(custom) => items.push(self.custom_panel(id, custom, now, cx)),
+        }
+        items
+    }
+    /// Custom… opens in place: Duration (an amount and a unit) or Date and
+    /// time (the next seven days and a half-hour clock).
+    fn custom_panel(&self, id: &str, custom: Custom, now: u64, cx: &mut Context<Self>) -> AnyElement {
+        let chip = |selector: String, label: String, on: bool| {
+            div()
+                .id(gpui::ElementId::Name(selector.clone().into()))
+                .debug_selector(move || selector.clone())
+                .h(px(24.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(6.))
+                .text_size(px(12.))
+                .cursor_pointer()
+                .text_color(if on { theme().text } else { theme().text_muted })
+                .when(on, |c| c.bg(theme().selection))
+                .when(!on, |c| c.hover(|s| s.bg(theme().hover)))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(label)
+        };
+        let step = |selector: &'static str, glyph: &'static str| {
+            div()
+                .id(selector)
+                .debug_selector(move || selector.into())
+                .size(px(24.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(6.))
+                .text_size(px(14.))
+                .text_color(theme().text_muted)
+                .cursor_pointer()
+                .hover(|s| s.bg(theme().hover))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(glyph)
+        };
+        let mode = div()
+            .flex()
+            .gap(px(2.))
+            .p(px(2.))
+            .rounded(px(8.))
+            .bg(theme().hover)
+            .child(
+                chip("sidebar-snooze-custom-duration".into(), "Duration".into(), !custom.by_date)
+                    .flex_1()
+                    .on_click(setter(cx, |c| c.by_date = false)),
+            )
+            .child(
+                chip("sidebar-snooze-custom-date".into(), "Date and time".into(), custom.by_date)
+                    .flex_1()
+                    .on_click(setter(cx, |c| c.by_date = true)),
+            );
+        let body = if custom.by_date {
+            let days = (0..7u64).map(|day| {
+                let label = match day {
+                    0 => "Today".to_owned(),
+                    1 => "Tmrw".to_owned(),
+                    _ => {
+                        let at = at_local(now, day, 12 * HOUR);
+                        ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekday(at) as usize].to_owned()
+                    }
+                };
+                let pick: fn(&mut Custom) = match day {
+                    0 => |c| c.day = 0,
+                    1 => |c| c.day = 1,
+                    2 => |c| c.day = 2,
+                    3 => |c| c.day = 3,
+                    4 => |c| c.day = 4,
+                    5 => |c| c.day = 5,
+                    _ => |c| c.day = 6,
+                };
+                chip(format!("sidebar-snooze-custom-day-{day}"), label, custom.day == day)
+                    .flex_1()
+                    .px(px(0.))
+                    .text_size(px(11.5))
+                    .on_click(setter(cx, pick))
+            }).collect::<Vec<_>>();
+            let clock = until_label(at_local(now, 0, custom.minute * 60), now);
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(div().flex().gap(px(1.)).children(days))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(step("sidebar-snooze-custom-earlier", "−").on_click(setter(cx, |c| {
+                            c.minute = (c.minute + 24 * 60 - 30) % (24 * 60)
+                        })))
+                        .child(div().flex_1().flex().justify_center().text_size(px(13.)).child(clock))
+                        .child(step("sidebar-snooze-custom-later", "+").on_click(setter(cx, |c| {
+                            c.minute = (c.minute + 30) % (24 * 60)
+                        }))),
+                )
+                .into_any_element()
+        } else {
+            let units = UNITS.iter().enumerate().map(|(i, (name, _))| {
+                let pick: fn(&mut Custom) = match i {
+                    0 => |c| c.unit = 0,
+                    1 => |c| c.unit = 1,
+                    _ => |c| c.unit = 2,
+                };
+                chip(format!("sidebar-snooze-custom-unit-{i}"), (*name).into(), custom.unit == i)
+                    .on_click(setter(cx, pick))
+            }).collect::<Vec<_>>();
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(step("sidebar-snooze-custom-less", "−").on_click(setter(cx, |c| {
+                    c.amount = c.amount.saturating_sub(1).max(1)
+                })))
+                .child(
+                    div()
+                        .debug_selector(|| "sidebar-snooze-custom-amount".into())
+                        .w(px(28.))
+                        .flex()
+                        .justify_center()
+                        .text_size(px(13.))
+                        .child(custom.amount.to_string()),
+                )
+                .child(step("sidebar-snooze-custom-more", "+").on_click(setter(cx, |c| {
+                    c.amount = (c.amount + 1).min(99)
+                })))
+                .child(div().flex().gap(px(2.)).children(units))
+                .into_any_element()
+        };
+        let until = custom.until(now);
+        let id = id.to_owned();
+        let confirm = div()
+            .id("sidebar-snooze-custom-confirm")
+            .debug_selector(|| "sidebar-snooze-custom-confirm".into())
+            .h(px(28.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(7.))
+            .text_size(px(12.5))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .map(|button| match until {
+                Some(until) => button
+                    .bg(theme().accent)
+                    .text_color(gpui::white())
+                    .cursor_pointer()
+                    .child(format!("Snooze until {}", until_label(until, now)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.snooze_custom = None;
+                        this.snooze(id.clone(), Some(until), cx)
+                    })),
+                None => button
+                    .bg(theme().hover)
+                    .text_color(theme().text_faint)
+                    .child("Pick a time ahead"),
+            });
+        div()
+            .mt(px(4.))
+            .pt(px(6.))
+            .px(px(4.))
+            .pb(px(2.))
+            .border_t_1()
+            .border_color(theme().border)
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(mode)
+            .child(body)
+            .child(confirm)
+            .into_any_element()
     }
 }
 
@@ -242,6 +480,29 @@ mod tests {
         assert!(presets.windows(2).all(|w| w[0].1 < w[1].1));
         let (into, _) = local_day(presets.last().unwrap().1);
         assert_eq!(into, 9 * HOUR);
+    }
+    #[test]
+    fn custom_snooze_counts_a_duration_or_lands_on_a_local_time() {
+        let now = 1_793_000_000;
+        let mut custom = Custom::new(now);
+        assert_eq!(custom.until(now), Some(now + 2 * HOUR), "two hours by default");
+        custom.unit = 2;
+        custom.amount = 3;
+        assert_eq!(custom.until(now), Some(now + 3 * DAY));
+        custom.by_date = true;
+        custom.day = 1;
+        custom.minute = 9 * 60 + 30;
+        let until = custom.until(now).unwrap();
+        assert_eq!(local_day(until).0, 9 * HOUR + 30 * 60);
+        assert!(until_label(until, now).ends_with(" 9:30 AM"));
+        // A time already gone today offers nothing.
+        custom.day = 0;
+        custom.minute = (local_day(now).0 / 60).saturating_sub(30);
+        assert_eq!(custom.until(now), None);
+        // The default date is a half hour, an hour or more ahead.
+        let fresh = Custom::new(now);
+        let at = at_local(now, fresh.day, fresh.minute * 60);
+        assert!(at >= now + HOUR && at < now + HOUR + 30 * 60 + 60, "{at} vs {now}");
     }
     #[test]
     fn labels_read_local_clock_times() {

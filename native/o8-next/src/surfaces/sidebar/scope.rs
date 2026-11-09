@@ -474,6 +474,7 @@ impl ThreadList {
             .find(|s| s.id == id)
             .and_then(|s| s.repo_path.clone())
             .filter(|repo| repos.iter().any(|(path, _)| path == repo));
+        self.snooze_custom = None;
         // Every thread row offers Archive or Restore.
         self.row_menu = Some(RowMenu {
             repo,
@@ -731,7 +732,8 @@ impl ThreadList {
                             }))
                             .map(|menu| {
                                 if snooze_only {
-                                    return menu.min_w(px(220.)).children(snooze);
+                                    // One width for both Custom… tabs, so the menu holds still.
+                                    return menu.w(px(256.)).children(snooze);
                                 }
                                 menu.children(pin)
                                     .children(auto_settle)

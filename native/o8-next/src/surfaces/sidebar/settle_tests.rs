@@ -17,11 +17,11 @@ fn list<R>(shell: &Entity<Shell>, cx: &VisualTestContext, read: impl Fn(&ThreadL
         read(s.surfaces.sidebar.view.as_ref().unwrap().read(cx))
     })
 }
-/// The section heading above a thread's row.
+/// The section heading above a thread's row; the Inbox's shelves count.
 fn section(list: &ThreadList, id: &str) -> Option<String> {
     let mut heading = None;
     for row in list.rows.iter() {
-        if row.kind == "section" {
+        if row.kind == "section" || row.kind == "shelf" {
             heading = Some(row.title.clone());
         } else if row.id.as_deref() == Some(id) {
             return heading;
@@ -110,6 +110,14 @@ pub(super) fn start(
         [FIRST, SECOND]
             .iter()
             .all(|id| list.rows.iter().any(|r| r.id.as_deref() == Some(*id)))
+    });
+    // The shelves fold by default; these tests follow threads onto them.
+    shell.update(&mut visual, |s, cx| {
+        let sidebar = s.surfaces.sidebar.view.clone().unwrap();
+        sidebar.update(cx, |l, cx| {
+            l.open_shelves();
+            cx.notify();
+        });
     });
     (fixture, shell, visual, id)
 }
@@ -900,4 +908,82 @@ fn sidebar_parked_runtime_keeps_receipt_and_restore_after_inventory_refresh(cx: 
     assert_eq!(after["workspaceRestores"][0]["packetId"], "sidebar-branch");
     assert!(after["workspaceRestores"][0]["clientMutationId"].as_str().is_some_and(|id| !id.is_empty()));
     assert_eq!(after["snapshot"], oracle["snapshot"], "the explicit held request cannot restore the checkout");
+}
+
+/// Presses one painted element, drags it onto another and lets go: the real
+/// drag path, through GPUI's drag and drop listeners.
+fn drag_onto(cx: &mut VisualTestContext, from: &'static str, to: &'static str) {
+    draw(cx);
+    let start = cx.debug_bounds(from).unwrap_or_else(|| panic!("{from} painted")).center();
+    let end = cx.debug_bounds(to).unwrap_or_else(|| panic!("{to} painted")).center();
+    let none = gpui::Modifiers::default();
+    cx.simulate_mouse_down(start, gpui::MouseButton::Left, none);
+    cx.simulate_mouse_move(start + gpui::point(px(12.), px(0.)), Some(gpui::MouseButton::Left), none);
+    draw(cx);
+    cx.simulate_mouse_move(end, Some(gpui::MouseButton::Left), none);
+    draw(cx);
+    cx.simulate_mouse_up(end, gpui::MouseButton::Left, none);
+    draw(cx);
+}
+
+/// Q 2026-11-09: a thread dropped on an Inbox heading moves there (T3 Code's
+/// drag between sections). The heading under a Pinned shelf is also a pin
+/// drop zone, and GPUI keeps one drop listener per drag type, so a second
+/// one there aborted the app on the drop.
+#[gpui::test]
+fn sidebar_inbox_drops_threads_on_headings_beside_pins(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual, project) = start("--shell --composer --sidebar", cx);
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-inbox");
+    wait_for(&shell, &mut visual, |s, _| {
+        s.state.sidebar_view.get(&project).map(String::as_str) == Some("inbox")
+    });
+    // Pin SECOND through its row menu, so a Pinned shelf heads the list.
+    let pinned = row(&shell, &mut visual, SECOND);
+    let at = visual.debug_bounds(pinned).unwrap().center();
+    visual.simulate_mouse_down(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+    visual.simulate_mouse_up(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+    click(&mut visual, "sidebar-row-pin");
+    wait_for(&shell, &mut visual, |s, cx| {
+        let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+        list.rows.first().is_some_and(|r| r.title == "Pinned")
+    });
+    // Settle FIRST with its control, so the Settled shelf is up.
+    let first = row(&shell, &mut visual, FIRST);
+    click(&mut visual, first);
+    let first = row(&shell, &mut visual, FIRST);
+    let at = visual.debug_bounds(first).unwrap().center();
+    visual.simulate_mouse_move(at, None, gpui::Modifiers::default());
+    click(&mut visual, Box::leak(format!("thread-settle-{FIRST}").into_boxed_str()));
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Settled"));
+
+    // Another Active thread dropped on the Settled shelf settles.
+    let other = list(&shell, &visual, |l| {
+        let start = l.rows.iter().position(|r| r.kind == "section" && r.title == "Active").unwrap();
+        l.rows[start + 1..]
+            .iter()
+            .take_while(|r| r.kind == "thread")
+            .find_map(|r| r.id.clone())
+            .expect("an Active thread")
+    });
+    let from = row(&shell, &mut visual, &other);
+    drag_onto(&mut visual, from, "sidebar-shelf-settled");
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, &other, "Settled"));
+    assert_eq!(stored(&fixture, &other), "settled");
+
+    // FIRST dropped on the Active heading, under the Pinned shelf, comes back.
+    let active = list(&shell, &visual, |l| {
+        l.rows.iter().position(|r| r.kind == "section" && r.title == "Active").unwrap()
+    });
+    assert!(
+        list(&shell, &visual, |l| l.rows[active - 1].id.as_deref() == Some(SECOND)),
+        "the Active heading sits right under the Pinned shelf, a pin drop zone"
+    );
+    let heading: &'static str = Box::leak(format!("thread-row-{active}").into_boxed_str());
+    let from = row(&shell, &mut visual, FIRST);
+    drag_onto(&mut visual, from, heading);
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Active"));
+    assert_ne!(stored(&fixture, FIRST), "settled");
+    // The pin stayed put.
+    assert!(list(&shell, &visual, |l| l.rows[1].id.as_deref() == Some(SECOND)));
 }

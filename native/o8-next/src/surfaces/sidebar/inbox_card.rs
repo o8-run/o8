@@ -21,6 +21,10 @@ pub(crate) const SLIM_HEIGHT: f32 = 34.;
 const CONTROLS_WIDTH: f32 = 84.;
 /// A shelf's folded header.
 pub(crate) const SHELF_HEIGHT: f32 = 30.;
+/// How long a thread that stopped working still reads as working.
+const WORKING_EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+/// A row's fade-in on arriving in a section.
+const FADE: std::time::Duration = std::time::Duration::from_millis(180);
 
 // Lucide icons.
 const CIRCLE_DASHED: &str = "M10.1 2.182a10 10 0 0 1 3.8 0 M13.9 21.818a10 10 0 0 1-3.8 0 M17.609 3.721a10 10 0 0 1 2.69 2.7 M2.182 13.9a10 10 0 0 1 0-3.8 M20.279 17.609a10 10 0 0 1-2.7 2.69 M21.818 10.1a10 10 0 0 1 0 3.8 M3.721 6.391a10 10 0 0 1 2.7-2.69 M6.391 20.279a10 10 0 0 1-2.69-2.7";
@@ -437,6 +441,15 @@ impl ThreadList {
                 12.,
                 2.,
             ))
+            .when(name == "Settled", |header| {
+                header
+                    .drag_over::<crate::shell::features::RailPane>(|style, _, _, _| {
+                        style.bg(theme().selection)
+                    })
+                    .on_drop(cx.listener(|this, pane: &crate::shell::features::RailPane, _, cx| {
+                        this.drop_thread("Settled", pane, cx)
+                    }))
+            })
             .on_click(cx.listener(move |this, _, _, cx| {
                 let key = super::inbox::open_key(&name);
                 if !this.expanded.remove(&key) {
@@ -447,24 +460,154 @@ impl ThreadList {
             }))
     }
 
+    /// Unfolds the Snoozed and Settled shelves, for tests that follow a
+    /// thread onto them.
+    #[cfg(test)]
+    pub(crate) fn open_shelves(&mut self) {
+        for shelf in inbox::SHELVES {
+            self.expanded.insert(inbox::open_key(shelf));
+        }
+        self.rebuild();
+    }
+    /// A thread dropped on a section heading moves there, as in T3 Code's
+    /// sidebar: Settled settles it; Active brings it back from Settled,
+    /// Snoozed or Pinned; Pinned pins it.
+    pub(super) fn drop_thread(
+        &mut self,
+        section: &str,
+        pane: &crate::shell::features::RailPane,
+        cx: &mut Context<Self>,
+    ) {
+        let crate::shell::features::RailPane::Thread { id, .. } = pane else {
+            return;
+        };
+        let Some(session) = self.sessions.iter().find(|s| &s.id == id) else {
+            return;
+        };
+        let (settled, snoozed, pinned) = (session.settled(), self.snoozed(id), self.pinned(id));
+        let id = id.clone();
+        match section {
+            "Settled" if !settled => {
+                if snoozed {
+                    self.snooze(id.clone(), None, cx);
+                }
+                self.settle_id(id, cx);
+            }
+            "Active" => {
+                if snoozed {
+                    self.snooze(id.clone(), None, cx);
+                }
+                if pinned {
+                    self.toggle_pin(id.clone(), cx);
+                }
+                if settled {
+                    self.settle_id(id, cx);
+                }
+            }
+            "Pinned" if !pinned => self.toggle_pin(id, cx),
+            _ => {}
+        }
+    }
+
+    /// A row that lands in a new place fades in (T3 Code's 150ms ease-out
+    /// enter); the first build shows everything at once.
+    pub(super) fn note_arrivals(&mut self, rows: &[Row]) {
+        if self.view() != folders::View::Inbox {
+            self.placed = None;
+            return;
+        }
+        let now = std::time::Instant::now();
+        let current: HashSet<String> = rows
+            .iter()
+            .filter_map(|r| r.id.as_ref().map(|id| format!("{id}/{}", r.marker)))
+            .collect();
+        if let Some(previous) = &self.placed {
+            for key in current.difference(previous) {
+                self.arrivals.insert(key.clone(), now);
+            }
+        }
+        self.arrivals.retain(|_, at| now.duration_since(*at) < FADE);
+        self.placed = Some(current);
+    }
+    pub(super) fn arrival_opacity(&self, i: usize) -> f32 {
+        let Some(row) = self.rows.get(i) else { return 1. };
+        let Some(id) = row.id.as_ref() else { return 1. };
+        let Some(at) = self.arrivals.get(&format!("{id}/{}", row.marker)) else {
+            return 1.;
+        };
+        let t = (at.elapsed().as_secs_f32() / FADE.as_secs_f32()).min(1.);
+        // Ease out: quick to appear, gentle to settle.
+        1. - (1. - t).powi(3)
+    }
+    /// Repaints at display rate while a row is fading in.
+    pub(super) fn tick_fade(&mut self, cx: &mut Context<Self>) {
+        if self.fade_tick || self.arrivals.values().all(|at| at.elapsed() >= FADE) {
+            return;
+        }
+        self.fade_tick = true;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(16)).await;
+            let _ = this.update(cx, |this, cx| {
+                this.fade_tick = false;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Keeps Working timers counting: one repaint a second while any is shown.
     pub(super) fn tick_working(&mut self, cx: &mut Context<Self>) {
         if self.second_tick || self.view() != folders::View::Inbox {
             return;
         }
         let shown = self.rows.iter().any(|r| r.running && r.id.is_some());
-        if !shown {
+        if !shown && self.lingering.is_empty() {
             return;
         }
         self.second_tick = true;
+        // Half a second keeps the clocks on time and ends a grace promptly.
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(std::time::Duration::from_millis(1000)).await;
+            cx.background_executor().timer(std::time::Duration::from_millis(500)).await;
             let _ = this.update(cx, |this, cx| {
                 this.second_tick = false;
+                if !this.lingering.is_empty() {
+                    this.rebuild();
+                }
                 cx.notify();
             });
         })
         .detach();
+    }
+    /// A thread that stops working keeps reading as working for a moment: an
+    /// orchestrator's run can end just before its continuation starts (T3
+    /// Code's WORKING_EXIT_GRACE_MS in packages/client-runtime/src/state/
+    /// threadInbox.ts, commit 6b02cbff). A question or approval skips it.
+    pub(super) fn track_working(&mut self) {
+        let now = std::time::Instant::now();
+        let mut seen = std::mem::take(&mut self.working_seen);
+        self.lingering.clear();
+        for s in &self.sessions {
+            if sidebar::working(s) {
+                // Still running: no deadline yet.
+                seen.insert(s.id.clone(), None);
+                continue;
+            }
+            let Some(entry) = seen.get_mut(&s.id) else { continue };
+            if inbox::needs_input(s) {
+                seen.remove(&s.id);
+                continue;
+            }
+            // The grace starts when the stop is first seen.
+            let deadline = *entry.get_or_insert(now + WORKING_EXIT_GRACE);
+            if now < deadline {
+                self.lingering.insert(s.id.clone());
+            } else {
+                seen.remove(&s.id);
+            }
+        }
+        let live: HashSet<&str> = self.sessions.iter().map(|s| s.id.as_str()).collect();
+        seen.retain(|id, _| live.contains(id.as_str()));
+        self.working_seen = seen;
     }
 }
 

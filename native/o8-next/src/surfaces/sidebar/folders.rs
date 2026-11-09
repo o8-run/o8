@@ -305,7 +305,12 @@ impl ThreadList {
                 .child(view.label())
                 .on_click(cx.listener(move |this, _, _, cx| this.set_view(view, cx)))
         };
-        let (detailed, working) = (self.detailed, self.working_section);
+        let detailed = self.detailed;
+        let working = if self.view() == View::Inbox {
+            self.inbox_working
+        } else {
+            self.working_section
+        };
         let toggle = |key: &'static str, label: &'static str, on: bool, cx: &mut Context<Self>| {
             let selector = format!("sidebar-view-{key}");
             div()

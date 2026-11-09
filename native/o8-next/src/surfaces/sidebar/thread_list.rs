@@ -40,7 +40,8 @@ pub enum Event {
     /// Snoozed inbox threads and when each comes back, in Unix seconds.
     Snoozes(Vec<(String, u64)>),
     /// Detailed rows, and whether running threads fold into a Working section.
-    RowMode(bool, bool),
+    /// Detailed rows, the Working section, and the Inbox's Working shelf.
+    RowMode(bool, bool, bool),
     /// The project menu's Switch workspace, with the focus to give back.
     WorkspacePicker(Option<gpui::FocusHandle>),
 }
@@ -163,6 +164,19 @@ pub struct ThreadList {
     pub(super) detailed: bool,
     /// Running threads fold into a Working section; `working_closed` collapses it.
     pub(super) working_section: bool,
+    /// The Inbox folds running threads into its Working shelf.
+    pub(super) inbox_working: bool,
+    /// The snooze menu's Custom… panel, while it is open.
+    pub(super) snooze_custom: Option<snooze::Custom>,
+    /// Each Inbox row's place ("id/marker") at the last build, None before
+    /// the first, and when each newly placed row arrived, for its fade-in.
+    pub(super) placed: Option<HashSet<String>>,
+    pub(super) arrivals: HashMap<String, std::time::Instant>,
+    pub(super) fade_tick: bool,
+    /// Threads seen working; a stopped one carries its grace deadline.
+    pub(super) working_seen: HashMap<String, Option<std::time::Instant>>,
+    /// Threads that stopped working inside the grace and still read as working.
+    pub(super) lingering: HashSet<String>,
     pub(super) working_closed: bool,
     /// A one-second repaint is queued for the Working timers.
     pub(super) second_tick: bool,
@@ -284,6 +298,13 @@ impl ThreadList {
             branch_names: HashMap::new(),
             detailed: false,
             working_section: false,
+            inbox_working: true,
+            snooze_custom: None,
+            placed: None,
+            arrivals: HashMap::new(),
+            fade_tick: false,
+            working_seen: HashMap::new(),
+            lingering: HashSet::new(),
             second_tick: false,
             working_closed: false,
             archived_open: false,
@@ -330,6 +351,7 @@ impl ThreadList {
             .and_then(|id| self.rows.iter().find(|r| r.id.as_ref() == Some(id)))
     }
     fn rebuild(&mut self) {
+        self.track_working();
         let previous_choice = self
             .rows
             .iter()
@@ -355,6 +377,7 @@ impl ThreadList {
             self.expanded.insert(self.group_key(session).into());
             rows = self.view_rows(&sessions);
         }
+        self.note_arrivals(&rows);
         self.rows = Rc::new(rows);
         // Remeasure detailed rows; keep the reader's place.
         let top = self.detailed_list.logical_scroll_top();
@@ -395,7 +418,7 @@ impl ThreadList {
         }
         self.rows
             .iter()
-            .position(|r| r.kind == "shelf")
+            .position(|r| r.kind == "shelf" && inbox::SHELVES.contains(&r.title.as_str()))
             .unwrap_or(self.rows.len())
     }
     /// The disclosure group a thread belongs to in the current view.
@@ -454,6 +477,8 @@ impl ThreadList {
                 &self.snoozes,
                 self.selected.as_deref(),
                 &pins::pinned_order(sessions),
+                self.inbox_working,
+                &self.lingering,
             ),
             folders::View::Repo => {
                 let keys = self.scope_keys();
